@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 from pathlib import Path
 import os
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,7 +22,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure--np2=%3ftuxijbpmtb8nf0=ux$4_%e)ye&l829((8olx&8z2*d"
+# SECRET_KEY = "django-insecure--np2=%3ftuxijbpmtb8nf0=ux$4_%e)ye&l829((8olx&8z2*d"
+SECRET_KEY = config("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -39,6 +41,9 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "swf_monitor_project.monitor_app",  # Changed from "monitor_app"
+    # Third-party apps
+    "rest_framework",
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -80,9 +85,9 @@ DATABASES = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": "swfdb",
         "USER": "admin",
-        "PASSWORD": "temp",
+        "PASSWORD": config("DB_PASSWORD"),
         "HOST": "localhost",
-        "PORT": "8020",
+        "PORT": "",
     }
 }
 
@@ -127,3 +132,61 @@ STATIC_URL = "static/"
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# Django REST framework settings
+REST_FRAMEWORK = {
+    # Use Django's standard `django.contrib.auth` permissions,
+    # or allow read-only access for unauthenticated users.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly"
+    ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ],
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "SWF Monitor API",
+    "DESCRIPTION": "API for the ePIC Streaming Workflow Testbed Monitor",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    # OTHER SETTINGS
+}
+
+# ActiveMQ Settings
+ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')
+ACTIVEMQ_PORT = config('ACTIVEMQ_PORT', default=61613, cast=int)
+ACTIVEMQ_USER = config('ACTIVEMQ_USER', default='admin')
+ACTIVEMQ_PASSWORD = config('ACTIVEMQ_PASSWORD', default='admin')
+ACTIVEMQ_HEARTBEAT_TOPIC = config('ACTIVEMQ_HEARTBEAT_TOPIC', default='/topic/swf.heartbeats')
+
+# Basic Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+            'propagate': False,
+        },
+        # You can add specific loggers here if needed, e.g.:
+        # 'swf_monitor_project.monitor_app.activemq_listener': {
+        #     'handlers': ['console'],
+        #     'level': 'INFO',
+        #     'propagate': False,
+        # },
+    },
+}
