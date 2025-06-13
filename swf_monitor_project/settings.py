@@ -34,6 +34,9 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",  # Add daphne for ASGI server
+    "channels",  # Add channels for WebSocket support
+    "mcp_app",  # Changed from "swf_monitor_project.mcp_app"
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -75,6 +78,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "swf_monitor_project.wsgi.application"
+ASGI_APPLICATION = "swf_monitor_project.asgi.application"  # Added ASGI application
 
 
 # Database
@@ -161,7 +165,14 @@ ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')
 ACTIVEMQ_PORT = config('ACTIVEMQ_PORT', default=61613, cast=int)
 ACTIVEMQ_USER = config('ACTIVEMQ_USER', default='admin')
 ACTIVEMQ_PASSWORD = config('ACTIVEMQ_PASSWORD', default='admin')
-ACTIVEMQ_HEARTBEAT_TOPIC = config('ACTIVEMQ_HEARTBEAT_TOPIC', default='/topic/swf.heartbeats')
+ACTIVEMQ_HEARTBEAT_TOPIC = config('ACTIVEMQ_HEARTBEAT_TOPIC', default='/topic/heartbeat') # Updated to working topic
+
+# Channel layer settings (using in-memory for now, consider Redis for production)
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer"
+    }
+}
 
 # Basic Logging Configuration
 LOGGING = {
