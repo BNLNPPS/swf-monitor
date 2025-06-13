@@ -13,7 +13,8 @@ class MCPConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'type': 'connection_established',
             'message': 'Welcome to the SWF Monitor MCP Service!',
-            'available_commands': ['get_all_statuses', 'get_agent_status <agent_name>']
+            # Corrected to show agent_id
+            'available_commands': ['get_all_statuses', 'get_agent_status (expects {"command": "get_agent_status", "agent_id": "your_agent_id"})']
         }))
 
     async def disconnect(self, close_code):
@@ -26,16 +27,17 @@ class MCPConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
             command = data.get("command")
-            params = data.get("params", {})
+            # Removed params nesting, directly get agent_id from top level
+            agent_id = data.get("agent_id")
 
             if command == "get_all_statuses":
                 await self.get_all_statuses()
             elif command == "get_agent_status":
-                agent_name = params.get("agent_name")
-                if agent_name:
-                    await self.get_agent_status(agent_name)
+                if agent_id: # Check for agent_id directly
+                    await self.get_agent_status(agent_id)
                 else:
-                    await self.send_error("Missing agent_name parameter for get_agent_status")
+                    # Corrected error message to reflect agent_id
+                    await self.send_error("Missing agent_id parameter for get_agent_status")
             else:
                 await self.send_error(f"Unknown command: {command}")
         except json.JSONDecodeError:
