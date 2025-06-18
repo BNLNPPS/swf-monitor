@@ -1,0 +1,116 @@
+{% extends 'base.html' %}
+
+{% block title %}Account Management{% endblock %}
+
+{% block content %}
+<style>
+    .account-container {
+        display: flex;
+        margin-top: 20px;
+    }
+    .account-nav {
+        width: 200px;
+        border-right: 1px solid #ddd;
+        padding-right: 20px;
+    }
+    .account-nav ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .account-nav li {
+        padding: 12px 15px;
+        cursor: pointer;
+        border-radius: 5px;
+        margin-bottom: 5px;
+    }
+    .account-nav li:hover {
+        background-color: #f0f0f0;
+    }
+    .account-nav li.active {
+        background-color: #007bff;
+        color: white;
+    }
+    .account-content {
+        padding-left: 20px;
+        flex-grow: 1;
+    }
+    .panel {
+        display: none;
+    }
+    .panel.active {
+        display: block;
+    }
+</style>
+
+<div class="container">
+    <h2>Account Management</h2>
+
+    <div class="account-container">
+        <div class="account-nav">
+            <ul>
+                <li class="active" onclick="showPanel(event, 'account')">Account</li>
+                <li onclick="showPanel(event, 'change-password')">Change Password</li>
+            </ul>
+        </div>
+
+        <div class="account-content">
+            <div id="account" class="panel active">
+                <h3>Account Details</h3>
+                <p><strong>Username:</strong> {{ user.username }}</p>
+                <p><strong>Email:</strong> {{ user.email|default:'Not set' }}</p>
+                <p><strong>Roles:</strong>
+                    {% if user.is_superuser %}Superuser{% endif %}
+                    {% if user.is_staff and not user.is_superuser %}Staff{% endif %}
+                    {% if not user.is_superuser and not user.is_staff %}User{% endif %}
+                </p>
+            </div>
+
+            <div id="change-password" class="panel">
+                <h3>Change Password</h3>
+                {% if messages %}
+                    <ul class="messages">
+                        {% for message in messages %}
+                            <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+                <form method="post" action="{% url 'monitor_app:account' %}">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <button type="submit">Change Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showPanel(evt, panelId) {
+    // Hide all panel content
+    document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
+
+    // Deactivate all nav items
+    document.querySelectorAll('.account-nav li').forEach(nav => nav.classList.remove('active'));
+
+    // Show the selected panel and activate the corresponding nav item
+    document.getElementById(panelId).classList.add('active');
+    evt.currentTarget.classList.add('active');
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    // Check if the password form has errors or success messages
+    const changePasswordPanel = document.getElementById('change-password');
+    const hasErrors = changePasswordPanel.querySelector('.errorlist');
+    const hasMessages = changePasswordPanel.querySelector('.messages');
+
+    if (hasErrors || hasMessages) {
+        // If so, show the 'Change Password' panel by default
+        showPanel({currentTarget: document.querySelector('li[onclick*="change-password"]_')}, 'change-password');
+    } else {
+        // Otherwise, show the 'Account' panel
+        showPanel({currentTarget: document.querySelector('li[onclick*="account"]_')}, 'account');
+    }
+});
+</script>
+{% endblock %}

@@ -56,7 +56,7 @@ This guide will walk you through setting up the `swf-monitor` for local developm
 
 ### Create an Admin User
 
-To access the admin interface and manage the application, you need to create a superuser account:
+To access the admin interface and manage the application, you need to create a superuser account. This user will have `is_staff` set to `True`, granting them access to create, update, and delete agents.
 
 ```bash
 python manage.py createsuperuser
@@ -96,10 +96,10 @@ The project includes a comprehensive test suite to ensure functionality and stab
 
 ### Running the Tests
 
-To run the full test suite, use `pytest`:
+To run the full test suite, use the Django `test` command:
 
 ```bash
-pytest
+python manage.py test
 ```
 
 All tests should pass.
@@ -109,15 +109,17 @@ All tests should pass.
 The test suite covers the following key areas of the application:
 
 - **REST API**:
-  - Full CRUD (Create, Read, Update, Delete) operations for monitored items.
+  - Full CRUD (Create, Read, Update, Delete) operations for system agents.
   - Token-based authentication for write operations.
+  - Handling of invalid data and non-existent objects.
 - **WebSocket Service**:
   - Authentication checks to ensure only logged-in users can connect.
-  - Core commands like `get_all_statuses` and `get_agent_status`.
+  - Real-time agent status updates via heartbeats.
+  - Graceful handling of invalid messages and database errors.
 - **Browser-Based UI**:
   - Authentication flow (login/logout visibility).
-  - Form-based CRUD operations for monitored items.
-  - Access control to ensure only logged-in users can modify data.
+  - Form-based CRUD operations for system agents.
+  - Access control to ensure only staff users can modify data.
 - **Management Commands**:
   - The `get_token` command, including user creation.
 
@@ -126,8 +128,9 @@ The test suite covers the following key areas of the application:
 ### Browser Interface
 
 - **Monitor Dashboard**: Access `http://127.0.0.1:8000/` to see the main dashboard.
-- **Login**: Click the "Login" link and use the credentials you created. Once logged in, you will be able to create, edit, and delete monitored items.
-- **Admin Panel**: If you are logged in as an admin user, click the "Admin" link to access the Django admin site, where you can manage users and permissions.
+- **Login**: Click the "Login" link and use the credentials you created.
+- **Agent Management**: If you are logged in as a staff user, you will be able to create, edit, and delete system agents from the dashboard.
+- **Admin Panel**: If you are logged in as a staff user, click the "Admin" link to access the Django admin site, where you can manage users and permissions.
 
 ### API Access and Authentication
 
@@ -153,15 +156,15 @@ For programmatic access, the service provides a REST API that uses token-based a
     # Create a new agent
     curl -X POST -H "Authorization: Token <your_token_here>" \
          -H "Content-Type: application/json" \
-         -d '{"name": "new-api-agent", "status": "OK"}' \
-         http://127.0.0.1:8000/api/monitoreditems/
+         -d '{"instance_name": "new-api-agent", "agent_type": "some_type", "status": "OK"}' \
+         http://127.0.0.1:8000/api/systemagents/
 
     # Update an agent's status using PATCH
     # First, get the ID of the agent you want to update
     curl -X PATCH -H "Authorization: Token <your_token_here>" \
          -H "Content-Type: application/json" \
          -d '{"status": "ERROR"}' \
-         http://127.0.0.1:8000/api/monitoreditems/<agent_id>/
+         http://127.0.0.1:8000/api/systemagents/<agent_id>/
     ```
 
 ### API Documentation
@@ -181,7 +184,7 @@ The API is documented using OpenAPI (Swagger). You can view the interactive API 
 
 ### MCP WebSocket Service
 
-(Details about the WebSocket service...)
+(Details about the WebSocket service... The service currently only handles heartbeat messages.)
 
 ### Management Commands
 

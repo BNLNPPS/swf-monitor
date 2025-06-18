@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+
+{% block title %}About SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="about-container">
+    <h1>About SWF Monitor</h1>
+    <p>
+        This application is a monitoring and information service for the ePIC streaming workflow testbed.
+    </p>
+    <p>
+        It provides a browser-based dashboard, a REST API, and a WebSocket service for monitoring the state of the testbed components (agents).
+    </p>
+    <h2>Features</h2>
+    <ul>
+        <li>Real-time status updates of monitored agents.</li>
+        <li>A REST API for programmatic access and control.</li>
+        <li>A WebSocket interface for receiving live updates.</li>
+        <li>User authentication and an admin interface for management.</li>
+    </ul>
+</div>
+{% endblock %}

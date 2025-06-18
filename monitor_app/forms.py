@@ -1,7 +1,7 @@
 from django import forms
-from .models import MonitoredItem
+from .models import SystemAgent
 
-class MonitoredItemForm(forms.ModelForm):
+class SystemAgentForm(forms.ModelForm):
     class Meta:
-        model = MonitoredItem
-        fields = ['name', 'description', 'status', 'agent_url']
+        model = SystemAgent
+        fields = ['instance_name', 'agent_type', 'description', 'status', 'agent_url']

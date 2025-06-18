@@ -1,116 +1,77 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from monitor_app.models import MonitoredItem # Adjusted import path
+from monitor_app.models import SystemAgent
 
 class MCPConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope["user"]
-        if not self.user.is_authenticated:
+        if not self.user or not self.user.is_authenticated:
             await self.close()
-            print(f"MCP WebSocket connection rejected for unauthenticated user.")
             return
 
         await self.accept()
-        print(f"MCP WebSocket connection established for user {self.user.username}: {self.channel_name}")
-        # Optionally, send an initial message or available commands
         await self.send(text_data=json.dumps({
             'type': 'connection_established',
-            'message': f'Welcome {self.user.username}! You are connected to the SWF Monitor MCP Service.',
-            # Corrected to show agent_id
-            'available_commands': ['get_all_statuses', 'get_agent_status (expects {"command": "get_agent_status", "agent_id": "your_agent_id"})']
+            'message': f'MCP WebSocket connection established for user {self.user.username}'
         }))
 
     async def disconnect(self, close_code):
-        if hasattr(self, 'user') and self.user.is_authenticated:
-            print(f"MCP WebSocket connection for user {self.user.username} closed: {self.channel_name}")
-        else:
-            print(f"MCP WebSocket connection closed: {self.channel_name}")
-        # Perform cleanup if needed
         pass
 
     async def receive(self, text_data):
-        print(f"MCP received message from {self.user.username}: {text_data}")
+        user = self.scope['user']
+        print(f"MCP received message from {user.username}: {text_data}")
         try:
             data = json.loads(text_data)
             command = data.get("command")
-            # Removed params nesting, directly get agent_id from top level
-            agent_id = data.get("agent_id")
 
-            if command == "get_all_statuses":
-                await self.get_all_statuses()
-            elif command == "get_agent_status":
-                if agent_id: # Check for agent_id directly
-                    await self.get_agent_status(agent_id)
-                else:
-                    # Corrected error message to reflect agent_id
-                    await self.send_error("Missing agent_id parameter for get_agent_status")
+            if command == "heartbeat":
+                await self.send_heartbeat(data)
             else:
                 await self.send_error(f"Unknown command: {command}")
         except json.JSONDecodeError:
             await self.send_error("Invalid JSON received.")
         except Exception as e:
-            await self.send_error(f"An error occurred: {str(e)}")
+            await self.send_error(f"An unexpected error occurred: {str(e)}")
 
     @database_sync_to_async
-    def _get_all_monitored_items(self):
-        items = MonitoredItem.objects.all()
-        # Serialize queryset to a list of dicts
-        return list(items.values('name', 'status', 'last_heartbeat', 'agent_url', 'updated_at'))
-
-    @database_sync_to_async
-    def _get_monitored_item_by_name(self, name): # Assuming agent_id corresponds to the 'name' field
+    def update_agent_status(self, agent_id, status):
+        """Updates the status of an agent."""
         try:
-            item = MonitoredItem.objects.get(name=name)
-            # Serialize single object to a dict
+            agent = SystemAgent.objects.get(instance_name=agent_id)
+            agent.status = status
+            agent.save()
             return {
-                'name': item.name,
-                'status': item.status,
-                'last_heartbeat': item.last_heartbeat,
-                'agent_url': item.agent_url,
-                'updated_at': item.updated_at,
+                'id': agent.id,
+                'instance_name': agent.instance_name,
+                'agent_type': agent.agent_type,
+                'status': agent.status,
+                'last_heartbeat': agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+                'agent_url': agent.agent_url
             }
-        except MonitoredItem.DoesNotExist:
+        except SystemAgent.DoesNotExist:
             return None
 
-    async def get_all_statuses(self):
-        items_data = await self._get_all_monitored_items()
-        # Convert datetime objects to string if they are not JSON serializable by default
-        for item in items_data:
-            if item.get('last_heartbeat'):
-                item['last_heartbeat'] = item['last_heartbeat'].isoformat()
-            if item.get('updated_at'):
-                item['updated_at'] = item['updated_at'].isoformat()
+    async def send_heartbeat(self, data):
+        agent_id = data.get('agent_id')
+        status = data.get('status')
+        if not agent_id or not status:
+            await self.send_error("Missing agent_id or status for heartbeat.")
+            return
 
-        await self.send(text_data=json.dumps({
-            'command': 'all_statuses',
-            'data': items_data
-        }))
+        updated_agent = await self.update_agent_status(agent_id, status)
 
-    async def get_agent_status(self, agent_id):
-        item_data = await self._get_monitored_item_by_name(agent_id)
-        if item_data:
-            # Convert datetime objects to string
-            if item_data.get('last_heartbeat'):
-                item_data['last_heartbeat'] = item_data['last_heartbeat'].isoformat()
-            if item_data.get('updated_at'):
-                item_data['updated_at'] = item_data['updated_at'].isoformat()
+        if updated_agent:
             await self.send(text_data=json.dumps({
-                'command': 'agent_status',
-                'agent_id': agent_id,
-                'data': item_data
+                'type': 'heartbeat',
+                'agent': updated_agent
             }))
         else:
-            await self.send(text_data=json.dumps({
-                'command': 'agent_status',
-                'agent_id': agent_id,
-                'error': 'Agent not found'
-            }))
+            await self.send_error(f"Agent with id {agent_id} not found.")
 
     async def send_error(self, message):
         await self.send(text_data=json.dumps({
             'type': 'error',
             'message': message
         }))
-
-    # ... any other MCP commands can be added here ...
