@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from swf_monitor_project.monitor_app.models import MonitoredItem
+from monitor_app.models import MonitoredItem
 
 class Command(BaseCommand):
     help = 'Populates the database with initial agent data from the swf-testbed project.'

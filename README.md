@@ -19,3 +19,36 @@ for other agents in the system to report status and retrieve information.
   messages.
 - Interfaces with OpenSearch/Grafana for monitoring dashboards.
 
+## Agent Status Update API
+
+Agents can update their status and heartbeat using the following REST endpoint:
+
+**POST** `/api/monitoreditems/update_status/`
+
+**Request body (JSON):**
+```
+{
+  "name": "<agent_name>",
+  "status": "<status>",
+  "last_heartbeat": "<ISO8601 datetime, optional>"
+}
+```
+- `name` (string, required): The unique name of the agent (must match an existing MonitoredItem)
+- `status` (string, required): One of `UNKNOWN`, `OK`, `WARNING`, `ERROR`
+- `last_heartbeat` (string, optional): ISO8601 datetime string (e.g., `2025-06-18T12:00:00Z`)
+
+**Response:**
+- 200 OK: Returns the updated agent record
+- 400 Bad Request: Missing required fields
+- 404 Not Found: Agent not found
+
+## Running the API Tests
+
+To run the API tests for agent status update:
+
+```
+python manage.py test monitor_app
+```
+
+This will run the tests in `monitor_app/tests.py` which cover success, missing fields, and agent not found cases for the update_status endpoint.
+

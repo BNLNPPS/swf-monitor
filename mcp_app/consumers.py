@@ -1,7 +1,7 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from swf_monitor_project.monitor_app.models import MonitoredItem # Adjusted import path
+from monitor_app.models import MonitoredItem # Adjusted import path
 
 class MCPConsumer(AsyncWebsocketConsumer):
     async def connect(self):

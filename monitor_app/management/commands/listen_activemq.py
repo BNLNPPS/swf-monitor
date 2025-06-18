@@ -1,6 +1,5 @@
-\
 from django.core.management.base import BaseCommand
-from swf_monitor_project.monitor_app.activemq_listener import start_activemq_listener
+from monitor_app.activemq_listener import start_activemq_listener
 import logging
 
 logger = logging.getLogger(__name__)

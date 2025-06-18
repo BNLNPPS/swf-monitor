@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "swf_monitor_project.monitor_app",  # Changed from "monitor_app"
+    "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     # Third-party apps
     "rest_framework",
     "drf_spectacular",
@@ -194,7 +194,7 @@ LOGGING = {
             'propagate': False,
         },
         # You can add specific loggers here if needed, e.g.:
-        # 'swf_monitor_project.monitor_app.activemq_listener': {
+        # 'monitor_app.activemq_listener': {
         #     'handlers': ['console'],
         #     'level': 'INFO',
         #     'propagate': False,
