@@ -36,3 +36,6 @@ typing_extensions==4.14.0
 uritemplate==4.2.0
 websocket-client==1.8.0
 zope.interface==7.2
+pytest
+pytest-asyncio
+pytest-django

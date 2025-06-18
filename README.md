@@ -42,13 +42,113 @@ Agents can update their status and heartbeat using the following REST endpoint:
 - 400 Bad Request: Missing required fields
 - 404 Not Found: Agent not found
 
-## Running the API Tests
+## REST API Endpoints
 
-To run the API tests for agent status update:
+The service provides a standard REST API for managing monitored items.
+
+### List and Create Monitored Items
+
+- **GET** `/api/monitoreditems/`
+  - **Description:** Retrieves a list of all monitored items.
+  - **Response:** `200 OK` with a list of monitored item objects.
+
+- **POST** `/api/monitoreditems/`
+  - **Description:** Creates a new monitored item.
+  - **Request Body:** A JSON object representing the item (e.g., `{"name": "new-agent", "description": "...", "status": "OK"}`).
+  - **Response:** `201 Created` with the newly created item object.
+
+### Retrieve, Update, and Delete a Monitored Item
+
+- **GET** `/api/monitoreditems/{id}/`
+  - **Description:** Retrieves a single monitored item by its ID.
+  - **Response:** `200 OK` with the item object.
+
+- **PUT** `/api/monitoreditems/{id}/`
+  - **Description:** Updates all fields of a specific monitored item.
+  - **Request Body:** A JSON object with all required fields for the item.
+  - **Response:** `200 OK` with the updated item object.
+
+- **PATCH** `/api/monitoreditems/{id}/`
+  - **Description:** Partially updates a specific monitored item.
+  - **Request Body:** A JSON object with the fields to be updated.
+  - **Response:** `200 OK` with the updated item object.
+
+- **DELETE** `/api/monitoreditems/{id}/`
+  - **Description:** Deletes a specific monitored item.
+  - **Response:** `204 No Content`.
+
+### Custom Agent Status Update
+
+The custom agent status update can be performed using the standard Monitored Item endpoints. Agents should report their status as part of the monitored item's data. The status can be one of `UNKNOWN`, `OK`, `WARNING`, or `ERROR`.
+
+## Authentication
+
+Write operations (POST, PUT, PATCH, DELETE) to the REST API require token authentication. Read operations (GET) are publicly accessible.
+
+### Generating a Token
+
+You can generate an API token for a user with the following management command:
+
+```bash
+python manage.py get_token <username>
+```
+
+If the user does not exist, you can create them at the same time:
+
+```bash
+python manage.py get_token <username> --create-user
+```
+
+### Using the Token
+
+To authenticate your API requests, you must include the token in the `Authorization` header:
 
 ```
-python manage.py test monitor_app
+Authorization: Token <your_token_here>
 ```
 
-This will run the tests in `monitor_app/tests.py` which cover success, missing fields, and agent not found cases for the update_status endpoint.
+For example, using `curl`:
+
+```bash
+curl -X POST -H "Authorization: Token <your_token_here>" -H "Content-Type: application/json" -d '{"name": "new-agent"}' http://localhost:8000/api/monitoreditems/
+```
+
+## Browser-Based Interface
+
+The project includes a browser-based interface for monitoring and managing items. 
+
+- **Read-Only Access**: By default, all users can view the list of monitored items and their status in a read-only mode.
+- **Authenticated Access**: Users who log in can create, update, and delete monitored items directly through the web interface.
+
+### Login and Logout
+
+- To log in, navigate to the `/login/` URL and enter your credentials.
+- A "Login" link is available in the navigation bar.
+- Once logged in, a "Logout" link will appear in the navigation bar.
+
+### User Roles and Administration
+
+The application uses Django's built-in authentication and permissions system to manage user access. There are two main roles:
+
+- **Standard Users**: Can log in to the web interface to manage monitored items.
+- **Admin Users**: Have all the permissions of a standard user, plus access to the Django admin site to manage users and their permissions.
+
+#### Creating an Admin User
+
+To create a user with admin privileges, run the following command:
+
+```bash
+python manage.py createsuperuser
+```
+
+You will be prompted to set a username, email, and password. This user will have access to the admin site.
+
+#### Managing Users
+
+Admin users can manage users and their permissions by:
+1.  Logging into the web interface.
+2.  Clicking the "Admin" link in the navigation bar.
+3.  Using the Django admin interface to add, edit, or delete users.
+
+## REST API Authentication
 
