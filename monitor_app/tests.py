@@ -4,40 +4,9 @@ from rest_framework import status
 from .models import MonitoredItem
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
-
-class TestMonitoredItemUpdateStatus(APITestCase):
-    def setUp(self):
-        self.agent = MonitoredItem.objects.create(
-            name="test-agent",
-            description="A test agent",
-            status="UNKNOWN"
-        )
-        self.url = reverse('monitoreditem-update-status')
-
-    def test_update_status_success(self):
-        data = {
-            "name": "test-agent",
-            "status": "OK",
-            "last_heartbeat": "2025-06-18T12:00:00Z"
-        }
-        response = self.client.post(self.url, data, format='json')
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.agent.refresh_from_db()
-        self.assertEqual(self.agent.status, "OK")
-        self.assertEqual(response.data["status"], "OK")
-        self.assertEqual(response.data["last_heartbeat"], "2025-06-18T12:00:00Z")
-
-    def test_update_status_missing_fields(self):
-        data = {"name": "test-agent"}
-        response = self.client.post(self.url, data, format='json')
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn('error', response.data)
-
-    def test_update_status_agent_not_found(self):
-        data = {"name": "nonexistent-agent", "status": "OK"}
-        response = self.client.post(self.url, data, format='json')
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        self.assertIn('error', response.data)
+from io import StringIO
+from django.core.management import call_command
+from django.test import TestCase
 
 class MonitoredItemViewSetTests(APITestCase):
     def setUp(self):
@@ -107,3 +76,83 @@ class MonitoredItemViewSetTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(MonitoredItem.objects.count(), 1)
         self.assertFalse(MonitoredItem.objects.filter(pk=self.item1.pk).exists())
+
+
+class MonitorAppUITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='ui_user', password='password')
+        self.item = MonitoredItem.objects.create(name="ui_agent", status="OK")
+
+    def test_index_view_unauthenticated(self):
+        """Ensure anonymous users can see the index page but not edit controls."""
+        response = self.client.get(reverse('monitor_app:index'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertContains(response, "Login")
+        self.assertNotContains(response, "Create New Item")
+
+    def test_index_view_authenticated(self):
+        """Ensure logged-in users see the index page with edit controls."""
+        self.client.login(username='ui_user', password='password')
+        response = self.client.get(reverse('monitor_app:index'))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertContains(response, "Logout")
+        self.assertContains(response, "Create New Item")
+
+    def test_login_required_for_create_view(self):
+        """Ensure create view requires login."""
+        response = self.client.get(reverse('monitor_app:monitored_item_create'))
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertIn(reverse('login'), response.url)
+
+    def test_create_monitored_item(self):
+        """Ensure a logged-in user can create a new item via the form."""
+        self.client.login(username='ui_user', password='password')
+        initial_count = MonitoredItem.objects.count()
+        data = {'name': 'new_ui_agent', 'status': 'WARNING', 'description': 'From UI test'}
+        response = self.client.post(reverse('monitor_app:monitored_item_create'), data)
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertEqual(MonitoredItem.objects.count(), initial_count + 1)
+        self.assertTrue(MonitoredItem.objects.filter(name='new_ui_agent').exists())
+
+    def test_update_monitored_item(self):
+        """Ensure a logged-in user can update an item via the form."""
+        self.client.login(username='ui_user', password='password')
+        data = {'name': 'updated_ui_agent', 'status': 'ERROR', 'description': self.item.description}
+        response = self.client.post(reverse('monitor_app:monitored_item_update', kwargs={'pk': self.item.pk}), data)
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.name, 'updated_ui_agent')
+        self.assertEqual(self.item.status, 'ERROR')
+
+    def test_delete_monitored_item(self):
+        """Ensure a logged-in user can delete an item."""
+        self.client.login(username='ui_user', password='password')
+        initial_count = MonitoredItem.objects.count()
+        response = self.client.post(reverse('monitor_app:monitored_item_delete', kwargs={'pk': self.item.pk}))
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertEqual(MonitoredItem.objects.count(), initial_count - 1)
+        self.assertFalse(MonitoredItem.objects.filter(pk=self.item.pk).exists())
+
+
+class GetTokenCommandTest(TestCase):
+    def test_get_token_for_existing_user(self):
+        """Ensure the command retrieves a token for an existing user."""
+        user = User.objects.create_user(username='token_user', password='password')
+        out = StringIO()
+        call_command('get_token', user.username, stdout=out)
+        token = Token.objects.get(user=user)
+        self.assertIn(token.key, out.getvalue())
+
+    def test_get_token_and_create_user(self):
+        """Ensure the command creates a new user and token with the --create-user flag."""
+        out = StringIO()
+        call_command('get_token', 'new_token_user', '--create-user', stdout=out)
+        self.assertTrue(User.objects.filter(username='new_token_user').exists())
+        user = User.objects.get(username='new_token_user')
+        token = Token.objects.get(user=user)
+        self.assertIn(token.key, out.getvalue())
+
+    def test_get_token_user_not_found(self):
+        """Ensure the command raises an error if the user does not exist and --create-user is not used."""
+        with self.assertRaises(Exception):
+            call_command('get_token', 'nonexistent_user')

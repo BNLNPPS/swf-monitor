@@ -5,25 +5,32 @@ from monitor_app.models import MonitoredItem # Adjusted import path
 
 class MCPConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        # Perform connection setup, e.g., authentication, logging
-        # For now, just accept all connections
+        self.user = self.scope["user"]
+        if not self.user.is_authenticated:
+            await self.close()
+            print(f"MCP WebSocket connection rejected for unauthenticated user.")
+            return
+
         await self.accept()
-        print(f"MCP WebSocket connection established: {self.channel_name}")
+        print(f"MCP WebSocket connection established for user {self.user.username}: {self.channel_name}")
         # Optionally, send an initial message or available commands
         await self.send(text_data=json.dumps({
             'type': 'connection_established',
-            'message': 'Welcome to the SWF Monitor MCP Service!',
+            'message': f'Welcome {self.user.username}! You are connected to the SWF Monitor MCP Service.',
             # Corrected to show agent_id
             'available_commands': ['get_all_statuses', 'get_agent_status (expects {"command": "get_agent_status", "agent_id": "your_agent_id"})']
         }))
 
     async def disconnect(self, close_code):
-        print(f"MCP WebSocket connection closed: {self.channel_name}")
+        if hasattr(self, 'user') and self.user.is_authenticated:
+            print(f"MCP WebSocket connection for user {self.user.username} closed: {self.channel_name}")
+        else:
+            print(f"MCP WebSocket connection closed: {self.channel_name}")
         # Perform cleanup if needed
         pass
 
     async def receive(self, text_data):
-        print(f"MCP received message: {text_data}")
+        print(f"MCP received message from {self.user.username}: {text_data}")
         try:
             data = json.loads(text_data)
             command = data.get("command")

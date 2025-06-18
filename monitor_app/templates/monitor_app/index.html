@@ -1,47 +1,46 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>{% block title %}SWF Monitor{% endblock %}</title>
-    {% load static %}
-    <link rel="stylesheet" type="text/css" href="{% static 'css/style.css' %}">
-</head>
-<body>
-    {% block content %}
-    <h1>Monitored Items</h1>
+{% extends 'base.html' %}
+{% load static %}
 
-    {% if user.is_authenticated %}
-        <a href="{% url 'monitor_app:monitored_item_create' %}">Create New Item</a>
-    {% endif %}
+{% block title %}SWF Monitor - Dashboard{% endblock %}
 
-    <table>
-        <thead>
+{% block content %}
+<h1>Monitored Items</h1>
+
+{% if user.is_authenticated %}
+    <a href="{% url 'monitor_app:monitored_item_create' %}" class="button">Create New Item</a>
+{% endif %}
+
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Last Heartbeat</th>
+            <th>Agent URL</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
             <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Last Heartbeat</th>
-                <th>Agent URL</th>
-                <th>Actions</th>
+                <td>{{ item.name }}</td>
+                <td>{{ item.status }}</td>
+                <td>{{ item.last_heartbeat|date:"Y-m-d H:i:s"|default:"N/A" }}</td>
+                <td>{{ item.agent_url|default:"N/A" }}</td>
+                <td class="actions">
+                    {% if user.is_authenticated %}
+                        <a href="{% url 'monitor_app:monitored_item_update' item.pk %}">Edit</a>
+                        <a href="{% url 'monitor_app:monitored_item_delete' item.pk %}">Delete</a>
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </td>
             </tr>
-        </thead>
-        <tbody>
-            {% for item in items %}
-                <tr>
-                    <td>{{ item.name }}</td>
-                    <td>{{ item.status }}</td>
-                    <td>{{ item.last_heartbeat|default:"N/A" }}</td>
-                    <td>{{ item.agent_url|default:"N/A" }}</td>
-                    <td class="actions">
-                        {% if user.is_authenticated %}
-                            <a href="{% url 'monitor_app:monitored_item_update' item.pk %}">Edit</a>
-                            <a href="{% url 'monitor_app:monitored_item_delete' item.pk %}">Delete</a>
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% endblock %}
-</body>
-</html>
+        {% empty %}
+            <tr>
+                <td colspan="5">No monitored items found.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

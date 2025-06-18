@@ -26,9 +26,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Set DEBUG to False in production by setting the environment variable DEBUG=False
+DEBUG = config('DEBUG', default=True, cast=bool)
 
+# Define allowed hosts. In production, this should be a comma-separated string
+# of your domain(s) in the .env file.
 ALLOWED_HOSTS = []
+if not DEBUG:
+    allowed_hosts_str = config('ALLOWED_HOSTS', default='')
+    if allowed_hosts_str:
+        ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
+else:
+    # For development, allow localhost and 127.0.0.1
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 
 # Application definition

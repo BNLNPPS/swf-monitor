@@ -17,15 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
-from django.contrib.auth import views as auth_views
 
 urlpatterns = [
-    path("", include("monitor_app.urls")),
-    path('admin/', admin.site.urls),
-    path('login/', auth_views.LoginView.as_view(template_name='login.html'), name='login'),
-    path('logout/', auth_views.LogoutView.as_view(), name='logout'),
-    path('monitor/', include('monitor_app.urls')),
-    # DRF Spectacular URL patterns
+    path("admin/", admin.site.urls),
+    path("api/", include("monitor_app.api_urls")),  # Use the new api_urls for the API
+    path("api-auth/", include("rest_framework.urls")),
+    path("accounts/", include("django.contrib.auth.urls")),  # Add this line
+    path("", include("monitor_app.urls")),  # Include monitor_app URLs for the root path
+    # API Schema and Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     # Optional UI:
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

@@ -1,26 +1,40 @@
 import pytest
 from channels.testing import WebsocketCommunicator
-from swf_monitor_project.asgi import application  # Your ASGI application
+from swf_monitor_project.asgi import application
 from monitor_app.models import MonitoredItem
+from django.contrib.auth.models import User
 import json
-from datetime import datetime
 
 @pytest.mark.asyncio
 @pytest.mark.django_db(transaction=True)
-async def test_mcp_consumer_flow():
+async def test_mcp_consumer_unauthenticated_connection():
+    """Test that an unauthenticated user cannot connect to the WebSocket."""
+    communicator = WebsocketCommunicator(application, "/ws/mcp/")
+    connected, close_code = await communicator.connect()
+    assert not connected
+    # Optionally, check the close code if your consumer sets a specific one
+
+@pytest.mark.asyncio
+@pytest.mark.django_db(transaction=True)
+async def test_mcp_consumer_authenticated_flow():
+    """Test the full WebSocket flow for an authenticated user."""
+    # Create a test user
+    user = await User.objects.acreate(username='testuser')
+
     # Create test data
-    item1 = await MonitoredItem.objects.acreate(name="agent1", status="OK", agent_url="http://agent1.com")
-    item2 = await MonitoredItem.objects.acreate(name="agent2", status="WARNING", agent_url="http://agent2.com")
+    await MonitoredItem.objects.acreate(name="agent1", status="OK", agent_url="http://agent1.com")
+    await MonitoredItem.objects.acreate(name="agent2", status="WARNING", agent_url="http://agent2.com")
 
     communicator = WebsocketCommunicator(application, "/ws/mcp/")
+    communicator.scope['user'] = user  # Simulate an authenticated user
     connected, _ = await communicator.connect()
-    assert connected
+    assert connected, "Authenticated user should be able to connect"
 
     # Test connection established message
     response = await communicator.receive_from()
     data = json.loads(response)
     assert data['type'] == 'connection_established'
-    assert data['message'] == 'Welcome to the SWF Monitor MCP Service!'
+    assert user.username in data['message']
 
     # Test get_all_statuses
     await communicator.send_to(text_data=json.dumps({"command": "get_all_statuses"}))
