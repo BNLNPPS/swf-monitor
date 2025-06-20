@@ -40,21 +40,21 @@ The MCP is a lightweight, JSON-based protocol designed for agents and services t
 
 **Available Commands:**
 
-*   **`discover_capabilities`:**
-    *   **Description:** Returns a list of all available commands and their functions.
-    *   **Payload (Request):** `{}`
-    *   **Payload (Response):** A dictionary where keys are command names and values are their descriptions.
+* **`discover_capabilities`:**
+  * **Description:** Returns a list of all available commands and their functions.
+  * **Payload (Request):** `{}`
+  * **Payload (Response):** A dictionary where keys are command names and values are their descriptions.
 
-*   **`get_agent_liveness`:**
-    *   **Description:** Reports the liveness status (`alive` or `dead`) of all registered agents based on their last heartbeat.
-    *   **Payload (Request):** `{}`
-    *   **Payload (Response):** A dictionary mapping agent names to their liveness status.
+* **`get_agent_liveness`:**
+  * **Description:** Reports the liveness status (`alive` or `dead`) of all registered agents based on their last heartbeat.
+  * **Payload (Request):** `{}`
+  * **Payload (Response):** A dictionary mapping agent names to their liveness status.
 
 **Notifications:**
 
-*   **`heartbeat`:**
-    *   **Description:** A notification sent by an agent to signal it is still active. This is not a request and does not receive a direct response.
-    *   **Payload:** `{ "name": "agent-name", "timestamp": "iso-8601-timestamp" }`
+* **`heartbeat`:**
+  * **Description:** A notification sent by an agent to signal it is still active. This is not a request and does not receive a direct response.
+  * **Payload:** `{ "name": "agent-name", "timestamp": "iso-8601-timestamp" }`
 
 3.  **ActiveMQ Artemis Listener:** An integrated management command (`listen_activemq`) that can connect to an ActiveMQ topic to receive and process agent communications, serving as an alternative ingress for heartbeats.
 
@@ -72,8 +72,8 @@ This guide will walk you through setting up the `swf-monitor` for local developm
 
 ### Prerequisites
 
-- Python 3.9+
-- PostgreSQL
+* Python 3.9+
+* PostgreSQL
 
 ### Installation and Setup
 
@@ -103,7 +103,7 @@ This guide will walk you through setting up the `swf-monitor` for local developm
         *You can generate a new `SECRET_KEY` using an online generator or by running `python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())'`.*
 
 5.  **Set up the PostgreSQL database:**
-    -   Log in to PostgreSQL and create the database and user specified in your `.env` file.
+    *   Log in to PostgreSQL and create the database and user specified in your `.env` file.
         ```sql
         CREATE DATABASE swfdb;
         CREATE USER admin WITH PASSWORD 'your_db_password';
@@ -172,29 +172,29 @@ All tests should pass.
 
 The test suite covers the following key areas of the application:
 
-- **REST API**:
-  - Full CRUD (Create, Read, Update, Delete) operations for system agents.
-  - Token-based authentication for write operations.
-  - Handling of invalid data and non-existent objects.
-- **WebSocket Service**:
-  - Authentication checks to ensure only logged-in users can connect.
-  - Real-time agent status updates via heartbeats.
-  - Graceful handling of invalid messages and database errors.
-- **Browser-Based UI**:
-  - Authentication flow (login/logout visibility).
-  - Form-based CRUD operations for system agents.
-  - Access control to ensure only staff users can modify data.
-- **Management Commands**:
-  - The `get_token` command, including user creation.
+* **REST API**:
+  * Full CRUD (Create, Read, Update, Delete) operations for system agents.
+  * Token-based authentication for write operations.
+  * Handling of invalid data and non-existent objects.
+* **WebSocket Service**:
+  * Authentication checks to ensure only logged-in users can connect.
+  * Real-time agent status updates via heartbeats.
+  * Graceful handling of invalid messages and database errors.
+* **Browser-Based UI**:
+  * Authentication flow (login/logout visibility).
+  * Form-based CRUD operations for system agents.
+  * Access control to ensure only staff users can modify data.
+* **Management Commands**:
+  * The `get_token` command, including user creation.
 
 ## Usage
 
 ### Browser Interface
 
-- **Monitor Dashboard**: Access `http://127.0.0.1:8000/` to see the main dashboard.
-- **Login**: Click the "Login" link and use the credentials you created.
-- **Agent Management**: If you are logged in as a staff user, you will be able to create, edit, and delete system agents from the dashboard.
-- **Admin Panel**: If you are logged in as a staff user, click the "Admin" link to access the Django admin site, where you can manage users and permissions.
+* **Monitor Dashboard**: Access `http://127.0.0.1:8000/` to see the main dashboard.
+* **Login**: Click the "Login" link and use the credentials you created.
+* **Agent Management**: If you are logged in as a staff user, you will be able to create, edit, and delete system agents from the dashboard.
+* **Admin Panel**: If you are logged in as a staff user, click the "Admin" link to access the Django admin site, where you can manage users and permissions.
 
 ### API Access and Authentication
 
@@ -235,8 +235,8 @@ For programmatic access, the service provides a REST API that uses token-based a
 
 The API is documented using OpenAPI (Swagger). You can view the interactive API documentation in your browser:
 
-- **Swagger UI**: `http://127.0.0.1:8000/api/schema/swagger-ui/`
-- **ReDoc**: `http://127.0.0.1:8000/api/schema/redoc/`
+* **Swagger UI**: `http://127.0.0.1:8000/api/schema/swagger-ui/`
+* **ReDoc**: `http://127.0.0.1:8000/api/schema/redoc/`
 
 ---
 
@@ -252,8 +252,8 @@ The API is documented using OpenAPI (Swagger). You can view the interactive API 
 
 ### Management Commands
 
-- `createsuperuser`: Create an admin user.
-- `get_token <username> [--create-user]`: Generate an API token.
-- `listen_activemq`: Listen for heartbeats on an ActiveMQ topic.
-- `populate_agents`: Populate the database with initial agent data.
+* `createsuperuser`: Create an admin user.
+* `get_token <username> [--create-user]`: Generate an API token.
+* `listen_activemq`: Listen for heartbeats on an ActiveMQ topic.
+* `populate_agents`: Populate the database with initial agent data.
 
