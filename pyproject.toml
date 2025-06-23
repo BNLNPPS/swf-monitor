@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swf-monitor"
+version = "0.1.0"
+description = "The SWF monitoring application."
+requires-python = ">=3.9"
+dependencies = [
+    "asgiref==3.8.1",
+    "attrs==25.3.0",
+    "autobahn==24.4.2",
+    "Automat==25.4.16",
+    "cffi==1.17.1",
+    "channels==4.2.2",
+    "constantly==23.10.4",
+    "cryptography==45.0.4",
+    "daphne==4.2.0",
+    "Django==4.2.23",
+    "djangorestframework==3.16.0",
+    "docopt==0.6.2",
+    "drf-spectacular==0.28.0",
+    "hyperlink==21.0.0",
+    "idna==3.10",
+    "incremental==24.7.2",
+    "inflection==0.5.1",
+    "jsonschema==4.24.0",
+    "jsonschema-specifications==2025.4.1",
+    "psycopg2-binary==2.9.10",
+    "pyasn1==0.6.1",
+    "pyasn1_modules==0.4.2",
+    "pycparser==2.22",
+    "pyOpenSSL==25.1.0",
+    "python-decouple==3.8",
+    "PyYAML==6.0.2",
+    "referencing==0.36.2",
+    "rpds-py==0.25.1",
+    "service-identity==24.2.0",
+    "sqlparse==0.5.3",
+    "stomp.py==8.2.0",
+    "tomli==2.2.1",
+    "Twisted==25.5.0",
+    "txaio==23.1.1",
+    "typing_extensions==4.14.0",
+    "uritemplate==4.2.0",
+    "websocket-client==1.8.0",
+    "zope.interface==7.2",
+    # This is a dependency from our other local package
+    "swf-common-lib"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-django",
+]
+
+[project.urls]
+"Repository" = "https://github.com/bnlnpps/swf-monitor"
+"Homepage" = "https://github.com/bnlnpps/swf-monitor"
+"Documentation" = "https://swf-monitor.readthedocs.io/en/latest/"
+"Changelog" = "https://github.com/bnlnpps/swf-monitor/blob/main/CHANGELOG.md"
+"Issue Tracker" = "https://github.com/bnlnpps/swf-monitor/issues"
+"Source Code" = "https://github.com/bnlnpps/swf-monitor"
