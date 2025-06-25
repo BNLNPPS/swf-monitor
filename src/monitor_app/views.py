@@ -1,6 +1,8 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
-from rest_framework import viewsets
+from django.db.models import Count
+from django.core.paginator import Paginator
+from rest_framework import viewsets, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
@@ -12,8 +14,8 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent
-from .serializers import SystemAgentSerializer
+from .models import SystemAgent, AppLog
+from .serializers import SystemAgentSerializer, AppLogSerializer
 from .forms import SystemAgentForm
 
 # Create your views here.
@@ -103,3 +105,78 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
     serializer_class = SystemAgentSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
+
+class AppLogViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint that allows logs to be viewed or created.
+    """
+    queryset = AppLog.objects.all()
+    serializer_class = AppLogSerializer
+    permission_classes = [AllowAny] # For now, allow any client to post logs
+
+@login_required
+def log_summary(request):
+    """
+    Displays a summary of log entries, grouped by application, instance, and level.
+    """
+    log_summary_data = (
+        AppLog.objects.values("app_name", "instance_name", "level_name")
+        .annotate(count=Count("id"))
+        .order_by("app_name", "instance_name", "level_name")
+    )
+
+    # Restructure the data for the template
+    summary = {}
+    for item in log_summary_data:
+        app_key = item["app_name"]
+        instance_key = item["instance_name"]
+        level = item["level_name"]
+        count = item["count"]
+
+        if app_key not in summary:
+            summary[app_key] = {}
+        if instance_key not in summary[app_key]:
+            summary[app_key][instance_key] = {
+                "levels": {},
+                "total": 0,
+            }
+        
+        summary[app_key][instance_key]["levels"][level] = count
+        summary[app_key][instance_key]["total"] += count
+
+    context = {"summary": summary}
+    return render(request, "monitor_app/log_summary.html", context)
+
+@login_required
+def log_list(request):
+    """
+    Displays a paginated list of all log entries, with filtering.
+    """
+    log_list = AppLog.objects.all()
+
+    # Filtering
+    app_name = request.GET.get('app_name')
+    instance_name = request.GET.get('instance_name')
+
+    if app_name:
+        log_list = log_list.filter(app_name=app_name)
+    if instance_name:
+        log_list = log_list.filter(instance_name=instance_name)
+
+    # Get distinct app and instance names for filter dropdowns
+    app_names = AppLog.objects.values_list('app_name', flat=True).distinct()
+    instance_names = AppLog.objects.values_list('instance_name', flat=True).distinct()
+
+    # Pagination
+    paginator = Paginator(log_list, 25) # Show 25 logs per page
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        'page_obj': page_obj,
+        'app_names': app_names,
+        'instance_names': instance_names,
+        'selected_app': app_name,
+        'selected_instance': instance_name,
+    }
+    return render(request, 'monitor_app/log_list.html', context)

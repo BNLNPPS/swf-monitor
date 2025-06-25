@@ -37,8 +37,8 @@ if not DEBUG:
     if allowed_hosts_str:
         ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
 else:
-    # For development, allow localhost and 127.0.0.1
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+    # For development and testing, allow localhost, 127.0.0.1, and testserver
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
 
 
 # Application definition

@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Log Summary{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Log Summary</h2>
+    <p>This page provides a summary of log messages from all applications and instances.</p>
+
+    <div class="table-responsive">
+        <table class="table table-striped table-bordered">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Application Name</th>
+                    <th>Instance Name</th>
+                    <th>INFO</th>
+                    <th>WARNING</th>
+                    <th>ERROR</th>
+                    <th>CRITICAL</th>
+                    <th>DEBUG</th>
+                    <th>Total</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for app_name, instances in summary.items %}
+                    {% for instance_name, data in instances.items %}
+                        <tr>
+                            <td>{{ app_name }}</td>
+                            <td>{{ instance_name }}</td>
+                            <td>{{ data.levels.INFO|default:0 }}</td>
+                            <td>{{ data.levels.WARNING|default:0 }}</td>
+                            <td>{{ data.levels.ERROR|default:0 }}</td>
+                            <td>{{ data.levels.CRITICAL|default:0 }}</td>
+                            <td>{{ data.levels.DEBUG|default:0 }}</td>
+                            <td>{{ data.total }}</td>
+                            <td>
+                                <a href="{% url 'monitor_app:log_list' %}?app_name={{ app_name }}&instance_name={{ instance_name }}" class="btn btn-primary btn-sm">View Logs</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center">No log data available.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

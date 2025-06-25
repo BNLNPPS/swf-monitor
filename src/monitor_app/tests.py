@@ -1,12 +1,14 @@
 from django.test import TestCase
 from django.urls import reverse
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from .models import SystemAgent
-from .management.commands.get_token import Command as GetTokenCommand
+from .models import SystemAgent, AppLog
+from .serializers import AppLogSerializer
 from django.core.management import call_command
 from io import StringIO
+import logging
 
 class SystemAgentAPITests(APITestCase):
     def setUp(self):
@@ -55,6 +57,95 @@ class SystemAgentAPITests(APITestCase):
         url = reverse('systemagent-detail', kwargs={'pk': 999})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+class AppLogAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='testpassword')
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse('applog-list')
+        self.log_data = {
+            'app_name': 'test_app',
+            'instance_name': 'test_instance',
+            'timestamp': timezone.now().isoformat(),
+            'level': logging.INFO,
+            'level_name': 'INFO',
+            'message': 'This is a test log message.',
+            'module': 'test_module',
+            'func_name': 'test_func',
+            'line_no': 123,
+            'process': 456,
+            'thread': 789,
+        }
+
+    def test_create_log(self):
+        """
+        Ensure we can create a new app log.
+        """
+        response = self.client.post(self.url, self.log_data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        self.assertEqual(AppLog.objects.count(), 1)
+        log = AppLog.objects.get()
+        self.assertEqual(log.app_name, 'test_app')
+        self.assertEqual(log.message, self.log_data['message'])
+
+    def test_create_log_invalid_level(self):
+        """
+        Ensure we get a bad request for an invalid log level.
+        """
+        data = self.log_data.copy()
+        data['level'] = 999  # Invalid level
+        response = self.client.post(self.url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_log_missing_field(self):
+        """
+        Ensure we get a bad request for missing a required field.
+        """
+        data = self.log_data.copy()
+        del data['message']
+        response = self.client.post(self.url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class AppLogUITests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='ui_user', password='password')
+        self.client.login(username='ui_user', password='password')
+        now = timezone.now()
+        AppLog.objects.create(app_name='app1', instance_name='inst1', level=logging.INFO, message='info message 1', timestamp=now, level_name='INFO', module='m', func_name='f', line_no=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst1', level=logging.WARNING, message='warning message 1', timestamp=now, level_name='WARNING', module='m', func_name='f', line_no=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst2', level=logging.ERROR, message='error message 1', timestamp=now, level_name='ERROR', module='m', func_name='f', line_no=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app2', instance_name='inst1', level=logging.INFO, message='info message 2', timestamp=now, level_name='INFO', module='m', func_name='f', line_no=1, process=1, thread=1)
+
+    def test_log_summary_view(self):
+        response = self.client.get(reverse('monitor_app:log_summary'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Log Summary')
+        if response.context is None:
+            print(f'DEBUG: response.context is None for log_summary_view, response type: {type(response)}')
+        else:
+            summary_data = response.context['summary']
+            self.assertEqual(len(summary_data), 3) # app1/inst1, app1/inst2, app2/inst1
+
+    def test_log_list_view(self):
+        response = self.client.get(reverse('monitor_app:log_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Detailed Log View')
+        if response.context is None:
+            print(f'DEBUG: response.context is None for log_list_view, response type: {type(response)}')
+        else:
+            self.assertEqual(len(response.context['page_obj']), 4)
+
+    def test_log_list_view_filtered(self):
+        response = self.client.get(reverse('monitor_app:log_list') + '?app_name=app1&instance_name=inst1')
+        self.assertEqual(response.status_code, 200)
+        if response.context is None:
+            print(f'DEBUG: response.context is None for log_list_view_filtered, response type: {type(response)}')
+        else:
+            self.assertEqual(len(response.context['page_obj']), 2)
+            self.assertContains(response, 'info message 1')
+            self.assertContains(response, 'warning message 1')
+            self.assertNotContains(response, 'error message 1')
 
 class MonitorAppUITests(TestCase):
     def setUp(self):

@@ -8,6 +8,8 @@ from .views import (
     system_agent_delete,
     get_system_agents_data,
     account_view,
+    log_summary,
+    log_list,
 )
 
 app_name = 'monitor_app'
@@ -21,4 +23,6 @@ urlpatterns = [
     path('system_agents/<int:pk>/delete/', system_agent_delete, name='system_agent_delete'),
     path('api/system_agents/', get_system_agents_data, name='system_agents_data'),
     path('account/', account_view, name='account'),
+    path('logs/summary/', log_summary, name='log_summary'),
+    path('logs/', log_list, name='log_list'),
 ]

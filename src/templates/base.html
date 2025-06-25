@@ -12,6 +12,7 @@
         <a href="{% url 'monitor_app:home' %}">Home</a>
         {% if user.is_authenticated %}
             <a href="{% url 'monitor_app:index' %}">Dashboard</a>
+            <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
         {% endif %}
         <a href="{% url 'monitor_app:about' %}">About</a>
 
