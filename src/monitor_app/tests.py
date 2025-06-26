@@ -122,7 +122,7 @@ class AppLogUITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Log Summary')
         summary_data = response.context['summary']
-        self.assertEqual(len(summary_data), 3) # app1/inst1, app1/inst2, app2/inst1
+        self.assertEqual(len(summary_data), 2) # There are 2 unique app_names: app1, app2
 
     def test_log_list_view(self):
         response = self.client.get(reverse('monitor_app:log_list'))
