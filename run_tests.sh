@@ -1,26 +1,18 @@
 #!/usr/bin/env bash
-set -e
 
-# This script runs tests for swf-monitor.
-# It assumes that the unified project environment has already been set up and
-# activated by the master setup.sh script in the swf-testbed directory.
-# For running all project tests, use the master script in swf-testbed/run_tests.sh
+# This script runs the pytest tests for the swf-monitor project.
+# It ensures that the tests are run using the project's virtual environment.
 
-# Attempt to activate the environment if it's not already active.
-if [ -z "$VIRTUAL_ENV" ]; then
-    echo "No active virtual environment. Attempting to source setup_env.sh..."
-    # Assuming this script is in swf-monitor and setup_env.sh is in the sibling swf-testbed dir
-    SETUP_ENV_PATH="$(dirname "$0")/../swf-testbed/setup_env.sh"
-    if [ -f "$SETUP_ENV_PATH" ]; then
-        source "$SETUP_ENV_PATH"
-    else
-        echo "ERROR: Could not find setup_env.sh at $SETUP_ENV_PATH"
-        echo "Please run the master setup script from the swf-testbed directory: ./setup.sh"
-        exit 1
-    fi
+# The directory of this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+VENV_PATH="$SCRIPT_DIR/venv"
+
+if [ ! -d "$VENV_PATH" ]; then
+    echo "Virtual environment not found at $VENV_PATH"
+    echo "Please run the setup script to create it."
+    exit 1
 fi
 
-if [ "$1" != "--no-header" ]; then
-    echo "--- Running tests for swf-monitor ---"
-fi
-pytest
+# Activate the virtual environment and run pytest
+source "$VENV_PATH/bin/activate"
+python -m pytest "$@"

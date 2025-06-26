@@ -121,32 +121,22 @@ class AppLogUITests(TestCase):
         response = self.client.get(reverse('monitor_app:log_summary'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Log Summary')
-        if response.context is None:
-            print(f'DEBUG: response.context is None for log_summary_view, response type: {type(response)}')
-        else:
-            summary_data = response.context['summary']
-            num_app_instance_pairs = sum(len(instances) for instances in summary_data.values())
-            self.assertEqual(num_app_instance_pairs, 3) # app1/inst1, app1/inst2, app2/inst1
+        summary_data = response.context['summary']
+        self.assertEqual(len(summary_data), 3) # app1/inst1, app1/inst2, app2/inst1
 
     def test_log_list_view(self):
         response = self.client.get(reverse('monitor_app:log_list'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Detailed Log View')
-        if response.context is None:
-            print(f'DEBUG: response.context is None for log_list_view, response type: {type(response)}')
-        else:
-            self.assertEqual(len(response.context['page_obj']), 4)
+        self.assertEqual(len(response.context['page_obj']), 4)
 
     def test_log_list_view_filtered(self):
         response = self.client.get(reverse('monitor_app:log_list') + '?app_name=app1&instance_name=inst1')
         self.assertEqual(response.status_code, 200)
-        if response.context is None:
-            print(f'DEBUG: response.context is None for log_list_view_filtered, response type: {type(response)}')
-        else:
-            self.assertEqual(len(response.context['page_obj']), 2)
-            self.assertContains(response, 'info message 1')
-            self.assertContains(response, 'warning message 1')
-            self.assertNotContains(response, 'error message 1')
+        self.assertEqual(len(response.context['page_obj']), 2)
+        self.assertContains(response, 'info message 1')
+        self.assertContains(response, 'warning message 1')
+        self.assertNotContains(response, 'error message 1')
 
 class MonitorAppUITests(TestCase):
     def setUp(self):
