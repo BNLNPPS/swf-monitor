@@ -11,3 +11,7 @@ class AppLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = AppLog
         fields = '__all__'
+
+class LogSummarySerializer(serializers.Serializer):
+    error_counts = serializers.DictField(child=serializers.IntegerField())
+    recent_errors = serializers.ListField(child=serializers.DictField())

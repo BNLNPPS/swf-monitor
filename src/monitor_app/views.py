@@ -17,6 +17,7 @@ from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog
 from .serializers import SystemAgentSerializer, AppLogSerializer
 from .forms import SystemAgentForm
+from rest_framework.views import APIView
 
 # Create your views here.
 def home(request):
@@ -180,3 +181,34 @@ def log_list(request):
         'selected_instance': instance_name,
     }
     return render(request, 'monitor_app/log_list.html', context)
+
+class LogSummaryView(APIView):
+    """
+    API endpoint that provides a summary of logs grouped by app and instance, with error rollups.
+    """
+    def get(self, request, format=None):
+        # Get all unique app/instance pairs
+        logs = AppLog.objects.all()
+        summary = {}
+        for log in logs.values('app_name', 'instance_name').distinct():
+            app = log['app_name']
+            instance = log['instance_name']
+            if app not in summary:
+                summary[app] = {}
+            # Aggregate error counts by level for this app/instance
+            error_counts = (
+                AppLog.objects.filter(app_name=app, instance_name=instance)
+                .values('level_name')
+                .annotate(count=Count('id'))
+            )
+            # Get recent errors (last 5)
+            recent_errors = list(
+                AppLog.objects.filter(app_name=app, instance_name=instance, level_name__in=['ERROR', 'CRITICAL'])
+                .order_by('-timestamp')[:5]
+                .values('timestamp', 'level_name', 'message', 'module', 'func_name', 'line_no')
+            )
+            summary[app][instance] = {
+                'error_counts': {e['level_name']: e['count'] for e in error_counts},
+                'recent_errors': recent_errors,
+            }
+        return Response(summary, status=status.HTTP_200_OK)

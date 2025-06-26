@@ -194,3 +194,31 @@ class MonitorAppUITests(TestCase):
         url = reverse('monitor_app:system_agent_delete', kwargs={'pk': 999})
         response = self.client.get(url)
         self.assertEqual(response.status_code, 404)
+
+class LogSummaryAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='loguser', password='logpass')
+        self.client.force_authenticate(user=self.user)
+        now = timezone.now()
+        # Create logs for two apps and two instances
+        AppLog.objects.create(app_name='app1', instance_name='inst1', timestamp=now, level=logging.ERROR, level_name='ERROR', message='Error 1', module='mod', func_name='f', line_no=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst1', timestamp=now, level=logging.INFO, level_name='INFO', message='Info 1', module='mod', func_name='f', line_no=2, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst2', timestamp=now, level=logging.ERROR, level_name='ERROR', message='Error 2', module='mod', func_name='f', line_no=3, process=1, thread=1)
+        AppLog.objects.create(app_name='app2', instance_name='inst3', timestamp=now, level=logging.CRITICAL, level_name='CRITICAL', message='Critical 1', module='mod', func_name='f', line_no=4, process=1, thread=1)
+
+    def test_log_summary(self):
+        url = '/api/logs/summary/'
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.json()
+        self.assertIn('app1', data)
+        self.assertIn('app2', data)
+        self.assertIn('inst1', data['app1'])
+        self.assertIn('inst2', data['app1'])
+        self.assertIn('inst3', data['app2'])
+        # Check error counts
+        self.assertEqual(data['app1']['inst1']['error_counts'].get('ERROR', 0), 1)
+        self.assertEqual(data['app1']['inst2']['error_counts'].get('ERROR', 0), 1)
+        self.assertEqual(data['app2']['inst3']['error_counts'].get('CRITICAL', 0), 1)
+        # Check recent errors structure
+        self.assertTrue(isinstance(data['app1']['inst1']['recent_errors'], list))
