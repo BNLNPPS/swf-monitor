@@ -125,7 +125,8 @@ class AppLogUITests(TestCase):
             print(f'DEBUG: response.context is None for log_summary_view, response type: {type(response)}')
         else:
             summary_data = response.context['summary']
-            self.assertEqual(len(summary_data), 3) # app1/inst1, app1/inst2, app2/inst1
+            num_app_instance_pairs = sum(len(instances) for instances in summary_data.values())
+            self.assertEqual(num_app_instance_pairs, 3) # app1/inst1, app1/inst2, app2/inst1
 
     def test_log_list_view(self):
         response = self.client.get(reverse('monitor_app:log_list'))

@@ -20,5 +20,7 @@ if [ -z "$VIRTUAL_ENV" ]; then
     fi
 fi
 
-echo "--- Running tests for swf-monitor ---"
+if [ "$1" != "--no-header" ]; then
+    echo "--- Running tests for swf-monitor ---"
+fi
 pytest
