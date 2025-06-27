@@ -10,6 +10,7 @@ from .views import (
     account_view,
     log_summary,
     log_list,
+    authenticated_home,
 )
 
 app_name = 'monitor_app'
@@ -25,4 +26,5 @@ urlpatterns = [
     path('account/', account_view, name='account'),
     path('logs/summary/', log_summary, name='log_summary'),
     path('logs/', log_list, name='log_list'),
+    path('home/', authenticated_home, name='authenticated_home'),
 ]

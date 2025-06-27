@@ -1,6 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.core.paginator import Paginator
 from rest_framework import viewsets, generics
 from rest_framework.decorators import action
@@ -22,8 +22,12 @@ from rest_framework.views import APIView
 # Create your views here.
 def home(request):
     if request.user.is_authenticated:
-        return redirect('monitor_app:index')
+        return redirect('monitor_app:authenticated_home')
     return render(request, 'monitor_app/welcome.html')
+
+@login_required
+def authenticated_home(request):
+    return render(request, 'monitor_app/authenticated_home.html')
 
 def about(request):
     return render(request, 'monitor_app/about.html')
@@ -31,7 +35,28 @@ def about(request):
 @login_required
 def index(request):
     agents = SystemAgent.objects.all()
-    return render(request, 'monitor_app/index.html', {'agents': agents})
+
+    # Filtering
+    agent_type = request.GET.get('agent_type')
+    status = request.GET.get('status')
+    if agent_type:
+        agents = agents.filter(agent_type=agent_type)
+    if status:
+        agents = agents.filter(status=status)
+
+    # Get unique agent types and statuses for filter links
+    agent_types = SystemAgent.objects.values_list('agent_type', flat=True)
+    agent_types = sorted(set([t for t in agent_types if t]), key=lambda x: x.lower())
+    statuses = sorted([s[0] for s in SystemAgent.STATUS_CHOICES], key=lambda x: x.lower())
+
+    context = {
+        'agents': agents,
+        'agent_types': agent_types,
+        'statuses': statuses,
+        'selected_agent_type': agent_type,
+        'selected_status': status,
+    }
+    return render(request, 'monitor_app/index.html', context)
 
 def staff_member_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
@@ -126,6 +151,12 @@ def log_summary(request):
         .order_by("app_name", "instance_name", "level_name")
     )
 
+    # Get latest timestamp for each (app_name, instance_name)
+    latest_timestamps = AppLog.objects.values("app_name", "instance_name").annotate(latest=Max("timestamp"))
+    latest_map = {}
+    for item in latest_timestamps:
+        latest_map[(item["app_name"], item["instance_name"])] = item["latest"]
+
     # Restructure the data for the template
     summary = {}
     for item in log_summary_data:
@@ -140,6 +171,7 @@ def log_summary(request):
             summary[app_key][instance_key] = {
                 "levels": {},
                 "total": 0,
+                "latest": latest_map.get((app_key, instance_key)),
             }
         summary[app_key][instance_key]["levels"][level] = count
         summary[app_key][instance_key]["total"] += count
@@ -153,25 +185,43 @@ def log_list(request):
     """
     Displays a paginated list of all log entries, with filtering.
     """
+    from django.utils.dateparse import parse_datetime
     log_list = AppLog.objects.all()
 
     # Filtering
     app_name = request.GET.get('app_name')
     instance_name = request.GET.get('instance_name')
+    start_time = request.GET.get('start_time')
+    end_time = request.GET.get('end_time')
 
     if app_name:
         log_list = log_list.filter(app_name=app_name)
     if instance_name:
         log_list = log_list.filter(instance_name=instance_name)
+    if start_time:
+        dt = parse_datetime(start_time)
+        if dt:
+            log_list = log_list.filter(timestamp__gte=dt)
+    if end_time:
+        dt = parse_datetime(end_time)
+        if dt:
+            log_list = log_list.filter(timestamp__lte=dt)
 
-    # Get distinct app and instance names for filter dropdowns
-    app_names = AppLog.objects.values_list('app_name', flat=True).distinct()
-    instance_names = AppLog.objects.values_list('instance_name', flat=True).distinct()
+    # Get distinct app and instance names for filter links, sorted alphabetically, case-insensitive, unique
+    app_names_qs = AppLog.objects.values_list('app_name', flat=True)
+    instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
+    app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
+    instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
 
     # Pagination
     paginator = Paginator(log_list, 25) # Show 25 logs per page
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
+
+    # Get first and last log for timestamp range display
+    logs_list = list(page_obj.object_list)
+    first_log = logs_list[0] if logs_list else None
+    last_log = logs_list[-1] if logs_list else None
 
     # Always provide 'page_obj' in context, even if empty
     context = {
@@ -180,6 +230,8 @@ def log_list(request):
         'instance_names': instance_names,
         'selected_app': app_name,
         'selected_instance': instance_name,
+        'first_log': first_log,
+        'last_log': last_log,
     }
     return render(request, 'monitor_app/log_list.html', context)
 

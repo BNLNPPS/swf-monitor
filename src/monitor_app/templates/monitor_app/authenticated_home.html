@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+
+{% block title %}Home - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Welcome to the ePIC Streaming Workflow Monitor</h1>
+
+    <div class="function-section mb-5">
+        <h2>System Agents</h2>
+        <ul>
+            <li><a href="{% url 'monitor_app:index' %}">View and manage system agents</a></li>
+            <li><a href="{% url 'monitor_app:system_agent_create' %}">Add a new agent</a></li>
+        </ul>
+        <p class="text-muted">Monitor the status, type, and activity of all registered workflow agents. You can add, edit, or remove agents and filter by type or status.</p>
+    </div>
+
+    <div class="function-section mb-5">
+        <h2>Logs</h2>
+        <ul>
+            <li><a href="{% url 'monitor_app:log_summary' %}">Log summary</a></li>
+            <li><a href="{% url 'monitor_app:log_list' %}">Detailed log list</a></li>
+        </ul>
+        <p class="text-muted">Browse, filter, and analyze logs from all workflow applications and agents. Use the summary for a high-level overview or the detailed list for in-depth inspection and troubleshooting.</p>
+    </div>
+</div>
+{% endblock %}

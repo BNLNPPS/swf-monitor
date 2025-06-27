@@ -6,6 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}SWF Monitor{% endblock %}</title>
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    <style>
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 1em;
+      }
+      .nav-spacer {
+        flex: 1 1 auto;
+      }
+      .nav-auth {
+        display: flex;
+        gap: 1em;
+      }
+    </style>
 </head>
 <body>
     <nav>
@@ -14,8 +28,8 @@
             <a href="{% url 'monitor_app:index' %}">Dashboard</a>
             <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
         {% endif %}
+        <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
-
         <div class="nav-auth">
             {% if user.is_authenticated %}
                 {% if user.is_staff %}
