@@ -59,9 +59,12 @@ test = [
 ]
 
 [project.urls]
-"Repository" = "https://github.com/bnlnpps/swf-monitor"
-"Homepage" = "https://github.com/bnlnpps/swf-monitor"
-"Documentation" = "https://swf-monitor.readthedocs.io/en/latest/"
-"Changelog" = "https://github.com/bnlnpps/swf-monitor/blob/main/CHANGELOG.md"
-"Issue Tracker" = "https://github.com/bnlnpps/swf-monitor/issues"
-"Source Code" = "https://github.com/bnlnpps/swf-monitor"
+Repository = "https://github.com/bnlnpps/swf-monitor"
+Homepage = "https://github.com/bnlnpps/swf-monitor"
+Documentation = "https://swf-monitor.readthedocs.io/en/latest/"
+Changelog = "https://github.com/bnlnpps/swf-monitor/blob/main/CHANGELOG.md"
+IssueTracker = "https://github.com/bnlnpps/swf-monitor/issues"
+SourceCode = "https://github.com/bnlnpps/swf-monitor"
+
+[tool.setuptools.packages.find]
+where = ["src"]

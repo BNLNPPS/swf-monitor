@@ -15,7 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog
-from .serializers import SystemAgentSerializer, AppLogSerializer
+from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
 
@@ -141,10 +141,10 @@ def log_summary(request):
                 "levels": {},
                 "total": 0,
             }
-        
         summary[app_key][instance_key]["levels"][level] = count
         summary[app_key][instance_key]["total"] += count
 
+    # Only provide 'summary' in context, as requested
     context = {"summary": summary}
     return render(request, "monitor_app/log_summary.html", context)
 
@@ -173,6 +173,7 @@ def log_list(request):
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
+    # Always provide 'page_obj' in context, even if empty
     context = {
         'page_obj': page_obj,
         'app_names': app_names,
@@ -182,10 +183,14 @@ def log_list(request):
     }
     return render(request, 'monitor_app/log_list.html', context)
 
-class LogSummaryView(APIView):
+class LogSummaryView(generics.ListAPIView):
     """
     API endpoint that provides a summary of logs grouped by app and instance, with error rollups.
     """
+    serializer_class = LogSummarySerializer
+    permission_classes = [AllowAny]  # or your desired permission class
+    queryset = AppLog.objects.all()  # Provide a queryset for DRF permissions
+
     def get(self, request, format=None):
         # Get all unique app/instance pairs
         logs = AppLog.objects.all()

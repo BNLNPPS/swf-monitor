@@ -20,7 +20,8 @@ async def test_mcp_consumer_unauthenticated_connection():
 @pytest.mark.django_db(transaction=True)
 async def test_mcp_consumer_authenticated_connection():
     """Test that an authenticated user can connect."""
-    user = await User.objects.acreate(username='testuser', password='password')
+    unique_username = f"testuser_{uuid.uuid4()}"
+    user = await User.objects.acreate(username=unique_username, password='password')
     communicator = WebsocketCommunicator(application, "/ws/mcp/")
     communicator.scope['user'] = user
     connected, _ = await communicator.connect()
@@ -31,9 +32,11 @@ async def test_mcp_consumer_authenticated_connection():
 @pytest.mark.django_db(transaction=True)
 async def test_mcp_heartbeat_notification():
     """Test that the consumer correctly processes a heartbeat notification."""
-    user = await User.objects.acreate(username='testuser', password='password')
+    unique_username = f"testuser_{uuid.uuid4()}"
+    user = await User.objects.acreate(username=unique_username, password='password')
+    unique_instance = f"agent1_{uuid.uuid4()}"
     agent = await SystemAgent.objects.acreate(
-        instance_name='agent1', agent_type='type1', status='OK'
+        instance_name=unique_instance, agent_type='type1', status='OK'
     )
 
     communicator = WebsocketCommunicator(application, "/ws/mcp/")
@@ -48,7 +51,7 @@ async def test_mcp_heartbeat_notification():
         "message_id": message_id,
         "command": "heartbeat",
         "payload": {
-            "name": "agent1",
+            "name": unique_instance,
             "timestamp": timestamp,
             "status": "WARNING"
         }
@@ -69,7 +72,8 @@ async def test_mcp_heartbeat_notification():
 @pytest.mark.django_db(transaction=True)
 async def test_mcp_discover_capabilities():
     """Test the discover_capabilities command."""
-    user = await User.objects.acreate(username='testuser', password='password')
+    unique_username = f"testuser_{uuid.uuid4()}"
+    user = await User.objects.acreate(username=unique_username, password='password')
     communicator = WebsocketCommunicator(application, "/ws/mcp/")
     communicator.scope['user'] = user
     await communicator.connect()
@@ -97,15 +101,17 @@ async def test_mcp_discover_capabilities():
 @pytest.mark.django_db(transaction=True)
 async def test_mcp_get_agent_liveness():
     """Test the get_agent_liveness command returns correct agent statuses."""
-    user = await User.objects.acreate(username='testuser', password='password')
+    unique_username = f"testuser_{uuid.uuid4()}"
+    user = await User.objects.acreate(username=unique_username, password='password')
     now = timezone.now()
-
+    unique_alive = f"alive_agent_{uuid.uuid4()}"
+    unique_dead = f"dead_agent_{uuid.uuid4()}"
     await SystemAgent.objects.acreate(
-        instance_name='alive_agent', agent_type='type1', status='OK', 
+        instance_name=unique_alive, agent_type='type1', status='OK', 
         last_heartbeat=now - timedelta(minutes=1)
     )
     await SystemAgent.objects.acreate(
-        instance_name='dead_agent', agent_type='type2', status='OK', 
+        instance_name=unique_dead, agent_type='type2', status='OK', 
         last_heartbeat=now - timedelta(minutes=10)
     )
 
@@ -127,8 +133,8 @@ async def test_mcp_get_agent_liveness():
     assert data['status'] == 'success'
     assert data['in_reply_to'] == message_id
     payload = data['payload']
-    assert payload['alive_agent'] == 'alive'
-    assert payload['dead_agent'] == 'dead'
+    assert payload[unique_alive] == 'alive'
+    assert payload[unique_dead] == 'dead'
 
     await communicator.disconnect()
 
@@ -136,7 +142,8 @@ async def test_mcp_get_agent_liveness():
 @pytest.mark.django_db(transaction=True)
 async def test_mcp_invalid_json_message():
     """Test that the consumer handles invalid JSON messages gracefully."""
-    user = await User.objects.acreate(username='testuser', password='password')
+    unique_username = f"testuser_{uuid.uuid4()}"
+    user = await User.objects.acreate(username=unique_username, password='password')
     communicator = WebsocketCommunicator(application, "/ws/mcp/")
     communicator.scope['user'] = user
     await communicator.connect()
@@ -156,7 +163,8 @@ async def test_mcp_invalid_json_message():
 @pytest.mark.django_db(transaction=True)
 async def test_mcp_missing_mcp_version():
     """Test that messages missing the mcp_version field are rejected."""
-    user = await User.objects.acreate(username='testuser', password='password')
+    unique_username = f"testuser_{uuid.uuid4()}"
+    user = await User.objects.acreate(username=unique_username, password='password')
     communicator = WebsocketCommunicator(application, "/ws/mcp/")
     communicator.scope['user'] = user
     await communicator.connect()
