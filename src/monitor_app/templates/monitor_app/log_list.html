@@ -21,8 +21,8 @@
         color: #0056b3;
     }
     </style>
-    <div class="filter-bar" style="margin-bottom: 1em; display: flex; flex-wrap: wrap; gap: 1.5em; align-items: center;">
-        <div>
+    <div class="filter-bar" style="margin-bottom: 1em;">
+        <div style="margin-bottom: 0.5em;">
             <span style="font-weight: 600;">Applications:</span>
             <a href="?{% if selected_instance %}instance_name={{ selected_instance|urlencode }}{% endif %}"
                class="{% if not selected_app %}filter-active{% endif %}">All</a>
@@ -66,8 +66,8 @@
     </form>
     <div class="mb-3" style="font-size: 0.95em; color: #555;">
         {% if first_log and last_log %}
-            Showing logs from <strong>{{ last_log.timestamp|date:"Y-m-d H:i:s" }}</strong>
-            to <strong>{{ first_log.timestamp|date:"Y-m-d H:i:s" }}</strong>
+            Showing logs from <strong>{{ last_log.timestamp|date:"Ymd H:i:s" }}</strong>
+            to <strong>{{ first_log.timestamp|date:"Ymd H:i:s" }}</strong>
         {% else %}
             No logs in selected range.
         {% endif %}
@@ -110,7 +110,7 @@
             <tbody>
                 {% for log in page_obj %}
                     <tr>
-                        <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+                        <td>{{ log.timestamp|date:"Ymd H:i:s" }}</td>
                         <td>
                             <a href="?app_name={{ log.app_name|urlencode }}{% if selected_instance %}&instance_name={{ selected_instance|urlencode }}{% endif %}">{{ log.app_name }}</a>
                         </td>
@@ -121,10 +121,6 @@
                         <td style="white-space: normal; word-break: break-word;">{{ log.message }}</td>
                         <td>{{ log.module }}</td>
                         <td>{{ log.func_name }}:{{ log.line_no }}</td>
-                    </tr>
-                {% empty %}
-                    <tr>
-                        <td colspan="7" class="text-center">No logs found matching your criteria.</td>
                     </tr>
                 {% endfor %}
             </tbody>
@@ -160,7 +156,8 @@
               last: "Last",
               next: "Next",
               previous: "Previous"
-            }
+            },
+            emptyTable: "No logs found matching your criteria."
           }
         });
         // Double the width of the filter table text box

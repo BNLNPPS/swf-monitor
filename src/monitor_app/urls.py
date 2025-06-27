@@ -11,6 +11,8 @@ from .views import (
     log_summary,
     log_list,
     authenticated_home,
+    database_overview,
+    database_table_list,
 )
 
 app_name = 'monitor_app'
@@ -27,4 +29,6 @@ urlpatterns = [
     path('logs/summary/', log_summary, name='log_summary'),
     path('logs/', log_list, name='log_list'),
     path('home/', authenticated_home, name='authenticated_home'),
+    path('database/', database_overview, name='database_overview'),
+    path('database/<str:table_name>/', database_table_list, name='database_table_list'),
 ]

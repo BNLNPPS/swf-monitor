@@ -18,6 +18,9 @@ from .models import SystemAgent, AppLog
 from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
+from django.apps import apps
+from django.db import connection
+from django.utils import timezone
 
 # Create your views here.
 def home(request):
@@ -49,12 +52,22 @@ def index(request):
     agent_types = sorted(set([t for t in agent_types if t]), key=lambda x: x.lower())
     statuses = sorted([s[0] for s in SystemAgent.STATUS_CHOICES], key=lambda x: x.lower())
 
+    columns = [
+        {"name": "instance_name", "label": "Agent"},
+        {"name": "agent_type", "label": "Type"},
+        {"name": "status", "label": "Status"},
+        {"name": "last_heartbeat", "label": "Last Heartbeat"},
+        {"name": "agent_url", "label": "Agent URL"},
+        {"name": "actions", "label": "Actions"},
+    ]
+
     context = {
         'agents': agents,
         'agent_types': agent_types,
         'statuses': statuses,
         'selected_agent_type': agent_type,
         'selected_status': status,
+        'columns': columns,
     }
     return render(request, 'monitor_app/index.html', context)
 
@@ -171,7 +184,7 @@ def log_summary(request):
             summary[app_key][instance_key] = {
                 "levels": {},
                 "total": 0,
-                "latest": latest_map.get((app_key, instance_key)),
+                "latest_timestamp": latest_map.get((app_key, instance_key)),
             }
         summary[app_key][instance_key]["levels"][level] = count
         summary[app_key][instance_key]["total"] += count
@@ -269,3 +282,51 @@ class LogSummaryView(generics.ListAPIView):
                 'recent_errors': recent_errors,
             }
         return Response(summary, status=status.HTTP_200_OK)
+
+@login_required
+def database_overview(request):
+    tables = []
+    for model in apps.get_models():
+        table_info = {'name': model._meta.db_table, 'count': 0, 'last_insert': None}
+        try:
+            count = model.objects.count()
+            table_info['count'] = count
+            # Try to get last insertion time if a DateTimeField exists
+            dt_fields = [f.name for f in model._meta.fields if f.get_internal_type() == 'DateTimeField']
+            if dt_fields:
+                last_obj = model.objects.order_by('-' + dt_fields[0]).first()
+                if last_obj:
+                    table_info['last_insert'] = getattr(last_obj, dt_fields[0])
+        except Exception:
+            pass  # Table may not exist or be accessible
+        tables.append(table_info)
+    tables = sorted(tables, key=lambda t: t['name'])
+    tables = [t for t in tables if t['name'].startswith('swf_')]
+    return render(request, 'monitor_app/database_overview.html', {'tables': tables})
+
+from django.http import Http404
+
+@login_required
+def database_table_list(request, table_name):
+    if not table_name.startswith('swf_'):
+        raise Http404()
+    with connection.cursor() as cursor:
+        cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 100')
+        columns = [col[0] for col in cursor.description]
+        rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    # Identify datetime columns using Django model if available
+    dt_columns = []
+    for model in apps.get_models():
+        if model._meta.db_table == table_name:
+            dt_columns = [f.name for f in model._meta.fields if f.get_internal_type() == 'DateTimeField']
+            break
+    def get_item(row, key):
+        return row.get(key, '')
+    from django.template.defaulttags import register
+    register.filter('get_item', get_item)
+    return render(request, 'monitor_app/database_table_list.html', {
+        'table_name': table_name,
+        'columns': columns,
+        'rows': rows,
+        'dt_columns': dt_columns,
+    })

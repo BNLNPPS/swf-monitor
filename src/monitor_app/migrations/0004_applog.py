@@ -40,7 +40,7 @@ class Migration(migrations.Migration):
                 "indexes": [
                     models.Index(
                         fields=["-timestamp", "app_name", "instance_name"],
-                        name="monitor_app_timesta_98115a_idx",
+                        name="swf_timesta_98115a_idx",
                     )
                 ],
             },

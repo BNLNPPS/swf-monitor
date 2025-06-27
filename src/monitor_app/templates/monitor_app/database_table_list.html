@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+
+{% block title %}Table: {{ table_name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Table: {{ table_name }}</h2>
+    <div class="table-responsive">
+        <table id="db-table" class="table table-striped table-bordered table-sm">
+            <thead class="thead-dark">
+                <tr>
+                    {% for col in columns %}
+                        <th>{{ col }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    {% for col in columns %}
+                        <td>
+                            {% if col in dt_columns and row|get_item:col %}
+                                {{ row|get_item:col|date:"Ymd H:i:s" }}
+                            {% else %}
+                                {{ row|get_item:col }}
+                            {% endif %}
+                        </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

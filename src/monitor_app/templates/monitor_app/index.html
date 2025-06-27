@@ -43,42 +43,44 @@
         <table id="agents-table" class="table table-striped table-bordered table-sm">
             <thead class="thead-dark">
                 <tr>
-                    <th>Agent</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                    <th>Last Heartbeat</th>
-                    <th>Agent URL</th>
-                    <th>Actions</th>
+                    {% for col in columns %}
+                        <th>{{ col.label }}</th>
+                    {% endfor %}
                 </tr>
             </thead>
             <tbody>
                 {% for agent in agents %}
                 <tr>
-                    <td style="white-space: normal; word-break: break-word;">{{ agent.instance_name }}</td>
-                    <td>{{ agent.agent_type }}</td>
-                    <td>
-                        {% if agent.status == 'OK' %}
-                            <span class="status-badge status-ok">{{ agent.status }}</span>
-                        {% elif agent.status == 'WARNING' %}
-                            <span class="status-badge status-warning">{{ agent.status }}</span>
-                        {% else %}
-                            <span class="status-badge status-error">{{ agent.status }}</span>
+                    {% for col in columns %}
+                        {% if col.name == "instance_name" %}
+                            <td style="white-space: normal; word-break: break-word;">{{ agent.instance_name }}</td>
+                        {% elif col.name == "agent_type" %}
+                            <td>{{ agent.agent_type }}</td>
+                        {% elif col.name == "status" %}
+                            <td>
+                                {% if agent.status == 'OK' %}
+                                    <span class="status-badge status-ok">{{ agent.status }}</span>
+                                {% elif agent.status == 'WARNING' %}
+                                    <span class="status-badge status-warning">{{ agent.status }}</span>
+                                {% else %}
+                                    <span class="status-badge status-error">{{ agent.status }}</span>
+                                {% endif %}
+                            </td>
+                        {% elif col.name == "last_heartbeat" %}
+                            <td>{{ agent.last_heartbeat|date:"Ymd H:i:s"|default:"N/A" }}</td>
+                        {% elif col.name == "agent_url" %}
+                            <td><a href="{{ agent.agent_url }}" target="_blank">{{ agent.agent_url }}</a></td>
+                        {% elif col.name == "actions" %}
+                            <td>
+                                {% if user.is_authenticated %}
+                                    <a href="{% url 'monitor_app:system_agent_update' agent.pk %}">Edit</a> |
+                                    <a href="{% url 'monitor_app:system_agent_delete' agent.pk %}">Delete</a>
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </td>
                         {% endif %}
-                    </td>
-                    <td>{{ agent.last_heartbeat|date:"Y-m-d H:i:s"|default:"N/A" }}</td>
-                    <td><a href="{{ agent.agent_url }}" target="_blank">{{ agent.agent_url }}</a></td>
-                    <td>
-                        {% if user.is_authenticated %}
-                            <a href="{% url 'monitor_app:system_agent_update' agent.pk %}">Edit</a> |
-                            <a href="{% url 'monitor_app:system_agent_delete' agent.pk %}">Delete</a>
-                        {% else %}
-                            N/A
-                        {% endif %}
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="6">No system agents found.</td>
+                    {% endfor %}
                 </tr>
                 {% endfor %}
             </tbody>
@@ -106,6 +108,7 @@
             search: "Filter table:",
             lengthMenu: "Show _MENU_ entries",
             info: "Showing _START_ to _END_ of _TOTAL_ agents",
+            emptyTable: "No system agents found.",
             paginate: {
               first: "First",
               last: "Last",

@@ -22,6 +22,9 @@ class SystemAgent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        db_table = 'swf_systemagent'
+
     def __str__(self):
         return self.instance_name
 
@@ -48,6 +51,7 @@ class AppLog(models.Model):
     extra_data = models.JSONField(null=True, blank=True)
 
     class Meta:
+        db_table = 'swf_applog'
         ordering = ['-timestamp']
         verbose_name_plural = "App Logs"
         indexes = [

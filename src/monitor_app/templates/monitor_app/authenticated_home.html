@@ -23,5 +23,13 @@
         </ul>
         <p class="text-muted">Browse, filter, and analyze logs from all workflow applications and agents. Use the summary for a high-level overview or the detailed list for in-depth inspection and troubleshooting.</p>
     </div>
+
+    <div class="function-section mb-5">
+        <h2>Database Viewer</h2>
+        <ul>
+            <li><a href="{% url 'monitor_app:database_overview' %}">Database overview</a></li>
+        </ul>
+        <p class="text-muted">View a list of all database tables, with record counts and last insertion times. Useful for monitoring the state and growth of your workflow data.</p>
+    </div>
 </div>
 {% endblock %}

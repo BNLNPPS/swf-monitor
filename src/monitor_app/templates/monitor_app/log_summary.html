@@ -13,21 +13,25 @@
         <a href="{% url 'monitor_app:log_list' %}" class="btn btn-outline-primary">View All Logs</a>
     </div>
 
-    <!-- If you add filters to log summary, use the same filter-bar structure as log_list.html -->
     <div class="filter-bar mb-3">
-        {% if request.GET.app_name %}
-            <a href="{% url 'monitor_app:log_summary' %}" class="filter-active">All Applications</a>
-            <a href="{% url 'monitor_app:log_summary' %}?app_name={{ request.GET.app_name|urlencode }}" class="filter-active">{{ request.GET.app_name }}</a>
-        {% else %}
-            <a href="{% url 'monitor_app:log_summary' %}" class="filter-active">All Applications</a>
-        {% endif %}
-
-        {% if request.GET.instance_name %}
-            <a href="{% url 'monitor_app:log_summary' %}?app_name={{ request.GET.app_name|urlencode }}" class="filter-active">All Instances</a>
-            <a href="{% url 'monitor_app:log_summary' %}?app_name={{ request.GET.app_name|urlencode }}&instance_name={{ request.GET.instance_name|urlencode }}" class="filter-active">{{ request.GET.instance_name }}</a>
-        {% else %}
-            <a href="{% url 'monitor_app:log_summary' %}?app_name={{ request.GET.app_name|urlencode }}" class="filter-active">All Instances</a>
-        {% endif %}
+        <div style="margin-bottom: 0.5em;">
+            <span style="font-weight: 600;">Applications:</span>
+            <a href="{% url 'monitor_app:log_summary' %}{% if request.GET.instance_name %}?instance_name={{ request.GET.instance_name|urlencode }}{% endif %}"
+               class="{% if not request.GET.app_name %}filter-active{% endif %}">All</a>
+            {% for app in app_names %}
+                <a href="{% url 'monitor_app:log_summary' %}?app_name={{ app|urlencode }}{% if request.GET.instance_name %}&instance_name={{ request.GET.instance_name|urlencode }}{% endif %}"
+                   class="{% if request.GET.app_name == app %}filter-active{% endif %}">{{ app }}</a>
+            {% endfor %}
+        </div>
+        <div>
+            <span style="font-weight: 600;">Instances:</span>
+            <a href="{% url 'monitor_app:log_summary' %}{% if request.GET.app_name %}?app_name={{ request.GET.app_name|urlencode }}{% endif %}"
+               class="{% if not request.GET.instance_name %}filter-active{% endif %}">All</a>
+            {% for inst in instance_names %}
+                <a href="{% url 'monitor_app:log_summary' %}?instance_name={{ inst|urlencode }}{% if request.GET.app_name %}&app_name={{ request.GET.app_name|urlencode }}{% endif %}"
+                   class="{% if request.GET.instance_name == inst %}filter-active{% endif %}">{{ inst }}</a>
+            {% endfor %}
+        </div>
     </div>
 
     <div class="table-responsive">
@@ -60,22 +64,16 @@
                                     {{ instance_name }}
                                 </a>
                             </td>
-                            <td>{% if data.latest %}{{ data.latest|date:"Y-m-d H:i:s" }}{% else %}-{% endif %}</td>
-                            <td>{{ data.levels.INFO|default:0 }}</td>
-                            <td>{{ data.levels.WARNING|default:0 }}</td>
-                            <td>{{ data.levels.ERROR|default:0 }}</td>
-                            <td>{{ data.levels.CRITICAL|default:0 }}</td>
-                            <td>{{ data.levels.DEBUG|default:0 }}</td>
-                            <td>{{ data.total }}</td>
-                            <td>
-                                <a href="{% url 'monitor_app:log_list' %}?app_name={{ app_name|urlencode }}&instance_name={{ instance_name|urlencode }}" class="btn btn-primary btn-sm">View Logs</a>
-                            </td>
+                            <td>{{ data.latest_timestamp|date:"Ymd H:i:s"|default:"N/A" }}</td>
+                            <td>{{ data.level_counts.INFO|default:0 }}</td>
+                            <td>{{ data.level_counts.WARNING|default:0 }}</td>
+                            <td>{{ data.level_counts.ERROR|default:0 }}</td>
+                            <td>{{ data.level_counts.CRITICAL|default:0 }}</td>
+                            <td>{{ data.level_counts.DEBUG|default:0 }}</td>
+                            <td>{{ data.total|default:0 }}</td>
+                            <td><a href="{% url 'monitor_app:log_list' %}?app_name={{ app_name|urlencode }}&instance_name={{ instance_name|urlencode }}">View Logs</a></td>
                         </tr>
                     {% endfor %}
-                {% empty %}
-                    <tr>
-                        <td colspan="10" class="text-center">No log data available.</td>
-                    </tr>
                 {% endfor %}
             </tbody>
         </table>
