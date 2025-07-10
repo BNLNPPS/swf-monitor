@@ -5,7 +5,7 @@ set -e
 # It ensures that the tests are run using the project's virtual environment.
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-VENV_PATH="$SCRIPT_DIR/venv"
+VENV_PATH="$SCRIPT_DIR/.venv"
 REQS_TXT="$SCRIPT_DIR/requirements.txt"
 PYPROJECT="$SCRIPT_DIR/pyproject.toml"
 

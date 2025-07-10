@@ -10,18 +10,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Test runner manages virtual environment automatically
 
 ### Django Management  
-**CRITICAL: Always activate virtual environment first: `source venv/bin/activate`**
-- `source venv/bin/activate && python src/manage.py runserver` - Start development server
-- `source venv/bin/activate && python src/manage.py migrate` - Run database migrations
-- `source venv/bin/activate && python src/manage.py createsuperuser` - Create admin user
-- `source venv/bin/activate && python src/manage.py collectstatic` - Collect static files
+**CRITICAL: Use swf-testbed virtual environment (run install.sh from swf-testbed first)**
+- `python src/manage.py runserver` - Start development server (after PARENT_DIR set)
+- `python src/manage.py migrate` - Run database migrations
+- `python src/manage.py createsuperuser` - Create admin user
+- `python src/manage.py collectstatic` - Collect static files
 
 ### Installation and Dependencies
-**CRITICAL: Virtual environment must be activated for all Python operations**
-- `source venv/bin/activate && pip install -e .` - Install in development mode
-- Dependencies in `pyproject.toml` and `requirements.txt`
-- Requires `swf-common-lib` as sibling dependency
-- Virtual environment located at `venv/` - ALWAYS activate before any Python commands
+**CRITICAL: Run install.sh from swf-testbed directory to set up environment**
+- Dependencies in `requirements.txt` (installed by testbed install.sh)
+- Virtual environment managed by swf-testbed at `$PARENT_DIR/swf-testbed/.venv/`
+- PARENT_DIR environment variable set by install.sh for proper coordination
 
 ## Architecture Overview
 

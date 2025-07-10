@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block title %}Runs - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>Data-Taking Runs</h2>
+    
+    <style>
+    .filter-bar a {
+        margin-right: 0.5em;
+        color: #007bff;
+        text-decoration: none;
+    }
+    .filter-bar a.filter-active {
+        font-weight: bold;
+        text-decoration: underline;
+        color: #0056b3;
+    }
+    .status-badge {
+        padding: 0.25em 0.5em;
+        border-radius: 0.25em;
+        font-size: 0.8em;
+        font-weight: bold;
+    }
+    .status-active {
+        background-color: #28a745;
+        color: white;
+    }
+    .status-completed {
+        background-color: #6c757d;
+        color: white;
+    }
+    </style>
+    
+    <div class="filter-bar" style="margin-bottom: 1em;">
+        <div>
+            <span style="font-weight: 600;">Status:</span>
+            <a href="?" class="{% if not status_filter %}filter-active{% endif %}">All</a>
+            <a href="?status=active" class="{% if status_filter == 'active' %}filter-active{% endif %}">Active</a>
+            <a href="?status=completed" class="{% if status_filter == 'completed' %}filter-active{% endif %}">Completed</a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table id="runs-table" class="table table-striped table-bordered table-sm">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Run Number</th>
+                    <th>Status</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Duration</th>
+                    <th>STF Files</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs %}
+                <tr>
+                    <td>
+                        <a href="{% url 'monitor_app:run_detail' run.run_id %}">{{ run.run_number }}</a>
+                    </td>
+                    <td>
+                        {% if run.end_time %}
+                            <span class="status-badge status-completed">Completed</span>
+                        {% else %}
+                            <span class="status-badge status-active">Active</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ run.start_time|date:"Ymd H:i:s" }}</td>
+                    <td>{{ run.end_time|date:"Ymd H:i:s"|default:"—" }}</td>
+                    <td>
+                        {% if run.end_time %}
+                            {{ run.end_time|timeuntil:run.start_time }}
+                        {% else %}
+                            {{ run.start_time|timesince }}
+                        {% endif %}
+                    </td>
+                    <td>{{ run.stf_files.count }}</td>
+                    <td>
+                        <a href="{% url 'monitor_app:run_detail' run.run_id %}">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script>
+      $(document).ready(function() {
+        var table = $('#runs-table').DataTable({
+          paging: true,
+          pageLength: 50,
+          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+          ordering: true,
+          order: [[2, 'desc']],
+          info: true,
+          searching: true,
+          responsive: true,
+          search: {
+            caseInsensitive: true,
+            smart: false,
+            regex: false
+          },
+          language: {
+            search: "Filter table:",
+            lengthMenu: "Show _MENU_ entries",
+            info: "Showing _START_ to _END_ of _TOTAL_ runs",
+            emptyTable: "No runs found.",
+            paginate: {
+              first: "First",
+              last: "Last",
+              next: "Next",
+              previous: "Previous"
+            }
+          }
+        });
+        $(table.table().container()).find('input[type="search"]').css({'width':'24em','display':'inline-block'});
+      });
+    </script>
+</div>
+{% endblock %}

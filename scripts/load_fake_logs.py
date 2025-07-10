@@ -21,9 +21,12 @@ from django.utils import timezone
 # Robustness: Check for active virtual environment
 if sys.prefix == sys.base_prefix:
     print("\n[ERROR] This script should be run inside your project's Python virtual environment.")
-    print("Activate your venv with:")
-    print("  source ../swf-testbed/.venv/bin/activate   # (bash/zsh, macOS/Linux)")
-    print("  ..\\swf-testbed\\.venv\\Scripts\\activate   # (Windows cmd)")
+    parent_dir = os.environ.get('PARENT_DIR')
+    if parent_dir:
+        print("Activate your venv with:")
+        print(f"  source {parent_dir}/swf-testbed/.venv/bin/activate")
+    else:
+        print("Please run install.sh from swf-testbed directory first to set up environment.")
     print("Then run:\n  python scripts/load_fake_logs.py\n")
     sys.exit(1)
 
