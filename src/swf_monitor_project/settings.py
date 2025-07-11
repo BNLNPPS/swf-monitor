@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "rest_framework.authtoken",
+    "django_seed",
 ]
 
 MIDDLEWARE = [
@@ -98,11 +99,11 @@ ASGI_APPLICATION = "swf_monitor_project.asgi.application"  # Added ASGI applicat
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "swfdb",
-        "USER": "admin",
+        "NAME": config("DB_NAME", default="swfdb"),
+        "USER": config("DB_USER", default="admin"),
         "PASSWORD": config("DB_PASSWORD"),
-        "HOST": "localhost",
-        "PORT": "",
+        "HOST": config("DB_HOST", default="localhost"),
+        "PORT": config("DB_PORT", default="5432"),
     }
 }
 

@@ -8,6 +8,7 @@ constantly==23.10.4
 cryptography==45.0.4
 daphne==4.2.0
 Django==4.2.23
+django-seed==0.3.1
 djangorestframework==3.16.0
 docopt==0.6.2
 drf-spectacular==0.28.0

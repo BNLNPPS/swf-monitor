@@ -14,7 +14,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
 from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -116,7 +116,7 @@ def system_agent_delete(request, pk):
 def get_system_agents_data(request):
     agents = SystemAgent.objects.all()
     data = {
-        'agents': [{'id': agent.id, 'name': agent.name, 'status': agent.status} for agent in agents]
+        'agents': [{'id': agent.id, 'name': agent.instance_name, 'status': agent.status} for agent in agents]
     }
     return JsonResponse(data)
 
@@ -330,3 +330,154 @@ def database_table_list(request, table_name):
         'rows': rows,
         'dt_columns': dt_columns,
     })
+
+# Views for SWF Data Models
+
+@login_required
+def runs_list(request):
+    """Display list of data-taking runs"""
+    runs = Run.objects.all().order_by('-start_time')
+    
+    # Filter by status (active/completed)
+    status_filter = request.GET.get('status')
+    if status_filter == 'active':
+        runs = runs.filter(end_time__isnull=True)
+    elif status_filter == 'completed':
+        runs = runs.filter(end_time__isnull=False)
+    
+    context = {
+        'runs': runs,
+        'status_filter': status_filter,
+    }
+    return render(request, 'monitor_app/runs_list.html', context)
+
+@login_required
+def run_detail(request, run_id):
+    """Display detailed view of a specific run"""
+    run = get_object_or_404(Run, run_id=run_id)
+    stf_files = run.stf_files.all().order_by('-created_at')
+    
+    # Count files by status
+    file_stats = {}
+    for status_choice in StfFile._meta.get_field('status').choices:
+        status_value = status_choice[0]
+        file_stats[status_value] = stf_files.filter(status=status_value).count()
+    
+    context = {
+        'run': run,
+        'stf_files': stf_files,
+        'file_stats': file_stats,
+    }
+    return render(request, 'monitor_app/run_detail.html', context)
+
+@login_required
+def stf_files_list(request):
+    """Display list of STF files with filtering"""
+    stf_files = StfFile.objects.all().order_by('-created_at')
+    
+    # Filtering
+    run_number = request.GET.get('run_number')
+    status_filter = request.GET.get('status')
+    machine_state = request.GET.get('machine_state')
+    
+    if run_number:
+        stf_files = stf_files.filter(run__run_number=run_number)
+    if status_filter:
+        stf_files = stf_files.filter(status=status_filter)
+    if machine_state:
+        stf_files = stf_files.filter(machine_state=machine_state)
+    
+    # Get filter options
+    run_numbers = Run.objects.values_list('run_number', flat=True).distinct()
+    statuses = [choice[0] for choice in StfFile._meta.get_field('status').choices]
+    machine_states = StfFile.objects.values_list('machine_state', flat=True).distinct()
+    
+    # Pagination
+    paginator = Paginator(stf_files, 50)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    context = {
+        'stf_files': page_obj,
+        'page_obj': page_obj,
+        'run_numbers': sorted(run_numbers, reverse=True),
+        'statuses': statuses,
+        'machine_states': sorted(machine_states),
+        'filters': {
+            'run_number': run_number,
+            'status': status_filter,
+            'machine_state': machine_state,
+        }
+    }
+    return render(request, 'monitor_app/stf_files_list.html', context)
+
+@login_required
+def stf_file_detail(request, file_id):
+    """Display detailed view of a specific STF file"""
+    stf_file = get_object_or_404(StfFile, file_id=file_id)
+    dispatches = stf_file.dispatches.all().order_by('-dispatch_time')
+    
+    context = {
+        'stf_file': stf_file,
+        'dispatches': dispatches,
+    }
+    return render(request, 'monitor_app/stf_file_detail.html', context)
+
+@login_required
+def subscribers_list(request):
+    """Display list of message queue subscribers"""
+    subscribers = Subscriber.objects.all().order_by('subscriber_name')
+    
+    # Filter by active status
+    status_filter = request.GET.get('status')
+    if status_filter == 'active':
+        subscribers = subscribers.filter(is_active=True)
+    elif status_filter == 'inactive':
+        subscribers = subscribers.filter(is_active=False)
+    
+    context = {
+        'subscribers': subscribers,
+        'status_filter': status_filter,
+    }
+    return render(request, 'monitor_app/subscribers_list.html', context)
+
+@login_required
+def subscriber_detail(request, subscriber_id):
+    """Display details for a specific subscriber."""
+    subscriber = get_object_or_404(Subscriber, subscriber_id=subscriber_id)
+    
+    context = {
+        'subscriber': subscriber,
+    }
+    
+    return render(request, 'monitor_app/subscriber_detail.html', context)
+
+@login_required
+def message_dispatch_detail(request, dispatch_id):
+    """Display details for a specific message dispatch."""
+    dispatch = get_object_or_404(MessageQueueDispatch, dispatch_id=dispatch_id)
+    
+    context = {
+        'dispatch': dispatch,
+    }
+    
+    return render(request, 'monitor_app/message_dispatch_detail.html', context)
+
+@login_required
+def message_dispatches_list(request):
+    """Display list of message queue dispatches"""
+    dispatches = MessageQueueDispatch.objects.all().order_by('-dispatch_time')
+    
+    # Filtering
+    status_filter = request.GET.get('status')
+    
+    if status_filter == 'success':
+        dispatches = dispatches.filter(is_successful=True)
+    elif status_filter == 'failed':
+        dispatches = dispatches.filter(is_successful=False)
+    
+    context = {
+        'dispatches': dispatches,
+        'status_filter': status_filter,
+    }
+    return render(request, 'monitor_app/message_dispatches_list.html', context)

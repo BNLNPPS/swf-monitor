@@ -13,6 +13,14 @@ from .views import (
     authenticated_home,
     database_overview,
     database_table_list,
+    runs_list,
+    run_detail,
+    stf_files_list,
+    stf_file_detail,
+    subscribers_list,
+    subscriber_detail,
+    message_dispatches_list,
+    message_dispatch_detail,
 )
 
 app_name = 'monitor_app'
@@ -31,4 +39,14 @@ urlpatterns = [
     path('home/', authenticated_home, name='authenticated_home'),
     path('database/', database_overview, name='database_overview'),
     path('database/<str:table_name>/', database_table_list, name='database_table_list'),
+    
+    # SWF Data Model URLs
+    path('runs/', runs_list, name='runs_list'),
+    path('runs/<uuid:run_id>/', run_detail, name='run_detail'),
+    path('stf-files/', stf_files_list, name='stf_files_list'),
+    path('stf-files/<uuid:file_id>/', stf_file_detail, name='stf_file_detail'),
+    path('subscribers/', subscribers_list, name='subscribers_list'),
+    path('subscribers/<uuid:subscriber_id>/', subscriber_detail, name='subscriber_detail'),
+    path('message-dispatches/', message_dispatches_list, name='message_dispatches_list'),
+    path('message-dispatches/<uuid:dispatch_id>/', message_dispatch_detail, name='message_dispatch_detail'),
 ]
