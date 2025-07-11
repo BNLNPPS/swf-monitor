@@ -185,6 +185,10 @@ ACTIVEMQ_PORT = config('ACTIVEMQ_PORT', default=61613, cast=int)
 ACTIVEMQ_USER = config('ACTIVEMQ_USER', default='admin')
 ACTIVEMQ_PASSWORD = config('ACTIVEMQ_PASSWORD', default='admin')
 ACTIVEMQ_HEARTBEAT_TOPIC = config('ACTIVEMQ_HEARTBEAT_TOPIC', default='/topic/heartbeat') # Updated to working topic
+ACTIVEMQ_USE_SSL = config('ACTIVEMQ_USE_SSL', default=False, cast=bool)
+ACTIVEMQ_SSL_CERT_FILE = config('ACTIVEMQ_SSL_CERT_FILE', default='')
+ACTIVEMQ_SSL_KEY_FILE = config('ACTIVEMQ_SSL_KEY_FILE', default='')
+ACTIVEMQ_SSL_CA_CERTS = config('ACTIVEMQ_SSL_CA_CERTS', default='')
 
 # Channel layer settings (using in-memory for now, consider Redis for production)
 CHANNEL_LAYERS = {

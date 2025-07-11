@@ -1,10 +1,11 @@
 import stomp
+import ssl
 import time
 import logging
 import json # Add this import
 from django.conf import settings
 from django.utils import timezone # Add this import
-from .models import MonitoredItem # Add this import
+from .models import SystemAgent # Add this import
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,11 @@ class MessageListener(stomp.ConnectionListener):
 
             if agent_name: # Status can be optional if we only update heartbeat
                 try:
-                    item, created = MonitoredItem.objects.get_or_create(
-                        name=agent_name,
+                    item, created = SystemAgent.objects.get_or_create(
+                        instance_name=agent_name,
                         defaults={
-                            'status': status if status else MonitoredItem.STATUS_UNKNOWN,
+                            'agent_type': 'Unknown',  # Default agent type
+                            'status': status if status else 'UNKNOWN',
                             'last_heartbeat': timezone.now()
                         }
                     )
@@ -43,7 +45,7 @@ class MessageListener(stomp.ConnectionListener):
                         # if description:
                         #     item.description = description
                         item.save()
-                    logger.info(f'Updated/Created MonitoredItem for {agent_name} with status {item.status}')
+                    logger.info(f'Updated/Created SystemAgent for {agent_name} with status {item.status}')
                 except Exception as e:
                     logger.error(f'Error processing message for agent {agent_name}: {e}')
             else:
@@ -77,8 +79,35 @@ def start_activemq_listener():
     # These would come from your Django settings.py
     activemq_host = getattr(settings, 'ACTIVEMQ_HOST', 'localhost')
     activemq_port = getattr(settings, 'ACTIVEMQ_PORT', 61613)
+    use_ssl = getattr(settings, 'ACTIVEMQ_USE_SSL', False)
     
     conn = stomp.Connection([(activemq_host, activemq_port)])
+    
+    # Configure SSL if enabled
+    if use_ssl:
+        ssl_ca_certs = getattr(settings, 'ACTIVEMQ_SSL_CA_CERTS', '')
+        ssl_cert_file = getattr(settings, 'ACTIVEMQ_SSL_CERT_FILE', '')
+        ssl_key_file = getattr(settings, 'ACTIVEMQ_SSL_KEY_FILE', '')
+        
+        if ssl_ca_certs:
+            ssl_args = {
+                'ca_certs': ssl_ca_certs,
+                'ssl_version': ssl.PROTOCOL_TLS_CLIENT
+            }
+            
+            # Add client cert and key if provided
+            if ssl_cert_file and ssl_key_file:
+                ssl_args['certfile'] = ssl_cert_file
+                ssl_args['keyfile'] = ssl_key_file
+            
+            conn.transport.set_ssl(
+                for_hosts=[(activemq_host, activemq_port)],
+                **ssl_args
+            )
+            logger.info(f"SSL configured for ActiveMQ connection with CA certs: {ssl_ca_certs}")
+        else:
+            logger.warning("SSL enabled but no CA certificate file specified")
+    
     conn.set_listener('', MessageListener(conn))
     
     connect_and_subscribe(conn)
