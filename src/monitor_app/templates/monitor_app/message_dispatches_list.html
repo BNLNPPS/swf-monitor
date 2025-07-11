@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block title %}Message Dispatches - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>Message Queue Dispatches</h2>
+    
+    <style>
+    .filter-bar a {
+        margin-right: 0.5em;
+        color: #007bff;
+        text-decoration: none;
+    }
+    .filter-bar a.filter-active {
+        font-weight: bold;
+        text-decoration: underline;
+        color: #0056b3;
+    }
+    </style>
+    
+    <div class="filter-bar" style="margin-bottom: 1em;">
+        <div style="margin-bottom: 0.5em;">
+            <span style="font-weight: 600;">Status:</span>
+            <a href="?" class="{% if not status_filter %}filter-active{% endif %}">All</a>
+            <a href="?status=success" class="{% if status_filter == 'success' %}filter-active{% endif %}">Success</a>
+            <a href="?status=failed" class="{% if status_filter == 'failed' %}filter-active{% endif %}">Failed</a>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table id="dispatches-table" class="table table-striped table-bordered table-sm">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Message Content</th>
+                    <th>Status</th>
+                    <th>Dispatch Time</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for dispatch in dispatches %}
+                <tr>
+                    <td style="white-space: normal; word-break: break-word;">
+                        <span title="{{ dispatch.message_content }}">{{ dispatch.message_content|truncatechars:80 }}</span>
+                    </td>
+                    <td>
+                        <span class="badge badge-{% if dispatch.is_successful %}success{% else %}warning{% endif %}">
+                            {% if dispatch.is_successful %}Success{% else %}Failed{% endif %}
+                        </span>
+                    </td>
+                    <td>{{ dispatch.dispatch_time|date:"Ymd H:i:s" }}</td>
+                    <td>
+                        <a href="{% url 'monitor_app:message_dispatch_detail' dispatch.dispatch_id %}">View</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script>
+      $(document).ready(function() {
+        var table = $('#dispatches-table').DataTable({
+          paging: true,
+          pageLength: 50,
+          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+          ordering: true,
+          order: [[3, 'desc']],
+          info: true,
+          searching: true,
+          responsive: true,
+          search: {
+            caseInsensitive: true,
+            smart: false,
+            regex: false
+          },
+          language: {
+            search: "Filter table:",
+            lengthMenu: "Show _MENU_ entries",
+            info: "Showing _START_ to _END_ of _TOTAL_ dispatches",
+            emptyTable: "No message dispatches found.",
+            paginate: {
+              first: "First",
+              last: "Last",
+              next: "Next",
+              previous: "Previous"
+            }
+          }
+        });
+        $(table.table().container()).find('input[type="search"]').css({'width':'24em','display':'inline-block'});
+      });
+    </script>
+</div>
+{% endblock %}
