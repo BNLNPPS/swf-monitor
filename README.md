@@ -60,6 +60,98 @@ The MCP is a lightweight, JSON-based protocol designed for agents and services t
 
 4.  **PostgreSQL Database:** The primary data store for all agent information, user accounts, and application state.
 
+## Database Schema
+
+The `swf-monitor` uses Django models to define the database schema for tracking system agents, runs, data files, and messaging operations:
+
+<!-- 
+Mermaid ERD Syntax Note:
+- Fields must follow format: datatype field_name KEY_TYPE
+- Correct: "string instance_name PK"
+- Incorrect: "instance_name PK" (missing datatype)
+- Key types: PK (primary key), FK (foreign key), UK (unique key)
+-->
+
+```mermaid
+%%{init: {'theme':'neutral', 'themeVariables': {'fontSize': '24px', 'fontFamily': 'Arial'}}%%
+erDiagram
+    SystemAgent {
+        string instance_name PK
+        string agent_type
+        string description
+        string status
+        datetime last_heartbeat
+        string agent_url
+        datetime created_at
+        datetime updated_at
+    }
+    
+    Run {
+        int run_id PK
+        int run_number UK
+        datetime start_time
+        datetime end_time
+        json run_conditions
+    }
+    
+    StfFile {
+        uuid file_id PK
+        int run_id FK
+        string machine_state
+        string file_url
+        bigint file_size_bytes
+        string checksum
+        datetime created_at
+        string status
+        json metadata
+    }
+    
+    MessageQueueDispatch {
+        uuid dispatch_id PK
+        uuid stf_file_id FK
+        datetime dispatch_time
+        json message_content
+        boolean is_successful
+        string error_message
+    }
+    
+    Subscriber {
+        int subscriber_id PK
+        string subscriber_name
+        float fraction
+        string description
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }
+    
+    AppLog {
+        int log_id PK
+        string app_name
+        string instance_name
+        datetime timestamp
+        int level
+        string level_name
+        text message
+        string module
+        string func_name
+        int line_no
+        int process
+        int thread
+        json extra_data
+    }
+    
+    Run ||--o{ StfFile : "contains"
+    StfFile ||--o{ MessageQueueDispatch : "triggers"
+```
+
+*Figure: Database entity relationship diagram showing the core models and their relationships*
+
+**Key Model Relationships:**
+- **Run → StfFile**: One-to-many relationship where each experimental run contains multiple Super Time Frame (STF) files
+- **StfFile → MessageQueueDispatch**: One-to-many relationship tracking message queue operations for each STF file
+- **SystemAgent, Subscriber, AppLog**: Independent entities for system monitoring and logging
+
 ### Testing
 
 A comprehensive test suite is a critical part of this project. It is designed to ensure the reliability, correctness, and stability of all components and is essential for validating changes and preventing regressions.

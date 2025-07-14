@@ -38,7 +38,7 @@ if not DEBUG:
         ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
 else:
     # For development and testing, allow localhost, 127.0.0.1, and testserver
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver', 'pandaserver02.sdcc.bnl.gov', 'pandaserver02']
 
 
 # Application definition
