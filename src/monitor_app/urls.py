@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path, include
 from .views import (
     home,
     authenticated_home,
@@ -68,4 +68,7 @@ urlpatterns = [
     path('workflow/performance/', workflow_performance, name='workflow_performance'),
     path('workflow/realtime/', workflow_realtime_dashboard, name='workflow_realtime_dashboard'),
     path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
+    
+    # API v1
+    path('api/v1/', include('monitor_app.api_urls')),
 ]

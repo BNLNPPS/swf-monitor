@@ -16,7 +16,7 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
-from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer
+from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
 from django.apps import apps
@@ -114,6 +114,49 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
     serializer_class = SystemAgentSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
+
+    @action(detail=False, methods=['post'], url_path='heartbeat')
+    def heartbeat(self, request):
+        """
+        Custom action for agents to register themselves and send heartbeats.
+        This will create or update an agent entry.
+        """
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        instance_name = serializer.validated_data.get('instance_name')
+        
+        # Use update_or_create to handle both registration and heartbeats
+        agent, created = SystemAgent.objects.update_or_create(
+            instance_name=instance_name,
+            defaults=serializer.validated_data
+        )
+        
+        # Update the last_heartbeat timestamp
+        agent.last_heartbeat = timezone.now()
+        agent.save()
+        
+        # Return the full agent data
+        return Response(self.get_serializer(agent).data, status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED)
+
+
+class STFWorkflowViewSet(viewsets.ModelViewSet):
+    """API endpoint for STF Workflows."""
+    queryset = STFWorkflow.objects.all()
+    serializer_class = STFWorkflowSerializer
+    permission_classes = [AllowAny] # Adjust as needed
+
+class AgentWorkflowStageViewSet(viewsets.ModelViewSet):
+    """API endpoint for Agent Workflow Stages."""
+    queryset = AgentWorkflowStage.objects.all()
+    serializer_class = AgentWorkflowStageSerializer
+    permission_classes = [AllowAny] # Adjust as needed
+
+class WorkflowMessageViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workflow Messages."""
+    queryset = WorkflowMessage.objects.all()
+    serializer_class = WorkflowMessageSerializer
+    permission_classes = [AllowAny] # Adjust as needed
+
 
 class AppLogViewSet(viewsets.ModelViewSet):
     """
