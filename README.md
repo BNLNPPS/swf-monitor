@@ -349,3 +349,97 @@ The API is documented using OpenAPI (Swagger). You can view the interactive API 
 * `listen_activemq`: Listen for heartbeats on an ActiveMQ topic.
 * `populate_agents`: Populate the database with initial agent data.
 
+---
+
+## TODO: Agent Workflow Development
+
+### Overview
+The swf-monitor serves as the central hub for the ePIC streaming workflow testbed. The system is driven by the `swf-daqsim-agent` which generates Super Time Frame (STF) files and sends workflow messages via ActiveMQ following a state-based schedule (no_beam → beam → run states with various substates).
+
+### Current System Architecture
+```
+swf-daqsim-agent (scheduler/generator)
+    ↓ ActiveMQ messages
+[swf-data-agent] → [swf-processing-agent] → [swf-fastmon-agent]
+    ↓ status updates
+swf-monitor (dashboard/database)
+```
+
+### Development Strategy
+To avoid interfering with active agent development while establishing the monitoring infrastructure, we will:
+
+1. **Create emulated agents within the monitor repo** as Django management commands
+2. **Develop the database schema** to track the complete workflow pipeline
+3. **Build monitoring views** to visualize workflow state and debug ActiveMQ traffic
+4. **Design the message protocol** so real agents can later plug in seamlessly
+
+### Task List
+
+#### Phase 1: Database Schema Design
+- [ ] Analyze STF messages from daqsim to understand data flow structure
+- [ ] Design workflow tracking models:
+  - STF lifecycle (received, processing, completed, failed)
+  - Agent status and heartbeat tracking
+  - Message dispatch history and error tracking
+- [ ] Extend existing models (StfFile, MessageQueueDispatch) for workflow support
+- [ ] Create Django migrations for schema changes
+
+#### Phase 2: Agent Emulation
+- [ ] Create `emulate_data_agent` management command:
+  - Listen for STF messages from daqsim
+  - Simulate data storage/transfer operations
+  - Send appropriate status updates to monitor
+- [ ] Create `emulate_processing_agent` management command:
+  - Listen for processing requests from data agent
+  - Simulate data processing workflows
+  - Report processing results and status
+- [ ] Leverage existing ActiveMQ infrastructure (`activemq_listener.py`, `listen_activemq`)
+
+#### Phase 3: Monitoring Views
+- [ ] Create workflow visualization dashboard:
+  - Real-time STF processing pipeline status
+  - Agent health and performance metrics
+  - Historical workflow analysis
+- [ ] Implement ActiveMQ traffic monitoring:
+  - Message flow debugging interface
+  - Error tracking and alerting
+  - Performance bottleneck identification
+
+#### Phase 4: Message Protocol Design
+- [ ] Define standardized message formats for each agent type
+- [ ] Document message flow patterns and error handling
+- [ ] Create protocol validation and testing framework
+- [ ] Ensure seamless integration path for real agents
+
+### Technical Notes
+
+**ActiveMQ Configuration:**
+- Local development: Set `MQ_LOCAL=1` in `~/.env` for no-SSL mode
+- Production: Uses SSL with certificate-based authentication
+- Default local credentials: admin/admin on localhost:61616
+
+**STF Message Format Example:**
+```json
+{
+    "filename": "swf.20250707.190903.run.physics.stf",
+    "start": "20250707190900",
+    "end": "20250707190903", 
+    "state": "run",
+    "substate": "physics",
+    "msg_type": "stf_gen",
+    "req_id": 1
+}
+```
+
+**Development Environment:**
+- Use swf-testbed virtual environment for all agent emulation
+- ActiveMQ and PostgreSQL run via Docker Compose
+- Monitor runs on Django development server (port 8001 recommended)
+
+### Success Criteria
+- [ ] Complete STF workflow visible in monitor dashboard
+- [ ] Emulated agents respond appropriately to daqsim messages
+- [ ] Database schema supports full workflow tracking
+- [ ] Monitoring views provide actionable insights
+- [ ] Real agents can integrate without code changes
+

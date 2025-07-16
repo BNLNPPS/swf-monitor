@@ -15,6 +15,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
+from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
 from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -481,3 +482,419 @@ def message_dispatches_list(request):
         'status_filter': status_filter,
     }
     return render(request, 'monitor_app/message_dispatches_list.html', context)
+
+
+# ==================== WORKFLOW VIEWS ====================
+
+@login_required
+def workflow_dashboard(request):
+    """Main workflow dashboard showing pipeline status and statistics."""
+    
+    # Get workflow statistics
+    total_workflows = STFWorkflow.objects.count()
+    active_workflows = STFWorkflow.objects.exclude(
+        current_status__in=[WorkflowStatus.WORKFLOW_COMPLETE, WorkflowStatus.FAILED]
+    ).count()
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE
+    ).count()
+    failed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.FAILED
+    ).count()
+    
+    # Get recent workflows
+    recent_workflows = STFWorkflow.objects.all().order_by('-created_at')[:20]
+    
+    # Get workflow status distribution
+    status_counts = STFWorkflow.objects.values('current_status').annotate(
+        count=Count('current_status')
+    ).order_by('current_status')
+    
+    # Get agent statistics
+    workflow_agents = SystemAgent.objects.filter(workflow_enabled=True)
+    
+    # Get DAQ state distribution
+    daq_state_counts = STFWorkflow.objects.values('daq_state').annotate(
+        count=Count('daq_state')
+    ).order_by('daq_state')
+    
+    context = {
+        'total_workflows': total_workflows,
+        'active_workflows': active_workflows,
+        'completed_workflows': completed_workflows,
+        'failed_workflows': failed_workflows,
+        'recent_workflows': recent_workflows,
+        'status_counts': status_counts,
+        'workflow_agents': workflow_agents,
+        'daq_state_counts': daq_state_counts,
+    }
+    
+    return render(request, 'monitor_app/workflow_dashboard.html', context)
+
+
+@login_required
+def workflow_list(request):
+    """List view of all STF workflows with filtering and pagination."""
+    
+    workflows = STFWorkflow.objects.all().order_by('-created_at')
+    
+    # Filtering
+    status_filter = request.GET.get('status')
+    agent_filter = request.GET.get('agent')
+    daq_state_filter = request.GET.get('daq_state')
+    
+    if status_filter:
+        workflows = workflows.filter(current_status=status_filter)
+    if agent_filter:
+        workflows = workflows.filter(current_agent=agent_filter)
+    if daq_state_filter:
+        workflows = workflows.filter(daq_state=daq_state_filter)
+    
+    # Pagination
+    paginator = Paginator(workflows, 50)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    # Get filter options
+    status_options = WorkflowStatus.choices
+    agent_options = AgentType.choices
+    daq_state_options = STFWorkflow.objects.values_list('daq_state', flat=True).distinct()
+    
+    context = {
+        'page_obj': page_obj,
+        'workflows': page_obj,
+        'status_filter': status_filter,
+        'agent_filter': agent_filter,
+        'daq_state_filter': daq_state_filter,
+        'status_options': status_options,
+        'agent_options': agent_options,
+        'daq_state_options': daq_state_options,
+    }
+    
+    return render(request, 'monitor_app/workflow_list.html', context)
+
+
+@login_required
+def workflow_detail(request, workflow_id):
+    """Detailed view of a specific workflow including all stages and messages."""
+    
+    workflow = get_object_or_404(STFWorkflow, workflow_id=workflow_id)
+    
+    # Get all stages for this workflow
+    stages = AgentWorkflowStage.objects.filter(
+        workflow=workflow
+    ).order_by('created_at')
+    
+    # Get all messages for this workflow
+    messages = WorkflowMessage.objects.filter(
+        workflow=workflow
+    ).order_by('sent_at')
+    
+    # Calculate workflow timing
+    workflow_duration = None
+    if workflow.completed_at:
+        workflow_duration = (workflow.completed_at - workflow.created_at).total_seconds()
+    elif workflow.failed_at:
+        workflow_duration = (workflow.failed_at - workflow.created_at).total_seconds()
+    
+    context = {
+        'workflow': workflow,
+        'stages': stages,
+        'messages': messages,
+        'workflow_duration': workflow_duration,
+    }
+    
+    return render(request, 'monitor_app/workflow_detail.html', context)
+
+
+@login_required
+def workflow_agents_status(request):
+    """View showing the status of all workflow agents."""
+    
+    agents = SystemAgent.objects.filter(workflow_enabled=True).order_by('agent_type', 'instance_name')
+    
+    # Get current processing counts per agent
+    agent_stats = []
+    for agent in agents:
+        # Get current processing stages
+        current_stages = AgentWorkflowStage.objects.filter(
+            agent_name=agent.instance_name,
+            status__in=[
+                WorkflowStatus.DATA_RECEIVED,
+                WorkflowStatus.DATA_PROCESSING,
+                WorkflowStatus.PROC_RECEIVED,
+                WorkflowStatus.PROC_PROCESSING,
+                WorkflowStatus.FASTMON_RECEIVED,
+            ]
+        ).count()
+        
+        # Get recent completion rate (last hour)
+        from datetime import timedelta
+        recent_completed = AgentWorkflowStage.objects.filter(
+            agent_name=agent.instance_name,
+            completed_at__gte=timezone.now() - timedelta(hours=1)
+        ).count()
+        
+        agent_stats.append({
+            'agent': agent,
+            'current_processing': current_stages,
+            'recent_completed': recent_completed,
+        })
+    
+    context = {
+        'agent_stats': agent_stats,
+    }
+    
+    return render(request, 'monitor_app/workflow_agents_status.html', context)
+
+
+@login_required
+def workflow_messages(request):
+    """View showing all workflow messages for debugging."""
+    
+    messages = WorkflowMessage.objects.all().order_by('-sent_at')
+    
+    # Filtering
+    message_type_filter = request.GET.get('message_type')
+    sender_filter = request.GET.get('sender')
+    success_filter = request.GET.get('success')
+    
+    if message_type_filter:
+        messages = messages.filter(message_type=message_type_filter)
+    if sender_filter:
+        messages = messages.filter(sender_agent=sender_filter)
+    if success_filter:
+        if success_filter == 'true':
+            messages = messages.filter(is_successful=True)
+        elif success_filter == 'false':
+            messages = messages.filter(is_successful=False)
+    
+    # Pagination
+    paginator = Paginator(messages, 100)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    # Get filter options
+    message_types = WorkflowMessage.objects.values_list('message_type', flat=True).distinct()
+    senders = WorkflowMessage.objects.values_list('sender_agent', flat=True).distinct()
+    
+    context = {
+        'page_obj': page_obj,
+        'messages': page_obj,
+        'message_type_filter': message_type_filter,
+        'sender_filter': sender_filter,
+        'success_filter': success_filter,
+        'message_types': message_types,
+        'senders': senders,
+    }
+    
+    return render(request, 'monitor_app/workflow_messages.html', context)
+
+
+@login_required
+def workflow_performance(request):
+    """View showing workflow performance metrics and analytics."""
+    
+    # Get processing time statistics
+    from django.db.models import Avg, Min, Max, Count
+    
+    # Overall workflow completion times
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE,
+        completed_at__isnull=False
+    )
+    
+    # Agent performance statistics
+    agent_performance = []
+    for agent_type in AgentType.choices:
+        agent_code = agent_type[0]
+        agent_name = agent_type[1]
+        
+        stages = AgentWorkflowStage.objects.filter(
+            agent_type=agent_code,
+            processing_time_seconds__isnull=False
+        )
+        
+        if stages.exists():
+            stats = stages.aggregate(
+                avg_time=Avg('processing_time_seconds'),
+                min_time=Min('processing_time_seconds'),
+                max_time=Max('processing_time_seconds'),
+                count=Count('stage_id')
+            )
+            
+            agent_performance.append({
+                'agent_type': agent_name,
+                'agent_code': agent_code,
+                'avg_time': stats['avg_time'],
+                'min_time': stats['min_time'],
+                'max_time': stats['max_time'],
+                'count': stats['count']
+            })
+    
+    # Recent throughput (last 24 hours)
+    from datetime import timedelta
+    recent_time = timezone.now() - timedelta(hours=24)
+    
+    recent_workflows = STFWorkflow.objects.filter(
+        created_at__gte=recent_time
+    ).count()
+    
+    recent_completed = STFWorkflow.objects.filter(
+        completed_at__gte=recent_time
+    ).count()
+    
+    context = {
+        'completed_workflows': completed_workflows,
+        'agent_performance': agent_performance,
+        'recent_workflows': recent_workflows,
+        'recent_completed': recent_completed,
+    }
+    
+    return render(request, 'monitor_app/workflow_performance.html', context)
+
+
+@login_required
+def workflow_realtime_dashboard(request):
+    """Real-time workflow dashboard with live updates."""
+    
+    # Get initial data (same as regular dashboard)
+    total_workflows = STFWorkflow.objects.count()
+    active_workflows = STFWorkflow.objects.exclude(
+        current_status__in=[WorkflowStatus.WORKFLOW_COMPLETE, WorkflowStatus.FAILED]
+    ).count()
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE
+    ).count()
+    failed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.FAILED
+    ).count()
+    
+    workflow_agents = SystemAgent.objects.filter(workflow_enabled=True)
+    
+    context = {
+        'total_workflows': total_workflows,
+        'active_workflows': active_workflows,
+        'completed_workflows': completed_workflows,
+        'failed_workflows': failed_workflows,
+        'workflow_agents': workflow_agents,
+    }
+    
+    return render(request, 'monitor_app/workflow_realtime_dashboard.html', context)
+
+
+@login_required
+def workflow_realtime_data_api(request):
+    """API endpoint providing real-time data for dashboard updates."""
+    
+    from datetime import timedelta
+    
+    # Basic metrics
+    total_workflows = STFWorkflow.objects.count()
+    active_workflows = STFWorkflow.objects.exclude(
+        current_status__in=[WorkflowStatus.WORKFLOW_COMPLETE, WorkflowStatus.FAILED]
+    ).count()
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE
+    ).count()
+    failed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.FAILED
+    ).count()
+    
+    # Pipeline stage counts
+    pipeline_counts = {
+        'daqsim': STFWorkflow.objects.filter(current_status=WorkflowStatus.GENERATED).count(),
+        'data': STFWorkflow.objects.filter(
+            current_status__in=[
+                WorkflowStatus.DATA_RECEIVED, 
+                WorkflowStatus.DATA_PROCESSING, 
+                WorkflowStatus.DATA_COMPLETE
+            ]
+        ).count(),
+        'processing': STFWorkflow.objects.filter(
+            current_status__in=[
+                WorkflowStatus.PROC_RECEIVED, 
+                WorkflowStatus.PROC_PROCESSING, 
+                WorkflowStatus.PROC_COMPLETE
+            ]
+        ).count(),
+        'fastmon': STFWorkflow.objects.filter(
+            current_status__in=[
+                WorkflowStatus.FASTMON_RECEIVED, 
+                WorkflowStatus.FASTMON_COMPLETE
+            ]
+        ).count(),
+    }
+    
+    # Agent status
+    agents_data = []
+    for agent in SystemAgent.objects.filter(workflow_enabled=True):
+        agents_data.append({
+            'instance_name': agent.instance_name,
+            'agent_type': agent.agent_type,
+            'status': agent.status,
+            'current_stf_count': agent.current_stf_count,
+            'total_stf_processed': agent.total_stf_processed,
+            'last_heartbeat': agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+        })
+    
+    # Recent messages (last 10)
+    recent_messages = []
+    for message in WorkflowMessage.objects.all().order_by('-sent_at')[:10]:
+        recent_messages.append({
+            'message_type': message.message_type,
+            'sender_agent': message.sender_agent,
+            'recipient_agent': message.recipient_agent,
+            'timestamp': message.sent_at.strftime('%H:%M:%S'),
+            'filename': message.workflow.filename if message.workflow else None,
+            'is_successful': message.is_successful,
+        })
+    
+    # Chart data
+    # Throughput over last 10 minutes (data points every minute)
+    now = timezone.now()
+    throughput_labels = []
+    throughput_data = []
+    
+    for i in range(10, 0, -1):
+        time_point = now - timedelta(minutes=i)
+        label = time_point.strftime('%H:%M')
+        throughput_labels.append(label)
+        
+        # Count workflows created in this minute
+        count = STFWorkflow.objects.filter(
+            created_at__gte=time_point,
+            created_at__lt=time_point + timedelta(minutes=1)
+        ).count()
+        throughput_data.append(count)
+    
+    # Processing times by agent type
+    from django.db.models import Avg
+    processing_times = []
+    for agent_type in [AgentType.DATA, AgentType.PROCESSING, AgentType.FASTMON]:
+        avg_time = AgentWorkflowStage.objects.filter(
+            agent_type=agent_type,
+            processing_time_seconds__isnull=False
+        ).aggregate(avg=Avg('processing_time_seconds'))['avg']
+        processing_times.append(round(avg_time, 2) if avg_time else 0)
+    
+    data = {
+        'metrics': {
+            'total_workflows': total_workflows,
+            'active_workflows': active_workflows,
+            'completed_workflows': completed_workflows,
+            'failed_workflows': failed_workflows,
+        },
+        'pipeline': pipeline_counts,
+        'agents': agents_data,
+        'recent_messages': recent_messages,
+        'charts': {
+            'throughput': {
+                'labels': throughput_labels,
+                'data': throughput_data,
+            },
+            'processing_times': processing_times,
+        }
+    }
+    
+    return JsonResponse(data)

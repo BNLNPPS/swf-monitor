@@ -21,6 +21,15 @@ from .views import (
     subscriber_detail,
     message_dispatches_list,
     message_dispatch_detail,
+    # Workflow views
+    workflow_dashboard,
+    workflow_list,
+    workflow_detail,
+    workflow_agents_status,
+    workflow_messages,
+    workflow_performance,
+    workflow_realtime_dashboard,
+    workflow_realtime_data_api,
 )
 
 app_name = 'monitor_app'
@@ -49,4 +58,14 @@ urlpatterns = [
     path('subscribers/<uuid:subscriber_id>/', subscriber_detail, name='subscriber_detail'),
     path('message-dispatches/', message_dispatches_list, name='message_dispatches_list'),
     path('message-dispatches/<uuid:dispatch_id>/', message_dispatch_detail, name='message_dispatch_detail'),
+    
+    # Workflow URLs
+    path('workflow/', workflow_dashboard, name='workflow_dashboard'),
+    path('workflow/list/', workflow_list, name='workflow_list'),
+    path('workflow/<uuid:workflow_id>/', workflow_detail, name='workflow_detail'),
+    path('workflow/agents/', workflow_agents_status, name='workflow_agents_status'),
+    path('workflow/messages/', workflow_messages, name='workflow_messages'),
+    path('workflow/performance/', workflow_performance, name='workflow_performance'),
+    path('workflow/realtime/', workflow_realtime_dashboard, name='workflow_realtime_dashboard'),
+    path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
 ]

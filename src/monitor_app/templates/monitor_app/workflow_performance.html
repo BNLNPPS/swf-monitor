@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block title %}Workflow Performance{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <h1>Workflow Performance</h1>
+
+    <div class="row">
+        <div class="col-md-6">
+            <h2>Agent Performance</h2>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Agent Type</th>
+                        <th>Avg. Time (s)</th>
+                        <th>Min. Time (s)</th>
+                        <th>Max. Time (s)</th>
+                        <th>Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agent in agent_performance %}
+                    <tr>
+                        <td>{{ agent.agent_type }}</td>
+                        <td>{{ agent.avg_time|floatformat:2 }}</td>
+                        <td>{{ agent.min_time|floatformat:2 }}</td>
+                        <td>{{ agent.max_time|floatformat:2 }}</td>
+                        <td>{{ agent.count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="col-md-6">
+            <h2>Throughput (last 24 hours)</h2>
+            <p>Workflows created: {{ recent_workflows }}</p>
+            <p>Workflows completed: {{ recent_completed }}</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

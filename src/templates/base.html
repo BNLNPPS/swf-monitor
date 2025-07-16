@@ -19,6 +19,48 @@
         display: flex;
         gap: 1em;
       }
+      /* Dropdown Button */
+      .dropbtn {
+        background-color: inherit;
+        color: #ADD8E6; /* Light Blue */
+        text-decoration: none;
+        padding: 0;
+        font-size: inherit;
+        border: none;
+        cursor: pointer;
+      }
+
+      /* The container <div> - needed to position the dropdown content */
+      .dropdown {
+        position: relative;
+        display: inline-block;
+      }
+
+      /* Dropdown Content (Hidden by Default) */
+      .dropdown-content {
+        display: none;
+        position: absolute;
+        background-color: #f9f9f9;
+        min-width: 160px;
+        box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+        z-index: 1;
+      }
+
+      /* Links inside the dropdown */
+      .dropdown-content a {
+        color: black;
+        padding: 12px 16px;
+        text-decoration: none;
+        display: block;
+      }
+
+      /* Change color of dropdown links on hover */
+      .dropdown-content a:hover {background-color: #f1f1f1}
+
+      /* Show the dropdown menu on hover */
+      .dropdown:hover .dropdown-content {
+        display: block;
+      }
     </style>
 </head>
 <body>
@@ -26,6 +68,17 @@
         <a href="{% url 'monitor_app:home' %}">Home</a>
         {% if user.is_authenticated %}
             <a href="{% url 'monitor_app:index' %}">Dashboard</a>
+            <div class="dropdown">
+                <button class="dropbtn">Workflow</button>
+                <div class="dropdown-content">
+                    <a href="{% url 'monitor_app:workflow_dashboard' %}">Workflow Dashboard</a>
+                    <a href="{% url 'monitor_app:workflow_realtime_dashboard' %}">Real-time Monitor</a>
+                    <a href="{% url 'monitor_app:workflow_list' %}">Workflow List</a>
+                    <a href="{% url 'monitor_app:workflow_agents_status' %}">Agent Status</a>
+                    <a href="{% url 'monitor_app:workflow_messages' %}">Messages</a>
+                    <a href="{% url 'monitor_app:workflow_performance' %}">Performance</a>
+                </div>
+            </div>
             <a href="{% url 'monitor_app:runs_list' %}">Runs</a>
             <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
             <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>
