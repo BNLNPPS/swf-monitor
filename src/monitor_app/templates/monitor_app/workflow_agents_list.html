@@ -26,14 +26,14 @@
             <tbody>
                 {% for stat in agent_stats %}
                 <tr>
-                    <td>{{ stat.agent.instance_name }}</td>
+                    <td><a href="{% url 'monitor_app:agent_detail' stat.agent.instance_name %}">{{ stat.agent.instance_name }}</a></td>
                     <td>{{ stat.agent.get_agent_type_display }}</td>
                     <td>
                         <span class="badge badge-{% if stat.agent.status == 'OK' %}success{% elif stat.agent.status == 'WARNING' %}warning{% elif stat.agent.status == 'ERROR' %}danger{% else %}secondary{% endif %}">
                             {{ stat.agent.status }}
                         </span>
                     </td>
-                    <td>{{ stat.agent.last_heartbeat|date:"Y-m-d-Hi" }}</td>
+                    <td>{{ stat.agent.last_heartbeat|date:"Ymd-H:i:s" }}</td>
                     <td>{{ stat.current_processing }}</td>
                     <td>{{ stat.recent_completed }}</td>
                     <td>{{ stat.agent.total_stf_processed }}</td>

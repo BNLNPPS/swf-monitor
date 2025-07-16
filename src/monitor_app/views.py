@@ -589,6 +589,20 @@ def workflow_agents_list(request):
 
 
 @login_required
+def agent_detail(request, instance_name):
+    """Display details for a specific agent and its associated workflows."""
+    agent = get_object_or_404(SystemAgent, instance_name=instance_name)
+    workflows = STFWorkflow.objects.filter(current_agent=agent.agent_type).order_by('-generated_time')
+
+    context = {
+        'agent': agent,
+        'workflows': workflows,
+    }
+    return render(request, 'monitor_app/agent_detail.html', context)
+
+
+
+@login_required
 def workflow_messages(request):
     """View showing all workflow messages for debugging."""
     

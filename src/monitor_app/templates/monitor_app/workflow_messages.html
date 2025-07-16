@@ -25,11 +25,11 @@
             <tbody>
                 {% for message in messages %}
                 <tr>
-                    <td>{{ message.sent_at|date:"Y-m-d-Hi" }}</td>
+                    <td>{{ message.sent_at|date:"Ymd-H:i:s" }}</td>
                     <td>{{ message.message_type }}</td>
-                    <td>{{ message.sender_agent }}</td>
-                    <td>{{ message.recipient_agent }}</td>
-                    <td>
+                    <td><a href="{% url 'monitor_app:agent_detail' message.sender_agent %}">{{ message.sender_agent }}</a></td>
+                    <td><a href="{% url 'monitor_app:agent_detail' message.recipient_agent %}">{{ message.recipient_agent }}</a></td>
+                    <td style="font-size: 0.8rem;">
                         {% if message.workflow %}
                             <a href="{% url 'monitor_app:workflow_detail' message.workflow.workflow_id %}">{{ message.workflow.filename }}</a>
                         {% else %}

@@ -24,7 +24,7 @@
                 <tr>
                     <td><a href="{% url 'monitor_app:database_table_list' table.name %}">{{ table.name }}</a></td>
                     <td>{{ table.count }}</td>
-                    <td>{{ table.last_insert|date:"Y-m-d-Hi"|default:"N/A" }}</td>
+                    <td>{{ table.last_insert|date:"Ymd-H:i:s"|default:"N/A" }}</td>
                 </tr>
                 {% empty %}
                 <tr>

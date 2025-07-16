@@ -15,13 +15,10 @@
             <p><strong>Status:</strong> <span class="badge badge-{% if workflow.current_status == 'workflow_complete' %}success{% elif workflow.current_status == 'failed' %}danger{% else %}warning{% endif %}">{{ workflow.get_current_status_display }}</span></p>
             <p><strong>Current Agent:</strong> {{ workflow.get_current_agent_display }}</p>
             <p><strong>DAQ State:</strong> {{ workflow.daq_state }} / {{ workflow.daq_substate }}</p>
-            <p><strong>Generated:</strong> {{ workflow.generated_time|date:"Y-m-d-Hi" }}</p>
-            <p><strong>Last Updated:</strong> {{ workflow.updated_at|date:"Y-m-d-Hi" }}</p>
+            <p><strong>Generated:</strong> {{ workflow.generated_time|date:"Ymd-H:i:s" }}</p>
+            <p><strong>Last Updated:</strong> {{ workflow.updated_at|date:"Ymd-H:i:s" }}</p>
             {% if workflow_duration %}
             <p><strong>Total Duration:</strong> {{ workflow_duration|floatformat:2 }} seconds</p>
-            {% endif %}
-            {% if workflow.failure_reason %}
-            <p class="text-danger"><strong>Failure Reason:</strong> {{ workflow.failure_reason }}</p>
             {% endif %}
         </div>
     </div>
@@ -44,9 +41,9 @@
                 <tr>
                     <td>{{ stage.get_agent_type_display }}</td>
                     <td>{{ stage.get_status_display }}</td>
-                    <td>{{ stage.received_at|date:"Y-m-d-Hi"|default:"N/A" }}</td>
-                    <td>{{ stage.started_at|date:"Y-m-d-Hi"|default:"N/A" }}</td>
-                    <td>{{ stage.completed_at|date:"Y-m-d-Hi"|default:"N/A" }}</td>
+                    <td>{{ stage.received_at|date:"Ymd-H:i:s"|default:"N/A" }}</td>
+                    <td>{{ stage.started_at|date:"Ymd-H:i:s"|default:"N/A" }}</td>
+                    <td>{{ stage.completed_at|date:"Ymd-H:i:s"|default:"N/A" }}</td>
                     <td>{{ stage.processing_time_seconds|floatformat:2|default:"N/A" }}</td>
                 </tr>
                 {% empty %}
@@ -73,7 +70,7 @@
             <tbody>
                 {% for message in messages %}
                 <tr>
-                    <td>{{ message.sent_at|date:"Y-m-d-Hi" }}</td>
+                    <td>{{ message.sent_at|date:"Ymd-H:i:s" }}</td>
                     <td>{{ message.message_type }}</td>
                     <td>{{ message.sender_agent }}</td>
                     <td>{{ message.recipient_agent }}</td>

@@ -112,7 +112,7 @@
                                             </span>
                                         </td>
                                         <td>{{ workflow.get_current_agent_display }}</td>
-                                        <td>{{ workflow.created_at|date:"Y-m-d-Hi" }}</td>
+                                        <td>{{ workflow.created_at|date:"Ymd-H:i:s" }}</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>

@@ -1,11 +1,17 @@
 {% extends 'base.html' %}
 
-{% block title %}Testbed Workflows{% endblock %}
+{% block title %}Agent Detail: {{ agent.instance_name }}{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
-    <h2>Testbed Workflows</h2>
-    <p>This page shows a detailed list of all testbed workflows.</p>
+    <h2>Agent Detail: {{ agent.instance_name }}</h2>
+    <p><strong>Type:</strong> {{ agent.get_agent_type_display }}</p>
+    <p><strong>Status:</strong> {{ agent.status }}</p>
+    <p><strong>Last Heartbeat:</strong> {{ agent.last_heartbeat|date:"Ymd-H:i:s" }}</p>
+    <p><strong>Description:</strong> {{ agent.description }}</p>
+
+    <h3 class="mt-5">Associated Workflows</h3>
+    <p>Showing workflows currently assigned to this agent type.</p>
 
     <!-- DataTables CSS -->
     <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
@@ -17,10 +23,8 @@
                     <th>Filename</th>
                     <th>Type</th>
                     <th>Status</th>
-                    <th>Current Agent</th>
                     <th>DAQ State</th>
                     <th>Generated</th>
-                    <th>Updated</th>
                 </tr>
             </thead>
             <tbody>
@@ -29,14 +33,12 @@
                     <td style="font-size: 0.8rem;"><a href="{% url 'monitor_app:workflow_detail' workflow.workflow_id %}">{{ workflow.filename }}</a></td>
                     <td>{{ workflow.stf_metadata.msg_type }}</td>
                     <td>{{ workflow.get_current_status_display }}</td>
-                    <td>{{ workflow.get_current_agent_display }}</td>
                     <td>{{ workflow.daq_state }} / {{ workflow.daq_substate }}</td>
                     <td>{{ workflow.generated_time|date:"Ymd-H:i:s" }}</td>
-                    <td>{{ workflow.updated_at|date:"Ymd-H:i:s" }}</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="7">No workflows found.</td>
+                    <td colspan="5">No workflows currently associated with this agent.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -48,12 +50,12 @@
     <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
     <script>
       $(document).ready(function() {
-        var table = $('#workflows-table').DataTable({
+        $('#workflows-table').DataTable({
           paging: true,
-          pageLength: 100,
+          pageLength: 50,
           lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
           ordering: true,
-          order: [[5, 'desc']],
+          order: [[4, 'desc']],
           info: true,
           searching: true,
           responsive: true,
@@ -64,18 +66,9 @@
           },
           language: {
             search: "Filter table:",
-            lengthMenu: "Show _MENU_ entries",
-            info: "Showing _START_ to _END_ of _TOTAL_ workflows",
-            paginate: {
-              first: "First",
-              last: "Last",
-              next: "Next",
-              previous: "Previous"
-            },
             emptyTable: "No workflows found matching your criteria."
           }
         });
-        $(table.table().container()).find('input[type="search"]').css({'width':'24em','display':'inline-block'});
       });
     </script>
 </div>
