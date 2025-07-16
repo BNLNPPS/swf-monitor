@@ -74,7 +74,7 @@
                     <a href="{% url 'monitor_app:workflow_dashboard' %}">Workflow Dashboard</a>
                     <a href="{% url 'monitor_app:workflow_realtime_dashboard' %}">Real-time Monitor</a>
                     <a href="{% url 'monitor_app:workflow_list' %}">Workflow List</a>
-                    <a href="{% url 'monitor_app:workflow_agents_status' %}">Agent Status</a>
+                    <a href="{% url 'monitor_app:workflow_agents_list' %}">Agent Status</a>
                     <a href="{% url 'monitor_app:workflow_messages' %}">Messages</a>
                     <a href="{% url 'monitor_app:workflow_performance' %}">Performance</a>
                 </div>
@@ -84,7 +84,7 @@
             <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>
             <a href="{% url 'monitor_app:message_dispatches_list' %}">Dispatches</a>
             <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
-            <a href="{% url 'monitor_app:database_overview' %}">Database</a>
+            <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
         {% endif %}
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>

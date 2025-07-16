@@ -38,39 +38,8 @@ def about(request):
 
 @login_required
 def index(request):
-    agents = SystemAgent.objects.all()
-
-    # Filtering
-    agent_type = request.GET.get('agent_type')
-    status = request.GET.get('status')
-    if agent_type:
-        agents = agents.filter(agent_type=agent_type)
-    if status:
-        agents = agents.filter(status=status)
-
-    # Get unique agent types and statuses for filter links
-    agent_types = SystemAgent.objects.values_list('agent_type', flat=True)
-    agent_types = sorted(set([t for t in agent_types if t]), key=lambda x: x.lower())
-    statuses = sorted([s[0] for s in SystemAgent.STATUS_CHOICES], key=lambda x: x.lower())
-
-    columns = [
-        {"name": "instance_name", "label": "Agent"},
-        {"name": "agent_type", "label": "Type"},
-        {"name": "status", "label": "Status"},
-        {"name": "last_heartbeat", "label": "Last Heartbeat"},
-        {"name": "agent_url", "label": "Agent URL"},
-        {"name": "actions", "label": "Actions"},
-    ]
-
-    context = {
-        'agents': agents,
-        'agent_types': agent_types,
-        'statuses': statuses,
-        'selected_agent_type': agent_type,
-        'selected_status': status,
-        'columns': columns,
-    }
-    return render(request, 'monitor_app/index.html', context)
+    """A simple landing page for authenticated users."""
+    return render(request, 'monitor_app/index.html')
 
 def staff_member_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
@@ -285,7 +254,7 @@ class LogSummaryView(generics.ListAPIView):
         return Response(summary, status=status.HTTP_200_OK)
 
 @login_required
-def database_overview(request):
+def database_tables_list(request):
     tables = []
     for model in apps.get_models():
         table_info = {'name': model._meta.db_table, 'count': 0, 'last_insert': None}
@@ -303,7 +272,7 @@ def database_overview(request):
         tables.append(table_info)
     tables = sorted(tables, key=lambda t: t['name'])
     tables = [t for t in tables if t['name'].startswith('swf_')]
-    return render(request, 'monitor_app/database_overview.html', {'tables': tables})
+    return render(request, 'monitor_app/database_tables_list.html', {'tables': tables})
 
 from django.http import Http404
 
@@ -534,41 +503,12 @@ def workflow_dashboard(request):
 
 @login_required
 def workflow_list(request):
-    """List view of all STF workflows with filtering and pagination."""
+    """List view of all STF workflows."""
     
     workflows = STFWorkflow.objects.all().order_by('-created_at')
     
-    # Filtering
-    status_filter = request.GET.get('status')
-    agent_filter = request.GET.get('agent')
-    daq_state_filter = request.GET.get('daq_state')
-    
-    if status_filter:
-        workflows = workflows.filter(current_status=status_filter)
-    if agent_filter:
-        workflows = workflows.filter(current_agent=agent_filter)
-    if daq_state_filter:
-        workflows = workflows.filter(daq_state=daq_state_filter)
-    
-    # Pagination
-    paginator = Paginator(workflows, 50)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    # Get filter options
-    status_options = WorkflowStatus.choices
-    agent_options = AgentType.choices
-    daq_state_options = STFWorkflow.objects.values_list('daq_state', flat=True).distinct()
-    
     context = {
-        'page_obj': page_obj,
-        'workflows': page_obj,
-        'status_filter': status_filter,
-        'agent_filter': agent_filter,
-        'daq_state_filter': daq_state_filter,
-        'status_options': status_options,
-        'agent_options': agent_options,
-        'daq_state_options': daq_state_options,
+        'workflows': workflows,
     }
     
     return render(request, 'monitor_app/workflow_list.html', context)
@@ -608,7 +548,7 @@ def workflow_detail(request, workflow_id):
 
 
 @login_required
-def workflow_agents_status(request):
+def workflow_agents_list(request):
     """View showing the status of all workflow agents."""
     
     agents = SystemAgent.objects.filter(workflow_enabled=True).order_by('agent_type', 'instance_name')
@@ -645,7 +585,7 @@ def workflow_agents_status(request):
         'agent_stats': agent_stats,
     }
     
-    return render(request, 'monitor_app/workflow_agents_status.html', context)
+    return render(request, 'monitor_app/workflow_agents_list.html', context)
 
 
 @login_required
@@ -654,38 +594,8 @@ def workflow_messages(request):
     
     messages = WorkflowMessage.objects.all().order_by('-sent_at')
     
-    # Filtering
-    message_type_filter = request.GET.get('message_type')
-    sender_filter = request.GET.get('sender')
-    success_filter = request.GET.get('success')
-    
-    if message_type_filter:
-        messages = messages.filter(message_type=message_type_filter)
-    if sender_filter:
-        messages = messages.filter(sender_agent=sender_filter)
-    if success_filter:
-        if success_filter == 'true':
-            messages = messages.filter(is_successful=True)
-        elif success_filter == 'false':
-            messages = messages.filter(is_successful=False)
-    
-    # Pagination
-    paginator = Paginator(messages, 100)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
-    
-    # Get filter options
-    message_types = WorkflowMessage.objects.values_list('message_type', flat=True).distinct()
-    senders = WorkflowMessage.objects.values_list('sender_agent', flat=True).distinct()
-    
     context = {
-        'page_obj': page_obj,
-        'messages': page_obj,
-        'message_type_filter': message_type_filter,
-        'sender_filter': sender_filter,
-        'success_filter': success_filter,
-        'message_types': message_types,
-        'senders': senders,
+        'messages': messages,
     }
     
     return render(request, 'monitor_app/workflow_messages.html', context)

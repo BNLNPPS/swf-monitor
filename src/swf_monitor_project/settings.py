@@ -201,26 +201,38 @@ CHANNEL_LAYERS = {
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'json': {
+            '()': 'pythonjsonlogger.json.JsonFormatter',
+            'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s'
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'formatter': 'json',
+        },
+        'db': {
+            'class': 'swf_common_lib.logging_utils.PostgresLogHandler',
+            'db_params': {
+                "dbname": config("DB_NAME", default="swfdb"),
+                "user": config("DB_USER", default="admin"),
+                "password": config("DB_PASSWORD"),
+                "host": config("DB_HOST", default="localhost"),
+                "port": config("DB_PORT", default="5432"),
+            },
+            'formatter': 'json',
         },
     },
     'root': {
-        'handlers': ['console'],
+        'handlers': ['console', 'db'],
         'level': 'INFO',
     },
     'loggers': {
         'django': {
-            'handlers': ['console'],
+            'handlers': ['console', 'db'],
             'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
             'propagate': False,
         },
-        # You can add specific loggers here if needed, e.g.:
-        # 'monitor_app.activemq_listener': {
-        #     'handlers': ['console'],
-        #     'level': 'INFO',
-        #     'propagate': False,
-        # },
     },
 }

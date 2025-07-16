@@ -15,36 +15,44 @@
     <!-- Statistics Cards -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="card text-white bg-primary">
-                <div class="card-body">
-                    <h5 class="card-title">Total Workflows</h5>
-                    <h2 class="card-text">{{ total_workflows }}</h2>
+            <a href="{% url 'monitor_app:workflow_list' %}" class="text-decoration-none">
+                <div class="card text-white bg-primary">
+                    <div class="card-body p-3">
+                        <h6 class="card-title mb-1">Total Workflows</h6>
+                        <h4 class="card-text">{{ total_workflows }}</h4>
+                    </div>
                 </div>
-            </div>
+            </a>
         </div>
         <div class="col-md-3">
-            <div class="card text-white bg-warning">
-                <div class="card-body">
-                    <h5 class="card-title">Active</h5>
-                    <h2 class="card-text">{{ active_workflows }}</h2>
+            <a href="{% url 'monitor_app:workflow_list' %}?status=active" class="text-decoration-none">
+                <div class="card text-white bg-warning">
+                    <div class="card-body p-3">
+                        <h6 class="card-title mb-1">Active</h6>
+                        <h4 class="card-text">{{ active_workflows }}</h4>
+                    </div>
                 </div>
-            </div>
+            </a>
         </div>
         <div class="col-md-3">
-            <div class="card text-white bg-success">
-                <div class="card-body">
-                    <h5 class="card-title">Completed</h5>
-                    <h2 class="card-text">{{ completed_workflows }}</h2>
+            <a href="{% url 'monitor_app:workflow_list' %}?status=workflow_complete" class="text-decoration-none">
+                <div class="card text-white bg-success">
+                    <div class="card-body p-3">
+                        <h6 class="card-title mb-1">Completed</h6>
+                        <h4 class="card-text">{{ completed_workflows }}</h4>
+                    </div>
                 </div>
-            </div>
+            </a>
         </div>
         <div class="col-md-3">
-            <div class="card text-white bg-danger">
-                <div class="card-body">
-                    <h5 class="card-title">Failed</h5>
-                    <h2 class="card-text">{{ failed_workflows }}</h2>
+            <a href="{% url 'monitor_app:workflow_list' %}?status=failed" class="text-decoration-none">
+                <div class="card text-white bg-danger">
+                    <div class="card-body p-3">
+                        <h6 class="card-title mb-1">Failed</h6>
+                        <h4 class="card-text">{{ failed_workflows }}</h4>
+                    </div>
                 </div>
-            </div>
+            </a>
         </div>
     </div>
     
@@ -58,7 +66,7 @@
                 <a href="{% url 'monitor_app:workflow_list' %}" class="btn btn-outline-primary">
                     <i class="fas fa-list"></i> All Workflows
                 </a>
-                <a href="{% url 'monitor_app:workflow_agents_status' %}" class="btn btn-outline-info">
+                <a href="{% url 'monitor_app:workflow_agents_list' %}" class="btn btn-outline-info">
                     <i class="fas fa-users"></i> Agent Status
                 </a>
                 <a href="{% url 'monitor_app:workflow_messages' %}" class="btn btn-outline-secondary">
@@ -93,9 +101,9 @@
                                 <tbody>
                                     {% for workflow in recent_workflows %}
                                     <tr>
-                                        <td>
+                                        <td style="font-size: 0.8rem;">
                                             <a href="{% url 'monitor_app:workflow_detail' workflow.workflow_id %}">
-                                                {{ workflow.filename|truncatechars:30 }}
+                                                {{ workflow.filename }}
                                             </a>
                                         </td>
                                         <td>
@@ -104,7 +112,7 @@
                                             </span>
                                         </td>
                                         <td>{{ workflow.get_current_agent_display }}</td>
-                                        <td>{{ workflow.created_at|date:"H:i" }}</td>
+                                        <td>{{ workflow.created_at|date:"Y-m-d-Hi" }}</td>
                                     </tr>
                                     {% endfor %}
                                 </tbody>
