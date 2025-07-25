@@ -121,22 +121,24 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
         Custom action for agents to register themselves and send heartbeats.
         This will create or update an agent entry.
         """
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        instance_name = serializer.validated_data.get('instance_name')
+        instance_name = request.data.get('instance_name')
+        if not instance_name:
+            return Response({"instance_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
         
         # Use update_or_create to handle both registration and heartbeats
         agent, created = SystemAgent.objects.update_or_create(
             instance_name=instance_name,
-            defaults=serializer.validated_data
+            defaults={
+                'agent_type': request.data.get('agent_type', 'other'),
+                'description': request.data.get('description', ''),
+                'status': request.data.get('status', 'OK'),
+                'agent_url': request.data.get('agent_url', None),
+                'last_heartbeat': timezone.now(),
+            }
         )
         
-        # Update the last_heartbeat timestamp
-        agent.last_heartbeat = timezone.now()
-        agent.save()
-        
         # Return the full agent data
-        return Response(self.get_serializer(agent).data, status=status.HTTP_200_OK if not created else status.HTTP_201_CREATED)
+        return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
 class STFWorkflowViewSet(viewsets.ModelViewSet):
