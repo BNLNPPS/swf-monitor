@@ -204,7 +204,13 @@ LOGGING = {
     'formatters': {
         'json': {
             '()': 'pythonjsonlogger.json.JsonFormatter',
-            'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s'
+            'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s',
+            'rename_fields': {
+                'asctime': 'timestamp',
+                'levelname': 'level_name',
+                'funcName': 'func_name',
+                'lineno': 'line_no'
+            }
         },
     },
     'handlers': {
