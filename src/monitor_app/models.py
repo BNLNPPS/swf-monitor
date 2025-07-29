@@ -22,7 +22,7 @@ class SystemAgent(models.Model):
     ]
 
     instance_name = models.CharField(max_length=100, unique=True)
-    agent_type = models.CharField(max_length=100, choices=AGENT_TYPE_CHOICES)
+    agent_type = models.CharField(max_length=20, choices=AGENT_TYPE_CHOICES)
     description = models.TextField(blank=True)
     status = models.CharField(
         max_length=10,

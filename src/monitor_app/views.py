@@ -149,19 +149,22 @@ class STFWorkflowViewSet(viewsets.ModelViewSet):
     """API endpoint for STF Workflows."""
     queryset = STFWorkflow.objects.all()
     serializer_class = STFWorkflowSerializer
-    permission_classes = [AllowAny] # Adjust as needed
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
 class AgentWorkflowStageViewSet(viewsets.ModelViewSet):
     """API endpoint for Agent Workflow Stages."""
     queryset = AgentWorkflowStage.objects.all()
     serializer_class = AgentWorkflowStageSerializer
-    permission_classes = [AllowAny] # Adjust as needed
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
 class WorkflowMessageViewSet(viewsets.ModelViewSet):
     """API endpoint for Workflow Messages."""
     queryset = WorkflowMessage.objects.all()
     serializer_class = WorkflowMessageSerializer
-    permission_classes = [AllowAny] # Adjust as needed
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
 
 class AppLogViewSet(viewsets.ModelViewSet):
@@ -304,7 +307,8 @@ class LogSummaryView(generics.ListAPIView):
     API endpoint that provides a summary of logs grouped by app and instance, with error rollups.
     """
     serializer_class = LogSummarySerializer
-    permission_classes = [AllowAny]  # or your desired permission class
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
     queryset = AppLog.objects.all()  # Provide a queryset for DRF permissions
 
     def get(self, request, format=None):
@@ -643,8 +647,8 @@ def workflow_agents_list(request):
             status__in=[
                 WorkflowStatus.DATA_RECEIVED,
                 WorkflowStatus.DATA_PROCESSING,
-                WorkflowStatus.PROC_RECEIVED,
-                WorkflowStatus.PROC_PROCESSING,
+                WorkflowStatus.PROCESSING_RECEIVED,
+                WorkflowStatus.PROCESSING_PROCESSING,
                 WorkflowStatus.FASTMON_RECEIVED,
             ]
         ).count()
@@ -818,9 +822,9 @@ def workflow_realtime_data_api(request):
         ).count(),
         'processing': STFWorkflow.objects.filter(
             current_status__in=[
-                WorkflowStatus.PROC_RECEIVED, 
-                WorkflowStatus.PROC_PROCESSING, 
-                WorkflowStatus.PROC_COMPLETE
+                WorkflowStatus.PROCESSING_RECEIVED, 
+                WorkflowStatus.PROCESSING_PROCESSING, 
+                WorkflowStatus.PROCESSING_COMPLETE
             ]
         ).count(),
         'fastmon': STFWorkflow.objects.filter(

@@ -113,12 +113,12 @@ class ProcessingAgentMessageListener(stomp.ConnectionListener):
             workflow=workflow,
             agent_name=self.agent_name,
             agent_type=self.agent_type,
-            status=WorkflowStatus.PROC_RECEIVED,
+            status=WorkflowStatus.PROCESSING_RECEIVED,
             input_message=data_message
         )
         
         # Update workflow status
-        workflow.current_status = WorkflowStatus.PROC_RECEIVED
+        workflow.current_status = WorkflowStatus.PROCESSING_RECEIVED
         workflow.current_agent = self.agent_type
         workflow.save()
         
@@ -134,7 +134,7 @@ class ProcessingAgentMessageListener(stomp.ConnectionListener):
         
         # Mark as processing
         stage.mark_processing()
-        workflow.current_status = WorkflowStatus.PROC_PROCESSING
+        workflow.current_status = WorkflowStatus.PROCESSING_PROCESSING
         workflow.save()
         
         # Simulate processing work
@@ -168,7 +168,7 @@ class ProcessingAgentMessageListener(stomp.ConnectionListener):
         stage.mark_completed(output_message)
         
         # Update workflow status
-        workflow.current_status = WorkflowStatus.PROC_COMPLETE
+        workflow.current_status = WorkflowStatus.PROCESSING_COMPLETE
         workflow.save()
         
         # Update agent stats

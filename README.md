@@ -244,7 +244,7 @@ When you are ready to deploy the application to a production environment, you sh
 
 1. **Disable Debug Mode**: In your `.env` file, set `DEBUG=False`. This is a critical security measure.
 
-2. **Configure Allowed Hosts**: In your `.env` file, set `ALLOWED_HOSTS` to a comma-separated list of the domain names that will serve your application. For example: `ALLOWED_HOSTS=swf-monitor.example.com,www.swf-monitor.example.com`.
+2. **Configure Allowed Hosts**: In your `.env` file, set `SWF_ALLOWED_HOSTS` to a comma-separated list of the domain names that will serve your application. For example: `SWF_ALLOWED_HOSTS=swf-monitor.example.com,www.swf-monitor.example.com`. This is a critical security setting that prevents HTTP Host header attacks.
 
 ## Testing
 

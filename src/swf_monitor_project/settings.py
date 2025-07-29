@@ -29,16 +29,26 @@ SECRET_KEY = config("SECRET_KEY")
 # Set DEBUG to False in production by setting the environment variable DEBUG=False
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-# Define allowed hosts. In production, this should be a comma-separated string
-# of your domain(s) in the .env file.
+# Define allowed hosts. 
+# IMPORTANT: Use SWF_ALLOWED_HOSTS environment variable to configure allowed hosts.
+# This is a comma-separated list of domain names/IP addresses that can serve this application.
+# Example: SWF_ALLOWED_HOSTS=swf-monitor.example.com,www.swf-monitor.example.com,10.0.0.1
+# 
+# Security Note: Never hardcode production hostnames in this file. Always use environment variables
+# to avoid exposing infrastructure details in the codebase.
 ALLOWED_HOSTS = []
-if not DEBUG:
-    allowed_hosts_str = config('ALLOWED_HOSTS', default='')
-    if allowed_hosts_str:
-        ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
+
+# Get allowed hosts from environment variable SWF_ALLOWED_HOSTS
+allowed_hosts_str = config('SWF_ALLOWED_HOSTS', default='')
+if allowed_hosts_str:
+    ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
+elif DEBUG:
+    # Only use default localhost values in development when SWF_ALLOWED_HOSTS is not set
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
 else:
-    # For development and testing, allow localhost, 127.0.0.1, and testserver
-    ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver', 'pandaserver02.sdcc.bnl.gov', 'pandaserver02']
+    # In production, SWF_ALLOWED_HOSTS must be set or Django will raise ImproperlyConfigured
+    # This is a security feature to prevent the site from running with improper host validation
+    pass
 
 
 # Application definition

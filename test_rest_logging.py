@@ -25,7 +25,7 @@ class RestLogHandler(logging.Handler):
     """
     
     def __init__(self, base_url: str, app_name: str, instance_name: str, 
-                 timeout: int = 5):
+                 timeout: int = 10):
         """
         Initialize the REST logging handler.
         
@@ -144,7 +144,7 @@ def send_direct_log_message(base_url: str, app_name: str, instance_name: str,
         response = requests.post(
             logs_url,
             json=log_data,
-            timeout=5,
+            timeout=10,
             headers={'Content-Type': 'application/json'}
         )
         response.raise_for_status()
