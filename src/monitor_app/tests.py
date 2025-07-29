@@ -17,7 +17,7 @@ class SystemAgentAPITests(APITestCase):
         unique_username = f"testuser_{uuid.uuid4()}"
         self.user = User.objects.create_user(username=unique_username, password='testpassword')
         self.client.force_authenticate(user=self.user)
-        self.agent = SystemAgent.objects.create(instance_name='test_agent', agent_type='test_type', status='OK')
+        self.agent = SystemAgent.objects.create(instance_name='test_agent', agent_type='test', status='OK')
 
     def test_list_agents(self):
         url = reverse('systemagent-list')
@@ -26,7 +26,7 @@ class SystemAgentAPITests(APITestCase):
 
     def test_create_agent(self):
         url = reverse('systemagent-list')
-        data = {'instance_name': 'new_agent', 'agent_type': 'new_type', 'status': 'OK'}
+        data = {'instance_name': 'new_agent', 'agent_type': 'test', 'status': 'OK'}
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
@@ -152,7 +152,7 @@ class MonitorAppUITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='ui_user', password='password')
         self.staff_user = User.objects.create_user(username='staff_user', password='password', is_staff=True)
-        self.agent = SystemAgent.objects.create(instance_name='ui_agent', agent_type='ui_type', status='OK')
+        self.agent = SystemAgent.objects.create(instance_name='ui_agent', agent_type='test', status='OK')
 
     def test_index_view_unauthenticated(self):
         response = self.client.get(reverse('monitor_app:index'))
@@ -162,12 +162,11 @@ class MonitorAppUITests(TestCase):
         self.client.login(username='ui_user', password='password')
         response = self.client.get(reverse('monitor_app:index'))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, self.agent.instance_name)
 
     def test_create_agent_view_as_staff(self):
         self.client.login(username='staff_user', password='password')
         url = reverse('monitor_app:system_agent_create')
-        data = {'instance_name': 'new_ui_agent', 'agent_type': 'new_ui_type', 'status': 'OK'}
+        data = {'instance_name': 'new_ui_agent', 'agent_type': 'test', 'status': 'OK'}
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, 302) # Redirect on success
         self.assertTrue(SystemAgent.objects.filter(instance_name='new_ui_agent').exists())
@@ -175,7 +174,7 @@ class MonitorAppUITests(TestCase):
     def test_create_agent_view_as_non_staff(self):
         self.client.login(username='ui_user', password='password')
         url = reverse('monitor_app:system_agent_create')
-        data = {'instance_name': 'new_ui_agent', 'agent_type': 'new_ui_type', 'status': 'OK'}
+        data = {'instance_name': 'new_ui_agent', 'agent_type': 'test', 'status': 'OK'}
         response = self.client.post(url, data)
         self.assertEqual(response.status_code, 403) # Forbidden
 

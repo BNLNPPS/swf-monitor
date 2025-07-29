@@ -17,11 +17,12 @@ class SystemAgent(models.Model):
         ('processing', 'Processing Agent'),
         ('fastmon', 'Fast Monitoring Agent'),
         ('monitor', 'Monitor System'),
+        ('test', 'Test Agent'),
         ('other', 'Other'),
     ]
 
     instance_name = models.CharField(max_length=100, unique=True)
-    agent_type = models.CharField(max_length=100, choices=AGENT_TYPE_CHOICES, default='other')
+    agent_type = models.CharField(max_length=100, choices=AGENT_TYPE_CHOICES)
     description = models.TextField(blank=True)
     status = models.CharField(
         max_length=10,
