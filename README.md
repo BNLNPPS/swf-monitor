@@ -268,6 +268,14 @@ The test suite covers the following key areas of the application:
   * Full CRUD (Create, Read, Update, Delete) operations for system agents.
   * Token-based authentication for write operations.
   * Handling of invalid data and non-existent objects.
+  * Complete REST API coverage for all models (Run, StfFile, Subscriber, MessageQueueDispatch).
+* **REST Logging Integration**:
+  * End-to-end testing of agent log submission via REST API.
+  * Multiple log level testing (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+  * Bulk logging performance testing.
+  * Log retrieval and validation.
+  * Invalid data handling and error cases.
+  * Real-world agent workflow simulation.
 * **WebSocket Service**:
   * Authentication checks to ensure only logged-in users can connect.
   * Real-time agent status updates via heartbeats.
@@ -329,6 +337,70 @@ The API is documented using OpenAPI (Swagger). You can view the interactive API 
 
 * **Swagger UI**: `http://127.0.0.1:8000/api/schema/swagger-ui/`
 * **ReDoc**: `http://127.0.0.1:8000/api/schema/redoc/`
+
+## Agent Integration
+
+### Logging Integration
+
+Agents can send logs directly to the swf-monitor database using the REST logging module from `swf-common-lib`. This provides centralized log collection and monitoring.
+
+#### Setup for Agents
+
+1. **Install swf-common-lib**:
+   ```bash
+   pip install swf-common-lib
+   ```
+
+2. **Use REST logging in your agent**:
+   ```python
+   import logging
+   from swf_common_lib.rest_logging import setup_rest_logging
+
+   # Setup logging - single function call
+   logger = setup_rest_logging(
+       app_name='my_agent',
+       instance_name='agent_001',
+       base_url='http://your-monitor-server:8000'  # Optional
+   )
+
+   # Now just use standard Python logging
+   logger.info("Agent starting up")
+   logger.warning("Processing took longer than expected")
+   logger.error("Failed to process item")
+   ```
+
+#### Features
+
+- **Zero Configuration**: Works out of the box with default settings
+- **Fallback Support**: Automatically falls back to console logging if monitor is unavailable
+- **Standard Interface**: Uses Python's standard logging module
+- **Configurable**: Supports custom timeouts and monitor URLs
+
+#### REST Logging Endpoint
+
+- **URL**: `/api/v1/logs/`
+- **Method**: POST
+- **Authentication**: None required (designed for agent logging)
+- **Content-Type**: `application/json`
+
+**Example log entry**:
+```json
+{
+    "app_name": "data_agent",
+    "instance_name": "agent_001", 
+    "timestamp": "2025-01-15T10:30:00.000Z",
+    "level": 20,
+    "level_name": "INFO",
+    "message": "Processing file batch 1/10",
+    "module": "data_processor",
+    "func_name": "process_batch",
+    "line_no": 45,
+    "process": 1234,
+    "thread": 5678
+}
+```
+
+All agent logs sent via this endpoint are stored in the `AppLog` model and visible in the monitor dashboard.
 
 ---
 
