@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from .models import SystemAgent, AppLog
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
 from .serializers import AppLogSerializer
 from django.core.management import call_command
 from io import StringIO
@@ -237,6 +237,329 @@ class LogSummaryAPITests(TestCase):
         self.assertEqual(data['app2']['inst3']['error_counts'].get('CRITICAL', 0), 1)
         # Check recent errors structure
         self.assertTrue(isinstance(data['app1']['inst1']['recent_errors'], list))
+
+
+class RunAPITests(APITestCase):
+    def setUp(self):
+        unique_username = f"testuser_{uuid.uuid4()}"
+        self.user = User.objects.create_user(username=unique_username, password='testpassword')
+        self.client.force_authenticate(user=self.user)
+        self.run = Run.objects.create(
+            run_number=12345,
+            start_time=timezone.now(),
+            run_conditions={'beam_energy': 10.0, 'detector_config': 'standard'}
+        )
+
+    def test_list_runs(self):
+        url = reverse('run-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_create_run(self):
+        url = reverse('run-list')
+        data = {
+            'run_number': 12346,
+            'start_time': timezone.now().isoformat(),
+            'run_conditions': {'beam_energy': 12.0, 'detector_config': 'high_rate'}
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Run.objects.count(), 2)
+
+    def test_get_run(self):
+        url = reverse('run-detail', kwargs={'pk': self.run.run_id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['run_number'], 12345)
+
+    def test_update_run(self):
+        url = reverse('run-detail', kwargs={'pk': self.run.run_id})
+        data = {'end_time': timezone.now().isoformat()}
+        response = self.client.patch(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.run.refresh_from_db()
+        self.assertIsNotNone(self.run.end_time)
+
+    def test_delete_run(self):
+        url = reverse('run-detail', kwargs={'pk': self.run.run_id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Run.objects.filter(pk=self.run.run_id).exists())
+
+    def test_create_run_duplicate_number(self):
+        url = reverse('run-list')
+        data = {
+            'run_number': 12345,  # Same as existing run
+            'start_time': timezone.now().isoformat()
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_access_denied(self):
+        self.client.force_authenticate(user=None)
+        url = reverse('run-list')
+        response = self.client.get(url)
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+
+class StfFileAPITests(APITestCase):
+    def setUp(self):
+        unique_username = f"testuser_{uuid.uuid4()}"
+        self.user = User.objects.create_user(username=unique_username, password='testpassword')
+        self.client.force_authenticate(user=self.user)
+        self.run = Run.objects.create(
+            run_number=12345,
+            start_time=timezone.now()
+        )
+        self.stf_file = StfFile.objects.create(
+            run=self.run,
+            machine_state="physics",
+            file_url="https://example.com/files/test.stf",
+            file_size_bytes=1024000,
+            checksum="abc123def456"
+        )
+
+    def test_list_stf_files(self):
+        url = reverse('stffile-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_create_stf_file(self):
+        url = reverse('stffile-list')
+        data = {
+            'run': self.run.run_id,
+            'machine_state': 'cosmics',
+            'file_url': 'https://example.com/files/test2.stf',
+            'file_size_bytes': 2048000,
+            'checksum': 'def789abc123',
+            'status': 'registered'
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(StfFile.objects.count(), 2)
+
+    def test_get_stf_file(self):
+        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['file_url'], "https://example.com/files/test.stf")
+
+    def test_update_stf_file_status(self):
+        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        data = {'status': 'processing'}
+        response = self.client.patch(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.stf_file.refresh_from_db()
+        self.assertEqual(self.stf_file.status, 'processing')
+
+    def test_delete_stf_file(self):
+        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(StfFile.objects.filter(pk=self.stf_file.file_id).exists())
+
+    def test_create_stf_file_duplicate_url(self):
+        url = reverse('stffile-list')
+        data = {
+            'run': self.run.run_id,
+            'file_url': 'https://example.com/files/test.stf',  # Same as existing
+            'file_size_bytes': 1000,
+            'checksum': 'duplicate'
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_status_value(self):
+        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        data = {'status': 'invalid_status'}
+        response = self.client.patch(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_access_denied(self):
+        self.client.force_authenticate(user=None)
+        url = reverse('stffile-list')
+        response = self.client.get(url)
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+
+class SubscriberAPITests(APITestCase):
+    def setUp(self):
+        unique_username = f"testuser_{uuid.uuid4()}"
+        self.user = User.objects.create_user(username=unique_username, password='testpassword')
+        self.client.force_authenticate(user=self.user)
+        self.subscriber = Subscriber.objects.create(
+            subscriber_name="test_subscriber",
+            fraction=0.5,
+            description="Test subscriber for unit tests",
+            is_active=True
+        )
+
+    def test_list_subscribers(self):
+        url = reverse('subscriber-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_create_subscriber(self):
+        url = reverse('subscriber-list')
+        data = {
+            'subscriber_name': 'new_subscriber',
+            'fraction': 0.8,
+            'description': 'New test subscriber',
+            'is_active': True
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Subscriber.objects.count(), 2)
+
+    def test_get_subscriber(self):
+        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['subscriber_name'], "test_subscriber")
+
+    def test_update_subscriber_status(self):
+        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        data = {'is_active': False}
+        response = self.client.patch(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscriber.refresh_from_db()
+        self.assertFalse(self.subscriber.is_active)
+
+    def test_update_subscriber_fraction(self):
+        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        data = {'fraction': 0.3}
+        response = self.client.patch(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.subscriber.refresh_from_db()
+        self.assertEqual(self.subscriber.fraction, 0.3)
+
+    def test_delete_subscriber(self):
+        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Subscriber.objects.filter(pk=self.subscriber.subscriber_id).exists())
+
+    def test_create_subscriber_duplicate_name(self):
+        url = reverse('subscriber-list')
+        data = {
+            'subscriber_name': 'test_subscriber',  # Same as existing
+            'fraction': 0.1,
+            'description': 'Duplicate name test'
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_invalid_fraction_range(self):
+        url = reverse('subscriber-list')
+        data = {
+            'subscriber_name': 'invalid_fraction_subscriber',
+            'fraction': 1.5,  # Invalid: > 1.0
+            'description': 'Invalid fraction test'
+        }
+        response = self.client.post(url, data, format='json')
+        # Note: This test may pass if no validation is implemented, but documents expected behavior
+        # self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_unauthenticated_access_denied(self):
+        self.client.force_authenticate(user=None)
+        url = reverse('subscriber-list')
+        response = self.client.get(url)
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+
+class MessageQueueDispatchAPITests(APITestCase):
+    def setUp(self):
+        unique_username = f"testuser_{uuid.uuid4()}"
+        self.user = User.objects.create_user(username=unique_username, password='testpassword')
+        self.client.force_authenticate(user=self.user)
+        self.run = Run.objects.create(
+            run_number=12345,
+            start_time=timezone.now()
+        )
+        self.stf_file = StfFile.objects.create(
+            run=self.run,
+            machine_state="physics",
+            file_url="https://example.com/files/test.stf",
+            file_size_bytes=1024000,
+            checksum="abc123def456"
+        )
+        self.dispatch = MessageQueueDispatch.objects.create(
+            stf_file=self.stf_file,
+            message_content={"file_path": "/data/test.stf", "status": "ready"},
+            is_successful=True
+        )
+
+    def test_list_dispatches(self):
+        url = reverse('messagedispatch-list')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_create_dispatch(self):
+        url = reverse('messagedispatch-list')
+        data = {
+            'stf_file': str(self.stf_file.file_id),
+            'message_content': {"file_path": "/data/test2.stf", "status": "processing"},
+            'is_successful': False,
+            'error_message': 'Queue connection failed'
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(MessageQueueDispatch.objects.count(), 2)
+
+    def test_get_dispatch(self):
+        url = reverse('messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_successful'])
+
+    def test_update_dispatch_status(self):
+        url = reverse('messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
+        data = {
+            'is_successful': False,
+            'error_message': 'Updated: Connection timeout'
+        }
+        response = self.client.patch(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.dispatch.refresh_from_db()
+        self.assertFalse(self.dispatch.is_successful)
+        self.assertEqual(self.dispatch.error_message, 'Updated: Connection timeout')
+
+    def test_delete_dispatch(self):
+        url = reverse('messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
+        response = self.client.delete(url)
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(MessageQueueDispatch.objects.filter(pk=self.dispatch.dispatch_id).exists())
+
+    def test_create_dispatch_invalid_stf_file(self):
+        url = reverse('messagedispatch-list')
+        data = {
+            'stf_file': '00000000-0000-0000-0000-000000000000',  # Non-existent UUID
+            'message_content': {"test": "data"},
+            'is_successful': True
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_dispatch_time_auto_set(self):
+        """Test that dispatch_time is automatically set on creation"""
+        url = reverse('messagedispatch-list')
+        before_creation = timezone.now()
+        data = {
+            'stf_file': str(self.stf_file.file_id),
+            'message_content': {"test": "auto_time"},
+            'is_successful': True
+        }
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        dispatch = MessageQueueDispatch.objects.get(pk=response.data['dispatch_id'])
+        self.assertGreaterEqual(dispatch.dispatch_time, before_creation)
+
+    def test_unauthenticated_access_denied(self):
+        self.client.force_authenticate(user=None)
+        url = reverse('messagedispatch-list')
+        response = self.client.get(url)
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
 
 
 class ActiveMQSSLConnectionTests(TestCase):

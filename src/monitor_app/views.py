@@ -16,7 +16,11 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
-from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer
+from .serializers import (
+    SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
+    STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
+    RunSerializer, StfFileSerializer, SubscriberSerializer, MessageQueueDispatchSerializer
+)
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
 from django.apps import apps
@@ -167,6 +171,38 @@ class AppLogViewSet(viewsets.ModelViewSet):
     queryset = AppLog.objects.all()
     serializer_class = AppLogSerializer
     permission_classes = [AllowAny] # For now, allow any client to post logs
+
+
+class RunViewSet(viewsets.ModelViewSet):
+    """API endpoint for data-taking runs."""
+    queryset = Run.objects.all()
+    serializer_class = RunSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class StfFileViewSet(viewsets.ModelViewSet):
+    """API endpoint for STF file tracking."""
+    queryset = StfFile.objects.all()
+    serializer_class = StfFileSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class SubscriberViewSet(viewsets.ModelViewSet):
+    """API endpoint for message queue subscribers."""
+    queryset = Subscriber.objects.all()
+    serializer_class = SubscriberSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
+    """API endpoint for message queue dispatches."""
+    queryset = MessageQueueDispatch.objects.all()
+    serializer_class = MessageQueueDispatchSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
 
 @login_required
 def log_summary(request):
