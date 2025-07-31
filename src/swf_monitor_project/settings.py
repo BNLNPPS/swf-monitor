@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
+    "django_dbml",  # For schema diagram generation
     # Third-party apps
     "rest_framework",
     "drf_spectacular",
