@@ -209,38 +209,57 @@ CHANNEL_LAYERS = {
 }
 
 # Basic Logging Configuration
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'json': {
-            '()': 'pythonjsonlogger.json.JsonFormatter',
-            'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s',
-            'rename_fields': {
-                'funcName': 'funcname'
-            }
+# Set DJANGO_LOGGING_MODE='none' to disable all logging configuration (useful for schema generation, etc.)
+LOGGING_MODE = os.getenv('DJANGO_LOGGING_MODE', 'normal')
+
+if LOGGING_MODE == 'none':
+    # Minimal logging configuration with no external dependencies
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'null': {
+                'class': 'logging.NullHandler',
+            },
         },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'json',
+        'root': {
+            'handlers': ['null'],
         },
-        'rest': {
-            'class': 'swf_common_lib.logging_utils.RestLogHandler',
-            'url': 'http://localhost:8002/api/logs/',
-            'formatter': 'json',
+    }
+else:
+    # Normal logging configuration
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'json': {
+                '()': 'pythonjsonlogger.json.JsonFormatter',
+                'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s',
+                'rename_fields': {
+                    'funcName': 'funcname'
+                }
+            },
         },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
-    },
-    'loggers': {
-        'django': {
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'json',
+            },
+            'rest': {
+                'class': 'swf_common_lib.logging_utils.RestLogHandler',
+                'url': 'http://localhost:8002/api/logs/',
+                'formatter': 'json',
+            },
+        },
+        'root': {
             'handlers': ['console'],
-            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
-            'propagate': False,
+            'level': 'INFO',
         },
-    },
-}
+        'loggers': {
+            'django': {
+                'handlers': ['console'],
+                'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+                'propagate': False,
+            },
+        },
+    }
