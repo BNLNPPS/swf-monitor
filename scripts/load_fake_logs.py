@@ -72,16 +72,16 @@ for app in APPS:
                     instance_name=inst,
                     timestamp=now - timedelta(minutes=random.randint(0, 120)),
                     level=level,
-                    level_name=level_name,
+                    levelname=level_name,
                     message=message,
                     module="demo_module",
-                    func_name="demo_func",
-                    line_no=random.randint(1, 100),
+                    funcname="demo_func",
+                    lineno=random.randint(1, 100),
                     process=random.randint(1000, 2000),
                     thread=random.randint(1, 10),
                 )
                 log.save()
-                print(f"Created log: {log.app_name} {log.instance_name} {log.level_name} {log.message}")
+                print(f"Created log: {log.app_name} {log.instance_name} {log.levelname} {log.message}")
                 created += 1
 
 print(f"Fake logs loaded. Total created: {created}")

@@ -117,10 +117,10 @@
                         <td>
                             <a href="?instance_name={{ log.instance_name|urlencode }}{% if selected_app %}&app_name={{ selected_app|urlencode }}{% endif %}">{{ log.instance_name }}</a>
                         </td>
-                        <td><span class="badge badge-{{ log.level_name|lower }}">{{ log.level_name }}</span></td>
+                        <td><span class="badge badge-{{ log.levelname|lower }}">{{ log.levelname }}</span></td>
                         <td style="white-space: normal; word-break: break-word;">{{ log.message }}</td>
                         <td>{{ log.module }}</td>
-                        <td>{{ log.func_name }}:{{ log.line_no }}</td>
+                        <td>{{ log.funcname }}:{{ log.lineno }}</td>
                     </tr>
                 {% endfor %}
             </tbody>

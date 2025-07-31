@@ -216,10 +216,7 @@ LOGGING = {
             '()': 'pythonjsonlogger.json.JsonFormatter',
             'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s',
             'rename_fields': {
-                'asctime': 'timestamp',
-                'levelname': 'level_name',
-                'funcName': 'func_name',
-                'lineno': 'line_no'
+                'funcName': 'funcname'
             }
         },
     },
@@ -228,25 +225,19 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'json',
         },
-        'db': {
-            'class': 'swf_common_lib.logging_utils.PostgresLogHandler',
-            'db_params': {
-                "dbname": config("DB_NAME", default="swfdb"),
-                "user": config("DB_USER", default="admin"),
-                "password": config("DB_PASSWORD"),
-                "host": config("DB_HOST", default="localhost"),
-                "port": config("DB_PORT", default="5432"),
-            },
+        'rest': {
+            'class': 'swf_common_lib.logging_utils.RestLogHandler',
+            'url': 'http://localhost:8002/api/logs/',
             'formatter': 'json',
         },
     },
     'root': {
-        'handlers': ['console', 'db'],
+        'handlers': ['console'],
         'level': 'INFO',
     },
     'loggers': {
         'django': {
-            'handlers': ['console', 'db'],
+            'handlers': ['console'],
             'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
             'propagate': False,
         },

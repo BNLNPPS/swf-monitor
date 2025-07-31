@@ -213,9 +213,9 @@ def log_summary(request):
     Displays a summary of log entries, grouped by application, instance, and level.
     """
     log_summary_data = (
-        AppLog.objects.values("app_name", "instance_name", "level_name")
+        AppLog.objects.values("app_name", "instance_name", "levelname")
         .annotate(count=Count("id"))
-        .order_by("app_name", "instance_name", "level_name")
+        .order_by("app_name", "instance_name", "levelname")
     )
 
     # Get latest timestamp for each (app_name, instance_name)
@@ -229,7 +229,7 @@ def log_summary(request):
     for item in log_summary_data:
         app_key = item["app_name"]
         instance_key = item["instance_name"]
-        level = item["level_name"]
+        level = item["levelname"]
         count = item["count"]
 
         if app_key not in summary:
@@ -323,17 +323,17 @@ class LogSummaryView(generics.ListAPIView):
             # Aggregate error counts by level for this app/instance
             error_counts = (
                 AppLog.objects.filter(app_name=app, instance_name=instance)
-                .values('level_name')
+                .values('levelname')
                 .annotate(count=Count('id'))
             )
             # Get recent errors (last 5)
             recent_errors = list(
-                AppLog.objects.filter(app_name=app, instance_name=instance, level_name__in=['ERROR', 'CRITICAL'])
+                AppLog.objects.filter(app_name=app, instance_name=instance, levelname__in=['ERROR', 'CRITICAL'])
                 .order_by('-timestamp')[:5]
-                .values('timestamp', 'level_name', 'message', 'module', 'func_name', 'line_no')
+                .values('timestamp', 'levelname', 'message', 'module', 'funcname', 'lineno')
             )
             summary[app][instance] = {
-                'error_counts': {e['level_name']: e['count'] for e in error_counts},
+                'error_counts': {e['levelname']: e['count'] for e in error_counts},
                 'recent_errors': recent_errors,
             }
         return Response(summary, status=status.HTTP_200_OK)

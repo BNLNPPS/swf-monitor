@@ -19,10 +19,8 @@ class MCPConsumer(AsyncWebsocketConsumer):
         }
 
     async def connect(self):
-        self.user = self.scope.get("user")
-        if not self.user or not self.user.is_authenticated:
-            await self.close(code=4003)
-            return
+        # Accept all connections (no authentication required for R&D/demo)
+        print(f"DEBUG: WebSocket connection accepted (no auth required)")
         await self.accept()
 
     async def disconnect(self, close_code):

@@ -72,11 +72,11 @@ class AppLogAPITests(APITestCase):
             'instance_name': 'test_instance',
             'timestamp': timezone.now().isoformat(),
             'level': logging.INFO,
-            'level_name': 'INFO',
+            'levelname': 'INFO',
             'message': 'This is a test log message.',
             'module': 'test_module',
-            'func_name': 'test_func',
-            'line_no': 123,
+            'funcname': 'test_func',
+            'lineno': 123,
             'process': 456,
             'thread': 789,
         }
@@ -117,10 +117,10 @@ class AppLogUITests(TestCase):
         self.user = User.objects.create_user(username=unique_username, password='password')
         self.client.login(username=unique_username, password='password')
         now = timezone.now()
-        AppLog.objects.create(app_name='app1', instance_name='inst1', level=logging.INFO, message='info message 1', timestamp=now, level_name='INFO', module='m', func_name='f', line_no=1, process=1, thread=1)
-        AppLog.objects.create(app_name='app1', instance_name='inst1', level=logging.WARNING, message='warning message 1', timestamp=now, level_name='WARNING', module='m', func_name='f', line_no=1, process=1, thread=1)
-        AppLog.objects.create(app_name='app1', instance_name='inst2', level=logging.ERROR, message='error message 1', timestamp=now, level_name='ERROR', module='m', func_name='f', line_no=1, process=1, thread=1)
-        AppLog.objects.create(app_name='app2', instance_name='inst1', level=logging.INFO, message='info message 2', timestamp=now, level_name='INFO', module='m', func_name='f', line_no=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst1', level=logging.INFO, message='info message 1', timestamp=now, levelname='INFO', module='m', funcname='f', lineno=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst1', level=logging.WARNING, message='warning message 1', timestamp=now, levelname='WARNING', module='m', funcname='f', lineno=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst2', level=logging.ERROR, message='error message 1', timestamp=now, levelname='ERROR', module='m', funcname='f', lineno=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app2', instance_name='inst1', level=logging.INFO, message='info message 2', timestamp=now, levelname='INFO', module='m', funcname='f', lineno=1, process=1, thread=1)
 
     def test_log_list_view(self):
         response = self.client.get(reverse('monitor_app:log_list'))
@@ -212,10 +212,10 @@ class LogSummaryAPITests(TestCase):
         self.client.login(username=self.username, password="testpass")
         now = timezone.now()
         # Create logs for two apps and two instances
-        AppLog.objects.create(app_name='app1', instance_name='inst1', timestamp=now, level=logging.ERROR, level_name='ERROR', message='Error 1', module='mod', func_name='f', line_no=1, process=1, thread=1)
-        AppLog.objects.create(app_name='app1', instance_name='inst1', timestamp=now, level=logging.INFO, level_name='INFO', message='Info 1', module='mod', func_name='f', line_no=2, process=1, thread=1)
-        AppLog.objects.create(app_name='app1', instance_name='inst2', timestamp=now, level=logging.ERROR, level_name='ERROR', message='Error 2', module='mod', func_name='f', line_no=3, process=1, thread=1)
-        AppLog.objects.create(app_name='app2', instance_name='inst3', timestamp=now, level=logging.CRITICAL, level_name='CRITICAL', message='Critical 1', module='mod', func_name='f', line_no=4, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst1', timestamp=now, level=logging.ERROR, levelname='ERROR', message='Error 1', module='mod', funcname='f', lineno=1, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst1', timestamp=now, level=logging.INFO, levelname='INFO', message='Info 1', module='mod', funcname='f', lineno=2, process=1, thread=1)
+        AppLog.objects.create(app_name='app1', instance_name='inst2', timestamp=now, level=logging.ERROR, levelname='ERROR', message='Error 2', module='mod', funcname='f', lineno=3, process=1, thread=1)
+        AppLog.objects.create(app_name='app2', instance_name='inst3', timestamp=now, level=logging.CRITICAL, levelname='CRITICAL', message='Critical 1', module='mod', funcname='f', lineno=4, process=1, thread=1)
 
     def tearDown(self):
         # Clean up created user
@@ -586,11 +586,11 @@ class RestLoggingIntegrationTests(APITestCase):
             'instance_name': 'test_instance',
             'timestamp': timezone.now().isoformat(),
             'level': logging.INFO,
-            'level_name': 'INFO',
+            'levelname': 'INFO',
             'message': 'Test log message via REST API',
             'module': 'test_module',
-            'func_name': 'test_function',
-            'line_no': 42,
+            'funcname': 'test_function',
+            'lineno': 42,
             'process': 1234,
             'thread': 5678,
             'extra_data': {'test': 'data'}
@@ -621,17 +621,17 @@ class RestLoggingIntegrationTests(APITestCase):
             ('CRITICAL', logging.CRITICAL, 'Critical message')
         ]
         
-        for level_name, level_int, message in test_logs:
+        for levelname, level_int, message in test_logs:
             log_data = {
                 'app_name': 'multi_level_test',
                 'instance_name': 'test_instance',
                 'timestamp': timezone.now().isoformat(),
                 'level': level_int,
-                'level_name': level_name,
+                'levelname': levelname,
                 'message': message,
                 'module': 'test_module',
-                'func_name': 'test_function',
-                'line_no': 1,
+                'funcname': 'test_function',
+                'lineno': 1,
                 'process': 1234,
                 'thread': 5678
             }
@@ -662,11 +662,11 @@ class RestLoggingIntegrationTests(APITestCase):
                 'instance_name': f'instance_{i % 5}',  # 5 different instances
                 'timestamp': timezone.now().isoformat(),
                 'level': logging.INFO,
-                'level_name': 'INFO',
+                'levelname': 'INFO',
                 'message': f'Bulk test log message {i+1}',
                 'module': 'bulk_test_module',
-                'func_name': 'bulk_test_function',
-                'line_no': i + 1,
+                'funcname': 'bulk_test_function',
+                'lineno': i + 1,
                 'process': 1234,
                 'thread': 5678
             }
@@ -695,11 +695,11 @@ class RestLoggingIntegrationTests(APITestCase):
                 'instance_name': 'test_instance',
                 'timestamp': timezone.now().isoformat(),
                 'level': logging.INFO,
-                'level_name': 'INFO',
+                'levelname': 'INFO',
                 'message': f'Retrieval test message {i+1}',
                 'module': 'test_module',
-                'func_name': 'test_function',
-                'line_no': i + 1,
+                'funcname': 'test_function',
+                'lineno': i + 1,
                 'process': 1234,
                 'thread': 5678
             }
@@ -756,17 +756,17 @@ class RestLoggingIntegrationTests(APITestCase):
             ('INFO', 'Agent ready for processing')
         ]
         
-        for level_name, message in startup_logs:
+        for levelname, message in startup_logs:
             log_data = {
                 'app_name': 'workflow_agent',
                 'instance_name': 'agent_001',
                 'timestamp': timezone.now().isoformat(),
-                'level': getattr(logging, level_name),
-                'level_name': level_name,
+                'level': getattr(logging, levelname),
+                'levelname': levelname,
                 'message': message,
                 'module': 'agent_workflow',
-                'func_name': 'startup_sequence',
-                'line_no': 1,
+                'funcname': 'startup_sequence',
+                'lineno': 1,
                 'process': 1234,
                 'thread': 5678
             }
@@ -782,17 +782,17 @@ class RestLoggingIntegrationTests(APITestCase):
             ('INFO', 'Batch processing completed')
         ]
         
-        for level_name, message in processing_logs:
+        for levelname, message in processing_logs:
             log_data = {
                 'app_name': 'workflow_agent',
                 'instance_name': 'agent_001',
                 'timestamp': timezone.now().isoformat(),
-                'level': getattr(logging, level_name),
-                'level_name': level_name,
+                'level': getattr(logging, levelname),
+                'levelname': levelname,
                 'message': message,
                 'module': 'agent_workflow',
-                'func_name': 'process_batch',
-                'line_no': 1,
+                'funcname': 'process_batch',
+                'lineno': 1,
                 'process': 1234,
                 'thread': 5678
             }
@@ -812,7 +812,7 @@ class RestLoggingIntegrationTests(APITestCase):
         self.assertEqual(agent_logs.count(), total_logs)
         
         # Verify different log levels are present
-        log_levels = set(agent_logs.values_list('level_name', flat=True))
+        log_levels = set(agent_logs.values_list('levelname', flat=True))
         expected_levels = {'INFO', 'DEBUG', 'WARNING'}
         self.assertEqual(log_levels, expected_levels)
 

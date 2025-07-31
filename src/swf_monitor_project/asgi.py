@@ -24,9 +24,7 @@ import mcp_app.routing # This import might trigger settings access if consumers.
 
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
-    "websocket": AuthMiddlewareStack(
-        URLRouter(
-            mcp_app.routing.websocket_urlpatterns
-        )
+    "websocket": URLRouter(
+        mcp_app.routing.websocket_urlpatterns
     ),
 })

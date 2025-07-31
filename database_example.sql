@@ -50,7 +50,7 @@ INSERT INTO swf_message_queue_dispatches (dispatch_id, stf_file_id, dispatch_tim
 ('ffffffff-ffff-ffff-ffff-ffffffffffff', '88888888-8888-8888-8888-888888888888', '2024-01-17 08:10:00', '{"file_id": "88888888-8888-8888-8888-888888888888", "run_number": 100005, "file_url": "https://data.epic.bnl.gov/stf/run100005/stf_001.dat", "status": "processed", "machine_state": "cosmics"}', true, NULL);
 
 -- App Logs test data
-INSERT INTO swf_applog (app_name, instance_name, timestamp, level, level_name, message, module, func_name, line_no, process, thread, extra_data) VALUES
+INSERT INTO swf_applog (app_name, instance_name, timestamp, level, levelname, message, module, funcname, lineno, process, thread, extra_data) VALUES
 ('STF-Agent', 'STF-Agent-1', '2024-01-15 10:00:00', 20, 'INFO', 'STF Agent started successfully', 'stf_agent', 'main', 45, 12345, 140123456789, '{"version": "1.0.0", "config": "physics"}'),
 ('STF-Agent', 'STF-Agent-1', '2024-01-15 10:05:00', 20, 'INFO', 'Processing STF file: stf_001.dat', 'stf_processor', 'process_file', 123, 12345, 140123456789, '{"file_size": 1073741824, "run_number": 100001}'),
 ('STF-Agent', 'STF-Agent-1', '2024-01-15 10:10:00', 20, 'INFO', 'STF file processed successfully', 'stf_processor', 'process_file', 156, 12345, 140123456789, '{"processing_time": 300, "event_count": 50000}'),
