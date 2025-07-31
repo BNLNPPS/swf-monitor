@@ -56,7 +56,7 @@ class AppLog(models.Model):
         ordering = ['-timestamp']
         verbose_name_plural = "App Logs"
         indexes = [
-            models.Index(fields=['-timestamp', 'app_name', 'instance_name']),
+            models.Index(fields=['timestamp', 'app_name', 'instance_name']),
         ]
 
     def __str__(self):

@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "rest_framework.authtoken",
     "django_seed",
+    "django_dbml"
 ]
 
 MIDDLEWARE = [
