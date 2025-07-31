@@ -3,6 +3,7 @@ import uuid
 from django.db import models
 from django.utils import timezone
 
+
 class SystemAgent(models.Model):
     STATUS_CHOICES = [
         ('UNKNOWN', 'Unknown'),
