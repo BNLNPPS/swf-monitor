@@ -15,11 +15,12 @@ pip install -r requirements.txt
 
 # Configure environment  
 cp .env.example .env
-# Edit .env with your SECRET_KEY and DB_PASSWORD
+# Edit .env with your SECRET_KEY, DB_PASSWORD, and SWF_TESTUSER_PASSWORD
 
-# Setup database and run
+# Setup database and users
 python manage.py migrate
 python manage.py createsuperuser
+python manage.py setup_testuser
 python manage.py runserver
 ```
 
@@ -55,7 +56,7 @@ Copy the example environment file:
 cp .env.example .env
 ```
 
-Edit the `.env` file and set your `SECRET_KEY` and `DB_PASSWORD`.
+Edit the `.env` file and set your `SECRET_KEY`, `DB_PASSWORD`, and `SWF_TESTUSER_PASSWORD`.
 
 *Generate a new `SECRET_KEY` using:*
 ```bash
@@ -90,6 +91,21 @@ python manage.py createsuperuser
 ```
 
 Follow the prompts to set username, email, and password.
+
+### 6. Create Test User (For Development/Testing)
+
+Create a test user account for automated testing and development:
+
+```bash
+python manage.py setup_testuser
+```
+
+This creates a user named `testuser` that can be used for:
+- Automated testing scripts
+- WebSocket authentication testing
+- Development workflow testing
+
+*Note: The testuser is a regular user (not staff) for testing normal user functionality.*
 
 ## Running the Application
 
