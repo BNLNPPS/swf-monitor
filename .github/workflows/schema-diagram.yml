@@ -22,7 +22,14 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install --no-cache-dir -r requirements.txt
+    
+    - name: Debug environment
+      run: |
+        echo "Current commit SHA: ${{ github.sha }}"
+        echo "DJANGO_LOGGING_MODE will be set to: none"
+        cd src
+        python -c "import os; print(f'Python sees DJANGO_LOGGING_MODE={os.getenv(\"DJANGO_LOGGING_MODE\", \"NOT SET\")}')"
     
     - name: Generate DBML schema
       env:
@@ -33,6 +40,7 @@ jobs:
         DB_HOST: 'localhost'
         DJANGO_LOGGING_MODE: 'none'
       run: |
+        echo "DJANGO_LOGGING_MODE=$DJANGO_LOGGING_MODE"
         cd src
         python manage.py dbml > ../testbed-schema.dbml
     
