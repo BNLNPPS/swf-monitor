@@ -1,6 +1,8 @@
 import logging
 import uuid
 from django.db import models
+from django.utils import timezone
+
 
 class SystemAgent(models.Model):
     STATUS_CHOICES = [
@@ -9,9 +11,19 @@ class SystemAgent(models.Model):
         ('WARNING', 'Warning'),
         ('ERROR', 'Error'),
     ]
+    
+    AGENT_TYPE_CHOICES = [
+        ('daqsim', 'DAQ Simulator'),
+        ('data', 'Data Agent'),
+        ('processing', 'Processing Agent'),
+        ('fastmon', 'Fast Monitoring Agent'),
+        ('monitor', 'Monitor System'),
+        ('test', 'Test Agent'),
+        ('other', 'Other'),
+    ]
 
     instance_name = models.CharField(max_length=100, unique=True)
-    agent_type = models.CharField(max_length=100)
+    agent_type = models.CharField(max_length=20, choices=AGENT_TYPE_CHOICES)
     description = models.TextField(blank=True)
     status = models.CharField(
         max_length=10,
@@ -20,6 +32,13 @@ class SystemAgent(models.Model):
     )
     last_heartbeat = models.DateTimeField(null=True, blank=True)
     agent_url = models.URLField(max_length=200, blank=True, null=True)
+    
+    # Workflow-specific fields
+    workflow_enabled = models.BooleanField(default=False)
+    current_stf_count = models.IntegerField(default=0)
+    total_stf_processed = models.IntegerField(default=0)
+    last_stf_processed = models.DateTimeField(null=True, blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -28,6 +47,18 @@ class SystemAgent(models.Model):
 
     def __str__(self):
         return self.instance_name
+        
+    def is_workflow_agent(self):
+        """Check if this agent participates in STF workflow."""
+        return self.agent_type in ['daqsim', 'data', 'processing', 'fastmon']
+        
+    def update_stf_stats(self, increment_current=0, increment_total=0):
+        """Update STF processing statistics."""
+        self.current_stf_count += increment_current
+        self.total_stf_processed += increment_total
+        if increment_total > 0:
+            self.last_stf_processed = timezone.now()
+        self.save()
 
 class AppLog(models.Model):
     LEVEL_CHOICES = [
@@ -42,11 +73,11 @@ class AppLog(models.Model):
     instance_name = models.CharField(max_length=100, db_index=True)
     timestamp = models.DateTimeField(db_index=True)
     level = models.IntegerField(choices=LEVEL_CHOICES, default=logging.NOTSET, db_index=True)
-    level_name = models.CharField(max_length=50)
+    levelname = models.CharField(max_length=50)
     message = models.TextField()
     module = models.CharField(max_length=255)
-    func_name = models.CharField(max_length=255)
-    line_no = models.IntegerField()
+    funcname = models.CharField(max_length=255)
+    lineno = models.IntegerField()
     process = models.IntegerField()
     thread = models.BigIntegerField()
     extra_data = models.JSONField(null=True, blank=True)
@@ -56,7 +87,7 @@ class AppLog(models.Model):
         ordering = ['-timestamp']
         verbose_name_plural = "App Logs"
         indexes = [
-            models.Index(fields=['-timestamp', 'app_name', 'instance_name']),
+            models.Index(fields=['timestamp', 'app_name', 'instance_name']),
         ]
 
     def __str__(self):
@@ -141,6 +172,12 @@ class StfFile(models.Model):
         default=FileStatus.REGISTERED
     )
     metadata = models.JSONField(null=True, blank=True)
+    
+    # Workflow integration fields
+    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
+    daq_state = models.CharField(max_length=20, null=True, blank=True)
+    daq_substate = models.CharField(max_length=20, null=True, blank=True)
+    workflow_status = models.CharField(max_length=30, null=True, blank=True)
 
     class Meta:
         db_table = 'swf_stf_files'
@@ -198,9 +235,27 @@ class MessageQueueDispatch(models.Model):
     message_content = models.JSONField(null=True, blank=True)
     is_successful = models.BooleanField(null=True, default=None)
     error_message = models.TextField(null=True, blank=True)
+    
+    # Workflow integration fields
+    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
+    message_type = models.CharField(max_length=50, null=True, blank=True)
+    sender_agent = models.CharField(max_length=100, null=True, blank=True)
+    recipient_agent = models.CharField(max_length=100, null=True, blank=True)
 
     class Meta:
         db_table = 'swf_message_queue_dispatches'
 
     def __str__(self):
         return f"Dispatch {self.dispatch_id} - STF {self.stf_file.file_id} - {'Success' if self.is_successful else 'Failed'}"
+
+
+# Import workflow models to register them with Django
+from .workflow_models import (
+    STFWorkflow,
+    AgentWorkflowStage,
+    WorkflowMessage,
+    DAQState,
+    DAQSubstate,
+    WorkflowStatus,
+    AgentType,
+)

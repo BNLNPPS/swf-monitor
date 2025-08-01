@@ -40,3 +40,5 @@ zope.interface==7.2
 pytest
 pytest-asyncio
 pytest-django
+django-dbml
+python-json-logger

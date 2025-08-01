@@ -29,16 +29,26 @@ SECRET_KEY = config("SECRET_KEY")
 # Set DEBUG to False in production by setting the environment variable DEBUG=False
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-# Define allowed hosts. In production, this should be a comma-separated string
-# of your domain(s) in the .env file.
+# Define allowed hosts. 
+# IMPORTANT: Use SWF_ALLOWED_HOSTS environment variable to configure allowed hosts.
+# This is a comma-separated list of domain names/IP addresses that can serve this application.
+# Example: SWF_ALLOWED_HOSTS=swf-monitor.example.com,www.swf-monitor.example.com,10.0.0.1
+# 
+# Security Note: Never hardcode production hostnames in this file. Always use environment variables
+# to avoid exposing infrastructure details in the codebase.
 ALLOWED_HOSTS = []
-if not DEBUG:
-    allowed_hosts_str = config('ALLOWED_HOSTS', default='')
-    if allowed_hosts_str:
-        ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
-else:
-    # For development and testing, allow localhost, 127.0.0.1, and testserver
+
+# Get allowed hosts from environment variable SWF_ALLOWED_HOSTS
+allowed_hosts_str = config('SWF_ALLOWED_HOSTS', default='')
+if allowed_hosts_str:
+    ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_str.split(',')]
+elif DEBUG:
+    # Only use default localhost values in development when SWF_ALLOWED_HOSTS is not set
     ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'testserver']
+else:
+    # In production, SWF_ALLOWED_HOSTS must be set or Django will raise ImproperlyConfigured
+    # This is a security feature to prevent the site from running with improper host validation
+    pass
 
 
 # Application definition
@@ -54,6 +64,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
+    "django_dbml",  # For schema diagram generation
     # Third-party apps
     "rest_framework",
     "drf_spectacular",
@@ -181,7 +192,7 @@ SPECTACULAR_SETTINGS = {
 
 # ActiveMQ Settings
 ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')
-ACTIVEMQ_PORT = config('ACTIVEMQ_PORT', default=61613, cast=int)
+ACTIVEMQ_PORT = config('ACTIVEMQ_PORT', default=61612, cast=int)
 ACTIVEMQ_USER = config('ACTIVEMQ_USER', default='admin')
 ACTIVEMQ_PASSWORD = config('ACTIVEMQ_PASSWORD', default='admin')
 ACTIVEMQ_HEARTBEAT_TOPIC = config('ACTIVEMQ_HEARTBEAT_TOPIC', default='/topic/heartbeat') # Updated to working topic
@@ -198,29 +209,57 @@ CHANNEL_LAYERS = {
 }
 
 # Basic Logging Configuration
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
+# Set DJANGO_LOGGING_MODE='none' to disable all logging configuration (useful for schema generation, etc.)
+LOGGING_MODE = os.getenv('DJANGO_LOGGING_MODE', 'normal')
+
+if LOGGING_MODE == 'none':
+    # Minimal logging configuration with no external dependencies
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'null': {
+                'class': 'logging.NullHandler',
+            },
         },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
-    },
-    'loggers': {
-        'django': {
+        'root': {
+            'handlers': ['null'],
+        },
+    }
+else:
+    # Normal logging configuration
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'formatters': {
+            'json': {
+                '()': 'pythonjsonlogger.json.JsonFormatter',
+                'format': '%(asctime)s %(name)s %(levelname)s %(module)s %(funcName)s %(lineno)d %(message)s',
+                'rename_fields': {
+                    'funcName': 'funcname'
+                }
+            },
+        },
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'json',
+            },
+            'rest': {
+                'class': 'swf_common_lib.logging_utils.RestLogHandler',
+                'url': 'http://localhost:8002/api/logs/',
+                'formatter': 'json',
+            },
+        },
+        'root': {
             'handlers': ['console'],
-            'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
-            'propagate': False,
+            'level': 'INFO',
         },
-        # You can add specific loggers here if needed, e.g.:
-        # 'monitor_app.activemq_listener': {
-        #     'handlers': ['console'],
-        #     'level': 'INFO',
-        #     'propagate': False,
-        # },
-    },
-}
+        'loggers': {
+            'django': {
+                'handlers': ['console'],
+                'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+                'propagate': False,
+            },
+        },
+    }

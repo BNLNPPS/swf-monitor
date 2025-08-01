@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+
+{% block title %}Agent Detail: {{ agent.instance_name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Agent Detail: {{ agent.instance_name }}</h2>
+    <p><strong>Type:</strong> {{ agent.get_agent_type_display }}</p>
+    <p><strong>Status:</strong> {{ agent.status }}</p>
+    <p><strong>Last Heartbeat:</strong> {{ agent.last_heartbeat|date:"Ymd-H:i:s" }}</p>
+    <p><strong>Description:</strong> {{ agent.description }}</p>
+
+    <h3 class="mt-5">Associated Workflows</h3>
+    <p>Showing workflows currently assigned to this agent type.</p>
+
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+
+    <div class="table-responsive">
+        <table id="workflows-table" class="table table-striped table-bordered table-sm">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Filename</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>DAQ State</th>
+                    <th>Generated</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for workflow in workflows %}
+                <tr>
+                    <td style="font-size: 0.8rem;"><a href="{% url 'monitor_app:workflow_detail' workflow.workflow_id %}">{{ workflow.filename }}</a></td>
+                    <td>{{ workflow.stf_metadata.msg_type }}</td>
+                    <td>{{ workflow.get_current_status_display }}</td>
+                    <td>{{ workflow.daq_state }} / {{ workflow.daq_substate }}</td>
+                    <td>{{ workflow.generated_time|date:"Ymd-H:i:s" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5">No workflows currently associated with this agent.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- DataTables JS -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script>
+      $(document).ready(function() {
+        $('#workflows-table').DataTable({
+          paging: true,
+          pageLength: 50,
+          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+          ordering: true,
+          order: [[4, 'desc']],
+          info: true,
+          searching: true,
+          responsive: true,
+          search: {
+            caseInsensitive: true,
+            smart: false,
+            regex: false
+          },
+          language: {
+            search: "Filter table:",
+            emptyTable: "No workflows found matching your criteria."
+          }
+        });
+      });
+    </script>
+</div>
+{% endblock %}

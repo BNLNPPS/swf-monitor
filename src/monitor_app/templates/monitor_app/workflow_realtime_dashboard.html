@@ -1,0 +1,477 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Real-time STF Workflow Dashboard{% endblock %}
+
+{% block extra_css %}
+<style>
+    .metric-card {
+        border-left: 4px solid #007bff;
+        transition: all 0.3s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    .status-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 5px;
+    }
+    .status-active { background-color: #28a745; }
+    .status-warning { background-color: #ffc107; }
+    .status-error { background-color: #dc3545; }
+    .status-inactive { background-color: #6c757d; }
+    
+    .workflow-flow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 20px 0;
+    }
+    .flow-stage {
+        flex: 1;
+        text-align: center;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 0 5px;
+        transition: all 0.3s ease;
+    }
+    .flow-stage.active {
+        background-color: #e3f2fd;
+        border: 2px solid #2196f3;
+    }
+    .flow-arrow {
+        font-size: 20px;
+        color: #666;
+    }
+    
+    .real-time-indicator {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        background-color: #28a745;
+        color: white;
+        padding: 5px 10px;
+        border-radius: 15px;
+        font-size: 12px;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+    }
+    
+    .chart-container {
+        position: relative;
+        height: 300px;
+        margin-bottom: 20px;
+    }
+    
+    .message-ticker {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 10px;
+        max-height: 200px;
+        overflow-y: auto;
+        font-family: monospace;
+        font-size: 12px;
+    }
+    
+    .message-entry {
+        margin-bottom: 5px;
+        padding: 5px;
+        border-radius: 3px;
+    }
+    .message-entry.stf_gen { background-color: #e3f2fd; }
+    .message-entry.data_ready { background-color: #f3e5f5; }
+    .message-entry.processing_complete { background-color: #e8f5e8; }
+    .message-entry.error { background-color: #ffebee; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="position-relative">
+                <h1>Real-time STF Workflow Dashboard</h1>
+                <div class="real-time-indicator">
+                    <i class="fas fa-circle"></i> LIVE
+                </div>
+                <p class="lead">Monitor the complete Super Time Frame processing pipeline in real-time</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Real-time Statistics -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card metric-card text-white bg-primary">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Total Workflows</h5>
+                            <h2 class="card-text" id="total-workflows">{{ total_workflows }}</h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-stream fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card metric-card text-white bg-warning">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Active</h5>
+                            <h2 class="card-text" id="active-workflows">{{ active_workflows }}</h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-spinner fa-spin fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card metric-card text-white bg-success">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Completed</h5>
+                            <h2 class="card-text" id="completed-workflows">{{ completed_workflows }}</h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-check-circle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card metric-card text-white bg-danger">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <h5 class="card-title">Failed</h5>
+                            <h2 class="card-text" id="failed-workflows">{{ failed_workflows }}</h2>
+                        </div>
+                        <div class="align-self-center">
+                            <i class="fas fa-exclamation-triangle fa-2x"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Workflow Pipeline Flow -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">STF Processing Pipeline</h5>
+                </div>
+                <div class="card-body">
+                    <div class="workflow-flow">
+                        <div class="flow-stage" id="stage-daqsim">
+                            <i class="fas fa-cogs fa-2x"></i>
+                            <div>DAQ Simulator</div>
+                            <div class="small text-muted">Generating STFs</div>
+                            <div class="badge badge-primary" id="daqsim-count">0</div>
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-stage" id="stage-data">
+                            <i class="fas fa-database fa-2x"></i>
+                            <div>Data Agent</div>
+                            <div class="small text-muted">Processing Data</div>
+                            <div class="badge badge-info" id="data-count">0</div>
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-stage" id="stage-processing">
+                            <i class="fas fa-microchip fa-2x"></i>
+                            <div>Processing Agent</div>
+                            <div class="small text-muted">Computing Results</div>
+                            <div class="badge badge-warning" id="processing-count">0</div>
+                        </div>
+                        <div class="flow-arrow">→</div>
+                        <div class="flow-stage" id="stage-fastmon">
+                            <i class="fas fa-tachometer-alt fa-2x"></i>
+                            <div>FastMon Agent</div>
+                            <div class="small text-muted">Monitoring</div>
+                            <div class="badge badge-success" id="fastmon-count">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <!-- Real-time Agent Status -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Agent Status</h5>
+                </div>
+                <div class="card-body">
+                    <div id="agent-status-container">
+                        {% for agent in workflow_agents %}
+                        <div class="d-flex justify-content-between align-items-center mb-2" data-agent="{{ agent.instance_name }}">
+                            <div>
+                                <span class="status-indicator status-{% if agent.status == 'OK' %}active{% elif agent.status == 'WARNING' %}warning{% elif agent.status == 'ERROR' %}error{% else %}inactive{% endif %}"></span>
+                                <strong>{{ agent.instance_name }}</strong>
+                                <span class="badge badge-secondary">{{ agent.get_agent_type_display }}</span>
+                            </div>
+                            <div class="text-right">
+                                <div class="small">Current: <span class="current-count">{{ agent.current_stf_count }}</span></div>
+                                <div class="small">Total: <span class="total-count">{{ agent.total_stf_processed }}</span></div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Real-time Message Stream -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Live Message Stream</h5>
+                </div>
+                <div class="card-body">
+                    <div class="message-ticker" id="message-stream">
+                        <!-- Messages will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Real-time Charts -->
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Workflow Throughput</h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="throughput-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Processing Times</h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="processing-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+// Real-time dashboard functionality
+class RealtimeDashboard {
+    constructor() {
+        this.updateInterval = 2000; // Update every 2 seconds
+        this.messageLimit = 50; // Keep last 50 messages
+        this.charts = {};
+        this.init();
+    }
+    
+    init() {
+        this.setupCharts();
+        this.startUpdating();
+    }
+    
+    setupCharts() {
+        // Throughput chart
+        const throughputCtx = document.getElementById('throughput-chart').getContext('2d');
+        this.charts.throughput = new Chart(throughputCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'STFs/minute',
+                    data: [],
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+        
+        // Processing times chart
+        const processingCtx = document.getElementById('processing-chart').getContext('2d');
+        this.charts.processing = new Chart(processingCtx, {
+            type: 'bar',
+            data: {
+                labels: ['Data Agent', 'Processing Agent', 'FastMon Agent'],
+                datasets: [{
+                    label: 'Avg Processing Time (s)',
+                    data: [0, 0, 0],
+                    backgroundColor: [
+                        'rgba(54, 162, 235, 0.5)',
+                        'rgba(255, 206, 86, 0.5)',
+                        'rgba(75, 192, 192, 0.5)'
+                    ],
+                    borderColor: [
+                        'rgba(54, 162, 235, 1)',
+                        'rgba(255, 206, 86, 1)',
+                        'rgba(75, 192, 192, 1)'
+                    ],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+    
+    startUpdating() {
+        this.updateData();
+        setInterval(() => this.updateData(), this.updateInterval);
+    }
+    
+    async updateData() {
+        try {
+            const response = await fetch('/workflow/api/realtime-data/');
+            const data = await response.json();
+            
+            this.updateMetrics(data.metrics);
+            this.updatePipeline(data.pipeline);
+            this.updateAgents(data.agents);
+            this.updateMessages(data.recent_messages);
+            this.updateCharts(data.charts);
+        } catch (error) {
+            console.error('Error updating dashboard:', error);
+        }
+    }
+    
+    updateMetrics(metrics) {
+        document.getElementById('total-workflows').textContent = metrics.total_workflows;
+        document.getElementById('active-workflows').textContent = metrics.active_workflows;
+        document.getElementById('completed-workflows').textContent = metrics.completed_workflows;
+        document.getElementById('failed-workflows').textContent = metrics.failed_workflows;
+    }
+    
+    updatePipeline(pipeline) {
+        Object.keys(pipeline).forEach(stage => {
+            const element = document.getElementById(`${stage}-count`);
+            if (element) {
+                element.textContent = pipeline[stage];
+            }
+            
+            const stageElement = document.getElementById(`stage-${stage}`);
+            if (stageElement) {
+                stageElement.classList.toggle('active', pipeline[stage] > 0);
+            }
+        });
+    }
+    
+    updateAgents(agents) {
+        agents.forEach(agent => {
+            const agentElement = document.querySelector(`[data-agent="${agent.instance_name}"]`);
+            if (agentElement) {
+                agentElement.querySelector('.current-count').textContent = agent.current_stf_count;
+                agentElement.querySelector('.total-count').textContent = agent.total_stf_processed;
+                
+                const indicator = agentElement.querySelector('.status-indicator');
+                indicator.className = `status-indicator status-${agent.status.toLowerCase() === 'ok' ? 'active' : 'error'}`;
+            }
+        });
+    }
+    
+    updateMessages(messages) {
+        const container = document.getElementById('message-stream');
+        
+        messages.forEach(message => {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message-entry ${message.message_type}`;
+            messageElement.innerHTML = `
+                <span class="text-muted">${message.timestamp}</span>
+                <strong>${message.message_type}</strong>: 
+                ${message.sender_agent} → ${message.recipient_agent}
+                ${message.filename ? `(${message.filename})` : ''}
+            `;
+            
+            container.insertBefore(messageElement, container.firstChild);
+        });
+        
+        // Keep only the last N messages
+        while (container.children.length > this.messageLimit) {
+            container.removeChild(container.lastChild);
+        }
+    }
+    
+    updateCharts(chartData) {
+        // Update throughput chart
+        const throughputChart = this.charts.throughput;
+        if (chartData.throughput) {
+            throughputChart.data.labels = chartData.throughput.labels;
+            throughputChart.data.datasets[0].data = chartData.throughput.data;
+            throughputChart.update('none');
+        }
+        
+        // Update processing times chart
+        const processingChart = this.charts.processing;
+        if (chartData.processing_times) {
+            processingChart.data.datasets[0].data = chartData.processing_times;
+            processingChart.update('none');
+        }
+    }
+}
+
+// Initialize dashboard when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    new RealtimeDashboard();
+});
+</script>
+{% endblock %}

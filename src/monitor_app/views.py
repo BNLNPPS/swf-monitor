@@ -15,7 +15,12 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
-from .serializers import SystemAgentSerializer, AppLogSerializer, LogSummarySerializer
+from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
+from .serializers import (
+    SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
+    STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
+    RunSerializer, StfFileSerializer, SubscriberSerializer, MessageQueueDispatchSerializer
+)
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
 from django.apps import apps
@@ -37,39 +42,8 @@ def about(request):
 
 @login_required
 def index(request):
-    agents = SystemAgent.objects.all()
-
-    # Filtering
-    agent_type = request.GET.get('agent_type')
-    status = request.GET.get('status')
-    if agent_type:
-        agents = agents.filter(agent_type=agent_type)
-    if status:
-        agents = agents.filter(status=status)
-
-    # Get unique agent types and statuses for filter links
-    agent_types = SystemAgent.objects.values_list('agent_type', flat=True)
-    agent_types = sorted(set([t for t in agent_types if t]), key=lambda x: x.lower())
-    statuses = sorted([s[0] for s in SystemAgent.STATUS_CHOICES], key=lambda x: x.lower())
-
-    columns = [
-        {"name": "instance_name", "label": "Agent"},
-        {"name": "agent_type", "label": "Type"},
-        {"name": "status", "label": "Status"},
-        {"name": "last_heartbeat", "label": "Last Heartbeat"},
-        {"name": "agent_url", "label": "Agent URL"},
-        {"name": "actions", "label": "Actions"},
-    ]
-
-    context = {
-        'agents': agents,
-        'agent_types': agent_types,
-        'statuses': statuses,
-        'selected_agent_type': agent_type,
-        'selected_status': status,
-        'columns': columns,
-    }
-    return render(request, 'monitor_app/index.html', context)
+    """A simple landing page for authenticated users."""
+    return render(request, 'monitor_app/index.html')
 
 def staff_member_required(view_func):
     def _wrapped_view(request, *args, **kwargs):
@@ -145,6 +119,54 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
+    @action(detail=False, methods=['post'], url_path='heartbeat')
+    def heartbeat(self, request):
+        """
+        Custom action for agents to register themselves and send heartbeats.
+        This will create or update an agent entry.
+        """
+        instance_name = request.data.get('instance_name')
+        if not instance_name:
+            return Response({"instance_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Use update_or_create to handle both registration and heartbeats
+        agent, created = SystemAgent.objects.update_or_create(
+            instance_name=instance_name,
+            defaults={
+                'agent_type': request.data.get('agent_type', 'other'),
+                'description': request.data.get('description', ''),
+                'status': request.data.get('status', 'OK'),
+                'agent_url': request.data.get('agent_url', None),
+                'last_heartbeat': timezone.now(),
+            }
+        )
+        
+        # Return the full agent data
+        return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+class STFWorkflowViewSet(viewsets.ModelViewSet):
+    """API endpoint for STF Workflows."""
+    queryset = STFWorkflow.objects.all()
+    serializer_class = STFWorkflowSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+class AgentWorkflowStageViewSet(viewsets.ModelViewSet):
+    """API endpoint for Agent Workflow Stages."""
+    queryset = AgentWorkflowStage.objects.all()
+    serializer_class = AgentWorkflowStageSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+class WorkflowMessageViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workflow Messages."""
+    queryset = WorkflowMessage.objects.all()
+    serializer_class = WorkflowMessageSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
 class AppLogViewSet(viewsets.ModelViewSet):
     """
     API endpoint that allows logs to be viewed or created.
@@ -153,15 +175,47 @@ class AppLogViewSet(viewsets.ModelViewSet):
     serializer_class = AppLogSerializer
     permission_classes = [AllowAny] # For now, allow any client to post logs
 
+
+class RunViewSet(viewsets.ModelViewSet):
+    """API endpoint for data-taking runs."""
+    queryset = Run.objects.all()
+    serializer_class = RunSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class StfFileViewSet(viewsets.ModelViewSet):
+    """API endpoint for STF file tracking."""
+    queryset = StfFile.objects.all()
+    serializer_class = StfFileSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class SubscriberViewSet(viewsets.ModelViewSet):
+    """API endpoint for message queue subscribers."""
+    queryset = Subscriber.objects.all()
+    serializer_class = SubscriberSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
+    """API endpoint for message queue dispatches."""
+    queryset = MessageQueueDispatch.objects.all()
+    serializer_class = MessageQueueDispatchSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
 @login_required
 def log_summary(request):
     """
     Displays a summary of log entries, grouped by application, instance, and level.
     """
     log_summary_data = (
-        AppLog.objects.values("app_name", "instance_name", "level_name")
+        AppLog.objects.values("app_name", "instance_name", "levelname")
         .annotate(count=Count("id"))
-        .order_by("app_name", "instance_name", "level_name")
+        .order_by("app_name", "instance_name", "levelname")
     )
 
     # Get latest timestamp for each (app_name, instance_name)
@@ -175,7 +229,7 @@ def log_summary(request):
     for item in log_summary_data:
         app_key = item["app_name"]
         instance_key = item["instance_name"]
-        level = item["level_name"]
+        level = item["levelname"]
         count = item["count"]
 
         if app_key not in summary:
@@ -253,7 +307,8 @@ class LogSummaryView(generics.ListAPIView):
     API endpoint that provides a summary of logs grouped by app and instance, with error rollups.
     """
     serializer_class = LogSummarySerializer
-    permission_classes = [AllowAny]  # or your desired permission class
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
     queryset = AppLog.objects.all()  # Provide a queryset for DRF permissions
 
     def get(self, request, format=None):
@@ -268,23 +323,23 @@ class LogSummaryView(generics.ListAPIView):
             # Aggregate error counts by level for this app/instance
             error_counts = (
                 AppLog.objects.filter(app_name=app, instance_name=instance)
-                .values('level_name')
+                .values('levelname')
                 .annotate(count=Count('id'))
             )
             # Get recent errors (last 5)
             recent_errors = list(
-                AppLog.objects.filter(app_name=app, instance_name=instance, level_name__in=['ERROR', 'CRITICAL'])
+                AppLog.objects.filter(app_name=app, instance_name=instance, levelname__in=['ERROR', 'CRITICAL'])
                 .order_by('-timestamp')[:5]
-                .values('timestamp', 'level_name', 'message', 'module', 'func_name', 'line_no')
+                .values('timestamp', 'levelname', 'message', 'module', 'funcname', 'lineno')
             )
             summary[app][instance] = {
-                'error_counts': {e['level_name']: e['count'] for e in error_counts},
+                'error_counts': {e['levelname']: e['count'] for e in error_counts},
                 'recent_errors': recent_errors,
             }
         return Response(summary, status=status.HTTP_200_OK)
 
 @login_required
-def database_overview(request):
+def database_tables_list(request):
     tables = []
     for model in apps.get_models():
         table_info = {'name': model._meta.db_table, 'count': 0, 'last_insert': None}
@@ -302,7 +357,7 @@ def database_overview(request):
         tables.append(table_info)
     tables = sorted(tables, key=lambda t: t['name'])
     tables = [t for t in tables if t['name'].startswith('swf_')]
-    return render(request, 'monitor_app/database_overview.html', {'tables': tables})
+    return render(request, 'monitor_app/database_tables_list.html', {'tables': tables})
 
 from django.http import Http404
 
@@ -481,3 +536,374 @@ def message_dispatches_list(request):
         'status_filter': status_filter,
     }
     return render(request, 'monitor_app/message_dispatches_list.html', context)
+
+
+# ==================== WORKFLOW VIEWS ====================
+
+@login_required
+def workflow_dashboard(request):
+    """Main workflow dashboard showing pipeline status and statistics."""
+    
+    # Get workflow statistics
+    total_workflows = STFWorkflow.objects.count()
+    active_workflows = STFWorkflow.objects.exclude(
+        current_status__in=[WorkflowStatus.WORKFLOW_COMPLETE, WorkflowStatus.FAILED]
+    ).count()
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE
+    ).count()
+    failed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.FAILED
+    ).count()
+    
+    # Get recent workflows
+    recent_workflows = STFWorkflow.objects.all().order_by('-created_at')[:20]
+    
+    # Get workflow status distribution
+    status_counts = STFWorkflow.objects.values('current_status').annotate(
+        count=Count('current_status')
+    ).order_by('current_status')
+    
+    # Get agent statistics
+    workflow_agents = SystemAgent.objects.filter(workflow_enabled=True)
+    
+    # Get DAQ state distribution
+    daq_state_counts = STFWorkflow.objects.values('daq_state').annotate(
+        count=Count('daq_state')
+    ).order_by('daq_state')
+    
+    context = {
+        'total_workflows': total_workflows,
+        'active_workflows': active_workflows,
+        'completed_workflows': completed_workflows,
+        'failed_workflows': failed_workflows,
+        'recent_workflows': recent_workflows,
+        'status_counts': status_counts,
+        'workflow_agents': workflow_agents,
+        'daq_state_counts': daq_state_counts,
+    }
+    
+    return render(request, 'monitor_app/workflow_dashboard.html', context)
+
+
+@login_required
+def workflow_list(request):
+    """List view of all STF workflows."""
+    
+    workflows = STFWorkflow.objects.all().order_by('-created_at')
+    
+    context = {
+        'workflows': workflows,
+    }
+    
+    return render(request, 'monitor_app/workflow_list.html', context)
+
+
+@login_required
+def workflow_detail(request, workflow_id):
+    """Detailed view of a specific workflow including all stages and messages."""
+    
+    workflow = get_object_or_404(STFWorkflow, workflow_id=workflow_id)
+    
+    # Get all stages for this workflow
+    stages = AgentWorkflowStage.objects.filter(
+        workflow=workflow
+    ).order_by('created_at')
+    
+    # Get all messages for this workflow
+    messages = WorkflowMessage.objects.filter(
+        workflow=workflow
+    ).order_by('sent_at')
+    
+    # Calculate workflow timing
+    workflow_duration = None
+    if workflow.completed_at:
+        workflow_duration = (workflow.completed_at - workflow.created_at).total_seconds()
+    elif workflow.failed_at:
+        workflow_duration = (workflow.failed_at - workflow.created_at).total_seconds()
+    
+    context = {
+        'workflow': workflow,
+        'stages': stages,
+        'messages': messages,
+        'workflow_duration': workflow_duration,
+    }
+    
+    return render(request, 'monitor_app/workflow_detail.html', context)
+
+
+@login_required
+def workflow_agents_list(request):
+    """View showing the status of all workflow agents."""
+    
+    agents = SystemAgent.objects.filter(workflow_enabled=True).order_by('agent_type', 'instance_name')
+    
+    # Get current processing counts per agent
+    agent_stats = []
+    for agent in agents:
+        # Get current processing stages
+        current_stages = AgentWorkflowStage.objects.filter(
+            agent_name=agent.instance_name,
+            status__in=[
+                WorkflowStatus.DATA_RECEIVED,
+                WorkflowStatus.DATA_PROCESSING,
+                WorkflowStatus.PROCESSING_RECEIVED,
+                WorkflowStatus.PROCESSING_PROCESSING,
+                WorkflowStatus.FASTMON_RECEIVED,
+            ]
+        ).count()
+        
+        # Get recent completion rate (last hour)
+        from datetime import timedelta
+        recent_completed = AgentWorkflowStage.objects.filter(
+            agent_name=agent.instance_name,
+            completed_at__gte=timezone.now() - timedelta(hours=1)
+        ).count()
+        
+        agent_stats.append({
+            'agent': agent,
+            'current_processing': current_stages,
+            'recent_completed': recent_completed,
+        })
+    
+    context = {
+        'agent_stats': agent_stats,
+    }
+    
+    return render(request, 'monitor_app/workflow_agents_list.html', context)
+
+
+@login_required
+def agent_detail(request, instance_name):
+    """Display details for a specific agent and its associated workflows."""
+    agent = get_object_or_404(SystemAgent, instance_name=instance_name)
+    workflows = STFWorkflow.objects.filter(current_agent=agent.agent_type).order_by('-generated_time')
+
+    context = {
+        'agent': agent,
+        'workflows': workflows,
+    }
+    return render(request, 'monitor_app/agent_detail.html', context)
+
+
+
+@login_required
+def workflow_messages(request):
+    """View showing all workflow messages for debugging."""
+    
+    messages = WorkflowMessage.objects.all().order_by('-sent_at')
+    
+    context = {
+        'messages': messages,
+    }
+    
+    return render(request, 'monitor_app/workflow_messages.html', context)
+
+
+@login_required
+def workflow_performance(request):
+    """View showing workflow performance metrics and analytics."""
+    
+    # Get processing time statistics
+    from django.db.models import Avg, Min, Max, Count
+    
+    # Overall workflow completion times
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE,
+        completed_at__isnull=False
+    )
+    
+    # Agent performance statistics
+    agent_performance = []
+    for agent_type in AgentType.choices:
+        agent_code = agent_type[0]
+        agent_name = agent_type[1]
+        
+        stages = AgentWorkflowStage.objects.filter(
+            agent_type=agent_code,
+            processing_time_seconds__isnull=False
+        )
+        
+        if stages.exists():
+            stats = stages.aggregate(
+                avg_time=Avg('processing_time_seconds'),
+                min_time=Min('processing_time_seconds'),
+                max_time=Max('processing_time_seconds'),
+                count=Count('stage_id')
+            )
+            
+            agent_performance.append({
+                'agent_type': agent_name,
+                'agent_code': agent_code,
+                'avg_time': stats['avg_time'],
+                'min_time': stats['min_time'],
+                'max_time': stats['max_time'],
+                'count': stats['count']
+            })
+    
+    # Recent throughput (last 24 hours)
+    from datetime import timedelta
+    recent_time = timezone.now() - timedelta(hours=24)
+    
+    recent_workflows = STFWorkflow.objects.filter(
+        created_at__gte=recent_time
+    ).count()
+    
+    recent_completed = STFWorkflow.objects.filter(
+        completed_at__gte=recent_time
+    ).count()
+    
+    context = {
+        'completed_workflows': completed_workflows,
+        'agent_performance': agent_performance,
+        'recent_workflows': recent_workflows,
+        'recent_completed': recent_completed,
+    }
+    
+    return render(request, 'monitor_app/workflow_performance.html', context)
+
+
+@login_required
+def workflow_realtime_dashboard(request):
+    """Real-time workflow dashboard with live updates."""
+    
+    # Get initial data (same as regular dashboard)
+    total_workflows = STFWorkflow.objects.count()
+    active_workflows = STFWorkflow.objects.exclude(
+        current_status__in=[WorkflowStatus.WORKFLOW_COMPLETE, WorkflowStatus.FAILED]
+    ).count()
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE
+    ).count()
+    failed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.FAILED
+    ).count()
+    
+    workflow_agents = SystemAgent.objects.filter(workflow_enabled=True)
+    
+    context = {
+        'total_workflows': total_workflows,
+        'active_workflows': active_workflows,
+        'completed_workflows': completed_workflows,
+        'failed_workflows': failed_workflows,
+        'workflow_agents': workflow_agents,
+    }
+    
+    return render(request, 'monitor_app/workflow_realtime_dashboard.html', context)
+
+
+@login_required
+def workflow_realtime_data_api(request):
+    """API endpoint providing real-time data for dashboard updates."""
+    
+    from datetime import timedelta
+    
+    # Basic metrics
+    total_workflows = STFWorkflow.objects.count()
+    active_workflows = STFWorkflow.objects.exclude(
+        current_status__in=[WorkflowStatus.WORKFLOW_COMPLETE, WorkflowStatus.FAILED]
+    ).count()
+    completed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.WORKFLOW_COMPLETE
+    ).count()
+    failed_workflows = STFWorkflow.objects.filter(
+        current_status=WorkflowStatus.FAILED
+    ).count()
+    
+    # Pipeline stage counts
+    pipeline_counts = {
+        'daqsim': STFWorkflow.objects.filter(current_status=WorkflowStatus.GENERATED).count(),
+        'data': STFWorkflow.objects.filter(
+            current_status__in=[
+                WorkflowStatus.DATA_RECEIVED, 
+                WorkflowStatus.DATA_PROCESSING, 
+                WorkflowStatus.DATA_COMPLETE
+            ]
+        ).count(),
+        'processing': STFWorkflow.objects.filter(
+            current_status__in=[
+                WorkflowStatus.PROCESSING_RECEIVED, 
+                WorkflowStatus.PROCESSING_PROCESSING, 
+                WorkflowStatus.PROCESSING_COMPLETE
+            ]
+        ).count(),
+        'fastmon': STFWorkflow.objects.filter(
+            current_status__in=[
+                WorkflowStatus.FASTMON_RECEIVED, 
+                WorkflowStatus.FASTMON_COMPLETE
+            ]
+        ).count(),
+    }
+    
+    # Agent status
+    agents_data = []
+    for agent in SystemAgent.objects.filter(workflow_enabled=True):
+        agents_data.append({
+            'instance_name': agent.instance_name,
+            'agent_type': agent.agent_type,
+            'status': agent.status,
+            'current_stf_count': agent.current_stf_count,
+            'total_stf_processed': agent.total_stf_processed,
+            'last_heartbeat': agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+        })
+    
+    # Recent messages (last 10)
+    recent_messages = []
+    for message in WorkflowMessage.objects.all().order_by('-sent_at')[:10]:
+        recent_messages.append({
+            'message_type': message.message_type,
+            'sender_agent': message.sender_agent,
+            'recipient_agent': message.recipient_agent,
+            'timestamp': message.sent_at.strftime('%H:%M:%S'),
+            'filename': message.workflow.filename if message.workflow else None,
+            'is_successful': message.is_successful,
+        })
+    
+    # Chart data
+    # Throughput over last 10 minutes (data points every minute)
+    now = timezone.now()
+    throughput_labels = []
+    throughput_data = []
+    
+    for i in range(10, 0, -1):
+        time_point = now - timedelta(minutes=i)
+        label = time_point.strftime('%H:%M')
+        throughput_labels.append(label)
+        
+        # Count workflows created in this minute
+        count = STFWorkflow.objects.filter(
+            created_at__gte=time_point,
+            created_at__lt=time_point + timedelta(minutes=1)
+        ).count()
+        throughput_data.append(count)
+    
+    # Processing times by agent type
+    from django.db.models import Avg
+    processing_times = []
+    for agent_type in [AgentType.DATA, AgentType.PROCESSING, AgentType.FASTMON]:
+        avg_time = AgentWorkflowStage.objects.filter(
+            agent_type=agent_type,
+            processing_time_seconds__isnull=False
+        ).aggregate(avg=Avg('processing_time_seconds'))['avg']
+        processing_times.append(round(avg_time, 2) if avg_time else 0)
+    
+    data = {
+        'metrics': {
+            'total_workflows': total_workflows,
+            'active_workflows': active_workflows,
+            'completed_workflows': completed_workflows,
+            'failed_workflows': failed_workflows,
+        },
+        'pipeline': pipeline_counts,
+        'agents': agents_data,
+        'recent_messages': recent_messages,
+        'charts': {
+            'throughput': {
+                'labels': throughput_labels,
+                'data': throughput_data,
+            },
+            'processing_times': processing_times,
+        }
+    }
+    
+    return JsonResponse(data)

@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}Workflow Messages{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Workflow Messages</h2>
+    <p>This page shows a detailed list of all workflow messages.</p>
+
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+
+    <div class="table-responsive">
+        <table id="messages-table" class="table table-striped table-bordered table-sm">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Type</th>
+                    <th>Sender</th>
+                    <th>Recipient</th>
+                    <th>Workflow</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for message in messages %}
+                <tr>
+                    <td>{{ message.sent_at|date:"Ymd-H:i:s" }}</td>
+                    <td>{{ message.message_type }}</td>
+                    <td><a href="{% url 'monitor_app:agent_detail' message.sender_agent %}">{{ message.sender_agent }}</a></td>
+                    <td><a href="{% url 'monitor_app:agent_detail' message.recipient_agent %}">{{ message.recipient_agent }}</a></td>
+                    <td style="font-size: 0.8rem;">
+                        {% if message.workflow %}
+                            <a href="{% url 'monitor_app:workflow_detail' message.workflow.workflow_id %}">{{ message.workflow.filename }}</a>
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if message.is_successful %}
+                            <span class="badge badge-success">Success</span>
+                        {% elif message.is_successful == False %}
+                            <span class="badge badge-danger">Failed</span>
+                        {% else %}
+                            <span class="badge badge-secondary">Unknown</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6">No messages found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- DataTables JS -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script>
+      $(document).ready(function() {
+        var table = $('#messages-table').DataTable({
+          paging: true,
+          pageLength: 100,
+          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+          ordering: true,
+          order: [[0, 'desc']],
+          info: true,
+          searching: true,
+          responsive: true,
+          search: {
+            caseInsensitive: true,
+            smart: false,
+            regex: false
+          },
+          language: {
+            search: "Filter table:",
+            lengthMenu: "Show _MENU_ entries",
+            info: "Showing _START_ to _END_ of _TOTAL_ messages",
+            paginate: {
+              first: "First",
+              last: "Last",
+              next: "Next",
+              previous: "Previous"
+            },
+            emptyTable: "No messages found matching your criteria."
+          }
+        });
+        $(table.table().container()).find('input[type="search"]').css({'width':'24em','display':'inline-block'});
+      });
+    </script>
+</div>
+{% endblock %}
