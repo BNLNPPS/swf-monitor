@@ -162,7 +162,7 @@ class StfFile(models.Model):
     file_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name='stf_files')
     machine_state = models.CharField(max_length=64, default="physics")
-    file_url = models.URLField(max_length=1024, unique=True)
+    stf_filename = models.CharField(max_length=255, unique=True)
     file_size_bytes = models.BigIntegerField(null=True, blank=True)
     checksum = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -247,6 +247,74 @@ class MessageQueueDispatch(models.Model):
 
     def __str__(self):
         return f"Dispatch {self.dispatch_id} - STF {self.stf_file.file_id} - {'Success' if self.is_successful else 'Failed'}"
+
+
+class PersistentState(models.Model):
+    """
+    Persistent state store with stable schema - just stores JSON.
+    Never modify this schema - it must remain stable across all deployments.
+    
+    Single record stores all persistent state as JSON blob.
+    Use get_state() and update_state() methods to access nested data.
+    """
+    id = models.AutoField(primary_key=True)  # Always have ID=1
+    state_data = models.JSONField(default=dict)  # All state stored here
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'swf_persistent_state'
+        
+    @classmethod
+    def get_state(cls):
+        """Get the complete state JSON object."""
+        obj, created = cls.objects.get_or_create(id=1, defaults={'state_data': {}})
+        return obj.state_data
+    
+    @classmethod
+    def update_state(cls, updates):
+        """Update state with new values (dict merge)."""
+        from django.db import transaction
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1, 
+                defaults={'state_data': {}}
+            )
+            obj.state_data.update(updates)
+            obj.save()
+            return obj.state_data
+    
+    @classmethod
+    def get_next_run_number(cls):
+        """Get next run number atomically and update last run info."""
+        from django.db import transaction
+        from django.utils import timezone
+        
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1,
+                defaults={'state_data': {
+                    'next_run_number': 100010,  # Start higher to avoid test data conflicts
+                    'last_run_number': None,
+                    'last_run_start_time': None
+                }}
+            )
+            
+            # Initialize if missing
+            if 'next_run_number' not in obj.state_data:
+                obj.state_data['next_run_number'] = 100010  # Start higher to avoid test data conflicts
+            
+            current_run = obj.state_data['next_run_number']
+            current_time = timezone.now().isoformat()
+            
+            # Update state for this run
+            obj.state_data.update({
+                'next_run_number': current_run + 1,
+                'last_run_number': current_run,
+                'last_run_start_time': current_time
+            })
+            obj.save()
+            
+            return current_run
 
 
 # Import workflow models to register them with Django

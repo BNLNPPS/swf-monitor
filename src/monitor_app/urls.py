@@ -30,6 +30,7 @@ from .views import (
     workflow_performance,
     workflow_realtime_dashboard,
     workflow_realtime_data_api,
+    persistent_state_view,
 )
 
 app_name = 'monitor_app'
@@ -50,11 +51,11 @@ urlpatterns = [
     
     # SWF Data Model URLs
     path('runs/', runs_list, name='runs_list'),
-    path('runs/<uuid:run_id>/', run_detail, name='run_detail'),
+    path('runs/<int:run_id>/', run_detail, name='run_detail'),
     path('stf-files/', stf_files_list, name='stf_files_list'),
     path('stf-files/<uuid:file_id>/', stf_file_detail, name='stf_file_detail'),
     path('subscribers/', subscribers_list, name='subscribers_list'),
-    path('subscribers/<uuid:subscriber_id>/', subscriber_detail, name='subscriber_detail'),
+    path('subscribers/<int:subscriber_id>/', subscriber_detail, name='subscriber_detail'),
     path('message-dispatches/', message_dispatches_list, name='message_dispatches_list'),
     path('message-dispatches/<uuid:dispatch_id>/', message_dispatch_detail, name='message_dispatch_detail'),
     
@@ -68,6 +69,9 @@ urlpatterns = [
     path('workflow/performance/', workflow_performance, name='workflow_performance'),
     path('workflow/realtime/', workflow_realtime_dashboard, name='workflow_realtime_dashboard'),
     path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
+    
+    # System State
+    path('persistent-state/', persistent_state_view, name='persistent_state'),
     
     # API
     path('api/', include('monitor_app.api_urls')),

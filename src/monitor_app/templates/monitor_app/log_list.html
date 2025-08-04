@@ -135,8 +135,8 @@
       $(document).ready(function() {
         var table = $('#log-table').DataTable({
           paging: true,
-          pageLength: 100, // default to 100 entries per page
-          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+          pageLength: 200, // default to 200 entries per page
+          lengthMenu: [[100, 200, 500, 1000, -1], [100, 200, 500, 1000, 'All']],
           ordering: true,
           order: [[0, 'desc']],
           info: true,

@@ -3,7 +3,7 @@ from django.http import HttpResponse, JsonResponse
 from django.db.models import Count, Max
 from django.core.paginator import Paginator
 from rest_framework import viewsets, generics
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -14,7 +14,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, PersistentState
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
@@ -281,7 +281,7 @@ def log_list(request):
     instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
 
     # Pagination
-    paginator = Paginator(log_list, 25) # Show 25 logs per page
+    paginator = Paginator(log_list, 200) # Show 200 logs per page
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
 
@@ -907,3 +907,44 @@ def workflow_realtime_data_api(request):
     }
     
     return JsonResponse(data)
+
+
+@login_required
+def persistent_state_view(request):
+    """View current persistent state data."""
+    import json
+    
+    state_data = PersistentState.get_state()
+    
+    # Get the actual database record for metadata
+    try:
+        state_obj = PersistentState.objects.get(id=1)
+        updated_at = state_obj.updated_at
+    except PersistentState.DoesNotExist:
+        updated_at = None
+    
+    context = {
+        'state_data': state_data,
+        'updated_at': updated_at,
+        'state_json': json.dumps(state_data, indent=2),
+    }
+    
+    return render(request, 'monitor_app/persistent_state.html', context)
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_next_run_number(request):
+    """API endpoint to get the next run number atomically."""
+    try:
+        run_number = PersistentState.get_next_run_number()
+        return Response({
+            'run_number': run_number,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

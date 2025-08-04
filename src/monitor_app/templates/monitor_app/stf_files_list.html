@@ -47,7 +47,7 @@
         <table id="stf-files-table" class="table table-striped table-bordered table-sm">
             <thead class="thead-dark">
                 <tr>
-                    <th>File URL</th>
+                    <th>STF Filename</th>
                     <th>Run</th>
                     <th>Machine State</th>
                     <th>Status</th>
@@ -59,7 +59,7 @@
                 {% for file in stf_files %}
                 <tr>
                     <td style="white-space: normal; word-break: break-all;">
-                        <a href="{{ file.file_url }}" target="_blank" title="{{ file.file_url }}">{{ file.file_url|truncatechars:60 }}</a>
+                        <span title="{{ file.stf_filename }}">{{ file.stf_filename }}</span>
                     </td>
                     <td>
                         <a href="{% url 'monitor_app:run_detail' file.run.run_id %}">{{ file.run.run_number }}</a>

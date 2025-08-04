@@ -5,11 +5,24 @@
 
 echo "Starting Django with dual HTTP/HTTPS support..."
 
+# Source ~/.env if it exists
+if [[ -f "$HOME/.env" ]]; then
+    source "$HOME/.env"
+fi
+
 # Navigate to swf-monitor source directory
-cd /eic/u/wenauseic/github/swf-monitor/src
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SWF_MONITOR_DIR="${SWF_MONITOR_DIR:-$SCRIPT_DIR}"
+cd "$SWF_MONITOR_DIR/src"
 
 # Activate virtual environment
-source /eic/u/wenauseic/github/swf-testbed/.venv/bin/activate
+SWF_TESTBED_DIR="${SWF_TESTBED_DIR:-$SCRIPT_DIR/../swf-testbed}"
+if [[ -f "$SWF_TESTBED_DIR/.venv/bin/activate" ]]; then
+    source "$SWF_TESTBED_DIR/.venv/bin/activate"
+else
+    echo "Warning: Virtual environment not found at $SWF_TESTBED_DIR/.venv"
+    echo "Continuing without virtual environment activation..."
+fi
 
 # Kill existing Django servers if running
 echo "Stopping existing Django servers..."
