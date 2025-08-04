@@ -26,12 +26,12 @@ class SubscriberAPITests(APITestCase):
         )
 
     def test_list_subscribers(self):
-        url = reverse('subscriber-list')
+        url = reverse('monitor_app:subscriber-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_create_subscriber(self):
-        url = reverse('subscriber-list')
+        url = reverse('monitor_app:subscriber-list')
         data = {
             'subscriber_name': 'new_subscriber',
             'fraction': 0.8,
@@ -43,13 +43,13 @@ class SubscriberAPITests(APITestCase):
         self.assertEqual(Subscriber.objects.count(), 2)
 
     def test_get_subscriber(self):
-        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        url = reverse('monitor_app:subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['subscriber_name'], "test_subscriber")
 
     def test_update_subscriber_status(self):
-        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        url = reverse('monitor_app:subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
         data = {'is_active': False}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -57,7 +57,7 @@ class SubscriberAPITests(APITestCase):
         self.assertFalse(self.subscriber.is_active)
 
     def test_update_subscriber_fraction(self):
-        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        url = reverse('monitor_app:subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
         data = {'fraction': 0.3}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -65,13 +65,13 @@ class SubscriberAPITests(APITestCase):
         self.assertEqual(self.subscriber.fraction, 0.3)
 
     def test_delete_subscriber(self):
-        url = reverse('subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
+        url = reverse('monitor_app:subscriber-detail', kwargs={'pk': self.subscriber.subscriber_id})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Subscriber.objects.filter(pk=self.subscriber.subscriber_id).exists())
 
     def test_create_subscriber_duplicate_name(self):
-        url = reverse('subscriber-list')
+        url = reverse('monitor_app:subscriber-list')
         data = {
             'subscriber_name': 'test_subscriber',  # Same as existing
             'fraction': 0.1,
@@ -81,7 +81,7 @@ class SubscriberAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_invalid_fraction_range(self):
-        url = reverse('subscriber-list')
+        url = reverse('monitor_app:subscriber-list')
         data = {
             'subscriber_name': 'invalid_fraction_subscriber',
             'fraction': 1.5,  # Invalid: > 1.0
@@ -93,6 +93,6 @@ class SubscriberAPITests(APITestCase):
 
     def test_unauthenticated_access_denied(self):
         self.client.force_authenticate(user=None)
-        url = reverse('subscriber-list')
+        url = reverse('monitor_app:subscriber-list')
         response = self.client.get(url)
         self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])

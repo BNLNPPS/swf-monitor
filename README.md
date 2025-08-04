@@ -52,7 +52,7 @@ The monitor serves as the central hub in a distributed agent-based workflow:
 | **[API Reference](docs/API_REFERENCE.md)** | REST API, WebSocket, database schema, authentication | Integration |
 | **[MCP Implementation](docs/MCP_REST_IMPLEMENTATION.md)** | Model Control Protocol REST API details | Agent communication |
 | **[Development Roadmap](docs/DEVELOPMENT_ROADMAP.md)** | Future plans, architecture, workflow design | Contributors |
-| **[Test Documentation](docs/TEST_REFACTORING_REPORT.md)** | Testing approach and structure | Quality assurance |
+| **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 
 ### Quick Links
 - **Interactive API Docs**: [Swagger UI](http://127.0.0.1:8000/api/schema/swagger-ui/) | [ReDoc](http://127.0.0.1:8000/api/schema/redoc/)
@@ -87,11 +87,7 @@ logger.info("Agent started")  # Automatically sent to monitor
 
 ## Testing
 
-```bash
-python manage.py test    # Run full test suite (65 tests)
-```
-
-Tests organized into focused modules in `src/monitor_app/tests/` for maintainability and AI-friendly navigation.
+See [Test System documentation](docs/TEST_SYSTEM.md) for comprehensive testing guide.
 
 ## Development
 

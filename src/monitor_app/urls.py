@@ -69,6 +69,6 @@ urlpatterns = [
     path('workflow/realtime/', workflow_realtime_dashboard, name='workflow_realtime_dashboard'),
     path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
     
-    # API v1
-    path('api/v1/', include('monitor_app.api_urls')),
+    # API
+    path('api/', include('monitor_app.api_urls')),
 ]

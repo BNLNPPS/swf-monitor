@@ -39,14 +39,9 @@ sleep 2
 
 # Start HTTPS server on port 8443 (for authenticated API calls)
 echo "Starting HTTPS server on port 8443 for authenticated APIs..."
-if python -c "import django_extensions" 2>/dev/null; then
-    python manage.py runserver_plus --cert-file "$SSL_CERT" --key-file "$SSL_KEY" 0.0.0.0:8443 &
-    HTTPS_PID=$!
-else
-    # Fallback: Use Daphne with HTTPS
-    daphne -p 8443 -b 0.0.0.0 --cert "$SSL_CERT" --key "$SSL_KEY" swf_monitor_project.asgi:application &
-    HTTPS_PID=$!
-fi
+# Use Daphne with proper SSL endpoint syntax
+daphne -e ssl:8443:privateKey="$SSL_KEY":certKey="$SSL_CERT":interface=0.0.0.0 swf_monitor_project.asgi:application &
+HTTPS_PID=$!
 
 echo "Django servers started:"
 echo "  HTTP (REST logging):     http://localhost:8002"

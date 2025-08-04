@@ -20,7 +20,7 @@ class RestLogHandler(logging.Handler):
     """
     Custom logging handler that sends log records to the swf-monitor REST API.
     
-    This handler formats Python log records and sends them to the /api/v1/logs/
+    This handler formats Python log records and sends them to the /api/logs/
     endpoint for storage in the database.
     """
     
@@ -36,7 +36,7 @@ class RestLogHandler(logging.Handler):
             timeout: Request timeout in seconds
         """
         super().__init__()
-        self.logs_url = f"{base_url.rstrip('/')}/api/v1/logs/"
+        self.logs_url = f"{base_url.rstrip('/')}/api/logs/"
         self.app_name = app_name
         self.instance_name = instance_name
         self.timeout = timeout
@@ -82,11 +82,11 @@ class RestLogHandler(logging.Handler):
             'instance_name': self.instance_name,
             'timestamp': datetime.fromtimestamp(record.created).isoformat(),
             'level': record.levelno,
-            'level_name': record.levelname,
+            'levelname': record.levelname,
             'message': record.getMessage(),
             'module': record.module or 'unknown',
-            'func_name': record.funcName or 'unknown',
-            'line_no': record.lineno or 0,
+            'funcname': record.funcName or 'unknown',
+            'lineno': record.lineno or 0,
             'process': record.process or 0,
             'thread': record.thread or 0,
             'extra_data': {
@@ -114,7 +114,7 @@ def send_direct_log_message(base_url: str, app_name: str, instance_name: str,
     Returns:
         True if successful, False otherwise
     """
-    logs_url = f"{base_url.rstrip('/')}/api/v1/logs/"
+    logs_url = f"{base_url.rstrip('/')}/api/logs/"
     
     # Map level names to integers
     level_mapping = {
@@ -130,11 +130,11 @@ def send_direct_log_message(base_url: str, app_name: str, instance_name: str,
         'instance_name': instance_name,
         'timestamp': datetime.now().isoformat(),
         'level': level_mapping.get(level.upper(), logging.INFO),
-        'level_name': level.upper(),
+        'levelname': level.upper(),
         'message': message,
         'module': kwargs.get('module', 'test_script'),
-        'func_name': kwargs.get('func_name', 'send_direct_log_message'),
-        'line_no': kwargs.get('line_no', 0),
+        'funcname': kwargs.get('funcname', 'send_direct_log_message'),
+        'lineno': kwargs.get('lineno', 0),
         'process': kwargs.get('process', os.getpid()),
         'thread': kwargs.get('thread', 0),
         'extra_data': kwargs.get('extra_data', {})

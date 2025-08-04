@@ -21,18 +21,18 @@ class SystemAgentAPITests(APITestCase):
         self.agent = SystemAgent.objects.create(instance_name='test_agent', agent_type='test', status='OK')
 
     def test_list_agents(self):
-        url = reverse('systemagent-list')
+        url = reverse('monitor_app:systemagent-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_create_agent(self):
-        url = reverse('systemagent-list')
+        url = reverse('monitor_app:systemagent-list')
         data = {'instance_name': 'new_agent', 'agent_type': 'test', 'status': 'OK'}
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
     def test_partial_update_agent(self):
-        url = reverse('systemagent-detail', kwargs={'pk': self.agent.pk})
+        url = reverse('monitor_app:systemagent-detail', kwargs={'pk': self.agent.pk})
         data = {'status': 'ERROR'}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -40,24 +40,24 @@ class SystemAgentAPITests(APITestCase):
         self.assertEqual(self.agent.status, 'ERROR')
 
     def test_delete_agent(self):
-        url = reverse('systemagent-detail', kwargs={'pk': self.agent.pk})
+        url = reverse('monitor_app:systemagent-detail', kwargs={'pk': self.agent.pk})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(SystemAgent.objects.filter(pk=self.agent.pk).exists())
 
     def test_create_agent_bad_data(self):
-        url = reverse('systemagent-list')
+        url = reverse('monitor_app:systemagent-list')
         data = {'instance_name': 'new_agent'} # Missing agent_type and status
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_update_non_existent_agent(self):
-        url = reverse('systemagent-detail', kwargs={'pk': 999})
+        url = reverse('monitor_app:systemagent-detail', kwargs={'pk': 999})
         data = {'status': 'ERROR'}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_delete_non_existent_agent(self):
-        url = reverse('systemagent-detail', kwargs={'pk': 999})
+        url = reverse('monitor_app:systemagent-detail', kwargs={'pk': 999})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
