@@ -31,12 +31,12 @@ class StfFileAPITests(APITestCase):
         )
 
     def test_list_stf_files(self):
-        url = reverse('stffile-list')
+        url = reverse('monitor_app:stffile-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_create_stf_file(self):
-        url = reverse('stffile-list')
+        url = reverse('monitor_app:stffile-list')
         data = {
             'run': self.run.run_id,
             'machine_state': 'cosmics',
@@ -50,13 +50,13 @@ class StfFileAPITests(APITestCase):
         self.assertEqual(StfFile.objects.count(), 2)
 
     def test_get_stf_file(self):
-        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        url = reverse('monitor_app:stffile-detail', kwargs={'pk': self.stf_file.file_id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['file_url'], "https://example.com/files/test.stf")
 
     def test_update_stf_file_status(self):
-        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        url = reverse('monitor_app:stffile-detail', kwargs={'pk': self.stf_file.file_id})
         data = {'status': 'processing'}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -64,13 +64,13 @@ class StfFileAPITests(APITestCase):
         self.assertEqual(self.stf_file.status, 'processing')
 
     def test_delete_stf_file(self):
-        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        url = reverse('monitor_app:stffile-detail', kwargs={'pk': self.stf_file.file_id})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(StfFile.objects.filter(pk=self.stf_file.file_id).exists())
 
     def test_create_stf_file_duplicate_url(self):
-        url = reverse('stffile-list')
+        url = reverse('monitor_app:stffile-list')
         data = {
             'run': self.run.run_id,
             'file_url': 'https://example.com/files/test.stf',  # Same as existing
@@ -81,13 +81,13 @@ class StfFileAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_invalid_status_value(self):
-        url = reverse('stffile-detail', kwargs={'pk': self.stf_file.file_id})
+        url = reverse('monitor_app:stffile-detail', kwargs={'pk': self.stf_file.file_id})
         data = {'status': 'invalid_status'}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_unauthenticated_access_denied(self):
         self.client.force_authenticate(user=None)
-        url = reverse('stffile-list')
+        url = reverse('monitor_app:stffile-list')
         response = self.client.get(url)
         self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])

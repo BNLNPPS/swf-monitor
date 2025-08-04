@@ -27,7 +27,7 @@ class RestLoggingIntegrationTests(APITestCase):
         unique_username = f"testuser_{uuid.uuid4()}"
         self.user = User.objects.create_user(username=unique_username, password='testpassword')
         self.client.force_authenticate(user=self.user)
-        self.logs_url = reverse('applog-list')
+        self.logs_url = reverse('monitor_app:applog-list')
         AppLog.objects.all().delete()  # Start with clean slate
     
     def test_direct_rest_log_creation(self):

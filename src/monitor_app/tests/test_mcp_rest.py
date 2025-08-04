@@ -1,137 +1,198 @@
-#!/usr/bin/env python3
 """
-Test script for MCP REST API endpoints.
-Verifies that all MCP REST endpoints respond correctly.
+Test MCP REST API endpoints.
+Tests the Model Control Protocol REST API implementation.
 """
 
-import requests
-import json
 import uuid
 from datetime import datetime
+from django.test import TestCase
+from django.contrib.auth.models import User
+from rest_framework.test import APIClient
+from rest_framework import status
+from rest_framework.authtoken.models import Token
+from monitor_app.models import SystemAgent
 
 
-def test_mcp_rest_endpoints():
-    """Test all MCP REST API endpoints."""
-    base_url = "http://localhost:8002/api/mcp"
+class MCPRestAPITests(TestCase):
+    """Test MCP REST API endpoints with proper authentication."""
     
-    print("🧪 Testing MCP REST API endpoints...")
-    print(f"Base URL: {base_url}")
-    
-    # Test data
-    message_id = str(uuid.uuid4())
-    
-    # Test 1: Discover Capabilities
-    print("\n1️⃣ Testing discover-capabilities endpoint...")
-    capabilities_payload = {
-        "mcp_version": "1.0",
-        "message_id": message_id,
-        "command": "discover_capabilities",
-        "payload": {}
-    }
-    
-    try:
-        response = requests.post(
-            f"{base_url}/discover-capabilities/",
-            json=capabilities_payload,
-            headers={"Content-Type": "application/json"}
+    def setUp(self):
+        """Set up test environment."""
+        # Create test user and token for authenticated requests
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='test@example.com',
+            password='testpass123'
         )
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            print(f"   ✅ Capabilities: {list(data.get('payload', {}).keys())}")
-        else:
-            print(f"   ❌ Error: {response.text}")
-    except requests.exceptions.ConnectionError:
-        print("   ⚠️  Server not running - start with: python manage.py runserver 8002")
-        return False
-    
-    # Test 2: Get Agent Liveness
-    print("\n2️⃣ Testing agent-liveness endpoint...")
-    liveness_payload = {
-        "mcp_version": "1.0", 
-        "message_id": str(uuid.uuid4()),
-        "command": "get_agent_liveness",
-        "payload": {}
-    }
-    
-    try:
-        response = requests.post(
-            f"{base_url}/agent-liveness/",
-            json=liveness_payload,
-            headers={"Content-Type": "application/json"}
+        self.token = Token.objects.create(user=self.user)
+        
+        # Create test client
+        self.client = APIClient()
+        
+        # Create test system agents
+        self.agent1 = SystemAgent.objects.create(
+            instance_name='test-agent-1',
+            agent_type='test',
+            description='Test agent 1 for MCP REST',
+            status='OK'
         )
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            agent_count = len(data.get('payload', {}))
-            print(f"   ✅ Found {agent_count} agents in system")
-        else:
-            print(f"   ❌ Error: {response.text}")
-    except requests.exceptions.ConnectionError:
-        print("   ⚠️  Server not running")
-        return False
+        self.agent2 = SystemAgent.objects.create(
+            instance_name='test-agent-2', 
+            agent_type='daqsim',
+            description='Test agent 2 for MCP REST',
+            status='WARNING'
+        )
     
-    # Test 3: Heartbeat (notification)
-    print("\n3️⃣ Testing heartbeat endpoint...")
-    heartbeat_payload = {
-        "mcp_version": "1.0",
-        "message_id": str(uuid.uuid4()),
-        "command": "heartbeat", 
-        "payload": {
-            "name": "test-agent-rest",
-            "timestamp": datetime.now().isoformat(),
-            "status": "OK"
+    def test_mcp_discover_capabilities_endpoint(self):
+        """Test MCP discover capabilities endpoint."""
+        capabilities_payload = {
+            "mcp_version": "1.0",
+            "message_id": str(uuid.uuid4()),
+            "command": "discover_capabilities",
+            "payload": {}
         }
-    }
-    
-    try:
-        response = requests.post(
-            f"{base_url}/heartbeat/",
-            json=heartbeat_payload,
-            headers={"Content-Type": "application/json"}
+        
+        response = self.client.post(
+            '/api/mcp/discover-capabilities/',
+            capabilities_payload,
+            format='json'
         )
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 200:
-            print("   ✅ Heartbeat processed successfully")
-        else:
-            print(f"   ❌ Error: {response.text}")
-    except requests.exceptions.ConnectionError:
-        print("   ⚠️  Server not running")
-        return False
+        
+        # Should return 200 OK
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Should return proper MCP response structure
+        data = response.json()
+        self.assertIn('mcp_version', data)
+        self.assertIn('message_id', data) 
+        self.assertIn('payload', data)
+        
+        # Should include capabilities in payload
+        capabilities = data.get('payload', {})
+        self.assertIsInstance(capabilities, dict)
     
-    # Test 4: Invalid request format
-    print("\n4️⃣ Testing error handling...")
-    invalid_payload = {
-        "invalid_field": "test"
-    }
-    
-    try:
-        response = requests.post(
-            f"{base_url}/discover-capabilities/",
-            json=invalid_payload,
-            headers={"Content-Type": "application/json"}
+    def test_mcp_agent_liveness_endpoint(self):
+        """Test MCP agent liveness endpoint."""
+        liveness_payload = {
+            "mcp_version": "1.0",
+            "message_id": str(uuid.uuid4()),
+            "command": "get_agent_liveness",
+            "payload": {}
+        }
+        
+        response = self.client.post(
+            '/api/mcp/agent-liveness/',
+            liveness_payload,
+            format='json'
         )
-        print(f"   Status: {response.status_code}")
-        if response.status_code == 400:
-            print("   ✅ Error handling works correctly")
-        else:
-            print(f"   ⚠️  Unexpected response: {response.text}")
-    except requests.exceptions.ConnectionError:
-        print("   ⚠️  Server not running")
-        return False
+        
+        # Should return 200 OK
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Should return proper MCP response structure
+        data = response.json()
+        self.assertIn('mcp_version', data)
+        self.assertIn('message_id', data)
+        self.assertIn('payload', data)
+        
+        # Should include our test agents
+        agents = data.get('payload', {})
+        self.assertIsInstance(agents, dict)
+        # Should have at least our 2 test agents
+        self.assertGreaterEqual(len(agents), 2)
     
-    print("\n🎉 MCP REST API test completed!")
-    return True
-
-
-if __name__ == "__main__":
-    print("MCP REST API Test Script")
-    print("=" * 40)
-    success = test_mcp_rest_endpoints()
+    def test_mcp_heartbeat_endpoint(self):
+        """Test MCP heartbeat endpoint."""
+        # Create agent first (MCP heartbeat updates existing agents)
+        test_agent = SystemAgent.objects.create(
+            instance_name='test-agent-mcp-rest',
+            agent_type='test',
+            description='Test agent for MCP heartbeat',
+            status='UNKNOWN'
+        )
+        
+        heartbeat_payload = {
+            "mcp_version": "1.0",
+            "message_id": str(uuid.uuid4()),
+            "command": "heartbeat",
+            "payload": {
+                "name": "test-agent-mcp-rest",
+                "timestamp": datetime.now().isoformat(),
+                "status": "OK"
+            }
+        }
+        
+        response = self.client.post(
+            '/api/mcp/heartbeat/',
+            heartbeat_payload,
+            format='json'
+        )
+        
+        # Should return 200 OK
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Should return success status
+        data = response.json()
+        self.assertEqual(data.get('status'), 'success')
+        
+        # Should have updated the agent status
+        test_agent.refresh_from_db()
+        self.assertEqual(test_agent.status, 'OK')
+        self.assertIsNotNone(test_agent.last_heartbeat)
     
-    if success:
-        print("\n✅ All tests completed. Check the output above for results.")
-    else:
-        print("\n❌ Tests failed. Make sure the Django server is running:")
-        print("   cd /path/to/swf-monitor/src")
-        print("   python manage.py runserver 8002")
+    def test_mcp_invalid_request_format(self):
+        """Test MCP endpoint with invalid request format."""
+        invalid_payload = {
+            "invalid_field": "test"
+        }
+        
+        response = self.client.post(
+            '/api/mcp/discover-capabilities/',
+            invalid_payload,
+            format='json'
+        )
+        
+        # Should return 400 Bad Request for invalid format
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    
+    def test_mcp_missing_required_fields(self):
+        """Test MCP endpoint with missing required fields."""
+        incomplete_payload = {
+            "mcp_version": "1.0",
+            # Missing message_id and command
+        }
+        
+        response = self.client.post(
+            '/api/mcp/discover-capabilities/',
+            incomplete_payload,
+            format='json'
+        )
+        
+        # Should return 400 Bad Request for missing fields
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+    
+    def test_mcp_authenticated_endpoint_access(self):
+        """Test that MCP endpoints work with authentication if required."""
+        # Set token authentication
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {self.token.key}')
+        
+        capabilities_payload = {
+            "mcp_version": "1.0",
+            "message_id": str(uuid.uuid4()),
+            "command": "discover_capabilities",
+            "payload": {}
+        }
+        
+        response = self.client.post(
+            '/api/mcp/discover-capabilities/',
+            capabilities_payload,
+            format='json'
+        )
+        
+        # Should work with authentication
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+    
+    def tearDown(self):
+        """Clean up after tests."""
+        # Clean up is handled automatically by Django's TestCase
+        pass

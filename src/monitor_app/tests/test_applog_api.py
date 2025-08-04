@@ -18,7 +18,7 @@ class AppLogAPITests(APITestCase):
         unique_username = f"testuser_{uuid.uuid4()}"
         self.user = User.objects.create_user(username=unique_username, password='testpassword')
         self.client.force_authenticate(user=self.user)
-        self.url = reverse('applog-list')
+        self.url = reverse('monitor_app:applog-list')
         self.log_data = {
             'app_name': 'test_app',
             'instance_name': 'test_instance',

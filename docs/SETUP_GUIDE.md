@@ -140,8 +140,21 @@ When deploying to production:
 Run the full test suite:
 
 ```bash
+./run_tests.py
+```
+
+This script automatically:
+- Activates the virtual environment (uses swf-testbed's .venv if available)
+- Runs pytest with proper Django configuration
+- Provides detailed test output and coverage
+
+Alternatively, you can use Django's built-in test runner:
+
+```bash
 python manage.py test
 ```
+
+*Note: `./run_tests.py` is the recommended approach as it handles environment setup automatically and provides better test output.*
 
 All tests should pass.
 

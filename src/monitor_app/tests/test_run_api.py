@@ -25,12 +25,12 @@ class RunAPITests(APITestCase):
         )
 
     def test_list_runs(self):
-        url = reverse('run-list')
+        url = reverse('monitor_app:run-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_create_run(self):
-        url = reverse('run-list')
+        url = reverse('monitor_app:run-list')
         data = {
             'run_number': 12346,
             'start_time': timezone.now().isoformat(),
@@ -41,13 +41,13 @@ class RunAPITests(APITestCase):
         self.assertEqual(Run.objects.count(), 2)
 
     def test_get_run(self):
-        url = reverse('run-detail', kwargs={'pk': self.run.run_id})
+        url = reverse('monitor_app:run-detail', kwargs={'pk': self.run.run_id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['run_number'], 12345)
 
     def test_update_run(self):
-        url = reverse('run-detail', kwargs={'pk': self.run.run_id})
+        url = reverse('monitor_app:run-detail', kwargs={'pk': self.run.run_id})
         data = {'end_time': timezone.now().isoformat()}
         response = self.client.patch(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -55,13 +55,13 @@ class RunAPITests(APITestCase):
         self.assertIsNotNone(self.run.end_time)
 
     def test_delete_run(self):
-        url = reverse('run-detail', kwargs={'pk': self.run.run_id})
+        url = reverse('monitor_app:run-detail', kwargs={'pk': self.run.run_id})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Run.objects.filter(pk=self.run.run_id).exists())
 
     def test_create_run_duplicate_number(self):
-        url = reverse('run-list')
+        url = reverse('monitor_app:run-list')
         data = {
             'run_number': 12345,  # Same as existing run
             'start_time': timezone.now().isoformat()
@@ -71,6 +71,6 @@ class RunAPITests(APITestCase):
 
     def test_unauthenticated_access_denied(self):
         self.client.force_authenticate(user=None)
-        url = reverse('run-list')
+        url = reverse('monitor_app:run-list')
         response = self.client.get(url)
         self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])

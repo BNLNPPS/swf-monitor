@@ -36,12 +36,12 @@ class MessageQueueDispatchAPITests(APITestCase):
         )
 
     def test_list_dispatches(self):
-        url = reverse('messagedispatch-list')
+        url = reverse('monitor_app:messagedispatch-list')
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_create_dispatch(self):
-        url = reverse('messagedispatch-list')
+        url = reverse('monitor_app:messagedispatch-list')
         data = {
             'stf_file': str(self.stf_file.file_id),
             'message_content': {"file_path": "/data/test2.stf", "status": "processing"},
@@ -53,13 +53,13 @@ class MessageQueueDispatchAPITests(APITestCase):
         self.assertEqual(MessageQueueDispatch.objects.count(), 2)
 
     def test_get_dispatch(self):
-        url = reverse('messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
+        url = reverse('monitor_app:messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['is_successful'])
 
     def test_update_dispatch_status(self):
-        url = reverse('messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
+        url = reverse('monitor_app:messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
         data = {
             'is_successful': False,
             'error_message': 'Updated: Connection timeout'
@@ -71,13 +71,13 @@ class MessageQueueDispatchAPITests(APITestCase):
         self.assertEqual(self.dispatch.error_message, 'Updated: Connection timeout')
 
     def test_delete_dispatch(self):
-        url = reverse('messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
+        url = reverse('monitor_app:messagedispatch-detail', kwargs={'pk': self.dispatch.dispatch_id})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(MessageQueueDispatch.objects.filter(pk=self.dispatch.dispatch_id).exists())
 
     def test_create_dispatch_invalid_stf_file(self):
-        url = reverse('messagedispatch-list')
+        url = reverse('monitor_app:messagedispatch-list')
         data = {
             'stf_file': '00000000-0000-0000-0000-000000000000',  # Non-existent UUID
             'message_content': {"test": "data"},
@@ -88,7 +88,7 @@ class MessageQueueDispatchAPITests(APITestCase):
 
     def test_dispatch_time_auto_set(self):
         """Test that dispatch_time is automatically set on creation"""
-        url = reverse('messagedispatch-list')
+        url = reverse('monitor_app:messagedispatch-list')
         before_creation = timezone.now()
         data = {
             'stf_file': str(self.stf_file.file_id),
@@ -103,6 +103,6 @@ class MessageQueueDispatchAPITests(APITestCase):
 
     def test_unauthenticated_access_denied(self):
         self.client.force_authenticate(user=None)
-        url = reverse('messagedispatch-list')
+        url = reverse('monitor_app:messagedispatch-list')
         response = self.client.get(url)
         self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
