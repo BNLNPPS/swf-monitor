@@ -102,13 +102,14 @@ class ActiveMQSSLConnectionTests(TestCase):
                     self.assertTrue(hasattr(conn, 'transport'))
                     
     def test_activemq_listener_import(self):
-        """Test that the ActiveMQ listener module imports correctly"""
+        """Test that the ActiveMQ listener components import correctly"""
         try:
-            from monitor_app.activemq_listener import start_activemq_listener, MessageListener
-            self.assertTrue(callable(start_activemq_listener))
-            self.assertTrue(MessageListener is not None)
+            from monitor_app.activemq_connection import ActiveMQConnectionManager
+            from monitor_app.activemq_processor import WorkflowMessageProcessor
+            self.assertTrue(ActiveMQConnectionManager is not None)
+            self.assertTrue(WorkflowMessageProcessor is not None)
         except ImportError as e:
-            self.fail(f"Failed to import ActiveMQ listener components: {e}")
+            self.fail(f"Failed to import ActiveMQ components: {e}")
             
     def test_activemq_ssl_connection_attempt(self):
         """Test actual SSL connection attempt (will fail if service not available)"""

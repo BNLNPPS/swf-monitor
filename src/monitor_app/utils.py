@@ -99,6 +99,26 @@ def format_elapsed_time(start_time, reference_time=None):
     return format_duration(elapsed)
 
 
+def format_datetime(dt):
+    """
+    Standard datetime formatting for all views in the monitor application.
+    
+    Args:
+        dt: datetime object to format
+        
+    Returns:
+        str: Formatted datetime string in YYYYMMDD HH:MM:SS format, or 'N/A' if None
+        
+    Example:
+        format_datetime(datetime(2024, 8, 5, 14, 30, 15))
+        # Returns: "20240805 14:30:15"
+    """
+    if not dt:
+        return 'N/A'
+    
+    return dt.strftime('%Y%m%d %H:%M:%S')
+
+
 class DataTablesProcessor:
     """
     Common processor for server-side DataTables AJAX requests.
@@ -220,6 +240,7 @@ def get_filter_params(request, param_names):
 def apply_filters(queryset, filters):
     """
     Apply multiple filters to a queryset.
+    Handles boolean field conversion from string values.
     
     Args:
         queryset: Django queryset to filter
@@ -229,6 +250,59 @@ def apply_filters(queryset, filters):
         Filtered queryset
     """
     for field, value in filters.items():
-        if value:
-            queryset = queryset.filter(**{field: value})
+        # Apply filter for any non-None, non-empty value (including 'false' string)
+        if value is not None and value != '':
+            # Convert string boolean values to actual booleans for database filtering
+            if value == 'true':
+                filter_value = True
+            elif value == 'false':
+                filter_value = False
+            else:
+                filter_value = value
+            
+            queryset = queryset.filter(**{field: filter_value})
     return queryset
+
+
+def get_filter_counts(queryset, filter_fields, current_filters=None):
+    """
+    Calculate counts for each possible filter value, considering current filters.
+    Only returns options that have >0 matches in the current filtered dataset.
+    
+    Args:
+        queryset: Base queryset to calculate counts from
+        filter_fields: List of field names to calculate counts for
+        current_filters: Dict of currently active filters to consider
+        
+    Returns:
+        Dict of filter_field: [(value, count), ...] pairs, sorted by count desc
+    """
+    from django.db.models import Count
+    
+    if current_filters is None:
+        current_filters = {}
+    
+    filter_counts = {}
+    
+    for field in filter_fields:
+        # Start with base queryset
+        field_queryset = queryset
+        
+        # Apply all current filters EXCEPT the one we're calculating counts for
+        temp_filters = {k: v for k, v in current_filters.items() if k != field and v}
+        field_queryset = apply_filters(field_queryset, temp_filters)
+        
+        # Get distinct values and their counts
+        # Use the model's primary key field name instead of assuming 'id'
+        pk_field = field_queryset.model._meta.pk.name
+        counts = (field_queryset
+                 .values(field)
+                 .annotate(count=Count(pk_field))
+                 .filter(count__gt=0)  # Only include options with >0 matches
+                 .order_by('-count', field))
+        
+        # Convert to list of tuples: (value, count)
+        # Include all values, including False for boolean fields (don't filter out falsy values)
+        filter_counts[field] = [(item[field], item['count']) for item in counts if item[field] is not None]
+    
+    return filter_counts

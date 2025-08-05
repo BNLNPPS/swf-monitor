@@ -1,0 +1,29 @@
+{% extends "monitor_app/_datatable_dynamic_base.html" %}
+
+{% block initial_filters %}
+{
+    is_active: '{{ selected_is_active|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[5, 'desc']]{% endblock %} <!-- Order by updated_at descending -->
+
+{% block update_active_filters_display %}
+const badges = [];
+
+// Show is_active filter if active (generic approach like logs)
+if (currentFilters.is_active) {
+    badges.push(`<span class="badge bg-info me-1">is_active: ${currentFilters.is_active}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="is_active"][data-value="' + currentFilters.is_active + '"]').addClass('filter-active');
+{% endblock %}
