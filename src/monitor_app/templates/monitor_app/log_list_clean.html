@@ -1,0 +1,157 @@
+{% extends "monitor_app/_datatable_base.html" %}
+
+{% block extra_filters %}
+<!-- Filter Controls -->
+<div class="card mb-3">
+    <div class="card-body">
+        
+        <!-- App/Instance/Level Quick Filters -->
+        <div class="filter-bar mb-2">
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Applications:</span>
+                <a href="#" data-filter="app_name" data-value="" class="filter-link {% if not selected_app %}filter-active{% endif %}">All</a>
+                {% for name in app_names %}
+                    <a href="#" data-filter="app_name" data-value="{{ name }}" class="filter-link {% if selected_app == name %}filter-active{% endif %}">{{ name }}</a>
+                {% endfor %}
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Instances:</span>
+                <a href="#" data-filter="instance_name" data-value="" class="filter-link {% if not selected_instance %}filter-active{% endif %}">All</a>
+                {% for name in instance_names %}
+                    <a href="#" data-filter="instance_name" data-value="{{ name }}" class="filter-link {% if selected_instance == name %}filter-active{% endif %}">{{ name }}</a>
+                {% endfor %}
+            </div>
+            <div>
+                <span style="font-weight: 600;">Levels:</span>
+                <a href="#" data-filter="levelname" data-value="" class="filter-link {% if not selected_levelname %}filter-active{% endif %}">All</a>
+                <a href="#" data-filter="levelname" data-value="DEBUG" class="filter-link {% if selected_levelname == 'DEBUG' %}filter-active{% endif %}">DEBUG</a>
+                <a href="#" data-filter="levelname" data-value="INFO" class="filter-link {% if selected_levelname == 'INFO' %}filter-active{% endif %}">INFO</a>
+                <a href="#" data-filter="levelname" data-value="WARNING" class="filter-link {% if selected_levelname == 'WARNING' %}filter-active{% endif %}">WARNING</a>
+                <a href="#" data-filter="levelname" data-value="ERROR" class="filter-link {% if selected_levelname == 'ERROR' %}filter-active{% endif %}">ERROR</a>
+                <a href="#" data-filter="levelname" data-value="CRITICAL" class="filter-link {% if selected_levelname == 'CRITICAL' %}filter-active{% endif %}">CRITICAL</a>
+            </div>
+        </div>
+
+        <!-- Time Range Filter -->
+        <form id="time-range-form" class="row g-3">
+            <div class="col-md-4">
+                <label for="start_time" class="form-label">Start Time</label>
+                <input type="datetime-local" class="form-control" id="start_time" name="start_time" value="{{ request.GET.start_time|default:'' }}">
+            </div>
+            <div class="col-md-4">
+                <label for="end_time" class="form-label">End Time</label>
+                <input type="datetime-local" class="form-control" id="end_time" name="end_time" value="{{ request.GET.end_time|default:'' }}">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="button" id="apply-time-filter" class="btn btn-primary me-2">Apply</button>
+                <button type="button" id="clear-time-filter" class="btn btn-outline-secondary">Clear</button>
+            </div>
+        </form>
+
+        <!-- Active filters display -->
+        <div id="active-filters" class="mt-2" style="display: none;">
+            <strong>Active filters:</strong>
+            <span id="filter-badges"></span>
+            <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2">clear all</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block initial_filters %}
+{
+    app_name: '{{ selected_app|default:"" }}',
+    instance_name: '{{ selected_instance|default:"" }}',
+    levelname: '{{ selected_levelname|default:"" }}',
+    start_time: '{{ request.GET.start_time|default:"" }}',
+    end_time: '{{ request.GET.end_time|default:"" }}'
+}
+{% endblock %}
+
+{% block update_active_filters_display %}
+const badges = [];
+// Combine app/instance:level into concise format
+let filterText = '';
+if (currentFilters.app_name && currentFilters.instance_name) {
+    filterText = `${currentFilters.app_name}/${currentFilters.instance_name}`;
+} else if (currentFilters.app_name) {
+    filterText = currentFilters.app_name;
+} else if (currentFilters.instance_name) {
+    filterText = currentFilters.instance_name;
+}
+
+if (currentFilters.levelname) {
+    if (filterText) {
+        filterText += `:${currentFilters.levelname}`;
+    } else {
+        filterText = currentFilters.levelname;
+    }
+}
+
+if (filterText) {
+    badges.push(`<span class="badge bg-info me-1">${filterText}</span>`);
+}
+
+if (currentFilters.start_time) {
+    badges.push(`<span class="badge bg-secondary me-1">From: ${currentFilters.start_time}</span>`);
+}
+if (currentFilters.end_time) {
+    badges.push(`<span class="badge bg-secondary me-1">To: ${currentFilters.end_time}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="app_name"][data-value="' + currentFilters.app_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="instance_name"][data-value="' + currentFilters.instance_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="levelname"][data-value="' + currentFilters.levelname + '"]').addClass('filter-active');
+{% endblock %}
+
+{% block extra_scripts %}
+// Handle filter link clicks
+$('.filter-link').on('click', function(e) {
+    e.preventDefault();
+    const filterType = $(this).data('filter');
+    const filterValue = $(this).data('value');
+    window.tableCurrentFilters[filterType] = filterValue;
+    window.tableUpdateFilters();
+});
+
+// Handle time range filters
+$('#apply-time-filter').on('click', function() {
+    window.tableCurrentFilters.start_time = $('#start_time').val();
+    window.tableCurrentFilters.end_time = $('#end_time').val();
+    window.tableUpdateFilters();
+});
+
+$('#clear-time-filter').on('click', function() {
+    window.tableCurrentFilters.start_time = '';
+    window.tableCurrentFilters.end_time = '';
+    $('#start_time').val('');
+    $('#end_time').val('');
+    window.tableUpdateFilters();
+});
+
+// Clear all filters
+$('#clear-all-filters').on('click', function() {
+    // Clear the actual currentFilters object used by the table
+    window.tableCurrentFilters.app_name = '';
+    window.tableCurrentFilters.instance_name = '';
+    window.tableCurrentFilters.levelname = '';
+    window.tableCurrentFilters.start_time = '';
+    window.tableCurrentFilters.end_time = '';
+    
+    // Clear the form inputs
+    $('#start_time').val('');
+    $('#end_time').val('');
+    
+    // Update the table and URL
+    window.tableUpdateFilters();
+});
+{% endblock %}

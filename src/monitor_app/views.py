@@ -1,5 +1,6 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
+from django.urls import reverse
 from django.db.models import Count, Max
 from django.core.paginator import Paginator
 from rest_framework import viewsets, generics
@@ -210,97 +211,352 @@ class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
 @login_required
 def log_summary(request):
     """
-    Displays a summary of log entries, grouped by application, instance, and level.
+    Professional log summary view using server-side DataTables for optimal performance.
+    Replaced the old client-side implementation.
     """
-    log_summary_data = (
-        AppLog.objects.values("app_name", "instance_name", "levelname")
-        .annotate(count=Count("id"))
-        .order_by("app_name", "instance_name", "levelname")
-    )
-
-    # Get latest timestamp for each (app_name, instance_name)
-    latest_timestamps = AppLog.objects.values("app_name", "instance_name").annotate(latest=Max("timestamp"))
-    latest_map = {}
-    for item in latest_timestamps:
-        latest_map[(item["app_name"], item["instance_name"])] = item["latest"]
-
-    # Restructure the data for the template
-    summary = {}
-    for item in log_summary_data:
-        app_key = item["app_name"]
-        instance_key = item["instance_name"]
-        level = item["levelname"]
-        count = item["count"]
-
-        if app_key not in summary:
-            summary[app_key] = {}
-        if instance_key not in summary[app_key]:
-            summary[app_key][instance_key] = {
-                "levels": {},
-                "total": 0,
-                "latest_timestamp": latest_map.get((app_key, instance_key)),
-            }
-        summary[app_key][instance_key]["levels"][level] = count
-        summary[app_key][instance_key]["total"] += count
-
-    # Only provide 'summary' in context, as requested
-    context = {"summary": summary}
-    return render(request, "monitor_app/log_summary.html", context)
-
-@login_required
-def log_list(request):
-    """
-    Displays a paginated list of all log entries, with filtering.
-    """
-    from django.utils.dateparse import parse_datetime
-    log_list = AppLog.objects.all()
-
-    # Filtering
+    # Get filter parameters (for initial state)
     app_name = request.GET.get('app_name')
     instance_name = request.GET.get('instance_name')
-    start_time = request.GET.get('start_time')
-    end_time = request.GET.get('end_time')
-
-    if app_name:
-        log_list = log_list.filter(app_name=app_name)
-    if instance_name:
-        log_list = log_list.filter(instance_name=instance_name)
-    if start_time:
-        dt = parse_datetime(start_time)
-        if dt:
-            log_list = log_list.filter(timestamp__gte=dt)
-    if end_time:
-        dt = parse_datetime(end_time)
-        if dt:
-            log_list = log_list.filter(timestamp__lte=dt)
-
-    # Get distinct app and instance names for filter links, sorted alphabetically, case-insensitive, unique
+    levelname = request.GET.get('levelname')
+    
+    # Get distinct app and instance names for filter links
     app_names_qs = AppLog.objects.values_list('app_name', flat=True)
     instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
     app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
     instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
 
-    # Pagination
-    paginator = Paginator(log_list, 200) # Show 200 logs per page
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'app_name', 'title': 'Application Name', 'orderable': True},
+        {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
+        {'name': 'latest_timestamp', 'title': 'Latest Timestamp', 'orderable': True},
+        {'name': 'info_count', 'title': 'INFO', 'orderable': True},
+        {'name': 'warning_count', 'title': 'WARNING', 'orderable': True},
+        {'name': 'error_count', 'title': 'ERROR', 'orderable': True},
+        {'name': 'critical_count', 'title': 'CRITICAL', 'orderable': True},
+        {'name': 'debug_count', 'title': 'DEBUG', 'orderable': True},
+        {'name': 'total_count', 'title': 'Total', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
 
-    # Get first and last log for timestamp range display
-    logs_list = list(page_obj.object_list)
-    first_log = logs_list[0] if logs_list else None
-    last_log = logs_list[-1] if logs_list else None
-
-    # Always provide 'page_obj' in context, even if empty
     context = {
-        'page_obj': page_obj,
+        'table_title': 'Log Summary',
+        'table_description': 'Server-side aggregated log counts by application and instance, with level breakdowns and drill-down access.',
+        'ajax_url': reverse('monitor_app:log_summary_datatable_ajax'),
+        'columns': columns,
         'app_names': app_names,
         'instance_names': instance_names,
         'selected_app': app_name,
         'selected_instance': instance_name,
-        'first_log': first_log,
-        'last_log': last_log,
+        'selected_levelname': levelname,
     }
-    return render(request, 'monitor_app/log_list.html', context)
+    return render(request, 'monitor_app/log_summary_ajax.html', context)
+
+
+
+
+def log_summary_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of log summary data.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from django.http import JsonResponse
+    from django.db.models import Q, Count, Max
+    import json
+    
+    # DataTables parameters
+    draw = int(request.GET.get('draw', 1))
+    start = int(request.GET.get('start', 0))
+    length = int(request.GET.get('length', 100))
+    search_value = request.GET.get('search[value]', '').strip()
+    
+    # Column definitions (must match template column order)
+    columns = ['app_name', 'instance_name', 'latest_timestamp', 'info_count', 'warning_count', 'error_count', 'critical_count', 'debug_count', 'total_count', 'actions']
+    
+    # Order parameters
+    order_column_idx = int(request.GET.get('order[0][column]', 0))
+    order_direction = request.GET.get('order[0][dir]', 'desc')
+    order_column = columns[order_column_idx] if 0 <= order_column_idx < len(columns) else 'app_name'
+    
+    # Apply existing filters (app_name, instance_name, levelname)
+    app_name = request.GET.get('app_name')
+    instance_name = request.GET.get('instance_name')
+    levelname = request.GET.get('levelname')
+    
+    # Start with base queryset
+    base_queryset = AppLog.objects.all()
+    if app_name:
+        base_queryset = base_queryset.filter(app_name=app_name)
+    if instance_name:
+        base_queryset = base_queryset.filter(instance_name=instance_name)
+    if levelname:
+        base_queryset = base_queryset.filter(levelname=levelname)
+    
+    # Create summary queryset - one row per app/instance pair
+    summary_queryset = (
+        base_queryset.values('app_name', 'instance_name')
+        .annotate(
+            latest_timestamp=Max('timestamp'),
+            info_count=Count('id', filter=Q(levelname='INFO')),
+            warning_count=Count('id', filter=Q(levelname='WARNING')),
+            error_count=Count('id', filter=Q(levelname='ERROR')),
+            critical_count=Count('id', filter=Q(levelname='CRITICAL')),
+            debug_count=Count('id', filter=Q(levelname='DEBUG')),
+            total_count=Count('id')
+        )
+    )
+    
+    # Total count before search filtering
+    records_total_queryset = (
+        AppLog.objects.values('app_name', 'instance_name')
+        .annotate(count=Count('id'))
+    )
+    records_total = records_total_queryset.count()
+    records_filtered = summary_queryset.count()
+    
+    # Apply search filter
+    if search_value:
+        search_q = Q(app_name__icontains=search_value) | Q(instance_name__icontains=search_value)
+        summary_queryset = summary_queryset.filter(search_q)
+        records_filtered = summary_queryset.count()
+    
+    # Apply ordering
+    if order_column == 'latest_timestamp':
+        order_by = f'{"-" if order_direction == "desc" else ""}latest_timestamp'
+    elif order_column in ['info_count', 'warning_count', 'error_count', 'critical_count', 'debug_count', 'total_count']:
+        order_by = f'{"-" if order_direction == "desc" else ""}{order_column}'
+    else:
+        # For app_name, instance_name, actions
+        order_by = f'{"-" if order_direction == "desc" else ""}{order_column}'
+    
+    summary_queryset = summary_queryset.order_by(order_by)
+    
+    # Apply pagination
+    summary_data = summary_queryset[start:start + length]
+    
+    # Format data for DataTables
+    data = []
+    for item in summary_data:
+        # Format timestamp
+        timestamp_str = item['latest_timestamp'].strftime('%Y%m%d %H:%M:%S') if item['latest_timestamp'] else 'N/A'
+        
+        # Create app_name link (preserve filters)
+        app_filter_url = f"?app_name={item['app_name']}"
+        if instance_name:
+            app_filter_url += f"&instance_name={instance_name}"
+        app_name_link = f'<a href="/logs/{app_filter_url}">{item["app_name"]}</a>'
+        
+        # Create instance_name link (preserve filters)
+        instance_filter_url = f"?instance_name={item['instance_name']}"
+        if app_name:
+            instance_filter_url += f"&app_name={app_name}"
+        instance_name_link = f'<a href="/logs/{instance_filter_url}">{item["instance_name"]}</a>'
+        
+        # View logs action link
+        view_logs_url = f'/logs/?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
+        view_logs_link = f'<a href="{view_logs_url}">View Logs</a>'
+        
+        # Create clickable drill-down links for each log level count
+        from urllib.parse import urlencode
+        
+        def create_level_link(count, level):
+            if count == 0:
+                return str(count)
+            params = {
+                'app_name': item['app_name'],
+                'instance_name': item['instance_name'],
+                'levelname': level
+            }
+            url = f'/logs/?{urlencode(params)}'
+            return f'<a href="{url}">{count}</a>'
+        
+        data.append([
+            app_name_link,
+            instance_name_link,
+            timestamp_str,
+            create_level_link(item['info_count'], 'INFO'),
+            create_level_link(item['warning_count'], 'WARNING'),
+            create_level_link(item['error_count'], 'ERROR'),
+            create_level_link(item['critical_count'], 'CRITICAL'),
+            create_level_link(item['debug_count'], 'DEBUG'),
+            item['total_count'],  # Total count stays as plain number
+            view_logs_link
+        ])
+    
+    response = {
+        'draw': draw,
+        'recordsTotal': records_total,
+        'recordsFiltered': records_filtered,
+        'data': data
+    }
+    
+    return JsonResponse(response)
+
+
+@login_required
+def log_list(request):
+    """
+    Professional log list view using server-side DataTables.
+    Replaced the old pagination-based view for better performance and UX.
+    """
+    from django.utils.dateparse import parse_datetime
+    
+    # Get filter parameters (for initial state)
+    app_name = request.GET.get('app_name')
+    instance_name = request.GET.get('instance_name')
+    levelname = request.GET.get('levelname')
+    
+    # Get distinct app and instance names for filter links
+    app_names_qs = AppLog.objects.values_list('app_name', flat=True)
+    instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
+    app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
+    instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
+
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'timestamp', 'title': 'Timestamp', 'orderable': True},
+        {'name': 'app_name', 'title': 'App Name', 'orderable': True},
+        {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
+        {'name': 'levelname', 'title': 'Level', 'orderable': True},
+        {'name': 'message', 'title': 'Message', 'orderable': False},
+        {'name': 'module', 'title': 'Module', 'orderable': True},
+        {'name': 'funcname', 'title': 'Function', 'orderable': True},
+    ]
+
+    context = {
+        'table_title': 'Log List',
+        'table_description': 'Server-side processing with live search, sorting, and filtering across all log records.',
+        'ajax_url': reverse('monitor_app:logs_datatable_ajax'),
+        'columns': columns,
+        'app_names': app_names,
+        'instance_names': instance_names,
+        'selected_app': app_name,
+        'selected_instance': instance_name,
+        'selected_levelname': levelname,
+    }
+    return render(request, 'monitor_app/log_list_clean.html', context)
+
+
+
+def logs_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of logs.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from django.http import JsonResponse
+    from django.utils.dateparse import parse_datetime
+    from django.db.models import Q
+    import json
+    
+    # DataTables parameters
+    draw = int(request.GET.get('draw', 1))
+    start = int(request.GET.get('start', 0))
+    length = int(request.GET.get('length', 25))
+    search_value = request.GET.get('search[value]', '').strip()
+    
+    # Column definitions (must match template column order)
+    columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
+    
+    # Order parameters
+    order_column_idx = int(request.GET.get('order[0][column]', 0))
+    order_direction = request.GET.get('order[0][dir]', 'desc')
+    order_column = columns[order_column_idx] if 0 <= order_column_idx < len(columns) else 'timestamp'
+    if order_direction == 'asc':
+        order_by = order_column
+    else:
+        order_by = f'-{order_column}'
+    
+    # Build base queryset
+    queryset = AppLog.objects.all()
+    
+    # Apply existing filters (app_name, instance_name, levelname, time_range)
+    app_name = request.GET.get('app_name')
+    instance_name = request.GET.get('instance_name')
+    levelname = request.GET.get('levelname')
+    start_time = request.GET.get('start_time')
+    end_time = request.GET.get('end_time')
+    
+    if app_name:
+        queryset = queryset.filter(app_name=app_name)
+    if instance_name:
+        queryset = queryset.filter(instance_name=instance_name)
+    if levelname:
+        queryset = queryset.filter(levelname=levelname)
+    if start_time:
+        dt = parse_datetime(start_time)
+        if dt:
+            queryset = queryset.filter(timestamp__gte=dt)
+    if end_time:
+        dt = parse_datetime(end_time)
+        if dt:
+            queryset = queryset.filter(timestamp__lte=dt)
+    
+    # Total count before search filtering
+    records_total = AppLog.objects.count()
+    records_filtered = queryset.count()
+    
+    # Apply search filter
+    if search_value:
+        search_q = Q(app_name__icontains=search_value) | \
+                   Q(instance_name__icontains=search_value) | \
+                   Q(levelname__icontains=search_value) | \
+                   Q(message__icontains=search_value) | \
+                   Q(module__icontains=search_value) | \
+                   Q(funcname__icontains=search_value)
+        queryset = queryset.filter(search_q)
+        records_filtered = queryset.count()
+    
+    # Apply ordering and pagination
+    queryset = queryset.order_by(order_by)[start:start + length]
+    
+    # Format data for DataTables
+    data = []
+    for log in queryset:
+        # Format timestamp for display
+        timestamp_str = log.timestamp.strftime('%Y%m%d %H:%M:%S')
+        
+        # Create app_name link (preserve filters)
+        app_filter_url = f"?app_name={log.app_name}"
+        if instance_name:
+            app_filter_url += f"&instance_name={instance_name}"
+        app_name_link = f'<a href="{app_filter_url}">{log.app_name}</a>'
+        
+        # Create instance_name link (preserve filters) 
+        instance_filter_url = f"?instance_name={log.instance_name}"
+        if app_name:
+            instance_filter_url += f"&app_name={app_name}"
+        instance_name_link = f'<a href="{instance_filter_url}">{log.instance_name}</a>'
+        
+        # Format level with badge
+        level_badge = f'<span class="badge badge-{log.levelname.lower()}">{log.levelname}</span>'
+        
+        # Truncate message if too long
+        message = log.message
+        if len(message) > 200:
+            message = message[:200] + '...'
+        
+        # Function with line number
+        func_display = f"{log.funcname}:{log.lineno}"
+        
+        data.append([
+            timestamp_str,
+            app_name_link,
+            instance_name_link,
+            level_badge,
+            message,
+            log.module,
+            func_display
+        ])
+    
+    response = {
+        'draw': draw,
+        'recordsTotal': records_total,
+        'recordsFiltered': records_filtered,
+        'data': data
+    }
+    
+    return JsonResponse(response)
+
 
 class LogSummaryView(generics.ListAPIView):
     """
@@ -390,21 +646,136 @@ def database_table_list(request, table_name):
 
 @login_required
 def runs_list(request):
-    """Display list of data-taking runs"""
-    runs = Run.objects.all().order_by('-start_time')
+    """
+    Professional runs list view using server-side DataTables.
+    Provides high-performance access to all run records with filtering.
+    """
+    from django.urls import reverse
     
-    # Filter by status (active/completed)
+    # Get filter parameters (for initial state)
     status_filter = request.GET.get('status')
-    if status_filter == 'active':
-        runs = runs.filter(end_time__isnull=True)
-    elif status_filter == 'completed':
-        runs = runs.filter(end_time__isnull=False)
+    
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'run_number', 'title': 'Run Number', 'orderable': True},
+        {'name': 'status', 'title': 'Status', 'orderable': True},
+        {'name': 'start_time', 'title': 'Start Time', 'orderable': True},
+        {'name': 'end_time', 'title': 'End Time', 'orderable': True},
+        {'name': 'duration', 'title': 'Duration', 'orderable': False},
+        {'name': 'stf_files_count', 'title': 'STF Files', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
     
     context = {
-        'runs': runs,
-        'status_filter': status_filter,
+        'table_title': 'Data-Taking Runs',
+        'table_description': 'Server-side processing with live search and filtering across all run records.',
+        'ajax_url': reverse('monitor_app:runs_datatable_ajax'),
+        'columns': columns,
+        'selected_status': status_filter,
     }
     return render(request, 'monitor_app/runs_list.html', context)
+
+
+def runs_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of runs.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from django.http import JsonResponse
+    from django.db.models import Q, Count
+    from django.utils import timezone
+    import json
+    
+    # DataTables parameters
+    draw = int(request.GET.get('draw', 1))
+    start = int(request.GET.get('start', 0))
+    length = int(request.GET.get('length', 50))
+    search_value = request.GET.get('search[value]', '').strip()
+    
+    # Column definitions (must match template column order)
+    columns = ['run_number', 'status', 'start_time', 'end_time', 'duration', 'stf_files_count', 'actions']
+    
+    # Order parameters
+    order_column_idx = int(request.GET.get('order[0][column]', 2))  # Default to start_time desc
+    order_direction = request.GET.get('order[0][dir]', 'desc')
+    order_column = columns[order_column_idx] if 0 <= order_column_idx < len(columns) else 'start_time'
+    
+    # Handle special ordering cases
+    if order_column == 'status':
+        # Order by end_time null status (active vs completed)
+        order_by = 'end_time' if order_direction == 'asc' else '-start_time'
+    elif order_column == 'stf_files_count':
+        # This will be handled after annotation
+        order_by = 'stf_files_count' if order_direction == 'asc' else '-stf_files_count'
+    else:
+        order_by = order_column if order_direction == 'asc' else f'-{order_column}'
+    
+    # Build base queryset with STF file count
+    queryset = Run.objects.annotate(stf_files_count=Count('stf_files')).all()
+    
+    # Apply existing filters (status)
+    status_filter = request.GET.get('status')
+    if status_filter == 'active':
+        queryset = queryset.filter(end_time__isnull=True)
+    elif status_filter == 'completed':
+        queryset = queryset.filter(end_time__isnull=False)
+    
+    # Total count before search filtering
+    records_total = Run.objects.count()
+    records_filtered = queryset.count()
+    
+    # Apply search filter
+    if search_value:
+        search_q = (Q(run_number__icontains=search_value) | 
+                   Q(start_time__icontains=search_value) |
+                   Q(end_time__icontains=search_value))
+        queryset = queryset.filter(search_q)
+        records_filtered = queryset.count()
+    
+    # Apply ordering
+    queryset = queryset.order_by(order_by)
+    
+    # Apply pagination
+    runs = queryset[start:start + length]
+    
+    # Format data for DataTables
+    data = []
+    for run in runs:
+        # Format status as plain text
+        status_text = 'Active' if not run.end_time else 'Completed'
+        
+        # Format timestamps
+        start_time_str = run.start_time.strftime('%Y%m%d %H:%M:%S') if run.start_time else 'N/A'
+        end_time_str = run.end_time.strftime('%Y%m%d %H:%M:%S') if run.end_time else '—'
+        
+        # Calculate duration using common utility
+        from .utils import format_run_duration
+        duration_str = format_run_duration(run.start_time, run.end_time)
+        
+        # Create run number link
+        run_number_link = f'<a href="/runs/{run.run_id}/">{run.run_number}</a>'
+        
+        # View details action link
+        view_link = f'<a href="/runs/{run.run_id}/">View</a>'
+        
+        data.append([
+            run_number_link,
+            status_text,
+            start_time_str,
+            end_time_str,
+            duration_str,
+            run.stf_files_count,
+            view_link
+        ])
+    
+    response = {
+        'draw': draw,
+        'recordsTotal': records_total,
+        'recordsFiltered': records_filtered,
+        'data': data
+    }
+    
+    return JsonResponse(response)
 
 @login_required
 def run_detail(request, run_id):
@@ -427,44 +798,148 @@ def run_detail(request, run_id):
 
 @login_required
 def stf_files_list(request):
-    """Display list of STF files with filtering"""
-    stf_files = StfFile.objects.all().order_by('-created_at')
+    """
+    Professional STF files list view using server-side DataTables.
+    Provides high-performance access to all STF file records with filtering.
+    """
+    from django.urls import reverse
     
-    # Filtering
+    # Get filter parameters (for initial state)
+    run_number = request.GET.get('run_number')
+    status_filter = request.GET.get('status')
+    machine_state = request.GET.get('machine_state')
+    
+    # Get filter options for dropdown links
+    run_numbers = Run.objects.values_list('run_number', flat=True).distinct()
+    statuses = [choice[0] for choice in StfFile._meta.get_field('status').choices]
+    machine_states = StfFile.objects.values_list('machine_state', flat=True).distinct()
+    
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'stf_filename', 'title': 'STF Filename', 'orderable': True},
+        {'name': 'run__run_number', 'title': 'Run', 'orderable': True},
+        {'name': 'machine_state', 'title': 'Machine State', 'orderable': True},
+        {'name': 'status', 'title': 'Status', 'orderable': True},
+        {'name': 'created_at', 'title': 'Created', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
+    
+    context = {
+        'table_title': 'STF Files',
+        'table_description': 'Server-side processing with live search and filtering across all STF file records.',
+        'ajax_url': reverse('monitor_app:stf_files_datatable_ajax'),
+        'columns': columns,
+        'run_numbers': sorted(run_numbers, reverse=True),
+        'statuses': statuses,
+        'machine_states': sorted([s for s in machine_states if s]),
+        'selected_run_number': run_number,
+        'selected_status': status_filter,
+        'selected_machine_state': machine_state,
+    }
+    return render(request, 'monitor_app/stf_files_list.html', context)
+
+
+def stf_files_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of STF files.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from django.http import JsonResponse
+    from django.db.models import Q
+    from urllib.parse import urlencode
+    import json
+    
+    # DataTables parameters
+    draw = int(request.GET.get('draw', 1))
+    start = int(request.GET.get('start', 0))
+    length = int(request.GET.get('length', 50))
+    search_value = request.GET.get('search[value]', '').strip()
+    
+    # Column definitions (must match template column order)
+    columns = ['stf_filename', 'run__run_number', 'machine_state', 'status', 'created_at', 'actions']
+    
+    # Order parameters
+    order_column_idx = int(request.GET.get('order[0][column]', 4))  # Default to created_at desc
+    order_direction = request.GET.get('order[0][dir]', 'desc')
+    order_column = columns[order_column_idx] if 0 <= order_column_idx < len(columns) else 'created_at'
+    if order_direction == 'asc':
+        order_by = order_column
+    else:
+        order_by = f'-{order_column}'
+    
+    # Build base queryset
+    queryset = StfFile.objects.select_related('run').all()
+    
+    # Apply existing filters (run_number, status, machine_state)
     run_number = request.GET.get('run_number')
     status_filter = request.GET.get('status')
     machine_state = request.GET.get('machine_state')
     
     if run_number:
-        stf_files = stf_files.filter(run__run_number=run_number)
+        queryset = queryset.filter(run__run_number=run_number)
     if status_filter:
-        stf_files = stf_files.filter(status=status_filter)
+        queryset = queryset.filter(status=status_filter)
     if machine_state:
-        stf_files = stf_files.filter(machine_state=machine_state)
+        queryset = queryset.filter(machine_state=machine_state)
     
-    # Get filter options
-    run_numbers = Run.objects.values_list('run_number', flat=True).distinct()
-    statuses = [choice[0] for choice in StfFile._meta.get_field('status').choices]
-    machine_states = StfFile.objects.values_list('machine_state', flat=True).distinct()
+    # Total count before search filtering
+    records_total = StfFile.objects.count()
+    records_filtered = queryset.count()
     
-    # Pagination
-    paginator = Paginator(stf_files, 50)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    # Apply search filter
+    if search_value:
+        search_q = (Q(stf_filename__icontains=search_value) | 
+                   Q(run__run_number__icontains=search_value) |
+                   Q(machine_state__icontains=search_value) |
+                   Q(status__icontains=search_value))
+        queryset = queryset.filter(search_q)
+        records_filtered = queryset.count()
     
-    context = {
-        'stf_files': page_obj,
-        'page_obj': page_obj,
-        'run_numbers': sorted(run_numbers, reverse=True),
-        'statuses': statuses,
-        'machine_states': sorted(machine_states),
-        'filters': {
-            'run_number': run_number,
-            'status': status_filter,
-            'machine_state': machine_state,
-        }
+    # Apply ordering
+    queryset = queryset.order_by(order_by)
+    
+    # Apply pagination
+    stf_files = queryset[start:start + length]
+    
+    # Format data for DataTables
+    data = []
+    for file in stf_files:
+        # Format status badge
+        status_class = {
+            'REGISTERED': 'primary',
+            'PROCESSING': 'warning', 
+            'PROCESSED': 'success',
+            'FAILED': 'danger'
+        }.get(file.status, 'secondary')
+        status_badge = f'<span class="badge bg-{status_class}">{file.get_status_display()}</span>'
+        
+        # Format timestamp
+        timestamp_str = file.created_at.strftime('%Y%m%d %H:%M:%S') if file.created_at else 'N/A'
+        
+        # Create run link
+        run_link = f'<a href="/runs/{file.run.run_id}/">{file.run.run_number}</a>' if file.run else 'N/A'
+        
+        # View details action link
+        view_link = f'<a href="/stf-files/{file.file_id}/">View</a>'
+        
+        data.append([
+            file.stf_filename,
+            run_link,
+            file.machine_state or '',
+            status_badge,
+            timestamp_str,
+            view_link
+        ])
+    
+    response = {
+        'draw': draw,
+        'recordsTotal': records_total,
+        'recordsFiltered': records_filtered,
+        'data': data
     }
-    return render(request, 'monitor_app/stf_files_list.html', context)
+    
+    return JsonResponse(response)
+
 
 @login_required
 def stf_file_detail(request, file_id):
