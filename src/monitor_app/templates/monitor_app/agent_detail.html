@@ -30,11 +30,11 @@
             <tbody>
                 {% for workflow in workflows %}
                 <tr>
-                    <td style="font-size: 0.8rem;"><a href="{% url 'monitor_app:workflow_detail' workflow.workflow_id %}">{{ workflow.filename }}</a></td>
-                    <td>{{ workflow.stf_metadata.msg_type }}</td>
-                    <td>{{ workflow.get_current_status_display }}</td>
-                    <td>{{ workflow.daq_state }} / {{ workflow.daq_substate }}</td>
-                    <td>{{ workflow.generated_time|date:"Ymd-H:i:s" }}</td>
+                    <td style="font-size: 0.8rem;"><a href="{% url 'monitor_app:workflow_detail' workflow.workflow_id %}">{{ workflow.filename|default:"—" }}</a></td>
+                    <td>{{ workflow.stf_metadata.msg_type|default:"—" }}</td>
+                    <td>{{ workflow.get_current_status_display|default:"—" }}</td>
+                    <td>{{ workflow.daq_state|default:"—" }} / {{ workflow.daq_substate|default:"—" }}</td>
+                    <td>{{ workflow.generated_time|date:"Ymd-H:i:s"|default:"—" }}</td>
                 </tr>
                 {% empty %}
                 <tr>
@@ -50,25 +50,28 @@
     <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
     <script>
       $(document).ready(function() {
-        $('#workflows-table').DataTable({
-          paging: true,
-          pageLength: 50,
-          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
-          ordering: true,
-          order: [[4, 'desc']],
-          info: true,
-          searching: true,
-          responsive: true,
-          search: {
-            caseInsensitive: true,
-            smart: false,
-            regex: false
-          },
-          language: {
-            search: "Filter table:",
-            emptyTable: "No workflows found matching your criteria."
-          }
-        });
+        // Only initialize DataTables if there are workflow rows
+        if ($('#workflows-table tbody tr').length > 0 && !$('#workflows-table tbody tr td[colspan]').length) {
+          $('#workflows-table').DataTable({
+            paging: true,
+            pageLength: 50,
+            lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
+            ordering: true,
+            order: [[4, 'desc']],
+            info: true,
+            searching: true,
+            responsive: true,
+            search: {
+              caseInsensitive: true,
+              smart: false,
+              regex: false
+            },
+            language: {
+              search: "Filter table:",
+              emptyTable: "No workflows found matching your criteria."
+            }
+          });
+        }
       });
     </script>
 </div>

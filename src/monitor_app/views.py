@@ -547,7 +547,7 @@ def database_tables_list(request):
         'ajax_url': reverse('monitor_app:database_tables_datatable_ajax'),
         'columns': columns,
     }
-    return render(request, 'monitor_app/_datatable_base.html', context)
+    return render(request, 'monitor_app/database_tables_server.html', context)
 
 
 def database_tables_datatable_ajax(request):
@@ -1680,20 +1680,57 @@ def workflow_realtime_data_api(request):
 def persistent_state_view(request):
     """View current persistent state data."""
     import json
+    from .utils import format_datetime
     
     state_data = PersistentState.get_state()
     
     # Get the actual database record for metadata
     try:
         state_obj = PersistentState.objects.get(id=1)
-        updated_at = state_obj.updated_at
+        updated_at = format_datetime(state_obj.updated_at)
     except PersistentState.DoesNotExist:
         updated_at = None
     
+    # Format any timestamp values in the state data for display
+    formatted_state_data = {}
+    for key, value in state_data.items():
+        if isinstance(value, str) and ('time' in key.lower() or 'timestamp' in key.lower()):
+            # Try to parse and format timestamp strings
+            try:
+                from datetime import datetime
+                # Handle various timestamp formats
+                if 'T' in value:  # ISO format
+                    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+                formatted_state_data[key] = format_datetime(dt)
+            except:
+                # If parsing fails, keep original value
+                formatted_state_data[key] = value
+        else:
+            formatted_state_data[key] = value
+    
+    # Format JSON for display with cleaned timestamps
+    formatted_json_data = {}
+    for key, value in state_data.items():
+        if isinstance(value, str) and ('time' in key.lower() or 'timestamp' in key.lower()):
+            try:
+                from datetime import datetime
+                # Handle various timestamp formats
+                if 'T' in value:  # ISO format
+                    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+                formatted_json_data[key] = format_datetime(dt)
+            except:
+                formatted_json_data[key] = value
+        else:
+            formatted_json_data[key] = value
+    
     context = {
-        'state_data': state_data,
+        'state_data': formatted_state_data,
         'updated_at': updated_at,
-        'state_json': json.dumps(state_data, indent=2),
+        'state_json': json.dumps(formatted_json_data, indent=2),  # Use formatted data for JSON view too
     }
     
     return render(request, 'monitor_app/persistent_state.html', context)

@@ -37,15 +37,9 @@ To avoid interfering with active agent development while establishing monitoring
 
 ### Phase 2: Agent Emulation
 
-- [ ] Create `emulate_data_agent` management command:
-  - Listen for STF messages from daqsim
-  - Simulate data storage/transfer operations
-  - Send appropriate status updates to monitor
-- [ ] Create `emulate_processing_agent` management command:
-  - Listen for processing requests from data agent
-  - Simulate data processing workflows
-  - Report processing results and status
-- [ ] Leverage existing ActiveMQ infrastructure (`activemq_listener.py`, `listen_activemq`)
+- [x] ~~Create emulate_data_agent management command~~ (Obsolete - agents now in swf-testbed/example_agents)
+- [x] ~~Create emulate_processing_agent management command~~ (Obsolete - agents now in swf-testbed/example_agents)
+- [x] Agent functionality moved to swf-testbed repository for better separation of concerns
 
 ### Phase 3: Monitoring Views
 
