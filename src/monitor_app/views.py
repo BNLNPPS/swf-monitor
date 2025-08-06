@@ -131,6 +131,7 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             return Response({"instance_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
         
         # Use update_or_create to handle both registration and heartbeats
+        # This ensures all fields are updated on every heartbeat, not just on creation
         agent, created = SystemAgent.objects.update_or_create(
             instance_name=instance_name,
             defaults={
@@ -138,9 +139,15 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
                 'description': request.data.get('description', ''),
                 'status': request.data.get('status', 'OK'),
                 'agent_url': request.data.get('agent_url', None),
+                'workflow_enabled': request.data.get('workflow_enabled', False),
                 'last_heartbeat': timezone.now(),
             }
         )
+        
+        # Explicitly update workflow_enabled if it was provided (to handle existing records)
+        if not created and 'workflow_enabled' in request.data:
+            agent.workflow_enabled = request.data.get('workflow_enabled', False)
+            agent.save(update_fields=['workflow_enabled'])
         
         # Return the full agent data
         return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
@@ -1167,19 +1174,21 @@ def workflow_agents_list(request):
     from django.urls import reverse
     
     context = {
-        'table_title': 'Workflow Agent Status',
-        'table_description': 'Status and statistics for all workflow agents.',
+        'table_title': 'Agent Status',
+        'table_description': 'Status and statistics for all agents.',
         'ajax_url': reverse('monitor_app:workflow_agents_datatable_ajax'),
         'columns': [
             {'title': 'Agent Name', 'orderable': True},
             {'title': 'Type', 'orderable': True},
             {'title': 'Status', 'orderable': True},
+            {'title': 'Workflow Enabled', 'orderable': True},
             {'title': 'Last Heartbeat', 'orderable': True},
             {'title': 'Currently Processing', 'orderable': True},
             {'title': 'Recently Completed (1hr)', 'orderable': True},
             {'title': 'Total Processed', 'orderable': True},
         ],
         'filter_fields': [],  # No filters for this view
+        'default_order': [[4, 'desc']],  # Default sort by Last Heartbeat descending
     }
     
     return render(request, 'monitor_app/workflow_agents_list_dynamic.html', context)
@@ -1192,12 +1201,12 @@ def workflow_agents_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime
     
     # Column definitions matching the template order
-    columns = ['instance_name', 'agent_type', 'status', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
+    columns = ['instance_name', 'agent_type', 'status', 'workflow_enabled', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
     
-    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')  # Sort by last_heartbeat descending
     
-    # Base queryset
-    queryset = SystemAgent.objects.filter(workflow_enabled=True)
+    # Base queryset - show all agents, not just workflow-enabled ones
+    queryset = SystemAgent.objects.all()
     
     # For sorting current_processing and recent_completed, we need to annotate
     # But for now, let's keep it simple and sort by the basic fields
@@ -1214,7 +1223,7 @@ def workflow_agents_datatable_ajax(request):
     queryset = dt.apply_search(queryset, search_fields)
     
     # Get counts
-    records_total = SystemAgent.objects.filter(workflow_enabled=True).count()
+    records_total = SystemAgent.objects.count()
     records_filtered = queryset.count()
     
     # Apply pagination
@@ -1253,11 +1262,20 @@ def workflow_agents_datatable_ajax(request):
         # Create agent name link
         agent_link = f'<a href="/workflow/agents/{agent.instance_name}/">{agent.instance_name}</a>'
         
+        # Format workflow enabled badge
+        workflow_enabled_class = 'success' if agent.workflow_enabled else 'secondary'
+        workflow_enabled_text = 'Enabled' if agent.workflow_enabled else 'Disabled'
+        workflow_enabled_badge = f'<span class="badge bg-{workflow_enabled_class}">{workflow_enabled_text}</span>'
+        
+        # Format heartbeat - sorting is now handled at database level
+        heartbeat_cell = format_datetime(agent.last_heartbeat) if agent.last_heartbeat else 'Never'
+        
         row = [
             agent_link,
             agent.get_agent_type_display(),
             status_badge,
-            format_datetime(agent.last_heartbeat),
+            workflow_enabled_badge,
+            heartbeat_cell,
             str(current_stages),
             str(recent_completed),
             str(agent.total_stf_processed or 0),
@@ -1388,7 +1406,14 @@ def workflow_messages_datatable_ajax(request):
         
         # Format agent links
         sender_link = f'<a href="/workflow/agents/{message.sender_agent}/">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
-        recipient_link = f'<a href="/workflow/agents/{message.recipient_agent}/">{message.recipient_agent}</a>' if message.recipient_agent else 'N/A'
+        
+        # Handle special case for "all-agents" recipient
+        if message.recipient_agent == 'all-agents':
+            recipient_link = f'<a href="/workflow/agents/">{message.recipient_agent}</a>'
+        elif message.recipient_agent:
+            recipient_link = f'<a href="/workflow/agents/{message.recipient_agent}/">{message.recipient_agent}</a>'
+        else:
+            recipient_link = 'N/A'
         
         row = [
             format_datetime(message.sent_at),

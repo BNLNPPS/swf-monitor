@@ -48,10 +48,13 @@ class ActiveMQConnectionManager:
             self.logger.info(f"Connecting to ActiveMQ at {host}:{port}")
             
             # Create connection matching working example agents
+            # Use heartbeats parameter like swf-common-lib does
+            heartbeats = (5000, 10000)  # (client, server) heartbeats in milliseconds
             self.conn = stomp.Connection(
                 host_and_ports=[(host, port)],
                 vhost=host, 
-                try_loopback_connect=False
+                try_loopback_connect=False,
+                heartbeats=heartbeats
             )
             
             # Configure SSL if enabled - MUST be done before set_listener
@@ -74,8 +77,7 @@ class ActiveMQConnectionManager:
                 wait=True, 
                 version='1.1',
                 headers={
-                    'client-id': 'swf-monitor-django',
-                    'heart-beat': '30000,3600000'  # Send heartbeat every 30sec, timeout after 1hr
+                    'client-id': 'swf-monitor-django'
                 }
             )
             self.conn.subscribe(destination=topic, id=1, ack='auto')

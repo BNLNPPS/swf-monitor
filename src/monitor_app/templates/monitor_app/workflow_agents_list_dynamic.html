@@ -111,7 +111,7 @@ $(document).ready(function() {
             }{% if not forloop.last %},{% endif %}
             {% endfor %}
         ],
-        order: [[0, 'asc']],
+        order: {% if default_order %}{{ default_order|safe }}{% else %}[[0, 'asc']]{% endif %},
         pageLength: 100,
         lengthMenu: [[100, 300, 1000, -1], [100, 300, 1000, 'All']],
         dom: 'rt<"bottom"ip><"clear">', // Table, processing, info and pagination
