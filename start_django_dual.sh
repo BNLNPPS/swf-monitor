@@ -5,11 +5,28 @@
 
 echo "Starting Django with dual HTTP/HTTPS support..."
 
-# Navigate to swf-monitor source directory
-cd /eic/u/wenauseic/github/swf-monitor/src
+# Source ~/.env if it exists
+if [[ -f "$HOME/.env" ]]; then
+    source "$HOME/.env"
+fi
 
-# Activate virtual environment
-source /eic/u/wenauseic/github/swf-testbed/.venv/bin/activate
+# Navigate to swf-monitor source directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SWF_MONITOR_DIR="${SWF_MONITOR_DIR:-$SCRIPT_DIR}"
+cd "$SWF_MONITOR_DIR/src"
+
+# Set up virtual environment paths
+SWF_TESTBED_DIR="${SWF_TESTBED_DIR:-$SCRIPT_DIR/../swf-testbed}"
+if [[ -f "$SWF_TESTBED_DIR/.venv/bin/activate" ]]; then
+    source "$SWF_TESTBED_DIR/.venv/bin/activate"
+    PYTHON_CMD="$SWF_TESTBED_DIR/.venv/bin/python"
+    DAPHNE_CMD="$SWF_TESTBED_DIR/.venv/bin/daphne"
+else
+    echo "Warning: Virtual environment not found at $SWF_TESTBED_DIR/.venv"
+    echo "Continuing with system python..."
+    PYTHON_CMD="python"
+    DAPHNE_CMD="daphne"
+fi
 
 # Kill existing Django servers if running
 echo "Stopping existing Django servers..."
@@ -31,7 +48,7 @@ fi
 
 # Start HTTP server on port 8002 (for REST logging)
 echo "Starting HTTP server on port 8002 for REST logging..."
-python manage.py runserver 0.0.0.0:8002 &
+$PYTHON_CMD manage.py runserver 0.0.0.0:8002 &
 HTTP_PID=$!
 
 # Wait a moment for HTTP server to start
@@ -40,7 +57,7 @@ sleep 2
 # Start HTTPS server on port 8443 (for authenticated API calls)
 echo "Starting HTTPS server on port 8443 for authenticated APIs..."
 # Use Daphne with proper SSL endpoint syntax
-daphne -e ssl:8443:privateKey="$SSL_KEY":certKey="$SSL_CERT":interface=0.0.0.0 swf_monitor_project.asgi:application &
+$DAPHNE_CMD -e ssl:8443:privateKey="$SSL_KEY":certKey="$SSL_CERT":interface=0.0.0.0 swf_monitor_project.asgi:application &
 HTTPS_PID=$!
 
 echo "Django servers started:"

@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     SystemAgentViewSet, AppLogViewSet, LogSummaryView,
     STFWorkflowViewSet, AgentWorkflowStageViewSet, WorkflowMessageViewSet,
-    RunViewSet, StfFileViewSet, SubscriberViewSet, MessageQueueDispatchViewSet
+    RunViewSet, StfFileViewSet, SubscriberViewSet, MessageQueueDispatchViewSet,
+    get_next_run_number
 )
 
 router = DefaultRouter()
@@ -19,5 +20,6 @@ router.register(r'message-dispatches', MessageQueueDispatchViewSet, basename='me
 
 urlpatterns = [
     path('logs/summary/', LogSummaryView.as_view(), name='log-summary'),
+    path('state/next-run-number/', get_next_run_number, name='get-next-run-number'),
     path('', include(router.urls)),
 ]

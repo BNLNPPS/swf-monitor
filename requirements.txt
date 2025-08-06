@@ -42,3 +42,4 @@ pytest-asyncio
 pytest-django
 django-dbml
 python-json-logger
+whitenoise

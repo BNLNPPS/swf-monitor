@@ -1,9 +1,10 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
+from django.urls import reverse
 from django.db.models import Count, Max
 from django.core.paginator import Paginator
 from rest_framework import viewsets, generics
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -14,7 +15,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, PersistentState
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
@@ -130,6 +131,7 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             return Response({"instance_name": ["This field is required."]}, status=status.HTTP_400_BAD_REQUEST)
         
         # Use update_or_create to handle both registration and heartbeats
+        # This ensures all fields are updated on every heartbeat, not just on creation
         agent, created = SystemAgent.objects.update_or_create(
             instance_name=instance_name,
             defaults={
@@ -137,9 +139,15 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
                 'description': request.data.get('description', ''),
                 'status': request.data.get('status', 'OK'),
                 'agent_url': request.data.get('agent_url', None),
+                'workflow_enabled': request.data.get('workflow_enabled', False),
                 'last_heartbeat': timezone.now(),
             }
         )
+        
+        # Explicitly update workflow_enabled if it was provided (to handle existing records)
+        if not created and 'workflow_enabled' in request.data:
+            agent.workflow_enabled = request.data.get('workflow_enabled', False)
+            agent.save(update_fields=['workflow_enabled'])
         
         # Return the full agent data
         return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
@@ -210,97 +218,277 @@ class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
 @login_required
 def log_summary(request):
     """
-    Displays a summary of log entries, grouped by application, instance, and level.
+    Professional log summary view using server-side DataTables for optimal performance.
+    Replaced the old client-side implementation.
     """
-    log_summary_data = (
-        AppLog.objects.values("app_name", "instance_name", "levelname")
-        .annotate(count=Count("id"))
-        .order_by("app_name", "instance_name", "levelname")
-    )
-
-    # Get latest timestamp for each (app_name, instance_name)
-    latest_timestamps = AppLog.objects.values("app_name", "instance_name").annotate(latest=Max("timestamp"))
-    latest_map = {}
-    for item in latest_timestamps:
-        latest_map[(item["app_name"], item["instance_name"])] = item["latest"]
-
-    # Restructure the data for the template
-    summary = {}
-    for item in log_summary_data:
-        app_key = item["app_name"]
-        instance_key = item["instance_name"]
-        level = item["levelname"]
-        count = item["count"]
-
-        if app_key not in summary:
-            summary[app_key] = {}
-        if instance_key not in summary[app_key]:
-            summary[app_key][instance_key] = {
-                "levels": {},
-                "total": 0,
-                "latest_timestamp": latest_map.get((app_key, instance_key)),
-            }
-        summary[app_key][instance_key]["levels"][level] = count
-        summary[app_key][instance_key]["total"] += count
-
-    # Only provide 'summary' in context, as requested
-    context = {"summary": summary}
-    return render(request, "monitor_app/log_summary.html", context)
-
-@login_required
-def log_list(request):
-    """
-    Displays a paginated list of all log entries, with filtering.
-    """
-    from django.utils.dateparse import parse_datetime
-    log_list = AppLog.objects.all()
-
-    # Filtering
+    # Get filter parameters (for initial state)
     app_name = request.GET.get('app_name')
     instance_name = request.GET.get('instance_name')
-    start_time = request.GET.get('start_time')
-    end_time = request.GET.get('end_time')
-
-    if app_name:
-        log_list = log_list.filter(app_name=app_name)
-    if instance_name:
-        log_list = log_list.filter(instance_name=instance_name)
-    if start_time:
-        dt = parse_datetime(start_time)
-        if dt:
-            log_list = log_list.filter(timestamp__gte=dt)
-    if end_time:
-        dt = parse_datetime(end_time)
-        if dt:
-            log_list = log_list.filter(timestamp__lte=dt)
-
-    # Get distinct app and instance names for filter links, sorted alphabetically, case-insensitive, unique
+    levelname = request.GET.get('levelname')
+    
+    # Get distinct app and instance names for filter links
     app_names_qs = AppLog.objects.values_list('app_name', flat=True)
     instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
     app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
     instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
 
-    # Pagination
-    paginator = Paginator(log_list, 25) # Show 25 logs per page
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'app_name', 'title': 'Application Name', 'orderable': True},
+        {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
+        {'name': 'latest_timestamp', 'title': 'Latest Timestamp', 'orderable': True},
+        {'name': 'info_count', 'title': 'INFO', 'orderable': True},
+        {'name': 'warning_count', 'title': 'WARNING', 'orderable': True},
+        {'name': 'error_count', 'title': 'ERROR', 'orderable': True},
+        {'name': 'critical_count', 'title': 'CRITICAL', 'orderable': True},
+        {'name': 'debug_count', 'title': 'DEBUG', 'orderable': True},
+        {'name': 'total_count', 'title': 'Total', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
 
-    # Get first and last log for timestamp range display
-    logs_list = list(page_obj.object_list)
-    first_log = logs_list[0] if logs_list else None
-    last_log = logs_list[-1] if logs_list else None
-
-    # Always provide 'page_obj' in context, even if empty
     context = {
-        'page_obj': page_obj,
+        'table_title': 'Log Summary',
+        'table_description': 'Server-side aggregated log counts by application and instance, with level breakdowns and drill-down access.',
+        'ajax_url': reverse('monitor_app:log_summary_datatable_ajax'),
+        'columns': columns,
         'app_names': app_names,
         'instance_names': instance_names,
         'selected_app': app_name,
         'selected_instance': instance_name,
-        'first_log': first_log,
-        'last_log': last_log,
+        'selected_levelname': levelname,
     }
-    return render(request, 'monitor_app/log_list.html', context)
+    return render(request, 'monitor_app/log_summary_ajax.html', context)
+
+
+
+
+def log_summary_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of log summary data.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
+    from django.db.models import Q, Count, Max
+    from urllib.parse import urlencode
+    
+    # Initialize DataTables processor
+    columns = ['app_name', 'instance_name', 'latest_timestamp', 'info_count', 'warning_count', 'error_count', 'critical_count', 'debug_count', 'total_count', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=2, default_order_direction='desc')
+    
+    # Apply filters to base queryset
+    base_queryset = AppLog.objects.all()
+    filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
+    base_queryset = apply_filters(base_queryset, filters)
+    
+    # Create summary queryset - one row per app/instance pair
+    summary_queryset = (
+        base_queryset.values('app_name', 'instance_name')
+        .annotate(
+            latest_timestamp=Max('timestamp'),
+            info_count=Count('id', filter=Q(levelname='INFO')),
+            warning_count=Count('id', filter=Q(levelname='WARNING')),
+            error_count=Count('id', filter=Q(levelname='ERROR')),
+            critical_count=Count('id', filter=Q(levelname='CRITICAL')),
+            debug_count=Count('id', filter=Q(levelname='DEBUG')),
+            total_count=Count('id')
+        )
+    )
+    
+    # Get counts and apply search
+    records_total = AppLog.objects.values('app_name', 'instance_name').annotate(count=Count('id')).count()
+    search_fields = ['app_name', 'instance_name']
+    summary_queryset = dt.apply_search(summary_queryset, search_fields)
+    records_filtered = summary_queryset.count()
+    
+    # Apply ordering (all columns can use default ordering)
+    summary_queryset = summary_queryset.order_by(dt.get_order_by())
+    summary_data = dt.apply_pagination(summary_queryset)
+    
+    # Helper function for drill-down links
+    def create_level_link(count, level, app_name, instance_name):
+        if count == 0:
+            return str(count)
+        params = {'app_name': app_name, 'instance_name': instance_name, 'levelname': level}
+        url = f'/logs/?{urlencode(params)}'
+        return f'<a href="{url}">{count}</a>'
+    
+    # Format data for DataTables
+    data = []
+    for item in summary_data:
+        timestamp_str = format_datetime(item['latest_timestamp'])
+        
+        # Create filter-preserving links
+        app_filter_url = f"?app_name={item['app_name']}"
+        if filters['instance_name']:
+            app_filter_url += f"&instance_name={filters['instance_name']}"
+        app_name_link = f'<a href="/logs/{app_filter_url}">{item["app_name"]}</a>'
+        
+        instance_filter_url = f"?instance_name={item['instance_name']}"
+        if filters['app_name']:
+            instance_filter_url += f"&app_name={filters['app_name']}"
+        instance_name_link = f'<a href="/logs/{instance_filter_url}">{item["instance_name"]}</a>'
+        
+        view_logs_url = f'/logs/?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
+        view_logs_link = f'<a href="{view_logs_url}">View Logs</a>'
+        
+        data.append([
+            app_name_link, instance_name_link, timestamp_str,
+            create_level_link(item['info_count'], 'INFO', item['app_name'], item['instance_name']),
+            create_level_link(item['warning_count'], 'WARNING', item['app_name'], item['instance_name']),
+            create_level_link(item['error_count'], 'ERROR', item['app_name'], item['instance_name']),
+            create_level_link(item['critical_count'], 'CRITICAL', item['app_name'], item['instance_name']),
+            create_level_link(item['debug_count'], 'DEBUG', item['app_name'], item['instance_name']),
+            item['total_count'], view_logs_link
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
+
+@login_required
+def log_list(request):
+    """
+    Professional log list view using server-side DataTables.
+    Replaced the old pagination-based view for better performance and UX.
+    """
+    from django.utils.dateparse import parse_datetime
+    
+    # Get filter parameters (for initial state)
+    app_name = request.GET.get('app_name')
+    instance_name = request.GET.get('instance_name')
+    levelname = request.GET.get('levelname')
+    
+    # Get distinct app and instance names for filter links
+    app_names_qs = AppLog.objects.values_list('app_name', flat=True)
+    instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
+    app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
+    instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
+
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'timestamp', 'title': 'Timestamp', 'orderable': True},
+        {'name': 'app_name', 'title': 'App Name', 'orderable': True},
+        {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
+        {'name': 'levelname', 'title': 'Level', 'orderable': True},
+        {'name': 'message', 'title': 'Message', 'orderable': False},
+        {'name': 'module', 'title': 'Module', 'orderable': True},
+        {'name': 'funcname', 'title': 'Function', 'orderable': True},
+    ]
+
+    # Filter field definitions for dynamic filtering
+    filter_fields = [
+        {'name': 'app_name', 'label': 'Applications', 'type': 'select'},
+        {'name': 'instance_name', 'label': 'Instances', 'type': 'select'},
+        {'name': 'levelname', 'label': 'Levels', 'type': 'select'},
+    ]
+
+    context = {
+        'table_title': 'Log List',
+        'table_description': 'View and search application logs with dynamic filtering by source, instance, and level.',
+        'ajax_url': reverse('monitor_app:logs_datatable_ajax'),
+        'filter_counts_url': reverse('monitor_app:log_filter_counts'),
+        'columns': columns,
+        'filter_fields': filter_fields,
+        'selected_app': app_name,
+        'selected_instance': instance_name,
+        'selected_levelname': levelname,
+    }
+    return render(request, 'monitor_app/log_list_dynamic.html', context)
+
+
+
+def logs_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of logs.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
+    from django.utils.dateparse import parse_datetime
+    
+    # Initialize DataTables processor
+    columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
+    
+    # Build base queryset and apply standard filters
+    queryset = AppLog.objects.all()
+    filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
+    queryset = apply_filters(queryset, filters)
+    
+    # Handle time range filters
+    start_time = request.GET.get('start_time')
+    end_time = request.GET.get('end_time')
+    if start_time:
+        dt_parsed = parse_datetime(start_time)
+        if dt_parsed:
+            queryset = queryset.filter(timestamp__gte=dt_parsed)
+    if end_time:
+        dt_parsed = parse_datetime(end_time)
+        if dt_parsed:
+            queryset = queryset.filter(timestamp__lte=dt_parsed)
+    
+    # Get counts and apply search/pagination
+    records_total = AppLog.objects.count()
+    search_fields = ['app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by())
+    logs = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for log in logs:
+        timestamp_str = format_datetime(log.timestamp)
+        
+        # Create filter-preserving links
+        app_filter_url = f"?app_name={log.app_name}"
+        if filters['instance_name']:
+            app_filter_url += f"&instance_name={filters['instance_name']}"
+        app_name_link = f'<a href="{app_filter_url}">{log.app_name}</a>'
+        
+        instance_filter_url = f"?instance_name={log.instance_name}"
+        if filters['app_name']:
+            instance_filter_url += f"&app_name={filters['app_name']}"
+        instance_name_link = f'<a href="{instance_filter_url}">{log.instance_name}</a>'
+        
+        # Use plain text level (consistent with other views)
+        level_text = log.levelname
+        
+        # Truncate message if too long
+        message = log.message[:200] + '...' if len(log.message) > 200 else log.message
+        func_display = f"{log.funcname}:{log.lineno}"
+        
+        data.append([
+            timestamp_str, app_name_link, instance_name_link, 
+            level_text, message, log.module, func_display
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
+
+def get_log_filter_counts(request):
+    """
+    AJAX endpoint that returns dynamic filter options with counts.
+    Only shows options that have >0 matches in the current filtered dataset.
+    """
+    from .utils import get_filter_counts, get_filter_params, apply_filters
+    
+    # Get current filters
+    current_filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
+    
+    # Build base queryset
+    base_queryset = AppLog.objects.all()
+    
+    # Get filter counts considering current filters
+    filter_fields = ['app_name', 'instance_name', 'levelname']
+    filter_counts = get_filter_counts(base_queryset, filter_fields, current_filters)
+    
+    return JsonResponse({
+        'filter_counts': filter_counts,
+        'current_filters': current_filters
+    })
+
+
+
 
 class LogSummaryView(generics.ListAPIView):
     """
@@ -340,24 +528,94 @@ class LogSummaryView(generics.ListAPIView):
 
 @login_required
 def database_tables_list(request):
-    tables = []
+    """
+    Modern database tables list view using server-side DataTables.
+    Shows all swf_ tables with counts and last insert times.
+    """
+    from django.urls import reverse
+    
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'name', 'title': 'Table Name', 'orderable': True},
+        {'name': 'count', 'title': 'Row Count', 'orderable': True},
+        {'name': 'last_insert', 'title': 'Last Insert', 'orderable': True},
+    ]
+    
+    context = {
+        'table_title': 'Database Overview',
+        'table_description': 'Server-side processing view of all swf_ tables in the database with row counts and last insert times.',
+        'ajax_url': reverse('monitor_app:database_tables_datatable_ajax'),
+        'columns': columns,
+    }
+    return render(request, 'monitor_app/_datatable_base.html', context)
+
+
+def database_tables_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of database tables.
+    Uses proper DataTables pattern with simulated queryset for table metadata.
+    """
+    from .utils import DataTablesProcessor, format_datetime
+    
+    # Initialize DataTables processor
+    columns = ['name', 'count', 'last_insert']
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    
+    # Build table metadata as a list of dict objects (simulating queryset records)
+    table_records = []
     for model in apps.get_models():
-        table_info = {'name': model._meta.db_table, 'count': 0, 'last_insert': None}
+        if not model._meta.db_table.startswith('swf_'):
+            continue
+            
+        record = {
+            'name': model._meta.db_table,
+            'count': 0,
+            'last_insert': None
+        }
+        
         try:
-            count = model.objects.count()
-            table_info['count'] = count
+            record['count'] = model.objects.count()
             # Try to get last insertion time if a DateTimeField exists
             dt_fields = [f.name for f in model._meta.fields if f.get_internal_type() == 'DateTimeField']
             if dt_fields:
                 last_obj = model.objects.order_by('-' + dt_fields[0]).first()
                 if last_obj:
-                    table_info['last_insert'] = getattr(last_obj, dt_fields[0])
+                    record['last_insert'] = getattr(last_obj, dt_fields[0])
         except Exception:
             pass  # Table may not exist or be accessible
-        tables.append(table_info)
-    tables = sorted(tables, key=lambda t: t['name'])
-    tables = [t for t in tables if t['name'].startswith('swf_')]
-    return render(request, 'monitor_app/database_tables_list.html', {'tables': tables})
+        
+        table_records.append(record)
+    
+    # Get total counts
+    records_total = len(table_records)
+    
+    # Apply search filtering using DataTables pattern
+    if dt.search_value:
+        search_term = dt.search_value.lower()
+        table_records = [r for r in table_records if search_term in r['name'].lower()]
+    
+    records_filtered = len(table_records)
+    
+    # Apply ordering using standard DataTables approach
+    # Python's sort handles None values naturally - they sort before all other values
+    table_records.sort(key=lambda r: (r[dt.order_column] is None, r[dt.order_column]), reverse=(dt.order_direction == 'desc'))
+    
+    # Apply pagination using DataTables pattern
+    start = dt.start
+    length = dt.length if dt.length > 0 else len(table_records)
+    paginated_records = table_records[start:start + length]
+    
+    # Format data for DataTables
+    data = []
+    for record in paginated_records:
+        table_link = f'<a href="/database/{record["name"]}/">{record["name"]}</a>'
+        count_str = str(record['count'])
+        last_insert_str = format_datetime(record['last_insert'])
+        
+        data.append([table_link, count_str, last_insert_str])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
 
 from django.http import Http404
 
@@ -390,21 +648,91 @@ def database_table_list(request, table_name):
 
 @login_required
 def runs_list(request):
-    """Display list of data-taking runs"""
-    runs = Run.objects.all().order_by('-start_time')
+    """
+    Professional runs list view using server-side DataTables.
+    Provides high-performance access to all run records with filtering.
+    """
+    from django.urls import reverse
     
-    # Filter by status (active/completed)
-    status_filter = request.GET.get('status')
-    if status_filter == 'active':
-        runs = runs.filter(end_time__isnull=True)
-    elif status_filter == 'completed':
-        runs = runs.filter(end_time__isnull=False)
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'run_number', 'title': 'Run Number', 'orderable': True},
+        {'name': 'start_time', 'title': 'Start Time', 'orderable': True},
+        {'name': 'end_time', 'title': 'End Time', 'orderable': True},
+        {'name': 'duration', 'title': 'Duration', 'orderable': True},
+        {'name': 'stf_files_count', 'title': 'STF Files', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
     
     context = {
-        'runs': runs,
-        'status_filter': status_filter,
+        'table_title': 'Testbed Runs',
+        'table_description': 'Monitor testbed runs with start/end times, duration, and associated STF files.',
+        'ajax_url': reverse('monitor_app:runs_datatable_ajax'),
+        'columns': columns,
     }
     return render(request, 'monitor_app/runs_list.html', context)
+
+
+def runs_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of runs.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from .utils import DataTablesProcessor, format_run_duration, format_datetime
+    from django.db.models import Count, Case, When, F, DurationField
+    from django.utils import timezone
+    
+    # Initialize DataTables processor
+    columns = ['run_number', 'start_time', 'end_time', 'duration', 'stf_files_count', 'actions']
+    special_order_cases = {
+        'stf_files_count': 'stf_files_count',
+        'duration': 'calculated_duration'  # Sort by the calculated duration field
+    }
+    dt = DataTablesProcessor(request, columns, default_order_column=1, default_order_direction='desc')
+    
+    # Build base queryset with STF file count and calculated duration
+    queryset = Run.objects.annotate(
+        stf_files_count=Count('stf_files'),
+        calculated_duration=Case(
+            # If end_time exists, calculate duration: end_time - start_time
+            When(end_time__isnull=False, then=F('end_time') - F('start_time')),
+            # If still in progress (end_time is NULL), duration = now - start_time
+            default=timezone.now() - F('start_time'),
+            output_field=DurationField()
+        )
+    ).all()
+    
+    # Get counts and apply search/pagination
+    records_total = Run.objects.count()
+    search_fields = ['run_number', 'start_time', 'end_time']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by(special_order_cases))
+    runs = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for run in runs:
+        start_time_str = format_datetime(run.start_time)
+        end_time_str = format_datetime(run.end_time) if run.end_time else '—'
+        duration_str = format_run_duration(run.start_time, run.end_time)
+        run_number_link = f'<a href="/runs/{run.run_id}/">{run.run_number}</a>'
+        
+        # Make STF files count clickable to filter STF files by this run
+        if run.stf_files_count > 0:
+            stf_files_link = f'<a href="/stf-files/?run_number={run.run_number}">{run.stf_files_count}</a>'
+        else:
+            stf_files_link = str(run.stf_files_count)
+        
+        view_link = f'<a href="/runs/{run.run_id}/">View</a>'
+        
+        data.append([
+            run_number_link, start_time_str, end_time_str,
+            duration_str, stf_files_link, view_link
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
 
 @login_required
 def run_detail(request, run_id):
@@ -427,44 +755,98 @@ def run_detail(request, run_id):
 
 @login_required
 def stf_files_list(request):
-    """Display list of STF files with filtering"""
-    stf_files = StfFile.objects.all().order_by('-created_at')
+    """
+    Professional STF files list view using server-side DataTables.
+    Provides high-performance access to all STF file records with filtering.
+    """
+    from django.urls import reverse
     
-    # Filtering
+    # Get filter parameters (for initial state)
     run_number = request.GET.get('run_number')
     status_filter = request.GET.get('status')
     machine_state = request.GET.get('machine_state')
     
-    if run_number:
-        stf_files = stf_files.filter(run__run_number=run_number)
-    if status_filter:
-        stf_files = stf_files.filter(status=status_filter)
-    if machine_state:
-        stf_files = stf_files.filter(machine_state=machine_state)
-    
-    # Get filter options
+    # Get filter options for dropdown links
     run_numbers = Run.objects.values_list('run_number', flat=True).distinct()
     statuses = [choice[0] for choice in StfFile._meta.get_field('status').choices]
     machine_states = StfFile.objects.values_list('machine_state', flat=True).distinct()
     
-    # Pagination
-    paginator = Paginator(stf_files, 50)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'stf_filename', 'title': 'STF Filename', 'orderable': True},
+        {'name': 'run__run_number', 'title': 'Run', 'orderable': True},
+        {'name': 'machine_state', 'title': 'Machine State', 'orderable': True},
+        {'name': 'status', 'title': 'Status', 'orderable': True},
+        {'name': 'created_at', 'title': 'Created', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
     
     context = {
-        'stf_files': page_obj,
-        'page_obj': page_obj,
+        'table_title': 'STF Files',
+        'table_description': 'Track STF files by run, machine state, and processing status.',
+        'ajax_url': reverse('monitor_app:stf_files_datatable_ajax'),
+        'columns': columns,
         'run_numbers': sorted(run_numbers, reverse=True),
         'statuses': statuses,
-        'machine_states': sorted(machine_states),
-        'filters': {
-            'run_number': run_number,
-            'status': status_filter,
-            'machine_state': machine_state,
-        }
+        'machine_states': sorted([s for s in machine_states if s]),
+        'selected_run_number': run_number,
+        'selected_status': status_filter,
+        'selected_machine_state': machine_state,
     }
     return render(request, 'monitor_app/stf_files_list.html', context)
+
+
+def stf_files_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of STF files.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from .utils import DataTablesProcessor, get_filter_params, format_datetime
+    
+    # Initialize DataTables processor
+    columns = ['stf_filename', 'run__run_number', 'machine_state', 'status', 'created_at', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')
+    
+    # Build base queryset
+    queryset = StfFile.objects.select_related('run').all()
+    
+    # Apply filters using utility
+    filter_mapping = {
+        'run_number': 'run__run_number',  # Map filter param to actual field
+        'status': 'status',
+        'machine_state': 'machine_state'
+    }
+    filters = get_filter_params(request, filter_mapping.keys())
+    # Apply filters with correct field names
+    for param_name, field_name in filter_mapping.items():
+        if filters[param_name]:
+            queryset = queryset.filter(**{field_name: filters[param_name]})
+    
+    # Get counts and apply search/pagination
+    records_total = StfFile.objects.count()
+    search_fields = ['stf_filename', 'run__run_number', 'machine_state', 'status']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by())
+    stf_files = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for file in stf_files:
+        # Use plain text status (consistent with runs view)
+        status_text = file.get_status_display()
+        timestamp_str = format_datetime(file.created_at)
+        run_link = f'<a href="/runs/{file.run.run_id}/">{file.run.run_number}</a>' if file.run else 'N/A'
+        view_link = f'<a href="/stf-files/{file.file_id}/">View</a>'
+        
+        data.append([
+            file.stf_filename, run_link, file.machine_state or '',
+            status_text, timestamp_str, view_link
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
 
 @login_required
 def stf_file_detail(request, file_id):
@@ -480,21 +862,103 @@ def stf_file_detail(request, file_id):
 
 @login_required
 def subscribers_list(request):
-    """Display list of message queue subscribers"""
-    subscribers = Subscriber.objects.all().order_by('subscriber_name')
+    """Professional subscribers list view using server-side DataTables."""
+    from django.urls import reverse
     
-    # Filter by active status
-    status_filter = request.GET.get('status')
-    if status_filter == 'active':
-        subscribers = subscribers.filter(is_active=True)
-    elif status_filter == 'inactive':
-        subscribers = subscribers.filter(is_active=False)
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'subscriber_name', 'title': 'Subscriber Name', 'orderable': True},
+        {'name': 'description', 'title': 'Description', 'orderable': True},
+        {'name': 'fraction', 'title': 'Fraction', 'orderable': True},
+        {'name': 'is_active', 'title': 'is_active', 'orderable': True},
+        {'name': 'created_at', 'title': 'Created', 'orderable': True},
+        {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
+    
+    # Filter field definitions for dynamic filtering using generic auto-discovery
+    filter_fields = [
+        {'name': 'is_active', 'label': 'is_active', 'type': 'select'},
+    ]
     
     context = {
-        'subscribers': subscribers,
-        'status_filter': status_filter,
+        'table_title': 'Message Queue Subscribers',
+        'table_description': 'Monitor message queue subscribers and their activity status.',
+        'ajax_url': reverse('monitor_app:subscribers_datatable_ajax'),
+        'filter_counts_url': reverse('monitor_app:subscribers_filter_counts'),
+        'columns': columns,
+        'filter_fields': filter_fields,
+        'selected_is_active': request.GET.get('is_active'),
     }
-    return render(request, 'monitor_app/subscribers_list.html', context)
+    return render(request, 'monitor_app/subscribers_list_dynamic.html', context)
+
+def subscribers_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of subscribers.
+    Handles pagination, searching, ordering, and filtering using utils.py functions.
+    """
+    from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
+    
+    # Initialize DataTables processor
+    columns = ['subscriber_name', 'description', 'fraction', 'is_active', 'created_at', 'updated_at', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    
+    # Build base queryset and apply filters using utils.py
+    queryset = Subscriber.objects.all()
+    filters = get_filter_params(request, ['is_active'])
+    queryset = apply_filters(queryset, filters)
+    
+    # Get counts and apply search/pagination
+    records_total = Subscriber.objects.count()
+    search_fields = ['subscriber_name', 'description']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by())
+    subscribers = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for subscriber in subscribers:
+        subscriber_name_link = f'<a href="/subscribers/{subscriber.subscriber_id}/">{subscriber.subscriber_name}</a>'
+        description = subscriber.description[:100] + '...' if subscriber.description and len(subscriber.description) > 100 else (subscriber.description or '')
+        fraction_str = f"{subscriber.fraction:.3f}" if subscriber.fraction is not None else 'N/A'
+        # Show raw DB value, not massaged badges
+        is_active_value = str(subscriber.is_active).lower()  # True -> 'true', False -> 'false'
+        created_str = format_datetime(subscriber.created_at)
+        updated_str = format_datetime(subscriber.updated_at)
+        view_link = f'<a href="/subscribers/{subscriber.subscriber_id}/">View</a>'
+        
+        data.append([
+            subscriber_name_link, description, fraction_str, is_active_value,
+            created_str, updated_str, view_link
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
+
+def get_subscribers_filter_counts(request):
+    """
+    AJAX endpoint that returns dynamic filter options with counts for subscribers.
+    Uses utils.py get_filter_counts() for generic auto-discovery of field values.
+    """
+    from .utils import get_filter_counts, get_filter_params, apply_filters
+    
+    # Get current filters
+    current_filters = get_filter_params(request, ['is_active'])
+    
+    # Build base queryset
+    base_queryset = Subscriber.objects.all()
+    
+    # Use generic get_filter_counts to auto-discover field values
+    filter_fields = ['is_active']
+    filter_counts = get_filter_counts(base_queryset, filter_fields, current_filters)
+    
+    return JsonResponse({
+        'filter_counts': filter_counts,
+        'current_filters': current_filters
+    })
+
 
 @login_required
 def subscriber_detail(request, subscriber_id):
@@ -588,15 +1052,87 @@ def workflow_dashboard(request):
 
 @login_required
 def workflow_list(request):
-    """List view of all STF workflows."""
+    """Professional workflow list view using server-side DataTables with dynamic filtering."""
+    from django.urls import reverse
+    from .utils import get_filter_counts
+    from .workflow_models import STFWorkflow
     
-    workflows = STFWorkflow.objects.all().order_by('-created_at')
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'filename', 'title': 'Filename', 'orderable': True},
+        {'name': 'msg_type', 'title': 'Type', 'orderable': True},
+        {'name': 'current_status', 'title': 'Status', 'orderable': True},
+        {'name': 'current_agent', 'title': 'Current Agent', 'orderable': True},
+        {'name': 'daq_state', 'title': 'DAQ State', 'orderable': True},
+        {'name': 'generated_time', 'title': 'Generated', 'orderable': True},
+        {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
+    ]
+    
+    # Get filter counts for dynamic filtering
+    filter_fields = ['current_status', 'current_agent', 'daq_state']
+    filter_counts = get_filter_counts(STFWorkflow.objects.all(), filter_fields)
     
     context = {
-        'workflows': workflows,
+        'table_title': 'Workflow List',
+        'table_description': 'Monitor workflow progress through the processing pipeline from generation to completion.',
+        'ajax_url': reverse('monitor_app:workflow_datatable_ajax'),
+        'columns': columns,
+        'filter_counts': filter_counts,
     }
-    
     return render(request, 'monitor_app/workflow_list.html', context)
+
+
+def workflow_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of workflows.
+    Handles pagination, searching, ordering, and filtering.
+    """
+    from .utils import DataTablesProcessor, format_datetime, apply_filters, get_filter_params
+    from .workflow_models import STFWorkflow
+    
+    # Initialize DataTables processor
+    columns = ['filename', 'msg_type', 'current_status', 'current_agent', 'daq_state', 'generated_time', 'updated_at']
+    dt = DataTablesProcessor(request, columns, default_order_column=5, default_order_direction='desc')
+    
+    # Build base queryset
+    queryset = STFWorkflow.objects.all()
+    
+    # Apply dynamic filters
+    filter_fields = ['current_status', 'current_agent', 'daq_state']
+    filters = get_filter_params(request, filter_fields)
+    queryset = apply_filters(queryset, filters)
+    
+    # Get counts and apply search/pagination
+    records_total = STFWorkflow.objects.count()
+    search_fields = ['filename', 'current_status', 'current_agent', 'daq_state']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by())
+    workflows = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for workflow in workflows:
+        filename_link = f'<a href="/workflow/{workflow.workflow_id}/">{workflow.filename}</a>'
+        
+        # Extract msg_type from JSON metadata safely
+        msg_type = 'N/A'
+        if workflow.stf_metadata and isinstance(workflow.stf_metadata, dict):
+            msg_type = workflow.stf_metadata.get('msg_type', 'N/A')
+        
+        status_display = workflow.get_current_status_display()
+        agent_display = workflow.get_current_agent_display()
+        daq_state_str = f"{workflow.daq_state} / {workflow.daq_substate}"
+        generated_time_str = format_datetime(workflow.generated_time)
+        updated_time_str = format_datetime(workflow.updated_at)
+        
+        data.append([
+            filename_link, msg_type, status_display, agent_display,
+            daq_state_str, generated_time_str, updated_time_str
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
 
 
 @login_required
@@ -634,14 +1170,69 @@ def workflow_detail(request, workflow_id):
 
 @login_required
 def workflow_agents_list(request):
-    """View showing the status of all workflow agents."""
+    """View showing the status of all workflow agents using server-side DataTables."""
+    from django.urls import reverse
     
-    agents = SystemAgent.objects.filter(workflow_enabled=True).order_by('agent_type', 'instance_name')
+    context = {
+        'table_title': 'Agent Status',
+        'table_description': 'Status and statistics for all agents.',
+        'ajax_url': reverse('monitor_app:workflow_agents_datatable_ajax'),
+        'columns': [
+            {'title': 'Agent Name', 'orderable': True},
+            {'title': 'Type', 'orderable': True},
+            {'title': 'Status', 'orderable': True},
+            {'title': 'Workflow Enabled', 'orderable': True},
+            {'title': 'Last Heartbeat', 'orderable': True},
+            {'title': 'Currently Processing', 'orderable': True},
+            {'title': 'Recently Completed (1hr)', 'orderable': True},
+            {'title': 'Total Processed', 'orderable': True},
+        ],
+        'filter_fields': [],  # No filters for this view
+        'default_order': [[4, 'desc']],  # Default sort by Last Heartbeat descending
+    }
     
-    # Get current processing counts per agent
-    agent_stats = []
+    return render(request, 'monitor_app/workflow_agents_list_dynamic.html', context)
+
+
+@login_required
+def workflow_agents_datatable_ajax(request):
+    """AJAX endpoint for workflow agents DataTable server-side processing."""
+    from datetime import timedelta
+    from .utils import DataTablesProcessor, format_datetime
+    
+    # Column definitions matching the template order
+    columns = ['instance_name', 'agent_type', 'status', 'workflow_enabled', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
+    
+    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')  # Sort by last_heartbeat descending
+    
+    # Base queryset - show all agents, not just workflow-enabled ones
+    queryset = SystemAgent.objects.all()
+    
+    # For sorting current_processing and recent_completed, we need to annotate
+    # But for now, let's keep it simple and sort by the basic fields
+    special_cases = {
+        'current_processing': 'instance_name',  # Fallback to instance name
+        'recent_completed': 'instance_name',     # Fallback to instance name
+    }
+    
+    order_by = dt.get_order_by(special_cases)
+    queryset = queryset.order_by(order_by)
+    
+    # Apply search if provided
+    search_fields = ['instance_name', 'agent_type', 'status']
+    queryset = dt.apply_search(queryset, search_fields)
+    
+    # Get counts
+    records_total = SystemAgent.objects.count()
+    records_filtered = queryset.count()
+    
+    # Apply pagination
+    agents = dt.apply_pagination(queryset)
+    
+    # Build data rows
+    data = []
     for agent in agents:
-        # Get current processing stages
+        # Calculate current processing stages
         current_stages = AgentWorkflowStage.objects.filter(
             agent_name=agent.instance_name,
             status__in=[
@@ -653,24 +1244,45 @@ def workflow_agents_list(request):
             ]
         ).count()
         
-        # Get recent completion rate (last hour)
-        from datetime import timedelta
+        # Calculate recent completion rate (last hour)
         recent_completed = AgentWorkflowStage.objects.filter(
             agent_name=agent.instance_name,
             completed_at__gte=timezone.now() - timedelta(hours=1)
         ).count()
         
-        agent_stats.append({
-            'agent': agent,
-            'current_processing': current_stages,
-            'recent_completed': recent_completed,
-        })
+        # Format status badge
+        status_class = {
+            'OK': 'success',
+            'WARNING': 'warning', 
+            'ERROR': 'danger'
+        }.get(agent.status, 'secondary')
+        
+        status_badge = f'<span class="badge bg-{status_class}">{agent.status}</span>'
+        
+        # Create agent name link
+        agent_link = f'<a href="/workflow/agents/{agent.instance_name}/">{agent.instance_name}</a>'
+        
+        # Format workflow enabled badge
+        workflow_enabled_class = 'success' if agent.workflow_enabled else 'secondary'
+        workflow_enabled_text = 'Enabled' if agent.workflow_enabled else 'Disabled'
+        workflow_enabled_badge = f'<span class="badge bg-{workflow_enabled_class}">{workflow_enabled_text}</span>'
+        
+        # Format heartbeat - sorting is now handled at database level
+        heartbeat_cell = format_datetime(agent.last_heartbeat) if agent.last_heartbeat else 'Never'
+        
+        row = [
+            agent_link,
+            agent.get_agent_type_display(),
+            status_badge,
+            workflow_enabled_badge,
+            heartbeat_cell,
+            str(current_stages),
+            str(recent_completed),
+            str(agent.total_stf_processed or 0),
+        ]
+        data.append(row)
     
-    context = {
-        'agent_stats': agent_stats,
-    }
-    
-    return render(request, 'monitor_app/workflow_agents_list.html', context)
+    return dt.create_response(data, records_total, records_filtered)
 
 
 @login_required
@@ -689,15 +1301,170 @@ def agent_detail(request, instance_name):
 
 @login_required
 def workflow_messages(request):
-    """View showing all workflow messages for debugging."""
-    
-    messages = WorkflowMessage.objects.all().order_by('-sent_at')
+    """View showing all workflow messages with dynamic filtering."""
+    from django.urls import reverse
     
     context = {
-        'messages': messages,
+        'table_title': 'Workflow Messages',
+        'table_description': 'All messages exchanged in the workflow system with filtering capabilities.',
+        'ajax_url': reverse('monitor_app:workflow_messages_datatable_ajax'),
+        'filter_counts_url': reverse('monitor_app:workflow_messages_filter_counts'),
+        'columns': [
+            {'title': 'Timestamp', 'orderable': True},
+            {'title': 'message_type', 'orderable': True},
+            {'title': 'sender_agent', 'orderable': True},
+            {'title': 'recipient_agent', 'orderable': True},
+            {'title': 'workflow', 'orderable': True},
+            {'title': 'is_successful', 'orderable': True},
+        ],
+        'filter_fields': [
+            {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
+            {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
+            {'name': 'recipient_agent', 'label': 'recipient_agent', 'type': 'select'},
+            {'name': 'workflow', 'label': 'workflow', 'type': 'select'},
+            {'name': 'is_successful', 'label': 'is_successful', 'type': 'select'},
+        ],
+        # Add current filter values for initial state
+        'selected_message_type': request.GET.get('message_type'),
+        'selected_sender_agent': request.GET.get('sender_agent'),
+        'selected_recipient_agent': request.GET.get('recipient_agent'),
+        'selected_workflow': request.GET.get('workflow'),
+        'selected_is_successful': request.GET.get('is_successful'),
     }
     
-    return render(request, 'monitor_app/workflow_messages.html', context)
+    return render(request, 'monitor_app/workflow_messages_dynamic.html', context)
+
+
+@login_required
+def workflow_messages_datatable_ajax(request):
+    """AJAX endpoint for workflow messages DataTable server-side processing."""
+    from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
+    
+    # Column definitions matching the template order  
+    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful']
+    
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
+    
+    # Base queryset
+    queryset = WorkflowMessage.objects.select_related('workflow')
+    
+    # Apply filters
+    filter_params = get_filter_params(request, ['message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+    
+    # Handle workflow filter - need to map workflow display names to IDs
+    if filter_params.get('workflow'):
+        workflow_value = filter_params['workflow']
+        # Try to find workflow by filename
+        try:
+            if workflow_value != 'N/A':
+                workflow_obj = STFWorkflow.objects.filter(filename=workflow_value).first()
+                if workflow_obj:
+                    filter_params['workflow'] = workflow_obj.workflow_id
+                else:
+                    # Filter out all results if workflow not found
+                    queryset = queryset.none()
+            else:
+                # Filter for null workflow
+                filter_params['workflow__isnull'] = True
+                del filter_params['workflow']
+        except:
+            pass
+    
+    queryset = apply_filters(queryset, filter_params)
+    
+    # Apply search if provided
+    search_fields = ['message_type', 'sender_agent', 'recipient_agent']
+    queryset = dt.apply_search(queryset, search_fields)
+    
+    # Apply ordering
+    order_by = dt.get_order_by()
+    queryset = queryset.order_by(order_by)
+    
+    # Get counts
+    records_total = WorkflowMessage.objects.count()
+    records_filtered = queryset.count()
+    
+    # Apply pagination
+    messages = dt.apply_pagination(queryset)
+    
+    # Build data rows
+    data = []
+    for message in messages:
+        # Format status
+        if message.is_successful is True:
+            status = '<span class="badge bg-success">Success</span>'
+        elif message.is_successful is False:
+            status = '<span class="badge bg-danger">Failed</span>'
+        else:
+            status = '<span class="badge bg-secondary">Unknown</span>'
+        
+        # Format workflow link
+        if message.workflow:
+            workflow_link = f'<a href="/workflow/{message.workflow.workflow_id}/" style="font-size: 0.8rem;">{message.workflow.filename}</a>'
+        else:
+            workflow_link = 'N/A'
+        
+        # Format agent links
+        sender_link = f'<a href="/workflow/agents/{message.sender_agent}/">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
+        
+        # Handle special case for "all-agents" recipient
+        if message.recipient_agent == 'all-agents':
+            recipient_link = f'<a href="/workflow/agents/">{message.recipient_agent}</a>'
+        elif message.recipient_agent:
+            recipient_link = f'<a href="/workflow/agents/{message.recipient_agent}/">{message.recipient_agent}</a>'
+        else:
+            recipient_link = 'N/A'
+        
+        row = [
+            format_datetime(message.sent_at),
+            message.message_type,
+            sender_link,
+            recipient_link,
+            workflow_link,
+            status,
+        ]
+        data.append(row)
+    
+    return dt.create_response(data, records_total, records_filtered)
+
+
+@login_required
+def get_workflow_messages_filter_counts(request):
+    """Get filter counts for workflow messages filters."""
+    from .utils import get_filter_params, apply_filters, get_filter_counts
+    from django.http import JsonResponse
+    
+    # Get current filters
+    current_filters = get_filter_params(request, ['message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+    
+    # Base queryset
+    queryset = WorkflowMessage.objects.select_related('workflow')
+    
+    # Calculate counts for each filter
+    filter_fields = ['message_type', 'sender_agent', 'recipient_agent', 'is_successful']
+    filter_counts = get_filter_counts(queryset, filter_fields, current_filters)
+    
+    # Handle workflow filter specially - show filenames instead of IDs
+    workflow_queryset = queryset
+    temp_filters = {k: v for k, v in current_filters.items() if k != 'workflow' and v}
+    workflow_queryset = apply_filters(workflow_queryset, temp_filters)
+    
+    # Get workflow counts with filenames
+    workflow_counts = []
+    
+    # Count messages with workflows
+    workflow_msgs = workflow_queryset.filter(workflow__isnull=False).values('workflow__filename').annotate(count=Count('message_id')).filter(count__gt=0).order_by('-count', 'workflow__filename')
+    for item in workflow_msgs:
+        workflow_counts.append((item['workflow__filename'], item['count']))
+    
+    # Count messages without workflows
+    null_count = workflow_queryset.filter(workflow__isnull=True).count()
+    if null_count > 0:
+        workflow_counts.append(('N/A', null_count))
+    
+    filter_counts['workflow'] = workflow_counts
+    
+    return JsonResponse({'filter_counts': filter_counts})
 
 
 @login_required
@@ -907,3 +1674,44 @@ def workflow_realtime_data_api(request):
     }
     
     return JsonResponse(data)
+
+
+@login_required
+def persistent_state_view(request):
+    """View current persistent state data."""
+    import json
+    
+    state_data = PersistentState.get_state()
+    
+    # Get the actual database record for metadata
+    try:
+        state_obj = PersistentState.objects.get(id=1)
+        updated_at = state_obj.updated_at
+    except PersistentState.DoesNotExist:
+        updated_at = None
+    
+    context = {
+        'state_data': state_data,
+        'updated_at': updated_at,
+        'state_json': json.dumps(state_data, indent=2),
+    }
+    
+    return render(request, 'monitor_app/persistent_state.html', context)
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_next_run_number(request):
+    """API endpoint to get the next run number atomically."""
+    try:
+        run_number = PersistentState.get_next_run_number()
+        return Response({
+            'run_number': run_number,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

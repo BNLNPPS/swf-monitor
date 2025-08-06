@@ -1,119 +1,102 @@
-{% extends 'base.html' %}
+{% extends "monitor_app/_datatable_base.html" %}
 
-{% block title %}STF Files - SWF Monitor{% endblock %}
-
-{% block content %}
-<div class="container">
-    <h2>STF (Super Time Frame) Files</h2>
-    
-    <style>
-    .filter-bar a {
-        margin-right: 0.5em;
-        color: #007bff;
-        text-decoration: none;
-    }
-    .filter-bar a.filter-active {
-        font-weight: bold;
-        text-decoration: underline;
-        color: #0056b3;
-    }
-    .status-badge {
-        padding: 0.25em 0.5em;
-        border-radius: 0.25em;
-        font-size: 0.8em;
-        font-weight: bold;
-    }
-    </style>
-    
-    <div class="filter-bar" style="margin-bottom: 1em;">
-        <div style="margin-bottom: 0.5em;">
-            <span style="font-weight: 600;">Status:</span>
-            <a href="?" class="{% if not status_filter %}filter-active{% endif %}">All</a>
-            <a href="?status=REGISTERED" class="{% if status_filter == 'REGISTERED' %}filter-active{% endif %}">Registered</a>
-            <a href="?status=PROCESSING" class="{% if status_filter == 'PROCESSING' %}filter-active{% endif %}">Processing</a>
-            <a href="?status=PROCESSED" class="{% if status_filter == 'PROCESSED' %}filter-active{% endif %}">Processed</a>
-            <a href="?status=FAILED" class="{% if status_filter == 'FAILED' %}filter-active{% endif %}">Failed</a>
-        </div>
-        <div>
-            <span style="font-weight: 600;">Machine State:</span>
-            <a href="?{% if status_filter %}status={{ status_filter }}&{% endif %}" class="{% if not machine_state_filter %}filter-active{% endif %}">All</a>
-            {% for state in machine_states %}
-                <a href="?{% if status_filter %}status={{ status_filter }}&{% endif %}machine_state={{ state|urlencode }}" class="{% if machine_state_filter == state %}filter-active{% endif %}">{{ state }}</a>
-            {% endfor %}
-        </div>
-    </div>
-
-    <div class="table-responsive">
-        <table id="stf-files-table" class="table table-striped table-bordered table-sm">
-            <thead class="thead-dark">
-                <tr>
-                    <th>File URL</th>
-                    <th>Run</th>
-                    <th>Machine State</th>
-                    <th>Status</th>
-                    <th>Created</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for file in stf_files %}
-                <tr>
-                    <td style="white-space: normal; word-break: break-all;">
-                        <a href="{{ file.file_url }}" target="_blank" title="{{ file.file_url }}">{{ file.file_url|truncatechars:60 }}</a>
-                    </td>
-                    <td>
-                        <a href="{% url 'monitor_app:run_detail' file.run.run_id %}">{{ file.run.run_number }}</a>
-                    </td>
-                    <td>{{ file.machine_state }}</td>
-                    <td>
-                        <span class="badge badge-{% if file.status == 'REGISTERED' %}primary{% elif file.status == 'PROCESSING' %}warning{% elif file.status == 'PROCESSED' %}success{% elif file.status == 'FAILED' %}danger{% else %}secondary{% endif %}">
-                            {{ file.get_status_display }}
-                        </span>
-                    </td>
-                    <td>{{ file.created_at|date:"Ymd H:i:s" }}</td>
-                    <td>
-                        <a href="{% url 'monitor_app:stf_file_detail' file.file_id %}">View</a>
-                    </td>
-                </tr>
+{% block extra_filters %}
+<!-- Filter Controls -->
+<div class="card mb-3">
+    <div class="card-body">
+        
+        <!-- Status/Machine State/Run Number Quick Filters -->
+        <div class="filter-bar mb-2">
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Status:</span>
+                <a href="#" data-filter="status" data-value="" class="filter-link {% if not selected_status %}filter-active{% endif %}">All</a>
+                {% for status in statuses %}
+                    <a href="#" data-filter="status" data-value="{{ status }}" class="filter-link {% if selected_status == status %}filter-active{% endif %}">{{ status }}</a>
                 {% endfor %}
-            </tbody>
-        </table>
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Machine State:</span>
+                <a href="#" data-filter="machine_state" data-value="" class="filter-link {% if not selected_machine_state %}filter-active{% endif %}">All</a>
+                {% for state in machine_states %}
+                    <a href="#" data-filter="machine_state" data-value="{{ state }}" class="filter-link {% if selected_machine_state == state %}filter-active{% endif %}">{{ state }}</a>
+                {% endfor %}
+            </div>
+            <div>
+                <span style="font-weight: 600;">Run Numbers:</span>
+                <a href="#" data-filter="run_number" data-value="" class="filter-link {% if not selected_run_number %}filter-active{% endif %}">All</a>
+                {% for run_num in run_numbers|slice:":10" %}
+                    <a href="#" data-filter="run_number" data-value="{{ run_num }}" class="filter-link {% if selected_run_number == run_num|stringformat:"s" %}filter-active{% endif %}">{{ run_num }}</a>
+                {% endfor %}
+                {% if run_numbers|length > 10 %}
+                    <span style="color: #6c757d; font-style: italic;">... and {{ run_numbers|length|add:"-10" }} more</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Active filters display -->
+        <div id="active-filters" class="mt-2" style="display: none;">
+            <strong>Active filters:</strong>
+            <span id="filter-badges"></span>
+            <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2">clear all</button>
+        </div>
     </div>
-    
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-    <script>
-      $(document).ready(function() {
-        var table = $('#stf-files-table').DataTable({
-          paging: true,
-          pageLength: 50,
-          lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
-          ordering: true,
-          order: [[4, 'desc']],
-          info: true,
-          searching: true,
-          responsive: true,
-          search: {
-            caseInsensitive: true,
-            smart: false,
-            regex: false
-          },
-          language: {
-            search: "Filter table:",
-            lengthMenu: "Show _MENU_ entries",
-            info: "Showing _START_ to _END_ of _TOTAL_ files",
-            emptyTable: "No STF files found.",
-            paginate: {
-              first: "First",
-              last: "Last",
-              next: "Next",
-              previous: "Previous"
-            }
-          }
-        });
-        $(table.table().container()).find('input[type="search"]').css({'width':'24em','display':'inline-block'});
-      });
-    </script>
 </div>
+{% endblock %}
+
+{% block initial_filters %}
+{
+    status: '{{ selected_status|default:"" }}',
+    machine_state: '{{ selected_machine_state|default:"" }}',
+    run_number: '{{ selected_run_number|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[4, 'desc']]{% endblock %} <!-- Order by created_at descending -->
+
+{% block update_active_filters_display %}
+const badges = [];
+// Combine filters into concise format
+const parts = [];
+if (currentFilters.status) parts.push(currentFilters.status);
+if (currentFilters.machine_state) parts.push(currentFilters.machine_state);
+if (currentFilters.run_number) parts.push(`Run:${currentFilters.run_number}`);
+
+if (parts.length > 0) {
+    badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="status"][data-value="' + currentFilters.status + '"]').addClass('filter-active');
+$('.filter-link[data-filter="machine_state"][data-value="' + currentFilters.machine_state + '"]').addClass('filter-active');
+$('.filter-link[data-filter="run_number"][data-value="' + currentFilters.run_number + '"]').addClass('filter-active');
+{% endblock %}
+
+{% block extra_scripts %}
+// Handle filter link clicks
+$('.filter-link').on('click', function(e) {
+    e.preventDefault();
+    const filterType = $(this).data('filter');
+    const filterValue = $(this).data('value');
+    window.tableCurrentFilters[filterType] = filterValue;
+    window.tableUpdateFilters();
+});
+
+// Clear all filters
+$('#clear-all-filters').on('click', function() {
+    // Clear the actual currentFilters object used by the table
+    window.tableCurrentFilters.status = '';
+    window.tableCurrentFilters.machine_state = '';
+    window.tableCurrentFilters.run_number = '';
+    
+    // Update the table and URL
+    window.tableUpdateFilters();
+});
 {% endblock %}

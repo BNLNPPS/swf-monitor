@@ -1,0 +1,47 @@
+{% extends "monitor_app/_datatable_dynamic_base.html" %}
+
+{% block initial_filters %}
+{
+    app_name: '{{ selected_app|default:"" }}',
+    instance_name: '{{ selected_instance|default:"" }}',
+    levelname: '{{ selected_levelname|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[0, 'desc']]{% endblock %} <!-- Order by timestamp descending -->
+
+{% block update_active_filters_display %}
+const badges = [];
+
+// Use concise format for app/instance combination
+let filterText = '';
+if (currentFilters.app_name && currentFilters.instance_name) {
+    filterText = `${currentFilters.app_name}/${currentFilters.instance_name}`;
+} else if (currentFilters.app_name) {
+    filterText = `App: ${currentFilters.app_name}`;
+} else if (currentFilters.instance_name) {
+    filterText = `Instance: ${currentFilters.instance_name}`;
+}
+
+if (filterText) {
+    badges.push(`<span class="badge bg-info me-1">${filterText}</span>`);
+}
+
+// Add level filter if active
+if (currentFilters.levelname) {
+    badges.push(`<span class="badge bg-info me-1">Level: ${currentFilters.levelname}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="app_name"][data-value="' + currentFilters.app_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="instance_name"][data-value="' + currentFilters.instance_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="levelname"][data-value="' + currentFilters.levelname + '"]').addClass('filter-active');
+{% endblock %}
