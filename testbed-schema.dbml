@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-01-2025 07:09PM UTC'''
+  Last Updated At 08-11-2025 03:57PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -482,6 +482,27 @@ error_message: Error details if dispatch failed
 ref: monitor_app.MessageQueueDispatch.stf_file_id > monitor_app.StfFile.file_id
 
 
+Table monitor_app.PersistentState {
+  Note: '''
+Persistent state store with stable schema - just stores JSON.
+Never modify this schema - it must remain stable across all deployments.
+
+Single record stores all persistent state as JSON blob.
+Use get_state() and update_state() methods to access nested data.
+
+
+*DB table: swf_persistent_state*'''
+
+  id auto [pk, unique, not null]
+  state_data json [default:`builtins.dict()`, not null]
+  updated_at date_time [not null]
+
+  indexes {
+    (id) [pk, unique, name: 'swf_persistent_state_pkey', type: btree]
+  }
+}
+
+
 Table monitor_app.Run {
   Note: '''
 Represents a data-taking run in the ePIC detector system.
@@ -569,7 +590,7 @@ metadata: JSON field for additional file metadata
   file_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
   run_id foreign_key [not null]
   machine_state char [default:`"physics"`, not null]
-  file_url url [unique, not null]
+  stf_filename char [unique, not null]
   file_size_bytes big_integer [null]
   checksum char [null]
   created_at date_time [not null]
@@ -581,9 +602,9 @@ metadata: JSON field for additional file metadata
   workflow_status char [null]
 
   indexes {
-    (file_url) [unique, name: 'swf_stf_files_file_url_key', type: btree]
     (file_id) [pk, unique, name: 'swf_stf_files_pkey', type: btree]
     (run_id) [name: 'swf_stf_files_run_id_9a2165d5', type: btree]
+    (stf_filename) [unique, name: 'swf_stf_files_stf_filename_key', type: btree]
     (workflow_id) [name: 'swf_stf_files_workflow_id_055cc696', type: btree]
   }
 }
@@ -634,7 +655,7 @@ SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, 
   status monitor_app.char_systemagent_status [default:`"UNKNOWN"`, not null]
   last_heartbeat date_time [null]
   agent_url url [null]
-  workflow_enabled boolean [default:`False`, not null]
+  workflow_enabled boolean [default:`True`, not null]
   current_stf_count integer [default:`0`, not null]
   total_stf_processed integer [default:`0`, not null]
   last_stf_processed date_time [null]
