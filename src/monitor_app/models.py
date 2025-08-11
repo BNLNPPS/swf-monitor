@@ -34,7 +34,7 @@ class SystemAgent(models.Model):
     agent_url = models.URLField(max_length=200, blank=True, null=True)
     
     # Workflow-specific fields
-    workflow_enabled = models.BooleanField(default=False)
+    workflow_enabled = models.BooleanField(default=True)
     current_stf_count = models.IntegerField(default=0)
     total_stf_processed = models.IntegerField(default=0)
     last_stf_processed = models.DateTimeField(null=True, blank=True)

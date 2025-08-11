@@ -84,7 +84,8 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 defaults={
                     'agent_type': 'Unknown',
                     'status': status if status else 'UNKNOWN',
-                    'last_heartbeat': timezone.now()
+                    'last_heartbeat': timezone.now(),
+                    'workflow_enabled': True  # All agents are workflow-enabled by default
                 }
             )
             
@@ -92,6 +93,9 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 if status:
                     agent.status = status
                 agent.last_heartbeat = timezone.now()
+                # Ensure existing agents are marked as workflow-enabled
+                if not agent.workflow_enabled:
+                    agent.workflow_enabled = True
                 agent.save()
             
             self.logger.debug(f"Updated SystemAgent {agent_name} with status {agent.status}")

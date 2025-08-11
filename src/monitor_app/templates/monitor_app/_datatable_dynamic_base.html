@@ -93,7 +93,20 @@ Filter field configuration format:
 
 /* DataTables styling */
 #main-table_wrapper .top {
-    display: none; /* Hide default controls */
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+}
+#main-table_wrapper .dataTables_filter {
+    margin-bottom: 0;
+}
+#main-table_wrapper .dataTables_filter label {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0;
+}
+#main-table_wrapper .dataTables_filter input {
+    margin-left: 0.5rem;
 }
 #main-table_wrapper .bottom {
     display: flex !important;
@@ -202,11 +215,12 @@ $(document).ready(function() {
         order: {% block default_order %}[[0, 'desc']]{% endblock %},
         pageLength: 100,
         lengthMenu: [[100, 300, 1000, -1], [100, 300, 1000, 'All']],
-        dom: 'rt<"bottom"ip><"clear">', // Table, processing, info and pagination
+        dom: '<"top"f>rt<"bottom"ip><"clear">', // Search, table, processing, info and pagination
         responsive: true,
         pagingType: "full_numbers",
         language: {
             processing: 'Loading data...',
+            search: "Search:",
             emptyTable: 'No records found.',
             zeroRecords: 'No matching records found.',
             info: "Showing _START_ to _END_ of _TOTAL_ entries",
