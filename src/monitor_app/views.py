@@ -1692,40 +1692,11 @@ def persistent_state_view(request):
         updated_at = None
     
     # Format any timestamp values in the state data for display
-    formatted_state_data = {}
-    for key, value in state_data.items():
-        if isinstance(value, str) and ('time' in key.lower() or 'timestamp' in key.lower()):
-            # Try to parse and format timestamp strings
-            try:
-                from datetime import datetime
-                # Handle various timestamp formats
-                if 'T' in value:  # ISO format
-                    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                else:
-                    dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
-                formatted_state_data[key] = format_datetime(dt)
-            except:
-                # If parsing fails, keep original value
-                formatted_state_data[key] = value
-        else:
-            formatted_state_data[key] = value
+    from monitor_app.utils import format_timestamp_fields
+    formatted_state_data = format_timestamp_fields(state_data)
     
-    # Format JSON for display with cleaned timestamps
-    formatted_json_data = {}
-    for key, value in state_data.items():
-        if isinstance(value, str) and ('time' in key.lower() or 'timestamp' in key.lower()):
-            try:
-                from datetime import datetime
-                # Handle various timestamp formats
-                if 'T' in value:  # ISO format
-                    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-                else:
-                    dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
-                formatted_json_data[key] = format_datetime(dt)
-            except:
-                formatted_json_data[key] = value
-        else:
-            formatted_json_data[key] = value
+    # Use the same formatted data for JSON display
+    formatted_json_data = formatted_state_data
     
     context = {
         'state_data': formatted_state_data,
