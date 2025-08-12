@@ -264,6 +264,41 @@ def apply_filters(queryset, filters):
     return queryset
 
 
+def format_timestamp_fields(data_dict):
+    """
+    Format timestamp fields in a dictionary for display.
+    
+    Automatically detects timestamp fields by name (containing 'time' or 'timestamp')
+    and formats them using the standard format_datetime function.
+    
+    Args:
+        data_dict: Dictionary with potential timestamp string values
+        
+    Returns:
+        New dictionary with formatted timestamp strings
+    """
+    from datetime import datetime
+    
+    formatted_dict = {}
+    for key, value in data_dict.items():
+        if isinstance(value, str) and ('time' in key.lower() or 'timestamp' in key.lower()):
+            # Try to parse and format timestamp strings
+            try:
+                # Handle various timestamp formats
+                if 'T' in value:  # ISO format
+                    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+                formatted_dict[key] = format_datetime(dt)
+            except:
+                # If parsing fails, keep original value
+                formatted_dict[key] = value
+        else:
+            formatted_dict[key] = value
+    
+    return formatted_dict
+
+
 def get_filter_counts(queryset, filter_fields, current_filters=None):
     """
     Calculate counts for each possible filter value, considering current filters.

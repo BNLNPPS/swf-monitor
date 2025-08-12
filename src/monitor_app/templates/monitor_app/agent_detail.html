@@ -37,7 +37,7 @@
                     <td>{{ workflow.generated_time|date:"Ymd-H:i:s"|default:"—" }}</td>
                 </tr>
                 {% empty %}
-                <tr>
+                <tr class="empty-state-row">
                     <td colspan="5">No workflows currently associated with this agent.</td>
                 </tr>
                 {% endfor %}
@@ -50,8 +50,8 @@
     <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
     <script>
       $(document).ready(function() {
-        // Only initialize DataTables if there are workflow rows
-        if ($('#workflows-table tbody tr').length > 0 && !$('#workflows-table tbody tr td[colspan]').length) {
+        // Only initialize DataTables if there are actual data rows (not empty state)
+        if ($('#workflows-table tbody tr').length > 0 && !$('#workflows-table tbody tr.empty-state-row').length) {
           $('#workflows-table').DataTable({
             paging: true,
             pageLength: 50,
