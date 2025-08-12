@@ -199,6 +199,7 @@ cython_debug/
 
 # Secrets
 .env
+production.env
 .DS_Store
 
 # SSL certificates and private keys
