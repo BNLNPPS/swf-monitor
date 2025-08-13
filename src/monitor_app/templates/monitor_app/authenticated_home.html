@@ -100,18 +100,25 @@
                 </div>
             </div>
         </div>
-    </div>
 
-    <div class="row mt-5">
-        <div class="col-12">
-            <div class="card bg-light">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
                 <div class="card-body">
-                    <h6 class="card-title">Quick Actions</h6>
-                    <div class="d-flex flex-wrap gap-2">
-                        <a href="{% url 'monitor_app:system_agent_create' %}" class="btn btn-sm btn-outline-primary">Add Agent</a>
-                        <a href="{% url 'monitor_app:workflow_realtime_dashboard' %}" class="btn btn-sm btn-outline-success">Realtime Dashboard</a>
-                        <a href="{% url 'monitor_app:workflow_dashboard' %}" class="btn btn-sm btn-outline-info">Workflow Dashboard</a>
-                    </div>
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:panda_queues_list' %}" class="text-decoration-none">PanDA Queues</a>
+                    </h5>
+                    <p class="card-text">Manage computing queue configurations for the PanDA workload management system. View and update queue settings from GitHub.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="text-decoration-none">Rucio Endpoints</a>
+                    </h5>
+                    <p class="card-text">Configure distributed data management endpoints for the Rucio system. Monitor storage sites and update configurations.</p>
                 </div>
             </div>
         </div>
