@@ -4,8 +4,11 @@
 # Usage: deploy-swf-monitor.sh [tag|branch] <reference>
 #
 # Examples:
-#   deploy-swf-monitor.sh tag infra/baseline-v17
+#   deploy-swf-monitor.sh tag tagName
 #   deploy-swf-monitor.sh branch infra/baseline-v18
+#   deploy-swf-monitor.sh branch main
+#
+# See docs/PRODUCTION_DEPLOYMENT.md for complete documentation
 
 set -e
 
@@ -138,6 +141,20 @@ chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 # Reload Apache
 log "Reloading Apache..."
 systemctl reload httpd
+
+# Health check
+log "Performing health check..."
+HEALTH_URL="http://localhost/swf-monitor/"
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+
+if [ "$HTTP_STATUS" = "200" ]; then
+    log "✅ Health check PASSED - Application responding (HTTP $HTTP_STATUS)"
+else
+    log "❌ Health check FAILED - Application not responding (HTTP $HTTP_STATUS)"
+    echo "WARNING: Deployment completed but application may not be working correctly"
+    echo "Check Apache error logs: sudo tail -f /var/log/httpd/error_log"
+    # Don't exit - deployment artifacts are in place, just alerting
+fi
 
 # Cleanup old releases (keep last 5)
 log "Cleaning up old releases..."

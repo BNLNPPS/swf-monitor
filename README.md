@@ -49,6 +49,7 @@ The monitor serves as the central hub in a distributed agent-based workflow:
 | Guide | Description | Use Case |
 |-------|-------------|----------|
 | **[Setup Guide](docs/SETUP_GUIDE.md)** | Installation, configuration, and development setup | Getting started |
+| **[Production Deployment](docs/PRODUCTION_DEPLOYMENT.md)** | Complete Apache production deployment guide | Production operations |
 | **[API Reference](docs/API_REFERENCE.md)** | REST API, WebSocket, database schema, authentication | Integration |
 | **[MCP Implementation](docs/MCP_REST_IMPLEMENTATION.md)** | Model Control Protocol REST API details | Agent communication |
 | **[Development Roadmap](docs/DEVELOPMENT_ROADMAP.md)** | Future plans, architecture, workflow design | Contributors |
