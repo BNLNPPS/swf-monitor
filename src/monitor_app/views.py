@@ -321,14 +321,17 @@ def log_summary_datatable_ajax(request):
         app_filter_url = f"?app_name={item['app_name']}"
         if filters['instance_name']:
             app_filter_url += f"&instance_name={filters['instance_name']}"
-        app_name_link = f'<a href="/logs/{app_filter_url}">{item["app_name"]}</a>'
+        logs_url = reverse('monitor_app:log_list')
+        app_name_link = f'<a href="{logs_url}?{app_filter_url}">{item["app_name"]}</a>'
         
         instance_filter_url = f"?instance_name={item['instance_name']}"
         if filters['app_name']:
             instance_filter_url += f"&app_name={filters['app_name']}"
-        instance_name_link = f'<a href="/logs/{instance_filter_url}">{item["instance_name"]}</a>'
+        logs_url = reverse('monitor_app:log_list')
+        instance_name_link = f'<a href="{logs_url}?{instance_filter_url}">{item["instance_name"]}</a>'
         
-        view_logs_url = f'/logs/?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
+        logs_url = reverse('monitor_app:log_list')
+        view_logs_url = f'{logs_url}?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
         view_logs_link = f'<a href="{view_logs_url}">View Logs</a>'
         
         data.append([
@@ -608,7 +611,8 @@ def database_tables_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for record in paginated_records:
-        table_link = f'<a href="/database/{record["name"]}/">{record["name"]}</a>'
+        table_url = reverse('monitor_app:database_table_list', args=[record['name']])
+        table_link = f'<a href="{table_url}">{record["name"]}</a>'
         count_str = str(record['count'])
         last_insert_str = format_datetime(record['last_insert'])
         
@@ -717,15 +721,18 @@ def runs_datatable_ajax(request):
         start_time_str = format_datetime(run.start_time)
         end_time_str = format_datetime(run.end_time) if run.end_time else '—'
         duration_str = format_run_duration(run.start_time, run.end_time)
-        run_number_link = f'<a href="/runs/{run.run_id}/">{run.run_number}</a>'
+        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_id])
+        run_number_link = f'<a href="{run_detail_url}">{run.run_number}</a>'
         
         # Make STF files count clickable to filter STF files by this run
         if run.stf_files_count > 0:
-            stf_files_link = f'<a href="/stf-files/?run_number={run.run_number}">{run.stf_files_count}</a>'
+            stf_files_url = reverse('monitor_app:stf_files_list')
+            stf_files_link = f'<a href="{stf_files_url}?run_number={run.run_number}">{run.stf_files_count}</a>'
         else:
             stf_files_link = str(run.stf_files_count)
         
-        view_link = f'<a href="/runs/{run.run_id}/">View</a>'
+        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_id])
+        view_link = f'<a href="{run_detail_url}">View</a>'
         
         data.append([
             run_number_link, start_time_str, end_time_str,
@@ -837,8 +844,9 @@ def stf_files_datatable_ajax(request):
         # Use plain text status (consistent with runs view)
         status_text = file.get_status_display()
         timestamp_str = format_datetime(file.created_at)
-        run_link = f'<a href="/runs/{file.run.run_id}/">{file.run.run_number}</a>' if file.run else 'N/A'
-        view_link = f'<a href="/stf-files/{file.file_id}/">View</a>'
+        run_link = f'<a href="{reverse("monitor_app:run_detail", args=[file.run.run_id])}">{file.run.run_number}</a>' if file.run else 'N/A'
+        stf_file_detail_url = reverse('monitor_app:stf_file_detail', args=[file.file_id])
+        view_link = f'<a href="{stf_file_detail_url}">View</a>'
         
         data.append([
             file.stf_filename, run_link, file.machine_state or '',
@@ -920,14 +928,16 @@ def subscribers_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for subscriber in subscribers:
-        subscriber_name_link = f'<a href="/subscribers/{subscriber.subscriber_id}/">{subscriber.subscriber_name}</a>'
+        subscriber_detail_url = reverse('monitor_app:subscriber_detail', args=[subscriber.subscriber_id])
+        subscriber_name_link = f'<a href="{subscriber_detail_url}">{subscriber.subscriber_name}</a>'
         description = subscriber.description[:100] + '...' if subscriber.description and len(subscriber.description) > 100 else (subscriber.description or '')
         fraction_str = f"{subscriber.fraction:.3f}" if subscriber.fraction is not None else 'N/A'
         # Show raw DB value, not massaged badges
         is_active_value = str(subscriber.is_active).lower()  # True -> 'true', False -> 'false'
         created_str = format_datetime(subscriber.created_at)
         updated_str = format_datetime(subscriber.updated_at)
-        view_link = f'<a href="/subscribers/{subscriber.subscriber_id}/">View</a>'
+        subscriber_detail_url = reverse('monitor_app:subscriber_detail', args=[subscriber.subscriber_id])
+        view_link = f'<a href="{subscriber_detail_url}">View</a>'
         
         data.append([
             subscriber_name_link, description, fraction_str, is_active_value,
@@ -1114,7 +1124,8 @@ def workflow_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for workflow in workflows:
-        filename_link = f'<a href="/workflow/{workflow.workflow_id}/">{workflow.filename}</a>'
+        workflow_detail_url = reverse('monitor_app:workflow_detail', args=[workflow.workflow_id])
+        filename_link = f'<a href="{workflow_detail_url}">{workflow.filename}</a>'
         
         # Extract msg_type from JSON metadata safely
         msg_type = 'N/A'
@@ -1260,7 +1271,8 @@ def workflow_agents_datatable_ajax(request):
         status_badge = f'<span class="badge bg-{status_class}">{agent.status}</span>'
         
         # Create agent name link
-        agent_link = f'<a href="/workflow/agents/{agent.instance_name}/">{agent.instance_name}</a>'
+        agent_detail_url = reverse('monitor_app:agent_detail', args=[agent.instance_name])
+        agent_link = f'<a href="{agent_detail_url}">{agent.instance_name}</a>'
         
         # Format workflow enabled badge
         workflow_enabled_class = 'success' if agent.workflow_enabled else 'secondary'
@@ -1400,18 +1412,21 @@ def workflow_messages_datatable_ajax(request):
         
         # Format workflow link
         if message.workflow:
-            workflow_link = f'<a href="/workflow/{message.workflow.workflow_id}/" style="font-size: 0.8rem;">{message.workflow.filename}</a>'
+            workflow_detail_url = reverse('monitor_app:workflow_detail', args=[message.workflow.workflow_id])
+            workflow_link = f'<a href="{workflow_detail_url}" style="font-size: 0.8rem;">{message.workflow.filename}</a>'
         else:
             workflow_link = 'N/A'
         
         # Format agent links
-        sender_link = f'<a href="/workflow/agents/{message.sender_agent}/">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
+        sender_link = f'<a href="{reverse("monitor_app:agent_detail", args=[message.sender_agent])}">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
         
         # Handle special case for "all-agents" recipient
         if message.recipient_agent == 'all-agents':
-            recipient_link = f'<a href="/workflow/agents/">{message.recipient_agent}</a>'
+            workflow_agents_url = reverse('monitor_app:workflow_agents_list')
+            recipient_link = f'<a href="{workflow_agents_url}">{message.recipient_agent}</a>'
         elif message.recipient_agent:
-            recipient_link = f'<a href="/workflow/agents/{message.recipient_agent}/">{message.recipient_agent}</a>'
+            agent_detail_url = reverse('monitor_app:agent_detail', args=[message.recipient_agent])
+            recipient_link = f'<a href="{agent_detail_url}">{message.recipient_agent}</a>'
         else:
             recipient_link = 'N/A'
         
