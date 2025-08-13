@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-13-2025 01:59PM UTC'''
+  Last Updated At 08-13-2025 02:12PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -481,6 +481,7 @@ error_message: Error details if dispatch failed
 }
 ref: monitor_app.MessageQueueDispatch.stf_file_id > monitor_app.StfFile.file_id
 
+
 Table monitor_app.PandaQueue {
   Note: '''
 Represents a PanDA compute queue configuration.
@@ -501,6 +502,7 @@ Stores the queue name and full configuration as JSON.
     (queue_name) [pk, unique, name: 'swf_panda_queues_pkey', type: btree]
   }
 }
+
 
 Table monitor_app.PersistentState {
   Note: '''
