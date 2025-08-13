@@ -1780,7 +1780,7 @@ def panda_queues_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for queue in queues:
-        queue_name_link = f'<a href="/panda-queues/{queue.queue_name}/">{queue.queue_name}</a>'
+        queue_name_link = f'<a href="{reverse("monitor_app:panda_queue_detail", args=[queue.queue_name])}">{queue.queue_name}</a>'
         
         # Extract key fields from config_data if not set
         if not queue.site and queue.config_data:
@@ -1789,7 +1789,7 @@ def panda_queues_datatable_ajax(request):
             queue.queue_type = queue.config_data.get('type', '')
         
         updated_str = format_datetime(queue.updated_at)
-        json_link = f'<a href="/panda-queues/{queue.queue_name}/json/">View JSON</a>'
+        json_link = f'<a href="{reverse("monitor_app:panda_queue_json", args=[queue.queue_name])}">View JSON</a>'
         
         data.append([
             queue_name_link, queue.site or '', queue.status,
@@ -1887,7 +1887,7 @@ def rucio_endpoints_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for endpoint in endpoints:
-        endpoint_name_link = f'<a href="/rucio-endpoints/{endpoint.endpoint_name}/">{endpoint.endpoint_name}</a>'
+        endpoint_name_link = f'<a href="{reverse("monitor_app:rucio_endpoint_detail", args=[endpoint.endpoint_name])}">{endpoint.endpoint_name}</a>'
         
         # Extract key fields from config_data if not set
         if not endpoint.site and endpoint.config_data:
@@ -1900,7 +1900,7 @@ def rucio_endpoints_datatable_ajax(request):
         is_active_badge = '<span class="badge bg-success">Active</span>' if endpoint.is_active else '<span class="badge bg-secondary">Inactive</span>'
         
         updated_str = format_datetime(endpoint.updated_at)
-        json_link = f'<a href="/rucio-endpoints/{endpoint.endpoint_name}/json/">View JSON</a>'
+        json_link = f'<a href="{reverse("monitor_app:rucio_endpoint_json", args=[endpoint.endpoint_name])}">View JSON</a>'
         
         data.append([
             endpoint_name_link, endpoint.site or '', endpoint.endpoint_type or '',
