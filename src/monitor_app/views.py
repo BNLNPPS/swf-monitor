@@ -1993,20 +1993,11 @@ def update_panda_queues_from_github(request):
     github_url = "https://raw.githubusercontent.com/BNLNPPS/swf-testbed/main/config/panda_queues.json"
     repo_location = "BNLNPPS/swf-testbed"
     file_path = "config/panda_queues.json"
+    github_file_url = "https://github.com/BNLNPPS/swf-testbed/blob/main/config/panda_queues.json"
     
     try:
         # Fetch JSON from GitHub
-        request_obj = urllib.request.Request(github_url)
-        with urllib.request.urlopen(request_obj) as response:
-            # Get file modification info from headers
-            last_modified = response.headers.get('Last-Modified')
-            if last_modified:
-                # Parse RFC 2822 date format
-                mod_time = email.utils.parsedate_to_datetime(last_modified)
-                mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S UTC')
-            else:
-                mod_time_str = 'Unknown'
-            
+        with urllib.request.urlopen(github_url) as response:
             data = json.loads(response.read().decode())
         
         # Clear existing data and reload
@@ -2037,7 +2028,7 @@ def update_panda_queues_from_github(request):
             f'Successfully updated {created_count} PanDA queues from GitHub<br>'
             f'<strong>Repository:</strong> {repo_location}<br>'
             f'<strong>File:</strong> {file_path}<br>'
-            f'<strong>Last Modified:</strong> {mod_time_str}',
+            f'<strong>View on GitHub:</strong> <a href="{github_file_url}" target="_blank">Click here to see what was loaded</a>',
             extra_tags='safe'
         )
         
@@ -2061,20 +2052,11 @@ def update_rucio_endpoints_from_github(request):
     github_url = "https://raw.githubusercontent.com/BNLNPPS/swf-testbed/main/config/ddm_endpoints.json"
     repo_location = "BNLNPPS/swf-testbed"
     file_path = "config/ddm_endpoints.json"
+    github_file_url = "https://github.com/BNLNPPS/swf-testbed/blob/main/config/ddm_endpoints.json"
     
     try:
         # Fetch JSON from GitHub
-        request_obj = urllib.request.Request(github_url)
-        with urllib.request.urlopen(request_obj) as response:
-            # Get file modification info from headers
-            last_modified = response.headers.get('Last-Modified')
-            if last_modified:
-                # Parse RFC 2822 date format
-                mod_time = email.utils.parsedate_to_datetime(last_modified)
-                mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S UTC')
-            else:
-                mod_time_str = 'Unknown'
-            
+        with urllib.request.urlopen(github_url) as response:
             data = json.loads(response.read().decode())
         
         # Clear existing data and reload
@@ -2112,7 +2094,7 @@ def update_rucio_endpoints_from_github(request):
             f'Successfully updated {created_count} Rucio endpoints from GitHub<br>'
             f'<strong>Repository:</strong> {repo_location}<br>'
             f'<strong>File:</strong> {file_path}<br>'
-            f'<strong>Last Modified:</strong> {mod_time_str}',
+            f'<strong>View on GitHub:</strong> <a href="{github_file_url}" target="_blank">Click here to see what was loaded</a>',
             extra_tags='safe'
         )
         
