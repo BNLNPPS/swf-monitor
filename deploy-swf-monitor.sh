@@ -88,22 +88,29 @@ log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
 source .venv/bin/activate
 
-# Create production environment file if it doesn't exist
+# Verify production environment file exists
 if [ ! -f "$DEPLOY_ROOT/config/env/production.env" ]; then
-    log "Creating production environment configuration..."
-    cat > "$DEPLOY_ROOT/config/env/production.env" << 'EOF'
-# Production Environment Configuration for SWF Monitor
-DEBUG=False
-SECRET_KEY=your-production-secret-key-here-change-this
-SWF_ALLOWED_HOSTS=localhost,127.0.0.1,pandasserver02.sdcc.bnl.gov
-SWF_MONITOR_URL=http://localhost
-SWF_MONITOR_HTTP_URL=http://localhost
-DB_HOST=localhost
-DB_NAME=swfdb
-DB_USER=wenaus
-# Add other production-specific environment variables here
-EOF
-    log "Created default production.env - please review and update values"
+    echo "ERROR: Production environment file not found at $DEPLOY_ROOT/config/env/production.env"
+    echo "Please create this file with appropriate production configuration before deploying."
+    echo "See docs/PRODUCTION_DEPLOYMENT.md for configuration details."
+    exit 1
+fi
+
+# Validate subpath configuration for Apache deployment
+log "Validating subpath configuration..."
+if grep -q "WSGIScriptAlias /swf-monitor" /etc/httpd/conf.d/swf-monitor.conf 2>/dev/null; then
+    if ! grep -q "SWF_DEPLOYMENT_SUBPATH=/swf-monitor" "$DEPLOY_ROOT/config/env/production.env"; then
+        echo "ERROR: Apache configured for /swf-monitor subpath but production.env missing subpath configuration"
+        echo "Required variables in production.env:"
+        echo "  SWF_DEPLOYMENT_SUBPATH=/swf-monitor"
+        echo "  SWF_STATIC_URL_BASE=/swf-monitor/static/"
+        echo "  SWF_LOGIN_REDIRECT=/swf-monitor/home/"
+        echo "See docs/PRODUCTION_DEPLOYMENT.md for complete configuration details."
+        exit 1
+    fi
+    log "✅ Subpath configuration validated"
+else
+    log "ℹ️ No subpath deployment detected in Apache config"
 fi
 
 # Link shared resources
