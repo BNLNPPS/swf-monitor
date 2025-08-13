@@ -130,17 +130,21 @@ rsync -a --delete "$RELEASE_DIR/src/staticfiles/" "$DEPLOY_ROOT/shared/static/"
 log "Running database migrations..."
 python manage.py migrate --settings=swf_monitor_project.settings
 
-# Update current symlink
-log "Updating current symlink..."
-ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
-
 # Set ownership
 log "Setting ownership..."
 chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 
-# Reload Apache
-log "Reloading Apache..."
-systemctl reload httpd
+# Stop Apache
+log "Stopping Apache..."
+systemctl stop httpd
+
+# Update current symlink
+log "Updating current symlink..."
+ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
+
+# Start Apache
+log "Starting Apache..."
+systemctl start httpd
 
 # Health check
 log "Performing health check..."
