@@ -481,7 +481,6 @@ error_message: Error details if dispatch failed
 }
 ref: monitor_app.MessageQueueDispatch.stf_file_id > monitor_app.StfFile.file_id
 
-
 Table monitor_app.PandaQueue {
   Note: '''
 Represents a PanDA compute queue configuration.
@@ -502,7 +501,6 @@ Stores the queue name and full configuration as JSON.
     (queue_name) [pk, unique, name: 'swf_panda_queues_pkey', type: btree]
   }
 }
-
 
 Table monitor_app.PersistentState {
   Note: '''
