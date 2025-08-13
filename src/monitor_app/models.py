@@ -317,6 +317,53 @@ class PersistentState(models.Model):
             return current_run
 
 
+class PandaQueue(models.Model):
+    """
+    Represents a PanDA compute queue configuration.
+    Stores the queue name and full configuration as JSON.
+    """
+    queue_name = models.CharField(max_length=100, unique=True, primary_key=True)
+    site = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=50, default='active')
+    queue_type = models.CharField(max_length=50, blank=True)
+    config_data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'swf_panda_queues'
+        ordering = ['queue_name']
+        verbose_name = 'PanDA Queue'
+        verbose_name_plural = 'PanDA Queues'
+    
+    def __str__(self):
+        return self.queue_name
+
+
+class RucioEndpoint(models.Model):
+    """
+    Represents a Rucio DDM (Distributed Data Management) endpoint configuration.
+    Stores the endpoint name and full configuration as JSON.
+    """
+    endpoint_name = models.CharField(max_length=100, unique=True, primary_key=True)
+    site = models.CharField(max_length=100, blank=True)
+    endpoint_type = models.CharField(max_length=50, blank=True)
+    is_tape = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    config_data = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'swf_rucio_endpoints'
+        ordering = ['endpoint_name']
+        verbose_name = 'Rucio Endpoint'
+        verbose_name_plural = 'Rucio Endpoints'
+    
+    def __str__(self):
+        return self.endpoint_name
+
+
 # Import workflow models to register them with Django
 from .workflow_models import (
     STFWorkflow,

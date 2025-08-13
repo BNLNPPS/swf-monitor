@@ -1,0 +1,22 @@
+{% extends "monitor_app/_datatable_base.html" %}
+
+{% block extra_filters %}
+<p class="d-flex justify-content-end">
+    <a href="{% url 'monitor_app:rucio_endpoints_all_json' %}" class="btn btn-primary">
+        View Full JSON Configuration
+    </a>
+</p>
+{% if user.is_superuser %}
+<p class="d-flex justify-content-end align-items-center">
+    <span class="text-muted me-2">Superusers can</span>
+    <a href="{% url 'monitor_app:update_rucio_endpoints_from_github' %}" 
+       class="btn btn-warning"
+       onclick="return confirm('This will replace all Rucio endpoint data with the latest from GitHub main branch. Continue?')">
+        update the JSON data
+    </a>
+    <span class="text-muted ms-2">from GitHub main</span>
+</p>
+{% endif %}
+{% endblock %}
+
+{% block default_order %}[[0, 'asc']]{% endblock %}

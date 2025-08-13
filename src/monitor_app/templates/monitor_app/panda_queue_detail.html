@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block title %}PanDA Queue: {{ queue.queue_name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:home' %}">Home</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_queues_list' %}">PanDA Queues</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">{{ queue.queue_name }}</li>
+                </ol>
+            </nav>
+            
+            <h1>PanDA Queue: {{ queue.queue_name }}</h1>
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Queue Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Queue Name:</th>
+                                    <td>{{ queue.queue_name }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Site:</th>
+                                    <td>{{ queue.site|default:"—" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Status:</th>
+                                    <td>
+                                        {% if queue.status == 'active' %}
+                                            <span class="badge bg-success">{{ queue.status }}</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ queue.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Type:</th>
+                                    <td>{{ queue.queue_type|default:"—" }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Created:</th>
+                                    <td>{{ queue.created_at|date:"Y-m-d H:i:s" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Updated:</th>
+                                    <td>{{ queue.updated_at|date:"Y-m-d H:i:s" }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            {% if summary_fields %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Configuration Summary</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        {% for key, value in summary_fields.items %}
+                        <tr>
+                            <th>{{ key }}:</th>
+                            <td>{{ value }}</td>
+                        </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="card">
+                <div class="card-header">
+                    <h5>Full Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <a href="{% url 'monitor_app:panda_queue_json' queue.queue_name %}" class="btn btn-primary">
+                        View Full JSON Configuration
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
