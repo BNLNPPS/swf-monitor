@@ -641,12 +641,107 @@ def database_table_list(request, table_name):
         return row.get(key, '')
     from django.template.defaulttags import register
     register.filter('get_item', get_item)
-    return render(request, 'monitor_app/database_table_list.html', {
+    from django.urls import reverse
+    
+    # Convert columns for DataTables format
+    datatable_columns = [{'name': col, 'title': col.replace('_', ' ').title(), 'orderable': True} for col in columns]
+    
+    context = {
+        'table_title': f'Table: {table_name}',
+        'table_description': f'Database table contents for {table_name} with search, sorting, and pagination.',
+        'ajax_url': reverse('monitor_app:database_table_datatable_ajax', kwargs={'table_name': table_name}),
+        'columns': datatable_columns,
         'table_name': table_name,
-        'columns': columns,
-        'rows': rows,
-        'dt_columns': dt_columns,
-    })
+    }
+    return render(request, 'monitor_app/database_table_list.html', context)
+
+
+@login_required
+def database_table_datatable_ajax(request, table_name):
+    """
+    AJAX endpoint for server-side DataTables processing of individual database table.
+    Provides pagination, search, and sorting for any swf_ table.
+    """
+    if not table_name.startswith('swf_'):
+        raise Http404()
+    
+    from .utils import DataTablesProcessor, format_datetime
+    
+    # Get column information
+    with connection.cursor() as cursor:
+        cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 1')
+        columns = [col[0] for col in cursor.description]
+    
+    # Initialize DataTables processor
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    
+    # Build base query
+    query = f'SELECT * FROM "{table_name}"'
+    count_query = f'SELECT COUNT(*) FROM "{table_name}"'
+    params = []
+    
+    # Get total count
+    with connection.cursor() as cursor:
+        cursor.execute(count_query)
+        records_total = cursor.fetchone()[0]
+    
+    # Apply search filtering
+    where_conditions = []
+    if dt.search_value:
+        search_conditions = []
+        for column in columns:
+            search_conditions.append(f'CAST("{column}" AS TEXT) ILIKE %s')
+            params.append(f'%{dt.search_value}%')
+        where_conditions.append(f"({' OR '.join(search_conditions)})")
+    
+    # Build filtered query
+    filtered_query = query
+    filtered_count_query = count_query
+    if where_conditions:
+        where_clause = ' WHERE ' + ' AND '.join(where_conditions)
+        filtered_query += where_clause
+        filtered_count_query += where_clause
+    
+    # Get filtered count
+    with connection.cursor() as cursor:
+        cursor.execute(filtered_count_query, params)
+        records_filtered = cursor.fetchone()[0]
+    
+    # Apply ordering
+    if dt.order_column and dt.order_column in columns:
+        order_clause = f' ORDER BY "{dt.order_column}" {dt.order_direction.upper()}'
+        filtered_query += order_clause
+    
+    # Apply pagination
+    filtered_query += f' LIMIT {dt.length} OFFSET {dt.start}'
+    
+    # Execute final query
+    with connection.cursor() as cursor:
+        cursor.execute(filtered_query, params)
+        results = cursor.fetchall()
+    
+    # Identify datetime columns using Django model if available
+    dt_columns = []
+    for model in apps.get_models():
+        if model._meta.db_table == table_name:
+            dt_columns = [f.name for f in model._meta.fields if f.get_internal_type() == 'DateTimeField']
+            break
+    
+    # Format results for DataTables
+    data = []
+    for row in results:
+        row_data = []
+        for i, value in enumerate(row):
+            column_name = columns[i]
+            if column_name in dt_columns and value:
+                # Format datetime values
+                row_data.append(format_datetime(value))
+            else:
+                row_data.append(str(value) if value is not None else '')
+        data.append(row_data)
+    
+    return dt.create_response(data, records_total, records_filtered)
+
 
 # Views for SWF Data Models
 
