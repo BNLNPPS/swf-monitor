@@ -24,11 +24,11 @@
             <div>
                 <span style="font-weight: 600;">Run Numbers:</span>
                 <a href="#" data-filter="run_number" data-value="" class="filter-link {% if not selected_run_number %}filter-active{% endif %}">All</a>
-                {% for run_num in run_numbers|slice:":10" %}
+                {% for run_num in run_numbers|slice:":100" %}
                     <a href="#" data-filter="run_number" data-value="{{ run_num }}" class="filter-link {% if selected_run_number == run_num|stringformat:"s" %}filter-active{% endif %}">{{ run_num }}</a>
                 {% endfor %}
-                {% if run_numbers|length > 10 %}
-                    <span style="color: #6c757d; font-style: italic;">... and {{ run_numbers|length|add:"-10" }} more</span>
+                {% if run_numbers|length > 100 %}
+                    <span style="color: #6c757d; font-style: italic;">... and {{ run_numbers|length|add:"-100" }} more</span>
                 {% endif %}
             </div>
         </div>
