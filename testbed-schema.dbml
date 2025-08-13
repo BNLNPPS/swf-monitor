@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-11-2025 03:57PM UTC'''
+  Last Updated At 08-13-2025 01:59PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -481,6 +481,26 @@ error_message: Error details if dispatch failed
 }
 ref: monitor_app.MessageQueueDispatch.stf_file_id > monitor_app.StfFile.file_id
 
+Table monitor_app.PandaQueue {
+  Note: '''
+Represents a PanDA compute queue configuration.
+Stores the queue name and full configuration as JSON.
+
+
+*DB table: swf_panda_queues*'''
+
+  queue_name char [pk, unique, not null]
+  site char [not null]
+  status char [default:`"active"`, not null]
+  queue_type char [not null]
+  config_data json [not null]
+  created_at date_time [not null]
+  updated_at date_time [not null]
+
+  indexes {
+    (queue_name) [pk, unique, name: 'swf_panda_queues_pkey', type: btree]
+  }
+}
 
 Table monitor_app.PersistentState {
   Note: '''
@@ -499,6 +519,29 @@ Use get_state() and update_state() methods to access nested data.
 
   indexes {
     (id) [pk, unique, name: 'swf_persistent_state_pkey', type: btree]
+  }
+}
+
+
+Table monitor_app.RucioEndpoint {
+  Note: '''
+Represents a Rucio DDM (Distributed Data Management) endpoint configuration.
+Stores the endpoint name and full configuration as JSON.
+
+
+*DB table: swf_rucio_endpoints*'''
+
+  endpoint_name char [pk, unique, not null]
+  site char [not null]
+  endpoint_type char [not null]
+  is_tape boolean [default:`False`, not null]
+  is_active boolean [default:`True`, not null]
+  config_data json [not null]
+  created_at date_time [not null]
+  updated_at date_time [not null]
+
+  indexes {
+    (endpoint_name) [pk, unique, name: 'swf_rucio_endpoints_pkey', type: btree]
   }
 }
 

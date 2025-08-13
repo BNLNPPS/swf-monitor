@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+
+{% block title %}Rucio Endpoint: {{ endpoint.endpoint_name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:home' %}">Home</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:rucio_endpoints_list' %}">Rucio Endpoints</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">{{ endpoint.endpoint_name }}</li>
+                </ol>
+            </nav>
+            
+            <h1>Rucio Endpoint: {{ endpoint.endpoint_name }}</h1>
+            
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Endpoint Information</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Endpoint Name:</th>
+                                    <td>{{ endpoint.endpoint_name }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Site:</th>
+                                    <td>{{ endpoint.site|default:"—" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Type:</th>
+                                    <td>{{ endpoint.endpoint_type|default:"—" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Storage Type:</th>
+                                    <td>
+                                        {% if endpoint.is_tape %}
+                                            <span class="badge bg-warning">Tape</span>
+                                        {% else %}
+                                            <span class="badge bg-info">Disk</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="col-md-6">
+                            <table class="table table-sm">
+                                <tr>
+                                    <th>Status:</th>
+                                    <td>
+                                        {% if endpoint.is_active %}
+                                            <span class="badge bg-success">Active</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Inactive</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <th>Created:</th>
+                                    <td>{{ endpoint.created_at|date:"Y-m-d H:i:s" }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Updated:</th>
+                                    <td>{{ endpoint.updated_at|date:"Y-m-d H:i:s" }}</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            {% if summary_fields %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Configuration Summary</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        {% for key, value in summary_fields.items %}
+                        <tr>
+                            <th>{{ key }}:</th>
+                            <td>{{ value }}</td>
+                        </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+            
+            <div class="card">
+                <div class="card-header">
+                    <h5>Full Configuration</h5>
+                </div>
+                <div class="card-body">
+                    <a href="{% url 'monitor_app:rucio_endpoint_json' endpoint.endpoint_name %}" class="btn btn-primary">
+                        View Full JSON Configuration
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

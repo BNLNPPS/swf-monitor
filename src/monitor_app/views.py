@@ -15,7 +15,7 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, PersistentState
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, PersistentState, PandaQueue, RucioEndpoint
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
@@ -1723,3 +1723,400 @@ def get_next_run_number(request):
             'error': str(e),
             'status': 'error'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
+
+@login_required
+def panda_queues_list(request):
+    """
+    Professional PanDA queues list view using server-side DataTables.
+    Displays computing queue configurations with key fields and JSON links.
+    """
+    from django.urls import reverse
+    
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'queue_name', 'title': 'Name', 'orderable': True},
+        {'name': 'site', 'title': 'Site', 'orderable': True},
+        {'name': 'status', 'title': 'Status', 'orderable': True},
+        {'name': 'queue_type', 'title': 'Type', 'orderable': True},
+        {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
+        {'name': 'json', 'title': 'JSON', 'orderable': False},
+    ]
+    
+    context = {
+        'table_title': 'PanDA Queues',
+        'table_description': 'Computing queue configurations for the PanDA workload management system.',
+        'ajax_url': reverse('monitor_app:panda_queues_datatable_ajax'),
+        'columns': columns,
+    }
+    return render(request, 'monitor_app/panda_queues_list.html', context)
+
+
+def panda_queues_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of PanDA queues.
+    Handles pagination, searching, and ordering.
+    """
+    from .utils import DataTablesProcessor, format_datetime
+    
+    # Initialize DataTables processor
+    columns = ['queue_name', 'site', 'status', 'queue_type', 'updated_at', 'json']
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    
+    # Build base queryset
+    queryset = PandaQueue.objects.all()
+    
+    # Get counts and apply search/pagination
+    records_total = PandaQueue.objects.count()
+    search_fields = ['queue_name', 'site', 'status', 'queue_type']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by())
+    queues = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for queue in queues:
+        queue_name_link = f'<a href="/panda-queues/{queue.queue_name}/">{queue.queue_name}</a>'
+        
+        # Extract key fields from config_data if not set
+        if not queue.site and queue.config_data:
+            queue.site = queue.config_data.get('site', '')
+        if not queue.queue_type and queue.config_data:
+            queue.queue_type = queue.config_data.get('type', '')
+        
+        updated_str = format_datetime(queue.updated_at)
+        json_link = f'<a href="/panda-queues/{queue.queue_name}/json/">View JSON</a>'
+        
+        data.append([
+            queue_name_link, queue.site or '', queue.status,
+            queue.queue_type or '', updated_str, json_link
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
+
+@login_required
+def panda_queue_detail(request, queue_name):
+    """Display detailed view of a specific PanDA queue configuration."""
+    queue = get_object_or_404(PandaQueue, queue_name=queue_name)
+    
+    # Extract some key fields for summary display
+    summary_fields = {}
+    if queue.config_data:
+        # Extract commonly useful fields
+        for field in ['resource_type', 'cloud', 'country', 'site']:
+            if field in queue.config_data:
+                summary_fields[field] = queue.config_data[field]
+    
+    context = {
+        'queue': queue,
+        'summary_fields': summary_fields,
+    }
+    return render(request, 'monitor_app/panda_queue_detail.html', context)
+
+
+@login_required
+def panda_queue_json(request, queue_name):
+    """Display JSON view of a PanDA queue configuration using renderjson."""
+    queue = get_object_or_404(PandaQueue, queue_name=queue_name)
+    
+    import json
+    context = {
+        'queue': queue,
+        'config_json': json.dumps(queue.config_data, indent=2),
+        'title': f'PanDA Queue: {queue.queue_name}',
+    }
+    return render(request, 'monitor_app/json_viewer.html', context)
+
+
+@login_required
+def rucio_endpoints_list(request):
+    """
+    Professional Rucio endpoints list view using server-side DataTables.
+    Displays DDM endpoint configurations with key fields and JSON links.
+    """
+    from django.urls import reverse
+    
+    # Column definitions for DataTables
+    columns = [
+        {'name': 'endpoint_name', 'title': 'Endpoint Name', 'orderable': True},
+        {'name': 'site', 'title': 'Site', 'orderable': True},
+        {'name': 'endpoint_type', 'title': 'Type', 'orderable': True},
+        {'name': 'is_tape', 'title': 'Tape', 'orderable': True},
+        {'name': 'is_active', 'title': 'Active', 'orderable': True},
+        {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
+        {'name': 'json', 'title': 'JSON', 'orderable': False},
+    ]
+    
+    context = {
+        'table_title': 'Rucio Endpoints',
+        'table_description': 'Distributed data management endpoints for the Rucio system.',
+        'ajax_url': reverse('monitor_app:rucio_endpoints_datatable_ajax'),
+        'columns': columns,
+    }
+    return render(request, 'monitor_app/rucio_endpoints_list.html', context)
+
+
+def rucio_endpoints_datatable_ajax(request):
+    """
+    AJAX endpoint for server-side DataTables processing of Rucio endpoints.
+    Handles pagination, searching, and ordering.
+    """
+    from .utils import DataTablesProcessor, format_datetime
+    
+    # Initialize DataTables processor
+    columns = ['endpoint_name', 'site', 'endpoint_type', 'is_tape', 'is_active', 'updated_at', 'json']
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    
+    # Build base queryset
+    queryset = RucioEndpoint.objects.all()
+    
+    # Get counts and apply search/pagination
+    records_total = RucioEndpoint.objects.count()
+    search_fields = ['endpoint_name', 'site', 'endpoint_type']
+    queryset = dt.apply_search(queryset, search_fields)
+    records_filtered = queryset.count()
+    
+    queryset = queryset.order_by(dt.get_order_by())
+    endpoints = dt.apply_pagination(queryset)
+    
+    # Format data for DataTables
+    data = []
+    for endpoint in endpoints:
+        endpoint_name_link = f'<a href="/rucio-endpoints/{endpoint.endpoint_name}/">{endpoint.endpoint_name}</a>'
+        
+        # Extract key fields from config_data if not set
+        if not endpoint.site and endpoint.config_data:
+            endpoint.site = endpoint.config_data.get('rcsite', endpoint.config_data.get('site', ''))
+        if not endpoint.endpoint_type and endpoint.config_data:
+            endpoint.endpoint_type = 'tape' if endpoint.config_data.get('is_tape') else 'disk'
+        
+        # Format boolean fields
+        is_tape_badge = '<span class="badge bg-warning">Tape</span>' if endpoint.is_tape else '<span class="badge bg-info">Disk</span>'
+        is_active_badge = '<span class="badge bg-success">Active</span>' if endpoint.is_active else '<span class="badge bg-secondary">Inactive</span>'
+        
+        updated_str = format_datetime(endpoint.updated_at)
+        json_link = f'<a href="/rucio-endpoints/{endpoint.endpoint_name}/json/">View JSON</a>'
+        
+        data.append([
+            endpoint_name_link, endpoint.site or '', endpoint.endpoint_type or '',
+            is_tape_badge, is_active_badge, updated_str, json_link
+        ])
+    
+    return dt.create_response(data, records_total, records_filtered)
+
+
+@login_required
+def rucio_endpoint_detail(request, endpoint_name):
+    """Display detailed view of a specific Rucio endpoint configuration."""
+    endpoint = get_object_or_404(RucioEndpoint, endpoint_name=endpoint_name)
+    
+    # Extract some key fields for summary display
+    summary_fields = {}
+    if endpoint.config_data:
+        # Extract commonly useful fields
+        for field in ['cloud', 'rc_site']:
+            if field in endpoint.config_data:
+                summary_fields[field] = endpoint.config_data[field]
+        
+        # Extract resource info if available
+        if 'resource' in endpoint.config_data and isinstance(endpoint.config_data['resource'], dict):
+            resource = endpoint.config_data['resource']
+            summary_fields['resource_endpoint'] = resource.get('endpoint', '')
+    
+    context = {
+        'endpoint': endpoint,
+        'summary_fields': summary_fields,
+    }
+    return render(request, 'monitor_app/rucio_endpoint_detail.html', context)
+
+
+@login_required
+def rucio_endpoint_json(request, endpoint_name):
+    """Display JSON view of a Rucio endpoint configuration using renderjson."""
+    endpoint = get_object_or_404(RucioEndpoint, endpoint_name=endpoint_name)
+    
+    import json
+    context = {
+        'endpoint': endpoint,
+        'config_json': json.dumps(endpoint.config_data, indent=2),
+        'title': f'Rucio Endpoint: {endpoint.endpoint_name}',
+    }
+    return render(request, 'monitor_app/json_viewer.html', context)
+
+
+@login_required
+def panda_queues_all_json(request):
+    """Display JSON view of all PanDA queue configurations."""
+    queues_data = {}
+    for queue in PandaQueue.objects.all().order_by('queue_name'):
+        queues_data[queue.queue_name] = queue.config_data
+    
+    import json
+    context = {
+        'config_json': json.dumps(queues_data, indent=2),
+        'title': 'All PanDA Queues Configuration',
+    }
+    return render(request, 'monitor_app/json_viewer.html', context)
+
+
+@login_required
+def rucio_endpoints_all_json(request):
+    """Display JSON view of all Rucio endpoint configurations."""
+    endpoints_data = {}
+    for endpoint in RucioEndpoint.objects.all().order_by('endpoint_name'):
+        endpoints_data[endpoint.endpoint_name] = endpoint.config_data
+    
+    import json
+    context = {
+        'config_json': json.dumps(endpoints_data, indent=2),
+        'title': 'All Rucio Endpoints Configuration',
+    }
+    return render(request, 'monitor_app/json_viewer.html', context)
+
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def update_panda_queues_from_github(request):
+    """Update PanDA queues from GitHub main branch. Requires superuser."""
+    import json
+    import urllib.request
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from datetime import datetime
+    import email.utils
+    
+    github_url = "https://raw.githubusercontent.com/BNLNPPS/swf-testbed/main/config/panda_queues.json"
+    repo_location = "BNLNPPS/swf-testbed"
+    file_path = "config/panda_queues.json"
+    
+    try:
+        # Fetch JSON from GitHub
+        request_obj = urllib.request.Request(github_url)
+        with urllib.request.urlopen(request_obj) as response:
+            # Get file modification info from headers
+            last_modified = response.headers.get('Last-Modified')
+            if last_modified:
+                # Parse RFC 2822 date format
+                mod_time = email.utils.parsedate_to_datetime(last_modified)
+                mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S UTC')
+            else:
+                mod_time_str = 'Unknown'
+            
+            data = json.loads(response.read().decode())
+        
+        # Clear existing data and reload
+        PandaQueue.objects.all().delete()
+        
+        created_count = 0
+        for queue_name, config in data.items():
+            # Extract key fields from config
+            site = config.get('site', '')
+            queue_type = config.get('type', '')
+            
+            # Determine status based on config
+            status = 'active'  # Default to active
+            if config.get('status') == 'offline':
+                status = 'offline'
+            
+            # Create queue
+            PandaQueue.objects.create(
+                queue_name=queue_name,
+                site=site,
+                queue_type=queue_type,
+                status=status,
+                config_data=config,
+            )
+            created_count += 1
+        
+        messages.success(request, 
+            f'Successfully updated {created_count} PanDA queues from GitHub<br>'
+            f'<strong>Repository:</strong> {repo_location}<br>'
+            f'<strong>File:</strong> {file_path}<br>'
+            f'<strong>Last Modified:</strong> {mod_time_str}',
+            extra_tags='safe'
+        )
+        
+    except Exception as e:
+        messages.error(request, f'Failed to update from GitHub: {str(e)}')
+    
+    return redirect('monitor_app:panda_queues_list')
+
+
+@login_required
+@user_passes_test(lambda u: u.is_superuser)
+def update_rucio_endpoints_from_github(request):
+    """Update Rucio endpoints from GitHub main branch. Requires superuser."""
+    import json
+    import urllib.request
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from datetime import datetime
+    import email.utils
+    
+    github_url = "https://raw.githubusercontent.com/BNLNPPS/swf-testbed/main/config/ddm_endpoints.json"
+    repo_location = "BNLNPPS/swf-testbed"
+    file_path = "config/ddm_endpoints.json"
+    
+    try:
+        # Fetch JSON from GitHub
+        request_obj = urllib.request.Request(github_url)
+        with urllib.request.urlopen(request_obj) as response:
+            # Get file modification info from headers
+            last_modified = response.headers.get('Last-Modified')
+            if last_modified:
+                # Parse RFC 2822 date format
+                mod_time = email.utils.parsedate_to_datetime(last_modified)
+                mod_time_str = mod_time.strftime('%Y-%m-%d %H:%M:%S UTC')
+            else:
+                mod_time_str = 'Unknown'
+            
+            data = json.loads(response.read().decode())
+        
+        # Clear existing data and reload
+        RucioEndpoint.objects.all().delete()
+        
+        created_count = 0
+        for endpoint_name, config in data.items():
+            # Extract key fields from config
+            site = config.get('rcsite', config.get('site', ''))
+            is_tape = config.get('is_tape', False)
+            
+            # Determine endpoint type
+            if is_tape:
+                endpoint_type = 'tape'
+            elif config.get('is_cache'):
+                endpoint_type = 'cache'
+            else:
+                endpoint_type = 'disk'
+            
+            # Check if active based on rc_site_state
+            is_active = config.get('rc_site_state') == 'ACTIVE'
+            
+            # Create endpoint
+            RucioEndpoint.objects.create(
+                endpoint_name=endpoint_name,
+                site=site,
+                endpoint_type=endpoint_type,
+                is_tape=is_tape,
+                is_active=is_active,
+                config_data=config,
+            )
+            created_count += 1
+        
+        messages.success(request, 
+            f'Successfully updated {created_count} Rucio endpoints from GitHub<br>'
+            f'<strong>Repository:</strong> {repo_location}<br>'
+            f'<strong>File:</strong> {file_path}<br>'
+            f'<strong>Last Modified:</strong> {mod_time_str}',
+            extra_tags='safe'
+        )
+        
+    except Exception as e:
+        messages.error(request, f'Failed to update from GitHub: {str(e)}')
+    
+    return redirect('monitor_app:rucio_endpoints_list')

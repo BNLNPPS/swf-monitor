@@ -4,32 +4,117 @@
 
 {% block content %}
 <div class="container mt-4">
-    <h1 class="mb-4">Welcome to the ePIC Streaming Workflow Monitor</h1>
+    <h1 class="mb-4">ePIC Streaming Workflow Monitor</h1>
+    <p class="lead mb-5">Real-time monitoring and management dashboard for the ePIC streaming workflow testbed</p>
 
-    <div class="function-section mb-5">
-        <h2>System Agents</h2>
-        <ul>
-            <li><a href="{% url 'monitor_app:index' %}">View and manage system agents</a></li>
-            <li><a href="{% url 'monitor_app:system_agent_create' %}">Add a new agent</a></li>
-        </ul>
-        <p class="text-muted">Monitor the status, type, and activity of all registered workflow agents. You can add, edit, or remove agents and filter by type or status.</p>
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:runs_list' %}" class="text-decoration-none">Runs</a>
+                    </h5>
+                    <p class="card-text">View and manage DAQ runs with their status, timing, and file counts. Monitor run lifecycle from imminent to completion.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:stf_files_list' %}" class="text-decoration-none">STF Files</a>
+                    </h5>
+                    <p class="card-text">Browse Sub-TimeFrame files generated during runs. Track file sizes, checksums, and processing status.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:workflow_agents_list' %}" class="text-decoration-none">Agents</a>
+                    </h5>
+                    <p class="card-text">Monitor workflow agents status, types, and heartbeats. Track DAQ simulator, data, processing, and monitoring agents.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:log_summary' %}" class="text-decoration-none">Logs</a>
+                    </h5>
+                    <p class="card-text">Access centralized logging from all workflow components. Filter by application, level, and timeframe for troubleshooting.</p>
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            <a href="{% url 'monitor_app:log_list' %}" class="text-decoration-none">Detailed log list</a>
+                        </small>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:subscribers_list' %}" class="text-decoration-none">Subscribers</a>
+                    </h5>
+                    <p class="card-text">Manage message queue subscribers and their connection status. Monitor ActiveMQ topic subscriptions.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:workflow_messages' %}" class="text-decoration-none">Messages</a>
+                    </h5>
+                    <p class="card-text">View workflow messages and dispatches. Track run events, STF generation, and agent communications.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:database_tables_list' %}" class="text-decoration-none">Database</a>
+                    </h5>
+                    <p class="card-text">Inspect database tables, record counts, and schema. Monitor data growth and last insertion times.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:persistent_state' %}" class="text-decoration-none">State</a>
+                    </h5>
+                    <p class="card-text">View and manage persistent workflow state including run numbers, configuration, and system parameters.</p>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="function-section mb-5">
-        <h2>Logs</h2>
-        <ul>
-            <li><a href="{% url 'monitor_app:log_summary' %}">Log summary</a></li>
-            <li><a href="{% url 'monitor_app:log_list' %}">Detailed log list</a></li>
-        </ul>
-        <p class="text-muted">Browse, filter, and analyze logs from all workflow applications and agents. Use the summary for a high-level overview or the detailed list for in-depth inspection and troubleshooting.</p>
-    </div>
-
-    <div class="function-section mb-5">
-        <h2>Database Viewer</h2>
-        <ul>
-            <li><a href="{% url 'monitor_app:database_tables_list' %}">Database overview</a></li>
-        </ul>
-        <p class="text-muted">View a list of all database tables, with record counts and last insertion times. Useful for monitoring the state and growth of your workflow data.</p>
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card bg-light">
+                <div class="card-body">
+                    <h6 class="card-title">Quick Actions</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        <a href="{% url 'monitor_app:system_agent_create' %}" class="btn btn-sm btn-outline-primary">Add Agent</a>
+                        <a href="{% url 'monitor_app:workflow_realtime_dashboard' %}" class="btn btn-sm btn-outline-success">Realtime Dashboard</a>
+                        <a href="{% url 'monitor_app:workflow_dashboard' %}" class="btn btn-sm btn-outline-info">Workflow Dashboard</a>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

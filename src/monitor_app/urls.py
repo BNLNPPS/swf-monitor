@@ -43,6 +43,19 @@ from .views import (
     subscribers_datatable_ajax,
     get_subscribers_filter_counts,
     persistent_state_view,
+    # PanDA and Rucio views
+    panda_queues_list,
+    panda_queues_datatable_ajax,
+    panda_queue_detail,
+    panda_queue_json,
+    rucio_endpoints_list,
+    rucio_endpoints_datatable_ajax,
+    rucio_endpoint_detail,
+    rucio_endpoint_json,
+    panda_queues_all_json,
+    rucio_endpoints_all_json,
+    update_panda_queues_from_github,
+    update_rucio_endpoints_from_github,
 )
 
 app_name = 'monitor_app'
@@ -96,6 +109,22 @@ urlpatterns = [
     
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
+    
+    # PanDA Queues
+    path('panda-queues/', panda_queues_list, name='panda_queues_list'),
+    path('panda-queues/datatable/', panda_queues_datatable_ajax, name='panda_queues_datatable_ajax'),
+    path('panda-queues/json/', panda_queues_all_json, name='panda_queues_all_json'),
+    path('panda-queues/update-from-github/', update_panda_queues_from_github, name='update_panda_queues_from_github'),
+    path('panda-queues/<str:queue_name>/', panda_queue_detail, name='panda_queue_detail'),
+    path('panda-queues/<str:queue_name>/json/', panda_queue_json, name='panda_queue_json'),
+    
+    # Rucio Endpoints
+    path('rucio-endpoints/', rucio_endpoints_list, name='rucio_endpoints_list'),
+    path('rucio-endpoints/datatable/', rucio_endpoints_datatable_ajax, name='rucio_endpoints_datatable_ajax'),
+    path('rucio-endpoints/json/', rucio_endpoints_all_json, name='rucio_endpoints_all_json'),
+    path('rucio-endpoints/update-from-github/', update_rucio_endpoints_from_github, name='update_rucio_endpoints_from_github'),
+    path('rucio-endpoints/<str:endpoint_name>/', rucio_endpoint_detail, name='rucio_endpoint_detail'),
+    path('rucio-endpoints/<str:endpoint_name>/json/', rucio_endpoint_json, name='rucio_endpoint_json'),
     
     # API
     path('api/', include('monitor_app.api_urls')),

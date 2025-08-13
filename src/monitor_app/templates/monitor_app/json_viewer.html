@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .renderjson {
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+    .renderjson a { text-decoration: none; }
+    .renderjson .disclosure { 
+        color: #555; 
+        font-size: 16px;
+        cursor: pointer;
+        margin-right: 5px;
+    }
+    .renderjson .syntax { color: grey; }
+    .renderjson .string { color: #008000; }
+    .renderjson .number { color: #0000ff; }
+    .renderjson .boolean { color: #ff6600; }
+    .renderjson .key { color: #0066cc; font-weight: bold; }
+    .renderjson .keyword { color: #ff0000; }
+    .renderjson .object.syntax { color: #555; }
+    .renderjson .array.syntax { color: #555; }
+    
+    #json-container {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        padding: 1rem;
+        margin-top: 1rem;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+    
+    .controls {
+        margin-bottom: 1rem;
+    }
+    
+    .controls button {
+        margin-right: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:home' %}">Home</a></li>
+                    {% if queue %}
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_queues_list' %}">PanDA Queues</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_queue_detail' queue.queue_name %}">{{ queue.queue_name }}</a></li>
+                    {% elif endpoint %}
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:rucio_endpoints_list' %}">Rucio Endpoints</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:rucio_endpoint_detail' endpoint.endpoint_name %}">{{ endpoint.endpoint_name }}</a></li>
+                    {% endif %}
+                    <li class="breadcrumb-item active" aria-current="page">JSON View</li>
+                </ol>
+            </nav>
+            
+            <h1>{{ title }}</h1>
+            
+            <div class="controls">
+                <button class="btn btn-sm btn-primary" onclick="expandAll()">Expand All</button>
+                <button class="btn btn-sm btn-secondary" onclick="collapseAll()">Collapse All</button>
+                <button class="btn btn-sm btn-info" onclick="copyToClipboard()">Copy JSON</button>
+            </div>
+            
+            <div id="json-container"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Include renderjson library from CDN -->
+<script src="https://cdn.jsdelivr.net/npm/renderjson@1.4.0/renderjson.min.js"></script>
+
+<script>
+    // Parse JSON data
+    const jsonData = {{ config_json|safe }};
+    
+    // Configure renderjson
+    renderjson.set_icons('+', '-');
+    renderjson.set_show_to_level(2);  // Show first 2 levels expanded by default
+    
+    // Render JSON
+    document.getElementById('json-container').appendChild(
+        renderjson(jsonData)
+    );
+    
+    // Helper functions for controls
+    function expandAll() {
+        renderjson.set_show_to_level('all');
+        document.getElementById('json-container').innerHTML = '';
+        document.getElementById('json-container').appendChild(
+            renderjson(jsonData)
+        );
+    }
+    
+    function collapseAll() {
+        renderjson.set_show_to_level(1);
+        document.getElementById('json-container').innerHTML = '';
+        document.getElementById('json-container').appendChild(
+            renderjson(jsonData)
+        );
+    }
+    
+    function copyToClipboard() {
+        const jsonString = JSON.stringify(jsonData, null, 2);
+        navigator.clipboard.writeText(jsonString).then(function() {
+            // Show temporary success message
+            const btn = event.target;
+            const originalText = btn.innerText;
+            btn.innerText = 'Copied!';
+            btn.classList.remove('btn-info');
+            btn.classList.add('btn-success');
+            setTimeout(() => {
+                btn.innerText = originalText;
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-info');
+            }, 2000);
+        }, function(err) {
+            console.error('Could not copy text: ', err);
+            alert('Failed to copy JSON to clipboard');
+        });
+    }
+</script>
+{% endblock %}
