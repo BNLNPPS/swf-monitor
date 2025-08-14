@@ -69,18 +69,18 @@ class AppLog(models.Model):
         (logging.DEBUG, 'DEBUG'),
         (logging.NOTSET, 'NOTSET'),
     ]
-    app_name = models.CharField(max_length=100, db_index=True)
-    instance_name = models.CharField(max_length=100, db_index=True)
-    timestamp = models.DateTimeField(db_index=True)
-    level = models.IntegerField(choices=LEVEL_CHOICES, default=logging.NOTSET, db_index=True)
-    levelname = models.CharField(max_length=50)
-    message = models.TextField()
-    module = models.CharField(max_length=255)
-    funcname = models.CharField(max_length=255)
-    lineno = models.IntegerField()
-    process = models.IntegerField()
-    thread = models.BigIntegerField()
-    extra_data = models.JSONField(null=True, blank=True)
+    app_name        = models.CharField(max_length=100, db_index=True)
+    instance_name   = models.CharField(max_length=100, db_index=True)
+    timestamp       = models.DateTimeField(db_index=True)
+    level           = models.IntegerField(choices=LEVEL_CHOICES, default=logging.NOTSET, db_index=True)
+    levelname       = models.CharField(max_length=50)
+    message         = models.TextField()
+    module          = models.CharField(max_length=255)
+    funcname        = models.CharField(max_length=255)
+    lineno          = models.IntegerField()
+    process         = models.IntegerField()
+    thread          = models.BigIntegerField()
+    extra_data      = models.JSONField(null=True, blank=True)
 
     class Meta:
         db_table = 'swf_applog'
@@ -111,11 +111,11 @@ class FileStatus(models.TextChoices):
     Done: sent to MQ
     Failed: Some problem in the workflow
     """
-    REGISTERED = "registered", "Registered"
-    PROCESSING = "processing", "Processing"
-    PROCESSED = "processed", "Processed"
-    FAILED = "failed", "Failed"
-    DONE = "done", "Done"
+    REGISTERED  = "registered", "Registered"
+    PROCESSING  = "processing", "Processing"
+    PROCESSED   = "processed",  "Processed"
+    FAILED      = "failed",     "Failed"
+    DONE        = "done",       "Done"
 
 
 class Run(models.Model):
@@ -129,11 +129,11 @@ class Run(models.Model):
         end_time: When the run ended (null if still active)
         run_conditions: JSON field storing experimental conditions
     """
-    run_id = models.AutoField(primary_key=True)
-    run_number = models.IntegerField(unique=True)
-    start_time = models.DateTimeField()
-    end_time = models.DateTimeField(null=True, blank=True)
-    run_conditions = models.JSONField(null=True, blank=True)
+    run_id          = models.AutoField(primary_key=True)
+    run_number      = models.IntegerField(unique=True)
+    start_time      = models.DateTimeField()
+    end_time        = models.DateTimeField(null=True, blank=True)
+    run_conditions  = models.JSONField(null=True, blank=True)
 
     class Meta:
         db_table = 'swf_runs'
@@ -159,24 +159,27 @@ class StfFile(models.Model):
         status: Current processing status (FileStatus enum)
         metadata: JSON field for additional file metadata
     """
-    file_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name='stf_files')
-    machine_state = models.CharField(max_length=64, default="physics")
-    stf_filename = models.CharField(max_length=255, unique=True)
+
+
+    file_id         = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    run             = models.ForeignKey(Run, on_delete=models.CASCADE, related_name='stf_files')
+    machine_state   = models.CharField(max_length=64, default="physics")
+    stf_filename    = models.CharField(max_length=255, unique=True)
     file_size_bytes = models.BigIntegerField(null=True, blank=True)
-    checksum = models.CharField(max_length=64, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(
+    checksum        = models.CharField(max_length=64, null=True, blank=True)
+    created_at      = models.DateTimeField(auto_now_add=True)
+    status          = models.CharField(
         max_length=20,
         choices=FileStatus.choices,
         default=FileStatus.REGISTERED
     )
-    metadata = models.JSONField(null=True, blank=True)
+
+    metadata        = models.JSONField(null=True, blank=True)
     
     # Workflow integration fields
-    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
-    daq_state = models.CharField(max_length=20, null=True, blank=True)
-    daq_substate = models.CharField(max_length=20, null=True, blank=True)
+    workflow_id     = models.UUIDField(null=True, blank=True, db_index=True)
+    daq_state       = models.CharField(max_length=20, null=True, blank=True)
+    daq_substate    = models.CharField(max_length=20, null=True, blank=True)
     workflow_status = models.CharField(max_length=30, null=True, blank=True)
 
     class Meta:
