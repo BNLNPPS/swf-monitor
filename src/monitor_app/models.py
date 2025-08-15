@@ -271,7 +271,6 @@ class FastMonFile(models.Model):
     tf_file_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     stf_file = models.ForeignKey(StfFile, on_delete=models.CASCADE, related_name='tf_files')
     tf_filename = models.CharField(max_length=255, unique=True)
-    sequence_number = models.IntegerField()
     file_size_bytes = models.BigIntegerField(null=True, blank=True)
     checksum = models.CharField(max_length=64, null=True, blank=True)
     status = models.CharField(
@@ -280,26 +279,20 @@ class FastMonFile(models.Model):
         default=FileStatus.REGISTERED
     )
     metadata = models.JSONField(null=True, blank=True)
-    
-    # Optional workflow integration fields
-    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
-    fastmon_agent = models.CharField(max_length=100, null=True, blank=True)
-    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'swf_fastmon_files'
-        ordering = ['stf_file', 'sequence_number']
+        ordering = ['stf_file']
         indexes = [
-            models.Index(fields=['stf_file', 'sequence_number']),
-            models.Index(fields=['status', 'created_at']),
-            models.Index(fields=['workflow_id']),
+            models.Index(fields=['stf_file']),
+            models.Index(fields=['status', 'created_at'])
         ]
-        unique_together = [['stf_file', 'sequence_number']]
+        unique_together = [['stf_file']]
 
     def __str__(self):
-        return f"TF File {self.tf_filename} (seq: {self.sequence_number})"
+        return f"TF File {self.tf_filename}"
 
 
 class PersistentState(models.Model):
