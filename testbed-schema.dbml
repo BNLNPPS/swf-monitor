@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-15-2025 07:18PM UTC'''
+  Last Updated At 08-15-2025 07:33PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -485,8 +485,6 @@ updated_at: Timestamp when TF record was last modified
     (tf_file_id) [pk, unique, name: 'swf_fastmon_files_pkey', type: btree]
     (stf_file_id) [name: 'swf_fastmon_files_stf_file_id_5994a143', type: btree]
     (tf_filename) [unique, name: 'swf_fastmon_files_tf_filename_key', type: btree]
-    (status,created_at) [name: 'swf_fastmon_status_03b5cf_idx', type: btree]
-    (stf_file_id) [name: 'swf_fastmon_stf_fil_90accb_idx', type: btree]
   }
 }
 ref: monitor_app.FastMonFile.stf_file_id > monitor_app.StfFile.file_id
