@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-13-2025 02:12PM UTC'''
+  Last Updated At 08-15-2025 06:31PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -34,6 +34,14 @@ enum monitor_app.char_agentworkflowstage_status {
   "fastmon_complete" [note: '''FastMon Agent Complete''']
   "workflow_complete" [note: '''Workflow Complete''']
   "failed" [note: '''Failed''']
+}
+
+enum monitor_app.char_fastmonfile_status {
+  "registered" [note: '''Registered''']
+  "processing" [note: '''Processing''']
+  "processed" [note: '''Processed''']
+  "failed" [note: '''Failed''']
+  "done" [note: '''Done''']
 }
 
 enum monitor_app.char_stffile_status {
@@ -442,6 +450,55 @@ AppLog(id, app_name, instance_name, timestamp, level, levelname, message, module
     (timestamp) [name: 'swf_applog_timestamp_fb0b69c3', type: btree]
   }
 }
+
+
+Table monitor_app.FastMonFile {
+  Note: '''
+Represents a Time Frame (TF) file for fast monitoring.
+TF files are subsamples of Super Time Frame (STF) files, processed for rapid monitoring.
+
+Attributes:
+tf_file_id: UUID primary key for unique TF file identification
+stf_file: Foreign key to the parent STF file this TF is derived from
+tf_filename: Unique filename for the TF file
+sequence_number: Position of this TF within the STF subsample sequence
+file_size_bytes: Size of the TF file in bytes
+checksum: File integrity checksum
+status: Current processing status (FileStatus enum)
+metadata: JSON field for flexible storage of TF-specific metadata
+workflow_id: Optional UUID linking to STFWorkflow
+fastmon_agent: Name of the fast monitoring agent that processed this TF
+created_at: Timestamp when TF record was created
+updated_at: Timestamp when TF record was last modified
+
+
+*DB table: swf_fastmon_files*'''
+
+  tf_file_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
+  stf_file_id foreign_key [not null]
+  tf_filename char [unique, not null]
+  sequence_number integer [not null]
+  file_size_bytes big_integer [null]
+  checksum char [null]
+  status monitor_app.char_fastmonfile_status [default:`"registered"`, not null]
+  metadata json [null]
+  workflow_id uuid [null]
+  fastmon_agent char [null]
+  created_at date_time [not null]
+  updated_at date_time [not null]
+
+  indexes {
+    (tf_file_id) [pk, unique, name: 'swf_fastmon_files_pkey', type: btree]
+    (stf_file_id) [name: 'swf_fastmon_files_stf_file_id_5994a143', type: btree]
+    (stf_file_id,sequence_number) [unique, name: 'swf_fastmon_files_stf_file_id_sequence_number_362982a3_uniq', type: btree]
+    (tf_filename) [unique, name: 'swf_fastmon_files_tf_filename_key', type: btree]
+    (workflow_id) [name: 'swf_fastmon_files_workflow_id_27310d54', type: btree]
+    (status,created_at) [name: 'swf_fastmon_status_03b5cf_idx', type: btree]
+    (stf_file_id,sequence_number) [name: 'swf_fastmon_stf_fil_f6adac_idx', type: btree]
+    (workflow_id) [name: 'swf_fastmon_workflo_9b13f0_idx', type: btree]
+  }
+}
+ref: monitor_app.FastMonFile.stf_file_id > monitor_app.StfFile.file_id
 
 
 Table monitor_app.MessageQueueDispatch {
