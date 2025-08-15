@@ -281,11 +281,6 @@ class FastMonFile(models.Model):
 
     class Meta:
         db_table = 'swf_fastmon_files'
-        ordering = ['stf_file']
-        indexes = [
-            models.Index(fields=['stf_file']),
-            models.Index(fields=['status', 'created_at'])
-        ]
 
     def __str__(self):
         return f"TF File {self.tf_filename}"
