@@ -2,14 +2,9 @@
 #
 # SWF Monitor Apache Deployment Setup Script
 # 
-# This script sets up the Apache deployment infrastructure for swf-monitor
-# Run with: sudo ./setup-apache-deployment.sh
-#
-# Creates:
-# - /opt/swf-monitor/ deployment structure
-# - Apache virtual host configuration
-# - Deployment automation script
-# - Production environment configuration
+# USAGE: sudo ./setup-apache-deployment.sh
+# 
+# See docs/PRODUCTION_DEPLOYMENT.md for complete documentation
 
 set -e  # Exit on any error
 

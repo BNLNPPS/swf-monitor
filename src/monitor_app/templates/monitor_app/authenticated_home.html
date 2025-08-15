@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="container mt-4">
-    <h1 class="mb-4">ePIC Streaming Workflow Monitor</h1>
+    <h1 class="mb-4">ePIC Streaming Workflow Testbed Monitor</h1>
     <p class="lead mb-5">Real-time monitoring and management dashboard for the ePIC streaming workflow testbed</p>
 
     <div class="row">
@@ -25,7 +25,7 @@
                     <h5 class="card-title">
                         <a href="{% url 'monitor_app:stf_files_list' %}" class="text-decoration-none">STF Files</a>
                     </h5>
-                    <p class="card-text">Browse Sub-TimeFrame files generated during runs. Track file sizes, checksums, and processing status.</p>
+                    <p class="card-text">Browse Super TimeFrame files generated during runs. Track file sizes, checksums, and processing status.</p>
                 </div>
             </div>
         </div>
@@ -74,7 +74,7 @@
                     <h5 class="card-title">
                         <a href="{% url 'monitor_app:workflow_messages' %}" class="text-decoration-none">Messages</a>
                     </h5>
-                    <p class="card-text">View workflow messages and dispatches. Track run events, STF generation, and agent communications.</p>
+                    <p class="card-text">View workflow messages. Track runs, STF generation, and agent communications.</p>
                 </div>
             </div>
         </div>

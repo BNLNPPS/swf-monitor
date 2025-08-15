@@ -382,7 +382,7 @@ class RealtimeDashboard {
     
     async updateData() {
         try {
-            const response = await fetch('/workflow/api/realtime-data/');
+            const response = await fetch('{% url "monitor_app:workflow_realtime_data_api" %}');
             const data = await response.json();
             
             this.updateMetrics(data.metrics);

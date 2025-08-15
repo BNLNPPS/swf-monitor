@@ -18,6 +18,7 @@ from .views import (
     database_tables_list,
     database_tables_datatable_ajax,
     database_table_list,
+    database_table_datatable_ajax,
     runs_list,
     run_detail,
     stf_files_list,
@@ -77,6 +78,7 @@ urlpatterns = [
     path('database/', database_tables_list, name='database_tables_list'),
     path('database/datatable/', database_tables_datatable_ajax, name='database_tables_datatable_ajax'),
     path('database/<str:table_name>/', database_table_list, name='database_table_list'),
+    path('database/<str:table_name>/datatable/', database_table_datatable_ajax, name='database_table_datatable_ajax'),
     
     # SWF Data Model URLs
     path('runs/', runs_list, name='runs_list'),

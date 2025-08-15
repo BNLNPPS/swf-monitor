@@ -127,13 +127,12 @@ python manage.py listen_activemq
 
 ## Production Deployment
 
-When deploying to production:
+For complete production deployment instructions including Apache setup, SSL configuration, and deployment automation, see the comprehensive **[Production Deployment Guide](PRODUCTION_DEPLOYMENT.md)**.
 
-1. **Disable Debug Mode**: Set `DEBUG=False` in `.env`
-2. **Configure Allowed Hosts**: Set `SWF_ALLOWED_HOSTS` to your domain names
-   ```
-   SWF_ALLOWED_HOSTS=swf-monitor.example.com,www.swf-monitor.example.com
-   ```
+**Quick Reference:**
+- Initial setup: Run `sudo ./setup-apache-deployment.sh` 
+- Deploy updates: `sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch main`
+- Configuration: Edit `/opt/swf-monitor/config/env/production.env`
 
 ## Testing
 

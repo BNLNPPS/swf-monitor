@@ -321,14 +321,17 @@ def log_summary_datatable_ajax(request):
         app_filter_url = f"?app_name={item['app_name']}"
         if filters['instance_name']:
             app_filter_url += f"&instance_name={filters['instance_name']}"
-        app_name_link = f'<a href="/logs/{app_filter_url}">{item["app_name"]}</a>'
+        logs_url = reverse('monitor_app:log_list')
+        app_name_link = f'<a href="{logs_url}?{app_filter_url}">{item["app_name"]}</a>'
         
         instance_filter_url = f"?instance_name={item['instance_name']}"
         if filters['app_name']:
             instance_filter_url += f"&app_name={filters['app_name']}"
-        instance_name_link = f'<a href="/logs/{instance_filter_url}">{item["instance_name"]}</a>'
+        logs_url = reverse('monitor_app:log_list')
+        instance_name_link = f'<a href="{logs_url}?{instance_filter_url}">{item["instance_name"]}</a>'
         
-        view_logs_url = f'/logs/?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
+        logs_url = reverse('monitor_app:log_list')
+        view_logs_url = f'{logs_url}?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
         view_logs_link = f'<a href="{view_logs_url}">View Logs</a>'
         
         data.append([
@@ -608,7 +611,8 @@ def database_tables_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for record in paginated_records:
-        table_link = f'<a href="/database/{record["name"]}/">{record["name"]}</a>'
+        table_url = reverse('monitor_app:database_table_list', args=[record['name']])
+        table_link = f'<a href="{table_url}">{record["name"]}</a>'
         count_str = str(record['count'])
         last_insert_str = format_datetime(record['last_insert'])
         
@@ -637,12 +641,107 @@ def database_table_list(request, table_name):
         return row.get(key, '')
     from django.template.defaulttags import register
     register.filter('get_item', get_item)
-    return render(request, 'monitor_app/database_table_list.html', {
+    from django.urls import reverse
+    
+    # Convert columns for DataTables format
+    datatable_columns = [{'name': col, 'title': col.replace('_', ' ').title(), 'orderable': True} for col in columns]
+    
+    context = {
+        'table_title': f'Table: {table_name}',
+        'table_description': f'Database table contents for {table_name} with search, sorting, and pagination.',
+        'ajax_url': reverse('monitor_app:database_table_datatable_ajax', kwargs={'table_name': table_name}),
+        'columns': datatable_columns,
         'table_name': table_name,
-        'columns': columns,
-        'rows': rows,
-        'dt_columns': dt_columns,
-    })
+    }
+    return render(request, 'monitor_app/database_table_list.html', context)
+
+
+@login_required
+def database_table_datatable_ajax(request, table_name):
+    """
+    AJAX endpoint for server-side DataTables processing of individual database table.
+    Provides pagination, search, and sorting for any swf_ table.
+    """
+    if not table_name.startswith('swf_'):
+        raise Http404()
+    
+    from .utils import DataTablesProcessor, format_datetime
+    
+    # Get column information
+    with connection.cursor() as cursor:
+        cursor.execute(f'SELECT * FROM "{table_name}" LIMIT 1')
+        columns = [col[0] for col in cursor.description]
+    
+    # Initialize DataTables processor
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+    
+    # Build base query
+    query = f'SELECT * FROM "{table_name}"'
+    count_query = f'SELECT COUNT(*) FROM "{table_name}"'
+    params = []
+    
+    # Get total count
+    with connection.cursor() as cursor:
+        cursor.execute(count_query)
+        records_total = cursor.fetchone()[0]
+    
+    # Apply search filtering
+    where_conditions = []
+    if dt.search_value:
+        search_conditions = []
+        for column in columns:
+            search_conditions.append(f'CAST("{column}" AS TEXT) ILIKE %s')
+            params.append(f'%{dt.search_value}%')
+        where_conditions.append(f"({' OR '.join(search_conditions)})")
+    
+    # Build filtered query
+    filtered_query = query
+    filtered_count_query = count_query
+    if where_conditions:
+        where_clause = ' WHERE ' + ' AND '.join(where_conditions)
+        filtered_query += where_clause
+        filtered_count_query += where_clause
+    
+    # Get filtered count
+    with connection.cursor() as cursor:
+        cursor.execute(filtered_count_query, params)
+        records_filtered = cursor.fetchone()[0]
+    
+    # Apply ordering
+    if dt.order_column and dt.order_column in columns:
+        order_clause = f' ORDER BY "{dt.order_column}" {dt.order_direction.upper()}'
+        filtered_query += order_clause
+    
+    # Apply pagination
+    filtered_query += f' LIMIT {dt.length} OFFSET {dt.start}'
+    
+    # Execute final query
+    with connection.cursor() as cursor:
+        cursor.execute(filtered_query, params)
+        results = cursor.fetchall()
+    
+    # Identify datetime columns using Django model if available
+    dt_columns = []
+    for model in apps.get_models():
+        if model._meta.db_table == table_name:
+            dt_columns = [f.name for f in model._meta.fields if f.get_internal_type() == 'DateTimeField']
+            break
+    
+    # Format results for DataTables
+    data = []
+    for row in results:
+        row_data = []
+        for i, value in enumerate(row):
+            column_name = columns[i]
+            if column_name in dt_columns and value:
+                # Format datetime values
+                row_data.append(format_datetime(value))
+            else:
+                row_data.append(str(value) if value is not None else '')
+        data.append(row_data)
+    
+    return dt.create_response(data, records_total, records_filtered)
+
 
 # Views for SWF Data Models
 
@@ -717,15 +816,18 @@ def runs_datatable_ajax(request):
         start_time_str = format_datetime(run.start_time)
         end_time_str = format_datetime(run.end_time) if run.end_time else '—'
         duration_str = format_run_duration(run.start_time, run.end_time)
-        run_number_link = f'<a href="/runs/{run.run_id}/">{run.run_number}</a>'
+        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_id])
+        run_number_link = f'<a href="{run_detail_url}">{run.run_number}</a>'
         
         # Make STF files count clickable to filter STF files by this run
         if run.stf_files_count > 0:
-            stf_files_link = f'<a href="/stf-files/?run_number={run.run_number}">{run.stf_files_count}</a>'
+            stf_files_url = reverse('monitor_app:stf_files_list')
+            stf_files_link = f'<a href="{stf_files_url}?run_number={run.run_number}">{run.stf_files_count}</a>'
         else:
             stf_files_link = str(run.stf_files_count)
         
-        view_link = f'<a href="/runs/{run.run_id}/">View</a>'
+        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_id])
+        view_link = f'<a href="{run_detail_url}">View</a>'
         
         data.append([
             run_number_link, start_time_str, end_time_str,
@@ -837,8 +939,9 @@ def stf_files_datatable_ajax(request):
         # Use plain text status (consistent with runs view)
         status_text = file.get_status_display()
         timestamp_str = format_datetime(file.created_at)
-        run_link = f'<a href="/runs/{file.run.run_id}/">{file.run.run_number}</a>' if file.run else 'N/A'
-        view_link = f'<a href="/stf-files/{file.file_id}/">View</a>'
+        run_link = f'<a href="{reverse("monitor_app:run_detail", args=[file.run.run_id])}">{file.run.run_number}</a>' if file.run else 'N/A'
+        stf_file_detail_url = reverse('monitor_app:stf_file_detail', args=[file.file_id])
+        view_link = f'<a href="{stf_file_detail_url}">View</a>'
         
         data.append([
             file.stf_filename, run_link, file.machine_state or '',
@@ -920,14 +1023,16 @@ def subscribers_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for subscriber in subscribers:
-        subscriber_name_link = f'<a href="/subscribers/{subscriber.subscriber_id}/">{subscriber.subscriber_name}</a>'
+        subscriber_detail_url = reverse('monitor_app:subscriber_detail', args=[subscriber.subscriber_id])
+        subscriber_name_link = f'<a href="{subscriber_detail_url}">{subscriber.subscriber_name}</a>'
         description = subscriber.description[:100] + '...' if subscriber.description and len(subscriber.description) > 100 else (subscriber.description or '')
         fraction_str = f"{subscriber.fraction:.3f}" if subscriber.fraction is not None else 'N/A'
         # Show raw DB value, not massaged badges
         is_active_value = str(subscriber.is_active).lower()  # True -> 'true', False -> 'false'
         created_str = format_datetime(subscriber.created_at)
         updated_str = format_datetime(subscriber.updated_at)
-        view_link = f'<a href="/subscribers/{subscriber.subscriber_id}/">View</a>'
+        subscriber_detail_url = reverse('monitor_app:subscriber_detail', args=[subscriber.subscriber_id])
+        view_link = f'<a href="{subscriber_detail_url}">View</a>'
         
         data.append([
             subscriber_name_link, description, fraction_str, is_active_value,
@@ -1114,7 +1219,8 @@ def workflow_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for workflow in workflows:
-        filename_link = f'<a href="/workflow/{workflow.workflow_id}/">{workflow.filename}</a>'
+        workflow_detail_url = reverse('monitor_app:workflow_detail', args=[workflow.workflow_id])
+        filename_link = f'<a href="{workflow_detail_url}">{workflow.filename}</a>'
         
         # Extract msg_type from JSON metadata safely
         msg_type = 'N/A'
@@ -1260,7 +1366,8 @@ def workflow_agents_datatable_ajax(request):
         status_badge = f'<span class="badge bg-{status_class}">{agent.status}</span>'
         
         # Create agent name link
-        agent_link = f'<a href="/workflow/agents/{agent.instance_name}/">{agent.instance_name}</a>'
+        agent_detail_url = reverse('monitor_app:agent_detail', args=[agent.instance_name])
+        agent_link = f'<a href="{agent_detail_url}">{agent.instance_name}</a>'
         
         # Format workflow enabled badge
         workflow_enabled_class = 'success' if agent.workflow_enabled else 'secondary'
@@ -1400,18 +1507,21 @@ def workflow_messages_datatable_ajax(request):
         
         # Format workflow link
         if message.workflow:
-            workflow_link = f'<a href="/workflow/{message.workflow.workflow_id}/" style="font-size: 0.8rem;">{message.workflow.filename}</a>'
+            workflow_detail_url = reverse('monitor_app:workflow_detail', args=[message.workflow.workflow_id])
+            workflow_link = f'<a href="{workflow_detail_url}" style="font-size: 0.8rem;">{message.workflow.filename}</a>'
         else:
             workflow_link = 'N/A'
         
         # Format agent links
-        sender_link = f'<a href="/workflow/agents/{message.sender_agent}/">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
+        sender_link = f'<a href="{reverse("monitor_app:agent_detail", args=[message.sender_agent])}">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
         
         # Handle special case for "all-agents" recipient
         if message.recipient_agent == 'all-agents':
-            recipient_link = f'<a href="/workflow/agents/">{message.recipient_agent}</a>'
+            workflow_agents_url = reverse('monitor_app:workflow_agents_list')
+            recipient_link = f'<a href="{workflow_agents_url}">{message.recipient_agent}</a>'
         elif message.recipient_agent:
-            recipient_link = f'<a href="/workflow/agents/{message.recipient_agent}/">{message.recipient_agent}</a>'
+            agent_detail_url = reverse('monitor_app:agent_detail', args=[message.recipient_agent])
+            recipient_link = f'<a href="{agent_detail_url}">{message.recipient_agent}</a>'
         else:
             recipient_link = 'N/A'
         
@@ -1780,7 +1890,7 @@ def panda_queues_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for queue in queues:
-        queue_name_link = f'<a href="/panda-queues/{queue.queue_name}/">{queue.queue_name}</a>'
+        queue_name_link = f'<a href="{reverse("monitor_app:panda_queue_detail", args=[queue.queue_name])}">{queue.queue_name}</a>'
         
         # Extract key fields from config_data if not set
         if not queue.site and queue.config_data:
@@ -1789,7 +1899,7 @@ def panda_queues_datatable_ajax(request):
             queue.queue_type = queue.config_data.get('type', '')
         
         updated_str = format_datetime(queue.updated_at)
-        json_link = f'<a href="/panda-queues/{queue.queue_name}/json/">View JSON</a>'
+        json_link = f'<a href="{reverse("monitor_app:panda_queue_json", args=[queue.queue_name])}">View JSON</a>'
         
         data.append([
             queue_name_link, queue.site or '', queue.status,
@@ -1887,7 +1997,7 @@ def rucio_endpoints_datatable_ajax(request):
     # Format data for DataTables
     data = []
     for endpoint in endpoints:
-        endpoint_name_link = f'<a href="/rucio-endpoints/{endpoint.endpoint_name}/">{endpoint.endpoint_name}</a>'
+        endpoint_name_link = f'<a href="{reverse("monitor_app:rucio_endpoint_detail", args=[endpoint.endpoint_name])}">{endpoint.endpoint_name}</a>'
         
         # Extract key fields from config_data if not set
         if not endpoint.site and endpoint.config_data:
@@ -1900,7 +2010,7 @@ def rucio_endpoints_datatable_ajax(request):
         is_active_badge = '<span class="badge bg-success">Active</span>' if endpoint.is_active else '<span class="badge bg-secondary">Inactive</span>'
         
         updated_str = format_datetime(endpoint.updated_at)
-        json_link = f'<a href="/rucio-endpoints/{endpoint.endpoint_name}/json/">View JSON</a>'
+        json_link = f'<a href="{reverse("monitor_app:rucio_endpoint_json", args=[endpoint.endpoint_name])}">View JSON</a>'
         
         data.append([
             endpoint_name_link, endpoint.site or '', endpoint.endpoint_type or '',
