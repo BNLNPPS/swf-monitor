@@ -258,13 +258,10 @@ class FastMonFile(models.Model):
         tf_file_id: UUID primary key for unique TF file identification
         stf_file: Foreign key to the parent STF file this TF is derived from
         tf_filename: Unique filename for the TF file
-        sequence_number: Position of this TF within the STF subsample sequence
         file_size_bytes: Size of the TF file in bytes
         checksum: File integrity checksum
         status: Current processing status (FileStatus enum)
         metadata: JSON field for flexible storage of TF-specific metadata
-        workflow_id: Optional UUID linking to STFWorkflow
-        fastmon_agent: Name of the fast monitoring agent that processed this TF
         created_at: Timestamp when TF record was created
         updated_at: Timestamp when TF record was last modified
     """
@@ -289,7 +286,6 @@ class FastMonFile(models.Model):
             models.Index(fields=['stf_file']),
             models.Index(fields=['status', 'created_at'])
         ]
-        unique_together = [['stf_file']]
 
     def __str__(self):
         return f"TF File {self.tf_filename}"
