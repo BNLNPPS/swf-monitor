@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-15-2025 07:02PM UTC'''
+  Last Updated At 08-15-2025 07:18PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -461,13 +461,10 @@ Attributes:
 tf_file_id: UUID primary key for unique TF file identification
 stf_file: Foreign key to the parent STF file this TF is derived from
 tf_filename: Unique filename for the TF file
-sequence_number: Position of this TF within the STF subsample sequence
 file_size_bytes: Size of the TF file in bytes
 checksum: File integrity checksum
 status: Current processing status (FileStatus enum)
 metadata: JSON field for flexible storage of TF-specific metadata
-workflow_id: Optional UUID linking to STFWorkflow
-fastmon_agent: Name of the fast monitoring agent that processed this TF
 created_at: Timestamp when TF record was created
 updated_at: Timestamp when TF record was last modified
 
@@ -487,7 +484,6 @@ updated_at: Timestamp when TF record was last modified
   indexes {
     (tf_file_id) [pk, unique, name: 'swf_fastmon_files_pkey', type: btree]
     (stf_file_id) [name: 'swf_fastmon_files_stf_file_id_5994a143', type: btree]
-    (stf_file_id) [unique, name: 'swf_fastmon_files_stf_file_id_5994a143_uniq', type: btree]
     (tf_filename) [unique, name: 'swf_fastmon_files_tf_filename_key', type: btree]
     (status,created_at) [name: 'swf_fastmon_status_03b5cf_idx', type: btree]
     (stf_file_id) [name: 'swf_fastmon_stf_fil_90accb_idx', type: btree]
