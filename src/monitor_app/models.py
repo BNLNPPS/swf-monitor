@@ -249,6 +249,59 @@ class MessageQueueDispatch(models.Model):
         return f"Dispatch {self.dispatch_id} - STF {self.stf_file.file_id} - {'Success' if self.is_successful else 'Failed'}"
 
 
+class FastMonFile(models.Model):
+    """
+    Represents a Time Frame (TF) file for fast monitoring.
+    TF files are subsamples of Super Time Frame (STF) files, processed for rapid monitoring.
+    
+    Attributes:
+        tf_file_id: UUID primary key for unique TF file identification
+        stf_file: Foreign key to the parent STF file this TF is derived from
+        tf_filename: Unique filename for the TF file
+        sequence_number: Position of this TF within the STF subsample sequence
+        file_size_bytes: Size of the TF file in bytes
+        checksum: File integrity checksum
+        status: Current processing status (FileStatus enum)
+        metadata: JSON field for flexible storage of TF-specific metadata
+        workflow_id: Optional UUID linking to STFWorkflow
+        fastmon_agent: Name of the fast monitoring agent that processed this TF
+        created_at: Timestamp when TF record was created
+        updated_at: Timestamp when TF record was last modified
+    """
+    tf_file_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stf_file = models.ForeignKey(StfFile, on_delete=models.CASCADE, related_name='tf_files')
+    tf_filename = models.CharField(max_length=255, unique=True)
+    sequence_number = models.IntegerField()
+    file_size_bytes = models.BigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=64, null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=FileStatus.choices,
+        default=FileStatus.REGISTERED
+    )
+    metadata = models.JSONField(null=True, blank=True)
+    
+    # Optional workflow integration fields
+    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
+    fastmon_agent = models.CharField(max_length=100, null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_fastmon_files'
+        ordering = ['stf_file', 'sequence_number']
+        indexes = [
+            models.Index(fields=['stf_file', 'sequence_number']),
+            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['workflow_id']),
+        ]
+        unique_together = [['stf_file', 'sequence_number']]
+
+    def __str__(self):
+        return f"TF File {self.tf_filename} (seq: {self.sequence_number})"
+
+
 class PersistentState(models.Model):
     """
     Persistent state store with stable schema - just stores JSON.
