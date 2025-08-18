@@ -15,12 +15,12 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, PersistentState, PandaQueue, RucioEndpoint
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
     STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
-    RunSerializer, StfFileSerializer, SubscriberSerializer, MessageQueueDispatchSerializer
+    RunSerializer, StfFileSerializer, SubscriberSerializer, MessageQueueDispatchSerializer, FastMonFileSerializer
 )
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -212,6 +212,13 @@ class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
     """API endpoint for message queue dispatches."""
     queryset = MessageQueueDispatch.objects.all()
     serializer_class = MessageQueueDispatchSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+class FastMonFileViewSet(viewsets.ModelViewSet):
+    """API endpoint for Fast Monitoring files."""
+    queryset = FastMonFile.objects.all()
+    serializer_class = FastMonFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
