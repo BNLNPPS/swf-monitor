@@ -216,7 +216,7 @@ class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
 class FastMonFileViewSet(viewsets.ModelViewSet):
-    """API endpoint for Fast Monitoring TF files."""
+    """API endpoint for Fast Monitoring files."""
     queryset = FastMonFile.objects.all()
     serializer_class = FastMonFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
