@@ -188,7 +188,8 @@ class StfFile(models.Model):
 
 class Subscriber(models.Model):
     """
-    Represents a message queue subscriber in the monitoring system. Subscribers receive notifications about STF files.
+    Represents a message queue subscriber in the monitoring system. 
+    Subscribers receive notifications about STF files via ActiveMQ directly or SSE.
     
     Attributes:
         subscriber_id: Auto-incrementing primary key
@@ -198,7 +199,22 @@ class Subscriber(models.Model):
         is_active: Whether the subscriber is currently active
         created_at: Timestamp when record was created
         updated_at: Timestamp when record was last updated
+        delivery_type: How messages are delivered (activemq or sse)
+        client_ip: IP address for SSE subscribers
+        client_location: Geographic location for SSE subscribers
+        connected_at: When SSE subscriber connected
+        disconnected_at: When SSE subscriber disconnected
+        last_activity: Last activity timestamp for SSE subscribers
+        message_filters: JSON filters for SSE message selection
+        messages_received: Count of messages received
+        messages_sent: Count of messages sent (SSE)
+        messages_dropped: Count of messages dropped due to queue overflow (SSE)
     """
+    DELIVERY_TYPE_CHOICES = [
+        ('activemq', 'ActiveMQ Direct'),
+        ('sse', 'Server-Sent Events'),
+    ]
+    
     subscriber_id = models.AutoField(primary_key=True)
     subscriber_name = models.CharField(max_length=255, unique=True)
     fraction = models.FloatField(null=True, blank=True)
@@ -206,9 +222,35 @@ class Subscriber(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # New fields for SSE support
+    delivery_type = models.CharField(
+        max_length=20, 
+        choices=DELIVERY_TYPE_CHOICES, 
+        default='activemq'
+    )
+    
+    # SSE-specific connection info (null for ActiveMQ subscribers)
+    client_ip = models.GenericIPAddressField(null=True, blank=True)
+    client_location = models.CharField(max_length=255, blank=True, default='')
+    connected_at = models.DateTimeField(null=True, blank=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+    last_activity = models.DateTimeField(null=True, blank=True)
+    
+    # Message filters (for SSE subscribers)
+    # Format: {"msg_types": ["stf_gen"], "agents": ["daq-simulator"], "run_ids": [1001]}
+    message_filters = models.JSONField(default=dict, blank=True)
+    
+    # Statistics (applicable to both types)
+    messages_received = models.IntegerField(default=0)
+    messages_sent = models.IntegerField(default=0)  # For SSE
+    messages_dropped = models.IntegerField(default=0)  # For SSE queue overflow
 
     class Meta:
         db_table = 'swf_subscribers'
+        indexes = [
+            models.Index(fields=['delivery_type', 'is_active']),
+        ]
 
     def __str__(self):
         return self.subscriber_name

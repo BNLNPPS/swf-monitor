@@ -219,12 +219,27 @@ ACTIVEMQ_SSL_CERT_FILE = config('ACTIVEMQ_SSL_CERT_FILE', default='')
 ACTIVEMQ_SSL_KEY_FILE = config('ACTIVEMQ_SSL_KEY_FILE', default='')
 ACTIVEMQ_SSL_CA_CERTS = config('ACTIVEMQ_SSL_CA_CERTS', default='')
 
-# Channel layer settings (using in-memory for now, consider Redis for production)
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
+# Channel layer settings
+# Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer"
+        }
+    }
+
+# SSE relay group name
+SSE_CHANNEL_GROUP = config('SSE_CHANNEL_GROUP', default='workflow_events')
 
 # Basic Logging Configuration
 # Set DJANGO_LOGGING_MODE='none' to disable all logging configuration (useful for schema generation, etc.)

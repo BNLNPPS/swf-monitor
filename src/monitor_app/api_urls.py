@@ -6,6 +6,7 @@ from .views import (
     RunViewSet, StfFileViewSet, SubscriberViewSet, MessageQueueDispatchViewSet, FastMonFileViewSet,
     get_next_run_number
 )
+from .sse_views import sse_message_stream, sse_status
 
 router = DefaultRouter()
 router.register(r'systemagents', SystemAgentViewSet, basename='systemagent')
@@ -22,5 +23,7 @@ router.register(r'fastmon-files', FastMonFileViewSet, basename='fastmonfile')
 urlpatterns = [
     path('logs/summary/', LogSummaryView.as_view(), name='log-summary'),
     path('state/next-run-number/', get_next_run_number, name='get-next-run-number'),
+    path('messages/stream/', sse_message_stream, name='sse-message-stream'),
+    path('messages/stream/status/', sse_status, name='sse-stream-status'),
     path('', include(router.urls)),
 ]
