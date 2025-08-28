@@ -165,6 +165,8 @@ Alias /swf-monitor/static /opt/swf-monitor/shared/static
     Header always set X-Frame-Options DENY
     Header always set X-XSS-Protection "1; mode=block"
 </Location>
+\n+# Forward Authorization header to Django (required for DRF Token auth)
+WSGIPassAuthorization On
 EOF
 
 echo "Generated Apache configuration at: $SCRIPT_DIR/apache-swf-monitor-generated.conf"
