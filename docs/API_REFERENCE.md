@@ -99,6 +99,62 @@ curl -X PATCH -H "Authorization: Token <your_token>" \
 - `POST /api/subscribers/` - Create subscriber
 - `PATCH /api/subscribers/{id}/` - Update subscriber
 
+## Server-Sent Events (SSE) Streaming
+
+### Overview
+The monitor provides real-time message streaming via Server-Sent Events for monitoring workflow progress and system status.
+
+### Endpoints
+
+#### Stream Messages
+- **URL**: `GET /api/messages/stream/`
+- **Authentication**: Token required
+- **Protocol**: HTTPS (port 8443)
+- **Content-Type**: `text/event-stream`
+
+#### Query Parameters
+- `msg_types`: Comma-separated message types to filter (e.g., `stf_gen,data_ready`)
+- `agents`: Comma-separated agent names to filter (e.g., `daq-simulator,data-agent`)
+- `run_ids`: Comma-separated run IDs to filter (e.g., `run-001,run-002`)
+
+#### Example Usage
+```bash
+curl -H "Authorization: Token YOUR_TOKEN" \
+     "https://127.0.0.1:8443/api/messages/stream/?msg_types=stf_gen,data_ready&agents=daq-simulator"
+```
+
+#### Stream Status
+- **URL**: `GET /api/messages/stream/status/`
+- **Authentication**: Token required
+- **Returns**: Current broadcaster status and connected client count
+
+```json
+{
+    "connected_clients": 2,
+    "client_ids": ["uuid1", "uuid2"],
+    "client_filters": {...}
+}
+```
+
+### Message Format
+SSE events use the following format:
+```
+event: message_type
+data: {"msg_type": "stf_gen", "processed_by": "daq-simulator", "run_id": "run-001", ...}
+
+event: heartbeat
+data: {"timestamp": 1640995200.0}
+
+event: connected
+data: {"client_id": "uuid", "status": "connected"}
+```
+
+### Architecture
+- **Message Routing**: ActiveMQ messages are relayed to SSE clients via Redis channel layer
+- **Client Management**: Each client gets a dedicated message queue with configurable filtering
+- **Scalability**: Redis-backed channel layer supports multiple Django processes
+- **Reliability**: Automatic client cleanup and connection management
+
 ## Model Control Protocol (MCP)
 
 ### WebSocket Service

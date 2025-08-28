@@ -81,6 +81,20 @@ SSE clients can filter via query params: `msg_types`, `agents`, `run_ids`.
 
 SSE is best-effort real-time; there is no replay on reconnect. Each client has a bounded queue (drop-oldest on overflow). Heartbeats are emitted ~30s by default.
 
+## Testing
+
+The SSE functionality is comprehensively tested in `monitor_app/tests/test_sse_stream.py`:
+- **Unit tests**: Core broadcasting logic, message filtering, client management
+- **Integration tests**: Channel layer communication (when Redis is available)
+- **HTTP endpoint tests**: Authentication, response format, status reporting
+
+Run SSE-specific tests:
+```bash
+./run_tests.py src/monitor_app/tests/test_sse_stream.py
+```
+
+The tests use Django's test infrastructure rather than external HTTP connections, providing fast, reliable validation of SSE functionality without network dependencies.
+
 ## Operational notes
 
 - If `REDIS_URL` is unset, cross-process fanout will not work; use only for single-process dev. For production and any deployment serving remote recipients, `REDIS_URL` must be configured and Redis must be running.

@@ -1,4 +1,9 @@
 #!/bin/bash
+# Require bash (fail fast if invoked under another shell)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "This script must be run with bash. Try: bash $0 \"$@\"" >&2
+    exit 1
+fi
 #
 # SWF Monitor Apache Deployment Setup Script
 # 

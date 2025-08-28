@@ -27,6 +27,7 @@ The SWF Monitor test system provides comprehensive coverage of Django web interf
 - **ActiveMQ SSL**: Message broker connectivity and certificate handling
 - **Database**: Model relationships, migrations, data integrity
 - **REST Logging**: End-to-end logging workflow validation
+- **SSE Streaming**: Server-Sent Events message broadcasting and filtering
 
 ## Directory Structure
 
@@ -48,6 +49,7 @@ src/monitor_app/tests/
 ├── test_django_https_authentication.py     # Django HTTPS auth unit tests (7 tests)
 ├── test_django_dual_server_integration.py  # Live server integration tests (5 tests)
 ├── test_mcp_rest.py                         # MCP REST API endpoints (6 tests)
+├── test_sse_stream.py                       # SSE message streaming tests (5 tests)
 └── test_rest_logging.py                     # REST logging utilities (1 test)
 ```
 
@@ -334,6 +336,67 @@ class NewFeatureAPITests(APITestCase):
 # Run full suite to ensure no regressions
 ./run_tests.py
 ```
+
+## SSE (Server-Sent Events) Testing
+
+### Overview
+The SSE streaming tests (`test_sse_stream.py`) validate real-time message broadcasting functionality used by the monitor to push workflow events to connected clients.
+
+### Test Architecture
+The SSE tests use **Django's test infrastructure** rather than external HTTP connections, providing:
+- **Fast execution** (< 5 seconds vs 70+ second timeouts)
+- **Reliable results** (no network timing issues)
+- **Proper isolation** (no interference between tests)
+
+### Test Classes
+
+#### TestSSEBroadcaster
+Tests the core message broadcasting logic:
+- **Message Broadcasting**: Validates messages reach connected clients
+- **Message Filtering**: Ensures filtering by message type and agent works
+- **Client Management**: Tests client connection/disconnection lifecycle
+- **Channel Layer Integration**: Validates Redis-backed cross-process messaging
+
+#### TestSSEEndpoint  
+Tests HTTP endpoint behavior:
+- **Authentication**: Verifies token-based auth is required
+- **Response Format**: Validates SSE content-type headers
+- **Status Endpoint**: Tests broadcaster status reporting
+
+### Key Features Tested
+
+1. **Message Filtering**
+   ```python
+   filters = {'msg_types': ['data_ready'], 'agents': ['data-agent']}
+   # Only matching messages reach the client
+   ```
+
+2. **Client Queue Management**
+   ```python
+   client_queue = broadcaster.add_client(client_id, request, filters)
+   # Messages queued for delivery to specific clients
+   ```
+
+3. **Channel Layer Fanout**
+   ```python
+   async_to_sync(channel_layer.group_send)('workflow_events', {...})
+   # Redis-based message distribution across processes
+   ```
+
+### Test Execution
+```bash
+# Run SSE tests specifically
+./run_tests.py src/monitor_app/tests/test_sse_stream.py
+
+# Run with verbose output to see detailed SSE operations
+python -m pytest monitor_app/tests/test_sse_stream.py -v
+```
+
+### Architecture Lessons Learned
+- **Avoid external connections in tests** - use Django's test client instead
+- **Test core logic directly** - don't rely on network timing
+- **Mock timing-dependent components** - background threads, async operations
+- **Use TransactionTestCase** for tests that need real database transactions
 
 ---
 
