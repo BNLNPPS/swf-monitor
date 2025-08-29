@@ -41,8 +41,8 @@ python /eic/u/wenauseic/github/swf-testbed/report_system_status.py
 - **Python 3.11 mod_wsgi**: WSGI interface for Django application
 - **PostgreSQL**: Production database (system-managed)
 - **ActiveMQ**: Message broker (system-managed via artemis.service)
- - **Redis (Channels layer)**: REQUIRED inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
-- **Release Management**: Automated deployment with rollback capability
+ - **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
+- **Release Management**: Automated deployment
 
 ## Prerequisites
 
@@ -52,7 +52,7 @@ Before starting production deployment, ensure:
    - PostgreSQL (postgresql-16.service or equivalent)
    - ActiveMQ/Artemis (artemis.service)
    - Apache HTTP Server (httpd.service)
-   - Redis (redis.service) — REQUIRED for SSE relay via Django Channels. This is integral to production operation to support remote recipients of ActiveMQ events over HTTPS (SSE).
+   - Redis (redis.service) — Required for SSE relay via Django Channels. This is integral to production operation to support remote recipients of ActiveMQ events over HTTPS (SSE).
 
 2. **Development Environment Ready:**
    - SWF testbed development environment set up (see [Development Environment Setup](#development-environment-setup) below)
@@ -136,7 +136,7 @@ sudo nano /opt/swf-monitor/config/env/production.env
 - **Host Configuration**: URLs and hostnames for the production server
 - **Database Configuration**: PostgreSQL connection details
 - **ActiveMQ Configuration**: Message broker settings and SSL certificates
-- **Redis/Channels Configuration**: `REDIS_URL` for Channels channel layer powering SSE relay. REQUIRED for remote ActiveMQ recipients; without it, only single-process dev streaming works and is not suitable for production.
+- **Redis/Channels Configuration**: `REDIS_URL` for Channels channel layer powering SSE relay. Required for remote ActiveMQ recipients; without it, only single-process dev streaming works and is not suitable for production.
 - **API Authentication**: Tokens for agent authentication
 - **Proxy Settings**: Network proxy configuration
 
@@ -160,7 +160,7 @@ Test the production deployment:
 
 ```bash
 # Test HTTP access
-curl http://localhost/swf-monitor/
+curl https://pandaserver02.sdcc.bnl.gov/swf-monitor/
 
 # Check Apache status
 systemctl status httpd
@@ -198,16 +198,13 @@ The deployment script automatically:
 4. **Copies** development virtual environment from the configured development path
 5. **Links** shared resources (logs, production.env, SSL certificates)
 6. **Collects** Django static files with `python manage.py collectstatic`
-
-## Dev HTTPS note: localhost vs 127.0.0.1
-
-When running the local dual server via `start_django_dual.sh`, the HTTPS endpoint is served by Daphne. On some hosts, `localhost` resolves to IPv6 (`::1`) while Daphne listens on IPv4 (`0.0.0.0`). This can cause HTTPS handshakes to stall. Use `https://127.0.0.1:8443` for local testing, or bind Daphne on IPv6 as well so `localhost` works on both stacks.
 7. **Syncs** static files to shared Apache location
 8. **Runs** database migrations with `python manage.py migrate`
 9. **Updates** current symlink to point to new release
 10. **Sets** proper file ownership and permissions
 11. **Reloads** Apache configuration (`systemctl reload httpd`)
 12. **Cleans up** old releases (keeps last 5)
+
 
 ### Deployment Output
 
@@ -288,32 +285,6 @@ sudo tail -f /opt/swf-monitor/shared/logs/swf-monitor.log
 sudo tail -f /opt/swf-monitor/current/src/debug.log
 ```
 
-## Rollback Procedures
-
-### Quick Rollback
-
-If the current deployment has issues, rollback to previous release:
-
-```bash
-# List available releases
-ls -1t /opt/swf-monitor/releases/
-
-# Rollback to previous release
-sudo ln -sfn /opt/swf-monitor/releases/branch-infra-baseline-v17 /opt/swf-monitor/current
-
-# Reload Apache
-sudo systemctl reload httpd
-```
-
-### Database Rollback
-
-**⚠️ Database migrations are NOT automatically rolled back.**
-
-If database rollback is needed:
-
-1. **Restore database backup** from before the deployment
-2. **OR manually reverse migrations** if safe to do so
-3. **OR rollback to release compatible** with current database schema
 
 ## Troubleshooting
 
@@ -379,7 +350,7 @@ source /opt/swf-monitor/current/.venv/bin/activate
 python manage.py check --deploy
 
 # Check all services
-sudo systemctl status httpd postgresql-16 artemis
+sudo systemctl status httpd postgresql-16 artemis redis
 ```
 
 ## Security Considerations

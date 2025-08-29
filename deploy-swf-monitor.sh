@@ -166,7 +166,7 @@ systemctl start httpd
 
 # Health check
 log "Performing health check..."
-HEALTH_URL="http://localhost/swf-monitor/"
+HEALTH_URL="https://pandaserver02.sdcc.bnl.gov/swf-monitor/"
 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
 
 if [ "$HTTP_STATUS" = "200" ]; then
