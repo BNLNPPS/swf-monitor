@@ -188,7 +188,8 @@ class StfFile(models.Model):
 
 class Subscriber(models.Model):
     """
-    Represents a message queue subscriber in the monitoring system. Subscribers receive notifications about STF files.
+    Represents a message queue subscriber in the monitoring system. 
+    Subscribers receive notifications about STF files via ActiveMQ directly or SSE.
     
     Attributes:
         subscriber_id: Auto-incrementing primary key
@@ -198,7 +199,22 @@ class Subscriber(models.Model):
         is_active: Whether the subscriber is currently active
         created_at: Timestamp when record was created
         updated_at: Timestamp when record was last updated
+        delivery_type: How messages are delivered (activemq or sse)
+        client_ip: IP address for SSE subscribers
+        client_location: Geographic location for SSE subscribers
+        connected_at: When SSE subscriber connected
+        disconnected_at: When SSE subscriber disconnected
+        last_activity: Last activity timestamp for SSE subscribers
+        message_filters: JSON filters for SSE message selection
+        messages_received: Count of messages received
+        messages_sent: Count of messages sent (SSE)
+        messages_dropped: Count of messages dropped due to queue overflow (SSE)
     """
+    DELIVERY_TYPE_CHOICES = [
+        ('activemq', 'ActiveMQ Direct'),
+        ('sse', 'Server-Sent Events'),
+    ]
+    
     subscriber_id = models.AutoField(primary_key=True)
     subscriber_name = models.CharField(max_length=255, unique=True)
     fraction = models.FloatField(null=True, blank=True)
@@ -206,9 +222,35 @@ class Subscriber(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    # New fields for SSE support
+    delivery_type = models.CharField(
+        max_length=20, 
+        choices=DELIVERY_TYPE_CHOICES, 
+        default='activemq'
+    )
+    
+    # SSE-specific connection info (null for ActiveMQ subscribers)
+    client_ip = models.GenericIPAddressField(null=True, blank=True)
+    client_location = models.CharField(max_length=255, blank=True, default='')
+    connected_at = models.DateTimeField(null=True, blank=True)
+    disconnected_at = models.DateTimeField(null=True, blank=True)
+    last_activity = models.DateTimeField(null=True, blank=True)
+    
+    # Message filters (for SSE subscribers)
+    # Format: {"msg_types": ["stf_gen"], "agents": ["daq-simulator"], "run_ids": [1001]}
+    message_filters = models.JSONField(default=dict, blank=True)
+    
+    # Statistics (applicable to both types)
+    messages_received = models.IntegerField(default=0)
+    messages_sent = models.IntegerField(default=0)  # For SSE
+    messages_dropped = models.IntegerField(default=0)  # For SSE queue overflow
 
     class Meta:
         db_table = 'swf_subscribers'
+        indexes = [
+            models.Index(fields=['delivery_type', 'is_active']),
+        ]
 
     def __str__(self):
         return self.subscriber_name
@@ -247,6 +289,43 @@ class MessageQueueDispatch(models.Model):
 
     def __str__(self):
         return f"Dispatch {self.dispatch_id} - STF {self.stf_file.file_id} - {'Success' if self.is_successful else 'Failed'}"
+
+
+class FastMonFile(models.Model):
+    """
+    Represents a Time Frame (TF) file for fast monitoring.
+    TF files are subsamples of Super Time Frame (STF) files, processed for rapid monitoring.
+    
+    Attributes:
+        tf_file_id: UUID primary key for unique TF file identification
+        stf_file: Foreign key to the parent STF file this TF is derived from
+        tf_filename: Unique filename for the TF file
+        file_size_bytes: Size of the TF file in bytes
+        checksum: File integrity checksum
+        status: Current processing status (FileStatus enum)
+        metadata: JSON field for flexible storage of TF-specific metadata
+        created_at: Timestamp when TF record was created
+        updated_at: Timestamp when TF record was last modified
+    """
+    tf_file_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stf_file = models.ForeignKey(StfFile, on_delete=models.CASCADE, related_name='tf_files')
+    tf_filename = models.CharField(max_length=255, unique=True)
+    file_size_bytes = models.BigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=64, null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=FileStatus.choices,
+        default=FileStatus.REGISTERED
+    )
+    metadata = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_fastmon_files'
+
+    def __str__(self):
+        return f"TF File {self.tf_filename}"
 
 
 class PersistentState(models.Model):

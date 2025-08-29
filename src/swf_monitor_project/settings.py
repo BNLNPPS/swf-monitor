@@ -152,10 +152,25 @@ USE_I18N = True
 USE_TZ = True
 
 
+# Subpath deployment configuration
+# For production deployments served under a subpath (e.g., /swf-monitor/)
+DEPLOYMENT_SUBPATH = config('SWF_DEPLOYMENT_SUBPATH', default='')
+
+if DEPLOYMENT_SUBPATH:
+    # Production subpath deployment
+    FORCE_SCRIPT_NAME = DEPLOYMENT_SUBPATH
+    STATIC_URL = config('SWF_STATIC_URL_BASE', default=f'{DEPLOYMENT_SUBPATH}/static/')
+    LOGIN_REDIRECT_URL = config('SWF_LOGIN_REDIRECT', default=f'{DEPLOYMENT_SUBPATH}/home/')
+    LOGOUT_REDIRECT_URL = config('SWF_LOGOUT_REDIRECT', default=DEPLOYMENT_SUBPATH + '/')
+else:
+    # Development defaults (no subpath)
+    STATIC_URL = "static/"
+    LOGIN_REDIRECT_URL = '/home/'
+    LOGOUT_REDIRECT_URL = '/'
+
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = "static/"
 STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
@@ -163,8 +178,6 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 LOGIN_URL = 'login'
-LOGIN_REDIRECT_URL = '/home/'  # Redirect to the new authenticated home page after login
-LOGOUT_REDIRECT_URL = '/'
 
 
 # Default primary key field type
@@ -206,12 +219,27 @@ ACTIVEMQ_SSL_CERT_FILE = config('ACTIVEMQ_SSL_CERT_FILE', default='')
 ACTIVEMQ_SSL_KEY_FILE = config('ACTIVEMQ_SSL_KEY_FILE', default='')
 ACTIVEMQ_SSL_CA_CERTS = config('ACTIVEMQ_SSL_CA_CERTS', default='')
 
-# Channel layer settings (using in-memory for now, consider Redis for production)
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
+# Channel layer settings
+# Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
+REDIS_URL = config('REDIS_URL', default='')
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        }
     }
-}
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer"
+        }
+    }
+
+# SSE relay group name
+SSE_CHANNEL_GROUP = config('SSE_CHANNEL_GROUP', default='workflow_events')
 
 # Basic Logging Configuration
 # Set DJANGO_LOGGING_MODE='none' to disable all logging configuration (useful for schema generation, etc.)

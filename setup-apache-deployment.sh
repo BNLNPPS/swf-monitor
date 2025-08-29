@@ -1,15 +1,15 @@
 #!/bin/bash
+# Require bash (fail fast if invoked under another shell)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "This script must be run with bash. Try: bash $0 \"$@\"" >&2
+    exit 1
+fi
 #
 # SWF Monitor Apache Deployment Setup Script
 # 
-# This script sets up the Apache deployment infrastructure for swf-monitor
-# Run with: sudo ./setup-apache-deployment.sh
-#
-# Creates:
-# - /opt/swf-monitor/ deployment structure
-# - Apache virtual host configuration
-# - Deployment automation script
-# - Production environment configuration
+# USAGE: sudo ./setup-apache-deployment.sh
+# 
+# See docs/PRODUCTION_DEPLOYMENT.md for complete documentation
 
 set -e  # Exit on any error
 
@@ -165,6 +165,8 @@ Alias /swf-monitor/static /opt/swf-monitor/shared/static
     Header always set X-Frame-Options DENY
     Header always set X-XSS-Protection "1; mode=block"
 </Location>
+\n+# Forward Authorization header to Django (required for DRF Token auth)
+WSGIPassAuthorization On
 EOF
 
 echo "Generated Apache configuration at: $SCRIPT_DIR/apache-swf-monitor-generated.conf"

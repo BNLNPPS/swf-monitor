@@ -6,6 +6,9 @@ from django.utils import timezone
 from django.db import connection
 from .models import SystemAgent
 from .workflow_models import WorkflowMessage, STFWorkflow
+from django.conf import settings
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 try:
     import stomp
@@ -128,8 +131,35 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 queue_name=getattr(frame, 'destination', 'epictopic'),
                 is_successful=True  # Assume successful since we received it
             )
+
+            # Enrich message for downstream consumers (SSE filters rely on these)
+            enriched = dict(data)
+            enriched.setdefault('sender_agent', sender_agent)
+            enriched.setdefault('recipient_agent', recipient_agent)
+            enriched.setdefault('queue_name', getattr(frame, 'destination', 'epictopic'))
+            enriched.setdefault('sent_at', timezone.now().isoformat())
+
+            # Publish to Channels group for cross-process fanout (preferred)
+            try:
+                channel_layer = get_channel_layer()
+                if channel_layer is not None:
+                    group = getattr(settings, 'SSE_CHANNEL_GROUP', 'workflow_events')
+                    async_to_sync(channel_layer.group_send)(
+                        group,
+                        {"type": "broadcast", "payload": enriched}
+                    )
+            except Exception as e:
+                self.logger.debug(f"Channels group_send failed or unavailable: {e}")
+
+            # Also attempt in-process broadcast (useful in single-process dev)
+            try:
+                from .sse_views import SSEMessageBroadcaster
+                broadcaster = SSEMessageBroadcaster()
+                broadcaster.broadcast_message(enriched)
+            except Exception as e:
+                self.logger.debug(f"In-process SSE broadcast skipped/failed: {e}")
             
-            self.logger.info(f"Stored workflow message: {msg_type} for run {run_id}, filename {filename}")
+            self.logger.info(f"Stored and relayed workflow message: {msg_type} for run {run_id}, filename {filename}")
             
         except Exception as e:
             self.logger.error(f"Error processing workflow message: {e}")

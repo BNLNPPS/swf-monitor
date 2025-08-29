@@ -12,6 +12,18 @@ Comprehensive documentation for the Model Control Protocol (MCP) REST API implem
 - Authentication and error handling
 - Integration with OpenAPI/Swagger
 
+## Operations Documentation
+
+### [Production Deployment Guide](PRODUCTION_DEPLOYMENT.md)
+### [SSE Relay (Channels + Redis)](SSE_RELAY.md)
+Details on the SSE forwarder architecture, configuration, authentication/CORS notes, and operational guidance.
+
+Complete Apache production deployment documentation covering:
+- Initial infrastructure setup and Apache configuration
+- Automated deployment process and release management
+- Configuration management and security considerations
+- Troubleshooting and maintenance procedures
+
 ## Development Documentation
 
 ### [Test Refactoring Report](TEST_REFACTORING_REPORT.md)

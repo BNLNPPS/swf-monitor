@@ -1,11 +1,19 @@
 #!/bin/bash
+# Require bash (fail fast if invoked under another shell)
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "This script must be run with bash. Try: bash $0 \"$@\"" >&2
+    exit 1
+fi
 #
 # SWF Monitor Deployment Script
 # Usage: deploy-swf-monitor.sh [tag|branch] <reference>
 #
 # Examples:
-#   deploy-swf-monitor.sh tag infra/baseline-v17
+#   deploy-swf-monitor.sh tag tagName
 #   deploy-swf-monitor.sh branch infra/baseline-v18
+#   deploy-swf-monitor.sh branch main
+#
+# See docs/PRODUCTION_DEPLOYMENT.md for complete documentation
 
 set -e
 
@@ -85,28 +93,41 @@ log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
 source .venv/bin/activate
 
-# Create production environment file if it doesn't exist
+# Verify production environment file exists
 if [ ! -f "$DEPLOY_ROOT/config/env/production.env" ]; then
-    log "Creating production environment configuration..."
-    cat > "$DEPLOY_ROOT/config/env/production.env" << 'EOF'
-# Production Environment Configuration for SWF Monitor
-DEBUG=False
-SECRET_KEY=your-production-secret-key-here-change-this
-SWF_ALLOWED_HOSTS=localhost,127.0.0.1,pandasserver02.sdcc.bnl.gov
-SWF_MONITOR_URL=http://localhost
-SWF_MONITOR_HTTP_URL=http://localhost
-DB_HOST=localhost
-DB_NAME=swfdb
-DB_USER=wenaus
-# Add other production-specific environment variables here
-EOF
-    log "Created default production.env - please review and update values"
+    echo "ERROR: Production environment file not found at $DEPLOY_ROOT/config/env/production.env"
+    echo "Please create this file with appropriate production configuration before deploying."
+    echo "See docs/PRODUCTION_DEPLOYMENT.md for configuration details."
+    exit 1
+fi
+
+# Validate subpath configuration for Apache deployment
+log "Validating subpath configuration..."
+if grep -q "WSGIScriptAlias /swf-monitor" /etc/httpd/conf.d/swf-monitor.conf 2>/dev/null; then
+    if ! grep -q "SWF_DEPLOYMENT_SUBPATH=/swf-monitor" "$DEPLOY_ROOT/config/env/production.env"; then
+        echo "ERROR: Apache configured for /swf-monitor subpath but production.env missing subpath configuration"
+        echo "Required variables in production.env:"
+        echo "  SWF_DEPLOYMENT_SUBPATH=/swf-monitor"
+        echo "  SWF_STATIC_URL_BASE=/swf-monitor/static/"
+        echo "  SWF_LOGIN_REDIRECT=/swf-monitor/home/"
+        echo "See docs/PRODUCTION_DEPLOYMENT.md for complete configuration details."
+        exit 1
+    fi
+    log "✅ Subpath configuration validated"
+else
+    log "ℹ️ No subpath deployment detected in Apache config"
 fi
 
 # Link shared resources
 log "Linking shared resources..."
 ln -sf "$DEPLOY_ROOT/shared/logs" "$RELEASE_DIR/logs"
 ln -sf "$DEPLOY_ROOT/config/env/production.env" "$RELEASE_DIR/.env"
+
+# Install WSGI module configuration if it exists in repository
+if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then
+    log "Installing WSGI module configuration..."
+    cp "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" /etc/httpd/conf.modules.d/20-swf-monitor-wsgi.conf
+fi
 
 # SSL certificate is already present from git clone if it exists in the repo
 if [ -f "$RELEASE_DIR/full-chain.pem" ]; then
@@ -127,17 +148,35 @@ rsync -a --delete "$RELEASE_DIR/src/staticfiles/" "$DEPLOY_ROOT/shared/static/"
 log "Running database migrations..."
 python manage.py migrate --settings=swf_monitor_project.settings
 
-# Update current symlink
-log "Updating current symlink..."
-ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
-
 # Set ownership
 log "Setting ownership..."
 chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 
-# Reload Apache
-log "Reloading Apache..."
-systemctl reload httpd
+# Stop Apache
+log "Stopping Apache..."
+systemctl stop httpd
+
+# Update current symlink
+log "Updating current symlink..."
+ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
+
+# Start Apache
+log "Starting Apache..."
+systemctl start httpd
+
+# Health check
+log "Performing health check..."
+HEALTH_URL="http://localhost/swf-monitor/"
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
+
+if [ "$HTTP_STATUS" = "200" ]; then
+    log "✅ Health check PASSED - Application responding (HTTP $HTTP_STATUS)"
+else
+    log "❌ Health check FAILED - Application not responding (HTTP $HTTP_STATUS)"
+    echo "WARNING: Deployment completed but application may not be working correctly"
+    echo "Check Apache error logs: sudo tail -f /var/log/httpd/error_log"
+    # Don't exit - deployment artifacts are in place, just alerting
+fi
 
 # Cleanup old releases (keep last 5)
 log "Cleaning up old releases..."
