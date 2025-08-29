@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 08-15-2025 09:27PM UTC'''
+  Last Updated At 08-26-2025 08:27PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -96,6 +96,11 @@ enum monitor_app.char_stfworkflow_daq_substate {
   "epic" [note: '''ePIC''']
   "daq" [note: '''DAQ''']
   "calib" [note: '''Calibration''']
+}
+
+enum monitor_app.char_subscriber_delivery_type {
+  "activemq" [note: '''ActiveMQ Direct''']
+  "sse" [note: '''Server-Sent Events''']
 }
 
 enum monitor_app.char_systemagent_agent_type {
@@ -704,7 +709,8 @@ ref: monitor_app.StfFile.run_id > monitor_app.Run.run_id
 
 Table monitor_app.Subscriber {
   Note: '''
-Represents a message queue subscriber in the monitoring system. Subscribers receive notifications about STF files.
+Represents a message queue subscriber in the monitoring system. 
+Subscribers receive notifications about STF files via ActiveMQ directly or SSE.
 
 Attributes:
 subscriber_id: Auto-incrementing primary key
@@ -714,6 +720,16 @@ description: Human-readable description of the subscriber
 is_active: Whether the subscriber is currently active
 created_at: Timestamp when record was created
 updated_at: Timestamp when record was last updated
+delivery_type: How messages are delivered (activemq or sse)
+client_ip: IP address for SSE subscribers
+client_location: Geographic location for SSE subscribers
+connected_at: When SSE subscriber connected
+disconnected_at: When SSE subscriber disconnected
+last_activity: Last activity timestamp for SSE subscribers
+message_filters: JSON filters for SSE message selection
+messages_received: Count of messages received
+messages_sent: Count of messages sent (SSE)
+messages_dropped: Count of messages dropped due to queue overflow (SSE)
 
 
 *DB table: swf_subscribers*'''
@@ -725,8 +741,19 @@ updated_at: Timestamp when record was last updated
   is_active boolean [default:`True`, not null]
   created_at date_time [not null]
   updated_at date_time [not null]
+  delivery_type monitor_app.char_subscriber_delivery_type [default:`"activemq"`, not null]
+  client_ip generic_ip_address [null]
+  client_location char [default:`""`, not null]
+  connected_at date_time [null]
+  disconnected_at date_time [null]
+  last_activity date_time [null]
+  message_filters json [default:`builtins.dict()`, not null]
+  messages_received integer [default:`0`, not null]
+  messages_sent integer [default:`0`, not null]
+  messages_dropped integer [default:`0`, not null]
 
   indexes {
+    (delivery_type,is_active) [name: 'swf_subscri_deliver_1836c2_idx', type: btree]
     (subscriber_id) [pk, unique, name: 'swf_subscribers_pkey', type: btree]
     (subscriber_name) [unique, name: 'swf_subscribers_subscriber_name_key', type: btree]
   }
