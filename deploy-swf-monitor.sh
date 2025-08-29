@@ -123,6 +123,12 @@ log "Linking shared resources..."
 ln -sf "$DEPLOY_ROOT/shared/logs" "$RELEASE_DIR/logs"
 ln -sf "$DEPLOY_ROOT/config/env/production.env" "$RELEASE_DIR/.env"
 
+# Install WSGI module configuration if it exists in repository
+if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then
+    log "Installing WSGI module configuration..."
+    cp "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" /etc/httpd/conf.modules.d/20-swf-monitor-wsgi.conf
+fi
+
 # SSL certificate is already present from git clone if it exists in the repo
 if [ -f "$RELEASE_DIR/full-chain.pem" ]; then
     log "SSL certificate found in deployment..."
