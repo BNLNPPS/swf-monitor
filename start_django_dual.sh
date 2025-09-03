@@ -95,12 +95,20 @@ fi
 
 # Kill existing Django servers if running
 echo "Stopping existing Django servers..."
-# Limit to current user and silence errors to avoid noisy 'Operation not permitted'
-if command -v pkill >/dev/null 2>&1; then
-    pkill -u "$USER" -f "manage.py runserver" >/dev/null 2>&1 || true
-    pkill -u "$USER" -f "daphne" >/dev/null 2>&1 || true
-fi
-sleep 2
+
+# Murder Django processes with extreme prejudice
+kill_django_processes() {
+    local pattern="$1"
+    local pids=$(pgrep -u "$USER" -f "$pattern" 2>/dev/null | tr '\n' ' ' | xargs)
+    if [ -n "$pids" ]; then
+        echo "Killing $pattern processes: $pids"
+        kill -9 $pids 2>/dev/null || true
+    fi
+}
+
+kill_django_processes "manage.py runserver"
+kill_django_processes "daphne.*swf_monitor_project"
+sleep 1
 
 # Ensure 8443 is completely free before starting Daphne
 kill_port 8443
@@ -139,7 +147,7 @@ echo "Process IDs: HTTP=$HTTP_PID, HTTPS=$HTTPS_PID"
 echo "Press Ctrl+C to stop both servers"
 
 # Wait for interrupt and clean up
-trap 'echo "Stopping servers..."; kill $HTTP_PID $HTTPS_PID 2>/dev/null; exit' INT
+trap 'echo -e "\nStopping servers..."; kill -9 $HTTP_PID $HTTPS_PID 2>/dev/null; echo "Django servers stopped."; exit' INT
 
 # Keep script running
 wait
