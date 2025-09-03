@@ -1428,6 +1428,7 @@ def workflow_messages(request):
             {'title': 'message_type', 'orderable': True},
             {'title': 'sender_agent', 'orderable': True},
             {'title': 'recipient_agent', 'orderable': True},
+            {'title': 'source', 'orderable': True},
             {'title': 'workflow', 'orderable': True},
             {'title': 'is_successful', 'orderable': True},
         ],
@@ -1455,7 +1456,7 @@ def workflow_messages_datatable_ajax(request):
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
     
     # Column definitions matching the template order  
-    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful']
+    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'source', 'workflow', 'is_successful']
     
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
     
@@ -1532,11 +1533,20 @@ def workflow_messages_datatable_ajax(request):
         else:
             recipient_link = 'N/A'
         
+        # Extract source from message_metadata
+        source = 'Unknown'
+        if message.message_metadata and isinstance(message.message_metadata, dict):
+            source = message.message_metadata.get('created_by', 'Unknown')
+        
+        # Apply smaller font to source for less column width
+        source = f'<span style="font-size: 0.8rem;">{source}</span>'
+        
         row = [
             format_datetime(message.sent_at),
             message.message_type,
             sender_link,
             recipient_link,
+            source,
             workflow_link,
             status,
         ]

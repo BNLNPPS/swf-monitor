@@ -123,7 +123,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             # Create metadata with originator tracking
             import os, socket
             metadata = {
-                'created_by': f"activemq_processor@{socket.gethostname()}",
+                'created_by': os.getcwd(),
                 'process_pid': os.getpid(),
                 'processed_at': timezone.now().isoformat(),
                 'django_instance': os.environ.get('DJANGO_SETTINGS_MODULE', 'unknown')
