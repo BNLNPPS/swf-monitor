@@ -266,6 +266,9 @@ class WorkflowMessage(models.Model):
     # Message content
     message_content = models.JSONField()
     
+    # Extensible metadata for monitoring and debugging
+    message_metadata = models.JSONField(null=True, blank=True, default=dict, help_text="Extensible metadata for monitoring, debugging, and system tracking")
+    
     # Delivery tracking
     sent_at = models.DateTimeField(auto_now_add=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
