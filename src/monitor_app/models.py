@@ -18,6 +18,8 @@ class SystemAgent(models.Model):
         ('processing', 'Processing Agent'),
         ('fastmon', 'Fast Monitoring Agent'),
         ('monitor', 'Monitor System'),
+        ('sse_sender', 'SSE Test Sender'),
+        ('sse_receiver', 'SSE Client/Receiver'),
         ('test', 'Test Agent'),
         ('other', 'Other'),
     ]
