@@ -123,7 +123,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             # Create metadata with originator tracking
             import os, socket
             metadata = {
-                'created_by': os.getcwd(),
+                'created_by': f"{os.getcwd()}:{os.getpid()}",  # Include PID for better instance tracking
                 'process_pid': os.getpid(),
                 'processed_at': timezone.now().isoformat(),
                 'django_instance': os.environ.get('DJANGO_SETTINGS_MODULE', 'unknown')
@@ -220,6 +220,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             'resume_run': 'all-agents',
             'end_run': 'all-agents',
             'data_ready': 'processing-agent',
-            'processing_complete': 'all-agents'
+            'processing_complete': 'all-agents',
+            'sse_test': 'all-agents'  # SSE test messages broadcast to all
         }
         return recipient_map.get(msg_type, 'unknown')
