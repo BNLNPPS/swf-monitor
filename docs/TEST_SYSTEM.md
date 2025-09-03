@@ -55,7 +55,6 @@ src/monitor_app/tests/
 
 ## Running Tests
 
-### Recommended Method
 ```bash
 ./run_tests.py
 ```
@@ -64,21 +63,6 @@ This script automatically:
 - Activates the virtual environment (uses swf-testbed's .venv if available)
 - Runs pytest with proper Django configuration
 - Provides detailed test output and coverage
-
-### Alternative Methods
-```bash
-# Django's built-in test runner
-python manage.py test
-
-# Direct pytest (requires manual environment setup)
-pytest
-
-# Run specific test files
-./run_tests.py src/monitor_app/tests/test_django_https_authentication.py
-
-# Run with verbose output
-python -m pytest -v -s
-```
 
 ## Test Types and Patterns
 
@@ -223,32 +207,6 @@ def test_auth(self):
     """Test authentication."""
 ```
 
-## Coverage Areas
-
-### Django Framework
-- Model validation and relationships
-- View rendering and form processing
-- URL routing and middleware
-- Template rendering and context
-
-### REST API
-- CRUD operations for all models
-- Authentication and authorization
-- Input validation and error handling
-- Response formatting and status codes
-
-### Security
-- HTTPS certificate validation
-- Token-based authentication
-- Permission enforcement
-- SQL injection prevention
-
-### External Integrations
-- ActiveMQ SSL connections
-- Database connectivity
-- Message queue dispatch
-- WebSocket communication
-
 ## Continuous Integration
 
 The test suite is designed for CI/CD environments:
@@ -282,18 +240,6 @@ source /eic/u/wenauseic/github/swf-testbed/.venv/bin/activate
 # Check Django settings
 python -c "import django; django.setup(); print('Django OK')"
 ```
-
-### Test-Specific Issues
-
-**Integration Tests Failing**
-- Ensure Django servers are running for live server tests
-- Check environment variables are properly set
-- Verify SSL certificates exist for HTTPS tests
-
-**Authentication Tests Failing**
-- Confirm API tokens are properly configured
-- Check user permissions and groups
-- Verify session middleware is enabled
 
 ## Adding New Tests
 

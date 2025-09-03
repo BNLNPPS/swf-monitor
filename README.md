@@ -13,34 +13,24 @@ The application is built on Django infrastructure and comprises two main web app
    * **REST API**: Programmatic interface with token-based authentication and OpenAPI schema
 
 2. **MCP App (`mcp_app`)**: Real-time communication layer
-   * **WebSocket Service**: Django Channels implementation of Model Control Protocol (MCP)
    * **REST Endpoints**: HTTP alternative to WebSocket for MCP commands
 
-3. **ActiveMQ Integration**: Management command (`listen_activemq`) for agent communications via message queue
+3. **ActiveMQ Integration**: Built-in message queue connectivity
+   * **Automatic Listening**: Connects to ActiveMQ automatically when Django starts
+   * **SSE REST Forwarding**: Server-Sent Events streaming of ActiveMQ messages via HTTPS
 
-4. **PostgreSQL Database**: Primary data store for agents, logs, runs, and application state
-
-### Architecture
-
-The monitor serves as the central hub in a distributed agent-based workflow:
-
-```
-┌─ swf-daqsim-agent (scheduler/generator)
-│   ↓ ActiveMQ messages  
-├─ [swf-data-agent] → [swf-processing-agent] → [swf-fastmon-agent]
-│   ↓ status updates & logs
-└─ swf-monitor (dashboard/database)
-```
+4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, files, workflows, and application state
 
 ## Key Features
 
 - 🖥️ **Real-time Dashboard** - Agent status monitoring with live updates
 - 🔗 **REST API** - Complete CRUD operations with OpenAPI documentation  
-- ⚡ **WebSocket Service** - Bidirectional real-time communication via MCP
+- 🔄 **MCP REST API** - Model Control Protocol endpoints for agent communication
+- 📡 **SSE Message Streaming** - Real-time ActiveMQ message forwarding via HTTPS with Django Channels and Redis
 - 📊 **Centralized Logging** - Agent log collection with `swf-common-lib` integration
 - 🔐 **Authentication** - Token-based API access and web session management
-- 📈 **Message Queue Integration** - ActiveMQ connectivity for workflow coordination
-- 🧪 **Comprehensive Testing** - 65 tests across API, UI, and integration scenarios
+- 📈 **ActiveMQ Integration** - Automatic message queue connectivity and monitoring
+- 🧪 **Comprehensive Testing** - 88+ tests across API, UI, and integration scenarios
 
 ## Documentation
 
@@ -52,11 +42,11 @@ The monitor serves as the central hub in a distributed agent-based workflow:
 | **[Production Deployment](docs/PRODUCTION_DEPLOYMENT.md)** | Complete Apache production deployment guide | Production operations |
 | **[API Reference](docs/API_REFERENCE.md)** | REST API, WebSocket, database schema, authentication | Integration |
 | **[MCP Implementation](docs/MCP_REST_IMPLEMENTATION.md)** | Model Control Protocol REST API details | Agent communication |
-| **[Development Roadmap](docs/DEVELOPMENT_ROADMAP.md)** | Future plans, architecture, workflow design | Contributors |
 | **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 
 ### Quick Links
-- **Interactive API Docs**: [Swagger UI](http://127.0.0.1:8000/api/schema/swagger-ui/) | [ReDoc](http://127.0.0.1:8000/api/schema/redoc/)
+- **Production Monitor**: [https://pandaserver02.sdcc.bnl.gov/swf-monitor/](https://pandaserver02.sdcc.bnl.gov/swf-monitor/)
+- **Interactive API Docs**: [Swagger UI](https://pandasserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/) | [ReDoc](https://pandasserver02.sdcc.bnl.gov/swf-monitor/api/schema/redoc/)
 - **Database Schema**: [testbed-schema.dbml](testbed-schema.dbml) (auto-generated)
 - **Parent Project**: [swf-testbed documentation](../swf-testbed/README.md)
 
@@ -65,25 +55,7 @@ The monitor serves as the central hub in a distributed agent-based workflow:
 ### Basic Setup
 ```bash
 # See docs/SETUP_GUIDE.md for complete installation
-python manage.py runserver          # Start web interface  
-python manage.py listen_activemq    # Start message queue listener
-```
-
-### API Usage
-```bash
-# Generate token and create agent
-python manage.py get_token username --create-user
-curl -H "Authorization: Token <token>" -H "Content-Type: application/json" \
-     -d '{"instance_name": "my-agent", "agent_type": "test", "status": "OK"}' \
-     http://127.0.0.1:8000/api/systemagents/
-```
-
-### Agent Integration
-```python
-# Centralized logging with swf-common-lib
-from swf_common_lib.rest_logging import setup_rest_logging
-logger = setup_rest_logging(app_name='my_agent', instance_name='agent_001')
-logger.info("Agent started")  # Automatically sent to monitor
+python manage.py runserver          # Start web interface (includes ActiveMQ integration)
 ```
 
 ## Testing

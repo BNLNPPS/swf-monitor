@@ -148,8 +148,8 @@ python test_mcp_rest.py
 
 ### Integration with Swagger/OpenAPI
 The REST endpoints are documented using `drf-spectacular` and available at:
-- **Swagger UI**: `/api/schema/swagger-ui/`
-- **ReDoc**: `/api/schema/redoc/`
+- **Swagger UI**: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/`
+- **ReDoc**: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/redoc/`
 - **Schema**: `/api/schema/`
 
 ## Compatibility
@@ -160,13 +160,6 @@ The REST implementation maintains full compatibility with the existing WebSocket
 - Same error codes and responses
 - Same agent data models
 
-## Next Steps
-
-1. **Production Authentication**: Implement proper authentication/authorization
-2. **Rate Limiting**: Add rate limiting for production use
-3. **Caching**: Consider caching for frequently accessed endpoints
-4. **Monitoring**: Add metrics and logging for REST endpoint usage
-5. **Client Libraries**: Develop client libraries for different programming languages
 
 ## Usage Examples
 

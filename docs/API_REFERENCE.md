@@ -6,8 +6,8 @@ Complete reference for the swf-monitor REST API and WebSocket services.
 
 The API is documented using OpenAPI (Swagger). View interactive documentation:
 
-* **Swagger UI**: `http://127.0.0.1:8000/api/schema/swagger-ui/`
-* **ReDoc**: `http://127.0.0.1:8000/api/schema/redoc/`
+* **Swagger UI**: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/`
+* **ReDoc**: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/redoc/`
 
 ## Database Schema
 
@@ -21,14 +21,46 @@ The system uses Django models to track agents, runs, data files, and messaging:
 - **AppLog**: Centralized logging from all agents and services  
 - **Run**: Experimental runs containing multiple STF files
 - **StfFile**: Super Time Frame files with processing status
+- **FastMonFile**: Fast monitoring time frame sample files metadata
 - **MessageQueueDispatch**: Message queue operations and delivery tracking
 - **Subscriber**: Message queue subscribers and their configurations
+- **PersistentState**: System state persistence for workflow tracking
+- **PandaQueue**: PanDA queue configuration for job submission
+- **RucioEndpoint**: Rucio data management endpoint definitions
 
-### Key Relationships
+## ActiveMQ Integration
 
-- **Run → StfFile**: One-to-many (each run contains multiple STF files)
-- **StfFile → MessageQueueDispatch**: One-to-many (each file triggers multiple dispatches)
-- **SystemAgent, Subscriber, AppLog**: Independent entities for monitoring
+### Automatic Connection Management
+
+The monitor includes built-in ActiveMQ integration that starts automatically when Django launches. This integration:
+
+- **Automatic Startup**: Connects to ActiveMQ when `python manage.py runserver` starts
+- **Smart Initialization**: Only connects during normal operation, not during management commands like `migrate` or `test`
+- **Configuration-Driven**: Requires `ACTIVEMQ_HOST` environment variable to be set
+- **SSL Support**: Handles SSL certificate configuration for secure connections
+- **Graceful Cleanup**: Automatically disconnects when Django shuts down
+
+### Implementation Details
+
+- **Connection Manager**: `ActiveMQConnectionManager` (singleton) in `monitor_app/activemq_connection.py`
+- **App Integration**: Initialized via `MonitorAppConfig.ready()` in `monitor_app/apps.py`
+- **Message Processing**: Handles agent heartbeats and workflow messages
+- **Thread Safety**: Uses threading locks for safe singleton operation
+
+### Configuration
+
+Set these environment variables for ActiveMQ integration:
+
+```bash
+export ACTIVEMQ_HOST='your-activemq-host'
+export ACTIVEMQ_PORT=61612
+export ACTIVEMQ_USER='username'
+export ACTIVEMQ_PASSWORD='password'
+export ACTIVEMQ_USE_SSL=True
+export ACTIVEMQ_SSL_CA_CERTS='/path/to/ca-cert.pem'
+```
+
+No separate management command is needed - the integration is fully automatic.
 
 ## Authentication
 
@@ -99,17 +131,43 @@ curl -X PATCH -H "Authorization: Token <your_token>" \
 - `POST /api/subscribers/` - Create subscriber
 - `PATCH /api/subscribers/{id}/` - Update subscriber
 
+### Fast Monitoring Files
+- `GET /api/fastmon-files/` - List fast monitoring files
+- `POST /api/fastmon-files/` - Register new fast monitoring file
+- `GET /api/fastmon-files/{id}/` - Get specific file
+- `PATCH /api/fastmon-files/{id}/` - Update file metadata
+
+### Workflows
+- `GET /api/workflows/` - List STF workflows
+- `POST /api/workflows/` - Create new workflow
+- `GET /api/workflows/{id}/` - Get specific workflow
+- `PATCH /api/workflows/{id}/` - Update workflow status
+
+### Workflow Stages
+- `GET /api/workflow-stages/` - List agent workflow stages
+- `POST /api/workflow-stages/` - Create workflow stage
+- `GET /api/workflow-stages/{id}/` - Get specific stage
+- `PATCH /api/workflow-stages/{id}/` - Update stage status
+
+### Workflow Messages
+- `GET /api/workflow-messages/` - List workflow messages
+- `POST /api/workflow-messages/` - Create workflow message
+- `GET /api/workflow-messages/{id}/` - Get specific message
+
+### System State
+- `GET /api/state/next-run-number/` - Get next available run number
+
 ## Server-Sent Events (SSE) Streaming
 
 ### Overview
-The monitor provides real-time message streaming via Server-Sent Events for monitoring workflow progress and system status.
+The monitor provides real-time message streaming via Server-Sent Events by forwarding ActiveMQ messages to receivers via HTTPS REST. This allows receivers to be geographically distributed anywhere with internet access, without requiring distributed ActiveMQ infrastructure - only HTTPS connectivity is needed.
 
 ### Endpoints
 
 #### Stream Messages
 - **URL**: `GET /api/messages/stream/`
 - **Authentication**: Token required
-- **Protocol**: HTTPS (port 8443)
+- **Protocol**: HTTPS (port 443)
 - **Content-Type**: `text/event-stream`
 
 #### Query Parameters
@@ -120,7 +178,7 @@ The monitor provides real-time message streaming via Server-Sent Events for moni
 #### Example Usage
 ```bash
 curl -H "Authorization: Token YOUR_TOKEN" \
-     "https://127.0.0.1:8443/api/messages/stream/?msg_types=stf_gen,data_ready&agents=daq-simulator"
+     "https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/messages/stream/?msg_types=stf_gen,data_ready&agents=daq-simulator"
 ```
 
 #### Stream Status
@@ -157,9 +215,6 @@ data: {"client_id": "uuid", "status": "connected"}
 
 ## Model Control Protocol (MCP)
 
-### WebSocket Service
-
-Connect to WebSocket at: `ws://127.0.0.1:8000/ws/mcp/`
 
 ### REST Endpoints
 
@@ -206,11 +261,10 @@ Agents can send logs using the `swf-common-lib` package:
 import logging
 from swf_common_lib.rest_logging import setup_rest_logging
 
-# Setup
+# Setup - the infrastructure handles URLs automatically
 logger = setup_rest_logging(
     app_name='my_agent',
-    instance_name='agent_001',
-    base_url='http://monitor-server:8000'
+    instance_name='agent_001'
 )
 
 # Use standard Python logging
@@ -246,8 +300,6 @@ Example log entry:
 
 - `createsuperuser` - Create admin user
 - `get_token <username> [--create-user]` - Generate API token
-- `listen_activemq` - Listen for ActiveMQ heartbeats
-- `populate_agents` - Populate initial agent data
 
 ## Error Handling
 
@@ -267,4 +319,4 @@ Example log entry:
 - `4004` - Unknown command
 - `5000` - Internal server error
 
-For detailed API schemas and examples, see the interactive documentation at `/api/schema/swagger-ui/`.
+For detailed API schemas and examples, see the interactive documentation at `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/`.

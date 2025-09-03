@@ -8,7 +8,7 @@ For experienced developers who want to get running immediately:
 
 ```bash
 # Clone and setup
-git clone https://github.com/your-username/swf-monitor.git
+git clone https://github.com/BNLNPPS/swf-monitor.git
 cd swf-monitor
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -28,17 +28,12 @@ Visit `http://127.0.0.1:8000/` to access the monitoring dashboard.
 
 *For detailed step-by-step instructions, continue reading below.*
 
-## Prerequisites
-
-* Python 3.9+
-* PostgreSQL
-
 ## Installation Steps
 
 ### 1. Clone and Setup Environment
 
 ```bash
-git clone https://github.com/your-username/swf-monitor.git
+git clone https://github.com/BNLNPPS/swf-monitor.git
 cd swf-monitor
 
 # Create and activate virtual environment
@@ -117,13 +112,10 @@ python manage.py runserver
 
 The web interface will be available at `http://127.0.0.1:8000/`.
 
-### Optional: Start ActiveMQ Listener
 
-If using ActiveMQ for agent heartbeats:
+### HTTPS Development Testing
 
-```bash
-python manage.py listen_activemq
-```
+When running the local dual server via `start_django_dual.sh`, the HTTPS endpoint is served by Daphne. On some hosts, `localhost` resolves to IPv6 (`::1`) while Daphne listens on IPv4 (`0.0.0.0`). This can cause HTTPS handshakes to stall. Use `https://127.0.0.1:8443` for local testing.
 
 ## Production Deployment
 

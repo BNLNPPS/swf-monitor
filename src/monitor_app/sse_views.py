@@ -255,12 +255,12 @@ def sse_event_generator(client_id: str, client_queue: queue.Queue):
         logger.error(f"Error in SSE event generator for client {client_id}: {e}")
 
 
-@api_view(['GET'])
-@authentication_classes([SessionAuthentication, TokenAuthentication])
-@permission_classes([IsAuthenticated])
 def sse_message_stream(request):
     """
     SSE endpoint for streaming ActiveMQ messages to remote clients.
+    
+    This is a plain Django view (not DRF) to avoid content negotiation issues with SSE.
+    Authentication is handled manually to support text/event-stream responses.
     
     Query parameters:
     - msg_types: Comma-separated list of message types to filter (e.g., "stf_gen,data_ready")
@@ -271,6 +271,31 @@ def sse_message_stream(request):
     GET /api/messages/stream/?msg_types=stf_gen,data_ready&agents=daq-simulator
     """
     import uuid
+    from django.http import HttpResponse
+    from rest_framework.authtoken.models import Token
+    from django.contrib.auth.models import AnonymousUser
+    
+    # Manual authentication handling (supports both session and token auth)
+    user = request.user if hasattr(request, 'user') else AnonymousUser()
+    
+    # Check for token authentication if user is not authenticated
+    if not user.is_authenticated:
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Token '):
+            token_key = auth_header[6:]  # Remove 'Token ' prefix
+            try:
+                token = Token.objects.get(key=token_key)
+                user = token.user
+            except Token.DoesNotExist:
+                pass
+    
+    # Check if user is authenticated
+    if not user.is_authenticated:
+        return HttpResponse(
+            json.dumps({'detail': 'Authentication credentials were not provided.'}),
+            status=401,
+            content_type='application/json'
+        )
     
     # Generate unique client ID
     client_id = str(uuid.uuid4())
