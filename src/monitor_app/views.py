@@ -2229,3 +2229,12 @@ def update_rucio_endpoints_from_github(request):
         messages.error(request, f'Failed to update from GitHub: {str(e)}')
     
     return redirect('monitor_app:rucio_endpoints_list')
+
+
+@login_required
+def panda_hub(request):
+    """
+    PanDA hub page that consolidates all PanDA-related functionality.
+    Includes sections for PanDA Queues, Rucio Endpoints, PanDA Database, and iDDS Database.
+    """
+    return render(request, 'monitor_app/panda_hub.html')

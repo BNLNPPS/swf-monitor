@@ -57,6 +57,24 @@ from .views import (
     rucio_endpoints_all_json,
     update_panda_queues_from_github,
     update_rucio_endpoints_from_github,
+    panda_hub,
+)
+
+# Import PanDA database views from new dedicated module
+from .viewdir.panda_database import (
+    panda_database_tables_list,
+    panda_database_tables_datatable_ajax,
+    panda_database_table_list,
+    panda_database_table_datatable_ajax,
+    panda_database_table_row_detail,
+)
+
+# Import iDDS database views from new dedicated module
+from .viewdir.idds_database import (
+    idds_database_tables_list,
+    idds_database_tables_datatable_ajax,
+    idds_database_table_list,
+    idds_database_table_datatable_ajax,
 )
 
 app_name = 'monitor_app'
@@ -127,6 +145,22 @@ urlpatterns = [
     path('rucio-endpoints/update-from-github/', update_rucio_endpoints_from_github, name='update_rucio_endpoints_from_github'),
     path('rucio-endpoints/<str:endpoint_name>/', rucio_endpoint_detail, name='rucio_endpoint_detail'),
     path('rucio-endpoints/<str:endpoint_name>/json/', rucio_endpoint_json, name='rucio_endpoint_json'),
+    
+    # PanDA Hub
+    path('panda/', panda_hub, name='panda_hub'),
+    
+    # PanDA Database
+    path('panda-database/', panda_database_tables_list, name='panda_database_tables_list'),
+    path('panda-database/datatable/', panda_database_tables_datatable_ajax, name='panda_database_tables_datatable_ajax'),
+    path('panda-database/<str:table_name>/', panda_database_table_list, name='panda_database_table_list'),
+    path('panda-database/<str:table_name>/datatable/', panda_database_table_datatable_ajax, name='panda_database_table_datatable_ajax'),
+    path('panda-database/<str:table_name>/<str:row_id>/', panda_database_table_row_detail, name='panda_database_table_row_detail'),
+    
+    # iDDS Database
+    path('idds-database/', idds_database_tables_list, name='idds_database_tables_list'),
+    path('idds-database/datatable/', idds_database_tables_datatable_ajax, name='idds_database_tables_datatable_ajax'),
+    path('idds-database/<str:table_name>/', idds_database_table_list, name='idds_database_table_list'),
+    path('idds-database/<str:table_name>/datatable/', idds_database_table_datatable_ajax, name='idds_database_table_datatable_ajax'),
     
     # API
     path('api/', include('monitor_app.api_urls')),
