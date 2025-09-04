@@ -80,21 +80,21 @@ python manage.py get_token <new_username> --create-user
 
 #### Use the Token
 
-Include the token in the `Authorization` header:
+Include the token in the `Authorization` header.
+
+### Production HTTPS Access
+
+When connecting to the production monitor at `https://pandasserver02.sdcc.bnl.gov/swf-monitor/`, clients need the SSL certificate chain for verification.
+
+#### SSL Certificate Setup
+
+Set the certificate bundle path before making requests:
 
 ```bash
-# Create a new agent
-curl -X POST -H "Authorization: Token <your_token>" \
-     -H "Content-Type: application/json" \
-     -d '{"instance_name": "new-agent", "agent_type": "test", "status": "OK"}' \
-     http://127.0.0.1:8000/api/systemagents/
-
-# Update agent status
-curl -X PATCH -H "Authorization: Token <your_token>" \
-     -H "Content-Type: application/json" \
-     -d '{"status": "ERROR"}' \
-     http://127.0.0.1:8000/api/systemagents/<agent_id>/
+export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 ```
+
+**Note**: The certificate bundle is deployed automatically by the production deployment script and contains the InCommon RSA IGTF Server CA chain required for pandasserver02.sdcc.bnl.gov certificate validation.
 
 ## REST API Endpoints
 
