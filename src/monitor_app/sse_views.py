@@ -3,15 +3,20 @@ import logging
 import threading
 import queue
 import time
+import uuid
 from typing import Dict, Optional
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse, JsonResponse
 from django.utils import timezone
+from django.db.models import F
+from django.contrib.auth.models import AnonymousUser
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.authtoken.models import Token
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
+from .models import Subscriber
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +69,6 @@ class SSEMessageBroadcaster:
             self.client_filters[client_id] = filters or {}
             
             # Create/update subscriber record
-            from .models import Subscriber
-            
             subscriber_name = f"sse_{client_id[:8]}"  # Use first 8 chars of UUID
             
             subscriber, created = Subscriber.objects.update_or_create(
@@ -97,8 +100,6 @@ class SSEMessageBroadcaster:
             
             # Update subscriber record
             if client_id in self.client_subscribers:
-                from .models import Subscriber
-                
                 try:
                     subscriber = Subscriber.objects.get(
                         subscriber_id=self.client_subscribers[client_id]
@@ -201,9 +202,6 @@ class SSEMessageBroadcaster:
     
     def _update_subscriber_stats(self, subscriber_id: int, stat_type: str):
         """Update subscriber statistics in database."""
-        from .models import Subscriber
-        from django.db.models import F
-        
         try:
             if stat_type == 'sent':
                 Subscriber.objects.filter(subscriber_id=subscriber_id).update(
@@ -270,11 +268,6 @@ def sse_message_stream(request):
     Example:
     GET /api/messages/stream/?msg_types=stf_gen,data_ready&agents=daq-simulator
     """
-    import uuid
-    from django.http import HttpResponse
-    from rest_framework.authtoken.models import Token
-    from django.contrib.auth.models import AnonymousUser
-    
     # Manual authentication handling (supports both session and token auth)
     user = request.user if hasattr(request, 'user') else AnonymousUser()
     
@@ -344,8 +337,6 @@ def sse_status(request):
     """
     Get current SSE broadcaster status including connected clients.
     """
-    from django.http import JsonResponse
-    
     broadcaster = SSEMessageBroadcaster()
     
     status = {
