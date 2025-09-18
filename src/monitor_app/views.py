@@ -1428,6 +1428,7 @@ def workflow_messages(request):
             {'title': 'message_type', 'orderable': True},
             {'title': 'sender_agent', 'orderable': True},
             {'title': 'recipient_agent', 'orderable': True},
+            {'title': 'source', 'orderable': True},
             {'title': 'workflow', 'orderable': True},
             {'title': 'is_successful', 'orderable': True},
         ],
@@ -1455,7 +1456,7 @@ def workflow_messages_datatable_ajax(request):
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
     
     # Column definitions matching the template order  
-    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful']
+    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'source', 'workflow', 'is_successful']
     
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
     
@@ -1532,11 +1533,20 @@ def workflow_messages_datatable_ajax(request):
         else:
             recipient_link = 'N/A'
         
+        # Extract source from message_metadata
+        source = 'Unknown'
+        if message.message_metadata and isinstance(message.message_metadata, dict):
+            source = message.message_metadata.get('created_by', 'Unknown')
+        
+        # Apply smaller font to source for less column width
+        source = f'<span style="font-size: 0.8rem;">{source}</span>'
+        
         row = [
             format_datetime(message.sent_at),
             message.message_type,
             sender_link,
             recipient_link,
+            source,
             workflow_link,
             status,
         ]
@@ -1833,6 +1843,24 @@ def get_next_run_number(request):
         run_number = PersistentState.get_next_run_number()
         return Response({
             'run_number': run_number,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_next_agent_id(request):
+    """API endpoint to get the next agent ID atomically."""
+    try:
+        agent_id = PersistentState.get_next_agent_id()
+        return Response({
+            'agent_id': agent_id,
             'status': 'success'
         })
     except Exception as e:
@@ -2219,3 +2247,12 @@ def update_rucio_endpoints_from_github(request):
         messages.error(request, f'Failed to update from GitHub: {str(e)}')
     
     return redirect('monitor_app:rucio_endpoints_list')
+
+
+@login_required
+def panda_hub(request):
+    """
+    PanDA hub page that consolidates all PanDA-related functionality.
+    Includes sections for PanDA Queues, Rucio Endpoints, PanDA Database, and iDDS Database.
+    """
+    return render(request, 'monitor_app/panda_hub.html')

@@ -1,4 +1,8 @@
 #!/bin/bash
+#
+# Note: websockets are not in used at present (9/2025).
+# start_django_dual.sh is the script in use for standalone dev django.
+#
 # Require bash (fail fast if invoked under another shell)
 if [ -z "${BASH_VERSION:-}" ]; then
 	echo "This script must be run with bash. Try: bash $0 \"$@\"" >&2

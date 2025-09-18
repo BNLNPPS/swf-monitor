@@ -95,12 +95,20 @@ fi
 
 # Kill existing Django servers if running
 echo "Stopping existing Django servers..."
-# Limit to current user and silence errors to avoid noisy 'Operation not permitted'
-if command -v pkill >/dev/null 2>&1; then
-    pkill -u "$USER" -f "manage.py runserver" >/dev/null 2>&1 || true
-    pkill -u "$USER" -f "daphne" >/dev/null 2>&1 || true
-fi
-sleep 2
+
+# Murder Django processes with extreme prejudice
+kill_django_processes() {
+    local pattern="$1"
+    local pids=$(pgrep -u "$USER" -f "$pattern" 2>/dev/null | tr '\n' ' ' | xargs)
+    if [ -n "$pids" ]; then
+        echo "Killing $pattern processes: $pids"
+        kill -9 $pids 2>/dev/null || true
+    fi
+}
+
+kill_django_processes "manage.py runserver"
+kill_django_processes "daphne.*swf_monitor_project"
+sleep 1
 
 # Ensure 8443 is completely free before starting Daphne
 kill_port 8443
@@ -117,29 +125,28 @@ if [[ ! -f "$SSL_CERT" || ! -f "$SSL_KEY" ]]; then
     echo "SSL private key created: $SSL_KEY"
 fi
 
-# Start HTTP server on port 8002 (for REST logging)
-echo "Starting HTTP server on port 8002 for REST logging..."
+# Start HTTP server on port 8002 (for REST logging) IN BACKGROUND
+echo "Starting HTTP server on port 8002 for REST logging (background)..."
 $PYTHON_CMD manage.py runserver 0.0.0.0:8002 &
 HTTP_PID=$!
 
 # Wait a moment for HTTP server to start
 sleep 2
 
-# Start HTTPS server on port 8443 (for authenticated API calls)
-echo "Starting HTTPS server on port 8443 for authenticated APIs..."
-# Use Daphne with proper SSL endpoint syntax
+echo "Django servers starting:"
+echo "  HTTP (REST logging):     http://localhost:8002 (background)"
+echo "  HTTPS (authenticated):   https://localhost:8443 (foreground with auto-reload)"
+echo ""
+echo "Process ID: HTTP=$HTTP_PID"
+echo "Press Ctrl+C to stop both servers"
+
+# Start HTTPS server on port 8443 IN FOREGROUND (for auto-reload)
+echo "Starting HTTPS server on port 8443 for authenticated APIs (foreground with auto-reload)..."
 $DAPHNE_CMD -e ssl:8443:privateKey="$SSL_KEY":certKey="$SSL_CERT":interface=0.0.0.0 swf_monitor_project.asgi:application &
 HTTPS_PID=$!
 
-echo "Django servers started:"
-echo "  HTTP (REST logging):     http://localhost:8002"
-echo "  HTTPS (authenticated):   https://localhost:8443"
-echo ""
-echo "Process IDs: HTTP=$HTTP_PID, HTTPS=$HTTPS_PID"
-echo "Press Ctrl+C to stop both servers"
+# Set up trap to kill both servers when interrupted
+trap 'echo -e "\nStopping servers..."; kill -9 $HTTP_PID $HTTPS_PID 2>/dev/null; echo "Django servers stopped."; exit' INT
 
-# Wait for interrupt and clean up
-trap 'echo "Stopping servers..."; kill $HTTP_PID $HTTPS_PID 2>/dev/null; exit' INT
-
-# Keep script running
-wait
+# Wait for the foreground HTTPS process
+wait $HTTPS_PID

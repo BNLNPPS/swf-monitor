@@ -102,21 +102,23 @@ def format_elapsed_time(start_time, reference_time=None):
 def format_datetime(dt):
     """
     Standard datetime formatting for all views in the monitor application.
+    Converts UTC timestamps to Eastern time for display.
     
     Args:
-        dt: datetime object to format
+        dt: datetime object to format (expected to be timezone-aware UTC)
         
     Returns:
-        str: Formatted datetime string in YYYYMMDD HH:MM:SS format, or 'N/A' if None
-        
-    Example:
-        format_datetime(datetime(2024, 8, 5, 14, 30, 15))
-        # Returns: "20240805 14:30:15"
+        str: Formatted datetime string in YYYYMMDD HH:MM:SS format (Eastern time), or 'N/A' if None
     """
     if not dt:
         return 'N/A'
     
-    return dt.strftime('%Y%m%d %H:%M:%S')
+    # Convert to Eastern time using Django's timezone support
+    from zoneinfo import ZoneInfo
+    eastern_tz = ZoneInfo('America/New_York')
+    dt_eastern = dt.astimezone(eastern_tz)
+    
+    return dt_eastern.strftime('%Y%m%d %H:%M:%S')
 
 
 class DataTablesProcessor:

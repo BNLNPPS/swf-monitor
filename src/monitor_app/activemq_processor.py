@@ -120,6 +120,15 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             sender_agent = data.get('processed_by') or self._infer_sender_from_message_type(msg_type)
             recipient_agent = self._infer_recipient_from_message_type(msg_type)
             
+            # Create metadata with originator tracking
+            import os, socket
+            metadata = {
+                'created_by': f"{os.getcwd()}:{os.getpid()}",  # Include PID for better instance tracking
+                'process_pid': os.getpid(),
+                'processed_at': timezone.now().isoformat(),
+                'django_instance': os.environ.get('DJANGO_SETTINGS_MODULE', 'unknown')
+            }
+
             # Create WorkflowMessage record
             workflow_message = WorkflowMessage.objects.create(
                 workflow=workflow,
@@ -127,6 +136,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 sender_agent=sender_agent,
                 recipient_agent=recipient_agent,
                 message_content=data,
+                message_metadata=metadata,
                 sent_at=timezone.now(),
                 queue_name=getattr(frame, 'destination', 'epictopic'),
                 is_successful=True  # Assume successful since we received it
@@ -210,6 +220,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             'resume_run': 'all-agents',
             'end_run': 'all-agents',
             'data_ready': 'processing-agent',
-            'processing_complete': 'monitoring-agent'
+            'processing_complete': 'all-agents',
+            'sse_test': 'all-agents'  # SSE test messages broadcast to all
         }
         return recipient_map.get(msg_type, 'unknown')

@@ -8,10 +8,13 @@ fi
 # SWF Monitor Deployment Script
 # Usage: deploy-swf-monitor.sh [tag|branch] <reference>
 #
+# This script is used to deploy the specified branch to the production apache
+# system service on pandaserver02.sdcc.bnl.gov
+#
 # Examples:
-#   deploy-swf-monitor.sh tag tagName
 #   deploy-swf-monitor.sh branch infra/baseline-v18
 #   deploy-swf-monitor.sh branch main
+#   deploy-swf-monitor.sh tag tagName        (tags not in use as of 9/2025)
 #
 # See docs/PRODUCTION_DEPLOYMENT.md for complete documentation
 
