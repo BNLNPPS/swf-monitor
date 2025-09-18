@@ -397,6 +397,39 @@ class PersistentState(models.Model):
             
             return current_run
 
+    @classmethod
+    def get_next_agent_id(cls):
+        """Get next agent ID atomically and update last agent info."""
+        from django.db import transaction
+        from django.utils import timezone
+
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1,
+                defaults={'state_data': {
+                    'next_agent_id': 1,  # Start at 1
+                    'last_agent_id': None,
+                    'last_agent_registration_time': None
+                }}
+            )
+
+            # Initialize if missing
+            if 'next_agent_id' not in obj.state_data:
+                obj.state_data['next_agent_id'] = 1  # Start at 1
+
+            current_agent_id = obj.state_data['next_agent_id']
+            current_time = timezone.now().isoformat()
+
+            # Update state for this agent
+            obj.state_data.update({
+                'next_agent_id': current_agent_id + 1,
+                'last_agent_id': current_agent_id,
+                'last_agent_registration_time': current_time
+            })
+            obj.save()
+
+            return current_agent_id
+
 
 class PandaQueue(models.Model):
     """

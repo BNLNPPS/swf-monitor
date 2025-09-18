@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Home - SWF Monitor{% endblock %}
+{% block title %}SWF Testbed Monitor{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
@@ -105,20 +105,9 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
-                        <a href="{% url 'monitor_app:panda_queues_list' %}" class="text-decoration-none">PanDA Queues</a>
+                        <a href="{% url 'monitor_app:panda_hub' %}" class="text-decoration-none">PanDA/Rucio</a>
                     </h5>
-                    <p class="card-text">Manage computing queue configurations for the PanDA workload management system. View and update queue settings from GitHub.</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <h5 class="card-title">
-                        <a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="text-decoration-none">Rucio Endpoints</a>
-                    </h5>
-                    <p class="card-text">Configure distributed data management endpoints for the Rucio system. Monitor storage sites and update configurations.</p>
+                    <p class="card-text">Centralized access to PanDA workload management, Rucio data management, and database browsing for external systems.</p>
                 </div>
             </div>
         </div>

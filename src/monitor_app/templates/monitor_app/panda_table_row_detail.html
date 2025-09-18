@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}PanDA Table Row Detail: {{ table_name }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>PanDA Table Row Detail</h2>
+    <p><strong>Table:</strong> {{ table_name }} | <strong>Row ID:</strong> {{ row_id }}</p>
+    
+    <div class="mb-3">
+        <a href="{% url 'monitor_app:panda_database_table_list' table_name %}" class="btn btn-secondary">← Back to {{ table_name }}</a>
+    </div>
+    
+    <div class="table-responsive">
+        <table class="table table-striped table-bordered">
+            <thead class="thead-dark">
+                <tr>
+                    <th>Field Name</th>
+                    <th>Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for column, value in row_data %}
+                    <tr>
+                        <td><strong>{{ column }}</strong></td>
+                        <td>
+                            {% if value is None %}
+                                <em class="text-muted">NULL</em>
+                            {% else %}
+                                {{ value }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

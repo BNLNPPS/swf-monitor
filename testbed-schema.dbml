@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 09-03-2025 03:11PM UTC'''
+  Last Updated At 09-18-2025 05:16PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -809,6 +809,7 @@ message tracking with agent identification and message type categorization.
   recipient_agent char [null]
   recipient_type monitor_app.char_workflowmessage_recipient_type [null]
   message_content json [not null]
+  message_metadata json [note: '''Extensible metadata for monitoring, debugging, and system tracking''', default:`builtins.dict()`, null]
   sent_at date_time [not null]
   delivered_at date_time [null]
   acknowledged_at date_time [null]

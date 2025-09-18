@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+
+{% block title %}PanDA & Rucio Hub - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">PanDA & Rucio Hub</h1>
+    <p class="lead mb-5">Centralized access to PanDA workload management, Rucio data management, and database browsing</p>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong><a href="{% url 'monitor_app:panda_queues_list' %}" class="text-decoration-none">PanDA Queues</a></strong>
+                    </p>
+                    <p class="card-text">Manage computing queue configurations for the PanDA workload management system. View and update queue settings from GitHub.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong><a href="{% url 'monitor_app:panda_database_tables_list' %}" class="text-decoration-none">PanDA Database</a></strong>
+                    </p>
+                    <p class="card-text">Browse tables and data in the external PanDA database system. Inspect production workload management data.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong><a href="{% url 'monitor_app:idds_database_tables_list' %}" class="text-decoration-none">iDDS Database</a></strong>
+                    </p>
+                    <p class="card-text">Browse tables and data in the external iDDS (intelligent Data Delivery Service) database system. Monitor distributed data management operations.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong><a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="text-decoration-none">Rucio Endpoints</a></strong>
+                    </p>
+                    <p class="card-text">Configure distributed data management endpoints for the Rucio system. Monitor storage sites and update configurations.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

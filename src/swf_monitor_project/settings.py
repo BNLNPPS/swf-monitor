@@ -117,6 +117,25 @@ DATABASES = {
         "PASSWORD": config("DB_PASSWORD", default="dummy"),
         "HOST": config("DB_HOST", default="localhost"),
         "PORT": config("DB_PORT", default="5432"),
+    },
+    "panda": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": config("PANDA_DB_NAME", default="panda_db"),
+        "USER": config("PANDA_DB_USER", default="panda"),
+        "PASSWORD": config("PANDA_DB_PASSWORD", default="dummy"),
+        "HOST": config("PANDA_DB_HOST", default="pandadb01.sdcc.bnl.gov"),
+        "PORT": config("PANDA_DB_PORT", default="5432"),
+    },
+    "idds": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": config("IDDS_DB_NAME", default="idds_db"),
+        "USER": config("IDDS_DB_USER", default="idds"),
+        "PASSWORD": config("IDDS_DB_PASSWORD", default="dummy"),
+        "HOST": config("IDDS_DB_HOST", default="pandadb01.sdcc.bnl.gov"),
+        "PORT": config("IDDS_DB_PORT", default="5432"),
+        "OPTIONS": {
+            "options": f"-c search_path={config('IDDS_DB_SCHEMA', default='doma_idds')}"
+        },
     }
 }
 
@@ -145,7 +164,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = config('DISPLAY_TIMEZONE', default='America/New_York')
 
 USE_I18N = True
 
