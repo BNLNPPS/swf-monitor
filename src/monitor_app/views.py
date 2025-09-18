@@ -1852,6 +1852,24 @@ def get_next_run_number(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_next_agent_id(request):
+    """API endpoint to get the next agent ID atomically."""
+    try:
+        agent_id = PersistentState.get_next_agent_id()
+        return Response({
+            'agent_id': agent_id,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
 
 @login_required
