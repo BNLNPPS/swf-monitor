@@ -209,4 +209,5 @@ production.env
 *.cert
 ssl_cert.pem
 ssl_key.pem
-.nfs00000000cb9462ab0000002f
+# NFS temporary files
+.nfs*
