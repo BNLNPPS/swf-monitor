@@ -69,6 +69,7 @@
         {% if user.is_authenticated %}
             <a href="{% url 'monitor_app:runs_list' %}">Runs</a>
             <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
+            <a href="{% url 'monitor_app:fastmon_files_list' %}">TF Files</a>
             <a href="{% url 'monitor_app:workflow_agents_list' %}">Agents</a>
             <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
             <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>

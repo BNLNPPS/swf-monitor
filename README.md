@@ -19,7 +19,7 @@ The application is built on Django infrastructure and comprises two main web app
    * **Automatic Listening**: Connects to ActiveMQ automatically when Django starts
    * **SSE REST Forwarding**: Server-Sent Events streaming of ActiveMQ messages via HTTPS
 
-4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, files, workflows, and application state
+4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, STF files, FastMon files, workflows, and application state
 
 ## Key Features
 
