@@ -76,6 +76,10 @@ from .viewdir.idds_database import (
     idds_database_table_list,
     idds_database_table_datatable_ajax,
 )
+from .fastmon_views import (
+    fastmon_files_list,
+    fastmon_files_datatable_ajax,
+)
 
 app_name = 'monitor_app'
 
@@ -101,10 +105,15 @@ urlpatterns = [
     # SWF Data Model URLs
     path('runs/', runs_list, name='runs_list'),
     path('runs/datatable/', runs_datatable_ajax, name='runs_datatable_ajax'),
-    path('runs/<int:run_id>/', run_detail, name='run_detail'),
+    path('runs/<int:run_number>/', run_detail, name='run_detail'),
     path('stf-files/', stf_files_list, name='stf_files_list'),
     path('stf-files/datatable/', stf_files_datatable_ajax, name='stf_files_datatable_ajax'),
     path('stf-files/<uuid:file_id>/', stf_file_detail, name='stf_file_detail'),
+
+    # FastMon Files (Time Frames)
+    path('fastmon-files/', fastmon_files_list, name='fastmon_files_list'),
+    path('fastmon-files/datatable/', fastmon_files_datatable_ajax, name='fastmon_files_datatable_ajax'),
+
     path('subscribers/', subscribers_list, name='subscribers_list'),
     path('subscribers/datatable/', subscribers_datatable_ajax, name='subscribers_datatable_ajax'),
     path('subscribers/filter-counts/', get_subscribers_filter_counts, name='subscribers_filter_counts'),

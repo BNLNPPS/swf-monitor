@@ -34,6 +34,17 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
+                        <a href="{% url 'monitor_app:fastmon_files_list' %}" class="text-decoration-none">TF Files</a>
+                    </h5>
+                    <p class="card-text">Monitor Time Frame files sampled from STFs for fast monitoring. Track TF generation and quality assessment metrics.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
                         <a href="{% url 'monitor_app:workflow_agents_list' %}" class="text-decoration-none">Agents</a>
                     </h5>
                     <p class="card-text">Monitor workflow agents status, types, and heartbeats. Track DAQ simulator, data, processing, and monitoring agents.</p>

@@ -823,7 +823,7 @@ def runs_datatable_ajax(request):
         start_time_str = format_datetime(run.start_time)
         end_time_str = format_datetime(run.end_time) if run.end_time else '—'
         duration_str = format_run_duration(run.start_time, run.end_time)
-        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_id])
+        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_number])
         run_number_link = f'<a href="{run_detail_url}">{run.run_number}</a>'
         
         # Make STF files count clickable to filter STF files by this run
@@ -833,7 +833,7 @@ def runs_datatable_ajax(request):
         else:
             stf_files_link = str(run.stf_files_count)
         
-        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_id])
+        run_detail_url = reverse('monitor_app:run_detail', args=[run.run_number])
         view_link = f'<a href="{run_detail_url}">View</a>'
         
         data.append([
@@ -844,21 +844,25 @@ def runs_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 @login_required
-def run_detail(request, run_id):
+def run_detail(request, run_number):
     """Display detailed view of a specific run"""
-    run = get_object_or_404(Run, run_id=run_id)
+    run = get_object_or_404(Run, run_number=run_number)
     stf_files = run.stf_files.all().order_by('-created_at')
-    
+
+    # Count TF files for this run across all STF files
+    tf_files_count = FastMonFile.objects.filter(stf_file__run=run).count()
+
     # Count files by status
     file_stats = {}
     for status_choice in StfFile._meta.get_field('status').choices:
         status_value = status_choice[0]
         file_stats[status_value] = stf_files.filter(status=status_value).count()
-    
+
     context = {
         'run': run,
         'stf_files': stf_files,
         'file_stats': file_stats,
+        'tf_files_count': tf_files_count,
     }
     return render(request, 'monitor_app/run_detail.html', context)
 
@@ -884,7 +888,8 @@ def stf_files_list(request):
     columns = [
         {'name': 'stf_filename', 'title': 'STF Filename', 'orderable': True},
         {'name': 'run__run_number', 'title': 'Run', 'orderable': True},
-        {'name': 'machine_state', 'title': 'Machine State', 'orderable': True},
+        {'name': 'tf_files_count', 'title': 'TF Files', 'orderable': True},
+        {'name': 'machine_state', 'title': 'State', 'orderable': True},
         {'name': 'status', 'title': 'Status', 'orderable': True},
         {'name': 'created_at', 'title': 'Created', 'orderable': True},
         {'name': 'actions', 'title': 'Actions', 'orderable': False},
@@ -913,11 +918,14 @@ def stf_files_datatable_ajax(request):
     from .utils import DataTablesProcessor, get_filter_params, format_datetime
     
     # Initialize DataTables processor
-    columns = ['stf_filename', 'run__run_number', 'machine_state', 'status', 'created_at', 'actions']
-    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')
-    
-    # Build base queryset
-    queryset = StfFile.objects.select_related('run').all()
+    columns = ['stf_filename', 'run__run_number', 'tf_files_count', 'machine_state', 'status', 'created_at', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=5, default_order_direction='desc')
+
+    # Build base queryset with TF files count
+    from django.db.models import Count
+    queryset = StfFile.objects.select_related('run').annotate(
+        tf_files_count=Count('tf_files')
+    )
     
     # Apply filters using utility
     filter_mapping = {
@@ -946,12 +954,20 @@ def stf_files_datatable_ajax(request):
         # Use plain text status (consistent with runs view)
         status_text = file.get_status_display()
         timestamp_str = format_datetime(file.created_at)
-        run_link = f'<a href="{reverse("monitor_app:run_detail", args=[file.run.run_id])}">{file.run.run_number}</a>' if file.run else 'N/A'
+        run_link = f'<a href="{reverse("monitor_app:run_detail", args=[file.run.run_number])}">{file.run.run_number}</a>' if file.run else 'N/A'
+
+        # Make TF files count clickable to filter TF files by this STF
+        if file.tf_files_count > 0:
+            tf_files_url = reverse('monitor_app:fastmon_files_list')
+            tf_files_link = f'<a href="{tf_files_url}?stf_filename={file.stf_filename}">{file.tf_files_count}</a>'
+        else:
+            tf_files_link = str(file.tf_files_count)
+
         stf_file_detail_url = reverse('monitor_app:stf_file_detail', args=[file.file_id])
         view_link = f'<a href="{stf_file_detail_url}">View</a>'
-        
+
         data.append([
-            file.stf_filename, run_link, file.machine_state or '',
+            file.stf_filename, run_link, tf_files_link, file.machine_state or '',
             status_text, timestamp_str, view_link
         ])
     
