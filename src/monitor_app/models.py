@@ -396,6 +396,34 @@ class PersistentState(models.Model):
 
             return current_agent_id
 
+    @classmethod
+    def get_next_workflow_execution_id(cls):
+        """Get next workflow execution sequence number atomically."""
+        from django.db import transaction
+        from django.utils import timezone
+
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1,
+                defaults={'state_data': {
+                    'next_workflow_execution_id': 1,
+                    'last_workflow_execution_id': None,
+                    'last_workflow_execution_time': None
+                }}
+            )
+
+            current_time = timezone.now().isoformat()
+            current_id = obj.state_data.get('next_workflow_execution_id', 1)
+
+            obj.state_data.update({
+                'next_workflow_execution_id': current_id + 1,
+                'last_workflow_execution_id': current_id,
+                'last_workflow_execution_time': current_time
+            })
+            obj.save()
+
+            return current_id
+
 
 class PandaQueue(models.Model):
     """

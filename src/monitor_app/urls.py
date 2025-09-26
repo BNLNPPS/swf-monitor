@@ -26,14 +26,10 @@ from .views import (
     subscribers_list,
     subscriber_detail,
     # Workflow views
-    workflow_dashboard,
-    workflow_list,
     workflow_detail,
     workflow_agents_list,
     agent_detail,
     workflow_messages,
-    workflow_performance,
-    workflow_realtime_dashboard,
     workflow_realtime_data_api,
     workflow_datatable_ajax,
     workflow_agents_datatable_ajax,
@@ -129,8 +125,6 @@ urlpatterns = [
     path('subscribers/<int:subscriber_id>/', subscriber_detail, name='subscriber_detail'),
 
     # Workflow URLs
-    path('workflow/', workflow_dashboard, name='workflow_dashboard'),
-    path('workflow/list/', workflow_list, name='workflow_list'),
     path('workflow/list/datatable/', workflow_datatable_ajax, name='workflow_datatable_ajax'),
     path('workflow/<uuid:workflow_id>/', workflow_detail, name='workflow_detail'),
     path('workflow/agents/', workflow_agents_list, name='workflow_agents_list'),
@@ -139,8 +133,6 @@ urlpatterns = [
     path('workflow/messages/', workflow_messages, name='workflow_messages'),
     path('workflow/messages/datatable/', workflow_messages_datatable_ajax, name='workflow_messages_datatable_ajax'),
     path('workflow/messages/filter-counts/', get_workflow_messages_filter_counts, name='workflow_messages_filter_counts'),
-    path('workflow/performance/', workflow_performance, name='workflow_performance'),
-    path('workflow/realtime/', workflow_realtime_dashboard, name='workflow_realtime_dashboard'),
     path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
 
     # Workflow Management

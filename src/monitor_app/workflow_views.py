@@ -23,6 +23,16 @@ def workflow_definitions_list(request):
     """
     Professional workflow definitions list view using server-side DataTables.
     """
+    # Get filter parameters (for initial state)
+    workflow_name = request.GET.get('workflow_name')
+    workflow_type = request.GET.get('workflow_type')
+    created_by = request.GET.get('created_by')
+
+    # Get unique values for filter links
+    workflow_names = WorkflowDefinition.objects.values_list('workflow_name', flat=True).distinct().order_by('workflow_name')
+    workflow_types = WorkflowDefinition.objects.values_list('workflow_type', flat=True).distinct().order_by('workflow_type')
+    created_bys = WorkflowDefinition.objects.values_list('created_by', flat=True).distinct().order_by('created_by')
+
     columns = [
         {'name': 'workflow_name', 'title': 'Workflow Name', 'orderable': True},
         {'name': 'version', 'title': 'Version', 'orderable': True},
@@ -45,6 +55,12 @@ def workflow_definitions_list(request):
         'filter_counts_url': reverse('monitor_app:workflow_definitions_filter_counts'),
         'columns': columns,
         'filter_fields': filter_fields,
+        'workflow_names': list(workflow_names),
+        'workflow_types': list(workflow_types),
+        'created_bys': list(created_bys),
+        'selected_workflow_name': workflow_name,
+        'selected_workflow_type': workflow_type,
+        'selected_created_by': created_by,
     }
     return render(request, 'monitor_app/workflow_definitions_list.html', context)
 
@@ -62,6 +78,10 @@ def workflow_definitions_datatable_ajax(request):
     )
 
     # Apply filters
+    workflow_name = request.GET.get('workflow_name')
+    if workflow_name:
+        queryset = queryset.filter(workflow_name=workflow_name)
+
     workflow_type = request.GET.get('workflow_type')
     if workflow_type:
         queryset = queryset.filter(workflow_type=workflow_type)
@@ -83,7 +103,7 @@ def workflow_definitions_datatable_ajax(request):
     data = []
     for definition in definitions:
         data.append([
-            definition.workflow_name,
+            f'<a href="{reverse("monitor_app:workflow_definition_detail", args=[definition.workflow_name, definition.version])}" class="text-decoration-none">{definition.workflow_name}</a>',
             definition.version,
             definition.workflow_type,
             definition.created_by,
@@ -111,6 +131,19 @@ def workflow_executions_list(request):
     """
     Professional workflow executions list view using server-side DataTables.
     """
+    # Get filter parameters (for initial state)
+    workflow = request.GET.get('workflow')
+    status = request.GET.get('status')
+    executed_by = request.GET.get('executed_by')
+
+    # Get unique values for filter links
+    workflows = WorkflowExecution.objects.select_related('workflow_definition').values_list(
+        'workflow_definition__workflow_name', flat=True
+    ).distinct().order_by('workflow_definition__workflow_name')
+
+    statuses = WorkflowExecution.objects.values_list('status', flat=True).distinct().order_by('status')
+    executed_bys = WorkflowExecution.objects.values_list('executed_by', flat=True).distinct().order_by('executed_by')
+
     columns = [
         {'name': 'execution_id', 'title': 'Execution ID', 'orderable': True},
         {'name': 'workflow', 'title': 'Workflow', 'orderable': True},
@@ -133,6 +166,12 @@ def workflow_executions_list(request):
         'filter_counts_url': reverse('monitor_app:workflow_executions_filter_counts'),
         'columns': columns,
         'filter_fields': filter_fields,
+        'workflows': list(workflows),
+        'statuses': list(statuses),
+        'executed_bys': list(executed_bys),
+        'selected_workflow': workflow,
+        'selected_status': status,
+        'selected_executed_by': executed_by,
     }
     return render(request, 'monitor_app/workflow_executions_list.html', context)
 
@@ -148,6 +187,10 @@ def workflow_executions_datatable_ajax(request):
     queryset = WorkflowExecution.objects.select_related('workflow_definition')
 
     # Apply filters
+    workflow = request.GET.get('workflow')
+    if workflow:
+        queryset = queryset.filter(workflow_definition__workflow_name=workflow)
+
     status = request.GET.get('status')
     if status:
         queryset = queryset.filter(status=status)
@@ -179,7 +222,7 @@ def workflow_executions_datatable_ajax(request):
             duration_str = '-'
 
         data.append([
-            execution.execution_id,
+            f'<a href="{reverse("monitor_app:workflow_execution_detail", args=[execution.execution_id])}" class="text-decoration-none">{execution.execution_id}</a>',
             f"{execution.workflow_definition.workflow_name} v{execution.workflow_definition.version}",
             execution.status,
             execution.executed_by,
@@ -207,14 +250,12 @@ def workflow_definition_detail(request, workflow_name, version):
     """Detail view for a specific workflow definition."""
     definition = get_object_or_404(WorkflowDefinition, workflow_name=workflow_name, version=version)
 
-    # Get execution statistics
-    executions = definition.executions.all()
-    recent_executions = executions.order_by('-start_time')[:10]
+    # Get execution count for summary
+    total_executions = definition.executions.count()
 
     context = {
         'definition': definition,
-        'recent_executions': recent_executions,
-        'total_executions': executions.count(),
+        'total_executions': total_executions,
     }
     return render(request, 'monitor_app/workflow_definition_detail.html', context)
 

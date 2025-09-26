@@ -67,24 +67,31 @@
     <nav>
         <a href="{% url 'monitor_app:home' %}">Home</a>
         {% if user.is_authenticated %}
-            <a href="{% url 'monitor_app:workflows_home' %}">Workflows</a>
+            <div class="dropdown">
+                <button class="dropbtn">Workflows</button>
+                <div class="dropdown-content">
+                    <a href="{% url 'monitor_app:workflows_home' %}">Views</a>
+                    <a href="{% url 'monitor_app:runs_list' %}">Simulation runs</a>
+                    <a href="{% url 'monitor_app:workflow_definitions_list' %}">Workflow definitions</a>
+                    <a href="{% url 'monitor_app:workflow_executions_list' %}">Workflow executions</a>
+                </div>
+            </div>
             <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
             <a href="{% url 'monitor_app:fastmon_files_list' %}">TF Files</a>
             <a href="{% url 'monitor_app:workflow_agents_list' %}">Agents</a>
-            <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
             <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>
             <a href="{% url 'monitor_app:workflow_messages' %}">Messages</a>
+            <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
             <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
             <a href="{% url 'monitor_app:persistent_state' %}">State</a>
-            <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio</a>
             <div class="dropdown">
-                <button class="dropbtn">Unused</button>
+                <button class="dropbtn">PanDA/Rucio</button>
                 <div class="dropdown-content">
-                    <a href="{% url 'monitor_app:index' %}">Dashboard</a>
-                    <a href="{% url 'monitor_app:workflow_list' %}">Workflows</a>
-                    <a href="{% url 'monitor_app:workflow_dashboard' %}">Workflow Dashboard</a>
-                    <a href="{% url 'monitor_app:workflow_realtime_dashboard' %}">Real-time Monitor</a>
-                    <a href="{% url 'monitor_app:workflow_performance' %}">Performance</a>
+                    <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio Hub</a>
+                    <a href="{% url 'monitor_app:panda_queues_list' %}">PanDA Queues</a>
+                    <a href="{% url 'monitor_app:panda_database_tables_list' %}">PanDA Database</a>
+                    <a href="{% url 'monitor_app:idds_database_tables_list' %}">iDDS Database</a>
+                    <a href="{% url 'monitor_app:rucio_endpoints_list' %}">Rucio Endpoints</a>
                 </div>
             </div>
         {% endif %}

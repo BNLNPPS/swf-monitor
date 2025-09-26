@@ -782,7 +782,7 @@ def runs_list(request):
     ]
     
     context = {
-        'table_title': 'Testbed Runs',
+        'table_title': 'Simulation Runs',
         'table_description': 'Monitor testbed runs with start/end times, duration, and associated STF files.',
         'ajax_url': reverse('monitor_app:runs_datatable_ajax'),
         'columns': columns,
@@ -1856,6 +1856,24 @@ def get_next_agent_id(request):
         agent_id = PersistentState.get_next_agent_id()
         return Response({
             'agent_id': agent_id,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_next_workflow_execution_id(request):
+    """API endpoint to get the next workflow execution sequence number atomically."""
+    try:
+        sequence = PersistentState.get_next_workflow_execution_id()
+        return Response({
+            'sequence': sequence,
             'status': 'success'
         })
     except Exception as e:
