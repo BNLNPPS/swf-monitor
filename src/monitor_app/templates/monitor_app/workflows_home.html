@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}Workflows - SWF Testbed Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Testbed Workflows</h1>
+    <p class="lead mb-5">Monitor and manage streaming workflow executions, templates, and simulation runs</p>
+
+    <div class="row">
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:runs_list' %}" class="text-decoration-none">Simulation Runs</a>
+                    </h5>
+                    <p class="card-text">View and manage DAQ simulation runs with their status, timing, and STF file counts. Monitor run lifecycle from imminent to completion.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:workflow_definitions_list' %}" class="text-decoration-none">Workflow Definitions</a>
+                    </h5>
+                    <p class="card-text">Browse and manage workflow templates and configurations. View workflow types, versions, parameters, and execution statistics.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <a href="{% url 'monitor_app:workflow_executions_list' %}" class="text-decoration-none">Workflow Executions</a>
+                    </h5>
+                    <p class="card-text">Monitor workflow execution instances, their status, duration, and performance metrics. Track execution history and results.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

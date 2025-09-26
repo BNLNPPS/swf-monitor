@@ -78,6 +78,17 @@ from .fastmon_views import (
     fastmon_files_list,
     fastmon_files_datatable_ajax,
 )
+from .workflow_views import (
+    workflows_home,
+    workflow_definitions_list,
+    workflow_definitions_datatable_ajax,
+    workflow_definitions_filter_counts,
+    workflow_executions_list,
+    workflow_executions_datatable_ajax,
+    workflow_executions_filter_counts,
+    workflow_definition_detail,
+    workflow_execution_detail,
+)
 
 app_name = 'monitor_app'
 
@@ -131,7 +142,20 @@ urlpatterns = [
     path('workflow/performance/', workflow_performance, name='workflow_performance'),
     path('workflow/realtime/', workflow_realtime_dashboard, name='workflow_realtime_dashboard'),
     path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
-    
+
+    # Workflow Management
+    path('workflows/', workflows_home, name='workflows_home'),
+
+    # Workflow Definitions and Executions
+    path('workflow-definitions/', workflow_definitions_list, name='workflow_definitions_list'),
+    path('workflow-definitions/datatable/', workflow_definitions_datatable_ajax, name='workflow_definitions_datatable_ajax'),
+    path('workflow-definitions/filter-counts/', workflow_definitions_filter_counts, name='workflow_definitions_filter_counts'),
+    path('workflow-definitions/<str:workflow_name>/<str:version>/', workflow_definition_detail, name='workflow_definition_detail'),
+    path('workflow-executions/', workflow_executions_list, name='workflow_executions_list'),
+    path('workflow-executions/datatable/', workflow_executions_datatable_ajax, name='workflow_executions_datatable_ajax'),
+    path('workflow-executions/filter-counts/', workflow_executions_filter_counts, name='workflow_executions_filter_counts'),
+    path('workflow-executions/<str:execution_id>/', workflow_execution_detail, name='workflow_execution_detail'),
+
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
     

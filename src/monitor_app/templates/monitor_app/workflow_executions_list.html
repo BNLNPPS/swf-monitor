@@ -1,0 +1,34 @@
+{% extends "monitor_app/_datatable_dynamic_base.html" %}
+
+{% block initial_filters %}
+{
+    status: '{{ selected_status|default:"" }}',
+    executed_by: '{{ selected_executed_by|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[4, 'desc']]{% endblock %} <!-- Order by start_time descending -->
+
+{% block update_active_filters_display %}
+const badges = [];
+// Show status filter if active
+if (currentFilters.status) {
+    badges.push(`<span class="badge bg-info me-1">Status: ${currentFilters.status}</span>`);
+}
+// Show executed_by filter if active
+if (currentFilters.executed_by) {
+    badges.push(`<span class="badge bg-info me-1">Executed by: ${currentFilters.executed_by}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="status"][data-value="' + currentFilters.status + '"]').addClass('filter-active');
+$('.filter-link[data-filter="executed_by"][data-value="' + currentFilters.executed_by + '"]').addClass('filter-active');
+{% endblock %}

@@ -16,11 +16,12 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
-from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
+from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
-    SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
+    SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
     STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
-    RunSerializer, StfFileSerializer, SubscriberSerializer, FastMonFileSerializer
+    RunSerializer, StfFileSerializer, SubscriberSerializer, FastMonFileSerializer,
+    WorkflowDefinitionSerializer, WorkflowExecutionSerializer
 )
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -213,6 +214,22 @@ class FastMonFileViewSet(viewsets.ModelViewSet):
     """API endpoint for Fast Monitoring files."""
     queryset = FastMonFile.objects.all()
     serializer_class = FastMonFileSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workflow Definitions."""
+    queryset = WorkflowDefinition.objects.all()
+    serializer_class = WorkflowDefinitionSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class WorkflowExecutionViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workflow Executions."""
+    queryset = WorkflowExecution.objects.all()
+    serializer_class = WorkflowExecutionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
 

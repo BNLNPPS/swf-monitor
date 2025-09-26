@@ -4,6 +4,7 @@ from .views import (
     SystemAgentViewSet, AppLogViewSet, LogSummaryView,
     STFWorkflowViewSet, AgentWorkflowStageViewSet, WorkflowMessageViewSet,
     RunViewSet, StfFileViewSet, SubscriberViewSet, FastMonFileViewSet,
+    WorkflowDefinitionViewSet, WorkflowExecutionViewSet,
     get_next_run_number, get_next_agent_id
 )
 from .sse_views import sse_message_stream, sse_status
@@ -18,6 +19,8 @@ router.register(r'runs', RunViewSet, basename='run')
 router.register(r'stf-files', StfFileViewSet, basename='stffile')
 router.register(r'subscribers', SubscriberViewSet, basename='subscriber')
 router.register(r'fastmon-files', FastMonFileViewSet, basename='fastmonfile')
+router.register(r'workflow-definitions', WorkflowDefinitionViewSet, basename='workflowdefinition')
+router.register(r'workflow-executions', WorkflowExecutionViewSet, basename='workflowexecution')
 
 urlpatterns = [
     path('logs/summary/', LogSummaryView.as_view(), name='log-summary'),
