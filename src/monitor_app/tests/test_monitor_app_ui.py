@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APITestCase, APIClient
 from rest_framework import status
-from monitor_app.models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch
+from monitor_app.models import SystemAgent, AppLog, Run, StfFile, Subscriber
 from monitor_app.serializers import AppLogSerializer
 from django.core.management import call_command
 from io import StringIO

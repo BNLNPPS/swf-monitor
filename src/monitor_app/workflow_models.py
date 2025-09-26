@@ -243,9 +243,8 @@ class AgentWorkflowStage(models.Model):
 class WorkflowMessage(models.Model):
     """
     Tracks all messages exchanged in the workflow system.
-    
-    This extends the existing MessageQueueDispatch concept to include workflow-specific
-    message tracking with agent identification and message type categorization.
+
+    Provides workflow-specific message tracking with agent identification and message type categorization.
     """
     message_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     
@@ -305,3 +304,45 @@ class WorkflowMessage(models.Model):
         self.is_successful = False
         self.error_message = error
         self.save()
+
+
+class WorkflowDefinition(models.Model):
+    """
+    Defines reusable workflow templates with parameters and execution logic.
+    """
+    workflow_name = models.CharField(max_length=200, help_text="Unique workflow name")
+    version = models.CharField(max_length=50, help_text="Version string")
+    workflow_type = models.CharField(max_length=100, help_text="Flexible workflow type classification")
+    definition = models.TextField(max_length=5000, help_text="Python workflow code content")
+    parameter_values = models.JSONField(default=dict, help_text="Default parameter values and schema")
+    created_by = models.CharField(max_length=100, help_text="Username who created this workflow")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_workflow_definitions'
+        unique_together = [['workflow_name', 'version']]
+
+    def __str__(self):
+        return f"{self.workflow_name} v{self.version}"
+
+
+class WorkflowExecution(models.Model):
+    """
+    Tracks individual workflow execution instances.
+    """
+    execution_id = models.CharField(primary_key=True, max_length=100, help_text="Human-readable execution ID")
+    workflow_definition = models.ForeignKey(WorkflowDefinition, on_delete=models.CASCADE, related_name='executions')
+    parameter_values = models.JSONField(help_text="Actual parameter values used for this execution")
+    performance_metrics = models.JSONField(null=True, blank=True, help_text="Performance metrics and results")
+    status = models.CharField(max_length=50, default='pending', help_text="Flexible execution status")
+    start_time = models.DateTimeField(help_text="Execution start timestamp")
+    end_time = models.DateTimeField(null=True, blank=True, help_text="Execution completion timestamp")
+    executed_by = models.CharField(max_length=100, help_text="Username who executed this workflow")
+
+    class Meta:
+        db_table = 'swf_workflow_executions'
+        ordering = ['-start_time']
+
+    def __str__(self):
+        return f"Execution {self.execution_id} ({self.status})"

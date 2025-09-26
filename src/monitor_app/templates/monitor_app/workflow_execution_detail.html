@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Execution {{ execution.execution_id }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Execution {{ execution.execution_id }}</h2>
+        <a href="{% url 'monitor_app:workflow_executions_list' %}" class="btn btn-secondary">Back to List</a>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Execution Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Execution Information</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <th style="width: 150px;">Execution ID:</th>
+                            <td>{{ execution.execution_id }}</td>
+                        </tr>
+                        <tr>
+                            <th>Workflow:</th>
+                            <td>
+                                <a href="{% url 'monitor_app:workflow_definition_detail' execution.workflow_definition.workflow_name execution.workflow_definition.version %}">
+                                    {{ execution.workflow_definition.workflow_name }} v{{ execution.workflow_definition.version }}
+                                </a>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Type:</th>
+                            <td>{{ execution.workflow_definition.workflow_type }}</td>
+                        </tr>
+                        <tr>
+                            <th>Status:</th>
+                            <td>
+                                <span class="badge bg-{% if execution.status == 'completed' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}primary{% else %}secondary{% endif %}">
+                                    {{ execution.status }}
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>Executed By:</th>
+                            <td>{{ execution.executed_by }}</td>
+                        </tr>
+                        <tr>
+                            <th>Started:</th>
+                            <td>{{ execution.start_time }}</td>
+                        </tr>
+                        {% if execution.end_time %}
+                        <tr>
+                            <th>Ended:</th>
+                            <td>{{ execution.end_time }}</td>
+                        </tr>
+                        <tr>
+                            <th>Duration:</th>
+                            <td>{{ duration_text }}</td>
+                        </tr>
+                        {% elif execution.status == 'running' %}
+                        <tr>
+                            <th>Running For:</th>
+                            <td id="running-duration">-</td>
+                        </tr>
+                        {% endif %}
+                    </table>
+                </div>
+            </div>
+
+            <!-- Parameters Used -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Parameters Used</h5>
+                </div>
+                <div class="card-body">
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ execution.parameter_values|pprint }}</code></pre>
+                </div>
+            </div>
+
+            {% if execution.performance_metrics %}
+            <!-- Performance Metrics -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Performance Metrics</h5>
+                </div>
+                <div class="card-body">
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ execution.performance_metrics|pprint }}</code></pre>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if execution.execution_environment %}
+            <!-- Execution Environment -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Execution Environment</h5>
+                </div>
+                <div class="card-body">
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ execution.execution_environment|pprint }}</code></pre>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if execution.error_message %}
+            <!-- Error Information -->
+            <div class="card mb-4 border-danger">
+                <div class="card-header bg-danger text-white">
+                    <h5>Error Information</h5>
+                </div>
+                <div class="card-body">
+                    <p><strong>Error Message:</strong></p>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code>{{ execution.error_message }}</code></pre>
+                    {% if execution.stack_trace %}
+                    <p><strong>Stack Trace:</strong></p>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code>{{ execution.stack_trace }}</code></pre>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+</div>
+
+{% if execution.status == 'running' %}
+<script>
+// Update running duration every second
+function updateRunningDuration() {
+    const startTime = new Date('{{ execution.start_time|date:"c" }}');
+    const now = new Date();
+    const duration = Math.floor((now - startTime) / 1000);
+
+    const hours = Math.floor(duration / 3600);
+    const minutes = Math.floor((duration % 3600) / 60);
+    const seconds = duration % 60;
+
+    const formatted = `${hours}h ${minutes}m ${seconds}s`;
+    document.getElementById('running-duration').textContent = formatted;
+}
+
+// Update immediately and then every second
+updateRunningDuration();
+setInterval(updateRunningDuration, 1000);
+</script>
+{% endif %}
+{% endblock %}

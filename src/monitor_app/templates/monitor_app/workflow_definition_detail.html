@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}{{ definition.workflow_name }} v{{ definition.version }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ definition.workflow_name }} v{{ definition.version }}</h2>
+        <a href="{% url 'monitor_app:workflow_definitions_list' %}" class="btn btn-secondary">Back to List</a>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <!-- Workflow Information -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Workflow Information</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <tr>
+                            <th style="width: 150px;">Name:</th>
+                            <td>{{ definition.workflow_name }}</td>
+                        </tr>
+                        <tr>
+                            <th>Version:</th>
+                            <td>{{ definition.version }}</td>
+                        </tr>
+                        <tr>
+                            <th>Type:</th>
+                            <td>{{ definition.workflow_type }}</td>
+                        </tr>
+                        <tr>
+                            <th>Created By:</th>
+                            <td>{{ definition.created_by }}</td>
+                        </tr>
+                        <tr>
+                            <th>Created:</th>
+                            <td>{{ definition.created_at }}</td>
+                        </tr>
+                        <tr>
+                            <th>Updated:</th>
+                            <td>{{ definition.updated_at }}</td>
+                        </tr>
+                        <tr>
+                            <th>Total Executions:</th>
+                            <td><a href="{% url 'monitor_app:workflow_executions_list' %}?workflow={{ definition.workflow_name }}" class="text-decoration-none">{{ total_executions }}</a></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Workflow Definition -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Workflow Definition</h5>
+                </div>
+                <div class="card-body">
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-python">{{ definition.definition }}</code></pre>
+                </div>
+            </div>
+
+            <!-- Parameters -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Parameters</h5>
+                </div>
+                <div class="card-body">
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ definition.parameter_values|pprint }}</code></pre>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

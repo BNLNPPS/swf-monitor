@@ -1,0 +1,99 @@
+{% extends "monitor_app/_datatable_base.html" %}
+
+{% block extra_filters %}
+<!-- Filter Controls -->
+<div class="card mb-3">
+    <div class="card-body">
+
+        <!-- Workflow Name/Type/Created By Quick Filters -->
+        <div class="filter-bar mb-2">
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Workflow Name:</span>
+                <a href="#" data-filter="workflow_name" data-value="" class="filter-link {% if not selected_workflow_name %}filter-active{% endif %}">All</a>
+                {% for name in workflow_names %}
+                    <a href="#" data-filter="workflow_name" data-value="{{ name }}" class="filter-link {% if selected_workflow_name == name %}filter-active{% endif %}">{{ name }}</a>
+                {% endfor %}
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Type:</span>
+                <a href="#" data-filter="workflow_type" data-value="" class="filter-link {% if not selected_workflow_type %}filter-active{% endif %}">All</a>
+                {% for type in workflow_types %}
+                    <a href="#" data-filter="workflow_type" data-value="{{ type }}" class="filter-link {% if selected_workflow_type == type %}filter-active{% endif %}">{{ type }}</a>
+                {% endfor %}
+            </div>
+            <div>
+                <span style="font-weight: 600;">Created By:</span>
+                <a href="#" data-filter="created_by" data-value="" class="filter-link {% if not selected_created_by %}filter-active{% endif %}">All</a>
+                {% for creator in created_bys %}
+                    <a href="#" data-filter="created_by" data-value="{{ creator }}" class="filter-link {% if selected_created_by == creator %}filter-active{% endif %}">{{ creator }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Active filters display -->
+        <div id="active-filters" class="mt-2" style="display: none;">
+            <strong>Active filters:</strong>
+            <span id="filter-badges"></span>
+            <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2">clear all</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block initial_filters %}
+{
+    workflow_name: '{{ selected_workflow_name|default:"" }}',
+    workflow_type: '{{ selected_workflow_type|default:"" }}',
+    created_by: '{{ selected_created_by|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[4, 'desc']]{% endblock %} <!-- Order by created_at descending -->
+
+{% block update_active_filters_display %}
+const badges = [];
+// Combine filters into concise format
+const parts = [];
+if (currentFilters.workflow_name) parts.push(`Name:${currentFilters.workflow_name}`);
+if (currentFilters.workflow_type) parts.push(`Type:${currentFilters.workflow_type}`);
+if (currentFilters.created_by) parts.push(`By:${currentFilters.created_by}`);
+
+if (parts.length > 0) {
+    badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="workflow_name"][data-value="' + currentFilters.workflow_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="workflow_type"][data-value="' + currentFilters.workflow_type + '"]').addClass('filter-active');
+$('.filter-link[data-filter="created_by"][data-value="' + currentFilters.created_by + '"]').addClass('filter-active');
+{% endblock %}
+
+{% block extra_scripts %}
+// Handle filter link clicks
+$('.filter-link').on('click', function(e) {
+    e.preventDefault();
+    const filterType = $(this).data('filter');
+    const filterValue = $(this).data('value');
+    window.tableCurrentFilters[filterType] = filterValue;
+    window.tableUpdateFilters();
+});
+
+// Clear all filters
+$('#clear-all-filters').on('click', function() {
+    // Clear the actual currentFilters object used by the table
+    window.tableCurrentFilters.workflow_name = '';
+    window.tableCurrentFilters.workflow_type = '';
+    window.tableCurrentFilters.created_by = '';
+
+    // Update the table and URL
+    window.tableUpdateFilters();
+});
+{% endblock %}

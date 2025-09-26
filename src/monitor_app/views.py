@@ -15,12 +15,13 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
-from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
+from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
-    SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
+    SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
     STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
-    RunSerializer, StfFileSerializer, SubscriberSerializer, MessageQueueDispatchSerializer, FastMonFileSerializer
+    RunSerializer, StfFileSerializer, SubscriberSerializer, FastMonFileSerializer,
+    WorkflowDefinitionSerializer, WorkflowExecutionSerializer
 )
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -208,17 +209,27 @@ class SubscriberViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
-    """API endpoint for message queue dispatches."""
-    queryset = MessageQueueDispatch.objects.all()
-    serializer_class = MessageQueueDispatchSerializer
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
 
 class FastMonFileViewSet(viewsets.ModelViewSet):
     """API endpoint for Fast Monitoring files."""
     queryset = FastMonFile.objects.all()
     serializer_class = FastMonFileSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workflow Definitions."""
+    queryset = WorkflowDefinition.objects.all()
+    serializer_class = WorkflowDefinitionSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class WorkflowExecutionViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workflow Executions."""
+    queryset = WorkflowExecution.objects.all()
+    serializer_class = WorkflowExecutionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -771,7 +782,7 @@ def runs_list(request):
     ]
     
     context = {
-        'table_title': 'Testbed Runs',
+        'table_title': 'Simulation Runs',
         'table_description': 'Monitor testbed runs with start/end times, duration, and associated STF files.',
         'ajax_url': reverse('monitor_app:runs_datatable_ajax'),
         'columns': columns,
@@ -978,11 +989,9 @@ def stf_files_datatable_ajax(request):
 def stf_file_detail(request, file_id):
     """Display detailed view of a specific STF file"""
     stf_file = get_object_or_404(StfFile, file_id=file_id)
-    dispatches = stf_file.dispatches.all().order_by('-dispatch_time')
-    
+
     context = {
         'stf_file': stf_file,
-        'dispatches': dispatches,
     }
     return render(request, 'monitor_app/stf_file_detail.html', context)
 
@@ -1098,36 +1107,6 @@ def subscriber_detail(request, subscriber_id):
     }
     
     return render(request, 'monitor_app/subscriber_detail.html', context)
-
-@login_required
-def message_dispatch_detail(request, dispatch_id):
-    """Display details for a specific message dispatch."""
-    dispatch = get_object_or_404(MessageQueueDispatch, dispatch_id=dispatch_id)
-    
-    context = {
-        'dispatch': dispatch,
-    }
-    
-    return render(request, 'monitor_app/message_dispatch_detail.html', context)
-
-@login_required
-def message_dispatches_list(request):
-    """Display list of message queue dispatches"""
-    dispatches = MessageQueueDispatch.objects.all().order_by('-dispatch_time')
-    
-    # Filtering
-    status_filter = request.GET.get('status')
-    
-    if status_filter == 'success':
-        dispatches = dispatches.filter(is_successful=True)
-    elif status_filter == 'failed':
-        dispatches = dispatches.filter(is_successful=False)
-    
-    context = {
-        'dispatches': dispatches,
-        'status_filter': status_filter,
-    }
-    return render(request, 'monitor_app/message_dispatches_list.html', context)
 
 
 # ==================== WORKFLOW VIEWS ====================
@@ -1877,6 +1856,24 @@ def get_next_agent_id(request):
         agent_id = PersistentState.get_next_agent_id()
         return Response({
             'agent_id': agent_id,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def get_next_workflow_execution_id(request):
+    """API endpoint to get the next workflow execution sequence number atomically."""
+    try:
+        sequence = PersistentState.get_next_workflow_execution_id()
+        return Response({
+            'sequence': sequence,
             'status': 'success'
         })
     except Exception as e:

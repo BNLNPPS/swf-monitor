@@ -1,0 +1,99 @@
+{% extends "monitor_app/_datatable_base.html" %}
+
+{% block extra_filters %}
+<!-- Filter Controls -->
+<div class="card mb-3">
+    <div class="card-body">
+
+        <!-- Workflow/Status/Executed By Quick Filters -->
+        <div class="filter-bar mb-2">
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Workflow:</span>
+                <a href="#" data-filter="workflow" data-value="" class="filter-link {% if not selected_workflow %}filter-active{% endif %}">All</a>
+                {% for wf in workflows %}
+                    <a href="#" data-filter="workflow" data-value="{{ wf }}" class="filter-link {% if selected_workflow == wf %}filter-active{% endif %}">{{ wf }}</a>
+                {% endfor %}
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Status:</span>
+                <a href="#" data-filter="status" data-value="" class="filter-link {% if not selected_status %}filter-active{% endif %}">All</a>
+                {% for stat in statuses %}
+                    <a href="#" data-filter="status" data-value="{{ stat }}" class="filter-link {% if selected_status == stat %}filter-active{% endif %}">{{ stat }}</a>
+                {% endfor %}
+            </div>
+            <div>
+                <span style="font-weight: 600;">Executed By:</span>
+                <a href="#" data-filter="executed_by" data-value="" class="filter-link {% if not selected_executed_by %}filter-active{% endif %}">All</a>
+                {% for executor in executed_bys %}
+                    <a href="#" data-filter="executed_by" data-value="{{ executor }}" class="filter-link {% if selected_executed_by == executor %}filter-active{% endif %}">{{ executor }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Active filters display -->
+        <div id="active-filters" class="mt-2" style="display: none;">
+            <strong>Active filters:</strong>
+            <span id="filter-badges"></span>
+            <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2">clear all</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block initial_filters %}
+{
+    workflow: '{{ selected_workflow|default:"" }}',
+    status: '{{ selected_status|default:"" }}',
+    executed_by: '{{ selected_executed_by|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[4, 'desc']]{% endblock %} <!-- Order by start_time descending -->
+
+{% block update_active_filters_display %}
+const badges = [];
+// Combine filters into concise format
+const parts = [];
+if (currentFilters.workflow) parts.push(`Workflow:${currentFilters.workflow}`);
+if (currentFilters.status) parts.push(`Status:${currentFilters.status}`);
+if (currentFilters.executed_by) parts.push(`By:${currentFilters.executed_by}`);
+
+if (parts.length > 0) {
+    badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="workflow"][data-value="' + currentFilters.workflow + '"]').addClass('filter-active');
+$('.filter-link[data-filter="status"][data-value="' + currentFilters.status + '"]').addClass('filter-active');
+$('.filter-link[data-filter="executed_by"][data-value="' + currentFilters.executed_by + '"]').addClass('filter-active');
+{% endblock %}
+
+{% block extra_scripts %}
+// Handle filter link clicks
+$('.filter-link').on('click', function(e) {
+    e.preventDefault();
+    const filterType = $(this).data('filter');
+    const filterValue = $(this).data('value');
+    window.tableCurrentFilters[filterType] = filterValue;
+    window.tableUpdateFilters();
+});
+
+// Clear all filters
+$('#clear-all-filters').on('click', function() {
+    // Clear the actual currentFilters object used by the table
+    window.tableCurrentFilters.workflow = '';
+    window.tableCurrentFilters.status = '';
+    window.tableCurrentFilters.executed_by = '';
+
+    // Update the table and URL
+    window.tableUpdateFilters();
+});
+{% endblock %}

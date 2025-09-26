@@ -258,40 +258,6 @@ class Subscriber(models.Model):
         return self.subscriber_name
 
 
-class MessageQueueDispatch(models.Model):
-    """
-    Records message queue dispatch operations for STF file events.
-    
-    Tracks when and how STF file notifications are sent to message queues, including success/failure status and error 
-    details for monitoring.
-    
-    Attributes:
-        dispatch_id: UUID primary key for unique dispatch identification
-        stf_file: Foreign key to the associated STF file
-        dispatch_time: Timestamp when the dispatch occurred (auto_now_add)
-        message_content: JSON content of the dispatched message
-        is_successful: Whether the dispatch succeeded
-        error_message: Error details if dispatch failed
-    """
-    dispatch_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    stf_file = models.ForeignKey(StfFile, on_delete=models.CASCADE, related_name='dispatches')
-    dispatch_time = models.DateTimeField(auto_now_add=True)
-    message_content = models.JSONField(null=True, blank=True)
-    is_successful = models.BooleanField(null=True, default=None)
-    error_message = models.TextField(null=True, blank=True)
-    
-    # Workflow integration fields
-    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
-    message_type = models.CharField(max_length=50, null=True, blank=True)
-    sender_agent = models.CharField(max_length=100, null=True, blank=True)
-    recipient_agent = models.CharField(max_length=100, null=True, blank=True)
-
-    class Meta:
-        db_table = 'swf_message_queue_dispatches'
-
-    def __str__(self):
-        return f"Dispatch {self.dispatch_id} - STF {self.stf_file.file_id} - {'Success' if self.is_successful else 'Failed'}"
-
 
 class FastMonFile(models.Model):
     """
@@ -429,6 +395,34 @@ class PersistentState(models.Model):
             obj.save()
 
             return current_agent_id
+
+    @classmethod
+    def get_next_workflow_execution_id(cls):
+        """Get next workflow execution sequence number atomically."""
+        from django.db import transaction
+        from django.utils import timezone
+
+        with transaction.atomic():
+            obj, created = cls.objects.select_for_update().get_or_create(
+                id=1,
+                defaults={'state_data': {
+                    'next_workflow_execution_id': 1,
+                    'last_workflow_execution_id': None,
+                    'last_workflow_execution_time': None
+                }}
+            )
+
+            current_time = timezone.now().isoformat()
+            current_id = obj.state_data.get('next_workflow_execution_id', 1)
+
+            obj.state_data.update({
+                'next_workflow_execution_id': current_id + 1,
+                'last_workflow_execution_id': current_id,
+                'last_workflow_execution_time': current_time
+            })
+            obj.save()
+
+            return current_id
 
 
 class PandaQueue(models.Model):
