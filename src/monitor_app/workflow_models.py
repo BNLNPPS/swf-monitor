@@ -243,9 +243,8 @@ class AgentWorkflowStage(models.Model):
 class WorkflowMessage(models.Model):
     """
     Tracks all messages exchanged in the workflow system.
-    
-    This extends the existing MessageQueueDispatch concept to include workflow-specific
-    message tracking with agent identification and message type categorization.
+
+    Provides workflow-specific message tracking with agent identification and message type categorization.
     """
     message_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     

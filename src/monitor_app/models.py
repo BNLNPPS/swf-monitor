@@ -258,40 +258,6 @@ class Subscriber(models.Model):
         return self.subscriber_name
 
 
-class MessageQueueDispatch(models.Model):
-    """
-    Records message queue dispatch operations for STF file events.
-    
-    Tracks when and how STF file notifications are sent to message queues, including success/failure status and error 
-    details for monitoring.
-    
-    Attributes:
-        dispatch_id: UUID primary key for unique dispatch identification
-        stf_file: Foreign key to the associated STF file
-        dispatch_time: Timestamp when the dispatch occurred (auto_now_add)
-        message_content: JSON content of the dispatched message
-        is_successful: Whether the dispatch succeeded
-        error_message: Error details if dispatch failed
-    """
-    dispatch_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    stf_file = models.ForeignKey(StfFile, on_delete=models.CASCADE, related_name='dispatches')
-    dispatch_time = models.DateTimeField(auto_now_add=True)
-    message_content = models.JSONField(null=True, blank=True)
-    is_successful = models.BooleanField(null=True, default=None)
-    error_message = models.TextField(null=True, blank=True)
-    
-    # Workflow integration fields
-    workflow_id = models.UUIDField(null=True, blank=True, db_index=True)
-    message_type = models.CharField(max_length=50, null=True, blank=True)
-    sender_agent = models.CharField(max_length=100, null=True, blank=True)
-    recipient_agent = models.CharField(max_length=100, null=True, blank=True)
-
-    class Meta:
-        db_table = 'swf_message_queue_dispatches'
-
-    def __str__(self):
-        return f"Dispatch {self.dispatch_id} - STF {self.stf_file.file_id} - {'Success' if self.is_successful else 'Failed'}"
-
 
 class FastMonFile(models.Model):
     """

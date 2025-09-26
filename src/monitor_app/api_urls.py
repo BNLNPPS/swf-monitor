@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     SystemAgentViewSet, AppLogViewSet, LogSummaryView,
     STFWorkflowViewSet, AgentWorkflowStageViewSet, WorkflowMessageViewSet,
-    RunViewSet, StfFileViewSet, SubscriberViewSet, MessageQueueDispatchViewSet, FastMonFileViewSet,
+    RunViewSet, StfFileViewSet, SubscriberViewSet, FastMonFileViewSet,
     get_next_run_number, get_next_agent_id
 )
 from .sse_views import sse_message_stream, sse_status
@@ -17,7 +17,6 @@ router.register(r'workflow-messages', WorkflowMessageViewSet, basename='workflow
 router.register(r'runs', RunViewSet, basename='run')
 router.register(r'stf-files', StfFileViewSet, basename='stffile')
 router.register(r'subscribers', SubscriberViewSet, basename='subscriber')
-router.register(r'message-dispatches', MessageQueueDispatchViewSet, basename='messagedispatch')
 router.register(r'fastmon-files', FastMonFileViewSet, basename='fastmonfile')
 
 urlpatterns = [

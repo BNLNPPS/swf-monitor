@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, FastMonFile
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage
 
 class SystemAgentSerializer(serializers.ModelSerializer):
@@ -41,11 +41,6 @@ class StfFileSerializer(serializers.ModelSerializer):
 class SubscriberSerializer(serializers.ModelSerializer):
     class Meta:
         model = Subscriber
-        fields = '__all__'
-
-class MessageQueueDispatchSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = MessageQueueDispatch
         fields = '__all__'
 
 class FastMonFileSerializer(serializers.ModelSerializer):

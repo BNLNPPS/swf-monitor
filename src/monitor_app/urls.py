@@ -25,8 +25,6 @@ from .views import (
     stf_file_detail,
     subscribers_list,
     subscriber_detail,
-    message_dispatches_list,
-    message_dispatch_detail,
     # Workflow views
     workflow_dashboard,
     workflow_list,
@@ -118,9 +116,7 @@ urlpatterns = [
     path('subscribers/datatable/', subscribers_datatable_ajax, name='subscribers_datatable_ajax'),
     path('subscribers/filter-counts/', get_subscribers_filter_counts, name='subscribers_filter_counts'),
     path('subscribers/<int:subscriber_id>/', subscriber_detail, name='subscriber_detail'),
-    path('message-dispatches/', message_dispatches_list, name='message_dispatches_list'),
-    path('message-dispatches/<uuid:dispatch_id>/', message_dispatch_detail, name='message_dispatch_detail'),
-    
+
     # Workflow URLs
     path('workflow/', workflow_dashboard, name='workflow_dashboard'),
     path('workflow/list/', workflow_list, name='workflow_list'),

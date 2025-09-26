@@ -15,12 +15,12 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, MessageQueueDispatch, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer, 
     STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
-    RunSerializer, StfFileSerializer, SubscriberSerializer, MessageQueueDispatchSerializer, FastMonFileSerializer
+    RunSerializer, StfFileSerializer, SubscriberSerializer, FastMonFileSerializer
 )
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -208,12 +208,6 @@ class SubscriberViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
 
-class MessageQueueDispatchViewSet(viewsets.ModelViewSet):
-    """API endpoint for message queue dispatches."""
-    queryset = MessageQueueDispatch.objects.all()
-    serializer_class = MessageQueueDispatchSerializer
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
 
 class FastMonFileViewSet(viewsets.ModelViewSet):
     """API endpoint for Fast Monitoring files."""
@@ -978,11 +972,9 @@ def stf_files_datatable_ajax(request):
 def stf_file_detail(request, file_id):
     """Display detailed view of a specific STF file"""
     stf_file = get_object_or_404(StfFile, file_id=file_id)
-    dispatches = stf_file.dispatches.all().order_by('-dispatch_time')
-    
+
     context = {
         'stf_file': stf_file,
-        'dispatches': dispatches,
     }
     return render(request, 'monitor_app/stf_file_detail.html', context)
 
@@ -1098,36 +1090,6 @@ def subscriber_detail(request, subscriber_id):
     }
     
     return render(request, 'monitor_app/subscriber_detail.html', context)
-
-@login_required
-def message_dispatch_detail(request, dispatch_id):
-    """Display details for a specific message dispatch."""
-    dispatch = get_object_or_404(MessageQueueDispatch, dispatch_id=dispatch_id)
-    
-    context = {
-        'dispatch': dispatch,
-    }
-    
-    return render(request, 'monitor_app/message_dispatch_detail.html', context)
-
-@login_required
-def message_dispatches_list(request):
-    """Display list of message queue dispatches"""
-    dispatches = MessageQueueDispatch.objects.all().order_by('-dispatch_time')
-    
-    # Filtering
-    status_filter = request.GET.get('status')
-    
-    if status_filter == 'success':
-        dispatches = dispatches.filter(is_successful=True)
-    elif status_filter == 'failed':
-        dispatches = dispatches.filter(is_successful=False)
-    
-    context = {
-        'dispatches': dispatches,
-        'status_filter': status_filter,
-    }
-    return render(request, 'monitor_app/message_dispatches_list.html', context)
 
 
 # ==================== WORKFLOW VIEWS ====================
