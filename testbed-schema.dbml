@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 09-26-2025 02:59PM UTC'''
+  Last Updated At 09-26-2025 07:41PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -749,6 +749,54 @@ SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, 
     (id) [pk, unique, name: 'swf_systemagent_pkey', type: btree]
   }
 }
+
+
+Table monitor_app.WorkflowDefinition {
+  Note: '''
+Defines reusable workflow templates with parameters and execution logic.
+
+
+*DB table: swf_workflow_definitions*'''
+
+  id big_auto [pk, unique, not null]
+  workflow_name char [note: '''Unique workflow name''', not null]
+  version char [note: '''Version string''', not null]
+  workflow_type char [note: '''Flexible workflow type classification''', not null]
+  definition text [note: '''Python workflow code content''', not null]
+  parameter_values json [note: '''Default parameter values and schema''', default:`builtins.dict()`, not null]
+  created_by char [note: '''Username who created this workflow''', not null]
+  created_at date_time [not null]
+  updated_at date_time [not null]
+
+  indexes {
+    (id) [pk, unique, name: 'swf_workflow_definitions_pkey', type: btree]
+    (workflow_name,version) [unique, name: 'swf_workflow_definitions_workflow_name_version_c54e03fa_uniq', type: btree]
+  }
+}
+
+
+Table monitor_app.WorkflowExecution {
+  Note: '''
+Tracks individual workflow execution instances.
+
+
+*DB table: swf_workflow_executions*'''
+
+  execution_id char [note: '''Human-readable execution ID''', pk, unique, not null]
+  workflow_definition_id foreign_key [not null]
+  parameter_values json [note: '''Actual parameter values used for this execution''', not null]
+  performance_metrics json [note: '''Performance metrics and results''', null]
+  status char [note: '''Flexible execution status''', default:`"pending"`, not null]
+  start_time date_time [note: '''Execution start timestamp''', not null]
+  end_time date_time [note: '''Execution completion timestamp''', null]
+  executed_by char [note: '''Username who executed this workflow''', not null]
+
+  indexes {
+    (execution_id) [pk, unique, name: 'swf_workflow_executions_pkey', type: btree]
+    (workflow_definition_id) [name: 'swf_workflow_executions_workflow_definition_id_527d2e0a', type: btree]
+  }
+}
+ref: monitor_app.WorkflowExecution.workflow_definition_id > monitor_app.WorkflowDefinition.id
 
 
 Table monitor_app.WorkflowMessage {
