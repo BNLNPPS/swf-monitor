@@ -265,7 +265,22 @@ def workflow_execution_detail(request, execution_id):
     """Detail view for a specific workflow execution."""
     execution = get_object_or_404(WorkflowExecution, execution_id=execution_id)
 
+    # Calculate duration if completed
+    duration_text = None
+    if execution.end_time and execution.start_time:
+        delta = execution.end_time - execution.start_time
+        total_seconds = delta.total_seconds()
+
+        minutes = int(total_seconds // 60)
+        seconds = total_seconds % 60
+
+        if minutes > 0:
+            duration_text = f"{minutes} minutes, {seconds:.2f} seconds"
+        else:
+            duration_text = f"{seconds:.2f} seconds"
+
     context = {
         'execution': execution,
+        'duration_text': duration_text,
     }
     return render(request, 'monitor_app/workflow_execution_detail.html', context)

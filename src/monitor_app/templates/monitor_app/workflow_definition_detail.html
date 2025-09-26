@@ -56,17 +56,17 @@
                     <h5>Workflow Definition</h5>
                 </div>
                 <div class="card-body">
-                    <pre><code>{{ definition.definition }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-python">{{ definition.definition }}</code></pre>
                 </div>
             </div>
 
             <!-- Parameters -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5>Default Parameters</h5>
+                    <h5>Parameters</h5>
                 </div>
                 <div class="card-body">
-                    <pre><code>{{ definition.parameter_values|pprint }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ definition.parameter_values|pprint }}</code></pre>
                 </div>
             </div>
         </div>

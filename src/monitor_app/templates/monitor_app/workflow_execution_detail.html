@@ -31,6 +31,10 @@
                             </td>
                         </tr>
                         <tr>
+                            <th>Type:</th>
+                            <td>{{ execution.workflow_definition.workflow_type }}</td>
+                        </tr>
+                        <tr>
                             <th>Status:</th>
                             <td>
                                 <span class="badge bg-{% if execution.status == 'completed' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}primary{% else %}secondary{% endif %}">
@@ -53,7 +57,7 @@
                         </tr>
                         <tr>
                             <th>Duration:</th>
-                            <td>{{ execution.duration_seconds }} seconds</td>
+                            <td>{{ duration_text }}</td>
                         </tr>
                         {% elif execution.status == 'running' %}
                         <tr>
@@ -71,7 +75,7 @@
                     <h5>Parameters Used</h5>
                 </div>
                 <div class="card-body">
-                    <pre><code>{{ execution.parameter_values|pprint }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ execution.parameter_values|pprint }}</code></pre>
                 </div>
             </div>
 
@@ -82,7 +86,7 @@
                     <h5>Performance Metrics</h5>
                 </div>
                 <div class="card-body">
-                    <pre><code>{{ execution.performance_metrics|pprint }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ execution.performance_metrics|pprint }}</code></pre>
                 </div>
             </div>
             {% endif %}
@@ -94,7 +98,7 @@
                     <h5>Execution Environment</h5>
                 </div>
                 <div class="card-body">
-                    <pre><code>{{ execution.execution_environment|pprint }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code class="language-json">{{ execution.execution_environment|pprint }}</code></pre>
                 </div>
             </div>
             {% endif %}
@@ -107,30 +111,16 @@
                 </div>
                 <div class="card-body">
                     <p><strong>Error Message:</strong></p>
-                    <pre><code>{{ execution.error_message }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code>{{ execution.error_message }}</code></pre>
                     {% if execution.stack_trace %}
                     <p><strong>Stack Trace:</strong></p>
-                    <pre><code>{{ execution.stack_trace }}</code></pre>
+                    <pre style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; overflow-x: auto; font-size: 12px;"><code>{{ execution.stack_trace }}</code></pre>
                     {% endif %}
                 </div>
             </div>
             {% endif %}
         </div>
 
-        <div class="col-md-4">
-            <!-- Related Workflow -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5>Workflow Definition</h5>
-                </div>
-                <div class="card-body">
-                    <p><strong>{{ execution.workflow_definition.workflow_name }}</strong></p>
-                    <p>Version: {{ execution.workflow_definition.version }}</p>
-                    <p>Type: {{ execution.workflow_definition.workflow_type }}</p>
-                    <a href="{% url 'monitor_app:workflow_definition_detail' execution.workflow_definition.workflow_name execution.workflow_definition.version %}" class="btn btn-outline-primary btn-sm">View Definition</a>
-                </div>
-            </div>
-        </div>
     </div>
 </div>
 
