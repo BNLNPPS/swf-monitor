@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 09-18-2025 05:18PM UTC'''
+  Last Updated At 09-26-2025 02:59PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -497,44 +497,6 @@ updated_at: Timestamp when TF record was last modified
 ref: monitor_app.FastMonFile.stf_file_id > monitor_app.StfFile.file_id
 
 
-Table monitor_app.MessageQueueDispatch {
-  Note: '''
-Records message queue dispatch operations for STF file events.
-
-Tracks when and how STF file notifications are sent to message queues, including success/failure status and error 
-details for monitoring.
-
-Attributes:
-dispatch_id: UUID primary key for unique dispatch identification
-stf_file: Foreign key to the associated STF file
-dispatch_time: Timestamp when the dispatch occurred (auto_now_add)
-message_content: JSON content of the dispatched message
-is_successful: Whether the dispatch succeeded
-error_message: Error details if dispatch failed
-
-
-*DB table: swf_message_queue_dispatches*'''
-
-  dispatch_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
-  stf_file_id foreign_key [not null]
-  dispatch_time date_time [not null]
-  message_content json [null]
-  is_successful boolean [default:`None`, null]
-  error_message text [null]
-  workflow_id uuid [null]
-  message_type char [null]
-  sender_agent char [null]
-  recipient_agent char [null]
-
-  indexes {
-    (dispatch_id) [pk, unique, name: 'swf_message_queue_dispatches_pkey', type: btree]
-    (stf_file_id) [name: 'swf_message_queue_dispatches_stf_file_id_034d1fe8', type: btree]
-    (workflow_id) [name: 'swf_message_queue_dispatches_workflow_id_70cbace2', type: btree]
-  }
-}
-ref: monitor_app.MessageQueueDispatch.stf_file_id > monitor_app.StfFile.file_id
-
-
 Table monitor_app.PandaQueue {
   Note: '''
 Represents a PanDA compute queue configuration.
@@ -793,8 +755,7 @@ Table monitor_app.WorkflowMessage {
   Note: '''
 Tracks all messages exchanged in the workflow system.
 
-This extends the existing MessageQueueDispatch concept to include workflow-specific
-message tracking with agent identification and message type categorization.
+Provides workflow-specific message tracking with agent identification and message type categorization.
 
 
 *DB table: swf_workflow_messages*'''
