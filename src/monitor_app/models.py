@@ -17,6 +17,7 @@ class SystemAgent(models.Model):
         ('data', 'Data Agent'),
         ('processing', 'Processing Agent'),
         ('fastmon', 'Fast Monitoring Agent'),
+        ('workflow_runner', 'Workflow Runner'),
         ('monitor', 'Monitor System'),
         ('sse_sender', 'SSE Test Sender'),
         ('sse_receiver', 'SSE Client/Receiver'),
