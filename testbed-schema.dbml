@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 09-26-2025 08:40PM UTC'''
+  Last Updated At 10-31-2025 04:12PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -590,6 +590,36 @@ run_conditions: JSON field storing experimental conditions
 }
 
 
+Table monitor_app.RunState {
+  Note: '''
+Tracks the current processing state for each run in the fast processing workflow.
+Provides quick access to run-level statistics and status.
+
+
+*DB table: swf_run_state*'''
+
+  run_number integer [pk, unique, not null]
+  phase char [not null]
+  state char [not null]
+  substate char [null]
+  target_worker_count integer [not null]
+  active_worker_count integer [default:`0`, not null]
+  stf_samples_received integer [default:`0`, not null]
+  slices_created integer [default:`0`, not null]
+  slices_queued integer [default:`0`, not null]
+  slices_processing integer [default:`0`, not null]
+  slices_completed integer [default:`0`, not null]
+  slices_failed integer [default:`0`, not null]
+  state_changed_at date_time [not null]
+  updated_at date_time [not null]
+  metadata json [null]
+
+  indexes {
+    (run_number) [pk, unique, name: 'swf_run_state_pkey', type: btree]
+  }
+}
+
+
 Table monitor_app.STFWorkflow {
   Note: '''
 Tracks the complete workflow lifecycle of a Super Time Frame from generation to completion.
@@ -747,6 +777,102 @@ SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, 
   indexes {
     (instance_name) [unique, name: 'swf_systemagent_instance_name_key', type: btree]
     (id) [pk, unique, name: 'swf_systemagent_pkey', type: btree]
+  }
+}
+
+
+Table monitor_app.SystemStateEvent {
+  Note: '''
+Event log for time-travel replay of system state.
+Records all significant events in the fast processing workflow.
+
+
+*DB table: swf_system_state_events*'''
+
+  event_id auto [pk, unique, not null]
+  timestamp date_time [not null]
+  run_number integer [not null]
+  event_type char [not null]
+  state char [not null]
+  substate char [null]
+  event_data json [not null]
+
+  indexes {
+    (timestamp,run_number) [name: 'swf_system__timesta_12647a_idx', type: btree]
+    (event_type) [name: 'swf_system_state_events_event_type_e0d9fd67', type: btree]
+    (event_id) [pk, unique, name: 'swf_system_state_events_pkey', type: btree]
+    (run_number) [name: 'swf_system_state_events_run_number_ec8a21e7', type: btree]
+    (state) [name: 'swf_system_state_events_state_fe4ff0e9', type: btree]
+    (substate) [name: 'swf_system_state_events_substate_62dc981d', type: btree]
+    (timestamp) [name: 'swf_system_state_events_timestamp_54e337bf', type: btree]
+  }
+}
+
+
+Table monitor_app.TFSlice {
+  Note: '''
+Represents a Time Frame slice for fast processing workflow.
+Each TF slice is a small portion (~15 per STF sample) that can be
+processed independently by workers in ~30 seconds.
+
+
+*DB table: swf_tf_slices*'''
+
+  id big_auto [pk, unique, not null]
+  slice_id integer [not null]
+  tf_first integer [not null]
+  tf_last integer [not null]
+  tf_count integer [not null]
+  tf_filename char [not null]
+  stf_filename char [not null]
+  run_number integer [not null]
+  status char [default:`"queued"`, not null]
+  retries integer [default:`0`, not null]
+  metadata json [null]
+  created_at date_time [not null]
+  updated_at date_time [not null]
+  assigned_worker char [null]
+  assigned_at date_time [null]
+  completed_at date_time [null]
+
+  indexes {
+    (run_number,status) [name: 'swf_tf_slic_run_num_783be1_idx', type: btree]
+    (status,created_at) [name: 'swf_tf_slic_status_a09d78_idx', type: btree]
+    (stf_filename,status) [name: 'swf_tf_slic_stf_fil_45fc7b_idx', type: btree]
+    (id) [pk, unique, name: 'swf_tf_slices_pkey', type: btree]
+    (run_number) [name: 'swf_tf_slices_run_number_7f432352', type: btree]
+    (stf_filename) [name: 'swf_tf_slices_stf_filename_013bb220', type: btree]
+    (tf_filename) [name: 'swf_tf_slices_tf_filename_3fa6f280', type: btree]
+    (tf_filename,slice_id) [unique, name: 'swf_tf_slices_tf_filename_slice_id_2ea501ba_uniq', type: btree]
+  }
+}
+
+
+Table monitor_app.Worker {
+  Note: '''
+Tracks workers processing TF slices in the fast processing workflow.
+Records both active and inactive workers for historical analysis.
+
+
+*DB table: swf_workers*'''
+
+  worker_id char [pk, unique, not null]
+  run_number integer [not null]
+  panda_job char [not null]
+  location char [not null]
+  status char [not null]
+  current_slice_id integer [null]
+  tf_filename char [null]
+  slices_completed integer [default:`0`, not null]
+  last_heartbeat date_time [null]
+  started_at date_time [not null]
+  ended_at date_time [null]
+  metadata json [null]
+
+  indexes {
+    (worker_id) [pk, unique, name: 'swf_workers_pkey', type: btree]
+    (run_number,status) [name: 'swf_workers_run_num_e495fa_idx', type: btree]
+    (run_number) [name: 'swf_workers_run_number_e9d22704', type: btree]
   }
 }
 
