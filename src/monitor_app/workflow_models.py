@@ -313,7 +313,7 @@ class WorkflowDefinition(models.Model):
     workflow_name = models.CharField(max_length=200, help_text="Unique workflow name")
     version = models.CharField(max_length=50, help_text="Version string")
     workflow_type = models.CharField(max_length=100, help_text="Flexible workflow type classification")
-    definition = models.TextField(max_length=5000, help_text="Python workflow code content")
+    definition = models.TextField(help_text="Python workflow code content")
     parameter_values = models.JSONField(default=dict, help_text="Default parameter values and schema")
     created_by = models.CharField(max_length=100, help_text="Username who created this workflow")
     created_at = models.DateTimeField(auto_now_add=True)
