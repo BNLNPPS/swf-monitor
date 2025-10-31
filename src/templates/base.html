@@ -38,6 +38,7 @@
       .dropdown {
         position: relative;
         display: inline-block;
+        margin-right: 1em;
       }
 
       /* Dropdown Content (Hidden by Default) */
@@ -80,8 +81,14 @@
                     <a href="{% url 'monitor_app:workflow_executions_list' %}">Workflow executions</a>
                 </div>
             </div>
-            <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
-            <a href="{% url 'monitor_app:fastmon_files_list' %}">TF Files</a>
+            <div class="dropdown">
+                <button class="dropbtn">Files</button>
+                <div class="dropdown-content">
+                    <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
+                    <a href="{% url 'monitor_app:fastmon_files_list' %}">STF Samples</a>
+                    <a href="{% url 'monitor_app:tf_slices_list' %}">TF Slices</a>
+                </div>
+            </div>
             <a href="{% url 'monitor_app:workflow_agents_list' %}">Agents</a>
             <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>
             <a href="{% url 'monitor_app:workflow_messages' %}">Messages</a>

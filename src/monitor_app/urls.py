@@ -74,6 +74,10 @@ from .fastmon_views import (
     fastmon_files_list,
     fastmon_files_datatable_ajax,
 )
+from .tf_slices_views import (
+    tf_slices_list,
+    tf_slices_datatable_ajax,
+)
 from .workflow_views import (
     workflows_home,
     workflow_definitions_list,
@@ -118,6 +122,10 @@ urlpatterns = [
     # FastMon Files (Time Frames)
     path('fastmon-files/', fastmon_files_list, name='fastmon_files_list'),
     path('fastmon-files/datatable/', fastmon_files_datatable_ajax, name='fastmon_files_datatable_ajax'),
+
+    # TF Slices (Fast Processing)
+    path('tf-slices/', tf_slices_list, name='tf_slices_list'),
+    path('tf-slices/datatable/', tf_slices_datatable_ajax, name='tf_slices_datatable_ajax'),
 
     path('subscribers/', subscribers_list, name='subscribers_list'),
     path('subscribers/datatable/', subscribers_datatable_ajax, name='subscribers_datatable_ajax'),
