@@ -263,7 +263,7 @@ class FastMonFile(models.Model):
     """
     Represents a Time Frame (TF) file for fast monitoring.
     TF files are subsamples of Super Time Frame (STF) files, processed for rapid monitoring.
-    
+
     Attributes:
         tf_file_id: UUID primary key for unique TF file identification
         stf_file: Foreign key to the parent STF file this TF is derived from
@@ -294,6 +294,122 @@ class FastMonFile(models.Model):
 
     def __str__(self):
         return f"TF File {self.tf_filename}"
+
+
+class TFSlice(models.Model):
+    """
+    Represents a Time Frame slice for fast processing workflow.
+    Each TF slice is a small portion (~15 per STF sample) that can be
+    processed independently by workers in ~30 seconds.
+    """
+    slice_id = models.IntegerField()  # Serial number within STF sample (1-15)
+    tf_first = models.IntegerField()  # First TF in the range
+    tf_last = models.IntegerField()   # Last TF in the range
+    tf_count = models.IntegerField()  # Number of TFs in the slice
+    tf_filename = models.CharField(max_length=255, db_index=True)
+    stf_filename = models.CharField(max_length=255, db_index=True)
+    run_number = models.IntegerField(db_index=True)
+    status = models.CharField(max_length=20, default='queued')
+    retries = models.IntegerField(default=0)
+    metadata = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    # Processing tracking
+    assigned_worker = models.CharField(max_length=255, null=True, blank=True)
+    assigned_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'swf_tf_slices'
+        indexes = [
+            models.Index(fields=['run_number', 'status']),
+            models.Index(fields=['stf_filename', 'status']),
+            models.Index(fields=['status', 'created_at']),
+        ]
+        unique_together = [['tf_filename', 'slice_id']]
+
+    def __str__(self):
+        return f"Slice {self.slice_id} of {self.tf_filename}"
+
+
+class Worker(models.Model):
+    """
+    Tracks workers processing TF slices in the fast processing workflow.
+    Records both active and inactive workers for historical analysis.
+    """
+    worker_id = models.CharField(max_length=255, primary_key=True)
+    run_number = models.IntegerField(db_index=True)
+    panda_job = models.CharField(max_length=255)
+    location = models.CharField(max_length=255)  # batch queue
+    status = models.CharField(max_length=20)
+    current_slice_id = models.IntegerField(null=True, blank=True)
+    tf_filename = models.CharField(max_length=255, null=True, blank=True)
+    slices_completed = models.IntegerField(default=0)
+    last_heartbeat = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'swf_workers'
+        indexes = [
+            models.Index(fields=['run_number', 'status']),
+        ]
+
+    def __str__(self):
+        return f"Worker {self.worker_id}"
+
+
+class RunState(models.Model):
+    """
+    Tracks the current processing state for each run in the fast processing workflow.
+    Provides quick access to run-level statistics and status.
+    """
+    run_number = models.IntegerField(primary_key=True)
+    phase = models.CharField(max_length=20)
+    state = models.CharField(max_length=20)
+    substate = models.CharField(max_length=20, null=True, blank=True)
+    target_worker_count = models.IntegerField()
+    active_worker_count = models.IntegerField(default=0)
+    stf_samples_received = models.IntegerField(default=0)
+    slices_created = models.IntegerField(default=0)
+    slices_queued = models.IntegerField(default=0)
+    slices_processing = models.IntegerField(default=0)
+    slices_completed = models.IntegerField(default=0)
+    slices_failed = models.IntegerField(default=0)
+    state_changed_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+    metadata = models.JSONField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'swf_run_state'
+
+    def __str__(self):
+        return f"Run {self.run_number} - {self.state}/{self.phase}"
+
+
+class SystemStateEvent(models.Model):
+    """
+    Event log for time-travel replay of system state.
+    Records all significant events in the fast processing workflow.
+    """
+    event_id = models.AutoField(primary_key=True)
+    timestamp = models.DateTimeField(db_index=True)
+    run_number = models.IntegerField(db_index=True)
+    event_type = models.CharField(max_length=50, db_index=True)
+    state = models.CharField(max_length=20, db_index=True)
+    substate = models.CharField(max_length=20, null=True, blank=True, db_index=True)
+    event_data = models.JSONField()
+
+    class Meta:
+        db_table = 'swf_system_state_events'
+        indexes = [
+            models.Index(fields=['timestamp', 'run_number']),
+        ]
+
+    def __str__(self):
+        return f"Event {self.event_id} - {self.event_type} at {self.timestamp}"
 
 
 class PersistentState(models.Model):
