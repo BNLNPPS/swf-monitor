@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 10-31-2025 04:12PM UTC'''
+  Last Updated At 10-31-2025 06:26PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -108,6 +108,7 @@ enum monitor_app.char_systemagent_agent_type {
   "data" [note: '''Data Agent''']
   "processing" [note: '''Processing Agent''']
   "fastmon" [note: '''Fast Monitoring Agent''']
+  "workflow_runner" [note: '''Workflow Runner''']
   "monitor" [note: '''Monitor System''']
   "sse_sender" [note: '''SSE Test Sender''']
   "sse_receiver" [note: '''SSE Client/Receiver''']
