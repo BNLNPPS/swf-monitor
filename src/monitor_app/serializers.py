@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, TFSlice, Worker, RunState, SystemStateEvent
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowDefinition, WorkflowExecution
 
 class SystemAgentSerializer(serializers.ModelSerializer):
@@ -63,3 +63,29 @@ class WorkflowExecutionSerializer(serializers.ModelSerializer):
 class LogSummarySerializer(serializers.Serializer):
     error_counts = serializers.DictField(child=serializers.IntegerField())
     recent_errors = serializers.ListField(child=serializers.DictField())
+
+
+# Fast Processing models serializers
+
+class TFSliceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TFSlice
+        fields = '__all__'
+
+
+class WorkerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Worker
+        fields = '__all__'
+
+
+class RunStateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RunState
+        fields = '__all__'
+
+
+class SystemStateEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemStateEvent
+        fields = '__all__'

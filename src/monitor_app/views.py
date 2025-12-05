@@ -15,13 +15,14 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
     STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
     RunSerializer, StfFileSerializer, SubscriberSerializer, FastMonFileSerializer,
-    WorkflowDefinitionSerializer, WorkflowExecutionSerializer
+    WorkflowDefinitionSerializer, WorkflowExecutionSerializer,
+    TFSliceSerializer, WorkerSerializer, RunStateSerializer, SystemStateEventSerializer
 )
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -232,6 +233,44 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
     serializer_class = WorkflowExecutionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
+
+
+# Fast Processing API ViewSets
+
+class TFSliceViewSet(viewsets.ModelViewSet):
+    """API endpoint for TF Slices (fast processing workflow)."""
+    queryset = TFSlice.objects.all()
+    serializer_class = TFSliceSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['run_number', 'status', 'stf_filename', 'assigned_worker']
+
+
+class WorkerViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workers (fast processing workflow)."""
+    queryset = Worker.objects.all()
+    serializer_class = WorkerSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['run_number', 'status', 'location']
+
+
+class RunStateViewSet(viewsets.ModelViewSet):
+    """API endpoint for Run State (fast processing workflow)."""
+    queryset = RunState.objects.all()
+    serializer_class = RunStateSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class SystemStateEventViewSet(viewsets.ModelViewSet):
+    """API endpoint for System State Events (fast processing workflow)."""
+    queryset = SystemStateEvent.objects.all()
+    serializer_class = SystemStateEventSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['run_number', 'event_type', 'state']
+
 
 @login_required
 def log_summary(request):
