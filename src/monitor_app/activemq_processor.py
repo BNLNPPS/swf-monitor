@@ -116,9 +116,10 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             # Try to find related workflow
             workflow = self._find_related_workflow(run_id, filename)
             
-            # Determine sender and recipient based on message type and content
-            sender_agent = data.get('processed_by') or self._infer_sender_from_message_type(msg_type)
-            recipient_agent = self._infer_recipient_from_message_type(msg_type)
+            # Extract sender, namespace, and recipient from message
+            sender_agent = data.get('sender')
+            namespace = data.get('namespace')
+            recipient_agent = data.get('recipient')
             
             # Create metadata with originator tracking
             import os, socket
@@ -135,6 +136,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 message_type=msg_type,
                 sender_agent=sender_agent,
                 recipient_agent=recipient_agent,
+                namespace=namespace,
                 message_content=data,
                 message_metadata=metadata,
                 sent_at=timezone.now(),
@@ -146,6 +148,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             enriched = dict(data)
             enriched.setdefault('sender_agent', sender_agent)
             enriched.setdefault('recipient_agent', recipient_agent)
+            enriched.setdefault('namespace', namespace)
             enriched.setdefault('queue_name', getattr(frame, 'destination', 'epictopic'))
             enriched.setdefault('sent_at', timezone.now().isoformat())
 
@@ -196,31 +199,3 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             self.logger.debug(f"Could not find workflow for run_id={run_id}, filename={filename}: {e}")
             return None
     
-    def _infer_sender_from_message_type(self, msg_type):
-        """Infer the sender agent based on message type"""
-        sender_map = {
-            'run_imminent': 'daq-simulator',
-            'start_run': 'daq-simulator', 
-            'stf_gen': 'daq-simulator',
-            'pause_run': 'daq-simulator',
-            'resume_run': 'daq-simulator',
-            'end_run': 'daq-simulator',
-            'data_ready': 'data-agent',
-            'processing_complete': 'processing-agent'
-        }
-        return sender_map.get(msg_type, 'unknown')
-    
-    def _infer_recipient_from_message_type(self, msg_type):
-        """Infer the recipient agent based on message type"""
-        recipient_map = {
-            'run_imminent': 'all-agents',
-            'start_run': 'all-agents',
-            'stf_gen': 'data-agent',
-            'pause_run': 'all-agents', 
-            'resume_run': 'all-agents',
-            'end_run': 'all-agents',
-            'data_ready': 'processing-agent',
-            'processing_complete': 'all-agents',
-            'sse_test': 'all-agents'  # SSE test messages broadcast to all
-        }
-        return recipient_map.get(msg_type, 'unknown')

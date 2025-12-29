@@ -1459,6 +1459,7 @@ def workflow_messages(request):
         'filter_counts_url': reverse('monitor_app:workflow_messages_filter_counts'),
         'columns': [
             {'title': 'Timestamp', 'orderable': True},
+            {'title': 'namespace', 'orderable': True},
             {'title': 'message_type', 'orderable': True},
             {'title': 'sender_agent', 'orderable': True},
             {'title': 'recipient_agent', 'orderable': True},
@@ -1467,6 +1468,7 @@ def workflow_messages(request):
             {'title': 'is_successful', 'orderable': True},
         ],
         'filter_fields': [
+            {'name': 'namespace', 'label': 'namespace', 'type': 'select'},
             {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
             {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
             {'name': 'recipient_agent', 'label': 'recipient_agent', 'type': 'select'},
@@ -1474,6 +1476,7 @@ def workflow_messages(request):
             {'name': 'is_successful', 'label': 'is_successful', 'type': 'select'},
         ],
         # Add current filter values for initial state
+        'selected_namespace': request.GET.get('namespace'),
         'selected_message_type': request.GET.get('message_type'),
         'selected_sender_agent': request.GET.get('sender_agent'),
         'selected_recipient_agent': request.GET.get('recipient_agent'),
@@ -1489,8 +1492,8 @@ def workflow_messages_datatable_ajax(request):
     """AJAX endpoint for workflow messages DataTable server-side processing."""
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
     
-    # Column definitions matching the template order  
-    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'source', 'workflow', 'is_successful']
+    # Column definitions matching the template order
+    columns = ['sent_at', 'namespace', 'message_type', 'sender_agent', 'recipient_agent', 'source', 'workflow', 'is_successful']
     
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
     
@@ -1498,7 +1501,7 @@ def workflow_messages_datatable_ajax(request):
     queryset = WorkflowMessage.objects.select_related('workflow')
     
     # Apply filters
-    filter_params = get_filter_params(request, ['message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+    filter_params = get_filter_params(request, ['namespace', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
     
     # Handle workflow filter - need to map workflow display names to IDs
     if filter_params.get('workflow'):
@@ -1577,6 +1580,7 @@ def workflow_messages_datatable_ajax(request):
         
         row = [
             format_datetime(message.sent_at),
+            message.namespace or '',
             message.message_type,
             sender_link,
             recipient_link,
@@ -1596,13 +1600,13 @@ def get_workflow_messages_filter_counts(request):
     from django.http import JsonResponse
     
     # Get current filters
-    current_filters = get_filter_params(request, ['message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
-    
+    current_filters = get_filter_params(request, ['namespace', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+
     # Base queryset
     queryset = WorkflowMessage.objects.select_related('workflow')
-    
+
     # Calculate counts for each filter
-    filter_fields = ['message_type', 'sender_agent', 'recipient_agent', 'is_successful']
+    filter_fields = ['namespace', 'message_type', 'sender_agent', 'recipient_agent', 'is_successful']
     filter_counts = get_filter_counts(queryset, filter_fields, current_filters)
     
     # Handle workflow filter specially - show filenames instead of IDs

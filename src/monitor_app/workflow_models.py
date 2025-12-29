@@ -261,6 +261,10 @@ class WorkflowMessage(models.Model):
     sender_type = models.CharField(max_length=20, choices=AgentType.choices, null=True, blank=True)
     recipient_agent = models.CharField(max_length=100, null=True, blank=True)
     recipient_type = models.CharField(max_length=20, choices=AgentType.choices, null=True, blank=True)
+
+    # Namespace for multi-user disambiguation
+    namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                 help_text="Testbed namespace for multi-user message filtering")
     
     # Message content
     message_content = models.JSONField()
