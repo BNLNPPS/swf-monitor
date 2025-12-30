@@ -41,7 +41,11 @@ class SystemAgent(models.Model):
     current_stf_count = models.IntegerField(default=0)
     total_stf_processed = models.IntegerField(default=0)
     last_stf_processed = models.DateTimeField(null=True, blank=True)
-    
+
+    # Namespace - identifies the testbed instance this agent belongs to
+    namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                 help_text="Testbed namespace for workflow delineation")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

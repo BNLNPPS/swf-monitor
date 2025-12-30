@@ -111,11 +111,12 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
         try:
             msg_type = data.get('msg_type')
             run_id = data.get('run_id')
+            execution_id = data.get('execution_id')
             filename = data.get('filename')
-            
+
             # Try to find related workflow
             workflow = self._find_related_workflow(run_id, filename)
-            
+
             # Extract sender, namespace, and recipient from message
             sender_agent = data.get('sender')
             namespace = data.get('namespace')
@@ -137,6 +138,8 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 sender_agent=sender_agent,
                 recipient_agent=recipient_agent,
                 namespace=namespace,
+                execution_id=execution_id,
+                run_id=run_id,
                 message_content=data,
                 message_metadata=metadata,
                 sent_at=timezone.now(),

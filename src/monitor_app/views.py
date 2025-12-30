@@ -142,6 +142,7 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
                 'status': request.data.get('status', 'OK'),
                 'agent_url': request.data.get('agent_url', None),
                 'workflow_enabled': request.data.get('workflow_enabled', False),
+                'namespace': request.data.get('namespace'),
                 'last_heartbeat': timezone.now(),
             }
         )
@@ -1437,7 +1438,17 @@ def workflow_agents_datatable_ajax(request):
 def agent_detail(request, instance_name):
     """Display details for a specific agent and its associated workflows."""
     agent = get_object_or_404(SystemAgent, instance_name=instance_name)
-    workflows = STFWorkflow.objects.filter(current_agent=agent.agent_type).order_by('-generated_time')
+
+    # Query workflows by namespace (the workflow delineator)
+    if agent.namespace:
+        workflows = STFWorkflow.objects.filter(namespace=agent.namespace).order_by('-generated_time')
+    else:
+        # Fallback for agents without namespace - show workflows from messages they sent
+        from .workflow_models import WorkflowMessage
+        workflow_ids = WorkflowMessage.objects.filter(
+            sender_agent=instance_name
+        ).values_list('workflow_id', flat=True).distinct()
+        workflows = STFWorkflow.objects.filter(workflow_id__in=workflow_ids).order_by('-generated_time')
 
     context = {
         'agent': agent,
