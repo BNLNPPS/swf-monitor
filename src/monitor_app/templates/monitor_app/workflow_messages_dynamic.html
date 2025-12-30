@@ -5,7 +5,6 @@
     namespace: '{{ selected_namespace|default:"" }}',
     message_type: '{{ selected_message_type|default:"" }}',
     sender_agent: '{{ selected_sender_agent|default:"" }}',
-    recipient_agent: '{{ selected_recipient_agent|default:"" }}',
     workflow: '{{ selected_workflow|default:"" }}',
     is_successful: '{{ selected_is_successful|default:"" }}'
 }
@@ -26,9 +25,6 @@ if (currentFilters.message_type) {
 if (currentFilters.sender_agent) {
     badges.push(`<span class="badge bg-info me-1">sender_agent: ${currentFilters.sender_agent}</span>`);
 }
-if (currentFilters.recipient_agent) {
-    badges.push(`<span class="badge bg-info me-1">recipient_agent: ${currentFilters.recipient_agent}</span>`);
-}
 if (currentFilters.workflow) {
     badges.push(`<span class="badge bg-info me-1">workflow: ${currentFilters.workflow}</span>`);
 }
@@ -48,7 +44,6 @@ $('.filter-link').removeClass('filter-active');
 $('.filter-link[data-filter="namespace"][data-value="' + currentFilters.namespace + '"]').addClass('filter-active');
 $('.filter-link[data-filter="message_type"][data-value="' + currentFilters.message_type + '"]').addClass('filter-active');
 $('.filter-link[data-filter="sender_agent"][data-value="' + currentFilters.sender_agent + '"]').addClass('filter-active');
-$('.filter-link[data-filter="recipient_agent"][data-value="' + currentFilters.recipient_agent + '"]').addClass('filter-active');
 $('.filter-link[data-filter="workflow"][data-value="' + currentFilters.workflow + '"]').addClass('filter-active');
 $('.filter-link[data-filter="is_successful"][data-value="' + currentFilters.is_successful + '"]').addClass('filter-active');
 {% endblock %}

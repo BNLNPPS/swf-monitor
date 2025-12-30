@@ -1462,7 +1462,6 @@ def workflow_messages(request):
             {'title': 'namespace', 'orderable': True},
             {'title': 'message_type', 'orderable': True},
             {'title': 'sender_agent', 'orderable': True},
-            {'title': 'recipient_agent', 'orderable': True},
             {'title': 'source', 'orderable': True},
             {'title': 'workflow', 'orderable': True},
             {'title': 'is_successful', 'orderable': True},
@@ -1471,7 +1470,6 @@ def workflow_messages(request):
             {'name': 'namespace', 'label': 'namespace', 'type': 'select'},
             {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
             {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
-            {'name': 'recipient_agent', 'label': 'recipient_agent', 'type': 'select'},
             {'name': 'workflow', 'label': 'workflow', 'type': 'select'},
             {'name': 'is_successful', 'label': 'is_successful', 'type': 'select'},
         ],
@@ -1479,7 +1477,6 @@ def workflow_messages(request):
         'selected_namespace': request.GET.get('namespace'),
         'selected_message_type': request.GET.get('message_type'),
         'selected_sender_agent': request.GET.get('sender_agent'),
-        'selected_recipient_agent': request.GET.get('recipient_agent'),
         'selected_workflow': request.GET.get('workflow'),
         'selected_is_successful': request.GET.get('is_successful'),
     }
@@ -1493,7 +1490,7 @@ def workflow_messages_datatable_ajax(request):
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
     
     # Column definitions matching the template order
-    columns = ['sent_at', 'namespace', 'message_type', 'sender_agent', 'recipient_agent', 'source', 'workflow', 'is_successful']
+    columns = ['sent_at', 'namespace', 'message_type', 'sender_agent', 'source', 'workflow', 'is_successful']
     
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
     
@@ -1559,17 +1556,7 @@ def workflow_messages_datatable_ajax(request):
         
         # Format agent links
         sender_link = f'<a href="{reverse("monitor_app:agent_detail", args=[message.sender_agent])}">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
-        
-        # Handle special case for "all-agents" recipient
-        if message.recipient_agent == 'all-agents':
-            workflow_agents_url = reverse('monitor_app:workflow_agents_list')
-            recipient_link = f'<a href="{workflow_agents_url}">{message.recipient_agent}</a>'
-        elif message.recipient_agent:
-            agent_detail_url = reverse('monitor_app:agent_detail', args=[message.recipient_agent])
-            recipient_link = f'<a href="{agent_detail_url}">{message.recipient_agent}</a>'
-        else:
-            recipient_link = 'N/A'
-        
+
         # Extract source from message_metadata
         source = 'Unknown'
         if message.message_metadata and isinstance(message.message_metadata, dict):
@@ -1583,7 +1570,6 @@ def workflow_messages_datatable_ajax(request):
             message.namespace or '',
             message.message_type,
             sender_link,
-            recipient_link,
             source,
             workflow_link,
             status,
@@ -1600,13 +1586,13 @@ def get_workflow_messages_filter_counts(request):
     from django.http import JsonResponse
     
     # Get current filters
-    current_filters = get_filter_params(request, ['namespace', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+    current_filters = get_filter_params(request, ['namespace', 'message_type', 'sender_agent', 'workflow', 'is_successful'])
 
     # Base queryset
     queryset = WorkflowMessage.objects.select_related('workflow')
 
     # Calculate counts for each filter
-    filter_fields = ['namespace', 'message_type', 'sender_agent', 'recipient_agent', 'is_successful']
+    filter_fields = ['namespace', 'message_type', 'sender_agent', 'is_successful']
     filter_counts = get_filter_counts(queryset, filter_fields, current_filters)
     
     # Handle workflow filter specially - show filenames instead of IDs
