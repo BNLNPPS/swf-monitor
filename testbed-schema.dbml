@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 10-31-2025 06:26PM UTC'''
+  Last Updated At 12-30-2025 05:27PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -634,6 +634,9 @@ and tracks the STF as it moves through different agents in the pipeline.
   workflow_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
   filename char [unique, not null]
   file_id uuid [null]
+  namespace char [note: '''Testbed namespace for workflow delineation''', null]
+  execution_id char [note: '''Workflow execution instance ID''', null]
+  run_id char [note: '''Run number within execution''', null]
   daq_state monitor_app.char_stfworkflow_daq_state [not null]
   daq_substate monitor_app.char_stfworkflow_daq_substate [not null]
   generated_time date_time [not null]
@@ -652,8 +655,13 @@ and tracks the STF as it moves through different agents in the pipeline.
     (current_status,generated_time) [name: 'swf_stf_wor_current_2362bd_idx', type: btree]
     (current_agent) [name: 'swf_stf_wor_current_b6bc73_idx', type: btree]
     (daq_state,daq_substate) [name: 'swf_stf_wor_daq_sta_d7effc_idx', type: btree]
+    (namespace,run_id) [name: 'swf_stf_wor_namespa_22a7e6_idx', type: btree]
+    (namespace,execution_id) [name: 'swf_stf_wor_namespa_e6efb3_idx', type: btree]
+    (execution_id) [name: 'swf_stf_workflows_execution_id_101eace0', type: btree]
     (filename) [unique, name: 'swf_stf_workflows_filename_key', type: btree]
+    (namespace) [name: 'swf_stf_workflows_namespace_f373e34c', type: btree]
     (workflow_id) [pk, unique, name: 'swf_stf_workflows_pkey', type: btree]
+    (run_id) [name: 'swf_stf_workflows_run_id_eb2b160c', type: btree]
   }
 }
 
@@ -757,7 +765,7 @@ messages_dropped: Count of messages dropped due to queue overflow (SSE)
 
 Table monitor_app.SystemAgent {
   Note: '''
-SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, agent_url, workflow_enabled, current_stf_count, total_stf_processed, last_stf_processed, created_at, updated_at)
+SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, agent_url, workflow_enabled, current_stf_count, total_stf_processed, last_stf_processed, namespace, created_at, updated_at)
 
 *DB table: swf_systemagent*'''
 
@@ -772,11 +780,13 @@ SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, 
   current_stf_count integer [default:`0`, not null]
   total_stf_processed integer [default:`0`, not null]
   last_stf_processed date_time [null]
+  namespace char [note: '''Testbed namespace for workflow delineation''', null]
   created_at date_time [not null]
   updated_at date_time [not null]
 
   indexes {
     (instance_name) [unique, name: 'swf_systemagent_instance_name_key', type: btree]
+    (namespace) [name: 'swf_systemagent_namespace_095b5b2c', type: btree]
     (id) [pk, unique, name: 'swf_systemagent_pkey', type: btree]
   }
 }
@@ -944,6 +954,9 @@ Provides workflow-specific message tracking with agent identification and messag
   sender_type monitor_app.char_workflowmessage_sender_type [null]
   recipient_agent char [null]
   recipient_type monitor_app.char_workflowmessage_recipient_type [null]
+  namespace char [note: '''Testbed namespace for multi-user message filtering''', null]
+  execution_id char [note: '''Workflow execution instance ID''', null]
+  run_id char [note: '''Run number within execution''', null]
   message_content json [not null]
   message_metadata json [note: '''Extensible metadata for monitoring, debugging, and system tracking''', default:`builtins.dict()`, null]
   sent_at date_time [not null]
@@ -956,9 +969,14 @@ Provides workflow-specific message tracking with agent identification and messag
 
   indexes {
     (message_type,sent_at) [name: 'swf_workflo_message_cb52f7_idx', type: btree]
+    (namespace,execution_id) [name: 'swf_workflo_namespa_5ae127_idx', type: btree]
+    (namespace,run_id) [name: 'swf_workflo_namespa_dd7c26_idx', type: btree]
     (sender_agent,sent_at) [name: 'swf_workflo_sender__34fb10_idx', type: btree]
     (workflow_id,message_type) [name: 'swf_workflo_workflo_0fe275_idx', type: btree]
+    (execution_id) [name: 'swf_workflow_messages_execution_id_79347dfb', type: btree]
+    (namespace) [name: 'swf_workflow_messages_namespace_6ecc2826', type: btree]
     (message_id) [pk, unique, name: 'swf_workflow_messages_pkey', type: btree]
+    (run_id) [name: 'swf_workflow_messages_run_id_132ff43b', type: btree]
     (stage_id) [name: 'swf_workflow_messages_stage_id_221b9ea1', type: btree]
     (workflow_id) [name: 'swf_workflow_messages_workflow_id_0515ebc8', type: btree]
   }
