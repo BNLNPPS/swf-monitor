@@ -1444,22 +1444,47 @@ def agent_detail(request, instance_name):
 
     if agent.namespace:
         # Filter by namespace and agent as sender
-        messages = WorkflowMessage.objects.filter(
+        agent_messages = WorkflowMessage.objects.filter(
             namespace=agent.namespace,
             sender_agent=instance_name
         ).order_by('-sent_at')[:100]
     else:
         # No namespace - just filter by sender
-        messages = WorkflowMessage.objects.filter(
+        agent_messages = WorkflowMessage.objects.filter(
             sender_agent=instance_name
         ).order_by('-sent_at')[:100]
 
     context = {
         'agent': agent,
-        'messages': messages,
+        'agent_messages': agent_messages,
     }
     return render(request, 'monitor_app/agent_detail.html', context)
 
+
+@login_required
+def message_detail(request, message_id):
+    """Display details for a specific workflow message."""
+    from .workflow_models import WorkflowMessage
+    message = get_object_or_404(WorkflowMessage, message_id=message_id)
+
+    # Flatten JSON content for display
+    content_items = []
+    if message.message_content and isinstance(message.message_content, dict):
+        for key, value in message.message_content.items():
+            content_items.append({'key': key, 'value': value})
+
+    # Flatten metadata for display
+    metadata_items = []
+    if message.message_metadata and isinstance(message.message_metadata, dict):
+        for key, value in message.message_metadata.items():
+            metadata_items.append({'key': key, 'value': value})
+
+    context = {
+        'message': message,
+        'content_items': content_items,
+        'metadata_items': metadata_items,
+    }
+    return render(request, 'monitor_app/message_detail.html', context)
 
 
 @login_required
@@ -1580,8 +1605,12 @@ def workflow_messages_datatable_ajax(request):
         # Apply smaller font to source for less column width
         source = f'<span style="font-size: 0.8rem;">{source}</span>'
         
+        # Format timestamp as link to message detail
+        message_detail_url = reverse('monitor_app:message_detail', args=[message.message_id])
+        timestamp_link = f'<a href="{message_detail_url}">{format_datetime(message.sent_at)}</a>'
+
         row = [
-            format_datetime(message.sent_at),
+            timestamp_link,
             message.namespace or '',
             message.message_type,
             sender_link,

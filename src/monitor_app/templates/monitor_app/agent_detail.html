@@ -10,7 +10,7 @@
     <p><strong>Last Heartbeat:</strong> {{ agent.last_heartbeat|date:"Ymd-H:i:s" }}</p>
     <p><strong>Description:</strong> {{ agent.description }}</p>
 
-    <h3 class="mt-5">Workflow Message Activity</h3>
+    <h3 class="mt-5">Agent Message Activity</h3>
     <p>Recent messages sent by this agent (up to 100).</p>
 
     <!-- DataTables CSS -->
@@ -28,9 +28,9 @@
                 </tr>
             </thead>
             <tbody>
-                {% for msg in messages %}
+                {% for msg in agent_messages %}
                 <tr>
-                    <td>{{ msg.sent_at|date:"Ymd-H:i:s"|default:"—" }}</td>
+                    <td><a href="{% url 'monitor_app:message_detail' msg.message_id %}">{{ msg.sent_at|date:"Ymd-H:i:s"|default:"—" }}</a></td>
                     <td>{{ msg.message_type|default:"—" }}</td>
                     <td>{{ msg.namespace|default:"—" }}</td>
                     <td>{{ msg.run_id|default:"—" }}</td>
