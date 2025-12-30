@@ -5,7 +5,7 @@ import time
 from django.utils import timezone
 from django.db import connection
 from .models import SystemAgent
-from .workflow_models import WorkflowMessage, STFWorkflow
+from .workflow_models import WorkflowMessage
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -114,9 +114,6 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             execution_id = data.get('execution_id')
             filename = data.get('filename')
 
-            # Try to find related workflow
-            workflow = self._find_related_workflow(run_id, filename)
-
             # Extract sender, namespace, and recipient from message
             sender_agent = data.get('sender')
             namespace = data.get('namespace')
@@ -133,7 +130,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
 
             # Create WorkflowMessage record
             workflow_message = WorkflowMessage.objects.create(
-                workflow=workflow,
+                workflow=None,
                 message_type=msg_type,
                 sender_agent=sender_agent,
                 recipient_agent=recipient_agent,
@@ -180,25 +177,4 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
         except Exception as e:
             self.logger.error(f"Error processing workflow message: {e}")
             self.logger.debug(f"Message data: {data}")
-    
-    def _find_related_workflow(self, run_id, filename):
-        """Find related STFWorkflow record"""
-        if not run_id:
-            return None
-        
-        try:
-            # Try exact match first (run_id + filename)
-            if filename:
-                workflow = STFWorkflow.objects.filter(
-                    run_id=run_id, filename=filename
-                ).first()
-                if workflow:
-                    return workflow
-            
-            # Fallback to run_id only
-            return STFWorkflow.objects.filter(run_id=run_id).first()
-            
-        except Exception as e:
-            self.logger.debug(f"Could not find workflow for run_id={run_id}, filename={filename}: {e}")
-            return None
     

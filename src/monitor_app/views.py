@@ -1436,23 +1436,27 @@ def workflow_agents_datatable_ajax(request):
 
 @login_required
 def agent_detail(request, instance_name):
-    """Display details for a specific agent and its associated workflows."""
+    """Display details for a specific agent and its workflow message activity."""
     agent = get_object_or_404(SystemAgent, instance_name=instance_name)
 
-    # Query workflows by namespace (the workflow delineator)
+    # Query messages where this agent is the sender
+    from .workflow_models import WorkflowMessage
+
     if agent.namespace:
-        workflows = STFWorkflow.objects.filter(namespace=agent.namespace).order_by('-generated_time')
-    else:
-        # Fallback for agents without namespace - show workflows from messages they sent
-        from .workflow_models import WorkflowMessage
-        workflow_ids = WorkflowMessage.objects.filter(
+        # Filter by namespace and agent as sender
+        messages = WorkflowMessage.objects.filter(
+            namespace=agent.namespace,
             sender_agent=instance_name
-        ).values_list('workflow_id', flat=True).distinct()
-        workflows = STFWorkflow.objects.filter(workflow_id__in=workflow_ids).order_by('-generated_time')
+        ).order_by('-sent_at')[:100]
+    else:
+        # No namespace - just filter by sender
+        messages = WorkflowMessage.objects.filter(
+            sender_agent=instance_name
+        ).order_by('-sent_at')[:100]
 
     context = {
         'agent': agent,
-        'workflows': workflows,
+        'messages': messages,
     }
     return render(request, 'monitor_app/agent_detail.html', context)
 
