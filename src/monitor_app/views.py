@@ -1508,6 +1508,7 @@ def workflow_messages(request):
         ],
         'filter_fields': [
             {'name': 'namespace', 'label': 'namespace', 'type': 'select'},
+            {'name': 'execution_id', 'label': 'execution_id', 'type': 'select'},
             {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
             {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
             {'name': 'workflow', 'label': 'workflow', 'type': 'select'},
@@ -1515,6 +1516,7 @@ def workflow_messages(request):
         ],
         # Add current filter values for initial state
         'selected_namespace': request.GET.get('namespace'),
+        'selected_execution_id': request.GET.get('execution_id'),
         'selected_message_type': request.GET.get('message_type'),
         'selected_sender_agent': request.GET.get('sender_agent'),
         'selected_workflow': request.GET.get('workflow'),
@@ -1538,7 +1540,7 @@ def workflow_messages_datatable_ajax(request):
     queryset = WorkflowMessage.objects.select_related('workflow')
     
     # Apply filters
-    filter_params = get_filter_params(request, ['namespace', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+    filter_params = get_filter_params(request, ['namespace', 'execution_id', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
     
     # Handle workflow filter - need to map workflow display names to IDs
     if filter_params.get('workflow'):
@@ -1630,13 +1632,13 @@ def get_workflow_messages_filter_counts(request):
     from django.http import JsonResponse
     
     # Get current filters
-    current_filters = get_filter_params(request, ['namespace', 'message_type', 'sender_agent', 'workflow', 'is_successful'])
+    current_filters = get_filter_params(request, ['namespace', 'execution_id', 'message_type', 'sender_agent', 'workflow', 'is_successful'])
 
     # Base queryset
     queryset = WorkflowMessage.objects.select_related('workflow')
 
     # Calculate counts for each filter
-    filter_fields = ['namespace', 'message_type', 'sender_agent', 'is_successful']
+    filter_fields = ['namespace', 'execution_id', 'message_type', 'sender_agent', 'is_successful']
     filter_counts = get_filter_counts(queryset, filter_fields, current_filters)
     
     # Handle workflow filter specially - show filenames instead of IDs

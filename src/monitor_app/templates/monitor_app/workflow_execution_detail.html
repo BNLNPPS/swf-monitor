@@ -47,6 +47,10 @@
                             <td>{{ execution.executed_by }}</td>
                         </tr>
                         <tr>
+                            <th>Messages:</th>
+                            <td><a href="{% url 'monitor_app:workflow_messages' %}?execution_id={{ execution.execution_id }}">View Messages</a></td>
+                        </tr>
+                        <tr>
                             <th>Started:</th>
                             <td>{{ execution.start_time }}</td>
                         </tr>

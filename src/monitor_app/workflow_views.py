@@ -148,6 +148,7 @@ def workflow_executions_list(request):
         {'name': 'execution_id', 'title': 'Execution ID', 'orderable': True},
         {'name': 'workflow', 'title': 'Workflow', 'orderable': True},
         {'name': 'status', 'title': 'Status', 'orderable': True},
+        {'name': 'stf_count', 'title': 'STFs', 'orderable': False},
         {'name': 'executed_by', 'title': 'Executed By', 'orderable': True},
         {'name': 'start_time', 'title': 'Started', 'orderable': True},
         {'name': 'duration', 'title': 'Duration', 'orderable': True},
@@ -179,9 +180,10 @@ def workflow_executions_list(request):
 def workflow_executions_datatable_ajax(request):
     """AJAX endpoint for server-side DataTables processing of workflow executions."""
     from .utils import DataTablesProcessor, format_datetime, format_duration
+    from .workflow_models import WorkflowMessage
 
-    columns = ['execution_id', 'workflow', 'status', 'executed_by', 'start_time', 'duration', 'actions']
-    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')
+    columns = ['execution_id', 'workflow', 'status', 'stf_count', 'executed_by', 'start_time', 'duration', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=5, default_order_direction='desc')
 
     # Build queryset
     queryset = WorkflowExecution.objects.select_related('workflow_definition')
@@ -221,10 +223,17 @@ def workflow_executions_datatable_ajax(request):
         else:
             duration_str = '-'
 
+        # Count STF messages for this execution
+        stf_count = WorkflowMessage.objects.filter(
+            execution_id=execution.execution_id,
+            message_type='stf_gen'
+        ).count()
+
         data.append([
             f'<a href="{reverse("monitor_app:workflow_execution_detail", args=[execution.execution_id])}" class="text-decoration-none">{execution.execution_id}</a>',
             f"{execution.workflow_definition.workflow_name} v{execution.workflow_definition.version}",
             execution.status,
+            str(stf_count),
             execution.executed_by,
             format_datetime(execution.start_time),
             duration_str,
