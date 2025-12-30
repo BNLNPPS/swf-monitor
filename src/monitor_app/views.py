@@ -1436,29 +1436,9 @@ def workflow_agents_datatable_ajax(request):
 
 @login_required
 def agent_detail(request, instance_name):
-    """Display details for a specific agent and its workflow message activity."""
+    """Display details for a specific agent."""
     agent = get_object_or_404(SystemAgent, instance_name=instance_name)
-
-    # Query messages where this agent is the sender
-    from .workflow_models import WorkflowMessage
-
-    if agent.namespace:
-        # Filter by namespace and agent as sender
-        agent_messages = WorkflowMessage.objects.filter(
-            namespace=agent.namespace,
-            sender_agent=instance_name
-        ).order_by('-sent_at')[:100]
-    else:
-        # No namespace - just filter by sender
-        agent_messages = WorkflowMessage.objects.filter(
-            sender_agent=instance_name
-        ).order_by('-sent_at')[:100]
-
-    context = {
-        'agent': agent,
-        'agent_messages': agent_messages,
-    }
-    return render(request, 'monitor_app/agent_detail.html', context)
+    return render(request, 'monitor_app/agent_detail.html', {'agent': agent})
 
 
 @login_required

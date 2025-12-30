@@ -9,70 +9,9 @@
     <p><strong>Status:</strong> {{ agent.status }}</p>
     <p><strong>Last Heartbeat:</strong> {{ agent.last_heartbeat|date:"Ymd-H:i:s" }}</p>
     <p><strong>Description:</strong> {{ agent.description }}</p>
+    {% if agent.namespace %}<p><strong>Namespace:</strong> {{ agent.namespace }}</p>{% endif %}
 
-    <h3 class="mt-5">Agent Message Activity</h3>
-    <p>Recent messages sent by this agent (up to 100).</p>
-
-    <!-- DataTables CSS -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
-
-    <div class="table-responsive">
-        <table id="workflows-table" class="table table-striped table-bordered table-sm">
-            <thead class="thead-dark">
-                <tr>
-                    <th>Timestamp</th>
-                    <th>Type</th>
-                    <th>Namespace</th>
-                    <th>Run ID</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for msg in agent_messages %}
-                <tr>
-                    <td><a href="{% url 'monitor_app:message_detail' msg.message_id %}">{{ msg.sent_at|date:"Ymd-H:i:s"|default:"—" }}</a></td>
-                    <td>{{ msg.message_type|default:"—" }}</td>
-                    <td>{{ msg.namespace|default:"—" }}</td>
-                    <td>{{ msg.run_id|default:"—" }}</td>
-                    <td>{% if msg.is_successful %}<span class="badge bg-success">OK</span>{% elif msg.is_successful == False %}<span class="badge bg-danger">Failed</span>{% else %}<span class="badge bg-secondary">—</span>{% endif %}</td>
-                </tr>
-                {% empty %}
-                <tr class="empty-state-row">
-                    <td colspan="5">No messages from this agent.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- DataTables JS -->
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-    <script>
-      $(document).ready(function() {
-        // Only initialize DataTables if there are actual data rows (not empty state)
-        if ($('#workflows-table tbody tr').length > 0 && !$('#workflows-table tbody tr.empty-state-row').length) {
-          $('#workflows-table').DataTable({
-            paging: true,
-            pageLength: 50,
-            lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, 'All']],
-            ordering: true,
-            order: [[4, 'desc']],
-            info: true,
-            searching: true,
-            responsive: true,
-            search: {
-              caseInsensitive: true,
-              smart: false,
-              regex: false
-            },
-            language: {
-              search: "Filter table:",
-              emptyTable: "No workflows found matching your criteria."
-            }
-          });
-        }
-      });
-    </script>
+    <h3 class="mt-4">Messages</h3>
+    <p><a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}" class="btn btn-primary">View Messages from this Agent &rarr;</a></p>
 </div>
 {% endblock %}
