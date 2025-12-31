@@ -1320,7 +1320,17 @@ def workflow_detail(request, workflow_id):
 def workflow_agents_list(request):
     """View showing the status of all workflow agents using server-side DataTables."""
     from django.urls import reverse
-    
+
+    # Get namespace filter from URL params
+    selected_namespace = request.GET.get('namespace', '')
+
+    # Get distinct namespaces for filter bar
+    namespaces = list(SystemAgent.objects.exclude(
+        namespace__isnull=True
+    ).exclude(
+        namespace=''
+    ).values_list('namespace', flat=True).distinct().order_by('namespace'))
+
     context = {
         'table_title': 'Agent Status',
         'table_description': 'Status and statistics for all agents.',
@@ -1329,15 +1339,18 @@ def workflow_agents_list(request):
             {'title': 'Agent Name', 'orderable': True},
             {'title': 'Type', 'orderable': True},
             {'title': 'Status', 'orderable': True},
+            {'title': 'Namespace', 'orderable': True},
             {'title': 'Last Heartbeat', 'orderable': True},
             {'title': 'Currently Processing', 'orderable': True},
             {'title': 'Recently Completed (1hr)', 'orderable': True},
             {'title': 'Total Processed', 'orderable': True},
         ],
-        'filter_fields': [],  # No filters for this view
-        'default_order': [[3, 'desc']],  # Default sort by Last Heartbeat descending
+        'filter_fields': [],  # Handled in template
+        'default_order': [[4, 'desc']],  # Default sort by Last Heartbeat descending
+        'selected_namespace': selected_namespace,
+        'namespaces': namespaces,
     }
-    
+
     return render(request, 'monitor_app/workflow_agents_list_dynamic.html', context)
 
 
@@ -1348,9 +1361,9 @@ def workflow_agents_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime
     
     # Column definitions matching the template order
-    columns = ['instance_name', 'agent_type', 'status', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
+    columns = ['instance_name', 'agent_type', 'status', 'namespace', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
 
-    dt = DataTablesProcessor(request, columns, default_order_column=3, default_order_direction='desc')  # Sort by last_heartbeat descending
+    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')  # Sort by last_heartbeat descending
     
     # Base queryset - show all agents, not just workflow-enabled ones
     queryset = SystemAgent.objects.all()
@@ -1418,10 +1431,18 @@ def workflow_agents_datatable_ajax(request):
         # Format heartbeat - sorting is now handled at database level
         heartbeat_cell = format_datetime(agent.last_heartbeat) if agent.last_heartbeat else 'Never'
 
+        # Format namespace as link if set
+        if agent.namespace:
+            namespace_url = reverse('monitor_app:namespace_detail', args=[agent.namespace])
+            namespace_cell = f'<a href="{namespace_url}">{agent.namespace}</a>'
+        else:
+            namespace_cell = '<em class="text-muted">-</em>'
+
         row = [
             agent_link,
             agent.get_agent_type_display(),
             status_badge,
+            namespace_cell,
             heartbeat_cell,
             str(current_stages),
             str(recent_completed),
