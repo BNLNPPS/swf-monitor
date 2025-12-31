@@ -1982,6 +1982,57 @@ def get_next_workflow_execution_id(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def ensure_namespace(request):
+    """
+    API endpoint to ensure a namespace exists, creating it if not.
+
+    Request body:
+        name: namespace name (required)
+        owner: owner username (required)
+        description: optional description (defaults to empty string)
+
+    Returns the namespace record (created or existing).
+    """
+    from .workflow_models import Namespace
+
+    name = request.data.get('name')
+    owner = request.data.get('owner')
+    description = request.data.get('description', '')
+
+    if not name:
+        return Response({
+            'error': 'name is required',
+            'status': 'error'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if not owner:
+        return Response({
+            'error': 'owner is required',
+            'status': 'error'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        namespace, created = Namespace.objects.get_or_create(
+            name=name,
+            defaults={'owner': owner, 'description': description}
+        )
+        return Response({
+            'name': namespace.name,
+            'owner': namespace.owner,
+            'description': namespace.description,
+            'created': created,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
 
 @login_required

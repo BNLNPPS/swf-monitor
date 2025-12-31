@@ -370,3 +370,23 @@ class WorkflowExecution(models.Model):
 
     def __str__(self):
         return f"Execution {self.execution_id} ({self.status})"
+
+
+class Namespace(models.Model):
+    """
+    Testbed namespace for workflow isolation and multi-user environments.
+    Namespaces group agents, executions, and messages for a particular user or purpose.
+    """
+    name = models.CharField(max_length=100, primary_key=True)
+    owner = models.CharField(max_length=100, help_text="Username of namespace owner")
+    description = models.TextField(blank=True)
+    metadata = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_namespace'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
