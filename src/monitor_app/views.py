@@ -291,14 +291,14 @@ def log_summary(request):
     app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
     instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
 
-    # Extract instance types from instance names (e.g., "workflow_runner-agent-wenauseic-25" -> "workflow_runner-agent")
+    # Extract agent types by stripping trailing -number (e.g., "workflow_runner-agent-wenauseic-25" -> "workflow_runner-agent-wenauseic")
     def extract_type(name):
         if not name:
             return None
-        parts = name.rsplit('-', 2)  # Split from right, max 2 splits
-        if len(parts) >= 3:
-            return parts[0]  # Return the type part
-        return name  # If not enough parts, return as-is
+        parts = name.rsplit('-', 1)  # Split from right, max 1 split
+        if len(parts) == 2 and parts[1].isdigit():
+            return parts[0]  # Return everything except the -number
+        return name  # If no trailing number, return as-is
 
     instance_types = sorted(set([extract_type(name) for name in instance_names if extract_type(name)]), key=lambda x: x.lower())
 
@@ -352,10 +352,12 @@ def log_summary_datatable_ajax(request):
     filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
     base_queryset = apply_filters(base_queryset, filters)
 
-    # Apply instance_type filter (prefix match on instance_name)
+    # Apply instance_type filter (match instances with this base name, with or without trailing -number)
     instance_type = request.GET.get('instance_type')
     if instance_type:
-        base_queryset = base_queryset.filter(instance_name__startswith=instance_type + '-')
+        base_queryset = base_queryset.filter(
+            Q(instance_name__startswith=instance_type + '-') | Q(instance_name=instance_type)
+        )
     
     # Create summary queryset - one row per app/instance pair
     summary_queryset = (

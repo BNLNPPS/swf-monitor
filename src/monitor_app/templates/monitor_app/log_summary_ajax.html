@@ -18,7 +18,7 @@
                 {% endfor %}
             </div>
             <div style="margin-bottom: 0.5em;">
-                <span style="font-weight: 600;">Agent Type:</span>
+                <span style="font-weight: 600;">Agent:</span>
                 <a href="#" data-filter="instance_type" data-value="" class="filter-link {% if not selected_instance_type %}filter-active{% endif %}">All</a>
                 {% for itype in instance_types %}
                     <a href="#" data-filter="instance_type" data-value="{{ itype }}" class="filter-link {% if selected_instance_type == itype %}filter-active{% endif %}">{{ itype }}</a>
