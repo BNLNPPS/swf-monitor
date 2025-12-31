@@ -18,10 +18,17 @@
                 {% endfor %}
             </div>
             <div style="margin-bottom: 0.5em;">
-                <span style="font-weight: 600;">Instance Type:</span>
+                <span style="font-weight: 600;">Agent Type:</span>
                 <a href="#" data-filter="instance_type" data-value="" class="filter-link {% if not selected_instance_type %}filter-active{% endif %}">All</a>
                 {% for itype in instance_types %}
                     <a href="#" data-filter="instance_type" data-value="{{ itype }}" class="filter-link {% if selected_instance_type == itype %}filter-active{% endif %}">{{ itype }}</a>
+                {% endfor %}
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Agent Instance:</span>
+                <a href="#" data-filter="instance_name" data-value="" class="filter-link {% if not selected_instance %}filter-active{% endif %}">All</a>
+                {% for inst in instance_names %}
+                    <a href="#" data-filter="instance_name" data-value="{{ inst }}" class="filter-link {% if selected_instance == inst %}filter-active{% endif %}">{{ inst }}</a>
                 {% endfor %}
             </div>
             <div style="margin-bottom: 0.5em;">
@@ -49,6 +56,7 @@
 {
     app_name: '{{ selected_app|default:"" }}',
     instance_type: '{{ selected_instance_type|default:"" }}',
+    instance_name: '{{ selected_instance|default:"" }}',
     levelname: '{{ selected_levelname|default:"" }}'
 }
 {% endblock %}
@@ -60,6 +68,7 @@ const badges = [];
 const parts = [];
 if (currentFilters.app_name) parts.push(`App:${currentFilters.app_name}`);
 if (currentFilters.instance_type) parts.push(`Type:${currentFilters.instance_type}`);
+if (currentFilters.instance_name) parts.push(`Instance:${currentFilters.instance_name}`);
 if (currentFilters.levelname) parts.push(`Level:${currentFilters.levelname}`);
 
 if (parts.length > 0) {
@@ -77,6 +86,7 @@ if (badges.length > 0) {
 $('.filter-link').removeClass('filter-active');
 $('.filter-link[data-filter="app_name"][data-value="' + currentFilters.app_name + '"]').addClass('filter-active');
 $('.filter-link[data-filter="instance_type"][data-value="' + currentFilters.instance_type + '"]').addClass('filter-active');
+$('.filter-link[data-filter="instance_name"][data-value="' + currentFilters.instance_name + '"]').addClass('filter-active');
 $('.filter-link[data-filter="levelname"][data-value="' + currentFilters.levelname + '"]').addClass('filter-active');
 {% endblock %}
 
@@ -94,6 +104,7 @@ $('.filter-link').on('click', function(e) {
 $('#clear-all-filters').on('click', function() {
     window.tableCurrentFilters.app_name = '';
     window.tableCurrentFilters.instance_type = '';
+    window.tableCurrentFilters.instance_name = '';
     window.tableCurrentFilters.levelname = '';
     window.tableUpdateFilters();
 });
