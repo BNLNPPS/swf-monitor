@@ -1,7 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 12-30-2025 05:27PM UTC'''
+  Last Updated At 12-31-2025 04:59PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -765,7 +765,7 @@ messages_dropped: Count of messages dropped due to queue overflow (SSE)
 
 Table monitor_app.SystemAgent {
   Note: '''
-SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, agent_url, workflow_enabled, current_stf_count, total_stf_processed, last_stf_processed, namespace, created_at, updated_at)
+SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, agent_url, workflow_enabled, current_stf_count, total_stf_processed, last_stf_processed, namespace, metadata, created_at, updated_at)
 
 *DB table: swf_systemagent*'''
 
@@ -781,6 +781,7 @@ SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, 
   total_stf_processed integer [default:`0`, not null]
   last_stf_processed date_time [null]
   namespace char [note: '''Testbed namespace for workflow delineation''', null]
+  metadata json [note: '''Extensible metadata for agent configuration and state''', null]
   created_at date_time [not null]
   updated_at date_time [not null]
 
@@ -921,6 +922,7 @@ Tracks individual workflow execution instances.
 
   execution_id char [note: '''Human-readable execution ID''', pk, unique, not null]
   workflow_definition_id foreign_key [not null]
+  namespace char [note: '''Testbed namespace for workflow delineation''', null]
   parameter_values json [note: '''Actual parameter values used for this execution''', not null]
   performance_metrics json [note: '''Performance metrics and results''', null]
   status char [note: '''Flexible execution status''', default:`"pending"`, not null]
@@ -929,6 +931,7 @@ Tracks individual workflow execution instances.
   executed_by char [note: '''Username who executed this workflow''', not null]
 
   indexes {
+    (namespace) [name: 'swf_workflow_executions_namespace_da80237b', type: btree]
     (execution_id) [pk, unique, name: 'swf_workflow_executions_pkey', type: btree]
     (workflow_definition_id) [name: 'swf_workflow_executions_workflow_definition_id_527d2e0a', type: btree]
   }
