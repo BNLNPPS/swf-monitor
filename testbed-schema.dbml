@@ -2,6 +2,7 @@ Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
   Last Updated At 12-31-2025 04:59PM UTC'''
+
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
