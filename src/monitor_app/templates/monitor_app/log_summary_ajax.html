@@ -18,13 +18,13 @@
                 {% endfor %}
             </div>
             <div style="margin-bottom: 0.5em;">
-                <span style="font-weight: 600;">Instances:</span>
-                <a href="#" data-filter="instance_name" data-value="" class="filter-link {% if not selected_instance %}filter-active{% endif %}">All</a>
-                {% for inst in instance_names %}
-                    <a href="#" data-filter="instance_name" data-value="{{ inst }}" class="filter-link {% if selected_instance == inst %}filter-active{% endif %}">{{ inst }}</a>
+                <span style="font-weight: 600;">Instance Type:</span>
+                <a href="#" data-filter="instance_type" data-value="" class="filter-link {% if not selected_instance_type %}filter-active{% endif %}">All</a>
+                {% for itype in instance_types %}
+                    <a href="#" data-filter="instance_type" data-value="{{ itype }}" class="filter-link {% if selected_instance_type == itype %}filter-active{% endif %}">{{ itype }}</a>
                 {% endfor %}
             </div>
-            <div>
+            <div style="margin-bottom: 0.5em;">
                 <span style="font-weight: 600;">Levels:</span>
                 <a href="#" data-filter="levelname" data-value="" class="filter-link {% if not selected_levelname %}filter-active{% endif %}">All</a>
                 <a href="#" data-filter="levelname" data-value="DEBUG" class="filter-link {% if selected_levelname == 'DEBUG' %}filter-active{% endif %}">DEBUG</a>
@@ -48,7 +48,7 @@
 {% block initial_filters %}
 {
     app_name: '{{ selected_app|default:"" }}',
-    instance_name: '{{ selected_instance|default:"" }}',
+    instance_type: '{{ selected_instance_type|default:"" }}',
     levelname: '{{ selected_levelname|default:"" }}'
 }
 {% endblock %}
@@ -57,18 +57,13 @@
 
 {% block update_active_filters_display %}
 const badges = [];
-// Combine app/instance into concise format
-let filterText = '';
-if (currentFilters.app_name && currentFilters.instance_name) {
-    filterText = `${currentFilters.app_name}/${currentFilters.instance_name}`;
-} else if (currentFilters.app_name) {
-    filterText = currentFilters.app_name;
-} else if (currentFilters.instance_name) {
-    filterText = currentFilters.instance_name;
-}
+const parts = [];
+if (currentFilters.app_name) parts.push(`App:${currentFilters.app_name}`);
+if (currentFilters.instance_type) parts.push(`Type:${currentFilters.instance_type}`);
+if (currentFilters.levelname) parts.push(`Level:${currentFilters.levelname}`);
 
-if (filterText) {
-    badges.push(`<span class="badge bg-info me-1">${filterText}</span>`);
+if (parts.length > 0) {
+    badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
 }
 
 if (badges.length > 0) {
@@ -81,7 +76,7 @@ if (badges.length > 0) {
 // Update filter link active states
 $('.filter-link').removeClass('filter-active');
 $('.filter-link[data-filter="app_name"][data-value="' + currentFilters.app_name + '"]').addClass('filter-active');
-$('.filter-link[data-filter="instance_name"][data-value="' + currentFilters.instance_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="instance_type"][data-value="' + currentFilters.instance_type + '"]').addClass('filter-active');
 $('.filter-link[data-filter="levelname"][data-value="' + currentFilters.levelname + '"]').addClass('filter-active');
 {% endblock %}
 
@@ -97,12 +92,9 @@ $('.filter-link').on('click', function(e) {
 
 // Clear all filters
 $('#clear-all-filters').on('click', function() {
-    // Clear the actual currentFilters object used by the table
     window.tableCurrentFilters.app_name = '';
-    window.tableCurrentFilters.instance_name = '';
+    window.tableCurrentFilters.instance_type = '';
     window.tableCurrentFilters.levelname = '';
-    
-    // Update the table and URL
     window.tableUpdateFilters();
 });
 {% endblock %}

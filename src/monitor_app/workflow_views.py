@@ -276,22 +276,21 @@ def workflow_executions_filter_counts(request):
 def namespaces_list(request):
     """
     Namespace list view using server-side DataTables.
-    Aggregates namespaces from SystemAgent, WorkflowExecution, and WorkflowMessage.
+    Primary source is the Namespace model with activity counts.
     """
-    from .models import SystemAgent
-    from .workflow_models import WorkflowMessage
-
     columns = [
-        {'name': 'namespace', 'title': 'Namespace', 'orderable': True},
+        {'name': 'name', 'title': 'Namespace', 'orderable': True},
+        {'name': 'owner', 'title': 'Owner', 'orderable': True},
+        {'name': 'description', 'title': 'Description', 'orderable': False},
         {'name': 'agent_count', 'title': 'Agents', 'orderable': True},
         {'name': 'execution_count', 'title': 'Executions', 'orderable': True},
         {'name': 'message_count', 'title': 'Messages', 'orderable': True},
-        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+        {'name': 'updated_at', 'title': 'Modified', 'orderable': True},
     ]
 
     context = {
         'table_title': 'Namespaces',
-        'table_description': 'View testbed namespaces and their associated agents, executions, and messages.',
+        'table_description': 'View registered namespaces and their associated agents, executions, and messages.',
         'ajax_url': reverse('monitor_app:namespaces_datatable_ajax'),
         'columns': columns,
     }
@@ -300,53 +299,66 @@ def namespaces_list(request):
 
 def namespaces_datatable_ajax(request):
     """AJAX endpoint for server-side DataTables processing of namespaces."""
+    from django.db.models import Count, Q
     from .utils import DataTablesProcessor
     from .models import SystemAgent
-    from .workflow_models import WorkflowMessage
+    from .workflow_models import WorkflowMessage, Namespace
 
-    columns = ['namespace', 'agent_count', 'execution_count', 'message_count', 'actions']
+    columns = ['name', 'owner', 'description', 'agent_count', 'execution_count', 'message_count', 'updated_at']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
 
-    # Collect all unique namespaces from different sources
-    agent_namespaces = set(SystemAgent.objects.exclude(
-        namespace__isnull=True
-    ).exclude(namespace='').values_list('namespace', flat=True))
-
-    execution_namespaces = set(WorkflowExecution.objects.exclude(
-        namespace__isnull=True
-    ).exclude(namespace='').values_list('namespace', flat=True))
-
-    message_namespaces = set(WorkflowMessage.objects.exclude(
-        namespace__isnull=True
-    ).exclude(namespace='').values_list('namespace', flat=True))
-
-    all_namespaces = sorted(agent_namespaces | execution_namespaces | message_namespaces)
-    records_total = len(all_namespaces)
+    # Query Namespace model
+    queryset = Namespace.objects.all()
+    records_total = queryset.count()
 
     # Apply search filter
-    search_value = request.GET.get('search[value]', '').strip().lower()
-    if search_value:
-        all_namespaces = [ns for ns in all_namespaces if search_value in ns.lower()]
-    records_filtered = len(all_namespaces)
+    if dt.search_value:
+        queryset = queryset.filter(
+            Q(name__icontains=dt.search_value) |
+            Q(owner__icontains=dt.search_value) |
+            Q(description__icontains=dt.search_value)
+        )
+    records_filtered = queryset.count()
+
+    # Apply ordering (only for Namespace model fields, not counts)
+    order_column = dt.order_column
+    if order_column in ['name', 'owner', 'description', 'updated_at']:
+        order_by = dt.get_order_by()
+        queryset = queryset.order_by(order_by)
+    else:
+        queryset = queryset.order_by('name')
 
     # Apply pagination
-    start = int(request.GET.get('start', 0))
-    length = int(request.GET.get('length', 25))
-    paginated_namespaces = all_namespaces[start:start + length]
+    queryset = queryset[dt.start:dt.start + dt.length]
 
-    # Build data with counts
+    # Get counts in 3 aggregate queries - efficient dict lookups
+    agent_counts = dict(
+        SystemAgent.objects.exclude(namespace__isnull=True).exclude(namespace='')
+        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+    )
+    execution_counts = dict(
+        WorkflowExecution.objects.exclude(namespace__isnull=True).exclude(namespace='')
+        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+    )
+    message_counts = dict(
+        WorkflowMessage.objects.exclude(namespace__isnull=True).exclude(namespace='')
+        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+    )
+
+    # Build data
     data = []
-    for namespace in paginated_namespaces:
-        agent_count = SystemAgent.objects.filter(namespace=namespace).count()
-        execution_count = WorkflowExecution.objects.filter(namespace=namespace).count()
-        message_count = WorkflowMessage.objects.filter(namespace=namespace).count()
+    for ns in queryset:
+        description = ns.description if ns.description else '-'
+        updated_at = ns.updated_at.strftime('%Y-%m-%d %H:%M')
 
         data.append([
-            f'<a href="{reverse("monitor_app:namespace_detail", args=[namespace])}">{namespace}</a>',
-            str(agent_count),
-            str(execution_count),
-            str(message_count),
-            f'<a href="{reverse("monitor_app:namespace_detail", args=[namespace])}" class="btn btn-sm btn-outline-primary">View</a>'
+            f'<a href="{reverse("monitor_app:namespace_detail", args=[ns.name])}">{ns.name}</a>',
+            ns.owner,
+            description,
+            str(agent_counts.get(ns.name, 0)),
+            str(execution_counts.get(ns.name, 0)),
+            str(message_counts.get(ns.name, 0)),
+            updated_at,
         ])
 
     return dt.create_response(data, records_total, records_filtered)

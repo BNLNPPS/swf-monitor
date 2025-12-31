@@ -281,14 +281,26 @@ def log_summary(request):
     """
     # Get filter parameters (for initial state)
     app_name = request.GET.get('app_name')
+    instance_type = request.GET.get('instance_type')
     instance_name = request.GET.get('instance_name')
     levelname = request.GET.get('levelname')
-    
+
     # Get distinct app and instance names for filter links
     app_names_qs = AppLog.objects.values_list('app_name', flat=True)
     instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
     app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
     instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
+
+    # Extract instance types from instance names (e.g., "workflow_runner-agent-wenauseic-25" -> "workflow_runner-agent")
+    def extract_type(name):
+        if not name:
+            return None
+        parts = name.rsplit('-', 2)  # Split from right, max 2 splits
+        if len(parts) >= 3:
+            return parts[0]  # Return the type part
+        return name  # If not enough parts, return as-is
+
+    instance_types = sorted(set([extract_type(name) for name in instance_names if extract_type(name)]), key=lambda x: x.lower())
 
     # Column definitions for DataTables
     columns = [
@@ -310,8 +322,10 @@ def log_summary(request):
         'ajax_url': reverse('monitor_app:log_summary_datatable_ajax'),
         'columns': columns,
         'app_names': app_names,
+        'instance_types': instance_types,
         'instance_names': instance_names,
         'selected_app': app_name,
+        'selected_instance_type': instance_type,
         'selected_instance': instance_name,
         'selected_levelname': levelname,
     }
@@ -337,6 +351,11 @@ def log_summary_datatable_ajax(request):
     base_queryset = AppLog.objects.all()
     filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
     base_queryset = apply_filters(base_queryset, filters)
+
+    # Apply instance_type filter (prefix match on instance_name)
+    instance_type = request.GET.get('instance_type')
+    if instance_type:
+        base_queryset = base_queryset.filter(instance_name__startswith=instance_type + '-')
     
     # Create summary queryset - one row per app/instance pair
     summary_queryset = (
