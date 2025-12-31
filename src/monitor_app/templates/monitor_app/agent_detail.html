@@ -41,6 +41,10 @@
                         <th>Agent URL</th>
                         <td>{% if agent.agent_url %}<a href="{{ agent.agent_url }}">{{ agent.agent_url }}</a>{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
                     </tr>
+                    <tr>
+                        <th>Messages</th>
+                        <td><a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}">View messages from this agent</a></td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -94,9 +98,5 @@
         </div>
     </div>
 
-    <div class="mt-4">
-        <a href="{% url 'monitor_app:workflow_executions_list' %}?agent={{ agent.instance_name }}" class="btn btn-primary me-2">Workflow Executions ({{ total_executions }}) &rarr;</a>
-        <a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}" class="btn btn-secondary">Messages from this Agent &rarr;</a>
-    </div>
 </div>
 {% endblock %}

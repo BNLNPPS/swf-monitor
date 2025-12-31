@@ -46,6 +46,10 @@ class SystemAgent(models.Model):
     namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
                                  help_text="Testbed namespace for workflow delineation")
 
+    # Extensible metadata
+    metadata = models.JSONField(null=True, blank=True,
+                                help_text="Extensible metadata for agent configuration and state")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

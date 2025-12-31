@@ -34,9 +34,9 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
-                        <a href="{% url 'monitor_app:runs_list' %}" class="text-decoration-none">Simulation Runs</a>
+                        <a href="{% url 'monitor_app:namespaces_list' %}" class="text-decoration-none">Namespaces</a>
                     </h5>
-                    <p class="card-text">View and manage DAQ simulation runs with their status, timing, and STF file counts. Monitor run lifecycle from imminent to completion. Superseded by workflow orchestrator.</p>
+                    <p class="card-text">View testbed namespaces and their associated agents, workflow executions, and messages. Namespaces isolate workflow activity for multi-user environments.</p>
                 </div>
             </div>
         </div>
@@ -45,9 +45,9 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
-                        <a href="{% url 'monitor_app:namespaces_list' %}" class="text-decoration-none">Namespaces</a>
+                        <a href="{% url 'monitor_app:runs_list' %}" class="text-decoration-none">Simulation Runs</a>
                     </h5>
-                    <p class="card-text">View testbed namespaces and their associated agents, workflow executions, and messages. Namespaces isolate workflow activity for multi-user environments.</p>
+                    <p class="card-text"><em>Superseded by workflow orchestrator.</em> View and manage DAQ simulation runs with their status, timing, and STF file counts. Monitor run lifecycle from imminent to completion.</p>
                 </div>
             </div>
         </div>

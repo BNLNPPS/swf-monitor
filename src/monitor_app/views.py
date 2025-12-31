@@ -1437,25 +1437,21 @@ def agent_detail(request, instance_name):
 @login_required
 def namespace_detail(request, namespace):
     """Display details for a namespace."""
-    from .workflow_models import WorkflowMessage
+    from .workflow_models import WorkflowMessage, WorkflowExecution
 
     # Get agents in this namespace
     agents = SystemAgent.objects.filter(namespace=namespace).order_by('agent_type', 'instance_name')
 
     # Count messages and executions for this namespace
     message_count = WorkflowMessage.objects.filter(namespace=namespace).count()
-    execution_ids = WorkflowMessage.objects.filter(
-        namespace=namespace
-    ).exclude(
-        execution_id__isnull=True
-    ).values_list('execution_id', flat=True).distinct()
+    execution_count = WorkflowExecution.objects.filter(namespace=namespace).count()
 
     return render(request, 'monitor_app/namespace_detail.html', {
         'namespace': namespace,
         'agents': agents,
         'agent_count': agents.count(),
         'message_count': message_count,
-        'execution_count': len(set(execution_ids)),
+        'execution_count': execution_count,
     })
 
 
