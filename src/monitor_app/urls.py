@@ -29,6 +29,8 @@ from .views import (
     workflow_detail,
     workflow_agents_list,
     agent_detail,
+    namespace_detail,
+    message_detail,
     workflow_messages,
     workflow_realtime_data_api,
     workflow_datatable_ajax,
@@ -74,6 +76,10 @@ from .fastmon_views import (
     fastmon_files_list,
     fastmon_files_datatable_ajax,
 )
+from .tf_slices_views import (
+    tf_slices_list,
+    tf_slices_datatable_ajax,
+)
 from .workflow_views import (
     workflows_home,
     workflow_definitions_list,
@@ -84,6 +90,8 @@ from .workflow_views import (
     workflow_executions_filter_counts,
     workflow_definition_detail,
     workflow_execution_detail,
+    namespaces_list,
+    namespaces_datatable_ajax,
 )
 
 app_name = 'monitor_app'
@@ -119,6 +127,10 @@ urlpatterns = [
     path('fastmon-files/', fastmon_files_list, name='fastmon_files_list'),
     path('fastmon-files/datatable/', fastmon_files_datatable_ajax, name='fastmon_files_datatable_ajax'),
 
+    # TF Slices (Fast Processing)
+    path('tf-slices/', tf_slices_list, name='tf_slices_list'),
+    path('tf-slices/datatable/', tf_slices_datatable_ajax, name='tf_slices_datatable_ajax'),
+
     path('subscribers/', subscribers_list, name='subscribers_list'),
     path('subscribers/datatable/', subscribers_datatable_ajax, name='subscribers_datatable_ajax'),
     path('subscribers/filter-counts/', get_subscribers_filter_counts, name='subscribers_filter_counts'),
@@ -130,7 +142,9 @@ urlpatterns = [
     path('workflow/agents/', workflow_agents_list, name='workflow_agents_list'),
     path('workflow/agents/datatable/', workflow_agents_datatable_ajax, name='workflow_agents_datatable_ajax'),
     path('workflow/agents/<str:instance_name>/', agent_detail, name='agent_detail'),
+    path('workflow/namespaces/<str:namespace>/', namespace_detail, name='namespace_detail'),
     path('workflow/messages/', workflow_messages, name='workflow_messages'),
+    path('workflow/messages/<uuid:message_id>/', message_detail, name='message_detail'),
     path('workflow/messages/datatable/', workflow_messages_datatable_ajax, name='workflow_messages_datatable_ajax'),
     path('workflow/messages/filter-counts/', get_workflow_messages_filter_counts, name='workflow_messages_filter_counts'),
     path('workflow/api/realtime-data/', workflow_realtime_data_api, name='workflow_realtime_data_api'),
@@ -147,6 +161,10 @@ urlpatterns = [
     path('workflow-executions/datatable/', workflow_executions_datatable_ajax, name='workflow_executions_datatable_ajax'),
     path('workflow-executions/filter-counts/', workflow_executions_filter_counts, name='workflow_executions_filter_counts'),
     path('workflow-executions/<str:execution_id>/', workflow_execution_detail, name='workflow_execution_detail'),
+
+    # Namespaces
+    path('namespaces/', namespaces_list, name='namespaces_list'),
+    path('namespaces/datatable/', namespaces_datatable_ajax, name='namespaces_datatable_ajax'),
 
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),

@@ -5,7 +5,9 @@ from .views import (
     STFWorkflowViewSet, AgentWorkflowStageViewSet, WorkflowMessageViewSet,
     RunViewSet, StfFileViewSet, SubscriberViewSet, FastMonFileViewSet,
     WorkflowDefinitionViewSet, WorkflowExecutionViewSet,
-    get_next_run_number, get_next_agent_id, get_next_workflow_execution_id
+    TFSliceViewSet, WorkerViewSet, RunStateViewSet, SystemStateEventViewSet,
+    get_next_run_number, get_next_agent_id, get_next_workflow_execution_id,
+    ensure_namespace
 )
 from .sse_views import sse_message_stream, sse_status
 
@@ -22,11 +24,18 @@ router.register(r'fastmon-files', FastMonFileViewSet, basename='fastmonfile')
 router.register(r'workflow-definitions', WorkflowDefinitionViewSet, basename='workflowdefinition')
 router.register(r'workflow-executions', WorkflowExecutionViewSet, basename='workflowexecution')
 
+# Fast Processing API endpoints
+router.register(r'tf-slices', TFSliceViewSet, basename='tfslice')
+router.register(r'workers', WorkerViewSet, basename='worker')
+router.register(r'run-states', RunStateViewSet, basename='runstate')
+router.register(r'system-state-events', SystemStateEventViewSet, basename='systemstateevent')
+
 urlpatterns = [
     path('logs/summary/', LogSummaryView.as_view(), name='log-summary'),
     path('state/next-run-number/', get_next_run_number, name='get-next-run-number'),
     path('state/next-agent-id/', get_next_agent_id, name='get-next-agent-id'),
     path('state/next-workflow-execution-id/', get_next_workflow_execution_id, name='get-next-workflow-execution-id'),
+    path('namespaces/ensure/', ensure_namespace, name='ensure-namespace'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),
     path('messages/stream/status/', sse_status, name='sse-stream-status'),
     path('', include(router.urls)),

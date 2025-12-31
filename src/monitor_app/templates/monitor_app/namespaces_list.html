@@ -1,0 +1,20 @@
+{% extends "monitor_app/_datatable_base.html" %}
+
+{% block extra_filters %}
+<!-- No filters for namespaces - simple list -->
+{% endblock %}
+
+{% block initial_filters %}
+{}
+{% endblock %}
+
+{% block default_order %}[[0, 'asc']]{% endblock %} <!-- Order by namespace name ascending -->
+
+{% block update_active_filters_display %}
+// No filters to display
+$('#active-filters').hide();
+{% endblock %}
+
+{% block extra_scripts %}
+// No extra filter handling needed
+{% endblock %}

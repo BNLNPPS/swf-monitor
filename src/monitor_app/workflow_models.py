@@ -83,16 +83,24 @@ class AgentType(models.TextChoices):
 class STFWorkflow(models.Model):
     """
     Tracks the complete workflow lifecycle of a Super Time Frame from generation to completion.
-    
+
     This model extends the existing StfFile model concept to include workflow-specific fields
     and tracks the STF as it moves through different agents in the pipeline.
     """
     workflow_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
+
     # STF identification and metadata
     filename = models.CharField(max_length=255, unique=True)
     file_id = models.UUIDField(null=True, blank=True)  # Link to StfFile if needed
-    
+
+    # Workflow instance identification
+    namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                 help_text="Testbed namespace for workflow delineation")
+    execution_id = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                    help_text="Workflow execution instance ID")
+    run_id = models.CharField(max_length=50, null=True, blank=True, db_index=True,
+                              help_text="Run number within execution")
+
     # DAQ state information
     daq_state = models.CharField(max_length=20, choices=DAQState.choices)
     daq_substate = models.CharField(max_length=20, choices=DAQSubstate.choices)
@@ -131,6 +139,8 @@ class STFWorkflow(models.Model):
             models.Index(fields=['current_status', 'generated_time']),
             models.Index(fields=['daq_state', 'daq_substate']),
             models.Index(fields=['current_agent']),
+            models.Index(fields=['namespace', 'execution_id']),
+            models.Index(fields=['namespace', 'run_id']),
         ]
 
     def __str__(self):
@@ -261,7 +271,17 @@ class WorkflowMessage(models.Model):
     sender_type = models.CharField(max_length=20, choices=AgentType.choices, null=True, blank=True)
     recipient_agent = models.CharField(max_length=100, null=True, blank=True)
     recipient_type = models.CharField(max_length=20, choices=AgentType.choices, null=True, blank=True)
-    
+
+    # Namespace for multi-user disambiguation
+    namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                 help_text="Testbed namespace for multi-user message filtering")
+
+    # Workflow instance identification (extracted from message content)
+    execution_id = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                    help_text="Workflow execution instance ID")
+    run_id = models.CharField(max_length=50, null=True, blank=True, db_index=True,
+                              help_text="Run number within execution")
+
     # Message content
     message_content = models.JSONField()
     
@@ -288,6 +308,8 @@ class WorkflowMessage(models.Model):
             models.Index(fields=['workflow', 'message_type']),
             models.Index(fields=['sender_agent', 'sent_at']),
             models.Index(fields=['message_type', 'sent_at']),
+            models.Index(fields=['namespace', 'execution_id']),
+            models.Index(fields=['namespace', 'run_id']),
         ]
 
     def __str__(self):
@@ -313,7 +335,7 @@ class WorkflowDefinition(models.Model):
     workflow_name = models.CharField(max_length=200, help_text="Unique workflow name")
     version = models.CharField(max_length=50, help_text="Version string")
     workflow_type = models.CharField(max_length=100, help_text="Flexible workflow type classification")
-    definition = models.TextField(max_length=5000, help_text="Python workflow code content")
+    definition = models.TextField(help_text="Python workflow code content")
     parameter_values = models.JSONField(default=dict, help_text="Default parameter values and schema")
     created_by = models.CharField(max_length=100, help_text="Username who created this workflow")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -333,6 +355,8 @@ class WorkflowExecution(models.Model):
     """
     execution_id = models.CharField(primary_key=True, max_length=100, help_text="Human-readable execution ID")
     workflow_definition = models.ForeignKey(WorkflowDefinition, on_delete=models.CASCADE, related_name='executions')
+    namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                 help_text="Testbed namespace for workflow delineation")
     parameter_values = models.JSONField(help_text="Actual parameter values used for this execution")
     performance_metrics = models.JSONField(null=True, blank=True, help_text="Performance metrics and results")
     status = models.CharField(max_length=50, default='pending', help_text="Flexible execution status")
@@ -346,3 +370,23 @@ class WorkflowExecution(models.Model):
 
     def __str__(self):
         return f"Execution {self.execution_id} ({self.status})"
+
+
+class Namespace(models.Model):
+    """
+    Testbed namespace for workflow isolation and multi-user environments.
+    Namespaces group agents, executions, and messages for a particular user or purpose.
+    """
+    name = models.CharField(max_length=100, primary_key=True)
+    owner = models.CharField(max_length=100, help_text="Username of namespace owner")
+    description = models.TextField(blank=True)
+    metadata = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_namespace'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name

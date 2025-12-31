@@ -5,7 +5,7 @@ import time
 from django.utils import timezone
 from django.db import connection
 from .models import SystemAgent
-from .workflow_models import WorkflowMessage, STFWorkflow
+from .workflow_models import WorkflowMessage
 from django.conf import settings
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -111,14 +111,13 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
         try:
             msg_type = data.get('msg_type')
             run_id = data.get('run_id')
+            execution_id = data.get('execution_id')
             filename = data.get('filename')
-            
-            # Try to find related workflow
-            workflow = self._find_related_workflow(run_id, filename)
-            
-            # Determine sender and recipient based on message type and content
-            sender_agent = data.get('processed_by') or self._infer_sender_from_message_type(msg_type)
-            recipient_agent = self._infer_recipient_from_message_type(msg_type)
+
+            # Extract sender, namespace, and recipient from message
+            sender_agent = data.get('sender')
+            namespace = data.get('namespace')
+            recipient_agent = data.get('recipient')
             
             # Create metadata with originator tracking
             import os, socket
@@ -131,10 +130,13 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
 
             # Create WorkflowMessage record
             workflow_message = WorkflowMessage.objects.create(
-                workflow=workflow,
+                workflow=None,
                 message_type=msg_type,
                 sender_agent=sender_agent,
                 recipient_agent=recipient_agent,
+                namespace=namespace,
+                execution_id=execution_id,
+                run_id=run_id,
                 message_content=data,
                 message_metadata=metadata,
                 sent_at=timezone.now(),
@@ -146,6 +148,7 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             enriched = dict(data)
             enriched.setdefault('sender_agent', sender_agent)
             enriched.setdefault('recipient_agent', recipient_agent)
+            enriched.setdefault('namespace', namespace)
             enriched.setdefault('queue_name', getattr(frame, 'destination', 'epictopic'))
             enriched.setdefault('sent_at', timezone.now().isoformat())
 
@@ -175,52 +178,3 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
             self.logger.error(f"Error processing workflow message: {e}")
             self.logger.debug(f"Message data: {data}")
     
-    def _find_related_workflow(self, run_id, filename):
-        """Find related STFWorkflow record"""
-        if not run_id:
-            return None
-        
-        try:
-            # Try exact match first (run_id + filename)
-            if filename:
-                workflow = STFWorkflow.objects.filter(
-                    run_id=run_id, filename=filename
-                ).first()
-                if workflow:
-                    return workflow
-            
-            # Fallback to run_id only
-            return STFWorkflow.objects.filter(run_id=run_id).first()
-            
-        except Exception as e:
-            self.logger.debug(f"Could not find workflow for run_id={run_id}, filename={filename}: {e}")
-            return None
-    
-    def _infer_sender_from_message_type(self, msg_type):
-        """Infer the sender agent based on message type"""
-        sender_map = {
-            'run_imminent': 'daq-simulator',
-            'start_run': 'daq-simulator', 
-            'stf_gen': 'daq-simulator',
-            'pause_run': 'daq-simulator',
-            'resume_run': 'daq-simulator',
-            'end_run': 'daq-simulator',
-            'data_ready': 'data-agent',
-            'processing_complete': 'processing-agent'
-        }
-        return sender_map.get(msg_type, 'unknown')
-    
-    def _infer_recipient_from_message_type(self, msg_type):
-        """Infer the recipient agent based on message type"""
-        recipient_map = {
-            'run_imminent': 'all-agents',
-            'start_run': 'all-agents',
-            'stf_gen': 'data-agent',
-            'pause_run': 'all-agents', 
-            'resume_run': 'all-agents',
-            'end_run': 'all-agents',
-            'data_ready': 'processing-agent',
-            'processing_complete': 'all-agents',
-            'sse_test': 'all-agents'  # SSE test messages broadcast to all
-        }
-        return recipient_map.get(msg_type, 'unknown')

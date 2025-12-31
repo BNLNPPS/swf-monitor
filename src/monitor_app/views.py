@@ -15,13 +15,14 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
     STFWorkflowSerializer, AgentWorkflowStageSerializer, WorkflowMessageSerializer,
     RunSerializer, StfFileSerializer, SubscriberSerializer, FastMonFileSerializer,
-    WorkflowDefinitionSerializer, WorkflowExecutionSerializer
+    WorkflowDefinitionSerializer, WorkflowExecutionSerializer,
+    TFSliceSerializer, WorkerSerializer, RunStateSerializer, SystemStateEventSerializer
 )
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
@@ -141,6 +142,7 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
                 'status': request.data.get('status', 'OK'),
                 'agent_url': request.data.get('agent_url', None),
                 'workflow_enabled': request.data.get('workflow_enabled', False),
+                'namespace': request.data.get('namespace'),
                 'last_heartbeat': timezone.now(),
             }
         )
@@ -233,6 +235,44 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
+
+# Fast Processing API ViewSets
+
+class TFSliceViewSet(viewsets.ModelViewSet):
+    """API endpoint for TF Slices (fast processing workflow)."""
+    queryset = TFSlice.objects.all()
+    serializer_class = TFSliceSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['run_number', 'status', 'stf_filename', 'assigned_worker']
+
+
+class WorkerViewSet(viewsets.ModelViewSet):
+    """API endpoint for Workers (fast processing workflow)."""
+    queryset = Worker.objects.all()
+    serializer_class = WorkerSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['run_number', 'status', 'location']
+
+
+class RunStateViewSet(viewsets.ModelViewSet):
+    """API endpoint for Run State (fast processing workflow)."""
+    queryset = RunState.objects.all()
+    serializer_class = RunStateSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+class SystemStateEventViewSet(viewsets.ModelViewSet):
+    """API endpoint for System State Events (fast processing workflow)."""
+    queryset = SystemStateEvent.objects.all()
+    serializer_class = SystemStateEventSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+    filterset_fields = ['run_number', 'event_type', 'state']
+
+
 @login_required
 def log_summary(request):
     """
@@ -241,14 +281,26 @@ def log_summary(request):
     """
     # Get filter parameters (for initial state)
     app_name = request.GET.get('app_name')
+    instance_type = request.GET.get('instance_type')
     instance_name = request.GET.get('instance_name')
     levelname = request.GET.get('levelname')
-    
+
     # Get distinct app and instance names for filter links
     app_names_qs = AppLog.objects.values_list('app_name', flat=True)
     instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
     app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
     instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
+
+    # Extract agent types by stripping trailing -number (e.g., "workflow_runner-agent-wenauseic-25" -> "workflow_runner-agent-wenauseic")
+    def extract_type(name):
+        if not name:
+            return None
+        parts = name.rsplit('-', 1)  # Split from right, max 1 split
+        if len(parts) == 2 and parts[1].isdigit():
+            return parts[0]  # Return everything except the -number
+        return name  # If no trailing number, return as-is
+
+    instance_types = sorted(set([extract_type(name) for name in instance_names if extract_type(name)]), key=lambda x: x.lower())
 
     # Column definitions for DataTables
     columns = [
@@ -270,8 +322,10 @@ def log_summary(request):
         'ajax_url': reverse('monitor_app:log_summary_datatable_ajax'),
         'columns': columns,
         'app_names': app_names,
+        'instance_types': instance_types,
         'instance_names': instance_names,
         'selected_app': app_name,
+        'selected_instance_type': instance_type,
         'selected_instance': instance_name,
         'selected_levelname': levelname,
     }
@@ -297,6 +351,13 @@ def log_summary_datatable_ajax(request):
     base_queryset = AppLog.objects.all()
     filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
     base_queryset = apply_filters(base_queryset, filters)
+
+    # Apply instance_type filter (match instances with this base name, with or without trailing -number)
+    instance_type = request.GET.get('instance_type')
+    if instance_type:
+        base_queryset = base_queryset.filter(
+            Q(instance_name__startswith=instance_type + '-') | Q(instance_name=instance_type)
+        )
     
     # Create summary queryset - one row per app/instance pair
     summary_queryset = (
@@ -1280,7 +1341,27 @@ def workflow_detail(request, workflow_id):
 def workflow_agents_list(request):
     """View showing the status of all workflow agents using server-side DataTables."""
     from django.urls import reverse
-    
+
+    # Get filters from URL params
+    selected_type = request.GET.get('agent_type', '')
+    selected_status = request.GET.get('status', '')
+    selected_namespace = request.GET.get('namespace', '')
+
+    # Get distinct values for filter bars
+    agent_types = list(SystemAgent.objects.values_list(
+        'agent_type', flat=True
+    ).distinct().order_by('agent_type'))
+
+    statuses = list(SystemAgent.objects.values_list(
+        'status', flat=True
+    ).distinct().order_by('status'))
+
+    namespaces = list(SystemAgent.objects.exclude(
+        namespace__isnull=True
+    ).exclude(
+        namespace=''
+    ).values_list('namespace', flat=True).distinct().order_by('namespace'))
+
     context = {
         'table_title': 'Agent Status',
         'table_description': 'Status and statistics for all agents.',
@@ -1289,16 +1370,22 @@ def workflow_agents_list(request):
             {'title': 'Agent Name', 'orderable': True},
             {'title': 'Type', 'orderable': True},
             {'title': 'Status', 'orderable': True},
-            {'title': 'Workflow Enabled', 'orderable': True},
+            {'title': 'Namespace', 'orderable': True},
             {'title': 'Last Heartbeat', 'orderable': True},
             {'title': 'Currently Processing', 'orderable': True},
             {'title': 'Recently Completed (1hr)', 'orderable': True},
             {'title': 'Total Processed', 'orderable': True},
         ],
-        'filter_fields': [],  # No filters for this view
+        'filter_fields': [],  # Handled in template
         'default_order': [[4, 'desc']],  # Default sort by Last Heartbeat descending
+        'selected_type': selected_type,
+        'selected_status': selected_status,
+        'selected_namespace': selected_namespace,
+        'agent_types': agent_types,
+        'statuses': statuses,
+        'namespaces': namespaces,
     }
-    
+
     return render(request, 'monitor_app/workflow_agents_list_dynamic.html', context)
 
 
@@ -1309,13 +1396,26 @@ def workflow_agents_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime
     
     # Column definitions matching the template order
-    columns = ['instance_name', 'agent_type', 'status', 'workflow_enabled', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
-    
+    columns = ['instance_name', 'agent_type', 'status', 'namespace', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
+
     dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')  # Sort by last_heartbeat descending
     
     # Base queryset - show all agents, not just workflow-enabled ones
     queryset = SystemAgent.objects.all()
-    
+
+    # Apply filters if provided
+    agent_type = request.GET.get('agent_type')
+    if agent_type:
+        queryset = queryset.filter(agent_type=agent_type)
+
+    status = request.GET.get('status')
+    if status:
+        queryset = queryset.filter(status=status)
+
+    namespace = request.GET.get('namespace')
+    if namespace:
+        queryset = queryset.filter(namespace=namespace)
+
     # For sorting current_processing and recent_completed, we need to annotate
     # But for now, let's keep it simple and sort by the basic fields
     special_cases = {
@@ -1370,20 +1470,22 @@ def workflow_agents_datatable_ajax(request):
         # Create agent name link
         agent_detail_url = reverse('monitor_app:agent_detail', args=[agent.instance_name])
         agent_link = f'<a href="{agent_detail_url}">{agent.instance_name}</a>'
-        
-        # Format workflow enabled badge
-        workflow_enabled_class = 'success' if agent.workflow_enabled else 'secondary'
-        workflow_enabled_text = 'Enabled' if agent.workflow_enabled else 'Disabled'
-        workflow_enabled_badge = f'<span class="badge bg-{workflow_enabled_class}">{workflow_enabled_text}</span>'
-        
+
         # Format heartbeat - sorting is now handled at database level
         heartbeat_cell = format_datetime(agent.last_heartbeat) if agent.last_heartbeat else 'Never'
-        
+
+        # Format namespace as link if set
+        if agent.namespace:
+            namespace_url = reverse('monitor_app:namespace_detail', args=[agent.namespace])
+            namespace_cell = f'<a href="{namespace_url}">{agent.namespace}</a>'
+        else:
+            namespace_cell = '<em class="text-muted">-</em>'
+
         row = [
             agent_link,
             agent.get_agent_type_display(),
             status_badge,
-            workflow_enabled_badge,
+            namespace_cell,
             heartbeat_cell,
             str(current_stages),
             str(recent_completed),
@@ -1396,16 +1498,60 @@ def workflow_agents_datatable_ajax(request):
 
 @login_required
 def agent_detail(request, instance_name):
-    """Display details for a specific agent and its associated workflows."""
+    """Display details for a specific agent."""
     agent = get_object_or_404(SystemAgent, instance_name=instance_name)
-    workflows = STFWorkflow.objects.filter(current_agent=agent.agent_type).order_by('-generated_time')
+    return render(request, 'monitor_app/agent_detail.html', {'agent': agent})
+
+
+@login_required
+def namespace_detail(request, namespace):
+    """Display details for a namespace."""
+    from .workflow_models import WorkflowMessage, WorkflowExecution, Namespace
+
+    # Try to get namespace record from database
+    try:
+        ns_record = Namespace.objects.get(name=namespace)
+    except Namespace.DoesNotExist:
+        ns_record = None
+
+    # Count agents, messages and executions for this namespace
+    agent_count = SystemAgent.objects.filter(namespace=namespace).count()
+    message_count = WorkflowMessage.objects.filter(namespace=namespace).count()
+    execution_count = WorkflowExecution.objects.filter(namespace=namespace).count()
+
+    return render(request, 'monitor_app/namespace_detail.html', {
+        'namespace': namespace,
+        'ns_record': ns_record,
+        'agent_count': agent_count,
+        'message_count': message_count,
+        'execution_count': execution_count,
+    })
+
+
+@login_required
+def message_detail(request, message_id):
+    """Display details for a specific workflow message."""
+    from .workflow_models import WorkflowMessage
+    message = get_object_or_404(WorkflowMessage, message_id=message_id)
+
+    # Flatten JSON content for display
+    content_items = []
+    if message.message_content and isinstance(message.message_content, dict):
+        for key, value in message.message_content.items():
+            content_items.append({'key': key, 'value': value})
+
+    # Flatten metadata for display
+    metadata_items = []
+    if message.message_metadata and isinstance(message.message_metadata, dict):
+        for key, value in message.message_metadata.items():
+            metadata_items.append({'key': key, 'value': value})
 
     context = {
-        'agent': agent,
-        'workflows': workflows,
+        'message': message,
+        'content_items': content_items,
+        'metadata_items': metadata_items,
     }
-    return render(request, 'monitor_app/agent_detail.html', context)
-
+    return render(request, 'monitor_app/message_detail.html', context)
 
 
 @login_required
@@ -1420,24 +1566,26 @@ def workflow_messages(request):
         'filter_counts_url': reverse('monitor_app:workflow_messages_filter_counts'),
         'columns': [
             {'title': 'Timestamp', 'orderable': True},
+            {'title': 'namespace', 'orderable': True},
             {'title': 'message_type', 'orderable': True},
             {'title': 'sender_agent', 'orderable': True},
-            {'title': 'recipient_agent', 'orderable': True},
             {'title': 'source', 'orderable': True},
             {'title': 'workflow', 'orderable': True},
             {'title': 'is_successful', 'orderable': True},
         ],
         'filter_fields': [
+            {'name': 'namespace', 'label': 'namespace', 'type': 'select'},
+            {'name': 'execution_id', 'label': 'execution_id', 'type': 'select'},
             {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
             {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
-            {'name': 'recipient_agent', 'label': 'recipient_agent', 'type': 'select'},
             {'name': 'workflow', 'label': 'workflow', 'type': 'select'},
             {'name': 'is_successful', 'label': 'is_successful', 'type': 'select'},
         ],
         # Add current filter values for initial state
+        'selected_namespace': request.GET.get('namespace'),
+        'selected_execution_id': request.GET.get('execution_id'),
         'selected_message_type': request.GET.get('message_type'),
         'selected_sender_agent': request.GET.get('sender_agent'),
-        'selected_recipient_agent': request.GET.get('recipient_agent'),
         'selected_workflow': request.GET.get('workflow'),
         'selected_is_successful': request.GET.get('is_successful'),
     }
@@ -1450,8 +1598,8 @@ def workflow_messages_datatable_ajax(request):
     """AJAX endpoint for workflow messages DataTable server-side processing."""
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
     
-    # Column definitions matching the template order  
-    columns = ['sent_at', 'message_type', 'sender_agent', 'recipient_agent', 'source', 'workflow', 'is_successful']
+    # Column definitions matching the template order
+    columns = ['sent_at', 'namespace', 'message_type', 'sender_agent', 'source', 'workflow', 'is_successful']
     
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
     
@@ -1459,7 +1607,7 @@ def workflow_messages_datatable_ajax(request):
     queryset = WorkflowMessage.objects.select_related('workflow')
     
     # Apply filters
-    filter_params = get_filter_params(request, ['message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
+    filter_params = get_filter_params(request, ['namespace', 'execution_id', 'message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
     
     # Handle workflow filter - need to map workflow display names to IDs
     if filter_params.get('workflow'):
@@ -1517,17 +1665,7 @@ def workflow_messages_datatable_ajax(request):
         
         # Format agent links
         sender_link = f'<a href="{reverse("monitor_app:agent_detail", args=[message.sender_agent])}">{message.sender_agent}</a>' if message.sender_agent else 'N/A'
-        
-        # Handle special case for "all-agents" recipient
-        if message.recipient_agent == 'all-agents':
-            workflow_agents_url = reverse('monitor_app:workflow_agents_list')
-            recipient_link = f'<a href="{workflow_agents_url}">{message.recipient_agent}</a>'
-        elif message.recipient_agent:
-            agent_detail_url = reverse('monitor_app:agent_detail', args=[message.recipient_agent])
-            recipient_link = f'<a href="{agent_detail_url}">{message.recipient_agent}</a>'
-        else:
-            recipient_link = 'N/A'
-        
+
         # Extract source from message_metadata
         source = 'Unknown'
         if message.message_metadata and isinstance(message.message_metadata, dict):
@@ -1536,11 +1674,22 @@ def workflow_messages_datatable_ajax(request):
         # Apply smaller font to source for less column width
         source = f'<span style="font-size: 0.8rem;">{source}</span>'
         
+        # Format timestamp as link to message detail
+        message_detail_url = reverse('monitor_app:message_detail', args=[message.message_id])
+        timestamp_link = f'<a href="{message_detail_url}">{format_datetime(message.sent_at)}</a>'
+
+        # Format namespace as link
+        if message.namespace:
+            namespace_url = reverse('monitor_app:namespace_detail', args=[message.namespace])
+            namespace_link = f'<a href="{namespace_url}">{message.namespace}</a>'
+        else:
+            namespace_link = ''
+
         row = [
-            format_datetime(message.sent_at),
+            timestamp_link,
+            namespace_link,
             message.message_type,
             sender_link,
-            recipient_link,
             source,
             workflow_link,
             status,
@@ -1557,13 +1706,13 @@ def get_workflow_messages_filter_counts(request):
     from django.http import JsonResponse
     
     # Get current filters
-    current_filters = get_filter_params(request, ['message_type', 'sender_agent', 'recipient_agent', 'workflow', 'is_successful'])
-    
+    current_filters = get_filter_params(request, ['namespace', 'execution_id', 'message_type', 'sender_agent', 'workflow', 'is_successful'])
+
     # Base queryset
     queryset = WorkflowMessage.objects.select_related('workflow')
-    
+
     # Calculate counts for each filter
-    filter_fields = ['message_type', 'sender_agent', 'recipient_agent', 'is_successful']
+    filter_fields = ['namespace', 'execution_id', 'message_type', 'sender_agent', 'is_successful']
     filter_counts = get_filter_counts(queryset, filter_fields, current_filters)
     
     # Handle workflow filter specially - show filenames instead of IDs
@@ -1874,6 +2023,57 @@ def get_next_workflow_execution_id(request):
         sequence = PersistentState.get_next_workflow_execution_id()
         return Response({
             'sequence': sequence,
+            'status': 'success'
+        })
+    except Exception as e:
+        return Response({
+            'error': str(e),
+            'status': 'error'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@authentication_classes([SessionAuthentication, TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def ensure_namespace(request):
+    """
+    API endpoint to ensure a namespace exists, creating it if not.
+
+    Request body:
+        name: namespace name (required)
+        owner: owner username (required)
+        description: optional description (defaults to empty string)
+
+    Returns the namespace record (created or existing).
+    """
+    from .workflow_models import Namespace
+
+    name = request.data.get('name')
+    owner = request.data.get('owner')
+    description = request.data.get('description', '')
+
+    if not name:
+        return Response({
+            'error': 'name is required',
+            'status': 'error'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if not owner:
+        return Response({
+            'error': 'owner is required',
+            'status': 'error'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        namespace, created = Namespace.objects.get_or_create(
+            name=name,
+            defaults={'owner': owner, 'description': description}
+        )
+        return Response({
+            'name': namespace.name,
+            'owner': namespace.owner,
+            'description': namespace.description,
+            'created': created,
             'status': 'success'
         })
     except Exception as e:

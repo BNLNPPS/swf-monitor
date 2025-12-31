@@ -1,12 +1,93 @@
 {% extends "monitor_app/_datatable_dynamic_base.html" %}
 
+{% block extra_filters %}
+<!-- Filter Controls -->
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="filter-bar mb-2">
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Type:</span>
+                <a href="#" data-filter="agent_type" data-value="" class="filter-link {% if not selected_type %}filter-active{% endif %}">All</a>
+                {% for t in agent_types %}
+                    <a href="#" data-filter="agent_type" data-value="{{ t }}" class="filter-link {% if selected_type == t %}filter-active{% endif %}">{{ t }}</a>
+                {% endfor %}
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Status:</span>
+                <a href="#" data-filter="status" data-value="" class="filter-link {% if not selected_status %}filter-active{% endif %}">All</a>
+                {% for s in statuses %}
+                    <a href="#" data-filter="status" data-value="{{ s }}" class="filter-link {% if selected_status == s %}filter-active{% endif %}">{{ s }}</a>
+                {% endfor %}
+            </div>
+            <div>
+                <span style="font-weight: 600;">Namespace:</span>
+                <a href="#" data-filter="namespace" data-value="" class="filter-link {% if not selected_namespace %}filter-active{% endif %}">All</a>
+                {% for ns in namespaces %}
+                    <a href="#" data-filter="namespace" data-value="{{ ns }}" class="filter-link {% if selected_namespace == ns %}filter-active{% endif %}">{{ ns }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Active filters display -->
+        <div id="active-filters" class="mt-2" style="display: none;">
+            <strong>Active filters:</strong>
+            <span id="filter-badges"></span>
+            <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2">clear all</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
 {% block initial_filters %}
-{}
+{
+    agent_type: '{{ selected_type|default:"" }}',
+    status: '{{ selected_status|default:"" }}',
+    namespace: '{{ selected_namespace|default:"" }}'
+}
 {% endblock %}
 
 {% block default_order %}[[4, 'desc']]{% endblock %} <!-- Order by last_heartbeat descending -->
 
 {% block update_active_filters_display %}
-// No filters for agents view - just hide the active filters section
-$('#active-filters').hide();
+const badges = [];
+const parts = [];
+if (currentFilters.agent_type) parts.push(`Type:${currentFilters.agent_type}`);
+if (currentFilters.status) parts.push(`Status:${currentFilters.status}`);
+if (currentFilters.namespace) parts.push(`Namespace:${currentFilters.namespace}`);
+
+if (parts.length > 0) {
+    badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
+}
+
+if (badges.length > 0) {
+    $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
+    $('#active-filters').show();
+} else {
+    $('#active-filters').hide();
+}
+
+// Update filter link active states
+$('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="agent_type"][data-value="' + currentFilters.agent_type + '"]').addClass('filter-active');
+$('.filter-link[data-filter="status"][data-value="' + currentFilters.status + '"]').addClass('filter-active');
+$('.filter-link[data-filter="namespace"][data-value="' + currentFilters.namespace + '"]').addClass('filter-active');
+{% endblock %}
+
+{% block extra_scripts %}
+// Handle filter link clicks
+$('.filter-link').on('click', function(e) {
+    e.preventDefault();
+    const filterType = $(this).data('filter');
+    const filterValue = $(this).data('value');
+    window.tableCurrentFilters[filterType] = filterValue;
+    window.tableUpdateFilters();
+});
+
+// Clear all filters
+$('#clear-all-filters').on('click', function() {
+    window.tableCurrentFilters.agent_type = '';
+    window.tableCurrentFilters.status = '';
+    window.tableCurrentFilters.namespace = '';
+    window.tableUpdateFilters();
+});
 {% endblock %}
