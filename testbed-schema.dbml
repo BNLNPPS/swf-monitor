@@ -1,8 +1,7 @@
 Project "None" {
   database_type: 'PostgreSQL'
   Note: '''None
-  Last Updated At 12-31-2025 04:59PM UTC'''
-
+  Last Updated At 12-31-2025 08:56PM UTC'''
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -497,6 +496,27 @@ updated_at: Timestamp when TF record was last modified
   }
 }
 ref: monitor_app.FastMonFile.stf_file_id > monitor_app.StfFile.file_id
+
+
+Table monitor_app.Namespace {
+  Note: '''
+Testbed namespace for workflow isolation and multi-user environments.
+Namespaces group agents, executions, and messages for a particular user or purpose.
+
+
+*DB table: swf_namespace*'''
+
+  name char [pk, unique, not null]
+  owner char [note: '''Username of namespace owner''', not null]
+  description text [not null]
+  metadata json [null]
+  created_at date_time [not null]
+  updated_at date_time [not null]
+
+  indexes {
+    (name) [pk, unique, name: 'swf_namespace_pkey', type: btree]
+  }
+}
 
 
 Table monitor_app.PandaQueue {
