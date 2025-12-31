@@ -45,7 +45,7 @@
                         {% if definition.parameter_values.source %}
                         <tr>
                             <th>Source:</th>
-                            <td><a href="https://github.com/{{ definition.parameter_values.source.org }}/{{ definition.parameter_values.source.repo }}/blob/main/{{ definition.parameter_values.source.script_path }}" target="_blank">{{ definition.parameter_values.source.org }}/{{ definition.parameter_values.source.repo }}/{{ definition.parameter_values.source.script_path }}</a></td>
+                            <td><a href="https://github.com/{{ definition.parameter_values.source.org }}/{{ definition.parameter_values.source.repo }}/blob/{{ definition.parameter_values.source.branch|default:'main' }}/{{ definition.parameter_values.source.script_path }}" target="_blank">{{ definition.parameter_values.source.org }}/{{ definition.parameter_values.source.repo }}/{{ definition.parameter_values.source.script_path }}</a></td>
                         </tr>
                         {% endif %}
                         <tr>
