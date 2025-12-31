@@ -355,6 +355,8 @@ class WorkflowExecution(models.Model):
     """
     execution_id = models.CharField(primary_key=True, max_length=100, help_text="Human-readable execution ID")
     workflow_definition = models.ForeignKey(WorkflowDefinition, on_delete=models.CASCADE, related_name='executions')
+    namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
+                                 help_text="Testbed namespace for workflow delineation")
     parameter_values = models.JSONField(help_text="Actual parameter values used for this execution")
     performance_metrics = models.JSONField(null=True, blank=True, help_text="Performance metrics and results")
     status = models.CharField(max_length=50, default='pending', help_text="Flexible execution status")

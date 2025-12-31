@@ -135,6 +135,7 @@ def workflow_executions_list(request):
     workflow = request.GET.get('workflow')
     status = request.GET.get('status')
     executed_by = request.GET.get('executed_by')
+    namespace = request.GET.get('namespace')
 
     # Get unique values for filter links
     workflows = WorkflowExecution.objects.select_related('workflow_definition').values_list(
@@ -143,10 +144,14 @@ def workflow_executions_list(request):
 
     statuses = WorkflowExecution.objects.values_list('status', flat=True).distinct().order_by('status')
     executed_bys = WorkflowExecution.objects.values_list('executed_by', flat=True).distinct().order_by('executed_by')
+    namespaces = WorkflowExecution.objects.exclude(namespace__isnull=True).exclude(namespace='').values_list(
+        'namespace', flat=True
+    ).distinct().order_by('namespace')
 
     columns = [
         {'name': 'execution_id', 'title': 'Execution ID', 'orderable': True},
         {'name': 'workflow', 'title': 'Workflow', 'orderable': True},
+        {'name': 'namespace', 'title': 'Namespace', 'orderable': True},
         {'name': 'status', 'title': 'Status', 'orderable': True},
         {'name': 'stf_count', 'title': 'STFs', 'orderable': False},
         {'name': 'executed_by', 'title': 'Executed By', 'orderable': True},
@@ -170,9 +175,11 @@ def workflow_executions_list(request):
         'workflows': list(workflows),
         'statuses': list(statuses),
         'executed_bys': list(executed_bys),
+        'namespaces': list(namespaces),
         'selected_workflow': workflow,
         'selected_status': status,
         'selected_executed_by': executed_by,
+        'selected_namespace': namespace,
     }
     return render(request, 'monitor_app/workflow_executions_list.html', context)
 
@@ -182,8 +189,8 @@ def workflow_executions_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime, format_duration
     from .workflow_models import WorkflowMessage
 
-    columns = ['execution_id', 'workflow', 'status', 'stf_count', 'executed_by', 'start_time', 'duration', 'actions']
-    dt = DataTablesProcessor(request, columns, default_order_column=5, default_order_direction='desc')
+    columns = ['execution_id', 'workflow', 'namespace', 'status', 'stf_count', 'executed_by', 'start_time', 'duration', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=6, default_order_direction='desc')
 
     # Build queryset
     queryset = WorkflowExecution.objects.select_related('workflow_definition')
@@ -200,6 +207,10 @@ def workflow_executions_datatable_ajax(request):
     executed_by = request.GET.get('executed_by')
     if executed_by:
         queryset = queryset.filter(executed_by=executed_by)
+
+    namespace = request.GET.get('namespace')
+    if namespace:
+        queryset = queryset.filter(namespace=namespace)
 
     # Get counts and apply search/pagination
     records_total = WorkflowExecution.objects.count()
@@ -229,9 +240,16 @@ def workflow_executions_datatable_ajax(request):
             message_type='stf_gen'
         ).count()
 
+        # Format namespace as link
+        if execution.namespace:
+            namespace_link = f'<a href="{reverse("monitor_app:namespace_detail", args=[execution.namespace])}">{execution.namespace}</a>'
+        else:
+            namespace_link = ''
+
         data.append([
             f'<a href="{reverse("monitor_app:workflow_execution_detail", args=[execution.execution_id])}" class="text-decoration-none">{execution.execution_id}</a>',
             f"{execution.workflow_definition.workflow_name} v{execution.workflow_definition.version}",
+            namespace_link,
             execution.status,
             str(stf_count),
             execution.executed_by,

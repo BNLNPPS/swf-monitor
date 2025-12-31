@@ -21,11 +21,18 @@
                     <a href="#" data-filter="status" data-value="{{ stat }}" class="filter-link {% if selected_status == stat %}filter-active{% endif %}">{{ stat }}</a>
                 {% endfor %}
             </div>
-            <div>
+            <div style="margin-bottom: 0.5em;">
                 <span style="font-weight: 600;">Executed By:</span>
                 <a href="#" data-filter="executed_by" data-value="" class="filter-link {% if not selected_executed_by %}filter-active{% endif %}">All</a>
                 {% for executor in executed_bys %}
                     <a href="#" data-filter="executed_by" data-value="{{ executor }}" class="filter-link {% if selected_executed_by == executor %}filter-active{% endif %}">{{ executor }}</a>
+                {% endfor %}
+            </div>
+            <div>
+                <span style="font-weight: 600;">Namespace:</span>
+                <a href="#" data-filter="namespace" data-value="" class="filter-link {% if not selected_namespace %}filter-active{% endif %}">All</a>
+                {% for ns in namespaces %}
+                    <a href="#" data-filter="namespace" data-value="{{ ns }}" class="filter-link {% if selected_namespace == ns %}filter-active{% endif %}">{{ ns }}</a>
                 {% endfor %}
             </div>
         </div>
@@ -44,11 +51,12 @@
 {
     workflow: '{{ selected_workflow|default:"" }}',
     status: '{{ selected_status|default:"" }}',
-    executed_by: '{{ selected_executed_by|default:"" }}'
+    executed_by: '{{ selected_executed_by|default:"" }}',
+    namespace: '{{ selected_namespace|default:"" }}'
 }
 {% endblock %}
 
-{% block default_order %}[[4, 'desc']]{% endblock %} <!-- Order by start_time descending -->
+{% block default_order %}[[6, 'desc']]{% endblock %} <!-- Order by start_time descending -->
 
 {% block update_active_filters_display %}
 const badges = [];
@@ -57,6 +65,7 @@ const parts = [];
 if (currentFilters.workflow) parts.push(`Workflow:${currentFilters.workflow}`);
 if (currentFilters.status) parts.push(`Status:${currentFilters.status}`);
 if (currentFilters.executed_by) parts.push(`By:${currentFilters.executed_by}`);
+if (currentFilters.namespace) parts.push(`Namespace:${currentFilters.namespace}`);
 
 if (parts.length > 0) {
     badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
@@ -74,6 +83,7 @@ $('.filter-link').removeClass('filter-active');
 $('.filter-link[data-filter="workflow"][data-value="' + currentFilters.workflow + '"]').addClass('filter-active');
 $('.filter-link[data-filter="status"][data-value="' + currentFilters.status + '"]').addClass('filter-active');
 $('.filter-link[data-filter="executed_by"][data-value="' + currentFilters.executed_by + '"]').addClass('filter-active');
+$('.filter-link[data-filter="namespace"][data-value="' + currentFilters.namespace + '"]').addClass('filter-active');
 {% endblock %}
 
 {% block extra_scripts %}
@@ -92,6 +102,7 @@ $('#clear-all-filters').on('click', function() {
     window.tableCurrentFilters.workflow = '';
     window.tableCurrentFilters.status = '';
     window.tableCurrentFilters.executed_by = '';
+    window.tableCurrentFilters.namespace = '';
 
     // Update the table and URL
     window.tableUpdateFilters();

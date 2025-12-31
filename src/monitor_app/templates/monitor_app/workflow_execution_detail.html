@@ -35,6 +35,10 @@
                             <td>{{ execution.workflow_definition.workflow_type }}</td>
                         </tr>
                         <tr>
+                            <th>Namespace:</th>
+                            <td>{% if execution.namespace %}<a href="{% url 'monitor_app:namespace_detail' execution.namespace %}">{{ execution.namespace }}</a>{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
+                        </tr>
+                        <tr>
                             <th>Status:</th>
                             <td>
                                 <span class="badge bg-{% if execution.status == 'completed' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}primary{% else %}secondary{% endif %}">
