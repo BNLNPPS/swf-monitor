@@ -42,6 +42,12 @@
                             <th>Updated:</th>
                             <td>{{ definition.updated_at }}</td>
                         </tr>
+                        {% if definition.parameter_values.source %}
+                        <tr>
+                            <th>Source:</th>
+                            <td><a href="https://github.com/{{ definition.parameter_values.source.org }}/{{ definition.parameter_values.source.repo }}/blob/main/{{ definition.parameter_values.source.script_path }}" target="_blank">{{ definition.parameter_values.source.org }}/{{ definition.parameter_values.source.repo }}/{{ definition.parameter_values.source.script_path }}</a></td>
+                        </tr>
+                        {% endif %}
                         <tr>
                             <th>Total Executions:</th>
                             <td><a href="{% url 'monitor_app:workflow_executions_list' %}?workflow={{ definition.workflow_name }}" class="text-decoration-none">{{ total_executions }}</a></td>
