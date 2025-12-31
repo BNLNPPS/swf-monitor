@@ -5,6 +5,20 @@
 <div class="card mb-3">
     <div class="card-body">
         <div class="filter-bar mb-2">
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Type:</span>
+                <a href="#" data-filter="agent_type" data-value="" class="filter-link {% if not selected_type %}filter-active{% endif %}">All</a>
+                {% for t in agent_types %}
+                    <a href="#" data-filter="agent_type" data-value="{{ t }}" class="filter-link {% if selected_type == t %}filter-active{% endif %}">{{ t }}</a>
+                {% endfor %}
+            </div>
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-weight: 600;">Status:</span>
+                <a href="#" data-filter="status" data-value="" class="filter-link {% if not selected_status %}filter-active{% endif %}">All</a>
+                {% for s in statuses %}
+                    <a href="#" data-filter="status" data-value="{{ s }}" class="filter-link {% if selected_status == s %}filter-active{% endif %}">{{ s }}</a>
+                {% endfor %}
+            </div>
             <div>
                 <span style="font-weight: 600;">Namespace:</span>
                 <a href="#" data-filter="namespace" data-value="" class="filter-link {% if not selected_namespace %}filter-active{% endif %}">All</a>
@@ -26,6 +40,8 @@
 
 {% block initial_filters %}
 {
+    agent_type: '{{ selected_type|default:"" }}',
+    status: '{{ selected_status|default:"" }}',
     namespace: '{{ selected_namespace|default:"" }}'
 }
 {% endblock %}
@@ -34,8 +50,13 @@
 
 {% block update_active_filters_display %}
 const badges = [];
-if (currentFilters.namespace) {
-    badges.push(`<span class="badge bg-info me-1">Namespace: ${currentFilters.namespace}</span>`);
+const parts = [];
+if (currentFilters.agent_type) parts.push(`Type:${currentFilters.agent_type}`);
+if (currentFilters.status) parts.push(`Status:${currentFilters.status}`);
+if (currentFilters.namespace) parts.push(`Namespace:${currentFilters.namespace}`);
+
+if (parts.length > 0) {
+    badges.push(`<span class="badge bg-info me-1">${parts.join('/')}</span>`);
 }
 
 if (badges.length > 0) {
@@ -47,6 +68,8 @@ if (badges.length > 0) {
 
 // Update filter link active states
 $('.filter-link').removeClass('filter-active');
+$('.filter-link[data-filter="agent_type"][data-value="' + currentFilters.agent_type + '"]').addClass('filter-active');
+$('.filter-link[data-filter="status"][data-value="' + currentFilters.status + '"]').addClass('filter-active');
 $('.filter-link[data-filter="namespace"][data-value="' + currentFilters.namespace + '"]').addClass('filter-active');
 {% endblock %}
 
@@ -62,6 +85,8 @@ $('.filter-link').on('click', function(e) {
 
 // Clear all filters
 $('#clear-all-filters').on('click', function() {
+    window.tableCurrentFilters.agent_type = '';
+    window.tableCurrentFilters.status = '';
     window.tableCurrentFilters.namespace = '';
     window.tableUpdateFilters();
 });

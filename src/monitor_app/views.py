@@ -1321,10 +1321,20 @@ def workflow_agents_list(request):
     """View showing the status of all workflow agents using server-side DataTables."""
     from django.urls import reverse
 
-    # Get namespace filter from URL params
+    # Get filters from URL params
+    selected_type = request.GET.get('agent_type', '')
+    selected_status = request.GET.get('status', '')
     selected_namespace = request.GET.get('namespace', '')
 
-    # Get distinct namespaces for filter bar
+    # Get distinct values for filter bars
+    agent_types = list(SystemAgent.objects.values_list(
+        'agent_type', flat=True
+    ).distinct().order_by('agent_type'))
+
+    statuses = list(SystemAgent.objects.values_list(
+        'status', flat=True
+    ).distinct().order_by('status'))
+
     namespaces = list(SystemAgent.objects.exclude(
         namespace__isnull=True
     ).exclude(
@@ -1347,7 +1357,11 @@ def workflow_agents_list(request):
         ],
         'filter_fields': [],  # Handled in template
         'default_order': [[4, 'desc']],  # Default sort by Last Heartbeat descending
+        'selected_type': selected_type,
+        'selected_status': selected_status,
         'selected_namespace': selected_namespace,
+        'agent_types': agent_types,
+        'statuses': statuses,
         'namespaces': namespaces,
     }
 
@@ -1368,7 +1382,15 @@ def workflow_agents_datatable_ajax(request):
     # Base queryset - show all agents, not just workflow-enabled ones
     queryset = SystemAgent.objects.all()
 
-    # Apply namespace filter if provided
+    # Apply filters if provided
+    agent_type = request.GET.get('agent_type')
+    if agent_type:
+        queryset = queryset.filter(agent_type=agent_type)
+
+    status = request.GET.get('status')
+    if status:
+        queryset = queryset.filter(status=status)
+
     namespace = request.GET.get('namespace')
     if namespace:
         queryset = queryset.filter(namespace=namespace)
