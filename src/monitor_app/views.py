@@ -1463,7 +1463,13 @@ def agent_detail(request, instance_name):
 @login_required
 def namespace_detail(request, namespace):
     """Display details for a namespace."""
-    from .workflow_models import WorkflowMessage, WorkflowExecution
+    from .workflow_models import WorkflowMessage, WorkflowExecution, Namespace
+
+    # Try to get namespace record from database
+    try:
+        ns_record = Namespace.objects.get(name=namespace)
+    except Namespace.DoesNotExist:
+        ns_record = None
 
     # Count agents, messages and executions for this namespace
     agent_count = SystemAgent.objects.filter(namespace=namespace).count()
@@ -1472,6 +1478,7 @@ def namespace_detail(request, namespace):
 
     return render(request, 'monitor_app/namespace_detail.html', {
         'namespace': namespace,
+        'ns_record': ns_record,
         'agent_count': agent_count,
         'message_count': message_count,
         'execution_count': execution_count,

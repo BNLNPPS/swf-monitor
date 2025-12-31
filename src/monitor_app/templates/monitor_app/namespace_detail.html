@@ -8,7 +8,41 @@
 
     <div class="card mb-4">
         <div class="card-header">
-            <h5 class="mb-0">Summary</h5>
+            <h5 class="mb-0">Namespace Information</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-sm">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Name</th>
+                        <td>{{ namespace }}</td>
+                    </tr>
+                    <tr>
+                        <th>Owner</th>
+                        <td>{% if ns_record %}{{ ns_record.owner }}{% else %}<em class="text-muted">not registered</em>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <th>Description</th>
+                        <td>{% if ns_record and ns_record.description %}{{ ns_record.description }}{% else %}<em class="text-muted">-</em>{% endif %}</td>
+                    </tr>
+                    {% if ns_record %}
+                    <tr>
+                        <th>Created</th>
+                        <td>{{ ns_record.created_at|date:"Y-m-d H:i:s" }} UTC</td>
+                    </tr>
+                    <tr>
+                        <th>Updated</th>
+                        <td>{{ ns_record.updated_at|date:"Y-m-d H:i:s" }} UTC</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Activity</h5>
         </div>
         <div class="card-body">
             <table class="table table-sm">
