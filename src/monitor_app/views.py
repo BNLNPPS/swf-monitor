@@ -1435,6 +1435,31 @@ def agent_detail(request, instance_name):
 
 
 @login_required
+def namespace_detail(request, namespace):
+    """Display details for a namespace."""
+    from .workflow_models import WorkflowMessage
+
+    # Get agents in this namespace
+    agents = SystemAgent.objects.filter(namespace=namespace).order_by('agent_type', 'instance_name')
+
+    # Count messages and executions for this namespace
+    message_count = WorkflowMessage.objects.filter(namespace=namespace).count()
+    execution_ids = WorkflowMessage.objects.filter(
+        namespace=namespace
+    ).exclude(
+        execution_id__isnull=True
+    ).values_list('execution_id', flat=True).distinct()
+
+    return render(request, 'monitor_app/namespace_detail.html', {
+        'namespace': namespace,
+        'agents': agents,
+        'agent_count': agents.count(),
+        'message_count': message_count,
+        'execution_count': len(set(execution_ids)),
+    })
+
+
+@login_required
 def message_detail(request, message_id):
     """Display details for a specific workflow message."""
     from .workflow_models import WorkflowMessage
@@ -1584,9 +1609,16 @@ def workflow_messages_datatable_ajax(request):
         message_detail_url = reverse('monitor_app:message_detail', args=[message.message_id])
         timestamp_link = f'<a href="{message_detail_url}">{format_datetime(message.sent_at)}</a>'
 
+        # Format namespace as link
+        if message.namespace:
+            namespace_url = reverse('monitor_app:namespace_detail', args=[message.namespace])
+            namespace_link = f'<a href="{namespace_url}">{message.namespace}</a>'
+        else:
+            namespace_link = ''
+
         row = [
             timestamp_link,
-            message.namespace or '',
+            namespace_link,
             message.message_type,
             sender_link,
             source,

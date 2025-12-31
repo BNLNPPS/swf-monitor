@@ -35,7 +35,7 @@
                     </tr>
                     <tr>
                         <th>Namespace</th>
-                        <td>{% if agent.namespace %}{{ agent.namespace }}{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
+                        <td>{% if agent.namespace %}<a href="{% url 'monitor_app:namespace_detail' agent.namespace %}">{{ agent.namespace }}</a>{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
                     </tr>
                     <tr>
                         <th>Agent URL</th>
@@ -95,7 +95,8 @@
     </div>
 
     <div class="mt-4">
-        <a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}" class="btn btn-primary">View Messages from this Agent &rarr;</a>
+        <a href="{% url 'monitor_app:workflow_executions_list' %}?agent={{ agent.instance_name }}" class="btn btn-primary me-2">Workflow Executions ({{ total_executions }}) &rarr;</a>
+        <a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}" class="btn btn-secondary">Messages from this Agent &rarr;</a>
     </div>
 </div>
 {% endblock %}

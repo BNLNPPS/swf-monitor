@@ -24,11 +24,11 @@
                                 </tr>
                                 <tr>
                                     <th>Namespace:</th>
-                                    <td>{{ message.namespace|default:"—" }}</td>
+                                    <td>{% if message.namespace %}<a href="{% url 'monitor_app:namespace_detail' message.namespace %}">{{ message.namespace }}</a>{% else %}—{% endif %}</td>
                                 </tr>
                                 <tr>
                                     <th>Execution ID:</th>
-                                    <td>{{ message.execution_id|default:"—" }}</td>
+                                    <td>{% if message.execution_id %}<a href="{% url 'monitor_app:workflow_execution_detail' message.execution_id %}">{{ message.execution_id }}</a>{% else %}—{% endif %}</td>
                                 </tr>
                                 <tr>
                                     <th>Run ID:</th>
