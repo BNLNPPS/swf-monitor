@@ -273,6 +273,86 @@ def workflow_executions_filter_counts(request):
 
 
 @login_required
+def namespaces_list(request):
+    """
+    Namespace list view using server-side DataTables.
+    Aggregates namespaces from SystemAgent, WorkflowExecution, and WorkflowMessage.
+    """
+    from .models import SystemAgent
+    from .workflow_models import WorkflowMessage
+
+    columns = [
+        {'name': 'namespace', 'title': 'Namespace', 'orderable': True},
+        {'name': 'agent_count', 'title': 'Agents', 'orderable': True},
+        {'name': 'execution_count', 'title': 'Executions', 'orderable': True},
+        {'name': 'message_count', 'title': 'Messages', 'orderable': True},
+        {'name': 'actions', 'title': 'Actions', 'orderable': False},
+    ]
+
+    context = {
+        'table_title': 'Namespaces',
+        'table_description': 'View testbed namespaces and their associated agents, executions, and messages.',
+        'ajax_url': reverse('monitor_app:namespaces_datatable_ajax'),
+        'columns': columns,
+    }
+    return render(request, 'monitor_app/namespaces_list.html', context)
+
+
+def namespaces_datatable_ajax(request):
+    """AJAX endpoint for server-side DataTables processing of namespaces."""
+    from .utils import DataTablesProcessor
+    from .models import SystemAgent
+    from .workflow_models import WorkflowMessage
+
+    columns = ['namespace', 'agent_count', 'execution_count', 'message_count', 'actions']
+    dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='asc')
+
+    # Collect all unique namespaces from different sources
+    agent_namespaces = set(SystemAgent.objects.exclude(
+        namespace__isnull=True
+    ).exclude(namespace='').values_list('namespace', flat=True))
+
+    execution_namespaces = set(WorkflowExecution.objects.exclude(
+        namespace__isnull=True
+    ).exclude(namespace='').values_list('namespace', flat=True))
+
+    message_namespaces = set(WorkflowMessage.objects.exclude(
+        namespace__isnull=True
+    ).exclude(namespace='').values_list('namespace', flat=True))
+
+    all_namespaces = sorted(agent_namespaces | execution_namespaces | message_namespaces)
+    records_total = len(all_namespaces)
+
+    # Apply search filter
+    search_value = request.GET.get('search[value]', '').strip().lower()
+    if search_value:
+        all_namespaces = [ns for ns in all_namespaces if search_value in ns.lower()]
+    records_filtered = len(all_namespaces)
+
+    # Apply pagination
+    start = int(request.GET.get('start', 0))
+    length = int(request.GET.get('length', 25))
+    paginated_namespaces = all_namespaces[start:start + length]
+
+    # Build data with counts
+    data = []
+    for namespace in paginated_namespaces:
+        agent_count = SystemAgent.objects.filter(namespace=namespace).count()
+        execution_count = WorkflowExecution.objects.filter(namespace=namespace).count()
+        message_count = WorkflowMessage.objects.filter(namespace=namespace).count()
+
+        data.append([
+            f'<a href="{reverse("monitor_app:namespace_detail", args=[namespace])}">{namespace}</a>',
+            str(agent_count),
+            str(execution_count),
+            str(message_count),
+            f'<a href="{reverse("monitor_app:namespace_detail", args=[namespace])}" class="btn btn-sm btn-outline-primary">View</a>'
+        ])
+
+    return dt.create_response(data, records_total, records_filtered)
+
+
+@login_required
 def workflow_definition_detail(request, workflow_name, version):
     """Detail view for a specific workflow definition."""
     definition = get_object_or_404(WorkflowDefinition, workflow_name=workflow_name, version=version)

@@ -90,6 +90,8 @@ from .workflow_views import (
     workflow_executions_filter_counts,
     workflow_definition_detail,
     workflow_execution_detail,
+    namespaces_list,
+    namespaces_datatable_ajax,
 )
 
 app_name = 'monitor_app'
@@ -159,6 +161,10 @@ urlpatterns = [
     path('workflow-executions/datatable/', workflow_executions_datatable_ajax, name='workflow_executions_datatable_ajax'),
     path('workflow-executions/filter-counts/', workflow_executions_filter_counts, name='workflow_executions_filter_counts'),
     path('workflow-executions/<str:execution_id>/', workflow_execution_detail, name='workflow_execution_detail'),
+
+    # Namespaces
+    path('namespaces/', namespaces_list, name='namespaces_list'),
+    path('namespaces/datatable/', namespaces_datatable_ajax, name='namespaces_datatable_ajax'),
 
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
