@@ -15,7 +15,7 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Agents</th>
-                        <td>{{ agent_count }}</td>
+                        <td><a href="{% url 'monitor_app:workflow_agents_list' %}?namespace={{ namespace }}">{{ agent_count }}</a></td>
                     </tr>
                     <tr>
                         <th>Workflow Executions</th>
@@ -30,42 +30,5 @@
         </div>
     </div>
 
-    {% if agents %}
-    <div class="card mb-4">
-        <div class="card-header">
-            <h5 class="mb-0">Agents ({{ agent_count }})</h5>
-        </div>
-        <div class="card-body">
-            <table class="table table-striped table-sm">
-                <thead>
-                    <tr>
-                        <th>Agent Instance</th>
-                        <th>Type</th>
-                        <th>Status</th>
-                        <th>Last Heartbeat</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for agent in agents %}
-                    <tr>
-                        <td><a href="{% url 'monitor_app:agent_detail' agent.instance_name %}">{{ agent.instance_name }}</a></td>
-                        <td>{{ agent.get_agent_type_display }}</td>
-                        <td>
-                            <span class="badge bg-{% if agent.status == 'OK' %}success{% elif agent.status == 'WARNING' %}warning{% elif agent.status == 'ERROR' %}danger{% else %}secondary{% endif %}">
-                                {{ agent.status }}
-                            </span>
-                        </td>
-                        <td>{% if agent.last_heartbeat %}{{ agent.last_heartbeat|date:"Y-m-d H:i:s" }}{% else %}<em class="text-muted">never</em>{% endif %}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
-
-    <div class="mt-4">
-        <a href="{% url 'monitor_app:workflow_agents_list' %}" class="btn btn-secondary">Back to Agents List</a>
-    </div>
 </div>
 {% endblock %}

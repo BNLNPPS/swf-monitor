@@ -1354,7 +1354,12 @@ def workflow_agents_datatable_ajax(request):
     
     # Base queryset - show all agents, not just workflow-enabled ones
     queryset = SystemAgent.objects.all()
-    
+
+    # Apply namespace filter if provided
+    namespace = request.GET.get('namespace')
+    if namespace:
+        queryset = queryset.filter(namespace=namespace)
+
     # For sorting current_processing and recent_completed, we need to annotate
     # But for now, let's keep it simple and sort by the basic fields
     special_cases = {
@@ -1439,17 +1444,14 @@ def namespace_detail(request, namespace):
     """Display details for a namespace."""
     from .workflow_models import WorkflowMessage, WorkflowExecution
 
-    # Get agents in this namespace
-    agents = SystemAgent.objects.filter(namespace=namespace).order_by('agent_type', 'instance_name')
-
-    # Count messages and executions for this namespace
+    # Count agents, messages and executions for this namespace
+    agent_count = SystemAgent.objects.filter(namespace=namespace).count()
     message_count = WorkflowMessage.objects.filter(namespace=namespace).count()
     execution_count = WorkflowExecution.objects.filter(namespace=namespace).count()
 
     return render(request, 'monitor_app/namespace_detail.html', {
         'namespace': namespace,
-        'agents': agents,
-        'agent_count': agents.count(),
+        'agent_count': agent_count,
         'message_count': message_count,
         'execution_count': execution_count,
     })
