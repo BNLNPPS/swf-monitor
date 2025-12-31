@@ -1329,14 +1329,13 @@ def workflow_agents_list(request):
             {'title': 'Agent Name', 'orderable': True},
             {'title': 'Type', 'orderable': True},
             {'title': 'Status', 'orderable': True},
-            {'title': 'Workflow Enabled', 'orderable': True},
             {'title': 'Last Heartbeat', 'orderable': True},
             {'title': 'Currently Processing', 'orderable': True},
             {'title': 'Recently Completed (1hr)', 'orderable': True},
             {'title': 'Total Processed', 'orderable': True},
         ],
         'filter_fields': [],  # No filters for this view
-        'default_order': [[4, 'desc']],  # Default sort by Last Heartbeat descending
+        'default_order': [[3, 'desc']],  # Default sort by Last Heartbeat descending
     }
     
     return render(request, 'monitor_app/workflow_agents_list_dynamic.html', context)
@@ -1349,9 +1348,9 @@ def workflow_agents_datatable_ajax(request):
     from .utils import DataTablesProcessor, format_datetime
     
     # Column definitions matching the template order
-    columns = ['instance_name', 'agent_type', 'status', 'workflow_enabled', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
-    
-    dt = DataTablesProcessor(request, columns, default_order_column=4, default_order_direction='desc')  # Sort by last_heartbeat descending
+    columns = ['instance_name', 'agent_type', 'status', 'last_heartbeat', 'current_processing', 'recent_completed', 'total_stf_processed']
+
+    dt = DataTablesProcessor(request, columns, default_order_column=3, default_order_direction='desc')  # Sort by last_heartbeat descending
     
     # Base queryset - show all agents, not just workflow-enabled ones
     queryset = SystemAgent.objects.all()
@@ -1410,20 +1409,14 @@ def workflow_agents_datatable_ajax(request):
         # Create agent name link
         agent_detail_url = reverse('monitor_app:agent_detail', args=[agent.instance_name])
         agent_link = f'<a href="{agent_detail_url}">{agent.instance_name}</a>'
-        
-        # Format workflow enabled badge
-        workflow_enabled_class = 'success' if agent.workflow_enabled else 'secondary'
-        workflow_enabled_text = 'Enabled' if agent.workflow_enabled else 'Disabled'
-        workflow_enabled_badge = f'<span class="badge bg-{workflow_enabled_class}">{workflow_enabled_text}</span>'
-        
+
         # Format heartbeat - sorting is now handled at database level
         heartbeat_cell = format_datetime(agent.last_heartbeat) if agent.last_heartbeat else 'Never'
-        
+
         row = [
             agent_link,
             agent.get_agent_type_display(),
             status_badge,
-            workflow_enabled_badge,
             heartbeat_cell,
             str(current_stages),
             str(recent_completed),

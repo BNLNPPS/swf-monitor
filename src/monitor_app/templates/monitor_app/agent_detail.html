@@ -5,13 +5,97 @@
 {% block content %}
 <div class="container mt-4">
     <h2>Agent Detail: {{ agent.instance_name }}</h2>
-    <p><strong>Type:</strong> {{ agent.get_agent_type_display }}</p>
-    <p><strong>Status:</strong> {{ agent.status }}</p>
-    <p><strong>Last Heartbeat:</strong> {{ agent.last_heartbeat|date:"Ymd-H:i:s" }}</p>
-    <p><strong>Description:</strong> {{ agent.description }}</p>
-    {% if agent.namespace %}<p><strong>Namespace:</strong> {{ agent.namespace }}</p>{% endif %}
 
-    <h3 class="mt-4">Messages</h3>
-    <p><a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}" class="btn btn-primary">View Messages from this Agent &rarr;</a></p>
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Agent Information</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Instance Name</th>
+                        <td>{{ agent.instance_name }}</td>
+                    </tr>
+                    <tr>
+                        <th>Type</th>
+                        <td>{{ agent.get_agent_type_display }} ({{ agent.agent_type }})</td>
+                    </tr>
+                    <tr>
+                        <th>Status</th>
+                        <td>
+                            <span class="badge bg-{% if agent.status == 'OK' %}success{% elif agent.status == 'WARNING' %}warning{% elif agent.status == 'ERROR' %}danger{% else %}secondary{% endif %}">
+                                {{ agent.status }}
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Description</th>
+                        <td>{% if agent.description %}{{ agent.description }}{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <th>Namespace</th>
+                        <td>{% if agent.namespace %}{{ agent.namespace }}{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <th>Agent URL</th>
+                        <td>{% if agent.agent_url %}<a href="{{ agent.agent_url }}">{{ agent.agent_url }}</a>{% else %}<em class="text-muted">not defined</em>{% endif %}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Timing</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Last Heartbeat</th>
+                        <td>{% if agent.last_heartbeat %}{{ agent.last_heartbeat|date:"Y-m-d H:i:s" }} UTC{% else %}<em class="text-muted">never</em>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <th>Last STF Processed</th>
+                        <td>{% if agent.last_stf_processed %}{{ agent.last_stf_processed|date:"Y-m-d H:i:s" }} UTC{% else %}<em class="text-muted">never</em>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <th>Created At</th>
+                        <td>{{ agent.created_at|date:"Y-m-d H:i:s" }} UTC</td>
+                    </tr>
+                    <tr>
+                        <th>Updated At</th>
+                        <td>{{ agent.updated_at|date:"Y-m-d H:i:s" }} UTC</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Processing Statistics</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Current STF Count</th>
+                        <td>{{ agent.current_stf_count }}</td>
+                    </tr>
+                    <tr>
+                        <th>Total STF Processed</th>
+                        <td>{{ agent.total_stf_processed }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}" class="btn btn-primary">View Messages from this Agent &rarr;</a>
+    </div>
 </div>
 {% endblock %}
