@@ -56,7 +56,9 @@ else:
 INSTALLED_APPS = [
     "daphne",  # Add daphne for ASGI server
     "channels",  # Add channels for WebSocket support
-    "mcp_app",  # Changed from "swf_monitor_project.mcp_app"
+    # "mcp_app",  # Replaced by mcp_server (proper MCP spec implementation)
+    "mcp_server",  # django-mcp-server for Model Context Protocol
+    "oauth2_provider",  # OAuth2 authentication for MCP
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -226,6 +228,26 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     # OTHER SETTINGS
 }
+
+# OAuth2 Provider settings for MCP authentication
+OAUTH2_PROVIDER = {
+    "SCOPES": {
+        "read": "Read access to MCP tools",
+        "write": "Write access to MCP tools",
+    },
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
+}
+
+# Django MCP Server configuration
+DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
+    "name": "swf-monitor",
+    "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
+}
+
+# MCP authentication - start with no auth for development, enable OAuth2 for production
+# DJANGO_MCP_AUTHENTICATION_CLASSES = [
+#     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
+# ]
 
 # ActiveMQ Settings
 ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')
