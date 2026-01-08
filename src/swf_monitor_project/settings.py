@@ -240,8 +240,30 @@ OAUTH2_PROVIDER = {
 
 # Django MCP Server configuration
 DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "name": "swf-monitor",
-    "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
+    "name": "swf-testbed",
+    "instructions": """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
+
+KEY CONCEPTS:
+- Namespaces: Isolation boundaries for different users' workflow runs (e.g., 'torre1', 'wenauseic')
+- Runs: Data-taking periods identified by run_number, containing multiple STF files
+- STF files: Super Time Frame files - primary data units from the detector DAQ system
+- TF slices: Small processing units (~15 per STF) for fast monitoring workflow
+- Agents: Processes that execute workflows (daq_simulator, data_agent, processing_agent, etc.)
+- Workflow executions: Instances of running workflows, tracked by execution_id
+
+COMMON QUERIES:
+- What's running now? → list_workflow_executions(currently_running=True)
+- Any errors? → list_logs(level='ERROR')
+- System health? → get_system_state()
+- Activity in a namespace? → get_namespace(namespace='name')
+- Failed workflows? → list_workflow_executions(status='failed')
+
+FILTERING:
+- All list tools support start_time/end_time parameters (ISO datetime strings)
+- Status filters are case-insensitive
+- Context cascades: run_number → stf_filename → tf_filename
+
+Use list_available_tools() to see all available tools with descriptions.""",
 }
 
 # MCP authentication - start with no auth for development, enable OAuth2 for production
