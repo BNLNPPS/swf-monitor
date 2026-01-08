@@ -4,7 +4,7 @@
 
 The SWF Monitor implements the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP), the open standard for LLM-system interaction. This enables natural language queries and control of the testbed via MCP-compatible LLMs.
 
-**Endpoint:** `/mcp/`
+**Endpoint:** `/swf-monitor/mcp/`
 
 **Package:** [django-mcp-server](https://github.com/omarbenhamid/django-mcp-server)
 
@@ -29,7 +29,7 @@ Add to `claude_desktop_config.json`:
 {
   "mcpServers": {
     "swf-monitor": {
-      "url": "https://pandaserver02.sdcc.bnl.gov/mcp/",
+      "url": "https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/",
       "transport": "http"
     }
   }
@@ -45,7 +45,7 @@ Add via `/mcp add` or create `.mcp.json` in project:
   "mcpServers": {
     "swf-monitor": {
       "type": "http",
-      "url": "https://pandaserver02.sdcc.bnl.gov/mcp/"
+      "url": "https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/"
     }
   }
 }
