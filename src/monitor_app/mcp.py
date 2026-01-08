@@ -12,8 +12,12 @@ Design Philosophy:
 - Context filters cascade: run_number -> stf_filename -> tf_filename
 """
 
+import logging
+
 from datetime import timedelta
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 from django.utils.dateparse import parse_datetime
 from django.db.models import Count
 from mcp_server import mcp_server as mcp
@@ -292,7 +296,7 @@ async def list_agents(
     Args:
         namespace: Filter to agents in this namespace (e.g., 'torre1', 'wenauseic')
         agent_type: Filter by type: 'daqsim', 'data', 'processing', 'fastmon', 'workflow_runner'
-        status: Filter by status: 'OK', 'WARNING', 'ERROR', 'UNKNOWN'
+        status: Filter by status: 'OK', 'WARNING', 'ERROR', 'UNKNOWN', 'EXITED'
         execution_id: Filter to agents that participated in this workflow execution
         start_time: Filter to agents with heartbeat >= this ISO datetime
         end_time: Filter to agents with heartbeat <= this ISO datetime
@@ -557,7 +561,7 @@ async def list_workflow_executions(
 
     Args:
         namespace: Filter to executions in this namespace
-        status: Filter by status: 'pending', 'running', 'completed', 'failed', 'cancelled'
+        status: Filter by status: 'pending', 'running', 'completed', 'failed', 'terminated'
         executed_by: Filter by user who started the execution
         workflow_name: Filter by workflow definition name
         currently_running: If True, return all running executions (ignores date range)
@@ -860,10 +864,11 @@ async def list_stf_files(
         if machine_state:
             qs = qs.filter(machine_state__iexact=machine_state)
 
-        # Date range filter
-        start = _parse_time(start_time) or _default_start_time(24)
+        # Date range filter (skip default if specific run is requested)
+        start = _parse_time(start_time) or (None if run_number else _default_start_time(24))
         end = _parse_time(end_time)
-        qs = qs.filter(created_at__gte=start)
+        if start:
+            qs = qs.filter(created_at__gte=start)
         if end:
             qs = qs.filter(created_at__lte=end)
 
@@ -981,10 +986,12 @@ async def list_tf_slices(
         if assigned_worker:
             qs = qs.filter(assigned_worker=assigned_worker)
 
-        # Date range filter
-        start = _parse_time(start_time) or _default_start_time(24)
+        # Date range filter (skip default if specific context is requested)
+        has_context = run_number or stf_filename or tf_filename
+        start = _parse_time(start_time) or (None if has_context else _default_start_time(24))
         end = _parse_time(end_time)
-        qs = qs.filter(created_at__gte=start)
+        if start:
+            qs = qs.filter(created_at__gte=start)
         if end:
             qs = qs.filter(created_at__lte=end)
 
@@ -1195,21 +1202,47 @@ async def start_workflow(workflow_name: str, namespace: str) -> dict:
 
 
 @mcp.tool()
-async def stop_workflow(execution_id: str) -> dict:
+async def end_execution(execution_id: str) -> dict:
     """
-    Stop a running workflow execution. NOT YET IMPLEMENTED.
+    End a running workflow execution by setting its status to 'terminated'.
 
-    This tool will eventually allow stopping a running workflow from the LLM interface.
-    Currently returns instructions for manual intervention.
+    Use this to clean up stale or stuck executions that are still marked as 'running'.
+    This is a state change only - no data is deleted. The action is logged.
 
     Args:
-        execution_id: The execution ID to stop (use list_workflow_executions to find running ones)
+        execution_id: The execution ID to end (use list_workflow_executions to find running ones)
 
     Returns:
-        Status message
+        Success/failure status with details
     """
+    try:
+        execution = WorkflowExecution.objects.get(execution_id=execution_id)
+    except WorkflowExecution.DoesNotExist:
+        return {
+            "success": False,
+            "error": f"Execution '{execution_id}' not found",
+        }
+
+    old_status = execution.status
+    if old_status != 'running':
+        return {
+            "success": False,
+            "error": f"Execution '{execution_id}' is not running (status: {old_status})",
+        }
+
+    execution.status = 'terminated'
+    execution.end_time = timezone.now()
+    execution.save()
+
+    logger.info(
+        f"MCP end_execution: '{execution_id}' terminated (was running since {execution.start_time})"
+    )
+
     return {
-        "status": "not_implemented",
-        "message": "Workflow stop via MCP not yet implemented",
+        "success": True,
         "execution_id": execution_id,
+        "old_status": old_status,
+        "new_status": "terminated",
+        "start_time": execution.start_time.isoformat() if execution.start_time else None,
+        "end_time": execution.end_time.isoformat() if execution.end_time else None,
     }

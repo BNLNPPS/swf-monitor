@@ -349,6 +349,10 @@ else:
                 'url': 'http://localhost:8002/api/logs/',
                 'formatter': 'json',
             },
+            'db': {
+                'class': 'monitor_app.db_log_handler.DbLogHandler',
+                'level': 'INFO',
+            },
         },
         'root': {
             'handlers': ['console'],
@@ -358,6 +362,11 @@ else:
             'django': {
                 'handlers': ['console'],
                 'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+                'propagate': False,
+            },
+            'monitor_app': {
+                'handlers': ['db', 'console'],
+                'level': 'INFO',
                 'propagate': False,
             },
         },

@@ -25,7 +25,7 @@ class StfFileAPITests(APITestCase):
         self.stf_file = StfFile.objects.create(
             run=self.run,
             machine_state="physics",
-            file_url="https://example.com/files/test.stf",
+            stf_filename="test_run12345_001.stf",
             file_size_bytes=1024000,
             checksum="abc123def456"
         )
@@ -40,7 +40,7 @@ class StfFileAPITests(APITestCase):
         data = {
             'run': self.run.run_id,
             'machine_state': 'cosmics',
-            'file_url': 'https://example.com/files/test2.stf',
+            'stf_filename': 'test_run12345_002.stf',
             'file_size_bytes': 2048000,
             'checksum': 'def789abc123',
             'status': 'registered'
@@ -53,7 +53,7 @@ class StfFileAPITests(APITestCase):
         url = reverse('monitor_app:stffile-detail', kwargs={'pk': self.stf_file.file_id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data['file_url'], "https://example.com/files/test.stf")
+        self.assertEqual(response.data['stf_filename'], "test_run12345_001.stf")
 
     def test_update_stf_file_status(self):
         url = reverse('monitor_app:stffile-detail', kwargs={'pk': self.stf_file.file_id})
@@ -69,11 +69,11 @@ class StfFileAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(StfFile.objects.filter(pk=self.stf_file.file_id).exists())
 
-    def test_create_stf_file_duplicate_url(self):
+    def test_create_stf_file_duplicate_filename(self):
         url = reverse('monitor_app:stffile-list')
         data = {
             'run': self.run.run_id,
-            'file_url': 'https://example.com/files/test.stf',  # Same as existing
+            'stf_filename': 'test_run12345_001.stf',  # Same as existing
             'file_size_bytes': 1000,
             'checksum': 'duplicate'
         }

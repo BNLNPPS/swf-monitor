@@ -388,7 +388,8 @@ def log_summary_datatable_ajax(request):
         if count == 0:
             return str(count)
         params = {'app_name': app_name, 'instance_name': instance_name, 'levelname': level}
-        url = f'/logs/?{urlencode(params)}'
+        base_url = reverse('monitor_app:log_list')
+        url = f'{base_url}?{urlencode(params)}'
         return f'<a href="{url}">{count}</a>'
     
     # Format data for DataTables
