@@ -56,7 +56,9 @@ else:
 INSTALLED_APPS = [
     "daphne",  # Add daphne for ASGI server
     "channels",  # Add channels for WebSocket support
-    "mcp_app",  # Changed from "swf_monitor_project.mcp_app"
+    # "mcp_app",  # Replaced by mcp_server (proper MCP spec implementation)
+    "mcp_server",  # django-mcp-server for Model Context Protocol
+    "oauth2_provider",  # OAuth2 authentication for MCP
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -227,6 +229,51 @@ SPECTACULAR_SETTINGS = {
     # OTHER SETTINGS
 }
 
+# OAuth2 Provider settings for MCP authentication
+OAUTH2_PROVIDER = {
+    "SCOPES": {
+        "read": "Read access to MCP tools",
+        "write": "Write access to MCP tools",
+    },
+    "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
+}
+
+# Django MCP Server configuration
+DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
+    "name": "swf-testbed",
+    "instructions": """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
+
+KEY CONCEPTS:
+- Namespaces: Isolation boundaries for different users' workflow runs (e.g., 'torre1', 'wenauseic')
+- Runs: Data-taking periods identified by run_number, containing multiple STF files
+- STF files: Super Time Frame files - primary data units from the detector DAQ system
+- TF slices: Small processing units (~15 per STF) for fast monitoring workflow
+- Agents: Processes that execute workflows (daq_simulator, data_agent, processing_agent, etc.)
+- Workflow executions: Instances of running workflows, tracked by execution_id
+
+COMMON QUERIES:
+- What's running now? → list_workflow_executions(currently_running=True)
+- Any errors? → list_logs(level='ERROR')
+- System health? → get_system_state()
+- Activity in a namespace? → get_namespace(namespace='name')
+- Failed workflows? → list_workflow_executions(status='failed')
+
+FILTERING:
+- All list tools support start_time/end_time parameters (ISO datetime strings)
+- Status filters are case-insensitive
+- Context cascades: run_number → stf_filename → tf_filename
+
+Use list_available_tools() to see all available tools with descriptions.""",
+}
+
+# MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
+DJANGO_MCP_ENDPOINT = ""
+
+# MCP authentication - start with no auth for development, enable OAuth2 for production
+# DJANGO_MCP_AUTHENTICATION_CLASSES = [
+#     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
+# ]
+
 # ActiveMQ Settings
 ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')
 ACTIVEMQ_PORT = config('ACTIVEMQ_PORT', default=61612, cast=int)
@@ -302,6 +349,10 @@ else:
                 'url': 'http://localhost:8002/api/logs/',
                 'formatter': 'json',
             },
+            'db': {
+                'class': 'monitor_app.db_log_handler.DbLogHandler',
+                'level': 'INFO',
+            },
         },
         'root': {
             'handlers': ['console'],
@@ -311,6 +362,11 @@ else:
             'django': {
                 'handlers': ['console'],
                 'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+                'propagate': False,
+            },
+            'monitor_app': {
+                'handlers': ['db', 'console'],
+                'level': 'INFO',
                 'propagate': False,
             },
         },

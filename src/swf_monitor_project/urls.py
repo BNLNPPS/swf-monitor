@@ -20,7 +20,9 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, Spec
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api/mcp/", include("mcp_app.urls")),  # MCP REST API endpoints
+    # path("api/mcp/", include("mcp_app.urls")),  # Old custom MCP - replaced by mcp_server
+    path("mcp/", include("mcp_server.urls")),  # Model Context Protocol endpoint
+    path("o/", include("oauth2_provider.urls", namespace="oauth2_provider")),  # OAuth2 for MCP
     path("api-auth/", include("rest_framework.urls")),
     path("accounts/", include("django.contrib.auth.urls")),  # Add this line
     path("", include("monitor_app.urls")),  # Include monitor_app URLs for the root path

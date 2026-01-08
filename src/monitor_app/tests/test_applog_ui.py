@@ -28,19 +28,18 @@ class AppLogUITests(TestCase):
         response = self.client.get(reverse('monitor_app:log_list'))
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
-        # Robust: check for valid HTML structure
+        # Check for valid HTML structure
         self.assertIn('<html', html.lower())
-        # Check for a table with at least one row (excluding header)
-        rows = re.findall(r'<tr>.*?</tr>', html, re.DOTALL)
-        self.assertTrue(len(rows) > 1)  # header + at least one data row
+        # DataTables template - check for table element (data loaded via AJAX)
+        self.assertIn('<table', html.lower())
 
     def test_log_list_view_filtered(self):
         response = self.client.get(reverse('monitor_app:log_list') + '?app_name=app1&instance_name=inst1')
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
         self.assertIn('<html', html.lower())
-        rows = re.findall(r'<tr>.*?</tr>', html, re.DOTALL)
-        self.assertTrue(len(rows) > 1)
+        # DataTables template - check for table element (data loaded via AJAX)
+        self.assertIn('<table', html.lower())
 
     def test_log_summary_view(self):
         response = self.client.get(reverse('monitor_app:log_summary'))
