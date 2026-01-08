@@ -11,7 +11,14 @@ class SystemAgent(models.Model):
         ('WARNING', 'Warning'),
         ('ERROR', 'Error'),
     ]
-    
+
+    OPERATIONAL_STATE_CHOICES = [
+        ('STARTING', 'Starting'),
+        ('READY', 'Ready'),
+        ('PROCESSING', 'Processing'),
+        ('EXITED', 'Exited'),
+    ]
+
     AGENT_TYPE_CHOICES = [
         ('daqsim', 'DAQ Simulator'),
         ('data', 'Data Agent'),
@@ -41,6 +48,18 @@ class SystemAgent(models.Model):
     current_stf_count = models.IntegerField(default=0)
     total_stf_processed = models.IntegerField(default=0)
     last_stf_processed = models.DateTimeField(null=True, blank=True)
+
+    # Process identification for agent management
+    pid = models.IntegerField(null=True, blank=True,
+                              help_text="Process ID for kill operations")
+    hostname = models.CharField(max_length=100, null=True, blank=True,
+                                help_text="Host where agent is running")
+    operational_state = models.CharField(
+        max_length=20,
+        choices=OPERATIONAL_STATE_CHOICES,
+        default='STARTING',
+        help_text="What the agent is doing (STARTING/READY/PROCESSING/EXITED)"
+    )
 
     # Namespace - identifies the testbed instance this agent belongs to
     namespace = models.CharField(max_length=100, null=True, blank=True, db_index=True,
