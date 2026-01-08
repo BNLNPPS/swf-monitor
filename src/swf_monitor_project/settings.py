@@ -266,6 +266,9 @@ FILTERING:
 Use list_available_tools() to see all available tools with descriptions.""",
 }
 
+# MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
+DJANGO_MCP_ENDPOINT = ""
+
 # MCP authentication - start with no auth for development, enable OAuth2 for production
 # DJANGO_MCP_AUTHENTICATION_CLASSES = [
 #     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
