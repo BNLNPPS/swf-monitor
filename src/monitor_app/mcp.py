@@ -1220,34 +1220,40 @@ async def end_execution(execution_id: str) -> dict:
     Returns:
         Success/failure status with details
     """
-    try:
-        execution = WorkflowExecution.objects.get(execution_id=execution_id)
-    except WorkflowExecution.DoesNotExist:
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_end():
+        try:
+            execution = WorkflowExecution.objects.get(execution_id=execution_id)
+        except WorkflowExecution.DoesNotExist:
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' not found",
+            }
+
+        old_status = execution.status
+        if old_status != 'running':
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' is not running (status: {old_status})",
+            }
+
+        execution.status = 'terminated'
+        execution.end_time = timezone.now()
+        execution.save()
+
+        logger.info(
+            f"MCP end_execution: '{execution_id}' terminated (was running since {execution.start_time})"
+        )
+
         return {
-            "success": False,
-            "error": f"Execution '{execution_id}' not found",
+            "success": True,
+            "execution_id": execution_id,
+            "old_status": old_status,
+            "new_status": "terminated",
+            "start_time": execution.start_time.isoformat() if execution.start_time else None,
+            "end_time": execution.end_time.isoformat() if execution.end_time else None,
         }
 
-    old_status = execution.status
-    if old_status != 'running':
-        return {
-            "success": False,
-            "error": f"Execution '{execution_id}' is not running (status: {old_status})",
-        }
-
-    execution.status = 'terminated'
-    execution.end_time = timezone.now()
-    execution.save()
-
-    logger.info(
-        f"MCP end_execution: '{execution_id}' terminated (was running since {execution.start_time})"
-    )
-
-    return {
-        "success": True,
-        "execution_id": execution_id,
-        "old_status": old_status,
-        "new_status": "terminated",
-        "start_time": execution.start_time.isoformat() if execution.start_time else None,
-        "end_time": execution.end_time.isoformat() if execution.end_time else None,
-    }
+    return await do_end()
