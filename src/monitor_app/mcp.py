@@ -203,12 +203,15 @@ async def get_system_state() -> dict:
         now = timezone.now()
         recent_threshold = now - timedelta(minutes=5)
 
-        # Agent stats
+        # Agent stats - exclude EXITED agents from health calculation
         total_agents = SystemAgent.objects.count()
+        exited_agents = SystemAgent.objects.filter(operational_state='EXITED').count()
+        active_agents = total_agents - exited_agents
+
         healthy_agents = SystemAgent.objects.filter(
             last_heartbeat__gte=recent_threshold,
             status='OK'
-        ).count()
+        ).exclude(operational_state='EXITED').count()
 
         # Execution stats
         running_executions = WorkflowExecution.objects.filter(status='running').count()
@@ -257,8 +260,10 @@ async def get_system_state() -> dict:
             "timestamp": now.isoformat(),
             "agents": {
                 "total": total_agents,
+                "active": active_agents,
+                "exited": exited_agents,
                 "healthy": healthy_agents,
-                "unhealthy": total_agents - healthy_agents,
+                "unhealthy": active_agents - healthy_agents,
             },
             "executions": {
                 "running": running_executions,
@@ -268,7 +273,7 @@ async def get_system_state() -> dict:
             "run_states": run_states,
             "persistent_state": persistent_state,
             "recent_events": recent_events,
-            "health": "healthy" if healthy_agents == total_agents else "degraded",
+            "health": "healthy" if active_agents == 0 or healthy_agents == active_agents else "degraded",
         }
 
     return await fetch()
