@@ -162,12 +162,18 @@ async def list_available_tools() -> list:
         },
         {
             "name": "start_workflow",
-            "description": "Start a workflow execution (NOT YET IMPLEMENTED)",
-            "parameters": ["workflow_name", "namespace"],
+            "description": "Start a workflow by sending command to DAQ Simulator agent",
+            "parameters": ["workflow_name", "namespace", "config", "realtime", "duration",
+                          "stf_count", "physics_period_count", "physics_period_duration", "stf_interval"],
+        },
+        {
+            "name": "stop_workflow",
+            "description": "Stop a running workflow by sending stop command to agent",
+            "parameters": ["execution_id"],
         },
         {
             "name": "end_execution",
-            "description": "End a running workflow execution by setting status to terminated",
+            "description": "Mark a workflow execution as terminated in database (no agent message)",
             "parameters": ["execution_id"],
         },
         {
@@ -1189,26 +1195,167 @@ async def get_log_entry(log_id: int) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def start_workflow(workflow_name: str, namespace: str) -> dict:
+async def start_workflow(
+    workflow_name: str,
+    namespace: str,
+    config: str = None,
+    realtime: bool = True,
+    duration: int = 0,
+    stf_count: int = None,
+    physics_period_count: int = None,
+    physics_period_duration: float = None,
+    stf_interval: float = None,
+) -> dict:
     """
-    Start a workflow execution. NOT YET IMPLEMENTED.
+    Start a workflow execution by sending a command to the DAQ Simulator agent.
 
-    This tool will eventually allow starting a workflow run from the LLM interface.
-    Currently returns instructions for using the CLI instead.
+    The DAQ Simulator agent must be running in persistent mode and listening
+    on the 'workflow_control' queue. Use list_agents to verify an agent with
+    type 'DAQ_Simulator' or 'workflow_runner' is running.
 
     Args:
-        workflow_name: Name of the workflow to run (use list_workflow_definitions to see available)
-        namespace: Testbed namespace for this execution (use list_namespaces to see available)
+        workflow_name: Name of the workflow to run (e.g., 'stf_datataking')
+        namespace: Testbed namespace for this execution (e.g., 'torre1')
+        config: Workflow config name (e.g., 'fast_processing_default'). If not
+                specified, uses {workflow_name}_default.toml
+        realtime: If True (default), run in real-time mode (1 sim sec = 1 wall sec).
+                  If False, run as fast as possible.
+        duration: Max duration in seconds (0 = run until complete)
+        stf_count: Number of STF files to generate (overrides config)
+        physics_period_count: Number of physics periods (overrides config)
+        physics_period_duration: Duration of each physics period in seconds (overrides config)
+        stf_interval: Interval between STF generation in seconds (overrides config)
 
     Returns:
-        Status message with CLI instructions
+        Success/failure status. On success, the workflow runs asynchronously -
+        use list_workflow_executions to monitor progress.
     """
-    return {
-        "status": "not_implemented",
-        "message": "Workflow start via MCP not yet implemented. Use CLI: swf-testbed run",
-        "workflow_name": workflow_name,
-        "namespace": namespace,
-    }
+    import json
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_start():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        # Build params dict from non-None override values
+        params = {}
+        if stf_count is not None:
+            params['stf_count'] = stf_count
+        if physics_period_count is not None:
+            params['physics_period_count'] = physics_period_count
+        if physics_period_duration is not None:
+            params['physics_period_duration'] = physics_period_duration
+        if stf_interval is not None:
+            params['stf_interval'] = stf_interval
+
+        # Build message matching WorkflowRunner._handle_run_workflow() expectations
+        msg = {
+            'msg_type': 'run_workflow',
+            'namespace': namespace,
+            'workflow_name': workflow_name,
+            'config': config,
+            'realtime': realtime,
+            'duration': duration,
+            'params': params,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        # Send to workflow_control queue
+        mq = ActiveMQConnectionManager()
+        if mq.send_message('/queue/workflow_control', json.dumps(msg)):
+            logger.info(
+                f"MCP start_workflow: sent run_workflow command for '{workflow_name}' "
+                f"(namespace={namespace}, config={config}, realtime={realtime})"
+            )
+            return {
+                "success": True,
+                "message": f"Workflow '{workflow_name}' start command sent to DAQ Simulator",
+                "workflow_name": workflow_name,
+                "namespace": namespace,
+                "config": config,
+                "realtime": realtime,
+                "params": params,
+                "note": "Workflow runs asynchronously. Use list_workflow_executions to monitor."
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "workflow_name": workflow_name,
+                "namespace": namespace,
+            }
+
+    return await do_start()
+
+
+@mcp.tool()
+async def stop_workflow(execution_id: str) -> dict:
+    """
+    Stop a running workflow by sending a stop command to the DAQ Simulator agent.
+
+    Sends a stop_workflow command that the agent checks between simulation events.
+    The workflow stops gracefully at the next checkpoint.
+
+    To find the execution_id, use list_workflow_executions(currently_running=True).
+
+    Args:
+        execution_id: The execution ID to stop (e.g., 'stf_datataking-wenauseic-0042')
+
+    Returns:
+        Success/failure status. The actual stop is asynchronous - monitor via
+        list_workflow_executions to confirm termination.
+    """
+    import json
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_stop():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        # Get namespace from execution record for message routing
+        try:
+            execution = WorkflowExecution.objects.get(execution_id=execution_id)
+        except WorkflowExecution.DoesNotExist:
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' not found",
+            }
+
+        if execution.status != 'running':
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' is not running (status: {execution.status})",
+            }
+
+        msg = {
+            'msg_type': 'stop_workflow',
+            'execution_id': execution_id,
+            'namespace': execution.namespace,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        mq = ActiveMQConnectionManager()
+        if mq.send_message('/queue/workflow_control', json.dumps(msg)):
+            logger.info(f"MCP stop_workflow: sent stop command for execution '{execution_id}'")
+            return {
+                "success": True,
+                "message": f"Stop command sent for execution '{execution_id}'",
+                "execution_id": execution_id,
+                "namespace": execution.namespace,
+                "note": "Workflow will stop at next checkpoint. Monitor via list_workflow_executions."
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "execution_id": execution_id,
+            }
+
+    return await do_stop()
 
 
 @mcp.tool()
