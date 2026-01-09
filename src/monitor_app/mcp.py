@@ -1445,49 +1445,33 @@ async def kill_agent(name: str) -> dict:
 
         pid = agent.pid
         hostname = agent.hostname
-
-        if not pid:
-            return {
-                "success": False,
-                "error": f"Agent '{name}' has no PID recorded. Cannot kill.",
-                "hostname": hostname,
-                "operational_state": agent.operational_state,
-            }
-
-        if hostname and hostname != current_host:
-            return {
-                "success": False,
-                "error": f"Agent '{name}' is on host '{hostname}', not current host '{current_host}'. Cannot kill remotely.",
-                "pid": pid,
-                "hostname": hostname,
-            }
-
-        # Attempt to kill the process
-        try:
-            os.kill(pid, signal.SIGKILL)
-            killed = True
-            kill_error = None
-        except ProcessLookupError:
-            killed = False
-            kill_error = f"Process {pid} not found (already dead)"
-        except PermissionError:
-            killed = False
-            kill_error = f"Permission denied to kill process {pid}"
-        except Exception as e:
-            killed = False
-            kill_error = str(e)
-
-        # Update agent state regardless of kill success
         old_state = agent.operational_state
+        killed = False
+        kill_error = None
+
+        # Try to kill if we have a PID and it's on this host
+        if pid:
+            if hostname and hostname != current_host:
+                kill_error = f"Agent on '{hostname}', not '{current_host}' - cannot kill remotely"
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    killed = True
+                except ProcessLookupError:
+                    kill_error = f"Process {pid} not found (already dead)"
+                except PermissionError:
+                    kill_error = f"Permission denied to kill process {pid}"
+                except Exception as e:
+                    kill_error = str(e)
+
+        # Always mark EXITED
         agent.operational_state = 'EXITED'
         agent.save(update_fields=['operational_state'])
 
-        logger.info(
-            f"MCP kill_agent: '{name}' pid={pid} killed={killed} error={kill_error}"
-        )
+        logger.info(f"MCP kill_agent: '{name}' pid={pid} killed={killed} error={kill_error}")
 
         return {
-            "success": killed or kill_error == f"Process {pid} not found (already dead)",
+            "success": True,
             "name": name,
             "pid": pid,
             "hostname": hostname,
