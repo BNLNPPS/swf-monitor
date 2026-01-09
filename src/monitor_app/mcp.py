@@ -166,9 +166,14 @@ async def list_available_tools() -> list:
             "parameters": ["workflow_name", "namespace"],
         },
         {
-            "name": "stop_workflow",
-            "description": "Stop a running workflow execution (NOT YET IMPLEMENTED)",
+            "name": "end_execution",
+            "description": "End a running workflow execution by setting status to terminated",
             "parameters": ["execution_id"],
+        },
+        {
+            "name": "kill_agent",
+            "description": "Kill an agent process by sending SIGKILL to its PID",
+            "parameters": ["name"],
         },
     ]
     return tools
@@ -1257,3 +1262,92 @@ async def end_execution(execution_id: str) -> dict:
         }
 
     return await do_end()
+
+
+@mcp.tool()
+async def kill_agent(name: str) -> dict:
+    """
+    Kill an agent process by sending SIGKILL to its PID.
+
+    Looks up the agent by instance_name, retrieves its pid and hostname,
+    and sends SIGKILL if the agent is on the current host. Updates the
+    agent's operational_state to EXITED.
+
+    Args:
+        name: The exact agent instance name (e.g., 'daq_simulator-agent-wenauseic-308')
+
+    Returns:
+        Success/failure status with details
+    """
+    import os
+    import signal
+    import socket
+    from asgiref.sync import sync_to_async
+
+    current_host = socket.gethostname()
+
+    @sync_to_async
+    def do_kill():
+        try:
+            agent = SystemAgent.objects.get(instance_name=name)
+        except SystemAgent.DoesNotExist:
+            return {
+                "success": False,
+                "error": f"Agent '{name}' not found. Use list_agents to see available agents.",
+            }
+
+        pid = agent.pid
+        hostname = agent.hostname
+
+        if not pid:
+            return {
+                "success": False,
+                "error": f"Agent '{name}' has no PID recorded. Cannot kill.",
+                "hostname": hostname,
+                "operational_state": agent.operational_state,
+            }
+
+        if hostname and hostname != current_host:
+            return {
+                "success": False,
+                "error": f"Agent '{name}' is on host '{hostname}', not current host '{current_host}'. Cannot kill remotely.",
+                "pid": pid,
+                "hostname": hostname,
+            }
+
+        # Attempt to kill the process
+        try:
+            os.kill(pid, signal.SIGKILL)
+            killed = True
+            kill_error = None
+        except ProcessLookupError:
+            killed = False
+            kill_error = f"Process {pid} not found (already dead)"
+        except PermissionError:
+            killed = False
+            kill_error = f"Permission denied to kill process {pid}"
+        except Exception as e:
+            killed = False
+            kill_error = str(e)
+
+        # Update agent state regardless of kill success
+        old_state = agent.operational_state
+        agent.operational_state = 'EXITED'
+        agent.save(update_fields=['operational_state'])
+
+        logger.info(
+            f"MCP kill_agent: '{name}' pid={pid} killed={killed} error={kill_error}"
+        )
+
+        return {
+            "success": killed or kill_error == f"Process {pid} not found (already dead)",
+            "name": name,
+            "pid": pid,
+            "hostname": hostname,
+            "killed": killed,
+            "kill_error": kill_error,
+            "old_state": old_state,
+            "new_state": "EXITED",
+        }
+
+    return await do_kill()
