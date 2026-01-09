@@ -284,7 +284,7 @@ async def get_system_state() -> dict:
             "run_states": run_states,
             "persistent_state": persistent_state,
             "recent_events": recent_events,
-            "health": "healthy" if active_agents == 0 or healthy_agents == active_agents else "degraded",
+            "health": "",
         }
 
     return await fetch()
@@ -1191,7 +1191,7 @@ async def get_log_entry(log_id: int) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# Action Tools (Not Yet Implemented)
+# Action Tools
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
