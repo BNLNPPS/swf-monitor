@@ -206,6 +206,16 @@ async def list_available_tools() -> list:
             "description": "Stop user's testbed via their agent manager daemon",
             "parameters": ["username"],
         },
+        {
+            "name": "get_workflow_monitor",
+            "description": "Get status and events for a workflow execution (aggregates messages/logs)",
+            "parameters": ["execution_id"],
+        },
+        {
+            "name": "list_workflow_monitors",
+            "description": "List recent workflow executions that can be monitored",
+            "parameters": [],
+        },
     ]
     return tools
 
@@ -224,22 +234,121 @@ async def get_system_state() -> dict:
 
     Returns:
     - timestamp: current server time
+    - user_context: namespace, workflow defaults from testbed.toml
+    - agent_manager: status of user's agent manager daemon
+    - workflow_runner: status of healthy DAQ_Simulator that can accept start_workflow
+    - ready_to_run: boolean - True if workflow_runner is healthy
+    - last_execution: most recent workflow execution for user's namespace
+    - errors_last_hour: count of ERROR logs in user's namespace
     - agents: total, healthy (heartbeat <5min), unhealthy counts
     - executions: running count, completed in last hour
     - messages: count in last 10 minutes
-    - run_states: current fast processing run states (phase, state, worker/slice counts)
+    - run_states: current fast processing run states
     - persistent_state: system-wide persistent state (next IDs, etc.)
     - recent_events: last 10 system state events
-    - health: 'healthy' if all agents OK, 'degraded' otherwise
     """
+    import getpass
+    import os
+    from pathlib import Path
     from asgiref.sync import sync_to_async
+
+    username = getpass.getuser()
 
     @sync_to_async
     def fetch():
         now = timezone.now()
         recent_threshold = now - timedelta(minutes=5)
 
-        # Agent stats - exclude EXITED agents from health calculation
+        # --- User context from testbed.toml ---
+        user_context = {
+            "username": username,
+            "namespace": None,
+            "workflow_name": None,
+            "config": None,
+        }
+        swf_home = os.getenv('SWF_HOME', '')
+        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml'
+        if testbed_toml.exists():
+            try:
+                import tomllib
+                with open(testbed_toml, 'rb') as f:
+                    toml_data = tomllib.load(f)
+                user_context["namespace"] = toml_data.get('testbed', {}).get('namespace')
+                workflow_section = toml_data.get('workflow', {})
+                user_context["workflow_name"] = workflow_section.get('name')
+                user_context["config"] = workflow_section.get('config')
+            except Exception:
+                pass
+
+        user_namespace = user_context.get("namespace")
+
+        # --- Agent manager status ---
+        agent_manager_name = f'agent-manager-{username}'
+        agent_manager = {"status": "missing", "last_heartbeat": None}
+        try:
+            am = SystemAgent.objects.get(instance_name=agent_manager_name)
+            if am.operational_state == 'EXITED':
+                agent_manager["status"] = "exited"
+            elif am.last_heartbeat and am.last_heartbeat >= recent_threshold:
+                agent_manager["status"] = "healthy"
+            else:
+                agent_manager["status"] = "unhealthy"
+            agent_manager["last_heartbeat"] = am.last_heartbeat.isoformat() if am.last_heartbeat else None
+        except SystemAgent.DoesNotExist:
+            pass
+
+        # --- Workflow runner status (DAQ_Simulator in user's namespace) ---
+        workflow_runner = {"status": "missing", "name": None, "last_heartbeat": None}
+        runner_qs = SystemAgent.objects.filter(
+            agent_type__in=['DAQ_Simulator', 'workflow_runner'],
+            namespace=user_namespace,
+            last_heartbeat__gte=recent_threshold,
+        ).exclude(operational_state='EXITED').order_by('-last_heartbeat')
+
+        if runner_qs.exists():
+            runner = runner_qs.first()
+            workflow_runner["status"] = "healthy"
+            workflow_runner["name"] = runner.instance_name
+            workflow_runner["last_heartbeat"] = runner.last_heartbeat.isoformat() if runner.last_heartbeat else None
+        else:
+            # Check if there's one but unhealthy
+            any_runner = SystemAgent.objects.filter(
+                agent_type__in=['DAQ_Simulator', 'workflow_runner'],
+                namespace=user_namespace,
+            ).exclude(operational_state='EXITED').first()
+            if any_runner:
+                workflow_runner["status"] = "unhealthy"
+                workflow_runner["name"] = any_runner.instance_name
+                workflow_runner["last_heartbeat"] = any_runner.last_heartbeat.isoformat() if any_runner.last_heartbeat else None
+
+        # --- Ready to run ---
+        ready_to_run = workflow_runner["status"] == "healthy"
+
+        # --- Last execution for user's namespace ---
+        last_execution = None
+        if user_namespace:
+            last_exec = WorkflowExecution.objects.filter(
+                namespace=user_namespace
+            ).order_by('-start_time').first()
+            if last_exec:
+                last_execution = {
+                    "execution_id": last_exec.execution_id,
+                    "status": last_exec.status,
+                    "start_time": last_exec.start_time.isoformat() if last_exec.start_time else None,
+                    "end_time": last_exec.end_time.isoformat() if last_exec.end_time else None,
+                }
+
+        # --- Errors in last hour for user's namespace ---
+        errors_last_hour = 0
+        if user_namespace:
+            import logging as py_logging
+            errors_last_hour = AppLog.objects.filter(
+                level__gte=py_logging.ERROR,
+                timestamp__gte=now - timedelta(hours=1),
+                extra_data__namespace=user_namespace,
+            ).count()
+
+        # --- Global agent stats ---
         total_agents = SystemAgent.objects.count()
         exited_agents = SystemAgent.objects.filter(operational_state='EXITED').count()
         active_agents = total_agents - exited_agents
@@ -294,6 +403,12 @@ async def get_system_state() -> dict:
 
         return {
             "timestamp": now.isoformat(),
+            "user_context": user_context,
+            "agent_manager": agent_manager,
+            "workflow_runner": workflow_runner,
+            "ready_to_run": ready_to_run,
+            "last_execution": last_execution,
+            "errors_last_hour": errors_last_hour,
             "agents": {
                 "total": total_agents,
                 "active": active_agents,
@@ -309,7 +424,6 @@ async def get_system_state() -> dict:
             "run_states": run_states,
             "persistent_state": persistent_state,
             "recent_events": recent_events,
-            "health": "",
         }
 
     return await fetch()
@@ -1775,3 +1889,150 @@ async def stop_user_testbed(username: str = None) -> dict:
             }
 
     return await send_command()
+
+
+# -----------------------------------------------------------------------------
+# Workflow Monitoring
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+async def get_workflow_monitor(execution_id: str) -> dict:
+    """
+    Get the status and accumulated events for a workflow execution.
+
+    This provides a summary of workflow progress without needing to poll
+    multiple tools. Aggregates messages and logs for the execution.
+
+    Args:
+        execution_id: The execution ID to get monitor status for
+
+    Returns:
+        - execution_id: The execution being monitored
+        - status: Current workflow status (running/completed/failed/terminated)
+        - phase: Current phase (imminent/running/ended)
+        - events: List of key events with timestamps
+        - stf_count: Number of STF files generated
+        - errors: List of any errors encountered
+        - duration_seconds: How long the workflow ran (if completed)
+    """
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def fetch():
+        # Get current execution status from database
+        try:
+            execution = WorkflowExecution.objects.get(execution_id=execution_id)
+            db_status = execution.status
+            db_start_time = execution.start_time
+            db_end_time = execution.end_time
+        except WorkflowExecution.DoesNotExist:
+            return {"error": f"Execution '{execution_id}' not found"}
+
+        # Calculate duration
+        duration_seconds = None
+        if db_start_time and db_end_time:
+            duration_seconds = (db_end_time - db_start_time).total_seconds()
+
+        # Get messages for this execution
+        messages = WorkflowMessage.objects.filter(
+            execution_id=execution_id
+        ).order_by('sent_at')
+
+        # Accumulate events
+        events = []
+        stf_count = 0
+        current_phase = "unknown"
+        run_id = None
+        errors = []
+
+        for msg in messages:
+            msg_type = msg.message_type
+            timestamp = msg.sent_at.isoformat() if msg.sent_at else None
+            content = msg.message_content or {}
+
+            if msg_type == 'run_imminent':
+                current_phase = "imminent"
+                run_id = content.get('run_id') or msg.run_id
+                events.append({"type": "run_imminent", "time": timestamp, "run_id": run_id})
+            elif msg_type == 'start_run':
+                current_phase = "running"
+                events.append({"type": "start_run", "time": timestamp})
+            elif msg_type == 'stf_gen':
+                stf_count += 1
+            elif msg_type == 'end_run':
+                current_phase = "ended"
+                events.append({"type": "end_run", "time": timestamp, "stf_count": stf_count})
+            elif msg_type in ('run_workflow_failed', 'error'):
+                errors.append({
+                    "time": timestamp,
+                    "error": content.get('error', str(content)),
+                })
+
+        # Check for errors in logs
+        import logging as py_logging
+        error_logs = AppLog.objects.filter(
+            level__gte=py_logging.ERROR,
+            extra_data__execution_id=execution_id,
+        ).order_by('timestamp')[:10]
+
+        for log in error_logs:
+            errors.append({
+                "time": log.timestamp.isoformat() if log.timestamp else None,
+                "error": log.message,
+                "source": "log",
+            })
+
+        return {
+            "execution_id": execution_id,
+            "status": db_status,
+            "phase": current_phase,
+            "run_id": run_id,
+            "stf_count": stf_count,
+            "events": events,
+            "errors": errors,
+            "start_time": db_start_time.isoformat() if db_start_time else None,
+            "end_time": db_end_time.isoformat() if db_end_time else None,
+            "duration_seconds": duration_seconds,
+        }
+
+    return await fetch()
+
+
+@mcp.tool()
+async def list_workflow_monitors() -> list:
+    """
+    List recent workflow executions that can be monitored.
+
+    Returns executions from the last 24 hours with their current status,
+    allowing you to pick one to monitor with get_workflow_monitor().
+
+    Returns list of executions with: execution_id, status, start_time, stf_count
+    """
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def fetch():
+        now = timezone.now()
+        executions = WorkflowExecution.objects.filter(
+            start_time__gte=now - timedelta(hours=24)
+        ).order_by('-start_time')[:20]
+
+        results = []
+        for e in executions:
+            # Count STF messages for this execution
+            stf_count = WorkflowMessage.objects.filter(
+                execution_id=e.execution_id,
+                message_type='stf_gen',
+            ).count()
+
+            results.append({
+                "execution_id": e.execution_id,
+                "status": e.status,
+                "start_time": e.start_time.isoformat() if e.start_time else None,
+                "end_time": e.end_time.isoformat() if e.end_time else None,
+                "stf_count": stf_count,
+            })
+
+        return results
+
+    return await fetch()
