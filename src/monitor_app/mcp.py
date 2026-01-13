@@ -1248,10 +1248,10 @@ async def get_log_entry(log_id: int) -> dict:
 
 @mcp.tool()
 async def start_workflow(
-    workflow_name: str,
-    namespace: str,
+    workflow_name: str = None,
+    namespace: str = None,
     config: str = None,
-    realtime: bool = True,
+    realtime: bool = None,
     duration: int = 0,
     stf_count: int = None,
     physics_period_count: int = None,
@@ -1261,17 +1261,14 @@ async def start_workflow(
     """
     Start a workflow execution by sending a command to the DAQ Simulator agent.
 
-    The DAQ Simulator agent must be running in persistent mode and listening
-    on the 'workflow_control' queue. Use list_agents to verify an agent with
-    type 'DAQ_Simulator' or 'workflow_runner' is running.
+    All parameters are optional - defaults are read from PersistentState 'workflow_defaults'.
+    Call with no arguments to use configured defaults.
 
     Args:
-        workflow_name: Name of the workflow to run (e.g., 'stf_datataking')
-        namespace: Testbed namespace for this execution (e.g., 'torre1')
-        config: Workflow config name (e.g., 'fast_processing_default'). If not
-                specified, uses {workflow_name}_default.toml
-        realtime: If True (default), run in real-time mode (1 sim sec = 1 wall sec).
-                  If False, run as fast as possible.
+        workflow_name: Name of the workflow (default: from config, typically 'stf_datataking')
+        namespace: Testbed namespace (default: from config, e.g., 'torre1')
+        config: Workflow config name (default: from config, e.g., 'fast_processing_default')
+        realtime: Run in real-time mode (default: from config, typically True)
         duration: Max duration in seconds (0 = run until complete)
         stf_count: Number of STF files to generate (overrides config)
         physics_period_count: Number of physics periods (overrides config)
@@ -1292,10 +1289,42 @@ async def start_workflow(
 
     @sync_to_async
     def do_start():
+        import os
+        from pathlib import Path
         from .activemq_connection import ActiveMQConnectionManager
 
-        # Build params dict from non-None override values
-        params = {}
+        # Read defaults from testbed.toml
+        toml_namespace = None
+        toml_workflow_name = None
+        toml_config = None
+        toml_realtime = None
+        toml_params = {}
+
+        swf_home = os.getenv('SWF_HOME', '')
+        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml'
+        if testbed_toml.exists():
+            try:
+                import tomllib
+                with open(testbed_toml, 'rb') as f:
+                    toml_data = tomllib.load(f)
+                toml_namespace = toml_data.get('testbed', {}).get('namespace')
+                workflow_section = toml_data.get('workflow', {})
+                toml_workflow_name = workflow_section.get('name')
+                toml_config = workflow_section.get('config')
+                toml_realtime = workflow_section.get('realtime')
+                # Get ALL parameters from [parameters] section - no hardcoding
+                toml_params = toml_data.get('parameters', {})
+            except Exception as e:
+                logger.warning(f"Failed to read testbed.toml: {e}")
+
+        # Apply defaults - explicit MCP args override toml values
+        actual_workflow_name = workflow_name or toml_workflow_name or 'stf_datataking'
+        actual_namespace = namespace or toml_namespace or 'torre1'
+        actual_config = config or toml_config or 'fast_processing_default'
+        actual_realtime = realtime if realtime is not None else (toml_realtime if toml_realtime is not None else True)
+
+        # Build params - start with ALL toml [parameters], then override with explicit MCP args
+        params = dict(toml_params)
         if stf_count is not None:
             params['stf_count'] = stf_count
         if physics_period_count is not None:
@@ -1308,10 +1337,10 @@ async def start_workflow(
         # Build message matching WorkflowRunner._handle_run_workflow() expectations
         msg = {
             'msg_type': 'run_workflow',
-            'namespace': namespace,
-            'workflow_name': workflow_name,
-            'config': config,
-            'realtime': realtime,
+            'namespace': actual_namespace,
+            'workflow_name': actual_workflow_name,
+            'config': actual_config,
+            'realtime': actual_realtime,
             'duration': duration,
             'params': params,
             'timestamp': datetime.now().isoformat(),
@@ -1322,16 +1351,16 @@ async def start_workflow(
         mq = ActiveMQConnectionManager()
         if mq.send_message('/queue/workflow_control', json.dumps(msg)):
             logger.info(
-                f"MCP start_workflow: sent run_workflow command for '{workflow_name}' "
-                f"(namespace={namespace}, config={config}, realtime={realtime})"
+                f"MCP start_workflow: sent run_workflow command for '{actual_workflow_name}' "
+                f"(namespace={actual_namespace}, config={actual_config}, realtime={actual_realtime})"
             )
             return {
                 "success": True,
-                "message": f"Workflow '{workflow_name}' start command sent to DAQ Simulator",
-                "workflow_name": workflow_name,
-                "namespace": namespace,
-                "config": config,
-                "realtime": realtime,
+                "message": f"Workflow '{actual_workflow_name}' start command sent to DAQ Simulator",
+                "workflow_name": actual_workflow_name,
+                "namespace": actual_namespace,
+                "config": actual_config,
+                "realtime": actual_realtime,
                 "params": params,
                 "note": "Workflow runs asynchronously. Use list_workflow_executions to monitor."
             }
@@ -1339,8 +1368,8 @@ async def start_workflow(
             return {
                 "success": False,
                 "error": "Failed to send message to ActiveMQ. Is the message broker running?",
-                "workflow_name": workflow_name,
-                "namespace": namespace,
+                "workflow_name": actual_workflow_name,
+                "namespace": actual_namespace,
             }
 
     return await do_start()
