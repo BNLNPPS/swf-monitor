@@ -10,6 +10,7 @@ class SystemAgent(models.Model):
         ('OK', 'OK'),
         ('WARNING', 'Warning'),
         ('ERROR', 'Error'),
+        ('EXITED', 'Exited'),
     ]
 
     OPERATIONAL_STATE_CHOICES = [

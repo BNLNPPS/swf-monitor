@@ -82,7 +82,7 @@ async def list_available_tools() -> list:
         },
         {
             "name": "list_agents",
-            "description": "List registered agents with filtering by namespace, type, status, date range",
+            "description": "List registered agents. Excludes EXITED agents by default. Use status='EXITED' to see exited, status='all' to see all.",
             "parameters": ["namespace", "agent_type", "status", "execution_id", "start_time", "end_time"],
         },
         {
@@ -178,7 +178,7 @@ async def list_available_tools() -> list:
         },
         {
             "name": "kill_agent",
-            "description": "Kill an agent process by sending SIGKILL to its PID",
+            "description": "Kill an agent process by sending SIGKILL to its PID. Sets status to EXITED.",
             "parameters": ["name"],
         },
     ]
@@ -309,16 +309,20 @@ async def list_agents(
     Agents are processes that participate in workflows (DAQ simulator, data agent,
     processing agent, fast monitoring agent). Each sends periodic heartbeats.
 
+    By default, excludes EXITED agents. Use status='EXITED' to see only exited,
+    or status='all' to see all agents regardless of status.
+
     Args:
         namespace: Filter to agents in this namespace (e.g., 'torre1', 'wenauseic')
         agent_type: Filter by type: 'daqsim', 'data', 'processing', 'fastmon', 'workflow_runner'
-        status: Filter by status: 'OK', 'WARNING', 'ERROR', 'UNKNOWN', 'EXITED'
+        status: Filter by status: 'OK', 'WARNING', 'ERROR', 'UNKNOWN', 'EXITED', or 'all'.
+                Default (None) excludes EXITED agents.
         execution_id: Filter to agents that participated in this workflow execution
         start_time: Filter to agents with heartbeat >= this ISO datetime
         end_time: Filter to agents with heartbeat <= this ISO datetime
 
-    Returns list of agents with: name, agent_type, status, namespace, last_heartbeat,
-    workflow_enabled, total_stf_processed
+    Returns list of agents with: name, agent_type, status, operational_state, namespace,
+    last_heartbeat, workflow_enabled, total_stf_processed
     """
     from asgiref.sync import sync_to_async
 
@@ -330,7 +334,11 @@ async def list_agents(
             qs = qs.filter(namespace=namespace)
         if agent_type:
             qs = qs.filter(agent_type=agent_type)
-        if status:
+
+        # Status filtering: default excludes EXITED
+        if status is None:
+            qs = qs.exclude(status='EXITED')
+        elif status.lower() != 'all':
             qs = qs.filter(status__iexact=status)
 
         # Date range filter on heartbeat
@@ -353,6 +361,7 @@ async def list_agents(
                 "name": a.instance_name,
                 "agent_type": a.agent_type,
                 "status": a.status,
+                "operational_state": a.operational_state,
                 "namespace": a.namespace,
                 "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
                 "workflow_enabled": a.workflow_enabled,
@@ -1417,8 +1426,9 @@ async def kill_agent(name: str) -> dict:
     Kill an agent process by sending SIGKILL to its PID.
 
     Looks up the agent by instance_name, retrieves its pid and hostname,
-    and sends SIGKILL if the agent is on the current host. Updates the
-    agent's operational_state to EXITED.
+    and sends SIGKILL if the agent is on the current host. Sets the agent's
+    status and operational_state to EXITED, so it won't appear in default
+    list_agents results.
 
     Args:
         name: The exact agent instance name (e.g., 'daq_simulator-agent-wenauseic-308')
@@ -1466,7 +1476,8 @@ async def kill_agent(name: str) -> dict:
 
         # Always mark EXITED
         agent.operational_state = 'EXITED'
-        agent.save(update_fields=['operational_state'])
+        agent.status = 'EXITED'
+        agent.save(update_fields=['operational_state', 'status'])
 
         logger.info(f"MCP kill_agent: '{name}' pid={pid} killed={killed} error={kill_error}")
 

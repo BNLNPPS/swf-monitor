@@ -234,6 +234,7 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
     serializer_class = WorkflowExecutionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
+    filterset_fields = ['status', 'namespace', 'executed_by']
 
 
 # Fast Processing API ViewSets
