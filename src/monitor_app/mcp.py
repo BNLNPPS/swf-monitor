@@ -87,8 +87,8 @@ async def list_available_tools() -> list:
         },
         {
             "name": "get_system_state",
-            "description": "Get comprehensive system state: agents, executions, run states, health",
-            "parameters": [],
+            "description": "Get comprehensive system state: user context, agent manager, workflow runner, readiness, agents, executions",
+            "parameters": ["username"],
         },
         {
             "name": "list_agents",
@@ -225,12 +225,16 @@ async def list_available_tools() -> list:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def get_system_state() -> dict:
+async def get_system_state(username: str = None) -> dict:
     """
     Get comprehensive system state including agents, executions, run states, and persistent state.
 
     Use this tool first to get a high-level view of the entire system before drilling
     into specific details. This is the starting point for understanding testbed health.
+
+    Args:
+        username: Username to get context for (reads their testbed.toml).
+                  If not provided, uses SWF_HOME environment variable.
 
     Returns:
     - timestamp: current server time
@@ -247,12 +251,28 @@ async def get_system_state() -> dict:
     - persistent_state: system-wide persistent state (next IDs, etc.)
     - recent_events: last 10 system state events
     """
-    import getpass
     import os
     from pathlib import Path
     from asgiref.sync import sync_to_async
 
-    username = getpass.getuser()
+    # Determine username and SWF_HOME path
+    if username:
+        # Compute path from username pattern: /data/{username}/github
+        swf_home = f'/data/{username}/github'
+    else:
+        swf_home = os.getenv('SWF_HOME', '')
+        # Try to extract username from SWF_HOME path
+        if swf_home and '/data/' in swf_home:
+            parts = swf_home.split('/')
+            try:
+                idx = parts.index('data')
+                if idx + 1 < len(parts):
+                    username = parts[idx + 1]
+            except (ValueError, IndexError):
+                pass
+        if not username:
+            import getpass
+            username = getpass.getuser()
 
     @sync_to_async
     def fetch():
@@ -266,9 +286,8 @@ async def get_system_state() -> dict:
             "workflow_name": None,
             "config": None,
         }
-        swf_home = os.getenv('SWF_HOME', '')
-        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml'
-        if testbed_toml.exists():
+        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml' if swf_home else None
+        if testbed_toml and testbed_toml.exists():
             try:
                 import tomllib
                 with open(testbed_toml, 'rb') as f:
