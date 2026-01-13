@@ -72,16 +72,18 @@ class ActiveMQConnectionManager:
             topic = getattr(settings, 'ACTIVEMQ_HEARTBEAT_TOPIC', 'epictopic')
             
             self.conn.connect(
-                user, 
-                password, 
-                wait=True, 
+                user,
+                password,
+                wait=True,
                 version='1.1',
                 headers={
                     'client-id': 'swf-monitor-django'
                 }
             )
+
+            # Subscribe to workflow topic (broadcast messages from agents)
             self.conn.subscribe(destination=topic, id=1, ack='auto')
-            
+
             self.logger.info(f"Successfully connected to ActiveMQ and subscribed to {topic}")
             return True
             
@@ -140,3 +142,27 @@ class ActiveMQConnectionManager:
     def is_connected(self):
         """Check if connection is active"""
         return self.conn and self.conn.is_connected()
+
+    def send_message(self, destination: str, body: str) -> bool:
+        """
+        Send a message to a destination queue/topic.
+
+        Args:
+            destination: Queue or topic name (e.g., '/queue/workflow_control')
+            body: Message body (typically JSON string)
+
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.is_connected():
+            if not self.connect():
+                self.logger.error("Cannot send message - not connected to ActiveMQ")
+                return False
+
+        try:
+            self.conn.send(destination=destination, body=body)
+            self.logger.info(f"Sent message to {destination}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to send message to {destination}: {e}")
+            return False

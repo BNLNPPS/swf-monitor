@@ -5,6 +5,16 @@ These tools enable LLM-based natural language interaction with the testbed,
 allowing users to query system state, agents, workflows, runs, STF files,
 TF slices, and messages.
 
+ARCHITECTURE PRINCIPLE:
+- Monitor consumes ALL workflow messages from ActiveMQ
+- MCP provides access to everything monitor captures
+- Use MCP tools for diagnostics, NOT log files
+
+DIAGNOSTIC TOOLS:
+- list_logs(instance_name='...') - Get logs for specific agent
+- list_logs(level='ERROR') - Find workflow failures and errors
+- list_messages(execution_id='...') - Track workflow progress
+
 Design Philosophy:
 - Tools are data access primitives with filtering capabilities
 - The LLM synthesizes, summarizes, and aggregates information
@@ -77,12 +87,12 @@ async def list_available_tools() -> list:
         },
         {
             "name": "get_system_state",
-            "description": "Get comprehensive system state: agents, executions, run states, health",
-            "parameters": [],
+            "description": "Get comprehensive system state: user context, agent manager, workflow runner, readiness, agents, executions",
+            "parameters": ["username"],
         },
         {
             "name": "list_agents",
-            "description": "List registered agents with filtering by namespace, type, status, date range",
+            "description": "List registered agents. Excludes EXITED agents by default. Use status='EXITED' to see exited, status='all' to see all.",
             "parameters": ["namespace", "agent_type", "status", "execution_id", "start_time", "end_time"],
         },
         {
@@ -162,13 +172,49 @@ async def list_available_tools() -> list:
         },
         {
             "name": "start_workflow",
-            "description": "Start a workflow execution (NOT YET IMPLEMENTED)",
-            "parameters": ["workflow_name", "namespace"],
+            "description": "Start a workflow by sending command to DAQ Simulator agent",
+            "parameters": ["workflow_name", "namespace", "config", "realtime", "duration",
+                          "stf_count", "physics_period_count", "physics_period_duration", "stf_interval"],
         },
         {
             "name": "stop_workflow",
-            "description": "Stop a running workflow execution (NOT YET IMPLEMENTED)",
+            "description": "Stop a running workflow by sending stop command to agent",
             "parameters": ["execution_id"],
+        },
+        {
+            "name": "end_execution",
+            "description": "Mark a workflow execution as terminated in database (no agent message)",
+            "parameters": ["execution_id"],
+        },
+        {
+            "name": "kill_agent",
+            "description": "Kill an agent process by sending SIGKILL to its PID. Sets status to EXITED.",
+            "parameters": ["name"],
+        },
+        {
+            "name": "check_agent_manager",
+            "description": "Check if user's agent manager daemon is alive (has recent heartbeat)",
+            "parameters": ["username"],
+        },
+        {
+            "name": "start_user_testbed",
+            "description": "Start user's testbed via their agent manager daemon",
+            "parameters": ["username", "config_name"],
+        },
+        {
+            "name": "stop_user_testbed",
+            "description": "Stop user's testbed via their agent manager daemon",
+            "parameters": ["username"],
+        },
+        {
+            "name": "get_workflow_monitor",
+            "description": "Get status and events for a workflow execution (aggregates messages/logs)",
+            "parameters": ["execution_id"],
+        },
+        {
+            "name": "list_workflow_monitors",
+            "description": "List recent workflow executions that can be monitored",
+            "parameters": [],
         },
     ]
     return tools
@@ -179,36 +225,157 @@ async def list_available_tools() -> list:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def get_system_state() -> dict:
+async def get_system_state(username: str = None) -> dict:
     """
     Get comprehensive system state including agents, executions, run states, and persistent state.
 
     Use this tool first to get a high-level view of the entire system before drilling
     into specific details. This is the starting point for understanding testbed health.
 
+    Args:
+        username: Username to get context for (reads their testbed.toml).
+                  If not provided, uses SWF_HOME environment variable.
+
     Returns:
     - timestamp: current server time
+    - user_context: namespace, workflow defaults from testbed.toml
+    - agent_manager: status of user's agent manager daemon
+    - workflow_runner: status of healthy DAQ_Simulator that can accept start_workflow
+    - ready_to_run: boolean - True if workflow_runner is healthy
+    - last_execution: most recent workflow execution for user's namespace
+    - errors_last_hour: count of ERROR logs in user's namespace
     - agents: total, healthy (heartbeat <5min), unhealthy counts
     - executions: running count, completed in last hour
     - messages: count in last 10 minutes
-    - run_states: current fast processing run states (phase, state, worker/slice counts)
+    - run_states: current fast processing run states
     - persistent_state: system-wide persistent state (next IDs, etc.)
     - recent_events: last 10 system state events
-    - health: 'healthy' if all agents OK, 'degraded' otherwise
     """
+    import os
+    from pathlib import Path
     from asgiref.sync import sync_to_async
+
+    # Determine username and SWF_HOME path
+    if username:
+        # Compute path from username pattern: /data/{username}/github
+        swf_home = f'/data/{username}/github'
+    else:
+        swf_home = os.getenv('SWF_HOME', '')
+        # Try to extract username from SWF_HOME path
+        if swf_home and '/data/' in swf_home:
+            parts = swf_home.split('/')
+            try:
+                idx = parts.index('data')
+                if idx + 1 < len(parts):
+                    username = parts[idx + 1]
+            except (ValueError, IndexError):
+                pass
+        if not username:
+            import getpass
+            username = getpass.getuser()
 
     @sync_to_async
     def fetch():
         now = timezone.now()
         recent_threshold = now - timedelta(minutes=5)
 
-        # Agent stats
+        # --- User context from testbed.toml ---
+        user_context = {
+            "username": username,
+            "namespace": None,
+            "workflow_name": None,
+            "config": None,
+        }
+        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml' if swf_home else None
+        if testbed_toml and testbed_toml.exists():
+            try:
+                import tomllib
+                with open(testbed_toml, 'rb') as f:
+                    toml_data = tomllib.load(f)
+                user_context["namespace"] = toml_data.get('testbed', {}).get('namespace')
+                workflow_section = toml_data.get('workflow', {})
+                user_context["workflow_name"] = workflow_section.get('name')
+                user_context["config"] = workflow_section.get('config')
+            except Exception:
+                pass
+
+        user_namespace = user_context.get("namespace")
+
+        # --- Agent manager status ---
+        agent_manager_name = f'agent-manager-{username}'
+        agent_manager = {"status": "missing", "last_heartbeat": None}
+        try:
+            am = SystemAgent.objects.get(instance_name=agent_manager_name)
+            if am.operational_state == 'EXITED':
+                agent_manager["status"] = "exited"
+            elif am.last_heartbeat and am.last_heartbeat >= recent_threshold:
+                agent_manager["status"] = "healthy"
+            else:
+                agent_manager["status"] = "unhealthy"
+            agent_manager["last_heartbeat"] = am.last_heartbeat.isoformat() if am.last_heartbeat else None
+        except SystemAgent.DoesNotExist:
+            pass
+
+        # --- Workflow runner status (DAQ_Simulator in user's namespace) ---
+        workflow_runner = {"status": "missing", "name": None, "last_heartbeat": None}
+        runner_qs = SystemAgent.objects.filter(
+            agent_type__in=['DAQ_Simulator', 'workflow_runner'],
+            namespace=user_namespace,
+            last_heartbeat__gte=recent_threshold,
+        ).exclude(operational_state='EXITED').order_by('-last_heartbeat')
+
+        if runner_qs.exists():
+            runner = runner_qs.first()
+            workflow_runner["status"] = "healthy"
+            workflow_runner["name"] = runner.instance_name
+            workflow_runner["last_heartbeat"] = runner.last_heartbeat.isoformat() if runner.last_heartbeat else None
+        else:
+            # Check if there's one but unhealthy
+            any_runner = SystemAgent.objects.filter(
+                agent_type__in=['DAQ_Simulator', 'workflow_runner'],
+                namespace=user_namespace,
+            ).exclude(operational_state='EXITED').first()
+            if any_runner:
+                workflow_runner["status"] = "unhealthy"
+                workflow_runner["name"] = any_runner.instance_name
+                workflow_runner["last_heartbeat"] = any_runner.last_heartbeat.isoformat() if any_runner.last_heartbeat else None
+
+        # --- Ready to run ---
+        ready_to_run = workflow_runner["status"] == "healthy"
+
+        # --- Last execution for user's namespace ---
+        last_execution = None
+        if user_namespace:
+            last_exec = WorkflowExecution.objects.filter(
+                namespace=user_namespace
+            ).order_by('-start_time').first()
+            if last_exec:
+                last_execution = {
+                    "execution_id": last_exec.execution_id,
+                    "status": last_exec.status,
+                    "start_time": last_exec.start_time.isoformat() if last_exec.start_time else None,
+                    "end_time": last_exec.end_time.isoformat() if last_exec.end_time else None,
+                }
+
+        # --- Errors in last hour for user's namespace ---
+        errors_last_hour = 0
+        if user_namespace:
+            import logging as py_logging
+            errors_last_hour = AppLog.objects.filter(
+                level__gte=py_logging.ERROR,
+                timestamp__gte=now - timedelta(hours=1),
+                extra_data__namespace=user_namespace,
+            ).count()
+
+        # --- Global agent stats ---
         total_agents = SystemAgent.objects.count()
+        exited_agents = SystemAgent.objects.filter(operational_state='EXITED').count()
+        active_agents = total_agents - exited_agents
+
         healthy_agents = SystemAgent.objects.filter(
             last_heartbeat__gte=recent_threshold,
             status='OK'
-        ).count()
+        ).exclude(operational_state='EXITED').count()
 
         # Execution stats
         running_executions = WorkflowExecution.objects.filter(status='running').count()
@@ -255,10 +422,18 @@ async def get_system_state() -> dict:
 
         return {
             "timestamp": now.isoformat(),
+            "user_context": user_context,
+            "agent_manager": agent_manager,
+            "workflow_runner": workflow_runner,
+            "ready_to_run": ready_to_run,
+            "last_execution": last_execution,
+            "errors_last_hour": errors_last_hour,
             "agents": {
                 "total": total_agents,
+                "active": active_agents,
+                "exited": exited_agents,
                 "healthy": healthy_agents,
-                "unhealthy": total_agents - healthy_agents,
+                "unhealthy": active_agents - healthy_agents,
             },
             "executions": {
                 "running": running_executions,
@@ -268,7 +443,6 @@ async def get_system_state() -> dict:
             "run_states": run_states,
             "persistent_state": persistent_state,
             "recent_events": recent_events,
-            "health": "healthy" if healthy_agents == total_agents else "degraded",
         }
 
     return await fetch()
@@ -293,16 +467,20 @@ async def list_agents(
     Agents are processes that participate in workflows (DAQ simulator, data agent,
     processing agent, fast monitoring agent). Each sends periodic heartbeats.
 
+    By default, excludes EXITED agents. Use status='EXITED' to see only exited,
+    or status='all' to see all agents regardless of status.
+
     Args:
         namespace: Filter to agents in this namespace (e.g., 'torre1', 'wenauseic')
         agent_type: Filter by type: 'daqsim', 'data', 'processing', 'fastmon', 'workflow_runner'
-        status: Filter by status: 'OK', 'WARNING', 'ERROR', 'UNKNOWN', 'EXITED'
+        status: Filter by status: 'OK', 'WARNING', 'ERROR', 'UNKNOWN', 'EXITED', or 'all'.
+                Default (None) excludes EXITED agents.
         execution_id: Filter to agents that participated in this workflow execution
         start_time: Filter to agents with heartbeat >= this ISO datetime
         end_time: Filter to agents with heartbeat <= this ISO datetime
 
-    Returns list of agents with: name, agent_type, status, namespace, last_heartbeat,
-    workflow_enabled, total_stf_processed
+    Returns list of agents with: name, agent_type, status, operational_state, namespace,
+    last_heartbeat, workflow_enabled, total_stf_processed
     """
     from asgiref.sync import sync_to_async
 
@@ -314,7 +492,11 @@ async def list_agents(
             qs = qs.filter(namespace=namespace)
         if agent_type:
             qs = qs.filter(agent_type=agent_type)
-        if status:
+
+        # Status filtering: default excludes EXITED
+        if status is None:
+            qs = qs.exclude(status='EXITED')
+        elif status.lower() != 'all':
             qs = qs.filter(status__iexact=status)
 
         # Date range filter on heartbeat
@@ -337,6 +519,7 @@ async def list_agents(
                 "name": a.instance_name,
                 "agent_type": a.agent_type,
                 "status": a.status,
+                "operational_state": a.operational_state,
                 "namespace": a.namespace,
                 "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
                 "workflow_enabled": a.workflow_enabled,
@@ -669,13 +852,20 @@ async def list_messages(
 
     Messages are sent between agents during workflow execution. They record
     events like STF creation, processing completion, state transitions, etc.
-    Useful for debugging workflow behavior or understanding what happened.
+
+    DIAGNOSTIC USE CASES:
+    - Track workflow progress: list_messages(execution_id='stf_datataking-user-0044')
+    - See what an agent sent: list_messages(agent='daq_simulator-agent-user-123')
+    - Debug message flow: list_messages(namespace='torre1', start_time='2025-01-13T11:00:00')
+    - For workflow failures: use list_logs(level='ERROR') instead
+
+    Common message types: run_imminent, start_run, stf_gen, end_run, pause_run, resume_run
 
     Args:
         namespace: Filter to messages from this namespace
         execution_id: Filter to messages for this workflow execution
         agent: Filter to messages from this sender agent
-        message_type: Filter by type (e.g., 'stf_created', 'processing_complete')
+        message_type: Filter by type (e.g., 'stf_gen', 'start_run')
         start_time: Filter messages sent >= this ISO datetime (default: last 1 hour)
         end_time: Filter messages sent <= this ISO datetime
 
@@ -1062,6 +1252,7 @@ async def get_tf_slice(tf_filename: str, slice_id: int) -> dict:
 async def list_logs(
     app_name: str = None,
     instance_name: str = None,
+    execution_id: str = None,
     level: str = None,
     search: str = None,
     start_time: str = None,
@@ -1073,9 +1264,16 @@ async def list_logs(
     All agents log to the central database via Python's logging module.
     Use this tool to discover errors, debug issues, and understand system behavior.
 
+    DIAGNOSTIC USE CASES:
+    - Workflow logs: list_logs(execution_id='stf_datataking-user-0044')
+    - Debug a specific agent: list_logs(instance_name='daq_simulator-agent-user-123')
+    - Find all errors: list_logs(level='ERROR')
+    - Search for specific issues: list_logs(search='connection failed')
+
     Args:
         app_name: Filter by application name (e.g., 'daq_simulator', 'data_agent')
         instance_name: Filter by agent instance name
+        execution_id: Filter by workflow execution ID (e.g., 'stf_datataking-wenauseic-0044')
         level: Minimum log level - returns this level and higher severity.
                DEBUG (all), INFO, WARNING, ERROR, CRITICAL
         search: Case-insensitive text search in log message
@@ -1096,6 +1294,8 @@ async def list_logs(
             qs = qs.filter(app_name=app_name)
         if instance_name:
             qs = qs.filter(instance_name=instance_name)
+        if execution_id:
+            qs = qs.filter(extra_data__execution_id=execution_id)
 
         # Level filtering (threshold - specified level and above)
         if level:
@@ -1131,6 +1331,7 @@ async def list_logs(
                 "module": log.module,
                 "funcname": log.funcname,
                 "lineno": log.lineno,
+                "extra_data": log.extra_data,
             }
             for log in qs[:200]
         ]
@@ -1175,30 +1376,204 @@ async def get_log_entry(log_id: int) -> dict:
 
 
 # -----------------------------------------------------------------------------
-# Action Tools (Not Yet Implemented)
+# Action Tools
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def start_workflow(workflow_name: str, namespace: str) -> dict:
+async def start_workflow(
+    workflow_name: str = None,
+    namespace: str = None,
+    config: str = None,
+    realtime: bool = None,
+    duration: int = 0,
+    stf_count: int = None,
+    physics_period_count: int = None,
+    physics_period_duration: float = None,
+    stf_interval: float = None,
+) -> dict:
     """
-    Start a workflow execution. NOT YET IMPLEMENTED.
+    Start a workflow execution by sending a command to the DAQ Simulator agent.
 
-    This tool will eventually allow starting a workflow run from the LLM interface.
-    Currently returns instructions for using the CLI instead.
+    All parameters are optional - defaults are read from PersistentState 'workflow_defaults'.
+    Call with no arguments to use configured defaults.
 
     Args:
-        workflow_name: Name of the workflow to run (use list_workflow_definitions to see available)
-        namespace: Testbed namespace for this execution (use list_namespaces to see available)
+        workflow_name: Name of the workflow (default: from config, typically 'stf_datataking')
+        namespace: Testbed namespace (default: from config, e.g., 'torre1')
+        config: Workflow config name (default: from config, e.g., 'fast_processing_default')
+        realtime: Run in real-time mode (default: from config, typically True)
+        duration: Max duration in seconds (0 = run until complete)
+        stf_count: Number of STF files to generate (overrides config)
+        physics_period_count: Number of physics periods (overrides config)
+        physics_period_duration: Duration of each physics period in seconds (overrides config)
+        stf_interval: Interval between STF generation in seconds (overrides config)
 
     Returns:
-        Status message with CLI instructions
+        Success/failure status with execution_id if started.
+
+    After starting, monitor with:
+        get_workflow_execution(execution_id) → status: running/completed/failed/terminated
+        list_messages(execution_id='...') → progress events
+        list_logs(execution_id='...') → workflow logs including errors
     """
-    return {
-        "status": "not_implemented",
-        "message": "Workflow start via MCP not yet implemented. Use CLI: swf-testbed run",
-        "workflow_name": workflow_name,
-        "namespace": namespace,
-    }
+    import json
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_start():
+        import os
+        from pathlib import Path
+        from .activemq_connection import ActiveMQConnectionManager
+
+        # Read defaults from testbed.toml
+        toml_namespace = None
+        toml_workflow_name = None
+        toml_config = None
+        toml_realtime = None
+        toml_params = {}
+
+        swf_home = os.getenv('SWF_HOME', '')
+        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml'
+        if testbed_toml.exists():
+            try:
+                import tomllib
+                with open(testbed_toml, 'rb') as f:
+                    toml_data = tomllib.load(f)
+                toml_namespace = toml_data.get('testbed', {}).get('namespace')
+                workflow_section = toml_data.get('workflow', {})
+                toml_workflow_name = workflow_section.get('name')
+                toml_config = workflow_section.get('config')
+                toml_realtime = workflow_section.get('realtime')
+                # Get ALL parameters from [parameters] section - no hardcoding
+                toml_params = toml_data.get('parameters', {})
+            except Exception as e:
+                logger.warning(f"Failed to read testbed.toml: {e}")
+
+        # Apply defaults - explicit MCP args override toml values
+        actual_workflow_name = workflow_name or toml_workflow_name or 'stf_datataking'
+        actual_namespace = namespace or toml_namespace or 'torre1'
+        actual_config = config or toml_config or 'fast_processing_default'
+        actual_realtime = realtime if realtime is not None else (toml_realtime if toml_realtime is not None else True)
+
+        # Build params - start with ALL toml [parameters], then override with explicit MCP args
+        params = dict(toml_params)
+        if stf_count is not None:
+            params['stf_count'] = stf_count
+        if physics_period_count is not None:
+            params['physics_period_count'] = physics_period_count
+        if physics_period_duration is not None:
+            params['physics_period_duration'] = physics_period_duration
+        if stf_interval is not None:
+            params['stf_interval'] = stf_interval
+
+        # Build message matching WorkflowRunner._handle_run_workflow() expectations
+        msg = {
+            'msg_type': 'run_workflow',
+            'namespace': actual_namespace,
+            'workflow_name': actual_workflow_name,
+            'config': actual_config,
+            'realtime': actual_realtime,
+            'duration': duration,
+            'params': params,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        # Send to workflow_control queue
+        mq = ActiveMQConnectionManager()
+        if mq.send_message('/queue/workflow_control', json.dumps(msg)):
+            logger.info(
+                f"MCP start_workflow: sent run_workflow command for '{actual_workflow_name}' "
+                f"(namespace={actual_namespace}, config={actual_config}, realtime={actual_realtime})"
+            )
+            return {
+                "success": True,
+                "message": f"Workflow '{actual_workflow_name}' start command sent to DAQ Simulator",
+                "workflow_name": actual_workflow_name,
+                "namespace": actual_namespace,
+                "config": actual_config,
+                "realtime": actual_realtime,
+                "params": params,
+                "note": "Workflow runs asynchronously. Use list_workflow_executions to monitor."
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "workflow_name": actual_workflow_name,
+                "namespace": actual_namespace,
+            }
+
+    return await do_start()
+
+
+@mcp.tool()
+async def stop_workflow(execution_id: str) -> dict:
+    """
+    Stop a running workflow by sending a stop command to the DAQ Simulator agent.
+
+    Sends a stop_workflow command that the agent checks between simulation events.
+    The workflow stops gracefully at the next checkpoint.
+
+    To find the execution_id, use list_workflow_executions(currently_running=True).
+
+    Args:
+        execution_id: The execution ID to stop (e.g., 'stf_datataking-wenauseic-0042')
+
+    Returns:
+        Success/failure status. The actual stop is asynchronous - monitor via
+        list_workflow_executions to confirm termination.
+    """
+    import json
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_stop():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        # Get namespace from execution record for message routing
+        try:
+            execution = WorkflowExecution.objects.get(execution_id=execution_id)
+        except WorkflowExecution.DoesNotExist:
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' not found",
+            }
+
+        if execution.status != 'running':
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' is not running (status: {execution.status})",
+            }
+
+        msg = {
+            'msg_type': 'stop_workflow',
+            'execution_id': execution_id,
+            'namespace': execution.namespace,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        mq = ActiveMQConnectionManager()
+        if mq.send_message('/queue/workflow_control', json.dumps(msg)):
+            logger.info(f"MCP stop_workflow: sent stop command for execution '{execution_id}'")
+            return {
+                "success": True,
+                "message": f"Stop command sent for execution '{execution_id}'",
+                "execution_id": execution_id,
+                "namespace": execution.namespace,
+                "note": "Workflow will stop at next checkpoint. Monitor via list_workflow_executions."
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "execution_id": execution_id,
+            }
+
+    return await do_stop()
 
 
 @mcp.tool()
@@ -1215,34 +1590,468 @@ async def end_execution(execution_id: str) -> dict:
     Returns:
         Success/failure status with details
     """
-    try:
-        execution = WorkflowExecution.objects.get(execution_id=execution_id)
-    except WorkflowExecution.DoesNotExist:
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_end():
+        try:
+            execution = WorkflowExecution.objects.get(execution_id=execution_id)
+        except WorkflowExecution.DoesNotExist:
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' not found",
+            }
+
+        old_status = execution.status
+        if old_status != 'running':
+            return {
+                "success": False,
+                "error": f"Execution '{execution_id}' is not running (status: {old_status})",
+            }
+
+        execution.status = 'terminated'
+        execution.end_time = timezone.now()
+        execution.save()
+
+        logger.info(
+            f"MCP end_execution: '{execution_id}' terminated (was running since {execution.start_time})"
+        )
+
         return {
-            "success": False,
-            "error": f"Execution '{execution_id}' not found",
+            "success": True,
+            "execution_id": execution_id,
+            "old_status": old_status,
+            "new_status": "terminated",
+            "start_time": execution.start_time.isoformat() if execution.start_time else None,
+            "end_time": execution.end_time.isoformat() if execution.end_time else None,
         }
 
-    old_status = execution.status
-    if old_status != 'running':
+    return await do_end()
+
+
+@mcp.tool()
+async def kill_agent(name: str) -> dict:
+    """
+    Kill an agent process by sending SIGKILL to its PID.
+
+    Looks up the agent by instance_name, retrieves its pid and hostname,
+    and sends SIGKILL if the agent is on the current host. Sets the agent's
+    status and operational_state to EXITED, so it won't appear in default
+    list_agents results.
+
+    Args:
+        name: The exact agent instance name (e.g., 'daq_simulator-agent-wenauseic-308')
+
+    Returns:
+        Success/failure status with details
+    """
+    import os
+    import signal
+    import socket
+    from asgiref.sync import sync_to_async
+
+    current_host = socket.gethostname()
+
+    @sync_to_async
+    def do_kill():
+        try:
+            agent = SystemAgent.objects.get(instance_name=name)
+        except SystemAgent.DoesNotExist:
+            return {
+                "success": False,
+                "error": f"Agent '{name}' not found. Use list_agents to see available agents.",
+            }
+
+        pid = agent.pid
+        hostname = agent.hostname
+        old_state = agent.operational_state
+        killed = False
+        kill_error = None
+
+        # Try to kill if we have a PID and it's on this host
+        if pid:
+            if hostname and hostname != current_host:
+                kill_error = f"Agent on '{hostname}', not '{current_host}' - cannot kill remotely"
+            else:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    killed = True
+                except ProcessLookupError:
+                    kill_error = f"Process {pid} not found (already dead)"
+                except PermissionError:
+                    kill_error = f"Permission denied to kill process {pid}"
+                except Exception as e:
+                    kill_error = str(e)
+
+        # Always mark EXITED
+        agent.operational_state = 'EXITED'
+        agent.status = 'EXITED'
+        agent.save(update_fields=['operational_state', 'status'])
+
+        logger.info(f"MCP kill_agent: '{name}' pid={pid} killed={killed} error={kill_error}")
+
         return {
-            "success": False,
-            "error": f"Execution '{execution_id}' is not running (status: {old_status})",
+            "success": True,
+            "name": name,
+            "pid": pid,
+            "hostname": hostname,
+            "killed": killed,
+            "kill_error": kill_error,
+            "old_state": old_state,
+            "new_state": "EXITED",
         }
 
-    execution.status = 'terminated'
-    execution.end_time = timezone.now()
-    execution.save()
+    return await do_kill()
 
-    logger.info(
-        f"MCP end_execution: '{execution_id}' terminated (was running since {execution.start_time})"
-    )
 
-    return {
-        "success": True,
-        "execution_id": execution_id,
-        "old_status": old_status,
-        "new_status": "terminated",
-        "start_time": execution.start_time.isoformat() if execution.start_time else None,
-        "end_time": execution.end_time.isoformat() if execution.end_time else None,
-    }
+# -----------------------------------------------------------------------------
+# User Agent Manager Tools
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+async def check_agent_manager(username: str = None) -> dict:
+    """
+    Check if a user's agent manager daemon is alive.
+
+    The agent manager is a lightweight per-user daemon that listens for MCP commands
+    to control testbed agents. It sends periodic heartbeats to the monitor.
+
+    Args:
+        username: The username to check. If not provided, uses current user.
+
+    Returns:
+        - alive: True if agent manager has recent heartbeat (within 5 minutes)
+        - instance_name: The agent manager's instance name
+        - last_heartbeat: When it last checked in
+        - control_queue: The queue to send commands to
+        - agents_running: Whether testbed agents are running
+        - how_to_start: Instructions if not alive
+    """
+    import getpass
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    instance_name = f'agent-manager-{username}'
+    control_queue = f'/queue/agent_control.{username}'
+
+    @sync_to_async
+    def fetch():
+        try:
+            agent = SystemAgent.objects.get(instance_name=instance_name)
+            now = timezone.now()
+            recent_threshold = now - timedelta(minutes=5)
+
+            alive = (
+                agent.last_heartbeat is not None and
+                agent.last_heartbeat >= recent_threshold and
+                agent.operational_state != 'EXITED'
+            )
+
+            metadata = agent.metadata or {}
+
+            return {
+                "alive": alive,
+                "username": username,
+                "instance_name": instance_name,
+                "last_heartbeat": agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+                "operational_state": agent.operational_state,
+                "control_queue": control_queue,
+                "agents_running": metadata.get('agents_running', False),
+            }
+        except SystemAgent.DoesNotExist:
+            return {
+                "alive": False,
+                "username": username,
+                "instance_name": instance_name,
+                "last_heartbeat": None,
+                "operational_state": None,
+                "control_queue": control_queue,
+                "agents_running": False,
+                "how_to_start": f"Run 'testbed agent-manager' in {username}'s swf-testbed directory",
+            }
+
+    return await fetch()
+
+
+@mcp.tool()
+async def start_user_testbed(username: str = None, config_name: str = None) -> dict:
+    """
+    Start a user's testbed via their agent manager daemon.
+
+    Sends a start_testbed command to the user's agent manager, which then
+    starts supervisord-managed agents. The agent manager must be running first.
+
+    Args:
+        username: The username whose testbed to start. If not provided, uses current user.
+        config_name: Optional config name (e.g., 'fast_processing'). If not specified,
+                     uses the default testbed configuration.
+
+    Returns:
+        Success/failure status. If agent manager is not running, provides instructions.
+    """
+    import json
+    import getpass
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    # First check if agent manager is alive
+    manager_status = await check_agent_manager(username)
+    if not manager_status.get('alive'):
+        return {
+            "success": False,
+            "error": f"Agent manager for '{username}' is not running",
+            "how_to_start": f"Run 'testbed agent-manager' in {username}'s swf-testbed directory",
+            "username": username,
+        }
+
+    control_queue = f'/queue/agent_control.{username}'
+
+    @sync_to_async
+    def send_command():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        msg = {
+            'command': 'start_testbed',
+            'config_name': config_name,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        mq = ActiveMQConnectionManager()
+        if mq.send_message(control_queue, json.dumps(msg)):
+            logger.info(
+                f"MCP start_user_testbed: sent start_testbed command for user '{username}' "
+                f"(config={config_name})"
+            )
+            return {
+                "success": True,
+                "message": f"Start command sent to {username}'s agent manager",
+                "username": username,
+                "config_name": config_name,
+                "control_queue": control_queue,
+                "note": "Agents will start asynchronously. Use list_agents to verify.",
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "username": username,
+            }
+
+    return await send_command()
+
+
+@mcp.tool()
+async def stop_user_testbed(username: str = None) -> dict:
+    """
+    Stop a user's testbed via their agent manager daemon.
+
+    Sends a stop_testbed command to the user's agent manager, which then
+    stops all supervisord-managed agents.
+
+    Args:
+        username: The username whose testbed to stop. If not provided, uses current user.
+
+    Returns:
+        Success/failure status.
+    """
+    import json
+    import getpass
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    # First check if agent manager is alive
+    manager_status = await check_agent_manager(username)
+    if not manager_status.get('alive'):
+        return {
+            "success": False,
+            "error": f"Agent manager for '{username}' is not running",
+            "username": username,
+            "note": "If agents are still running, you can kill them directly with kill_agent()",
+        }
+
+    control_queue = f'/queue/agent_control.{username}'
+
+    @sync_to_async
+    def send_command():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        msg = {
+            'command': 'stop_testbed',
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        mq = ActiveMQConnectionManager()
+        if mq.send_message(control_queue, json.dumps(msg)):
+            logger.info(f"MCP stop_user_testbed: sent stop_testbed command for user '{username}'")
+            return {
+                "success": True,
+                "message": f"Stop command sent to {username}'s agent manager",
+                "username": username,
+                "control_queue": control_queue,
+                "note": "Agents will stop asynchronously. Use list_agents to verify.",
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "username": username,
+            }
+
+    return await send_command()
+
+
+# -----------------------------------------------------------------------------
+# Workflow Monitoring
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+async def get_workflow_monitor(execution_id: str) -> dict:
+    """
+    Get the status and accumulated events for a workflow execution.
+
+    This provides a summary of workflow progress without needing to poll
+    multiple tools. Aggregates messages and logs for the execution.
+
+    Args:
+        execution_id: The execution ID to get monitor status for
+
+    Returns:
+        - execution_id: The execution being monitored
+        - status: Current workflow status (running/completed/failed/terminated)
+        - phase: Current phase (imminent/running/ended)
+        - events: List of key events with timestamps
+        - stf_count: Number of STF files generated
+        - errors: List of any errors encountered
+        - duration_seconds: How long the workflow ran (if completed)
+    """
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def fetch():
+        # Get current execution status from database
+        try:
+            execution = WorkflowExecution.objects.get(execution_id=execution_id)
+            db_status = execution.status
+            db_start_time = execution.start_time
+            db_end_time = execution.end_time
+        except WorkflowExecution.DoesNotExist:
+            return {"error": f"Execution '{execution_id}' not found"}
+
+        # Calculate duration
+        duration_seconds = None
+        if db_start_time and db_end_time:
+            duration_seconds = (db_end_time - db_start_time).total_seconds()
+
+        # Get messages for this execution
+        messages = WorkflowMessage.objects.filter(
+            execution_id=execution_id
+        ).order_by('sent_at')
+
+        # Accumulate events
+        events = []
+        stf_count = 0
+        current_phase = "unknown"
+        run_id = None
+        errors = []
+
+        for msg in messages:
+            msg_type = msg.message_type
+            timestamp = msg.sent_at.isoformat() if msg.sent_at else None
+            content = msg.message_content or {}
+
+            if msg_type == 'run_imminent':
+                current_phase = "imminent"
+                run_id = content.get('run_id') or msg.run_id
+                events.append({"type": "run_imminent", "time": timestamp, "run_id": run_id})
+            elif msg_type == 'start_run':
+                current_phase = "running"
+                events.append({"type": "start_run", "time": timestamp})
+            elif msg_type == 'stf_gen':
+                stf_count += 1
+            elif msg_type == 'end_run':
+                current_phase = "ended"
+                events.append({"type": "end_run", "time": timestamp, "stf_count": stf_count})
+            elif msg_type in ('run_workflow_failed', 'error'):
+                errors.append({
+                    "time": timestamp,
+                    "error": content.get('error', str(content)),
+                })
+
+        # Check for errors in logs
+        import logging as py_logging
+        error_logs = AppLog.objects.filter(
+            level__gte=py_logging.ERROR,
+            extra_data__execution_id=execution_id,
+        ).order_by('timestamp')[:10]
+
+        for log in error_logs:
+            errors.append({
+                "time": log.timestamp.isoformat() if log.timestamp else None,
+                "error": log.message,
+                "source": "log",
+            })
+
+        return {
+            "execution_id": execution_id,
+            "status": db_status,
+            "phase": current_phase,
+            "run_id": run_id,
+            "stf_count": stf_count,
+            "events": events,
+            "errors": errors,
+            "start_time": db_start_time.isoformat() if db_start_time else None,
+            "end_time": db_end_time.isoformat() if db_end_time else None,
+            "duration_seconds": duration_seconds,
+        }
+
+    return await fetch()
+
+
+@mcp.tool()
+async def list_workflow_monitors() -> list:
+    """
+    List recent workflow executions that can be monitored.
+
+    Returns executions from the last 24 hours with their current status,
+    allowing you to pick one to monitor with get_workflow_monitor().
+
+    Returns list of executions with: execution_id, status, start_time, stf_count
+    """
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def fetch():
+        now = timezone.now()
+        executions = WorkflowExecution.objects.filter(
+            start_time__gte=now - timedelta(hours=24)
+        ).order_by('-start_time')[:20]
+
+        results = []
+        for e in executions:
+            # Count STF messages for this execution
+            stf_count = WorkflowMessage.objects.filter(
+                execution_id=e.execution_id,
+                message_type='stf_gen',
+            ).count()
+
+            results.append({
+                "execution_id": e.execution_id,
+                "status": e.status,
+                "start_time": e.start_time.isoformat() if e.start_time else None,
+                "end_time": e.end_time.isoformat() if e.end_time else None,
+                "stf_count": stf_count,
+            })
+
+        return results
+
+    return await fetch()

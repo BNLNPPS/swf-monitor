@@ -45,6 +45,10 @@
                         <th>Messages</th>
                         <td><a href="{% url 'monitor_app:workflow_messages' %}?sender_agent={{ agent.instance_name }}">View messages from this agent</a></td>
                     </tr>
+                    <tr>
+                        <th>Logs</th>
+                        <td><a href="{% url 'monitor_app:log_list' %}?instance_name={{ agent.instance_name }}">View logs from this agent</a></td>
+                    </tr>
                 </tbody>
             </table>
         </div>

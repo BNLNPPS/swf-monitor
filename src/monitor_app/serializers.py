@@ -5,7 +5,13 @@ from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, W
 class SystemAgentSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemAgent
-        fields = ['id', 'instance_name', 'agent_type', 'description', 'status', 'last_heartbeat', 'agent_url', 'workflow_enabled', 'created_at', 'updated_at']
+        fields = [
+            'id', 'instance_name', 'agent_type', 'description', 'status',
+            'last_heartbeat', 'agent_url', 'workflow_enabled',
+            'current_stf_count', 'total_stf_processed', 'last_stf_processed',
+            'pid', 'hostname', 'operational_state', 'namespace',
+            'metadata', 'created_at', 'updated_at'
+        ]
         read_only_fields = ['created_at', 'updated_at']
 
 class AppLogSerializer(serializers.ModelSerializer):

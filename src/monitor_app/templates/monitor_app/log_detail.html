@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}Log Entry #{{ log.id }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Log Entry #{{ log.id }}</h2>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Log Information</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Timestamp</th>
+                        <td>{{ log.timestamp|date:"Y-m-d H:i:s.u" }} UTC</td>
+                    </tr>
+                    <tr>
+                        <th>Level</th>
+                        <td>
+                            <span class="badge bg-{% if log.levelname == 'ERROR' or log.levelname == 'CRITICAL' %}danger{% elif log.levelname == 'WARNING' %}warning{% elif log.levelname == 'DEBUG' %}secondary{% else %}info{% endif %}">
+                                {{ log.levelname }}
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Application</th>
+                        <td><a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name }}">{{ log.app_name }}</a></td>
+                    </tr>
+                    <tr>
+                        <th>Instance</th>
+                        <td>
+                            <a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>
+                            (<a href="{% url 'monitor_app:log_list' %}?instance_name={{ log.instance_name }}">logs</a>)
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Message</h5>
+        </div>
+        <div class="card-body">
+            <pre class="mb-0" style="white-space: pre-wrap; word-wrap: break-word;">{{ log.message }}</pre>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Source Location</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Module</th>
+                        <td>{{ log.module }}</td>
+                    </tr>
+                    <tr>
+                        <th>Function</th>
+                        <td>{{ log.funcname }}</td>
+                    </tr>
+                    <tr>
+                        <th>Line</th>
+                        <td>{{ log.lineno }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Process Information</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    <tr>
+                        <th style="width: 200px;">Process ID</th>
+                        <td>{{ log.process }}</td>
+                    </tr>
+                    <tr>
+                        <th>Thread ID</th>
+                        <td>{{ log.thread }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if log.extra_data %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">Extra Data</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <tbody>
+                    {% for key, value in log.extra_data.items %}
+                    <tr>
+                        <th style="width: 200px;">{{ key }}</th>
+                        <td>
+                            {% if key == 'execution_id' and value %}
+                                <a href="{% url 'monitor_app:workflow_execution_detail' value %}">{{ value }}</a>
+                            {% elif key == 'run_id' and value %}
+                                <a href="{% url 'monitor_app:run_detail' value %}">{{ value }}</a>
+                            {% else %}
+                                {{ value }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="mb-4">
+        <a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name }}&instance_name={{ log.instance_name }}" class="btn btn-secondary">
+            &larr; Back to Logs
+        </a>
+    </div>
+
+</div>
+{% endblock %}
