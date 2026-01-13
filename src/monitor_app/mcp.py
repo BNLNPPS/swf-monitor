@@ -191,6 +191,21 @@ async def list_available_tools() -> list:
             "description": "Kill an agent process by sending SIGKILL to its PID. Sets status to EXITED.",
             "parameters": ["name"],
         },
+        {
+            "name": "check_agent_manager",
+            "description": "Check if user's agent manager daemon is alive (has recent heartbeat)",
+            "parameters": ["username"],
+        },
+        {
+            "name": "start_user_testbed",
+            "description": "Start user's testbed via their agent manager daemon",
+            "parameters": ["username", "config_name"],
+        },
+        {
+            "name": "stop_user_testbed",
+            "description": "Stop user's testbed via their agent manager daemon",
+            "parameters": ["username"],
+        },
     ]
     return tools
 
@@ -1525,3 +1540,209 @@ async def kill_agent(name: str) -> dict:
         }
 
     return await do_kill()
+
+
+# -----------------------------------------------------------------------------
+# User Agent Manager Tools
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+async def check_agent_manager(username: str = None) -> dict:
+    """
+    Check if a user's agent manager daemon is alive.
+
+    The agent manager is a lightweight per-user daemon that listens for MCP commands
+    to control testbed agents. It sends periodic heartbeats to the monitor.
+
+    Args:
+        username: The username to check. If not provided, uses current user.
+
+    Returns:
+        - alive: True if agent manager has recent heartbeat (within 5 minutes)
+        - instance_name: The agent manager's instance name
+        - last_heartbeat: When it last checked in
+        - control_queue: The queue to send commands to
+        - agents_running: Whether testbed agents are running
+        - how_to_start: Instructions if not alive
+    """
+    import getpass
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    instance_name = f'agent-manager-{username}'
+    control_queue = f'/queue/agent_control.{username}'
+
+    @sync_to_async
+    def fetch():
+        try:
+            agent = SystemAgent.objects.get(instance_name=instance_name)
+            now = timezone.now()
+            recent_threshold = now - timedelta(minutes=5)
+
+            alive = (
+                agent.last_heartbeat is not None and
+                agent.last_heartbeat >= recent_threshold and
+                agent.operational_state != 'EXITED'
+            )
+
+            metadata = agent.metadata or {}
+
+            return {
+                "alive": alive,
+                "username": username,
+                "instance_name": instance_name,
+                "last_heartbeat": agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+                "operational_state": agent.operational_state,
+                "control_queue": control_queue,
+                "agents_running": metadata.get('agents_running', False),
+            }
+        except SystemAgent.DoesNotExist:
+            return {
+                "alive": False,
+                "username": username,
+                "instance_name": instance_name,
+                "last_heartbeat": None,
+                "operational_state": None,
+                "control_queue": control_queue,
+                "agents_running": False,
+                "how_to_start": f"Run 'testbed agent-manager' in {username}'s swf-testbed directory",
+            }
+
+    return await fetch()
+
+
+@mcp.tool()
+async def start_user_testbed(username: str = None, config_name: str = None) -> dict:
+    """
+    Start a user's testbed via their agent manager daemon.
+
+    Sends a start_testbed command to the user's agent manager, which then
+    starts supervisord-managed agents. The agent manager must be running first.
+
+    Args:
+        username: The username whose testbed to start. If not provided, uses current user.
+        config_name: Optional config name (e.g., 'fast_processing'). If not specified,
+                     uses the default testbed configuration.
+
+    Returns:
+        Success/failure status. If agent manager is not running, provides instructions.
+    """
+    import json
+    import getpass
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    # First check if agent manager is alive
+    manager_status = await check_agent_manager(username)
+    if not manager_status.get('alive'):
+        return {
+            "success": False,
+            "error": f"Agent manager for '{username}' is not running",
+            "how_to_start": f"Run 'testbed agent-manager' in {username}'s swf-testbed directory",
+            "username": username,
+        }
+
+    control_queue = f'/queue/agent_control.{username}'
+
+    @sync_to_async
+    def send_command():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        msg = {
+            'command': 'start_testbed',
+            'config_name': config_name,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        mq = ActiveMQConnectionManager()
+        if mq.send_message(control_queue, json.dumps(msg)):
+            logger.info(
+                f"MCP start_user_testbed: sent start_testbed command for user '{username}' "
+                f"(config={config_name})"
+            )
+            return {
+                "success": True,
+                "message": f"Start command sent to {username}'s agent manager",
+                "username": username,
+                "config_name": config_name,
+                "control_queue": control_queue,
+                "note": "Agents will start asynchronously. Use list_agents to verify.",
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "username": username,
+            }
+
+    return await send_command()
+
+
+@mcp.tool()
+async def stop_user_testbed(username: str = None) -> dict:
+    """
+    Stop a user's testbed via their agent manager daemon.
+
+    Sends a stop_testbed command to the user's agent manager, which then
+    stops all supervisord-managed agents.
+
+    Args:
+        username: The username whose testbed to stop. If not provided, uses current user.
+
+    Returns:
+        Success/failure status.
+    """
+    import json
+    import getpass
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    # First check if agent manager is alive
+    manager_status = await check_agent_manager(username)
+    if not manager_status.get('alive'):
+        return {
+            "success": False,
+            "error": f"Agent manager for '{username}' is not running",
+            "username": username,
+            "note": "If agents are still running, you can kill them directly with kill_agent()",
+        }
+
+    control_queue = f'/queue/agent_control.{username}'
+
+    @sync_to_async
+    def send_command():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        msg = {
+            'command': 'stop_testbed',
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+
+        mq = ActiveMQConnectionManager()
+        if mq.send_message(control_queue, json.dumps(msg)):
+            logger.info(f"MCP stop_user_testbed: sent stop_testbed command for user '{username}'")
+            return {
+                "success": True,
+                "message": f"Stop command sent to {username}'s agent manager",
+                "username": username,
+                "control_queue": control_queue,
+                "note": "Agents will stop asynchronously. Use list_agents to verify.",
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "username": username,
+            }
+
+    return await send_command()
