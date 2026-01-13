@@ -31,7 +31,10 @@
                     </tr>
                     <tr>
                         <th>Instance</th>
-                        <td><a href="{% url 'monitor_app:log_list' %}?instance_name={{ log.instance_name }}">{{ log.instance_name }}</a></td>
+                        <td>
+                            <a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>
+                            (<a href="{% url 'monitor_app:log_list' %}?instance_name={{ log.instance_name }}">logs</a>)
+                        </td>
                     </tr>
                 </tbody>
             </table>
