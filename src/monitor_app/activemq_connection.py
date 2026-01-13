@@ -72,16 +72,18 @@ class ActiveMQConnectionManager:
             topic = getattr(settings, 'ACTIVEMQ_HEARTBEAT_TOPIC', 'epictopic')
             
             self.conn.connect(
-                user, 
-                password, 
-                wait=True, 
+                user,
+                password,
+                wait=True,
                 version='1.1',
                 headers={
                     'client-id': 'swf-monitor-django'
                 }
             )
+
+            # Subscribe to workflow topic (broadcast messages from agents)
             self.conn.subscribe(destination=topic, id=1, ack='auto')
-            
+
             self.logger.info(f"Successfully connected to ActiveMQ and subscribed to {topic}")
             return True
             

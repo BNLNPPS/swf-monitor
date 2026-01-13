@@ -479,6 +479,12 @@ def log_list(request):
     return render(request, 'monitor_app/log_list_dynamic.html', context)
 
 
+@login_required
+def log_detail(request, log_id):
+    """Display details for a specific log entry."""
+    log = get_object_or_404(AppLog, id=log_id)
+    return render(request, 'monitor_app/log_detail.html', {'log': log})
+
 
 def logs_datatable_ajax(request):
     """
@@ -522,7 +528,9 @@ def logs_datatable_ajax(request):
     data = []
     for log in logs:
         timestamp_str = format_datetime(log.timestamp)
-        
+        # Link timestamp to detail page
+        timestamp_link = f'<a href="{reverse("monitor_app:log_detail", args=[log.id])}">{timestamp_str}</a>'
+
         # Create filter-preserving links
         app_filter_url = f"?app_name={log.app_name}"
         if filters['instance_name']:
@@ -542,7 +550,7 @@ def logs_datatable_ajax(request):
         func_display = f"{log.funcname}:{log.lineno}"
         
         data.append([
-            timestamp_str, app_name_link, instance_name_link, 
+            timestamp_link, app_name_link, instance_name_link,
             level_text, message, log.module, func_display
         ])
     

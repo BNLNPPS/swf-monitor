@@ -258,6 +258,11 @@ COMMON QUERIES:
 - Activity in a namespace? → get_namespace(namespace='name')
 - Failed workflows? → list_workflow_executions(status='failed')
 
+AFTER start_workflow:
+1. get_workflow_execution(execution_id) → status: running/completed/failed/terminated
+2. list_messages(execution_id='...') → progress: run_imminent, start_run, stf_gen, end_run
+3. list_logs(execution_id='...') → workflow logs including errors
+
 FILTERING:
 - All list tools support start_time/end_time parameters (ISO datetime strings)
 - Status filters are case-insensitive

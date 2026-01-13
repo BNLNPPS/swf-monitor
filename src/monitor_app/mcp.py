@@ -5,6 +5,16 @@ These tools enable LLM-based natural language interaction with the testbed,
 allowing users to query system state, agents, workflows, runs, STF files,
 TF slices, and messages.
 
+ARCHITECTURE PRINCIPLE:
+- Monitor consumes ALL workflow messages from ActiveMQ
+- MCP provides access to everything monitor captures
+- Use MCP tools for diagnostics, NOT log files
+
+DIAGNOSTIC TOOLS:
+- list_logs(instance_name='...') - Get logs for specific agent
+- list_logs(level='ERROR') - Find workflow failures and errors
+- list_messages(execution_id='...') - Track workflow progress
+
 Design Philosophy:
 - Tools are data access primitives with filtering capabilities
 - The LLM synthesizes, summarizes, and aggregates information
@@ -694,13 +704,20 @@ async def list_messages(
 
     Messages are sent between agents during workflow execution. They record
     events like STF creation, processing completion, state transitions, etc.
-    Useful for debugging workflow behavior or understanding what happened.
+
+    DIAGNOSTIC USE CASES:
+    - Track workflow progress: list_messages(execution_id='stf_datataking-user-0044')
+    - See what an agent sent: list_messages(agent='daq_simulator-agent-user-123')
+    - Debug message flow: list_messages(namespace='torre1', start_time='2025-01-13T11:00:00')
+    - For workflow failures: use list_logs(level='ERROR') instead
+
+    Common message types: run_imminent, start_run, stf_gen, end_run, pause_run, resume_run
 
     Args:
         namespace: Filter to messages from this namespace
         execution_id: Filter to messages for this workflow execution
         agent: Filter to messages from this sender agent
-        message_type: Filter by type (e.g., 'stf_created', 'processing_complete')
+        message_type: Filter by type (e.g., 'stf_gen', 'start_run')
         start_time: Filter messages sent >= this ISO datetime (default: last 1 hour)
         end_time: Filter messages sent <= this ISO datetime
 
@@ -1087,6 +1104,7 @@ async def get_tf_slice(tf_filename: str, slice_id: int) -> dict:
 async def list_logs(
     app_name: str = None,
     instance_name: str = None,
+    execution_id: str = None,
     level: str = None,
     search: str = None,
     start_time: str = None,
@@ -1098,9 +1116,16 @@ async def list_logs(
     All agents log to the central database via Python's logging module.
     Use this tool to discover errors, debug issues, and understand system behavior.
 
+    DIAGNOSTIC USE CASES:
+    - Workflow logs: list_logs(execution_id='stf_datataking-user-0044')
+    - Debug a specific agent: list_logs(instance_name='daq_simulator-agent-user-123')
+    - Find all errors: list_logs(level='ERROR')
+    - Search for specific issues: list_logs(search='connection failed')
+
     Args:
         app_name: Filter by application name (e.g., 'daq_simulator', 'data_agent')
         instance_name: Filter by agent instance name
+        execution_id: Filter by workflow execution ID (e.g., 'stf_datataking-wenauseic-0044')
         level: Minimum log level - returns this level and higher severity.
                DEBUG (all), INFO, WARNING, ERROR, CRITICAL
         search: Case-insensitive text search in log message
@@ -1121,6 +1146,8 @@ async def list_logs(
             qs = qs.filter(app_name=app_name)
         if instance_name:
             qs = qs.filter(instance_name=instance_name)
+        if execution_id:
+            qs = qs.filter(extra_data__execution_id=execution_id)
 
         # Level filtering (threshold - specified level and above)
         if level:
@@ -1156,6 +1183,7 @@ async def list_logs(
                 "module": log.module,
                 "funcname": log.funcname,
                 "lineno": log.lineno,
+                "extra_data": log.extra_data,
             }
             for log in qs[:200]
         ]
@@ -1236,8 +1264,12 @@ async def start_workflow(
         stf_interval: Interval between STF generation in seconds (overrides config)
 
     Returns:
-        Success/failure status. On success, the workflow runs asynchronously -
-        use list_workflow_executions to monitor progress.
+        Success/failure status with execution_id if started.
+
+    After starting, monitor with:
+        get_workflow_execution(execution_id) → status: running/completed/failed/terminated
+        list_messages(execution_id='...') → progress events
+        list_logs(execution_id='...') → workflow logs including errors
     """
     import json
     from datetime import datetime
