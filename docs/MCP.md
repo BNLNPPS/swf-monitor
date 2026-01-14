@@ -445,7 +445,48 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 ---
 
-## Example Prompts
+## Quick Reference - Example Prompts
+
+          System Readiness
+          - "What's the state of the testbed?"
+          - "Am I ready to run a workflow?"
+          - "Is my agent manager running?"
+          - "Are there any errors in the system?"
+
+          Starting the Testbed
+          - "Start my testbed"
+          - "Start my testbed with the fast_processing config"
+          - "Check if my agents are running"
+
+          Running Workflows
+          - "Start a workflow"
+          - "Run a workflow with 5 STF files"
+          - "Start a workflow with 3 physics periods"
+          - "What's running right now?"
+
+          Monitoring
+          - "What's the status of my workflow?"
+          - "Show me the progress of execution stf_datataking-wenauseic-0045"
+          - "How many STF files have been generated?"
+          - "Are there any errors in my workflow?"
+
+          Stopping
+          - "Stop my running workflow"
+          - "Stop the testbed"
+
+          Troubleshooting
+          - "Why did my workflow fail?"
+          - "Show me the logs for the DAQ simulator"
+          - "What errors happened in the last hour?"
+          - "Kill the stuck daq_simulator agent"
+
+          Combined Operations
+          - "Start my testbed and run a workflow with 10 STF files"
+          - "Check if I'm ready to run, and if so, start a workflow"
+
+---
+
+## Example Prompts - Detailed
 
 ### What's Running?
 
