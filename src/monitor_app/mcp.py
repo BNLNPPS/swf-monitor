@@ -65,6 +65,13 @@ def _default_start_time(hours=24):
     return timezone.now() - timedelta(hours=hours)
 
 
+def _monitor_url(path: str) -> str:
+    """Build a full monitor URL from a path."""
+    import os
+    base = os.getenv('SWF_MONITOR_HTTP_URL', 'http://localhost:8000/swf-monitor')
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
+
+
 # -----------------------------------------------------------------------------
 # Tool Discovery
 # -----------------------------------------------------------------------------
@@ -514,19 +521,35 @@ async def list_agents(
             ).values_list('sender_agent', flat=True).distinct()
             qs = qs.filter(instance_name__in=agent_names)
 
-        return [
-            {
-                "name": a.instance_name,
-                "agent_type": a.agent_type,
-                "status": a.status,
-                "operational_state": a.operational_state,
-                "namespace": a.namespace,
-                "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
-                "workflow_enabled": a.workflow_enabled,
-                "total_stf_processed": a.total_stf_processed,
-            }
-            for a in qs
-        ]
+        # Build URL with filters
+        params = []
+        if namespace:
+            params.append(f"namespace={namespace}")
+        if agent_type:
+            params.append(f"agent_type={agent_type}")
+        if status and status.lower() != 'all':
+            params.append(f"status={status}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/agents/?{query_string}" if query_string else "/agents/")
+
+        return {
+            "items": [
+                {
+                    "name": a.instance_name,
+                    "agent_type": a.agent_type,
+                    "status": a.status,
+                    "operational_state": a.operational_state,
+                    "namespace": a.namespace,
+                    "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
+                    "workflow_enabled": a.workflow_enabled,
+                    "total_stf_processed": a.total_stf_processed,
+                }
+                for a in qs
+            ],
+            "monitor_urls": [
+                {"title": "Agents List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -562,6 +585,9 @@ async def get_agent(name: str) -> dict:
                 "total_stf_processed": a.total_stf_processed,
                 "last_stf_processed": a.last_stf_processed.isoformat() if a.last_stf_processed else None,
                 "metadata": a.metadata,
+                "monitor_urls": [
+                    {"title": "Agent Detail", "url": _monitor_url(f"/agents/{a.instance_name}/")},
+                ],
             }
         except SystemAgent.DoesNotExist:
             return {"error": f"Agent '{name}' not found. Use list_agents to see available agents."}
@@ -587,14 +613,19 @@ async def list_namespaces() -> list:
 
     @sync_to_async
     def fetch():
-        return [
-            {
-                "name": n.name,
-                "owner": n.owner,
-                "description": n.description,
-            }
-            for n in Namespace.objects.all().order_by('name')
-        ]
+        return {
+            "items": [
+                {
+                    "name": n.name,
+                    "owner": n.owner,
+                    "description": n.description,
+                }
+                for n in Namespace.objects.all().order_by('name')
+            ],
+            "monitor_urls": [
+                {"title": "Namespaces List", "url": _monitor_url("/namespaces/")},
+            ],
+        }
 
     return await fetch()
 
@@ -670,6 +701,9 @@ async def get_namespace(
                 "start": start.isoformat(),
                 "end": end.isoformat(),
             },
+            "monitor_urls": [
+                {"title": "Namespace Detail", "url": _monitor_url(f"/namespaces/{namespace}/")},
+            ],
         }
 
     return await fetch()
@@ -710,17 +744,22 @@ async def list_workflow_definitions(
         if created_by:
             qs = qs.filter(created_by=created_by)
 
-        return [
-            {
-                "workflow_name": w.workflow_name,
-                "version": w.version,
-                "workflow_type": w.workflow_type,
-                "created_by": w.created_by,
-                "created_at": w.created_at.isoformat() if w.created_at else None,
-                "execution_count": w.execution_count,
-            }
-            for w in qs
-        ]
+        return {
+            "items": [
+                {
+                    "workflow_name": w.workflow_name,
+                    "version": w.version,
+                    "workflow_type": w.workflow_type,
+                    "created_by": w.created_by,
+                    "created_at": w.created_at.isoformat() if w.created_at else None,
+                    "execution_count": w.execution_count,
+                }
+                for w in qs
+            ],
+            "monitor_urls": [
+                {"title": "Workflow Definitions", "url": _monitor_url("/definitions/")},
+            ],
+        }
 
     return await fetch()
 
@@ -779,19 +818,35 @@ async def list_workflow_executions(
             if end:
                 qs = qs.filter(start_time__lte=end)
 
-        return [
-            {
-                "execution_id": e.execution_id,
-                "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
-                "namespace": e.namespace,
-                "status": e.status,
-                "executed_by": e.executed_by,
-                "start_time": e.start_time.isoformat() if e.start_time else None,
-                "end_time": e.end_time.isoformat() if e.end_time else None,
-                "parameter_values": e.parameter_values,
-            }
-            for e in qs[:100]
-        ]
+        # Build URL with filters
+        params = []
+        if namespace:
+            params.append(f"namespace={namespace}")
+        if status:
+            params.append(f"status={status}")
+        if executed_by:
+            params.append(f"executed_by={executed_by}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/executions/?{query_string}" if query_string else "/executions/")
+
+        return {
+            "items": [
+                {
+                    "execution_id": e.execution_id,
+                    "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
+                    "namespace": e.namespace,
+                    "status": e.status,
+                    "executed_by": e.executed_by,
+                    "start_time": e.start_time.isoformat() if e.start_time else None,
+                    "end_time": e.end_time.isoformat() if e.end_time else None,
+                    "parameter_values": e.parameter_values,
+                }
+                for e in qs[:100]
+            ],
+            "monitor_urls": [
+                {"title": "Executions List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -827,6 +882,9 @@ async def get_workflow_execution(execution_id: str) -> dict:
                 "end_time": e.end_time.isoformat() if e.end_time else None,
                 "parameter_values": e.parameter_values,
                 "performance_metrics": e.performance_metrics,
+                "monitor_urls": [
+                    {"title": "Execution Detail", "url": _monitor_url(f"/executions/{e.execution_id}/")},
+                ],
             }
         except WorkflowExecution.DoesNotExist:
             return {"error": f"Execution '{execution_id}' not found. Use list_workflow_executions to see recent runs."}
@@ -894,18 +952,34 @@ async def list_messages(
         if end:
             qs = qs.filter(sent_at__lte=end)
 
-        return [
-            {
-                "message_type": m.message_type,
-                "sender_agent": m.sender_agent,
-                "namespace": m.namespace,
-                "sent_at": m.sent_at.isoformat() if m.sent_at else None,
-                "execution_id": m.execution_id,
-                "run_id": m.run_id,
-                "payload_summary": str(m.message_content)[:200] if m.message_content else None,
-            }
-            for m in qs[:200]
-        ]
+        # Build URL with filters
+        params = []
+        if namespace:
+            params.append(f"namespace={namespace}")
+        if execution_id:
+            params.append(f"execution_id={execution_id}")
+        if message_type:
+            params.append(f"message_type={message_type}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/messages/?{query_string}" if query_string else "/messages/")
+
+        return {
+            "items": [
+                {
+                    "message_type": m.message_type,
+                    "sender_agent": m.sender_agent,
+                    "namespace": m.namespace,
+                    "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+                    "execution_id": m.execution_id,
+                    "run_id": m.run_id,
+                    "payload_summary": str(m.message_content)[:200] if m.message_content else None,
+                }
+                for m in qs[:200]
+            ],
+            "monitor_urls": [
+                {"title": "Messages List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -947,13 +1021,13 @@ async def list_runs(
         if end:
             qs = qs.filter(start_time__lte=end)
 
-        results = []
+        items = []
         for r in qs[:100]:
             duration = None
             if r.start_time and r.end_time:
                 duration = (r.end_time - r.start_time).total_seconds()
 
-            results.append({
+            items.append({
                 "run_number": r.run_number,
                 "start_time": r.start_time.isoformat() if r.start_time else None,
                 "end_time": r.end_time.isoformat() if r.end_time else None,
@@ -961,7 +1035,12 @@ async def list_runs(
                 "stf_file_count": r.stf_file_count,
             })
 
-        return results
+        return {
+            "items": items,
+            "monitor_urls": [
+                {"title": "Runs List", "url": _monitor_url("/runs/")},
+            ],
+        }
 
     return await fetch()
 
@@ -1004,6 +1083,9 @@ async def get_run(run_number: int) -> dict:
                 "run_conditions": r.run_conditions,
                 "file_stats": file_stats,
                 "total_stf_files": sum(file_stats.values()),
+                "monitor_urls": [
+                    {"title": "Run Detail", "url": _monitor_url(f"/runs/{r.run_number}/")},
+                ],
             }
         except Run.DoesNotExist:
             return {"error": f"Run {run_number} not found. Use list_runs to see available runs."}
@@ -1062,19 +1144,33 @@ async def list_stf_files(
         if end:
             qs = qs.filter(created_at__lte=end)
 
-        return [
-            {
-                "file_id": str(f.file_id),
-                "stf_filename": f.stf_filename,
-                "run_number": f.run.run_number if f.run else None,
-                "status": f.status,
-                "machine_state": f.machine_state,
-                "file_size_bytes": f.file_size_bytes,
-                "created_at": f.created_at.isoformat() if f.created_at else None,
-                "tf_file_count": f.tf_file_count,
-            }
-            for f in qs[:100]
-        ]
+        # Build URL with filters
+        params = []
+        if run_number:
+            params.append(f"run_number={run_number}")
+        if status:
+            params.append(f"status={status}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/stf-files/?{query_string}" if query_string else "/stf-files/")
+
+        return {
+            "items": [
+                {
+                    "file_id": str(f.file_id),
+                    "stf_filename": f.stf_filename,
+                    "run_number": f.run.run_number if f.run else None,
+                    "status": f.status,
+                    "machine_state": f.machine_state,
+                    "file_size_bytes": f.file_size_bytes,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                    "tf_file_count": f.tf_file_count,
+                }
+                for f in qs[:100]
+            ],
+            "monitor_urls": [
+                {"title": "STF Files List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -1120,6 +1216,9 @@ async def get_stf_file(file_id: str = None, stf_filename: str = None) -> dict:
                 "daq_state": f.daq_state,
                 "daq_substate": f.daq_substate,
                 "workflow_status": f.workflow_status,
+                "monitor_urls": [
+                    {"title": "STF File Detail", "url": _monitor_url(f"/stf-files/{f.file_id}/")},
+                ],
             }
         except StfFile.DoesNotExist:
             return {"error": "STF file not found. Use list_stf_files to see available files."}
@@ -1185,22 +1284,36 @@ async def list_tf_slices(
         if end:
             qs = qs.filter(created_at__lte=end)
 
-        return [
-            {
-                "slice_id": s.slice_id,
-                "tf_filename": s.tf_filename,
-                "stf_filename": s.stf_filename,
-                "run_number": s.run_number,
-                "tf_first": s.tf_first,
-                "tf_last": s.tf_last,
-                "tf_count": s.tf_count,
-                "status": s.status,
-                "assigned_worker": s.assigned_worker,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-            }
-            for s in qs[:200]
-        ]
+        # Build URL with filters
+        params = []
+        if run_number:
+            params.append(f"run_number={run_number}")
+        if status:
+            params.append(f"status={status}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/tf-slices/?{query_string}" if query_string else "/tf-slices/")
+
+        return {
+            "items": [
+                {
+                    "slice_id": s.slice_id,
+                    "tf_filename": s.tf_filename,
+                    "stf_filename": s.stf_filename,
+                    "run_number": s.run_number,
+                    "tf_first": s.tf_first,
+                    "tf_last": s.tf_last,
+                    "tf_count": s.tf_count,
+                    "status": s.status,
+                    "assigned_worker": s.assigned_worker,
+                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                }
+                for s in qs[:200]
+            ],
+            "monitor_urls": [
+                {"title": "TF Slices List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -1320,21 +1433,37 @@ async def list_logs(
         if end:
             qs = qs.filter(timestamp__lte=end)
 
-        return [
-            {
-                "id": log.id,
-                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                "app_name": log.app_name,
-                "instance_name": log.instance_name,
-                "level": log.levelname,
-                "message": log.message,
-                "module": log.module,
-                "funcname": log.funcname,
-                "lineno": log.lineno,
-                "extra_data": log.extra_data,
-            }
-            for log in qs[:200]
-        ]
+        # Build URL with filters
+        params = []
+        if instance_name:
+            params.append(f"instance_name={instance_name}")
+        if execution_id:
+            params.append(f"execution_id={execution_id}")
+        if level:
+            params.append(f"level={level}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/logs/?{query_string}" if query_string else "/logs/")
+
+        return {
+            "items": [
+                {
+                    "id": log.id,
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                    "app_name": log.app_name,
+                    "instance_name": log.instance_name,
+                    "level": log.levelname,
+                    "message": log.message,
+                    "module": log.module,
+                    "funcname": log.funcname,
+                    "lineno": log.lineno,
+                    "extra_data": log.extra_data,
+                }
+                for log in qs[:200]
+            ],
+            "monitor_urls": [
+                {"title": "Logs List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -1368,6 +1497,9 @@ async def get_log_entry(log_id: int) -> dict:
                 "process": log.process,
                 "thread": log.thread,
                 "extra_data": log.extra_data,
+                "monitor_urls": [
+                    {"title": "Log Detail", "url": _monitor_url(f"/logs/{log.id}/")},
+                ],
             }
         except AppLog.DoesNotExist:
             return {"error": f"Log entry {log_id} not found."}
@@ -2012,6 +2144,9 @@ async def get_workflow_monitor(execution_id: str) -> dict:
             "start_time": db_start_time.isoformat() if db_start_time else None,
             "end_time": db_end_time.isoformat() if db_end_time else None,
             "duration_seconds": duration_seconds,
+            "monitor_urls": [
+                {"title": "Execution Detail", "url": _monitor_url(f"/executions/{execution_id}/")},
+            ],
         }
 
     return await fetch()
@@ -2036,7 +2171,7 @@ async def list_workflow_monitors() -> list:
             start_time__gte=now - timedelta(hours=24)
         ).order_by('-start_time')[:20]
 
-        results = []
+        items = []
         for e in executions:
             # Count STF messages for this execution
             stf_count = WorkflowMessage.objects.filter(
@@ -2044,7 +2179,7 @@ async def list_workflow_monitors() -> list:
                 message_type='stf_gen',
             ).count()
 
-            results.append({
+            items.append({
                 "execution_id": e.execution_id,
                 "status": e.status,
                 "start_time": e.start_time.isoformat() if e.start_time else None,
@@ -2052,6 +2187,11 @@ async def list_workflow_monitors() -> list:
                 "stf_count": stf_count,
             })
 
-        return results
+        return {
+            "items": items,
+            "monitor_urls": [
+                {"title": "Executions List", "url": _monitor_url("/executions/")},
+            ],
+        }
 
     return await fetch()
