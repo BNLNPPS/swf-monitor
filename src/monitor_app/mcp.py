@@ -1599,7 +1599,10 @@ async def start_workflow(
         if stf_interval is not None:
             params['stf_interval'] = stf_interval
 
-        # Build message matching WorkflowRunner._handle_run_workflow() expectations
+        # Include namespace in params so it flows through to execution record
+        params['namespace'] = actual_namespace
+
+        # Build message (namespace at root for clarity, in params for override flow)
         msg = {
             'msg_type': 'run_workflow',
             'namespace': actual_namespace,
