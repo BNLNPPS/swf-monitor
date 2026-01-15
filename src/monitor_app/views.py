@@ -560,30 +560,27 @@ def get_log_filter_counts(request):
     AJAX endpoint that returns dynamic filter options with counts.
     Only shows options that have >0 matches in the current filtered dataset.
     """
-    from .utils import get_filter_counts, get_filter_params, apply_filters
+    from .utils import get_filter_counts, get_filter_params
     from django.db.models import Count
     import re
 
-    # Get current filters
+    # Get current filters for actual model fields only
     current_filters = get_filter_params(request, ['app_name', 'levelname'])
     username = request.GET.get('username')
-    current_filters['username'] = username
 
-    # Build base queryset
+    # Build base queryset with username filter applied if set
     base_queryset = AppLog.objects.all()
-
-    # Apply username filter if set (username is 3rd segment: "type-agent-username-id")
     if username:
         base_queryset = base_queryset.filter(instance_name__regex=rf'^[^-]+-[^-]+-{username}-')
 
     # Use standard utility for app_name and levelname counts
+    # NOTE: current_filters only contains model fields, not username
     filter_counts = get_filter_counts(base_queryset, ['app_name', 'levelname'], current_filters)
 
     # Extract usernames from instance_name patterns like "daq_simulator-agent-wenauseic-435"
-    # Pattern: *-agent-{username}-* or similar with username as 3rd segment
     username_pattern = re.compile(r'^[^-]+-[^-]+-([^-]+)-')
 
-    # Build queryset for username counts (apply other filters but not username)
+    # Build queryset for username counts (apply app_name and levelname filters)
     qs_for_username = AppLog.objects.all()
     if current_filters.get('app_name'):
         qs_for_username = qs_for_username.filter(app_name=current_filters['app_name'])
@@ -592,16 +589,17 @@ def get_log_filter_counts(request):
 
     # Count usernames extracted from instance_name
     username_counts = {}
-    instance_counts = qs_for_username.values('instance_name').annotate(count=Count('id'))
-    for item in instance_counts:
-        instance_name = item['instance_name']
-        match = username_pattern.match(instance_name)
+    for item in qs_for_username.values('instance_name').annotate(count=Count('id')):
+        match = username_pattern.match(item['instance_name'])
         if match:
             uname = match.group(1)
             username_counts[uname] = username_counts.get(uname, 0) + item['count']
 
     # Convert to sorted list of tuples (matching expected format)
     filter_counts['username'] = sorted(username_counts.items(), key=lambda x: (-x[1], x[0]))
+
+    # Add username to current_filters for UI state (after utility call, not before)
+    current_filters['username'] = username
 
     return JsonResponse({
         'filter_counts': filter_counts,
