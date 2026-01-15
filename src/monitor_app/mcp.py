@@ -1857,6 +1857,7 @@ async def check_agent_manager(username: str = None) -> dict:
     Returns:
         - alive: True if agent manager has recent heartbeat (within 5 minutes)
         - instance_name: The agent manager's instance name
+        - namespace: Current testbed namespace (from config)
         - last_heartbeat: When it last checked in
         - control_queue: The queue to send commands to
         - agents_running: Whether testbed agents are running
@@ -1890,6 +1891,7 @@ async def check_agent_manager(username: str = None) -> dict:
                 "alive": alive,
                 "username": username,
                 "instance_name": instance_name,
+                "namespace": agent.namespace,
                 "last_heartbeat": agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
                 "operational_state": agent.operational_state,
                 "control_queue": control_queue,
@@ -1900,6 +1902,7 @@ async def check_agent_manager(username: str = None) -> dict:
                 "alive": False,
                 "username": username,
                 "instance_name": instance_name,
+                "namespace": None,
                 "last_heartbeat": None,
                 "operational_state": None,
                 "control_queue": control_queue,
