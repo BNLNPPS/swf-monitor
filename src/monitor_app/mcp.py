@@ -10,10 +10,21 @@ ARCHITECTURE PRINCIPLE:
 - MCP provides access to everything monitor captures
 - Use MCP tools for diagnostics, NOT log files
 
+TESTBED MANAGEMENT:
+- get_testbed_status(username) - Comprehensive status: agent manager, namespace, agents
+- start_user_testbed(username, config_name) - Start testbed with config (default: testbed.toml)
+- stop_user_testbed(username) - Stop all workflow agents
+- check_agent_manager(username) - Check if agent manager daemon is alive
+
 DIAGNOSTIC TOOLS:
 - list_logs(instance_name='...') - Get logs for specific agent
 - list_logs(level='ERROR') - Find workflow failures and errors
 - list_messages(execution_id='...') - Track workflow progress
+
+WORKFLOW OPERATIONS:
+- start_workflow() - Start workflow using defaults from testbed.toml
+- stop_workflow(execution_id) - Stop a running workflow
+- get_workflow_monitor(execution_id) - Get workflow status and events
 
 Design Philosophy:
 - Tools are data access primitives with filtering capabilities
@@ -211,6 +222,11 @@ async def list_available_tools() -> list:
         {
             "name": "stop_user_testbed",
             "description": "Stop user's testbed via their agent manager daemon",
+            "parameters": ["username"],
+        },
+        {
+            "name": "get_testbed_status",
+            "description": "Get comprehensive testbed status: agent manager, namespace, workflow agents",
             "parameters": ["username"],
         },
         {
@@ -2105,6 +2121,95 @@ async def stop_user_testbed(username: str = None) -> dict:
             }
 
     return await send_command()
+
+
+@mcp.tool()
+async def get_testbed_status(username: str = None) -> dict:
+    """
+    Get comprehensive status of a user's testbed.
+
+    Shows agent manager status, namespace, and all workflow agents with their
+    current state (running/stopped based on heartbeat freshness).
+
+    Args:
+        username: The username to check. If not provided, uses current user.
+
+    Returns:
+        - agent_manager: Status of the agent manager daemon
+        - namespace: Current testbed namespace
+        - agents: List of workflow agents with status
+        - summary: Quick counts of running/stopped agents
+    """
+    import getpass
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    # Get agent manager status first
+    manager_status = await check_agent_manager(username)
+    namespace = manager_status.get('namespace')
+
+    @sync_to_async
+    def fetch_agents():
+        now = timezone.now()
+        healthy_threshold = now - timedelta(minutes=2)
+
+        # Get agents in the namespace (if we have one)
+        agents_info = []
+        running_count = 0
+        stopped_count = 0
+
+        if namespace:
+            agents = SystemAgent.objects.filter(
+                namespace=namespace
+            ).exclude(
+                agent_type='agent_manager'
+            ).exclude(
+                operational_state='EXITED'
+            ).order_by('-last_heartbeat')
+
+            for agent in agents:
+                is_running = (
+                    agent.last_heartbeat and
+                    agent.last_heartbeat >= healthy_threshold
+                )
+                if is_running:
+                    running_count += 1
+                else:
+                    stopped_count += 1
+
+                agents_info.append({
+                    'name': agent.instance_name,
+                    'type': agent.agent_type,
+                    'status': 'running' if is_running else 'stopped',
+                    'last_heartbeat': agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+                })
+
+        return {
+            'agents': agents_info,
+            'running': running_count,
+            'stopped': stopped_count,
+        }
+
+    agents_data = await fetch_agents()
+
+    return {
+        'username': username,
+        'agent_manager': {
+            'alive': manager_status.get('alive'),
+            'namespace': namespace,
+            'operational_state': manager_status.get('operational_state'),
+            'last_heartbeat': manager_status.get('last_heartbeat'),
+        },
+        'agents': agents_data['agents'],
+        'summary': {
+            'running': agents_data['running'],
+            'stopped': agents_data['stopped'],
+        },
+        'ready': manager_status.get('alive', False) and agents_data['running'] == 0,
+        'note': 'ready=True means testbed is idle and ready to start' if agents_data['running'] == 0 else None,
+    }
 
 
 # -----------------------------------------------------------------------------
