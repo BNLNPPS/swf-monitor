@@ -1952,6 +1952,15 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
         from .activemq_connection import ActiveMQConnectionManager
         mq = ActiveMQConnectionManager()
 
+        # Record the old PID before restart
+        old_pid = None
+        try:
+            old_agent = SystemAgent.objects.get(instance_name=instance_name)
+            old_pid = old_agent.pid
+            old_heartbeat = old_agent.last_heartbeat
+        except SystemAgent.DoesNotExist:
+            old_heartbeat = None
+
         # First restart the agent manager to pick up fresh code
         restart_msg = {
             'command': 'restart',
@@ -1967,8 +1976,37 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
 
         logger.info(f"MCP start_user_testbed: sent restart command, waiting for new agent manager")
 
-        # Wait for new agent manager to start
-        time.sleep(3)
+        # Poll for new agent manager to be ready (new PID or fresh heartbeat)
+        max_wait = 15  # seconds
+        poll_interval = 1
+        waited = 0
+        new_agent_ready = False
+
+        while waited < max_wait:
+            time.sleep(poll_interval)
+            waited += poll_interval
+            try:
+                agent = SystemAgent.objects.get(instance_name=instance_name)
+                # Check if this is a new agent (different PID or fresh heartbeat)
+                now = timezone.now()
+                is_new = (
+                    (old_pid and agent.pid and agent.pid != old_pid) or
+                    (agent.last_heartbeat and old_heartbeat and agent.last_heartbeat > old_heartbeat)
+                )
+                is_healthy = (
+                    agent.operational_state == 'READY' and
+                    agent.last_heartbeat and
+                    (now - agent.last_heartbeat).total_seconds() < 60
+                )
+                if is_new and is_healthy:
+                    new_agent_ready = True
+                    logger.info(f"MCP start_user_testbed: new agent manager ready (pid={agent.pid})")
+                    break
+            except SystemAgent.DoesNotExist:
+                pass
+
+        if not new_agent_ready:
+            logger.warning(f"MCP start_user_testbed: agent manager not confirmed ready after {max_wait}s")
 
         # Now send start_testbed command
         start_msg = {
@@ -1989,6 +2027,7 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
                 "username": username,
                 "config_name": config_name,
                 "control_queue": control_queue,
+                "new_agent_ready": new_agent_ready,
                 "note": "Agents will start asynchronously. Use list_agents to verify.",
             }
         else:
