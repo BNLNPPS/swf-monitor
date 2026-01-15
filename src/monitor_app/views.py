@@ -497,10 +497,10 @@ def logs_datatable_ajax(request):
     filters = get_filter_params(request, ['app_name', 'levelname'])
     queryset = apply_filters(queryset, filters)
 
-    # Handle username filter (username embedded in instance_name like "type-agent-username-id")
+    # Handle username filter (username is 3rd segment: "type-agent-username-id")
     username = request.GET.get('username')
     if username:
-        queryset = queryset.filter(instance_name__contains=f'-{username}-')
+        queryset = queryset.filter(instance_name__regex=rf'^[^-]+-[^-]+-{username}-')
     filters['username'] = username
 
     # Handle time range filters
@@ -572,9 +572,9 @@ def get_log_filter_counts(request):
     # Build base queryset
     base_queryset = AppLog.objects.all()
 
-    # Apply username filter if set (username is embedded in instance_name like "type-agent-username-id")
+    # Apply username filter if set (username is 3rd segment: "type-agent-username-id")
     if username:
-        base_queryset = base_queryset.filter(instance_name__contains=f'-{username}-')
+        base_queryset = base_queryset.filter(instance_name__regex=rf'^[^-]+-[^-]+-{username}-')
 
     # Use standard utility for app_name and levelname counts
     filter_counts = get_filter_counts(base_queryset, ['app_name', 'levelname'], current_filters)
