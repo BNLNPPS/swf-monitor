@@ -1945,6 +1945,7 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
         }
 
     control_queue = f'/queue/agent_control.{username}'
+    instance_name = f'agent-manager-{username}'
 
     @sync_to_async
     def send_commands():
