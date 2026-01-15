@@ -45,7 +45,7 @@ The application is built on Django infrastructure and comprises two main web app
 ### Quick Links
 - **Production Monitor**: [https://pandaserver02.sdcc.bnl.gov/swf-monitor/](https://pandaserver02.sdcc.bnl.gov/swf-monitor/)
 - **Interactive API Docs**: [Swagger UI](https://pandasserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/) | [ReDoc](https://pandasserver02.sdcc.bnl.gov/swf-monitor/api/schema/redoc/)
-- **Database Schema**: [testbed-schema.dbml](testbed-schema.dbml) (auto-generated)
+- **Database Schema**: [testbed-schema.dbml](testbed-schema.dbml) (auto-generated, view at [dbdiagram.io](https://dbdiagram.io))
 - **Parent Project**: [swf-testbed documentation](../swf-testbed/README.md)
 
 ## Quick Examples
