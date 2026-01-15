@@ -83,6 +83,30 @@ def _monitor_url(path: str) -> str:
     return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
+def _get_testbed_config_path() -> tuple:
+    """
+    Get the testbed config file path.
+
+    Returns:
+        (Path, str): Tuple of (config_path, source) where source is
+                     'SWF_TESTBED_CONFIG' or 'default'
+    """
+    import os
+    from pathlib import Path
+
+    swf_home = os.getenv('SWF_HOME', '')
+    config_env = os.getenv('SWF_TESTBED_CONFIG')
+
+    if config_env:
+        # Env var can be absolute or relative to workflows/
+        if os.path.isabs(config_env):
+            return Path(config_env), 'SWF_TESTBED_CONFIG'
+        else:
+            return Path(swf_home) / 'swf-testbed' / 'workflows' / config_env, 'SWF_TESTBED_CONFIG'
+    else:
+        return Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml', 'default'
+
+
 # -----------------------------------------------------------------------------
 # Tool Discovery
 # -----------------------------------------------------------------------------
@@ -302,14 +326,16 @@ async def get_system_state(username: str = None) -> dict:
         now = timezone.now()
         recent_threshold = now - timedelta(minutes=5)
 
-        # --- User context from testbed.toml ---
+        # --- User context from testbed config ---
+        testbed_toml, config_source = _get_testbed_config_path()
         user_context = {
             "username": username,
             "namespace": None,
             "workflow_name": None,
             "config": None,
+            "config_file": str(testbed_toml.name) if testbed_toml else None,
+            "config_source": config_source,
         }
-        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml' if swf_home else None
         if testbed_toml and testbed_toml.exists():
             try:
                 import tomllib
@@ -1574,15 +1600,14 @@ async def start_workflow(
         from pathlib import Path
         from .activemq_connection import ActiveMQConnectionManager
 
-        # Read defaults from testbed.toml
+        # Read defaults from testbed config (respects SWF_TESTBED_CONFIG env var)
         toml_namespace = None
         toml_workflow_name = None
         toml_config = None
         toml_realtime = None
         toml_params = {}
 
-        swf_home = os.getenv('SWF_HOME', '')
-        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml'
+        testbed_toml, config_source = _get_testbed_config_path()
         if testbed_toml.exists():
             try:
                 import tomllib
@@ -1595,8 +1620,10 @@ async def start_workflow(
                 toml_realtime = workflow_section.get('realtime')
                 # Get ALL parameters from [parameters] section - no hardcoding
                 toml_params = toml_data.get('parameters', {})
+                if config_source == 'SWF_TESTBED_CONFIG':
+                    logger.info(f"Using config from SWF_TESTBED_CONFIG: {testbed_toml.name}")
             except Exception as e:
-                logger.warning(f"Failed to read testbed.toml: {e}")
+                logger.warning(f"Failed to read {testbed_toml}: {e}")
 
         # Apply defaults - explicit MCP args override toml values
         actual_workflow_name = workflow_name or toml_workflow_name or 'stf_datataking'
