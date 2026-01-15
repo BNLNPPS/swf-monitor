@@ -435,17 +435,11 @@ def log_list(request):
     Replaced the old pagination-based view for better performance and UX.
     """
     from django.utils.dateparse import parse_datetime
-    
+
     # Get filter parameters (for initial state)
     app_name = request.GET.get('app_name')
-    instance_name = request.GET.get('instance_name')
+    username = request.GET.get('username')
     levelname = request.GET.get('levelname')
-    
-    # Get distinct app and instance names for filter links
-    app_names_qs = AppLog.objects.values_list('app_name', flat=True)
-    instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
-    app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
-    instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
 
     # Column definitions for DataTables
     columns = [
@@ -461,19 +455,19 @@ def log_list(request):
     # Filter field definitions for dynamic filtering
     filter_fields = [
         {'name': 'app_name', 'label': 'Applications', 'type': 'select'},
-        {'name': 'instance_name', 'label': 'Instances', 'type': 'select'},
+        {'name': 'username', 'label': 'Users', 'type': 'select'},
         {'name': 'levelname', 'label': 'Levels', 'type': 'select'},
     ]
 
     context = {
         'table_title': 'Log List',
-        'table_description': 'View and search application logs with dynamic filtering by source, instance, and level.',
+        'table_description': 'View and search application logs with dynamic filtering by source, user, and level.',
         'ajax_url': reverse('monitor_app:logs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:log_filter_counts'),
         'columns': columns,
         'filter_fields': filter_fields,
         'selected_app': app_name,
-        'selected_instance': instance_name,
+        'selected_username': username,
         'selected_levelname': levelname,
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
@@ -493,16 +487,22 @@ def logs_datatable_ajax(request):
     """
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
     from django.utils.dateparse import parse_datetime
-    
+
     # Initialize DataTables processor
     columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
-    
-    # Build base queryset and apply standard filters
+
+    # Build base queryset and apply standard filters (app_name, levelname)
     queryset = AppLog.objects.all()
-    filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
+    filters = get_filter_params(request, ['app_name', 'levelname'])
     queryset = apply_filters(queryset, filters)
-    
+
+    # Handle username filter (from extra_data JSON)
+    username = request.GET.get('username')
+    if username:
+        queryset = queryset.filter(extra_data__username=username)
+    filters['username'] = username
+
     # Handle time range filters
     start_time = request.GET.get('start_time')
     end_time = request.GET.get('end_time')
@@ -514,16 +514,16 @@ def logs_datatable_ajax(request):
         dt_parsed = parse_datetime(end_time)
         if dt_parsed:
             queryset = queryset.filter(timestamp__lte=dt_parsed)
-    
+
     # Get counts and apply search/pagination
     records_total = AppLog.objects.count()
     search_fields = ['app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
     queryset = dt.apply_search(queryset, search_fields)
     records_filtered = queryset.count()
-    
+
     queryset = queryset.order_by(dt.get_order_by())
     logs = dt.apply_pagination(queryset)
-    
+
     # Format data for DataTables
     data = []
     for log in logs:
@@ -533,27 +533,25 @@ def logs_datatable_ajax(request):
 
         # Create filter-preserving links
         app_filter_url = f"?app_name={log.app_name}"
-        if filters['instance_name']:
-            app_filter_url += f"&instance_name={filters['instance_name']}"
+        if filters['username']:
+            app_filter_url += f"&username={filters['username']}"
         app_name_link = f'<a href="{app_filter_url}">{log.app_name}</a>'
-        
-        instance_filter_url = f"?instance_name={log.instance_name}"
-        if filters['app_name']:
-            instance_filter_url += f"&app_name={filters['app_name']}"
-        instance_name_link = f'<a href="{instance_filter_url}">{log.instance_name}</a>'
-        
+
+        # Instance name displayed but not filterable (too many entries)
+        instance_name_display = log.instance_name
+
         # Use plain text level (consistent with other views)
         level_text = log.levelname
-        
+
         # Truncate message if too long
         message = log.message[:200] + '...' if len(log.message) > 200 else log.message
         func_display = f"{log.funcname}:{log.lineno}"
-        
+
         data.append([
-            timestamp_link, app_name_link, instance_name_link,
+            timestamp_link, app_name_link, instance_name_display,
             level_text, message, log.module, func_display
         ])
-    
+
     return dt.create_response(data, records_total, records_filtered)
 
 
@@ -563,17 +561,51 @@ def get_log_filter_counts(request):
     Only shows options that have >0 matches in the current filtered dataset.
     """
     from .utils import get_filter_counts, get_filter_params, apply_filters
-    
+    from django.db.models import Count
+
     # Get current filters
-    current_filters = get_filter_params(request, ['app_name', 'instance_name', 'levelname'])
-    
-    # Build base queryset
+    current_filters = get_filter_params(request, ['app_name', 'levelname'])
+    username = request.GET.get('username')
+    current_filters['username'] = username
+
+    # Build base queryset with standard filters applied
     base_queryset = AppLog.objects.all()
-    
-    # Get filter counts considering current filters
-    filter_fields = ['app_name', 'instance_name', 'levelname']
-    filter_counts = get_filter_counts(base_queryset, filter_fields, current_filters)
-    
+
+    # Apply cross-filters for counts
+    qs_for_app = base_queryset
+    qs_for_username = base_queryset
+    qs_for_level = base_queryset
+
+    if current_filters.get('levelname'):
+        qs_for_app = qs_for_app.filter(levelname=current_filters['levelname'])
+        qs_for_username = qs_for_username.filter(levelname=current_filters['levelname'])
+    if current_filters.get('app_name'):
+        qs_for_username = qs_for_username.filter(app_name=current_filters['app_name'])
+        qs_for_level = qs_for_level.filter(app_name=current_filters['app_name'])
+    if username:
+        qs_for_app = qs_for_app.filter(extra_data__username=username)
+        qs_for_level = qs_for_level.filter(extra_data__username=username)
+
+    # Get app_name counts
+    app_counts = dict(qs_for_app.values('app_name').annotate(count=Count('id')).values_list('app_name', 'count'))
+
+    # Get username counts from extra_data JSON
+    username_counts = {}
+    username_qs = qs_for_username.exclude(extra_data__isnull=True).exclude(extra_data__username__isnull=True)
+    for row in username_qs.values('extra_data__username').annotate(count=Count('id')):
+        uname = row['extra_data__username']
+        if uname:
+            username_counts[uname] = row['count']
+
+    # Get levelname counts
+    level_counts = dict(qs_for_level.values('levelname').annotate(count=Count('id')).values_list('levelname', 'count'))
+
+    filter_counts = {
+        'app_name': app_counts,
+        'username': username_counts,
+        'levelname': level_counts,
+    }
+
     return JsonResponse({
         'filter_counts': filter_counts,
         'current_filters': current_filters
