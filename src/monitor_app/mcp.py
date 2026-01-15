@@ -1947,25 +1947,45 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
     control_queue = f'/queue/agent_control.{username}'
 
     @sync_to_async
-    def send_command():
+    def send_commands():
+        import time
         from .activemq_connection import ActiveMQConnectionManager
+        mq = ActiveMQConnectionManager()
 
-        msg = {
+        # First restart the agent manager to pick up fresh code
+        restart_msg = {
+            'command': 'restart',
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+        if not mq.send_message(control_queue, json.dumps(restart_msg)):
+            return {
+                "success": False,
+                "error": "Failed to send restart command to ActiveMQ",
+                "username": username,
+            }
+
+        logger.info(f"MCP start_user_testbed: sent restart command, waiting for new agent manager")
+
+        # Wait for new agent manager to start
+        time.sleep(3)
+
+        # Now send start_testbed command
+        start_msg = {
             'command': 'start_testbed',
             'config_name': config_name,
             'timestamp': datetime.now().isoformat(),
             'source': 'mcp'
         }
 
-        mq = ActiveMQConnectionManager()
-        if mq.send_message(control_queue, json.dumps(msg)):
+        if mq.send_message(control_queue, json.dumps(start_msg)):
             logger.info(
                 f"MCP start_user_testbed: sent start_testbed command for user '{username}' "
                 f"(config={config_name})"
             )
             return {
                 "success": True,
-                "message": f"Start command sent to {username}'s agent manager",
+                "message": f"Agent manager restarted and start command sent",
                 "username": username,
                 "config_name": config_name,
                 "control_queue": control_queue,
@@ -1974,11 +1994,11 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
         else:
             return {
                 "success": False,
-                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "error": "Failed to send start_testbed command to ActiveMQ",
                 "username": username,
             }
 
-    return await send_command()
+    return await send_commands()
 
 
 @mcp.tool()
