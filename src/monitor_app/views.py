@@ -497,10 +497,10 @@ def logs_datatable_ajax(request):
     filters = get_filter_params(request, ['app_name', 'levelname'])
     queryset = apply_filters(queryset, filters)
 
-    # Handle username filter (username is 3rd segment: "type-agent-username-id")
+    # Handle username filter (username is segment before trailing numeric ID)
     username = request.GET.get('username')
     if username:
-        queryset = queryset.filter(instance_name__regex=rf'^[^-]+-[^-]+-{username}-')
+        queryset = queryset.filter(instance_name__regex=rf'-{username}-\d+$')
     filters['username'] = username
 
     # Handle time range filters
@@ -571,14 +571,14 @@ def get_log_filter_counts(request):
     # Build base queryset with username filter applied if set
     base_queryset = AppLog.objects.all()
     if username:
-        base_queryset = base_queryset.filter(instance_name__regex=rf'^[^-]+-[^-]+-{username}-')
+        base_queryset = base_queryset.filter(instance_name__regex=rf'-{username}-\d+$')
 
     # Use standard utility for app_name and levelname counts
     # NOTE: current_filters only contains model fields, not username
     filter_counts = get_filter_counts(base_queryset, ['app_name', 'levelname'], current_filters)
 
-    # Extract usernames from instance_name patterns like "daq_simulator-agent-wenauseic-435"
-    username_pattern = re.compile(r'^[^-]+-[^-]+-([^-]+)-')
+    # Extract usernames from instance_name (segment before trailing numeric ID)
+    username_pattern = re.compile(r'-([^-]+)-\d+$')
 
     # Build queryset for username counts (apply app_name and levelname filters)
     qs_for_username = AppLog.objects.all()
@@ -590,7 +590,7 @@ def get_log_filter_counts(request):
     # Count usernames extracted from instance_name
     username_counts = {}
     for item in qs_for_username.values('instance_name').annotate(count=Count('id')):
-        match = username_pattern.match(item['instance_name'])
+        match = username_pattern.search(item['instance_name'])
         if match:
             uname = match.group(1)
             username_counts[uname] = username_counts.get(uname, 0) + item['count']
