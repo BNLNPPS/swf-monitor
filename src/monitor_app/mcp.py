@@ -1911,7 +1911,7 @@ async def check_agent_manager(username: str = None) -> dict:
 
 
 @mcp.tool()
-async def start_user_testbed(username: str = None, config_name: str = None) -> dict:
+async def start_user_testbed(username: str = None, config_name: str = "testbed.toml") -> dict:
     """
     Start a user's testbed via their agent manager daemon.
 
@@ -1920,8 +1920,7 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
 
     Args:
         username: The username whose testbed to start. If not provided, uses current user.
-        config_name: Optional config name (e.g., 'fast_processing'). If not specified,
-                     uses the default testbed configuration.
+        config_name: Config file name in workflows/ directory (default: testbed.toml).
 
     Returns:
         Success/failure status. If agent manager is not running, provides instructions.
