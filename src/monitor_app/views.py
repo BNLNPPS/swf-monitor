@@ -134,17 +134,26 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
         
         # Use update_or_create to handle both registration and heartbeats
         # This ensures all fields are updated on every heartbeat, not just on creation
+        defaults = {
+            'agent_type': request.data.get('agent_type', 'other'),
+            'description': request.data.get('description', ''),
+            'status': request.data.get('status', 'OK'),
+            'agent_url': request.data.get('agent_url', None),
+            'workflow_enabled': request.data.get('workflow_enabled', False),
+            'namespace': request.data.get('namespace'),
+            'last_heartbeat': timezone.now(),
+        }
+        # Include process identification fields if provided
+        if 'operational_state' in request.data:
+            defaults['operational_state'] = request.data['operational_state']
+        if 'pid' in request.data:
+            defaults['pid'] = request.data['pid']
+        if 'hostname' in request.data:
+            defaults['hostname'] = request.data['hostname']
+
         agent, created = SystemAgent.objects.update_or_create(
             instance_name=instance_name,
-            defaults={
-                'agent_type': request.data.get('agent_type', 'other'),
-                'description': request.data.get('description', ''),
-                'status': request.data.get('status', 'OK'),
-                'agent_url': request.data.get('agent_url', None),
-                'workflow_enabled': request.data.get('workflow_enabled', False),
-                'namespace': request.data.get('namespace'),
-                'last_heartbeat': timezone.now(),
-            }
+            defaults=defaults
         )
         
         # Explicitly update workflow_enabled if it was provided (to handle existing records)
