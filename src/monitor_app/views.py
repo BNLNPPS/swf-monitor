@@ -497,10 +497,10 @@ def logs_datatable_ajax(request):
     filters = get_filter_params(request, ['app_name', 'levelname'])
     queryset = apply_filters(queryset, filters)
 
-    # Handle username filter (from extra_data JSON)
+    # Handle username filter (username embedded in instance_name like "type-agent-username-id")
     username = request.GET.get('username')
     if username:
-        queryset = queryset.filter(extra_data__username=username)
+        queryset = queryset.filter(instance_name__contains=f'-{username}-')
     filters['username'] = username
 
     # Handle time range filters
