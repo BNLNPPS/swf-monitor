@@ -51,6 +51,54 @@ Add via `/mcp add` or create `.mcp.json` in project:
 }
 ```
 
+### Claude Code Settings Example
+
+Full `~/.claude/settings.json` with swf-monitor MCP server, permissions, and status line:
+
+```json
+{
+  "mcpServers": {
+    "swf-monitor": {
+      "type": "http",
+      "url": "https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/"
+    }
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "mcp__swf-monitor__get_server_instructions",
+      "mcp__swf-monitor__list_agents",
+      "mcp__swf-monitor__get_agent",
+      "mcp__swf-monitor__list_workflow_executions",
+      "mcp__swf-monitor__get_workflow_execution",
+      "mcp__swf-monitor__list_logs",
+      "mcp__swf-monitor__get_system_state",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "defaultMode": "default"
+  },
+  "alwaysThinkingEnabled": true
+}
+```
+
+**Status line script** (`~/.claude/statusline.sh`):
+
+```bash
+#!/bin/bash
+input=$(cat)
+MODEL=$(echo "$input" | jq -r '.model.display_name')
+USED=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
+REMAINING=$(echo "$input" | jq -r '.context_window.remaining_percentage // 100')
+echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
+```
+
 ---
 
 ## Available Tools
