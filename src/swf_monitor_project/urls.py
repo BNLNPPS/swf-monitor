@@ -17,8 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
+from monitor_app.views import oauth_protected_resource
 
 urlpatterns = [
+    path(".well-known/oauth-protected-resource", oauth_protected_resource, name="oauth_protected_resource"),
     path("admin/", admin.site.urls),
     # path("api/mcp/", include("mcp_app.urls")),  # Old custom MCP - replaced by mcp_server
     path("mcp/", include("mcp_server.urls")),  # Model Context Protocol endpoint

@@ -48,7 +48,9 @@ dependencies = [
     "zope.interface==7.2",
     # This is a dependency from our other local package
     "swf-common-lib",
-    "supervisor"
+    "supervisor",
+    # Auth0 OAuth 2.1 for MCP
+    "python-jose[cryptography]",
 ]
 
 [project.optional-dependencies]

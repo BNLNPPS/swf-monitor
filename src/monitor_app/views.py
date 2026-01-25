@@ -29,6 +29,33 @@ from rest_framework.views import APIView
 from django.apps import apps
 from django.db import connection
 from django.utils import timezone
+from django.conf import settings as django_settings
+
+
+def oauth_protected_resource(request):
+    """
+    OAuth 2.0 Protected Resource Metadata (RFC 9728).
+
+    Returns metadata about this protected resource, including
+    the authorization server URL for OAuth discovery.
+    """
+    auth0_domain = getattr(django_settings, 'AUTH0_DOMAIN', None)
+    if not auth0_domain:
+        return JsonResponse({"error": "OAuth not configured"}, status=503)
+
+    scheme = "https" if request.is_secure() else "http"
+    host = request.get_host()
+    script_name = getattr(django_settings, 'FORCE_SCRIPT_NAME', None) or ""
+    resource = f"{scheme}://{host}{script_name}/mcp"
+
+    metadata = {
+        "resource": resource,
+        "authorization_servers": [f"https://{auth0_domain}/"],
+        "scopes_supported": ["openid", "profile", "email"],
+        "bearer_methods_supported": ["header"],
+    }
+    return JsonResponse(metadata)
+
 
 # Create your views here.
 def home(request):

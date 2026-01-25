@@ -81,6 +81,7 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
+    "monitor_app.middleware.MCPAuthMiddleware",  # Auth0 OAuth for MCP
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -237,6 +238,14 @@ OAUTH2_PROVIDER = {
     },
     "ACCESS_TOKEN_EXPIRE_SECONDS": 3600,
 }
+
+# Auth0 OAuth 2.1 Configuration (for Claude.ai MCP integration)
+# Leave empty to disable OAuth and allow direct MCP access
+AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
+AUTH0_CLIENT_ID = config("AUTH0_CLIENT_ID", default="")
+AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
+AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
+AUTH0_ALGORITHMS = ["RS256"]
 
 # Django MCP Server configuration
 DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
