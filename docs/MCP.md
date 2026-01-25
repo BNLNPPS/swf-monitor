@@ -51,6 +51,40 @@ Add via `/mcp add` or create `.mcp.json` in project:
 }
 ```
 
+## Authentication
+
+The MCP endpoint supports two authentication modes:
+
+### Claude Code (Local)
+
+POST requests (used by Claude Code) pass through without authentication. This enables local development and CLI-based MCP access without OAuth setup.
+
+### Claude.ai (Remote)
+
+GET requests require OAuth 2.1 Bearer token authentication via Auth0. This enables Claude.ai remote MCP connections with proper authorization.
+
+**OAuth Flow:**
+1. Claude.ai discovers OAuth metadata via `/.well-known/oauth-protected-resource`
+2. User authenticates with Auth0
+3. Claude.ai includes Bearer token in requests
+4. MCP middleware validates JWT against Auth0 JWKS
+
+**Configuration (production):**
+```bash
+# In .env or environment
+AUTH0_DOMAIN=your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=your-client-id
+AUTH0_CLIENT_SECRET=your-client-secret
+AUTH0_API_IDENTIFIER=https://your-server/swf-monitor/mcp
+```
+
+Leave `AUTH0_DOMAIN` empty to disable OAuth (allows all requests through).
+
+**Network Requirements:**
+Claude.ai connects from Anthropic's servers, so the MCP endpoint must be accessible from the public internet. Internal networks (e.g., behind lab firewalls) may require network configuration to allow external access.
+
+---
+
 ### Claude Code Settings Example
 
 Full `~/.claude/settings.json` with swf-monitor MCP server, permissions, and status line:
@@ -646,17 +680,22 @@ swf-monitor/
 │   └── MCP.md                              # This documentation
 ├── src/
 │   ├── monitor_app/
-│   │   └── mcp.py                          # Tool definitions (API code)
+│   │   ├── mcp.py                          # Tool definitions (API code)
+│   │   ├── auth0.py                        # JWT validation with Auth0 JWKS
+│   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
+│   │   └── views.py                        # OAuth protected resource metadata
 │   └── swf_monitor_project/
-│       ├── settings.py                     # Server config & instructions
-│       └── urls.py                         # Route registration (/mcp/)
+│       ├── settings.py                     # Server config, Auth0 settings
+│       └── urls.py                         # Route registration (/mcp/, /.well-known/)
 ```
 
 | File | Purpose |
 |------|---------|
 | `src/monitor_app/mcp.py` | **Tool definitions** - all MCP tool functions with docstrings |
-| `src/swf_monitor_project/settings.py` | **Server config** - `DJANGO_MCP_GLOBAL_SERVER_CONFIG` with name and instructions |
-| `src/swf_monitor_project/urls.py` | **Route registration** - mounts MCP at `/mcp/` |
+| `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
+| `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |
+| `src/swf_monitor_project/settings.py` | **Server config** - MCP config, Auth0 settings |
+| `src/swf_monitor_project/urls.py` | **Route registration** - mounts MCP at `/mcp/`, OAuth metadata at `/.well-known/` |
 | `docs/MCP.md` | **Documentation** - this file |
 
 ### Architecture
@@ -665,7 +704,7 @@ MCP is integrated directly into Django rather than as a separate service:
 
 - **Django** serves the MCP endpoint alongside REST API
 - **django-mcp-server** provides MCP spec compliance and tool registration
-- **OAuth2** authentication via django-oauth-toolkit (optional, disabled for development)
+- **Auth0 OAuth 2.1** authentication for Claude.ai remote connections (optional, disabled if AUTH0_DOMAIN not set)
 
 ### Tool Registration
 
@@ -688,10 +727,12 @@ DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
     "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
 }
 
-# OAuth2 (optional - commented out for development)
-# DJANGO_MCP_AUTHENTICATION_CLASSES = [
-#     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
-# ]
+# Auth0 OAuth 2.1 configuration (optional - leave AUTH0_DOMAIN empty to disable)
+AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
+AUTH0_CLIENT_ID = config("AUTH0_CLIENT_ID", default="")
+AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
+AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
+AUTH0_ALGORITHMS = ["RS256"]
 ```
 
 ### Adding New Tools
