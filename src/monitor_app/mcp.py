@@ -10,10 +10,21 @@ ARCHITECTURE PRINCIPLE:
 - MCP provides access to everything monitor captures
 - Use MCP tools for diagnostics, NOT log files
 
+TESTBED MANAGEMENT:
+- get_testbed_status(username) - Comprehensive status: agent manager, namespace, agents
+- start_user_testbed(username, config_name) - Start testbed with config (default: testbed.toml)
+- stop_user_testbed(username) - Stop all workflow agents
+- check_agent_manager(username) - Check if agent manager daemon is alive
+
 DIAGNOSTIC TOOLS:
 - list_logs(instance_name='...') - Get logs for specific agent
 - list_logs(level='ERROR') - Find workflow failures and errors
 - list_messages(execution_id='...') - Track workflow progress
+
+WORKFLOW OPERATIONS:
+- start_workflow() - Start workflow using defaults from testbed.toml
+- stop_workflow(execution_id) - Stop a running workflow
+- get_workflow_monitor(execution_id) - Get workflow status and events
 
 Design Philosophy:
 - Tools are data access primitives with filtering capabilities
@@ -63,6 +74,37 @@ def _parse_time(time_str):
 def _default_start_time(hours=24):
     """Return default start time (N hours ago)."""
     return timezone.now() - timedelta(hours=hours)
+
+
+def _monitor_url(path: str) -> str:
+    """Build a full monitor URL from a path."""
+    import os
+    base = os.getenv('SWF_MONITOR_HTTP_URL', 'http://localhost:8000/swf-monitor')
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _get_testbed_config_path() -> tuple:
+    """
+    Get the testbed config file path.
+
+    Returns:
+        (Path, str): Tuple of (config_path, source) where source is
+                     'SWF_TESTBED_CONFIG' or 'default'
+    """
+    import os
+    from pathlib import Path
+
+    swf_home = os.getenv('SWF_HOME', '')
+    config_env = os.getenv('SWF_TESTBED_CONFIG')
+
+    if config_env:
+        # Env var can be absolute or relative to workflows/
+        if os.path.isabs(config_env):
+            return Path(config_env), 'SWF_TESTBED_CONFIG'
+        else:
+            return Path(swf_home) / 'swf-testbed' / 'workflows' / config_env, 'SWF_TESTBED_CONFIG'
+    else:
+        return Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml', 'default'
 
 
 # -----------------------------------------------------------------------------
@@ -207,6 +249,11 @@ async def list_available_tools() -> list:
             "parameters": ["username"],
         },
         {
+            "name": "get_testbed_status",
+            "description": "Get comprehensive testbed status: agent manager, namespace, workflow agents",
+            "parameters": ["username"],
+        },
+        {
             "name": "get_workflow_monitor",
             "description": "Get status and events for a workflow execution (aggregates messages/logs)",
             "parameters": ["execution_id"],
@@ -279,14 +326,16 @@ async def get_system_state(username: str = None) -> dict:
         now = timezone.now()
         recent_threshold = now - timedelta(minutes=5)
 
-        # --- User context from testbed.toml ---
+        # --- User context from testbed config ---
+        testbed_toml, config_source = _get_testbed_config_path()
         user_context = {
             "username": username,
             "namespace": None,
             "workflow_name": None,
             "config": None,
+            "config_file": str(testbed_toml.name) if testbed_toml else None,
+            "config_source": config_source,
         }
-        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml' if swf_home else None
         if testbed_toml and testbed_toml.exists():
             try:
                 import tomllib
@@ -514,19 +563,35 @@ async def list_agents(
             ).values_list('sender_agent', flat=True).distinct()
             qs = qs.filter(instance_name__in=agent_names)
 
-        return [
-            {
-                "name": a.instance_name,
-                "agent_type": a.agent_type,
-                "status": a.status,
-                "operational_state": a.operational_state,
-                "namespace": a.namespace,
-                "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
-                "workflow_enabled": a.workflow_enabled,
-                "total_stf_processed": a.total_stf_processed,
-            }
-            for a in qs
-        ]
+        # Build URL with filters
+        params = []
+        if namespace:
+            params.append(f"namespace={namespace}")
+        if agent_type:
+            params.append(f"agent_type={agent_type}")
+        if status and status.lower() != 'all':
+            params.append(f"status={status}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/agents/?{query_string}" if query_string else "/agents/")
+
+        return {
+            "items": [
+                {
+                    "name": a.instance_name,
+                    "agent_type": a.agent_type,
+                    "status": a.status,
+                    "operational_state": a.operational_state,
+                    "namespace": a.namespace,
+                    "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
+                    "workflow_enabled": a.workflow_enabled,
+                    "total_stf_processed": a.total_stf_processed,
+                }
+                for a in qs
+            ],
+            "monitor_urls": [
+                {"title": "Agents List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -562,6 +627,9 @@ async def get_agent(name: str) -> dict:
                 "total_stf_processed": a.total_stf_processed,
                 "last_stf_processed": a.last_stf_processed.isoformat() if a.last_stf_processed else None,
                 "metadata": a.metadata,
+                "monitor_urls": [
+                    {"title": "Agent Detail", "url": _monitor_url(f"/agents/{a.instance_name}/")},
+                ],
             }
         except SystemAgent.DoesNotExist:
             return {"error": f"Agent '{name}' not found. Use list_agents to see available agents."}
@@ -587,14 +655,19 @@ async def list_namespaces() -> list:
 
     @sync_to_async
     def fetch():
-        return [
-            {
-                "name": n.name,
-                "owner": n.owner,
-                "description": n.description,
-            }
-            for n in Namespace.objects.all().order_by('name')
-        ]
+        return {
+            "items": [
+                {
+                    "name": n.name,
+                    "owner": n.owner,
+                    "description": n.description,
+                }
+                for n in Namespace.objects.all().order_by('name')
+            ],
+            "monitor_urls": [
+                {"title": "Namespaces List", "url": _monitor_url("/namespaces/")},
+            ],
+        }
 
     return await fetch()
 
@@ -670,6 +743,9 @@ async def get_namespace(
                 "start": start.isoformat(),
                 "end": end.isoformat(),
             },
+            "monitor_urls": [
+                {"title": "Namespace Detail", "url": _monitor_url(f"/namespaces/{namespace}/")},
+            ],
         }
 
     return await fetch()
@@ -710,17 +786,22 @@ async def list_workflow_definitions(
         if created_by:
             qs = qs.filter(created_by=created_by)
 
-        return [
-            {
-                "workflow_name": w.workflow_name,
-                "version": w.version,
-                "workflow_type": w.workflow_type,
-                "created_by": w.created_by,
-                "created_at": w.created_at.isoformat() if w.created_at else None,
-                "execution_count": w.execution_count,
-            }
-            for w in qs
-        ]
+        return {
+            "items": [
+                {
+                    "workflow_name": w.workflow_name,
+                    "version": w.version,
+                    "workflow_type": w.workflow_type,
+                    "created_by": w.created_by,
+                    "created_at": w.created_at.isoformat() if w.created_at else None,
+                    "execution_count": w.execution_count,
+                }
+                for w in qs
+            ],
+            "monitor_urls": [
+                {"title": "Workflow Definitions", "url": _monitor_url("/definitions/")},
+            ],
+        }
 
     return await fetch()
 
@@ -779,19 +860,35 @@ async def list_workflow_executions(
             if end:
                 qs = qs.filter(start_time__lte=end)
 
-        return [
-            {
-                "execution_id": e.execution_id,
-                "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
-                "namespace": e.namespace,
-                "status": e.status,
-                "executed_by": e.executed_by,
-                "start_time": e.start_time.isoformat() if e.start_time else None,
-                "end_time": e.end_time.isoformat() if e.end_time else None,
-                "parameter_values": e.parameter_values,
-            }
-            for e in qs[:100]
-        ]
+        # Build URL with filters
+        params = []
+        if namespace:
+            params.append(f"namespace={namespace}")
+        if status:
+            params.append(f"status={status}")
+        if executed_by:
+            params.append(f"executed_by={executed_by}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/executions/?{query_string}" if query_string else "/executions/")
+
+        return {
+            "items": [
+                {
+                    "execution_id": e.execution_id,
+                    "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
+                    "namespace": e.namespace,
+                    "status": e.status,
+                    "executed_by": e.executed_by,
+                    "start_time": e.start_time.isoformat() if e.start_time else None,
+                    "end_time": e.end_time.isoformat() if e.end_time else None,
+                    "parameter_values": e.parameter_values,
+                }
+                for e in qs[:100]
+            ],
+            "monitor_urls": [
+                {"title": "Executions List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -827,6 +924,9 @@ async def get_workflow_execution(execution_id: str) -> dict:
                 "end_time": e.end_time.isoformat() if e.end_time else None,
                 "parameter_values": e.parameter_values,
                 "performance_metrics": e.performance_metrics,
+                "monitor_urls": [
+                    {"title": "Execution Detail", "url": _monitor_url(f"/executions/{e.execution_id}/")},
+                ],
             }
         except WorkflowExecution.DoesNotExist:
             return {"error": f"Execution '{execution_id}' not found. Use list_workflow_executions to see recent runs."}
@@ -894,18 +994,34 @@ async def list_messages(
         if end:
             qs = qs.filter(sent_at__lte=end)
 
-        return [
-            {
-                "message_type": m.message_type,
-                "sender_agent": m.sender_agent,
-                "namespace": m.namespace,
-                "sent_at": m.sent_at.isoformat() if m.sent_at else None,
-                "execution_id": m.execution_id,
-                "run_id": m.run_id,
-                "payload_summary": str(m.message_content)[:200] if m.message_content else None,
-            }
-            for m in qs[:200]
-        ]
+        # Build URL with filters
+        params = []
+        if namespace:
+            params.append(f"namespace={namespace}")
+        if execution_id:
+            params.append(f"execution_id={execution_id}")
+        if message_type:
+            params.append(f"message_type={message_type}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/messages/?{query_string}" if query_string else "/messages/")
+
+        return {
+            "items": [
+                {
+                    "message_type": m.message_type,
+                    "sender_agent": m.sender_agent,
+                    "namespace": m.namespace,
+                    "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+                    "execution_id": m.execution_id,
+                    "run_id": m.run_id,
+                    "payload_summary": str(m.message_content)[:200] if m.message_content else None,
+                }
+                for m in qs[:200]
+            ],
+            "monitor_urls": [
+                {"title": "Messages List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -947,13 +1063,13 @@ async def list_runs(
         if end:
             qs = qs.filter(start_time__lte=end)
 
-        results = []
+        items = []
         for r in qs[:100]:
             duration = None
             if r.start_time and r.end_time:
                 duration = (r.end_time - r.start_time).total_seconds()
 
-            results.append({
+            items.append({
                 "run_number": r.run_number,
                 "start_time": r.start_time.isoformat() if r.start_time else None,
                 "end_time": r.end_time.isoformat() if r.end_time else None,
@@ -961,7 +1077,12 @@ async def list_runs(
                 "stf_file_count": r.stf_file_count,
             })
 
-        return results
+        return {
+            "items": items,
+            "monitor_urls": [
+                {"title": "Runs List", "url": _monitor_url("/runs/")},
+            ],
+        }
 
     return await fetch()
 
@@ -1004,6 +1125,9 @@ async def get_run(run_number: int) -> dict:
                 "run_conditions": r.run_conditions,
                 "file_stats": file_stats,
                 "total_stf_files": sum(file_stats.values()),
+                "monitor_urls": [
+                    {"title": "Run Detail", "url": _monitor_url(f"/runs/{r.run_number}/")},
+                ],
             }
         except Run.DoesNotExist:
             return {"error": f"Run {run_number} not found. Use list_runs to see available runs."}
@@ -1062,19 +1186,33 @@ async def list_stf_files(
         if end:
             qs = qs.filter(created_at__lte=end)
 
-        return [
-            {
-                "file_id": str(f.file_id),
-                "stf_filename": f.stf_filename,
-                "run_number": f.run.run_number if f.run else None,
-                "status": f.status,
-                "machine_state": f.machine_state,
-                "file_size_bytes": f.file_size_bytes,
-                "created_at": f.created_at.isoformat() if f.created_at else None,
-                "tf_file_count": f.tf_file_count,
-            }
-            for f in qs[:100]
-        ]
+        # Build URL with filters
+        params = []
+        if run_number:
+            params.append(f"run_number={run_number}")
+        if status:
+            params.append(f"status={status}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/stf-files/?{query_string}" if query_string else "/stf-files/")
+
+        return {
+            "items": [
+                {
+                    "file_id": str(f.file_id),
+                    "stf_filename": f.stf_filename,
+                    "run_number": f.run.run_number if f.run else None,
+                    "status": f.status,
+                    "machine_state": f.machine_state,
+                    "file_size_bytes": f.file_size_bytes,
+                    "created_at": f.created_at.isoformat() if f.created_at else None,
+                    "tf_file_count": f.tf_file_count,
+                }
+                for f in qs[:100]
+            ],
+            "monitor_urls": [
+                {"title": "STF Files List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -1120,6 +1258,9 @@ async def get_stf_file(file_id: str = None, stf_filename: str = None) -> dict:
                 "daq_state": f.daq_state,
                 "daq_substate": f.daq_substate,
                 "workflow_status": f.workflow_status,
+                "monitor_urls": [
+                    {"title": "STF File Detail", "url": _monitor_url(f"/stf-files/{f.file_id}/")},
+                ],
             }
         except StfFile.DoesNotExist:
             return {"error": "STF file not found. Use list_stf_files to see available files."}
@@ -1185,22 +1326,36 @@ async def list_tf_slices(
         if end:
             qs = qs.filter(created_at__lte=end)
 
-        return [
-            {
-                "slice_id": s.slice_id,
-                "tf_filename": s.tf_filename,
-                "stf_filename": s.stf_filename,
-                "run_number": s.run_number,
-                "tf_first": s.tf_first,
-                "tf_last": s.tf_last,
-                "tf_count": s.tf_count,
-                "status": s.status,
-                "assigned_worker": s.assigned_worker,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-            }
-            for s in qs[:200]
-        ]
+        # Build URL with filters
+        params = []
+        if run_number:
+            params.append(f"run_number={run_number}")
+        if status:
+            params.append(f"status={status}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/tf-slices/?{query_string}" if query_string else "/tf-slices/")
+
+        return {
+            "items": [
+                {
+                    "slice_id": s.slice_id,
+                    "tf_filename": s.tf_filename,
+                    "stf_filename": s.stf_filename,
+                    "run_number": s.run_number,
+                    "tf_first": s.tf_first,
+                    "tf_last": s.tf_last,
+                    "tf_count": s.tf_count,
+                    "status": s.status,
+                    "assigned_worker": s.assigned_worker,
+                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+                }
+                for s in qs[:200]
+            ],
+            "monitor_urls": [
+                {"title": "TF Slices List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -1320,21 +1475,37 @@ async def list_logs(
         if end:
             qs = qs.filter(timestamp__lte=end)
 
-        return [
-            {
-                "id": log.id,
-                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                "app_name": log.app_name,
-                "instance_name": log.instance_name,
-                "level": log.levelname,
-                "message": log.message,
-                "module": log.module,
-                "funcname": log.funcname,
-                "lineno": log.lineno,
-                "extra_data": log.extra_data,
-            }
-            for log in qs[:200]
-        ]
+        # Build URL with filters
+        params = []
+        if instance_name:
+            params.append(f"instance_name={instance_name}")
+        if execution_id:
+            params.append(f"execution_id={execution_id}")
+        if level:
+            params.append(f"level={level}")
+        query_string = "&".join(params)
+        url = _monitor_url(f"/logs/?{query_string}" if query_string else "/logs/")
+
+        return {
+            "items": [
+                {
+                    "id": log.id,
+                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                    "app_name": log.app_name,
+                    "instance_name": log.instance_name,
+                    "level": log.levelname,
+                    "message": log.message,
+                    "module": log.module,
+                    "funcname": log.funcname,
+                    "lineno": log.lineno,
+                    "extra_data": log.extra_data,
+                }
+                for log in qs[:200]
+            ],
+            "monitor_urls": [
+                {"title": "Logs List", "url": url},
+            ],
+        }
 
     return await fetch()
 
@@ -1368,6 +1539,9 @@ async def get_log_entry(log_id: int) -> dict:
                 "process": log.process,
                 "thread": log.thread,
                 "extra_data": log.extra_data,
+                "monitor_urls": [
+                    {"title": "Log Detail", "url": _monitor_url(f"/logs/{log.id}/")},
+                ],
             }
         except AppLog.DoesNotExist:
             return {"error": f"Log entry {log_id} not found."}
@@ -1426,15 +1600,14 @@ async def start_workflow(
         from pathlib import Path
         from .activemq_connection import ActiveMQConnectionManager
 
-        # Read defaults from testbed.toml
+        # Read defaults from testbed config (respects SWF_TESTBED_CONFIG env var)
         toml_namespace = None
         toml_workflow_name = None
         toml_config = None
         toml_realtime = None
         toml_params = {}
 
-        swf_home = os.getenv('SWF_HOME', '')
-        testbed_toml = Path(swf_home) / 'swf-testbed' / 'workflows' / 'testbed.toml'
+        testbed_toml, config_source = _get_testbed_config_path()
         if testbed_toml.exists():
             try:
                 import tomllib
@@ -1447,8 +1620,10 @@ async def start_workflow(
                 toml_realtime = workflow_section.get('realtime')
                 # Get ALL parameters from [parameters] section - no hardcoding
                 toml_params = toml_data.get('parameters', {})
+                if config_source == 'SWF_TESTBED_CONFIG':
+                    logger.info(f"Using config from SWF_TESTBED_CONFIG: {testbed_toml.name}")
             except Exception as e:
-                logger.warning(f"Failed to read testbed.toml: {e}")
+                logger.warning(f"Failed to read {testbed_toml}: {e}")
 
         # Apply defaults - explicit MCP args override toml values
         actual_workflow_name = workflow_name or toml_workflow_name or 'stf_datataking'
@@ -1467,7 +1642,10 @@ async def start_workflow(
         if stf_interval is not None:
             params['stf_interval'] = stf_interval
 
-        # Build message matching WorkflowRunner._handle_run_workflow() expectations
+        # Include namespace in params so it flows through to execution record
+        params['namespace'] = actual_namespace
+
+        # Build message (namespace at root for clarity, in params for override flow)
         msg = {
             'msg_type': 'run_workflow',
             'namespace': actual_namespace,
@@ -1722,6 +1900,7 @@ async def check_agent_manager(username: str = None) -> dict:
     Returns:
         - alive: True if agent manager has recent heartbeat (within 5 minutes)
         - instance_name: The agent manager's instance name
+        - namespace: Current testbed namespace (from config)
         - last_heartbeat: When it last checked in
         - control_queue: The queue to send commands to
         - agents_running: Whether testbed agents are running
@@ -1755,6 +1934,7 @@ async def check_agent_manager(username: str = None) -> dict:
                 "alive": alive,
                 "username": username,
                 "instance_name": instance_name,
+                "namespace": agent.namespace,
                 "last_heartbeat": agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
                 "operational_state": agent.operational_state,
                 "control_queue": control_queue,
@@ -1765,6 +1945,7 @@ async def check_agent_manager(username: str = None) -> dict:
                 "alive": False,
                 "username": username,
                 "instance_name": instance_name,
+                "namespace": None,
                 "last_heartbeat": None,
                 "operational_state": None,
                 "control_queue": control_queue,
@@ -1776,7 +1957,7 @@ async def check_agent_manager(username: str = None) -> dict:
 
 
 @mcp.tool()
-async def start_user_testbed(username: str = None, config_name: str = None) -> dict:
+async def start_user_testbed(username: str = None, config_name: str = "testbed.toml") -> dict:
     """
     Start a user's testbed via their agent manager daemon.
 
@@ -1785,8 +1966,7 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
 
     Args:
         username: The username whose testbed to start. If not provided, uses current user.
-        config_name: Optional config name (e.g., 'fast_processing'). If not specified,
-                     uses the default testbed configuration.
+        config_name: Config file name in workflows/ directory (default: testbed.toml).
 
     Returns:
         Success/failure status. If agent manager is not running, provides instructions.
@@ -1810,40 +1990,100 @@ async def start_user_testbed(username: str = None, config_name: str = None) -> d
         }
 
     control_queue = f'/queue/agent_control.{username}'
+    instance_name = f'agent-manager-{username}'
 
     @sync_to_async
-    def send_command():
+    def send_commands():
+        import time
         from .activemq_connection import ActiveMQConnectionManager
+        mq = ActiveMQConnectionManager()
 
-        msg = {
+        # Record the old PID before restart
+        old_pid = None
+        try:
+            old_agent = SystemAgent.objects.get(instance_name=instance_name)
+            old_pid = old_agent.pid
+            old_heartbeat = old_agent.last_heartbeat
+        except SystemAgent.DoesNotExist:
+            old_heartbeat = None
+
+        # First restart the agent manager to pick up fresh code
+        restart_msg = {
+            'command': 'restart',
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp'
+        }
+        if not mq.send_message(control_queue, json.dumps(restart_msg)):
+            return {
+                "success": False,
+                "error": "Failed to send restart command to ActiveMQ",
+                "username": username,
+            }
+
+        logger.info(f"MCP start_user_testbed: sent restart command, waiting for new agent manager")
+
+        # Poll for new agent manager to be ready (new PID or fresh heartbeat)
+        max_wait = 15  # seconds
+        poll_interval = 1
+        waited = 0
+        new_agent_ready = False
+
+        while waited < max_wait:
+            time.sleep(poll_interval)
+            waited += poll_interval
+            try:
+                agent = SystemAgent.objects.get(instance_name=instance_name)
+                # Check if this is a new agent (different PID or fresh heartbeat)
+                now = timezone.now()
+                is_new = (
+                    (old_pid and agent.pid and agent.pid != old_pid) or
+                    (agent.last_heartbeat and old_heartbeat and agent.last_heartbeat > old_heartbeat)
+                )
+                is_healthy = (
+                    agent.operational_state == 'READY' and
+                    agent.last_heartbeat and
+                    (now - agent.last_heartbeat).total_seconds() < 60
+                )
+                if is_new and is_healthy:
+                    new_agent_ready = True
+                    logger.info(f"MCP start_user_testbed: new agent manager ready (pid={agent.pid})")
+                    break
+            except SystemAgent.DoesNotExist:
+                pass
+
+        if not new_agent_ready:
+            logger.warning(f"MCP start_user_testbed: agent manager not confirmed ready after {max_wait}s")
+
+        # Now send start_testbed command
+        start_msg = {
             'command': 'start_testbed',
             'config_name': config_name,
             'timestamp': datetime.now().isoformat(),
             'source': 'mcp'
         }
 
-        mq = ActiveMQConnectionManager()
-        if mq.send_message(control_queue, json.dumps(msg)):
+        if mq.send_message(control_queue, json.dumps(start_msg)):
             logger.info(
                 f"MCP start_user_testbed: sent start_testbed command for user '{username}' "
                 f"(config={config_name})"
             )
             return {
                 "success": True,
-                "message": f"Start command sent to {username}'s agent manager",
+                "message": f"Agent manager restarted and start command sent",
                 "username": username,
                 "config_name": config_name,
                 "control_queue": control_queue,
+                "new_agent_ready": new_agent_ready,
                 "note": "Agents will start asynchronously. Use list_agents to verify.",
             }
         else:
             return {
                 "success": False,
-                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+                "error": "Failed to send start_testbed command to ActiveMQ",
                 "username": username,
             }
 
-    return await send_command()
+    return await send_commands()
 
 
 @mcp.tool()
@@ -1908,6 +2148,95 @@ async def stop_user_testbed(username: str = None) -> dict:
             }
 
     return await send_command()
+
+
+@mcp.tool()
+async def get_testbed_status(username: str = None) -> dict:
+    """
+    Get comprehensive status of a user's testbed.
+
+    Shows agent manager status, namespace, and all workflow agents with their
+    current state (running/stopped based on heartbeat freshness).
+
+    Args:
+        username: The username to check. If not provided, uses current user.
+
+    Returns:
+        - agent_manager: Status of the agent manager daemon
+        - namespace: Current testbed namespace
+        - agents: List of workflow agents with status
+        - summary: Quick counts of running/stopped agents
+    """
+    import getpass
+    from asgiref.sync import sync_to_async
+
+    if not username:
+        username = getpass.getuser()
+
+    # Get agent manager status first
+    manager_status = await check_agent_manager(username)
+    namespace = manager_status.get('namespace')
+
+    @sync_to_async
+    def fetch_agents():
+        now = timezone.now()
+        healthy_threshold = now - timedelta(minutes=2)
+
+        # Get agents in the namespace (if we have one)
+        agents_info = []
+        running_count = 0
+        stopped_count = 0
+
+        if namespace:
+            agents = SystemAgent.objects.filter(
+                namespace=namespace
+            ).exclude(
+                agent_type='agent_manager'
+            ).exclude(
+                operational_state='EXITED'
+            ).order_by('-last_heartbeat')
+
+            for agent in agents:
+                is_running = (
+                    agent.last_heartbeat and
+                    agent.last_heartbeat >= healthy_threshold
+                )
+                if is_running:
+                    running_count += 1
+                else:
+                    stopped_count += 1
+
+                agents_info.append({
+                    'name': agent.instance_name,
+                    'type': agent.agent_type,
+                    'status': 'running' if is_running else 'stopped',
+                    'last_heartbeat': agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
+                })
+
+        return {
+            'agents': agents_info,
+            'running': running_count,
+            'stopped': stopped_count,
+        }
+
+    agents_data = await fetch_agents()
+
+    return {
+        'username': username,
+        'agent_manager': {
+            'alive': manager_status.get('alive'),
+            'namespace': namespace,
+            'operational_state': manager_status.get('operational_state'),
+            'last_heartbeat': manager_status.get('last_heartbeat'),
+        },
+        'agents': agents_data['agents'],
+        'summary': {
+            'running': agents_data['running'],
+            'stopped': agents_data['stopped'],
+        },
+        'ready': manager_status.get('alive', False) and agents_data['running'] == 0,
+        'note': 'ready=True means testbed is idle and ready to start' if agents_data['running'] == 0 else None,
+    }
 
 
 # -----------------------------------------------------------------------------
@@ -2012,6 +2341,9 @@ async def get_workflow_monitor(execution_id: str) -> dict:
             "start_time": db_start_time.isoformat() if db_start_time else None,
             "end_time": db_end_time.isoformat() if db_end_time else None,
             "duration_seconds": duration_seconds,
+            "monitor_urls": [
+                {"title": "Execution Detail", "url": _monitor_url(f"/executions/{execution_id}/")},
+            ],
         }
 
     return await fetch()
@@ -2036,7 +2368,7 @@ async def list_workflow_monitors() -> list:
             start_time__gte=now - timedelta(hours=24)
         ).order_by('-start_time')[:20]
 
-        results = []
+        items = []
         for e in executions:
             # Count STF messages for this execution
             stf_count = WorkflowMessage.objects.filter(
@@ -2044,7 +2376,7 @@ async def list_workflow_monitors() -> list:
                 message_type='stf_gen',
             ).count()
 
-            results.append({
+            items.append({
                 "execution_id": e.execution_id,
                 "status": e.status,
                 "start_time": e.start_time.isoformat() if e.start_time else None,
@@ -2052,6 +2384,11 @@ async def list_workflow_monitors() -> list:
                 "stf_count": stf_count,
             })
 
-        return results
+        return {
+            "items": items,
+            "monitor_urls": [
+                {"title": "Executions List", "url": _monitor_url("/executions/")},
+            ],
+        }
 
     return await fetch()
