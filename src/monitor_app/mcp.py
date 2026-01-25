@@ -1964,6 +1964,9 @@ async def start_user_testbed(username: str = None, config_name: str = "testbed.t
     Sends a start_testbed command to the user's agent manager, which then
     starts supervisord-managed agents. The agent manager must be running first.
 
+    Refuses to start if workflow agents are already running. User must call
+    stop_user_testbed first to ensure clean slate.
+
     Args:
         username: The username whose testbed to start. If not provided, uses current user.
         config_name: Config file name in workflows/ directory (default: testbed.toml).
@@ -1987,6 +1990,19 @@ async def start_user_testbed(username: str = None, config_name: str = "testbed.t
             "error": f"Agent manager for '{username}' is not running",
             "how_to_start": f"Run 'testbed agent-manager' in {username}'s swf-testbed directory",
             "username": username,
+        }
+
+    # Check if workflow agents are already running - refuse if so
+    # This prevents starting with stale config or orphaned agents
+    testbed_status = await get_testbed_status(username)
+    running_agents = [a['name'] for a in testbed_status.get('agents', []) if a.get('status') == 'running']
+    if running_agents:
+        return {
+            "success": False,
+            "error": f"Cannot start: workflow agents already running: {running_agents}",
+            "how_to_fix": "Call stop_user_testbed first to stop existing agents",
+            "username": username,
+            "running_agents": running_agents,
         }
 
     control_queue = f'/queue/agent_control.{username}'
