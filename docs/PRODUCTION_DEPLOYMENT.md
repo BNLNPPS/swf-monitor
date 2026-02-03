@@ -142,6 +142,14 @@ sudo nano /opt/swf-monitor/config/env/production.env
 
 **Note**: The production.env file contains sensitive configuration values that must be customized for your environment.
 
+**⚠️ IMPORTANT: .env is NOT deployed from git.** The `.env` file is in `.gitignore` for security reasons. The deploy script symlinks the release `.env` to `/opt/swf-monitor/config/env/production.env`. When you need to change environment settings (e.g., `ACTIVEMQ_HEARTBEAT_TOPIC`), you must edit the production.env file directly:
+
+```bash
+sudo nano /opt/swf-monitor/config/env/production.env
+# Then restart Apache to pick up changes:
+sudo systemctl restart httpd
+```
+
 ### Step 3: Deploy First Release
 
 Deploy your first production release:

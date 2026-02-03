@@ -122,9 +122,13 @@ else
 fi
 
 # Link shared resources
+# NOTE: .env is NOT deployed from git (it's in .gitignore for security).
+# Production uses: $DEPLOY_ROOT/config/env/production.env
+# To update production .env settings, edit that file directly.
 log "Linking shared resources..."
 ln -sf "$DEPLOY_ROOT/shared/logs" "$RELEASE_DIR/logs"
 ln -sf "$DEPLOY_ROOT/config/env/production.env" "$RELEASE_DIR/.env"
+log "  .env source: $DEPLOY_ROOT/config/env/production.env (edit this file for config changes)"
 
 # Install WSGI module configuration if it exists in repository
 if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then
