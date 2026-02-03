@@ -25,6 +25,7 @@ WORKFLOW OPERATIONS:
 - start_workflow() - Start workflow using defaults from testbed.toml
 - stop_workflow(execution_id) - Stop a running workflow
 - get_workflow_monitor(execution_id) - Get workflow status and events
+- send_message(message, message_type) - Send message to monitoring stream
 
 Design Philosophy:
 - Tools are data access primitives with filtering capabilities
@@ -110,9 +111,13 @@ def _get_testbed_config_path() -> tuple:
 # -----------------------------------------------------------------------------
 # Tool Discovery
 # -----------------------------------------------------------------------------
+# IMPORTANT: When adding a new @mcp.tool(), you MUST also add it to the
+# hardcoded list in list_available_tools() below. This list is what LLMs
+# see when discovering available tools.
+# -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_available_tools() -> list:
+async def swf_list_available_tools() -> list:
     """
     List all available MCP tools with descriptions.
 
@@ -123,145 +128,150 @@ async def list_available_tools() -> list:
     """
     tools = [
         {
-            "name": "list_available_tools",
+            "name": "swf_list_available_tools",
             "description": "List all available MCP tools with descriptions",
             "parameters": [],
         },
         {
-            "name": "get_system_state",
+            "name": "swf_get_system_state",
             "description": "Get comprehensive system state: user context, agent manager, workflow runner, readiness, agents, executions",
             "parameters": ["username"],
         },
         {
-            "name": "list_agents",
+            "name": "swf_list_agents",
             "description": "List registered agents. Excludes EXITED agents by default. Use status='EXITED' to see exited, status='all' to see all.",
             "parameters": ["namespace", "agent_type", "status", "execution_id", "start_time", "end_time"],
         },
         {
-            "name": "get_agent",
+            "name": "swf_get_agent",
             "description": "Get detailed information about a specific agent",
             "parameters": ["name"],
         },
         {
-            "name": "list_namespaces",
+            "name": "swf_list_namespaces",
             "description": "List all testbed namespaces (isolation boundaries for users)",
             "parameters": [],
         },
         {
-            "name": "get_namespace",
+            "name": "swf_get_namespace",
             "description": "Get namespace details including activity counts",
             "parameters": ["namespace", "start_time", "end_time"],
         },
         {
-            "name": "list_workflow_definitions",
+            "name": "swf_list_workflow_definitions",
             "description": "List available workflow definitions that can be executed",
             "parameters": ["workflow_type", "created_by"],
         },
         {
-            "name": "list_workflow_executions",
+            "name": "swf_list_workflow_executions",
             "description": "List workflow executions. Use currently_running=True to see what's running now",
             "parameters": ["namespace", "status", "executed_by", "workflow_name", "currently_running", "start_time", "end_time"],
         },
         {
-            "name": "get_workflow_execution",
+            "name": "swf_get_workflow_execution",
             "description": "Get detailed information about a specific workflow execution",
             "parameters": ["execution_id"],
         },
         {
-            "name": "list_messages",
+            "name": "swf_list_messages",
             "description": "List workflow messages between agents for debugging",
             "parameters": ["namespace", "execution_id", "agent", "message_type", "start_time", "end_time"],
         },
         {
-            "name": "list_runs",
+            "name": "swf_list_runs",
             "description": "List simulation runs with timing and STF file counts",
             "parameters": ["start_time", "end_time"],
         },
         {
-            "name": "get_run",
+            "name": "swf_get_run",
             "description": "Get detailed information about a specific run",
             "parameters": ["run_number"],
         },
         {
-            "name": "list_stf_files",
+            "name": "swf_list_stf_files",
             "description": "List STF (Super Time Frame) files with filtering",
             "parameters": ["run_number", "status", "machine_state", "start_time", "end_time"],
         },
         {
-            "name": "get_stf_file",
+            "name": "swf_get_stf_file",
             "description": "Get detailed information about a specific STF file",
             "parameters": ["file_id", "stf_filename"],
         },
         {
-            "name": "list_tf_slices",
+            "name": "swf_list_tf_slices",
             "description": "List TF slices for fast processing workflow",
             "parameters": ["run_number", "stf_filename", "tf_filename", "status", "assigned_worker", "start_time", "end_time"],
         },
         {
-            "name": "get_tf_slice",
+            "name": "swf_get_tf_slice",
             "description": "Get detailed information about a specific TF slice",
             "parameters": ["tf_filename", "slice_id"],
         },
         {
-            "name": "list_logs",
+            "name": "swf_list_logs",
             "description": "List application log entries. Use level='ERROR' to find errors",
-            "parameters": ["app_name", "instance_name", "level", "search", "start_time", "end_time"],
+            "parameters": ["app_name", "instance_name", "execution_id", "level", "search", "start_time", "end_time"],
         },
         {
-            "name": "get_log_entry",
+            "name": "swf_get_log_entry",
             "description": "Get full details of a specific log entry",
             "parameters": ["log_id"],
         },
         {
-            "name": "start_workflow",
+            "name": "swf_start_workflow",
             "description": "Start a workflow by sending command to DAQ Simulator agent",
             "parameters": ["workflow_name", "namespace", "config", "realtime", "duration",
                           "stf_count", "physics_period_count", "physics_period_duration", "stf_interval"],
         },
         {
-            "name": "stop_workflow",
+            "name": "swf_stop_workflow",
             "description": "Stop a running workflow by sending stop command to agent",
             "parameters": ["execution_id"],
         },
         {
-            "name": "end_execution",
+            "name": "swf_end_execution",
             "description": "Mark a workflow execution as terminated in database (no agent message)",
             "parameters": ["execution_id"],
         },
         {
-            "name": "kill_agent",
+            "name": "swf_kill_agent",
             "description": "Kill an agent process by sending SIGKILL to its PID. Sets status to EXITED.",
             "parameters": ["name"],
         },
         {
-            "name": "check_agent_manager",
+            "name": "swf_check_agent_manager",
             "description": "Check if user's agent manager daemon is alive (has recent heartbeat)",
             "parameters": ["username"],
         },
         {
-            "name": "start_user_testbed",
+            "name": "swf_start_user_testbed",
             "description": "Start user's testbed via their agent manager daemon",
             "parameters": ["username", "config_name"],
         },
         {
-            "name": "stop_user_testbed",
+            "name": "swf_stop_user_testbed",
             "description": "Stop user's testbed via their agent manager daemon",
             "parameters": ["username"],
         },
         {
-            "name": "get_testbed_status",
+            "name": "swf_get_testbed_status",
             "description": "Get comprehensive testbed status: agent manager, namespace, workflow agents",
             "parameters": ["username"],
         },
         {
-            "name": "get_workflow_monitor",
+            "name": "swf_get_workflow_monitor",
             "description": "Get status and events for a workflow execution (aggregates messages/logs)",
             "parameters": ["execution_id"],
         },
         {
-            "name": "list_workflow_monitors",
+            "name": "swf_list_workflow_monitors",
             "description": "List recent workflow executions that can be monitored",
             "parameters": [],
+        },
+        {
+            "name": "swf_send_message",
+            "description": "Send a message to the monitoring stream (for testing, announcements, etc.)",
+            "parameters": ["message", "message_type", "metadata"],
         },
     ]
     return tools
@@ -272,7 +282,7 @@ async def list_available_tools() -> list:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def get_system_state(username: str = None) -> dict:
+async def swf_get_system_state(username: str = None) -> dict:
     """
     Get comprehensive system state including agents, executions, run states, and persistent state.
 
@@ -502,7 +512,7 @@ async def get_system_state(username: str = None) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_agents(
+async def swf_list_agents(
     namespace: str = None,
     agent_type: str = None,
     status: str = None,
@@ -572,22 +582,27 @@ async def list_agents(
         if status and status.lower() != 'all':
             params.append(f"status={status}")
         query_string = "&".join(params)
-        url = _monitor_url(f"/agents/?{query_string}" if query_string else "/agents/")
+        url = _monitor_url(f"/workflow/agents/?{query_string}" if query_string else "/workflow/agents/")
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "name": a.instance_name,
+                "agent_type": a.agent_type,
+                "status": a.status,
+                "operational_state": a.operational_state,
+                "namespace": a.namespace,
+                "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
+                "workflow_enabled": a.workflow_enabled,
+                "total_stf_processed": a.total_stf_processed,
+            }
+            for a in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "name": a.instance_name,
-                    "agent_type": a.agent_type,
-                    "status": a.status,
-                    "operational_state": a.operational_state,
-                    "namespace": a.namespace,
-                    "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
-                    "workflow_enabled": a.workflow_enabled,
-                    "total_stf_processed": a.total_stf_processed,
-                }
-                for a in qs
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Agents List", "url": url},
             ],
@@ -597,11 +612,11 @@ async def list_agents(
 
 
 @mcp.tool()
-async def get_agent(name: str) -> dict:
+async def swf_get_agent(name: str) -> dict:
     """
     Get detailed information about a specific agent.
 
-    Use list_agents first to see available agent names if you don't know them.
+    Use swf_list_agents first to see available agent names if you don't know them.
 
     Args:
         name: The exact agent instance name (e.g., 'daq_simulator_torre1')
@@ -628,11 +643,11 @@ async def get_agent(name: str) -> dict:
                 "last_stf_processed": a.last_stf_processed.isoformat() if a.last_stf_processed else None,
                 "metadata": a.metadata,
                 "monitor_urls": [
-                    {"title": "Agent Detail", "url": _monitor_url(f"/agents/{a.instance_name}/")},
+                    {"title": "Agent Detail", "url": _monitor_url(f"/workflow/agents/{a.instance_name}/")},
                 ],
             }
         except SystemAgent.DoesNotExist:
-            return {"error": f"Agent '{name}' not found. Use list_agents to see available agents."}
+            return {"error": f"Agent '{name}' not found. Use swf_list_agents to see available agents."}
 
     return await fetch()
 
@@ -642,7 +657,7 @@ async def get_agent(name: str) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_namespaces() -> list:
+async def swf_list_namespaces() -> list:
     """
     List all testbed namespaces.
 
@@ -655,15 +670,21 @@ async def list_namespaces() -> list:
 
     @sync_to_async
     def fetch():
+        qs = Namespace.objects.all().order_by('name')
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "name": n.name,
+                "owner": n.owner,
+                "description": n.description,
+            }
+            for n in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "name": n.name,
-                    "owner": n.owner,
-                    "description": n.description,
-                }
-                for n in Namespace.objects.all().order_by('name')
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Namespaces List", "url": _monitor_url("/namespaces/")},
             ],
@@ -673,7 +694,7 @@ async def list_namespaces() -> list:
 
 
 @mcp.tool()
-async def get_namespace(
+async def swf_get_namespace(
     namespace: str,
     start_time: str = None,
     end_time: str = None,
@@ -744,7 +765,7 @@ async def get_namespace(
                 "end": end.isoformat(),
             },
             "monitor_urls": [
-                {"title": "Namespace Detail", "url": _monitor_url(f"/namespaces/{namespace}/")},
+                {"title": "Namespace Detail", "url": _monitor_url(f"/workflow/namespaces/{namespace}/")},
             ],
         }
 
@@ -756,7 +777,7 @@ async def get_namespace(
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_workflow_definitions(
+async def swf_list_workflow_definitions(
     workflow_type: str = None,
     created_by: str = None,
 ) -> list:
@@ -786,20 +807,25 @@ async def list_workflow_definitions(
         if created_by:
             qs = qs.filter(created_by=created_by)
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "workflow_name": w.workflow_name,
+                "version": w.version,
+                "workflow_type": w.workflow_type,
+                "created_by": w.created_by,
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+                "execution_count": w.execution_count,
+            }
+            for w in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "workflow_name": w.workflow_name,
-                    "version": w.version,
-                    "workflow_type": w.workflow_type,
-                    "created_by": w.created_by,
-                    "created_at": w.created_at.isoformat() if w.created_at else None,
-                    "execution_count": w.execution_count,
-                }
-                for w in qs
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
-                {"title": "Workflow Definitions", "url": _monitor_url("/definitions/")},
+                {"title": "Workflow Definitions", "url": _monitor_url("/workflow-definitions/")},
             ],
         }
 
@@ -811,7 +837,7 @@ async def list_workflow_definitions(
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_workflow_executions(
+async def swf_list_workflow_executions(
     namespace: str = None,
     status: str = None,
     executed_by: str = None,
@@ -869,22 +895,27 @@ async def list_workflow_executions(
         if executed_by:
             params.append(f"executed_by={executed_by}")
         query_string = "&".join(params)
-        url = _monitor_url(f"/executions/?{query_string}" if query_string else "/executions/")
+        url = _monitor_url(f"/workflow-executions/?{query_string}" if query_string else "/workflow-executions/")
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "execution_id": e.execution_id,
+                "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
+                "namespace": e.namespace,
+                "status": e.status,
+                "executed_by": e.executed_by,
+                "start_time": e.start_time.isoformat() if e.start_time else None,
+                "end_time": e.end_time.isoformat() if e.end_time else None,
+                "parameter_values": e.parameter_values,
+            }
+            for e in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "execution_id": e.execution_id,
-                    "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
-                    "namespace": e.namespace,
-                    "status": e.status,
-                    "executed_by": e.executed_by,
-                    "start_time": e.start_time.isoformat() if e.start_time else None,
-                    "end_time": e.end_time.isoformat() if e.end_time else None,
-                    "parameter_values": e.parameter_values,
-                }
-                for e in qs[:100]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Executions List", "url": url},
             ],
@@ -894,11 +925,11 @@ async def list_workflow_executions(
 
 
 @mcp.tool()
-async def get_workflow_execution(execution_id: str) -> dict:
+async def swf_get_workflow_execution(execution_id: str) -> dict:
     """
     Get detailed information about a specific workflow execution.
 
-    Use list_workflow_executions first to find execution IDs if needed.
+    Use swf_list_workflow_executions first to find execution IDs if needed.
 
     Args:
         execution_id: The execution ID (e.g., 'stf_datataking-wenauseic-0042')
@@ -925,11 +956,11 @@ async def get_workflow_execution(execution_id: str) -> dict:
                 "parameter_values": e.parameter_values,
                 "performance_metrics": e.performance_metrics,
                 "monitor_urls": [
-                    {"title": "Execution Detail", "url": _monitor_url(f"/executions/{e.execution_id}/")},
+                    {"title": "Execution Detail", "url": _monitor_url(f"/workflow-executions/{e.execution_id}/")},
                 ],
             }
         except WorkflowExecution.DoesNotExist:
-            return {"error": f"Execution '{execution_id}' not found. Use list_workflow_executions to see recent runs."}
+            return {"error": f"Execution '{execution_id}' not found. Use swf_list_workflow_executions to see recent runs."}
 
     return await fetch()
 
@@ -939,7 +970,7 @@ async def get_workflow_execution(execution_id: str) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_messages(
+async def swf_list_messages(
     namespace: str = None,
     execution_id: str = None,
     agent: str = None,
@@ -1003,21 +1034,26 @@ async def list_messages(
         if message_type:
             params.append(f"message_type={message_type}")
         query_string = "&".join(params)
-        url = _monitor_url(f"/messages/?{query_string}" if query_string else "/messages/")
+        url = _monitor_url(f"/workflow/messages/?{query_string}" if query_string else "/workflow/messages/")
 
+        MAX_ITEMS = 200
+        total_count = qs.count()
+        items = [
+            {
+                "message_type": m.message_type,
+                "sender_agent": m.sender_agent,
+                "namespace": m.namespace,
+                "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+                "execution_id": m.execution_id,
+                "run_id": m.run_id,
+                "payload_summary": str(m.message_content)[:200] if m.message_content else None,
+            }
+            for m in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "message_type": m.message_type,
-                    "sender_agent": m.sender_agent,
-                    "namespace": m.namespace,
-                    "sent_at": m.sent_at.isoformat() if m.sent_at else None,
-                    "execution_id": m.execution_id,
-                    "run_id": m.run_id,
-                    "payload_summary": str(m.message_content)[:200] if m.message_content else None,
-                }
-                for m in qs[:200]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Messages List", "url": url},
             ],
@@ -1031,7 +1067,7 @@ async def list_messages(
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_runs(
+async def swf_list_runs(
     start_time: str = None,
     end_time: str = None,
 ) -> list:
@@ -1063,8 +1099,10 @@ async def list_runs(
         if end:
             qs = qs.filter(start_time__lte=end)
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
         items = []
-        for r in qs[:100]:
+        for r in qs[:MAX_ITEMS]:
             duration = None
             if r.start_time and r.end_time:
                 duration = (r.end_time - r.start_time).total_seconds()
@@ -1079,6 +1117,8 @@ async def list_runs(
 
         return {
             "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Runs List", "url": _monitor_url("/runs/")},
             ],
@@ -1088,7 +1128,7 @@ async def list_runs(
 
 
 @mcp.tool()
-async def get_run(run_number: int) -> dict:
+async def swf_get_run(run_number: int) -> dict:
     """
     Get detailed information about a specific run.
 
@@ -1130,7 +1170,7 @@ async def get_run(run_number: int) -> dict:
                 ],
             }
         except Run.DoesNotExist:
-            return {"error": f"Run {run_number} not found. Use list_runs to see available runs."}
+            return {"error": f"Run {run_number} not found. Use swf_list_runs to see available runs."}
 
     return await fetch()
 
@@ -1140,7 +1180,7 @@ async def get_run(run_number: int) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_stf_files(
+async def swf_list_stf_files(
     run_number: int = None,
     status: str = None,
     machine_state: str = None,
@@ -1195,20 +1235,25 @@ async def list_stf_files(
         query_string = "&".join(params)
         url = _monitor_url(f"/stf-files/?{query_string}" if query_string else "/stf-files/")
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "file_id": str(f.file_id),
+                "stf_filename": f.stf_filename,
+                "run_number": f.run.run_number if f.run else None,
+                "status": f.status,
+                "machine_state": f.machine_state,
+                "file_size_bytes": f.file_size_bytes,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+                "tf_file_count": f.tf_file_count,
+            }
+            for f in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "file_id": str(f.file_id),
-                    "stf_filename": f.stf_filename,
-                    "run_number": f.run.run_number if f.run else None,
-                    "status": f.status,
-                    "machine_state": f.machine_state,
-                    "file_size_bytes": f.file_size_bytes,
-                    "created_at": f.created_at.isoformat() if f.created_at else None,
-                    "tf_file_count": f.tf_file_count,
-                }
-                for f in qs[:100]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "STF Files List", "url": url},
             ],
@@ -1218,7 +1263,7 @@ async def list_stf_files(
 
 
 @mcp.tool()
-async def get_stf_file(file_id: str = None, stf_filename: str = None) -> dict:
+async def swf_get_stf_file(file_id: str = None, stf_filename: str = None) -> dict:
     """
     Get detailed information about a specific STF file.
 
@@ -1263,7 +1308,7 @@ async def get_stf_file(file_id: str = None, stf_filename: str = None) -> dict:
                 ],
             }
         except StfFile.DoesNotExist:
-            return {"error": "STF file not found. Use list_stf_files to see available files."}
+            return {"error": "STF file not found. Use swf_list_stf_files to see available files."}
 
     return await fetch()
 
@@ -1273,7 +1318,7 @@ async def get_stf_file(file_id: str = None, stf_filename: str = None) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_tf_slices(
+async def swf_list_tf_slices(
     run_number: int = None,
     stf_filename: str = None,
     tf_filename: str = None,
@@ -1335,23 +1380,28 @@ async def list_tf_slices(
         query_string = "&".join(params)
         url = _monitor_url(f"/tf-slices/?{query_string}" if query_string else "/tf-slices/")
 
+        MAX_ITEMS = 200
+        total_count = qs.count()
+        items = [
+            {
+                "slice_id": s.slice_id,
+                "tf_filename": s.tf_filename,
+                "stf_filename": s.stf_filename,
+                "run_number": s.run_number,
+                "tf_first": s.tf_first,
+                "tf_last": s.tf_last,
+                "tf_count": s.tf_count,
+                "status": s.status,
+                "assigned_worker": s.assigned_worker,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            }
+            for s in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "slice_id": s.slice_id,
-                    "tf_filename": s.tf_filename,
-                    "stf_filename": s.stf_filename,
-                    "run_number": s.run_number,
-                    "tf_first": s.tf_first,
-                    "tf_last": s.tf_last,
-                    "tf_count": s.tf_count,
-                    "status": s.status,
-                    "assigned_worker": s.assigned_worker,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-                }
-                for s in qs[:200]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "TF Slices List", "url": url},
             ],
@@ -1361,7 +1411,7 @@ async def list_tf_slices(
 
 
 @mcp.tool()
-async def get_tf_slice(tf_filename: str, slice_id: int) -> dict:
+async def swf_get_tf_slice(tf_filename: str, slice_id: int) -> dict:
     """
     Get detailed information about a specific TF slice.
 
@@ -1394,7 +1444,7 @@ async def get_tf_slice(tf_filename: str, slice_id: int) -> dict:
                 "metadata": s.metadata,
             }
         except TFSlice.DoesNotExist:
-            return {"error": f"TF slice {slice_id} for {tf_filename} not found. Use list_tf_slices to see available slices."}
+            return {"error": f"TF slice {slice_id} for {tf_filename} not found. Use swf_list_tf_slices to see available slices."}
 
     return await fetch()
 
@@ -1404,7 +1454,7 @@ async def get_tf_slice(tf_filename: str, slice_id: int) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def list_logs(
+async def swf_list_logs(
     app_name: str = None,
     instance_name: str = None,
     execution_id: str = None,
@@ -1486,22 +1536,27 @@ async def list_logs(
         query_string = "&".join(params)
         url = _monitor_url(f"/logs/?{query_string}" if query_string else "/logs/")
 
+        MAX_ITEMS = 200
+        total_count = qs.count()
+        items = [
+            {
+                "id": log.id,
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "app_name": log.app_name,
+                "instance_name": log.instance_name,
+                "level": log.levelname,
+                "message": log.message,
+                "module": log.module,
+                "funcname": log.funcname,
+                "lineno": log.lineno,
+                "extra_data": log.extra_data,
+            }
+            for log in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "id": log.id,
-                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                    "app_name": log.app_name,
-                    "instance_name": log.instance_name,
-                    "level": log.levelname,
-                    "message": log.message,
-                    "module": log.module,
-                    "funcname": log.funcname,
-                    "lineno": log.lineno,
-                    "extra_data": log.extra_data,
-                }
-                for log in qs[:200]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Logs List", "url": url},
             ],
@@ -1511,7 +1566,7 @@ async def list_logs(
 
 
 @mcp.tool()
-async def get_log_entry(log_id: int) -> dict:
+async def swf_get_log_entry(log_id: int) -> dict:
     """
     Get full details of a specific log entry.
 
@@ -1554,7 +1609,7 @@ async def get_log_entry(log_id: int) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def start_workflow(
+async def swf_start_workflow(
     workflow_name: str = None,
     namespace: str = None,
     config: str = None,
@@ -1673,7 +1728,7 @@ async def start_workflow(
                 "config": actual_config,
                 "realtime": actual_realtime,
                 "params": params,
-                "note": "Workflow runs asynchronously. Use list_workflow_executions to monitor."
+                "note": "Workflow runs asynchronously. Use swf_list_workflow_executions to monitor."
             }
         else:
             return {
@@ -1687,7 +1742,7 @@ async def start_workflow(
 
 
 @mcp.tool()
-async def stop_workflow(execution_id: str) -> dict:
+async def swf_stop_workflow(execution_id: str) -> dict:
     """
     Stop a running workflow by sending a stop command to the DAQ Simulator agent.
 
@@ -1755,7 +1810,7 @@ async def stop_workflow(execution_id: str) -> dict:
 
 
 @mcp.tool()
-async def end_execution(execution_id: str) -> dict:
+async def swf_end_execution(execution_id: str) -> dict:
     """
     End a running workflow execution by setting its status to 'terminated'.
 
@@ -1808,7 +1863,7 @@ async def end_execution(execution_id: str) -> dict:
 
 
 @mcp.tool()
-async def kill_agent(name: str) -> dict:
+async def swf_kill_agent(name: str) -> dict:
     """
     Kill an agent process by sending SIGKILL to its PID.
 
@@ -1837,7 +1892,7 @@ async def kill_agent(name: str) -> dict:
         except SystemAgent.DoesNotExist:
             return {
                 "success": False,
-                "error": f"Agent '{name}' not found. Use list_agents to see available agents.",
+                "error": f"Agent '{name}' not found. Use swf_list_agents to see available agents.",
             }
 
         pid = agent.pid
@@ -1887,7 +1942,7 @@ async def kill_agent(name: str) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def check_agent_manager(username: str = None) -> dict:
+async def swf_check_agent_manager(username: str = None) -> dict:
     """
     Check if a user's agent manager daemon is alive.
 
@@ -1957,7 +2012,7 @@ async def check_agent_manager(username: str = None) -> dict:
 
 
 @mcp.tool()
-async def start_user_testbed(username: str = None, config_name: str = "testbed.toml") -> dict:
+async def swf_start_user_testbed(username: str = None, config_name: str = "testbed.toml") -> dict:
     """
     Start a user's testbed via their agent manager daemon.
 
@@ -2090,7 +2145,7 @@ async def start_user_testbed(username: str = None, config_name: str = "testbed.t
                 "config_name": config_name,
                 "control_queue": control_queue,
                 "new_agent_ready": new_agent_ready,
-                "note": "Agents will start asynchronously. Use list_agents to verify.",
+                "note": "Agents will start asynchronously. Use swf_list_agents to verify.",
             }
         else:
             return {
@@ -2103,7 +2158,7 @@ async def start_user_testbed(username: str = None, config_name: str = "testbed.t
 
 
 @mcp.tool()
-async def stop_user_testbed(username: str = None) -> dict:
+async def swf_stop_user_testbed(username: str = None) -> dict:
     """
     Stop a user's testbed via their agent manager daemon.
 
@@ -2154,7 +2209,7 @@ async def stop_user_testbed(username: str = None) -> dict:
                 "message": f"Stop command sent to {username}'s agent manager",
                 "username": username,
                 "control_queue": control_queue,
-                "note": "Agents will stop asynchronously. Use list_agents to verify.",
+                "note": "Agents will stop asynchronously. Use swf_list_agents to verify.",
             }
         else:
             return {
@@ -2167,7 +2222,7 @@ async def stop_user_testbed(username: str = None) -> dict:
 
 
 @mcp.tool()
-async def get_testbed_status(username: str = None) -> dict:
+async def swf_get_testbed_status(username: str = None) -> dict:
     """
     Get comprehensive status of a user's testbed.
 
@@ -2260,7 +2315,7 @@ async def get_testbed_status(username: str = None) -> dict:
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
-async def get_workflow_monitor(execution_id: str) -> dict:
+async def swf_get_workflow_monitor(execution_id: str) -> dict:
     """
     Get the status and accumulated events for a workflow execution.
 
@@ -2358,7 +2413,7 @@ async def get_workflow_monitor(execution_id: str) -> dict:
             "end_time": db_end_time.isoformat() if db_end_time else None,
             "duration_seconds": duration_seconds,
             "monitor_urls": [
-                {"title": "Execution Detail", "url": _monitor_url(f"/executions/{execution_id}/")},
+                {"title": "Execution Detail", "url": _monitor_url(f"/workflow-executions/{execution_id}/")},
             ],
         }
 
@@ -2366,7 +2421,7 @@ async def get_workflow_monitor(execution_id: str) -> dict:
 
 
 @mcp.tool()
-async def list_workflow_monitors() -> list:
+async def swf_list_workflow_monitors() -> list:
     """
     List recent workflow executions that can be monitored.
 
@@ -2380,12 +2435,14 @@ async def list_workflow_monitors() -> list:
     @sync_to_async
     def fetch():
         now = timezone.now()
-        executions = WorkflowExecution.objects.filter(
+        qs = WorkflowExecution.objects.filter(
             start_time__gte=now - timedelta(hours=24)
-        ).order_by('-start_time')[:20]
+        ).order_by('-start_time')
 
+        MAX_ITEMS = 20
+        total_count = qs.count()
         items = []
-        for e in executions:
+        for e in qs[:MAX_ITEMS]:
             # Count STF messages for this execution
             stf_count = WorkflowMessage.objects.filter(
                 execution_id=e.execution_id,
@@ -2402,9 +2459,87 @@ async def list_workflow_monitors() -> list:
 
         return {
             "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
-                {"title": "Executions List", "url": _monitor_url("/executions/")},
+                {"title": "Executions List", "url": _monitor_url("/workflow-executions/")},
             ],
         }
 
     return await fetch()
+
+
+@mcp.tool()
+async def swf_send_message(message: str, message_type: str = "announcement", metadata: dict = None) -> dict:
+    """
+    Send a message to the workflow monitoring stream.
+
+    Use for testing the message pipeline, announcements to colleagues,
+    or any other broadcast purpose.
+
+    The sender is automatically identified as '{username}-personal-agent'.
+
+    Args:
+        message: The message text to send
+        message_type: Type of message - 'announcement', 'status', 'test', etc.
+                      If 'test', namespace is omitted. Otherwise uses configured namespace.
+        metadata: Optional additional key-value data to include
+
+    Returns:
+        Success/failure status with message details
+    """
+    import json
+    import getpass
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_send():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        username = getpass.getuser()
+        sender = f"{username}-personal-agent"
+
+        # Determine namespace based on message_type
+        namespace = None
+        if message_type != 'test':
+            testbed_toml, _ = _get_testbed_config_path()
+            if testbed_toml and testbed_toml.exists():
+                try:
+                    import tomllib
+                    with open(testbed_toml, 'rb') as f:
+                        toml_data = tomllib.load(f)
+                    namespace = toml_data.get('testbed', {}).get('namespace')
+                except Exception:
+                    pass
+
+        msg = {
+            'msg_type': message_type,
+            'sender': sender,
+            'namespace': namespace,
+            'message': message,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp_send_message',
+        }
+        if metadata:
+            msg['metadata'] = metadata
+
+        topic = '/topic/epictopic'
+        mq = ActiveMQConnectionManager()
+        if mq.send_message(topic, json.dumps(msg)):
+            logger.info(f"MCP send_message: sent {message_type} from {sender}")
+            return {
+                "success": True,
+                "message": "Message sent to monitoring stream",
+                "sender": sender,
+                "message_type": message_type,
+                "namespace": namespace,
+                "content": message,
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+            }
+
+    return await do_send()

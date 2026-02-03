@@ -19,6 +19,14 @@ MCP tools are **data access primitives** with filtering capabilities. The LLM sy
 
 **Date Range Convention:** All list tools support `start_time` and `end_time` parameters (ISO datetime strings). If omitted, tools default to a reasonable recent period.
 
+**Pagination Metadata:** All list tools return pagination metadata for LLM context management:
+- `items`: The returned records (limited to MAX_ITEMS per tool)
+- `total_count`: Total number of matching records in the database
+- `has_more`: Boolean indicating if there are more records beyond what was returned
+- `monitor_urls`: Links to the web UI for human review
+
+This helps LLMs understand when query results are truncated and whether to refine filters for better results.
+
 ## Client Configuration
 
 ### Claude Desktop
@@ -51,6 +59,40 @@ Add via `/mcp add` or create `.mcp.json` in project:
 }
 ```
 
+## Authentication
+
+The MCP endpoint supports two authentication modes:
+
+### Claude Code (Local)
+
+POST requests (used by Claude Code) pass through without authentication. This enables local development and CLI-based MCP access without OAuth setup.
+
+### Claude.ai (Remote)
+
+GET requests require OAuth 2.1 Bearer token authentication via Auth0. This enables Claude.ai remote MCP connections with proper authorization.
+
+**OAuth Flow:**
+1. Claude.ai discovers OAuth metadata via `/.well-known/oauth-protected-resource`
+2. User authenticates with Auth0
+3. Claude.ai includes Bearer token in requests
+4. MCP middleware validates JWT against Auth0 JWKS
+
+**Configuration (production):**
+```bash
+# In .env or environment
+AUTH0_DOMAIN=your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=your-client-id
+AUTH0_CLIENT_SECRET=your-client-secret
+AUTH0_API_IDENTIFIER=https://your-server/swf-monitor/mcp
+```
+
+Leave `AUTH0_DOMAIN` empty to disable OAuth (allows all requests through).
+
+**Network Requirements:**
+Claude.ai connects from Anthropic's servers, so the MCP endpoint must be accessible from the public internet. Internal networks (e.g., behind lab firewalls) may require network configuration to allow external access.
+
+---
+
 ### Claude Code Settings Example
 
 Full `~/.claude/settings.json` with swf-monitor MCP server, permissions, and status line:
@@ -73,12 +115,12 @@ Full `~/.claude/settings.json` with swf-monitor MCP server, permissions, and sta
       "Bash(wc:*)",
       "Bash(grep:*)",
       "mcp__swf-monitor__get_server_instructions",
-      "mcp__swf-monitor__list_agents",
-      "mcp__swf-monitor__get_agent",
-      "mcp__swf-monitor__list_workflow_executions",
-      "mcp__swf-monitor__get_workflow_execution",
-      "mcp__swf-monitor__list_logs",
-      "mcp__swf-monitor__get_system_state",
+      "mcp__swf-monitor__swf_list_agents",
+      "mcp__swf-monitor__swf_get_agent",
+      "mcp__swf-monitor__swf_list_workflow_executions",
+      "mcp__swf-monitor__swf_get_workflow_execution",
+      "mcp__swf-monitor__swf_list_logs",
+      "mcp__swf-monitor__swf_get_system_state",
       "WebSearch",
       "WebFetch"
     ],
@@ -107,7 +149,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_available_tools` | - | List all available MCP tools with descriptions. Use to discover capabilities. |
+| `swf_list_available_tools` | - | List all available MCP tools with descriptions. Use to discover capabilities. |
 
 ---
 
@@ -115,7 +157,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `get_system_state` | `username` | Comprehensive system state for a user: context from testbed.toml, agent manager status, workflow runner readiness, agent counts, execution stats. |
+| `swf_get_system_state` | `username` | Comprehensive system state for a user: context from testbed.toml, agent manager status, workflow runner readiness, agent counts, execution stats. |
 
 **Parameters:**
 - `username`: Optional. Username to get context for (reads their testbed.toml). If not provided, infers from SWF_HOME environment variable.
@@ -124,7 +166,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 - `timestamp`: Current server time
 - `user_context`: namespace, workflow defaults from user's testbed.toml
 - `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited)
-- `workflow_runner`: Status of healthy DAQ_Simulator that can accept start_workflow
+- `workflow_runner`: Status of healthy DAQ_Simulator that can accept swf_start_workflow
 - `ready_to_run`: Boolean - True if workflow_runner is healthy and can accept commands
 - `last_execution`: Most recent workflow execution for user's namespace
 - `errors_last_hour`: Count of ERROR logs in user's namespace
@@ -141,10 +183,10 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_agents` | `namespace`, `agent_type`, `status`, `execution_id`, `start_time`, `end_time` | List agents with filtering. **Excludes EXITED agents by default.** |
-| `get_agent` | `name` (required) | Full details for a specific agent including metadata. |
+| `swf_list_agents` | `namespace`, `agent_type`, `status`, `execution_id`, `start_time`, `end_time` | List agents with filtering. **Excludes EXITED agents by default.** |
+| `swf_get_agent` | `name` (required) | Full details for a specific agent including metadata. |
 
-**`list_agents` filters:**
+**`swf_list_agents` filters:**
 - `namespace`: Filter to agents in this namespace
 - `agent_type`: Filter by type (daqsim, data, processing, fastmon, workflow_runner, etc.)
 - `status`: Filter by status. Special values:
@@ -166,10 +208,10 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_namespaces` | - | List all testbed namespaces with owners. |
-| `get_namespace` | `namespace` (required), `start_time`, `end_time` | Details for a namespace including activity counts. |
+| `swf_list_namespaces` | - | List all testbed namespaces with owners. |
+| `swf_get_namespace` | `namespace` (required), `start_time`, `end_time` | Details for a namespace including activity counts. |
 
-**`get_namespace` returns:**
+**`swf_get_namespace` returns:**
 - `name`, `owner`, `description`
 - `agent_count`: Agents registered in namespace
 - `execution_count`: Workflow executions (in date range if specified)
@@ -182,7 +224,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_workflow_definitions` | `workflow_type`, `created_by` | List available workflow definitions. |
+| `swf_list_workflow_definitions` | `workflow_type`, `created_by` | List available workflow definitions. |
 
 **Returns per definition:**
 - `workflow_name`, `version`, `workflow_type`
@@ -195,10 +237,10 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_workflow_executions` | `namespace`, `status`, `executed_by`, `workflow_name`, `currently_running`, `start_time`, `end_time` | List workflow executions with filtering. |
-| `get_workflow_execution` | `execution_id` (required) | Full details for a specific execution. |
+| `swf_list_workflow_executions` | `namespace`, `status`, `executed_by`, `workflow_name`, `currently_running`, `start_time`, `end_time` | List workflow executions with filtering. |
+| `swf_get_workflow_execution` | `execution_id` (required) | Full details for a specific execution. |
 
-**`list_workflow_executions` filters:**
+**`swf_list_workflow_executions` filters:**
 - `namespace`: Filter to executions in this namespace
 - `status`: Filter by status (pending, running, completed, failed, terminated)
 - `executed_by`: Filter by user who started the execution
@@ -218,13 +260,14 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_messages` | `namespace`, `execution_id`, `agent`, `message_type`, `start_time`, `end_time` | List workflow messages with filtering. |
+| `swf_list_messages` | `namespace`, `execution_id`, `agent`, `message_type`, `start_time`, `end_time` | List workflow messages with filtering. |
+| `swf_send_message` | `message` (required), `message_type`, `metadata` | Send a message to the monitoring stream. |
 
 **Diagnostic use cases:**
-- Track workflow progress: `list_messages(execution_id='stf_datataking-user-0044')`
-- See what an agent sent: `list_messages(agent='daq_simulator-agent-user-123')`
-- Debug message flow: `list_messages(namespace='torre1', start_time='2026-01-13T11:00:00')`
-- For workflow failures: use `list_logs(level='ERROR')` instead
+- Track workflow progress: `swf_list_messages(execution_id='stf_datataking-user-0044')`
+- See what an agent sent: `swf_list_messages(agent='daq_simulator-agent-user-123')`
+- Debug message flow: `swf_list_messages(namespace='torre1', start_time='2026-01-13T11:00:00')`
+- For workflow failures: use `swf_list_logs(level='ERROR')` instead
 
 **Common message types:** `run_imminent`, `start_run`, `stf_gen`, `end_run`, `pause_run`, `resume_run`
 
@@ -241,21 +284,40 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 - `execution_id`, `run_id`
 - `payload_summary`: Truncated message content
 
+**`swf_send_message` parameters:**
+- `message` (required): The message text to send
+- `message_type`: Type of message (default: 'announcement')
+  - `'test'`: Namespace is omitted (for pipeline testing)
+  - `'announcement'`, `'status'`, etc.: Uses configured namespace from testbed.toml
+- `metadata`: Optional dict of additional key-value data
+
+**`swf_send_message` behavior:**
+- Sender is automatically identified as `{username}-personal-agent`
+- Messages are sent to `/topic/epictopic` and captured by the monitor
+- Use for: testing the message pipeline, announcements to colleagues, or any broadcast purpose
+
+**Returns:**
+- `success`: Whether the message was sent
+- `sender`: The sender identifier (e.g., 'wenauseic-personal-agent')
+- `message_type`: The type of message sent
+- `namespace`: The namespace used (or null for test messages)
+- `content`: The message content
+
 ---
 
 ### Runs
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_runs` | `start_time`, `end_time` | List simulation runs with timing and file counts. |
-| `get_run` | `run_number` (required) | Full details for a specific run. |
+| `swf_list_runs` | `start_time`, `end_time` | List simulation runs with timing and file counts. |
+| `swf_get_run` | `run_number` (required) | Full details for a specific run. |
 
-**`list_runs` returns per run:**
+**`swf_list_runs` returns per run:**
 - `run_number`
 - `start_time`, `end_time`, `duration_seconds`
 - `stf_file_count`: Number of STF files in this run
 
-**`get_run` returns:**
+**`swf_get_run` returns:**
 - All fields above plus:
 - `run_conditions`: JSON metadata
 - `file_stats`: STF file counts by status (registered, processing, done, failed)
@@ -266,10 +328,10 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_stf_files` | `run_number`, `status`, `machine_state`, `start_time`, `end_time` | List STF files with filtering. |
-| `get_stf_file` | `file_id` or `stf_filename` (one required) | Full details for a specific STF file. |
+| `swf_list_stf_files` | `run_number`, `status`, `machine_state`, `start_time`, `end_time` | List STF files with filtering. |
+| `swf_get_stf_file` | `file_id` or `stf_filename` (one required) | Full details for a specific STF file. |
 
-**`list_stf_files` filters:**
+**`swf_list_stf_files` filters:**
 - `run_number`: Filter to files from this run
 - `status`: Filter by processing status (registered, processing, processed, done, failed)
 - `machine_state`: Filter by detector state (physics, cosmics, etc.)
@@ -281,7 +343,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 - `file_size_bytes`, `created_at`
 - `tf_file_count`: Number of TF files derived from this STF
 
-**`get_stf_file` returns:**
+**`swf_get_stf_file` returns:**
 - All fields above plus:
 - `checksum`, `metadata`
 - `workflow_id`, `daq_state`, `daq_substate`, `workflow_status`
@@ -292,10 +354,10 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_tf_slices` | `run_number`, `stf_filename`, `tf_filename`, `status`, `assigned_worker`, `start_time`, `end_time` | List TF slices for fast processing workflow. |
-| `get_tf_slice` | `tf_filename`, `slice_id` (both required) | Full details for a specific TF slice. |
+| `swf_list_tf_slices` | `run_number`, `stf_filename`, `tf_filename`, `status`, `assigned_worker`, `start_time`, `end_time` | List TF slices for fast processing workflow. |
+| `swf_get_tf_slice` | `tf_filename`, `slice_id` (both required) | Full details for a specific TF slice. |
 
-**`list_tf_slices` filters:**
+**`swf_list_tf_slices` filters:**
 - `run_number`: Filter to slices from this run
 - `stf_filename`: Filter to slices from this STF file
 - `tf_filename`: Filter to slices from this TF sample
@@ -309,7 +371,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 - `status`, `assigned_worker`
 - `created_at`, `completed_at`
 
-**`get_tf_slice` returns:**
+**`swf_get_tf_slice` returns:**
 - All fields above plus:
 - `retries`, `assigned_at`
 - `metadata`
@@ -320,16 +382,16 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `list_logs` | `app_name`, `instance_name`, `execution_id`, `level`, `search`, `start_time`, `end_time` | List log entries from all agents. |
-| `get_log_entry` | `log_id` (required) | Full details for a specific log entry. |
+| `swf_list_logs` | `app_name`, `instance_name`, `execution_id`, `level`, `search`, `start_time`, `end_time` | List log entries from all agents. |
+| `swf_get_log_entry` | `log_id` (required) | Full details for a specific log entry. |
 
 **Diagnostic use cases:**
-- Workflow logs: `list_logs(execution_id='stf_datataking-user-0044')`
-- Debug a specific agent: `list_logs(instance_name='daq_simulator-agent-user-123')`
-- Find all errors: `list_logs(level='ERROR')`
-- Search for specific issues: `list_logs(search='connection failed')`
+- Workflow logs: `swf_list_logs(execution_id='stf_datataking-user-0044')`
+- Debug a specific agent: `swf_list_logs(instance_name='daq_simulator-agent-user-123')`
+- Find all errors: `swf_list_logs(level='ERROR')`
+- Search for specific issues: `swf_list_logs(search='connection failed')`
 
-**`list_logs` filters:**
+**`swf_list_logs` filters:**
 - `app_name`: Filter by application type (e.g., 'daq_simulator', 'data_agent')
 - `instance_name`: Filter by agent instance name
 - `execution_id`: Filter by workflow execution ID (e.g., 'stf_datataking-wenauseic-0044')
@@ -353,11 +415,11 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `start_workflow` | `workflow_name`, `namespace`, `config`, `realtime`, `duration`, `stf_count`, `physics_period_count`, `physics_period_duration`, `stf_interval` | Start a workflow by sending command to DAQ Simulator agent. |
-| `stop_workflow` | `execution_id` (required) | Stop a running workflow gracefully. |
-| `end_execution` | `execution_id` (required) | Mark a stuck execution as terminated (database state change only). |
+| `swf_start_workflow` | `workflow_name`, `namespace`, `config`, `realtime`, `duration`, `stf_count`, `physics_period_count`, `physics_period_duration`, `stf_interval` | Start a workflow by sending command to DAQ Simulator agent. |
+| `swf_stop_workflow` | `execution_id` (required) | Stop a running workflow gracefully. |
+| `swf_end_execution` | `execution_id` (required) | Mark a stuck execution as terminated (database state change only). |
 
-**`start_workflow` parameters:**
+**`swf_start_workflow` parameters:**
 
 All parameters are optional - defaults are read from the user's `testbed.toml`:
 - `workflow_name`: Name of workflow (default: from config, typically 'stf_datataking')
@@ -374,13 +436,13 @@ All parameters are optional - defaults are read from the user's `testbed.toml`:
 
 **After starting, monitor with:**
 - `get_workflow_execution(execution_id)` -> status: running/completed/failed/terminated
-- `list_messages(execution_id='...')` -> progress events
-- `list_logs(execution_id='...')` -> workflow logs including errors
+- `swf_list_messages(execution_id='...')` -> progress events
+- `swf_list_logs(execution_id='...')` -> workflow logs including errors
 - `get_workflow_monitor(execution_id)` -> aggregated status and events
 
-**`stop_workflow`:** Sends a stop command to the DAQ Simulator agent. The workflow stops gracefully at the next checkpoint. Use `list_workflow_executions(currently_running=True)` to find running execution IDs.
+**`swf_stop_workflow`:** Sends a stop command to the DAQ Simulator agent. The workflow stops gracefully at the next checkpoint. Use `swf_list_workflow_executions(currently_running=True)` to find running execution IDs.
 
-**`end_execution`:** Use to clean up stale or stuck executions that are still marked as 'running' in the database. This is a state change only - no agent message is sent.
+**`swf_end_execution`:** Use to clean up stale or stuck executions that are still marked as 'running' in the database. This is a state change only - no agent message is sent.
 
 ---
 
@@ -388,14 +450,14 @@ All parameters are optional - defaults are read from the user's `testbed.toml`:
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `kill_agent` | `name` (required) | Kill an agent process by sending SIGKILL to its PID. |
+| `swf_kill_agent` | `name` (required) | Kill an agent process by sending SIGKILL to its PID. |
 
-**`kill_agent` behavior:**
+**`swf_kill_agent` behavior:**
 - Looks up the agent by `instance_name`
 - Retrieves its `pid` and `hostname`
 - Sends SIGKILL if the agent is on the current host
 - Always marks the agent's status and operational_state as `EXITED`
-- Agent will no longer appear in default `list_agents` results
+- Agent will no longer appear in default `swf_list_agents` results
 
 **Returns:**
 - `success`: Whether the operation completed
@@ -411,11 +473,11 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `check_agent_manager` | `username` | Check if a user's agent manager daemon is alive. |
-| `start_user_testbed` | `username`, `config_name` | Start a user's testbed via their agent manager. |
-| `stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
+| `swf_check_agent_manager` | `username` | Check if a user's agent manager daemon is alive. |
+| `swf_start_user_testbed` | `username`, `config_name` | Start a user's testbed via their agent manager. |
+| `swf_stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
 
-**`check_agent_manager` returns:**
+**`swf_check_agent_manager` returns:**
 - `alive`: True if agent manager has recent heartbeat (within 5 minutes)
 - `username`: The user being checked
 - `instance_name`: The agent manager's instance name (e.g., 'agent-manager-wenauseic')
@@ -425,15 +487,15 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 - `agents_running`: Whether testbed agents are currently running
 - `how_to_start`: Instructions if not alive
 
-**`start_user_testbed`:**
+**`swf_start_user_testbed`:**
 - Sends `start_testbed` command to the user's agent manager
-- Agent manager must be running first (use `check_agent_manager` to verify)
+- Agent manager must be running first (use `swf_check_agent_manager` to verify)
 - `config_name`: Optional config name (e.g., 'fast_processing'). Uses default if not specified.
-- Agents start asynchronously - use `list_agents` to verify
+- Agents start asynchronously - use `swf_list_agents` to verify
 
-**`stop_user_testbed`:**
+**`swf_stop_user_testbed`:**
 - Sends `stop_testbed` command to the user's agent manager
-- If agent manager is not running, use `kill_agent` to stop agents directly
+- If agent manager is not running, use `swf_kill_agent` to stop agents directly
 
 **Starting the agent manager:**
 ```bash
@@ -448,10 +510,10 @@ testbed agent-manager
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `get_workflow_monitor` | `execution_id` (required) | Get aggregated status and events for a workflow execution. |
-| `list_workflow_monitors` | - | List recent executions that can be monitored. |
+| `swf_get_workflow_monitor` | `execution_id` (required) | Get aggregated status and events for a workflow execution. |
+| `swf_list_workflow_monitors` | - | List recent executions that can be monitored. |
 
-**`get_workflow_monitor` returns:**
+**`swf_get_workflow_monitor` returns:**
 - `execution_id`: The execution being monitored
 - `status`: Current workflow status (running/completed/failed/terminated)
 - `phase`: Current phase (imminent/running/ended/unknown)
@@ -464,9 +526,9 @@ testbed agent-manager
 
 This tool aggregates information from workflow messages and logs, providing a single-call summary of workflow progress without needing to poll multiple tools.
 
-**`list_workflow_monitors` returns:**
+**`swf_list_workflow_monitors` returns:**
 - List of executions from last 24 hours with: `execution_id`, `status`, `start_time`, `end_time`, `stf_count`
-- Use to pick an execution for detailed monitoring with `get_workflow_monitor`
+- Use to pick an execution for detailed monitoring with `swf_get_workflow_monitor`
 
 ---
 
@@ -474,22 +536,22 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 | Category | Tools | Count |
 |----------|-------|-------|
-| Tool Discovery | `list_available_tools` | 1 |
-| System State | `get_system_state` | 1 |
-| Agents | `list_agents`, `get_agent` | 2 |
-| Namespaces | `list_namespaces`, `get_namespace` | 2 |
-| Workflow Definitions | `list_workflow_definitions` | 1 |
-| Workflow Executions | `list_workflow_executions`, `get_workflow_execution` | 2 |
-| Messages | `list_messages` | 1 |
-| Runs | `list_runs`, `get_run` | 2 |
-| STF Files | `list_stf_files`, `get_stf_file` | 2 |
-| TF Slices | `list_tf_slices`, `get_tf_slice` | 2 |
-| Logs | `list_logs`, `get_log_entry` | 2 |
-| Workflow Control | `start_workflow`, `stop_workflow`, `end_execution` | 3 |
-| Agent Management | `kill_agent` | 1 |
-| User Agent Manager | `check_agent_manager`, `start_user_testbed`, `stop_user_testbed` | 3 |
-| Workflow Monitoring | `get_workflow_monitor`, `list_workflow_monitors` | 2 |
-| **Total** | | **27** |
+| Tool Discovery | `swf_list_available_tools` | 1 |
+| System State | `swf_get_system_state` | 1 |
+| Agents | `swf_list_agents`, `swf_get_agent` | 2 |
+| Namespaces | `swf_list_namespaces`, `swf_get_namespace` | 2 |
+| Workflow Definitions | `swf_list_workflow_definitions` | 1 |
+| Workflow Executions | `swf_list_workflow_executions`, `swf_get_workflow_execution` | 2 |
+| Messages | `swf_list_messages`, `swf_send_message` | 2 |
+| Runs | `swf_list_runs`, `swf_get_run` | 2 |
+| STF Files | `swf_list_stf_files`, `swf_get_stf_file` | 2 |
+| TF Slices | `swf_list_tf_slices`, `swf_get_tf_slice` | 2 |
+| Logs | `swf_list_logs`, `swf_get_log_entry` | 2 |
+| Workflow Control | `swf_start_workflow`, `swf_stop_workflow`, `swf_end_execution` | 3 |
+| Agent Management | `swf_kill_agent` | 1 |
+| User Agent Manager | `swf_check_agent_manager`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 3 |
+| Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
+| **Total** | | **28** |
 
 ---
 
@@ -540,53 +602,53 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 > "What's running in the testbed?"
 
-LLM calls `list_workflow_executions(currently_running=True)` and summarizes the running executions by namespace and workflow type.
+LLM calls `swf_list_workflow_executions(currently_running=True)` and summarizes the running executions by namespace and workflow type.
 
 > "What's the state of my running workflow?"
 
-LLM calls `get_workflow_monitor(execution_id='...')` for aggregated status, or `list_workflow_executions(currently_running=True, namespace="user_namespace")`.
+LLM calls `get_workflow_monitor(execution_id='...')` for aggregated status, or `swf_list_workflow_executions(currently_running=True, namespace="user_namespace")`.
 
 ### System Health
 
 > "What's the current state of the testbed?"
 
-LLM calls `get_system_state(username='wenauseic')` and summarizes user context, agent health, running workflows, and system state.
+LLM calls `swf_get_system_state(username='wenauseic')` and summarizes user context, agent health, running workflows, and system state.
 
 > "Am I ready to run a workflow?"
 
-LLM calls `get_system_state(username='...')` and checks `ready_to_run` field. If False, explains what's missing (agent manager, workflow runner).
+LLM calls `swf_get_system_state(username='...')` and checks `ready_to_run` field. If False, explains what's missing (agent manager, workflow runner).
 
 ### Starting and Stopping Workflows
 
 > "Start a workflow with 5 STF files"
 
-LLM calls `start_workflow(stf_count=5)` - other parameters default from testbed.toml.
+LLM calls `swf_start_workflow(stf_count=5)` - other parameters default from testbed.toml.
 
 > "Stop my running workflow"
 
-LLM calls `list_workflow_executions(currently_running=True)` to find the execution_id, then `stop_workflow(execution_id='...')`.
+LLM calls `swf_list_workflow_executions(currently_running=True)` to find the execution_id, then `swf_stop_workflow(execution_id='...')`.
 
 ### Error Discovery
 
 > "Are there any errors in the system?"
 
-LLM calls `list_logs(level='ERROR')` to find error and critical log entries, then summarizes the issues found.
+LLM calls `swf_list_logs(level='ERROR')` to find error and critical log entries, then summarizes the issues found.
 
 > "Why did my workflow fail?"
 
 LLM calls:
-1. `list_workflow_executions(status='failed', namespace="user_namespace")` - find failed executions
+1. `swf_list_workflow_executions(status='failed', namespace="user_namespace")` - find failed executions
 2. `get_workflow_monitor(execution_id='...')` - get aggregated errors
-3. `list_logs(execution_id='...', level='ERROR')` - detailed error logs
+3. `swf_list_logs(execution_id='...', level='ERROR')` - detailed error logs
 
 ### Activity Summary
 
 > "Summarize testbed activity for the past week."
 
 LLM makes multiple calls:
-1. `list_workflow_executions(start_time="2026-01-06T00:00:00", end_time="2026-01-13T00:00:00")` - all executions
-2. `list_agents()` - registered agents
-3. `list_namespaces()` - active namespaces
+1. `swf_list_workflow_executions(start_time="2026-01-06T00:00:00", end_time="2026-01-13T00:00:00")` - all executions
+2. `swf_list_agents()` - registered agents
+3. `swf_list_namespaces()` - active namespaces
 4. Synthesizes: "In the past week, 47 workflow executions ran across 3 namespaces..."
 
 ### Investigating a Run
@@ -594,7 +656,7 @@ LLM makes multiple calls:
 > "Show me details about run 100042 and its STF files."
 
 LLM calls:
-1. `get_run(run_number=100042)` - run details
+1. `swf_get_run(run_number=100042)` - run details
 2. `list_stf_files(run_number=100042)` - associated STF files
 
 ### Agent Troubleshooting
@@ -602,8 +664,8 @@ LLM calls:
 > "The fast_processing agent seems unresponsive. What's happening?"
 
 LLM calls:
-1. `get_agent(name="fast_processing-agent-wenauseic-123")` - agent status
-2. `list_logs(instance_name="fast_processing-agent-wenauseic-123", level='WARNING')` - recent issues
+1. `swf_get_agent(name="fast_processing-agent-wenauseic-123")` - agent status
+2. `swf_list_logs(instance_name="fast_processing-agent-wenauseic-123", level='WARNING')` - recent issues
 3. If needed: `kill_agent(name="...")` to terminate unresponsive agent
 
 ### Managing User Testbed
@@ -620,9 +682,9 @@ LLM calls:
 > "What's happening in namespace torre1 today?"
 
 LLM calls:
-1. `get_namespace(namespace="torre1", start_time="2026-01-13T00:00:00")` - activity counts
-2. `list_workflow_executions(namespace="torre1", start_time="2026-01-13T00:00:00")` - executions
-3. `list_agents(namespace="torre1")` - agents
+1. `swf_get_namespace(namespace="torre1", start_time="2026-01-13T00:00:00")` - activity counts
+2. `swf_list_workflow_executions(namespace="torre1", start_time="2026-01-13T00:00:00")` - executions
+3. `swf_list_agents(namespace="torre1")` - agents
 
 ### Fast Processing Status
 
@@ -646,17 +708,22 @@ swf-monitor/
 │   └── MCP.md                              # This documentation
 ├── src/
 │   ├── monitor_app/
-│   │   └── mcp.py                          # Tool definitions (API code)
+│   │   ├── mcp.py                          # Tool definitions (API code)
+│   │   ├── auth0.py                        # JWT validation with Auth0 JWKS
+│   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
+│   │   └── views.py                        # OAuth protected resource metadata
 │   └── swf_monitor_project/
-│       ├── settings.py                     # Server config & instructions
-│       └── urls.py                         # Route registration (/mcp/)
+│       ├── settings.py                     # Server config, Auth0 settings
+│       └── urls.py                         # Route registration (/mcp/, /.well-known/)
 ```
 
 | File | Purpose |
 |------|---------|
 | `src/monitor_app/mcp.py` | **Tool definitions** - all MCP tool functions with docstrings |
-| `src/swf_monitor_project/settings.py` | **Server config** - `DJANGO_MCP_GLOBAL_SERVER_CONFIG` with name and instructions |
-| `src/swf_monitor_project/urls.py` | **Route registration** - mounts MCP at `/mcp/` |
+| `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
+| `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |
+| `src/swf_monitor_project/settings.py` | **Server config** - MCP config, Auth0 settings |
+| `src/swf_monitor_project/urls.py` | **Route registration** - mounts MCP at `/mcp/`, OAuth metadata at `/.well-known/` |
 | `docs/MCP.md` | **Documentation** - this file |
 
 ### Architecture
@@ -665,7 +732,7 @@ MCP is integrated directly into Django rather than as a separate service:
 
 - **Django** serves the MCP endpoint alongside REST API
 - **django-mcp-server** provides MCP spec compliance and tool registration
-- **OAuth2** authentication via django-oauth-toolkit (optional, disabled for development)
+- **Auth0 OAuth 2.1** authentication for Claude.ai remote connections (optional, disabled if AUTH0_DOMAIN not set)
 
 ### Tool Registration
 
@@ -688,10 +755,12 @@ DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
     "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
 }
 
-# OAuth2 (optional - commented out for development)
-# DJANGO_MCP_AUTHENTICATION_CLASSES = [
-#     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
-# ]
+# Auth0 OAuth 2.1 configuration (optional - leave AUTH0_DOMAIN empty to disable)
+AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
+AUTH0_CLIENT_ID = config("AUTH0_CLIENT_ID", default="")
+AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
+AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
+AUTH0_ALGORITHMS = ["RS256"]
 ```
 
 ### Adding New Tools
@@ -731,6 +800,13 @@ async def my_new_tool(param: str, start_time: str = None, end_time: str = None) 
 
     return await do_work()
 ```
+
+**IMPORTANT:** After adding a new `@mcp.tool()`, you MUST also:
+1. Add the tool to the hardcoded list in `list_available_tools()` at the top of `mcp.py`
+2. Update the server instructions in `settings.py` (`DJANGO_MCP_GLOBAL_SERVER_CONFIG`)
+3. Update this documentation (`docs/MCP.md`)
+
+The `list_available_tools()` hardcoded list is what LLMs see when discovering available tools - if your tool isn't in that list, LLMs won't know it exists.
 
 ### References
 
