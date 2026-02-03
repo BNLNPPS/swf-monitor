@@ -261,24 +261,24 @@ KEY CONCEPTS:
 - Workflow executions: Instances of running workflows, tracked by execution_id
 
 COMMON QUERIES:
-- What's running now? → list_workflow_executions(currently_running=True)
-- Any errors? → list_logs(level='ERROR')
-- System health? → get_system_state()
-- Activity in a namespace? → get_namespace(namespace='name')
-- Failed workflows? → list_workflow_executions(status='failed')
-- Send announcement/test message? → send_message(message='...', message_type='announcement')
+- What's running now? → swf_list_workflow_executions(currently_running=True)
+- Any errors? → swf_list_logs(level='ERROR')
+- System health? → swf_get_system_state()
+- Activity in a namespace? → swf_get_namespace(namespace='name')
+- Failed workflows? → swf_list_workflow_executions(status='failed')
+- Send announcement/test message? → swf_send_message(message='...', message_type='announcement')
 
-AFTER start_workflow:
-1. get_workflow_execution(execution_id) → status: running/completed/failed/terminated
-2. list_messages(execution_id='...') → progress: run_imminent, start_run, stf_gen, end_run
-3. list_logs(execution_id='...') → workflow logs including errors
+AFTER swf_start_workflow:
+1. swf_get_workflow_execution(execution_id) → status: running/completed/failed/terminated
+2. swf_list_messages(execution_id='...') → progress: run_imminent, start_run, stf_gen, end_run
+3. swf_list_logs(execution_id='...') → workflow logs including errors
 
 FILTERING:
 - All list tools support start_time/end_time parameters (ISO datetime strings)
 - Status filters are case-insensitive
 - Context cascades: run_number → stf_filename → tf_filename
 
-Use list_available_tools() to see all available tools with descriptions.""",
+Use swf_list_available_tools() to see all available tools with descriptions.""",
 }
 
 # MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
