@@ -19,6 +19,14 @@ MCP tools are **data access primitives** with filtering capabilities. The LLM sy
 
 **Date Range Convention:** All list tools support `start_time` and `end_time` parameters (ISO datetime strings). If omitted, tools default to a reasonable recent period.
 
+**Pagination Metadata:** All list tools return pagination metadata for LLM context management:
+- `items`: The returned records (limited to MAX_ITEMS per tool)
+- `total_count`: Total number of matching records in the database
+- `has_more`: Boolean indicating if there are more records beyond what was returned
+- `monitor_urls`: Links to the web UI for human review
+
+This helps LLMs understand when query results are truncated and whether to refine filters for better results.
+
 ## Client Configuration
 
 ### Claude Desktop

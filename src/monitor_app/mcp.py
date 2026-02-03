@@ -584,20 +584,25 @@ async def swf_list_agents(
         query_string = "&".join(params)
         url = _monitor_url(f"/workflow/agents/?{query_string}" if query_string else "/workflow/agents/")
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "name": a.instance_name,
+                "agent_type": a.agent_type,
+                "status": a.status,
+                "operational_state": a.operational_state,
+                "namespace": a.namespace,
+                "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
+                "workflow_enabled": a.workflow_enabled,
+                "total_stf_processed": a.total_stf_processed,
+            }
+            for a in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "name": a.instance_name,
-                    "agent_type": a.agent_type,
-                    "status": a.status,
-                    "operational_state": a.operational_state,
-                    "namespace": a.namespace,
-                    "last_heartbeat": a.last_heartbeat.isoformat() if a.last_heartbeat else None,
-                    "workflow_enabled": a.workflow_enabled,
-                    "total_stf_processed": a.total_stf_processed,
-                }
-                for a in qs
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Agents List", "url": url},
             ],
@@ -665,15 +670,21 @@ async def swf_list_namespaces() -> list:
 
     @sync_to_async
     def fetch():
+        qs = Namespace.objects.all().order_by('name')
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "name": n.name,
+                "owner": n.owner,
+                "description": n.description,
+            }
+            for n in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "name": n.name,
-                    "owner": n.owner,
-                    "description": n.description,
-                }
-                for n in Namespace.objects.all().order_by('name')
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Namespaces List", "url": _monitor_url("/namespaces/")},
             ],
@@ -796,18 +807,23 @@ async def swf_list_workflow_definitions(
         if created_by:
             qs = qs.filter(created_by=created_by)
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "workflow_name": w.workflow_name,
+                "version": w.version,
+                "workflow_type": w.workflow_type,
+                "created_by": w.created_by,
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+                "execution_count": w.execution_count,
+            }
+            for w in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "workflow_name": w.workflow_name,
-                    "version": w.version,
-                    "workflow_type": w.workflow_type,
-                    "created_by": w.created_by,
-                    "created_at": w.created_at.isoformat() if w.created_at else None,
-                    "execution_count": w.execution_count,
-                }
-                for w in qs
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Workflow Definitions", "url": _monitor_url("/workflow-definitions/")},
             ],
@@ -881,20 +897,25 @@ async def swf_list_workflow_executions(
         query_string = "&".join(params)
         url = _monitor_url(f"/workflow-executions/?{query_string}" if query_string else "/workflow-executions/")
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "execution_id": e.execution_id,
+                "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
+                "namespace": e.namespace,
+                "status": e.status,
+                "executed_by": e.executed_by,
+                "start_time": e.start_time.isoformat() if e.start_time else None,
+                "end_time": e.end_time.isoformat() if e.end_time else None,
+                "parameter_values": e.parameter_values,
+            }
+            for e in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "execution_id": e.execution_id,
-                    "workflow_name": e.workflow_definition.workflow_name if e.workflow_definition else None,
-                    "namespace": e.namespace,
-                    "status": e.status,
-                    "executed_by": e.executed_by,
-                    "start_time": e.start_time.isoformat() if e.start_time else None,
-                    "end_time": e.end_time.isoformat() if e.end_time else None,
-                    "parameter_values": e.parameter_values,
-                }
-                for e in qs[:100]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Executions List", "url": url},
             ],
@@ -1015,19 +1036,24 @@ async def swf_list_messages(
         query_string = "&".join(params)
         url = _monitor_url(f"/workflow/messages/?{query_string}" if query_string else "/workflow/messages/")
 
+        MAX_ITEMS = 200
+        total_count = qs.count()
+        items = [
+            {
+                "message_type": m.message_type,
+                "sender_agent": m.sender_agent,
+                "namespace": m.namespace,
+                "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+                "execution_id": m.execution_id,
+                "run_id": m.run_id,
+                "payload_summary": str(m.message_content)[:200] if m.message_content else None,
+            }
+            for m in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "message_type": m.message_type,
-                    "sender_agent": m.sender_agent,
-                    "namespace": m.namespace,
-                    "sent_at": m.sent_at.isoformat() if m.sent_at else None,
-                    "execution_id": m.execution_id,
-                    "run_id": m.run_id,
-                    "payload_summary": str(m.message_content)[:200] if m.message_content else None,
-                }
-                for m in qs[:200]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Messages List", "url": url},
             ],
@@ -1073,8 +1099,10 @@ async def swf_list_runs(
         if end:
             qs = qs.filter(start_time__lte=end)
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
         items = []
-        for r in qs[:100]:
+        for r in qs[:MAX_ITEMS]:
             duration = None
             if r.start_time and r.end_time:
                 duration = (r.end_time - r.start_time).total_seconds()
@@ -1089,6 +1117,8 @@ async def swf_list_runs(
 
         return {
             "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Runs List", "url": _monitor_url("/runs/")},
             ],
@@ -1205,20 +1235,25 @@ async def swf_list_stf_files(
         query_string = "&".join(params)
         url = _monitor_url(f"/stf-files/?{query_string}" if query_string else "/stf-files/")
 
+        MAX_ITEMS = 100
+        total_count = qs.count()
+        items = [
+            {
+                "file_id": str(f.file_id),
+                "stf_filename": f.stf_filename,
+                "run_number": f.run.run_number if f.run else None,
+                "status": f.status,
+                "machine_state": f.machine_state,
+                "file_size_bytes": f.file_size_bytes,
+                "created_at": f.created_at.isoformat() if f.created_at else None,
+                "tf_file_count": f.tf_file_count,
+            }
+            for f in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "file_id": str(f.file_id),
-                    "stf_filename": f.stf_filename,
-                    "run_number": f.run.run_number if f.run else None,
-                    "status": f.status,
-                    "machine_state": f.machine_state,
-                    "file_size_bytes": f.file_size_bytes,
-                    "created_at": f.created_at.isoformat() if f.created_at else None,
-                    "tf_file_count": f.tf_file_count,
-                }
-                for f in qs[:100]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "STF Files List", "url": url},
             ],
@@ -1345,23 +1380,28 @@ async def swf_list_tf_slices(
         query_string = "&".join(params)
         url = _monitor_url(f"/tf-slices/?{query_string}" if query_string else "/tf-slices/")
 
+        MAX_ITEMS = 200
+        total_count = qs.count()
+        items = [
+            {
+                "slice_id": s.slice_id,
+                "tf_filename": s.tf_filename,
+                "stf_filename": s.stf_filename,
+                "run_number": s.run_number,
+                "tf_first": s.tf_first,
+                "tf_last": s.tf_last,
+                "tf_count": s.tf_count,
+                "status": s.status,
+                "assigned_worker": s.assigned_worker,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+                "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+            }
+            for s in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "slice_id": s.slice_id,
-                    "tf_filename": s.tf_filename,
-                    "stf_filename": s.stf_filename,
-                    "run_number": s.run_number,
-                    "tf_first": s.tf_first,
-                    "tf_last": s.tf_last,
-                    "tf_count": s.tf_count,
-                    "status": s.status,
-                    "assigned_worker": s.assigned_worker,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                    "completed_at": s.completed_at.isoformat() if s.completed_at else None,
-                }
-                for s in qs[:200]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "TF Slices List", "url": url},
             ],
@@ -1496,22 +1536,27 @@ async def swf_list_logs(
         query_string = "&".join(params)
         url = _monitor_url(f"/logs/?{query_string}" if query_string else "/logs/")
 
+        MAX_ITEMS = 200
+        total_count = qs.count()
+        items = [
+            {
+                "id": log.id,
+                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "app_name": log.app_name,
+                "instance_name": log.instance_name,
+                "level": log.levelname,
+                "message": log.message,
+                "module": log.module,
+                "funcname": log.funcname,
+                "lineno": log.lineno,
+                "extra_data": log.extra_data,
+            }
+            for log in qs[:MAX_ITEMS]
+        ]
         return {
-            "items": [
-                {
-                    "id": log.id,
-                    "timestamp": log.timestamp.isoformat() if log.timestamp else None,
-                    "app_name": log.app_name,
-                    "instance_name": log.instance_name,
-                    "level": log.levelname,
-                    "message": log.message,
-                    "module": log.module,
-                    "funcname": log.funcname,
-                    "lineno": log.lineno,
-                    "extra_data": log.extra_data,
-                }
-                for log in qs[:200]
-            ],
+            "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Logs List", "url": url},
             ],
@@ -2390,12 +2435,14 @@ async def swf_list_workflow_monitors() -> list:
     @sync_to_async
     def fetch():
         now = timezone.now()
-        executions = WorkflowExecution.objects.filter(
+        qs = WorkflowExecution.objects.filter(
             start_time__gte=now - timedelta(hours=24)
-        ).order_by('-start_time')[:20]
+        ).order_by('-start_time')
 
+        MAX_ITEMS = 20
+        total_count = qs.count()
         items = []
-        for e in executions:
+        for e in qs[:MAX_ITEMS]:
             # Count STF messages for this execution
             stf_count = WorkflowMessage.objects.filter(
                 execution_id=e.execution_id,
@@ -2412,6 +2459,8 @@ async def swf_list_workflow_monitors() -> list:
 
         return {
             "items": items,
+            "total_count": total_count,
+            "has_more": total_count > MAX_ITEMS,
             "monitor_urls": [
                 {"title": "Executions List", "url": _monitor_url("/workflow-executions/")},
             ],
