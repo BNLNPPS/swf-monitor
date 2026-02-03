@@ -25,6 +25,7 @@ WORKFLOW OPERATIONS:
 - start_workflow() - Start workflow using defaults from testbed.toml
 - stop_workflow(execution_id) - Stop a running workflow
 - get_workflow_monitor(execution_id) - Get workflow status and events
+- send_message(message, message_type) - Send message to monitoring stream
 
 Design Philosophy:
 - Tools are data access primitives with filtering capabilities
@@ -109,6 +110,10 @@ def _get_testbed_config_path() -> tuple:
 
 # -----------------------------------------------------------------------------
 # Tool Discovery
+# -----------------------------------------------------------------------------
+# IMPORTANT: When adding a new @mcp.tool(), you MUST also add it to the
+# hardcoded list in list_available_tools() below. This list is what LLMs
+# see when discovering available tools.
 # -----------------------------------------------------------------------------
 
 @mcp.tool()
@@ -262,6 +267,11 @@ async def list_available_tools() -> list:
             "name": "list_workflow_monitors",
             "description": "List recent workflow executions that can be monitored",
             "parameters": [],
+        },
+        {
+            "name": "send_message",
+            "description": "Send a message to the monitoring stream (for testing, announcements, etc.)",
+            "parameters": ["message", "message_type", "metadata"],
         },
     ]
     return tools
@@ -2408,3 +2418,79 @@ async def list_workflow_monitors() -> list:
         }
 
     return await fetch()
+
+
+@mcp.tool()
+async def send_message(message: str, message_type: str = "announcement", metadata: dict = None) -> dict:
+    """
+    Send a message to the workflow monitoring stream.
+
+    Use for testing the message pipeline, announcements to colleagues,
+    or any other broadcast purpose.
+
+    The sender is automatically identified as '{username}-personal-agent'.
+
+    Args:
+        message: The message text to send
+        message_type: Type of message - 'announcement', 'status', 'test', etc.
+                      If 'test', namespace is omitted. Otherwise uses configured namespace.
+        metadata: Optional additional key-value data to include
+
+    Returns:
+        Success/failure status with message details
+    """
+    import json
+    import getpass
+    from datetime import datetime
+    from asgiref.sync import sync_to_async
+
+    @sync_to_async
+    def do_send():
+        from .activemq_connection import ActiveMQConnectionManager
+
+        username = getpass.getuser()
+        sender = f"{username}-personal-agent"
+
+        # Determine namespace based on message_type
+        namespace = None
+        if message_type != 'test':
+            testbed_toml, _ = _get_testbed_config_path()
+            if testbed_toml and testbed_toml.exists():
+                try:
+                    import tomllib
+                    with open(testbed_toml, 'rb') as f:
+                        toml_data = tomllib.load(f)
+                    namespace = toml_data.get('testbed', {}).get('namespace')
+                except Exception:
+                    pass
+
+        msg = {
+            'msg_type': message_type,
+            'sender': sender,
+            'namespace': namespace,
+            'message': message,
+            'timestamp': datetime.now().isoformat(),
+            'source': 'mcp_send_message',
+        }
+        if metadata:
+            msg['metadata'] = metadata
+
+        topic = '/topic/epictopic'
+        mq = ActiveMQConnectionManager()
+        if mq.send_message(topic, json.dumps(msg)):
+            logger.info(f"MCP send_message: sent {message_type} from {sender}")
+            return {
+                "success": True,
+                "message": "Message sent to monitoring stream",
+                "sender": sender,
+                "message_type": message_type,
+                "namespace": namespace,
+                "content": message,
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to send message to ActiveMQ. Is the message broker running?",
+            }
+
+    return await do_send()

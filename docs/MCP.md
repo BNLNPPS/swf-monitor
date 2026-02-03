@@ -253,6 +253,7 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `list_messages` | `namespace`, `execution_id`, `agent`, `message_type`, `start_time`, `end_time` | List workflow messages with filtering. |
+| `send_message` | `message` (required), `message_type`, `metadata` | Send a message to the monitoring stream. |
 
 **Diagnostic use cases:**
 - Track workflow progress: `list_messages(execution_id='stf_datataking-user-0044')`
@@ -274,6 +275,25 @@ echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
 - `sent_at` (ISO timestamp)
 - `execution_id`, `run_id`
 - `payload_summary`: Truncated message content
+
+**`send_message` parameters:**
+- `message` (required): The message text to send
+- `message_type`: Type of message (default: 'announcement')
+  - `'test'`: Namespace is omitted (for pipeline testing)
+  - `'announcement'`, `'status'`, etc.: Uses configured namespace from testbed.toml
+- `metadata`: Optional dict of additional key-value data
+
+**`send_message` behavior:**
+- Sender is automatically identified as `{username}-personal-agent`
+- Messages are sent to `/topic/epictopic` and captured by the monitor
+- Use for: testing the message pipeline, announcements to colleagues, or any broadcast purpose
+
+**Returns:**
+- `success`: Whether the message was sent
+- `sender`: The sender identifier (e.g., 'wenauseic-personal-agent')
+- `message_type`: The type of message sent
+- `namespace`: The namespace used (or null for test messages)
+- `content`: The message content
 
 ---
 
@@ -514,7 +534,7 @@ This tool aggregates information from workflow messages and logs, providing a si
 | Namespaces | `list_namespaces`, `get_namespace` | 2 |
 | Workflow Definitions | `list_workflow_definitions` | 1 |
 | Workflow Executions | `list_workflow_executions`, `get_workflow_execution` | 2 |
-| Messages | `list_messages` | 1 |
+| Messages | `list_messages`, `send_message` | 2 |
 | Runs | `list_runs`, `get_run` | 2 |
 | STF Files | `list_stf_files`, `get_stf_file` | 2 |
 | TF Slices | `list_tf_slices`, `get_tf_slice` | 2 |
@@ -523,7 +543,7 @@ This tool aggregates information from workflow messages and logs, providing a si
 | Agent Management | `kill_agent` | 1 |
 | User Agent Manager | `check_agent_manager`, `start_user_testbed`, `stop_user_testbed` | 3 |
 | Workflow Monitoring | `get_workflow_monitor`, `list_workflow_monitors` | 2 |
-| **Total** | | **27** |
+| **Total** | | **28** |
 
 ---
 
@@ -772,6 +792,13 @@ async def my_new_tool(param: str, start_time: str = None, end_time: str = None) 
 
     return await do_work()
 ```
+
+**IMPORTANT:** After adding a new `@mcp.tool()`, you MUST also:
+1. Add the tool to the hardcoded list in `list_available_tools()` at the top of `mcp.py`
+2. Update the server instructions in `settings.py` (`DJANGO_MCP_GLOBAL_SERVER_CONFIG`)
+3. Update this documentation (`docs/MCP.md`)
+
+The `list_available_tools()` hardcoded list is what LLMs see when discovering available tools - if your tool isn't in that list, LLMs won't know it exists.
 
 ### References
 

@@ -266,6 +266,7 @@ COMMON QUERIES:
 - System health? → get_system_state()
 - Activity in a namespace? → get_namespace(namespace='name')
 - Failed workflows? → list_workflow_executions(status='failed')
+- Send announcement/test message? → send_message(message='...', message_type='announcement')
 
 AFTER start_workflow:
 1. get_workflow_execution(execution_id) → status: running/completed/failed/terminated
