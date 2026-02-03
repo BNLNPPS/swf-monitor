@@ -582,7 +582,7 @@ async def list_agents(
         if status and status.lower() != 'all':
             params.append(f"status={status}")
         query_string = "&".join(params)
-        url = _monitor_url(f"/agents/?{query_string}" if query_string else "/agents/")
+        url = _monitor_url(f"/workflow/agents/?{query_string}" if query_string else "/workflow/agents/")
 
         return {
             "items": [
@@ -638,7 +638,7 @@ async def get_agent(name: str) -> dict:
                 "last_stf_processed": a.last_stf_processed.isoformat() if a.last_stf_processed else None,
                 "metadata": a.metadata,
                 "monitor_urls": [
-                    {"title": "Agent Detail", "url": _monitor_url(f"/agents/{a.instance_name}/")},
+                    {"title": "Agent Detail", "url": _monitor_url(f"/workflow/agents/{a.instance_name}/")},
                 ],
             }
         except SystemAgent.DoesNotExist:
@@ -754,7 +754,7 @@ async def get_namespace(
                 "end": end.isoformat(),
             },
             "monitor_urls": [
-                {"title": "Namespace Detail", "url": _monitor_url(f"/namespaces/{namespace}/")},
+                {"title": "Namespace Detail", "url": _monitor_url(f"/workflow/namespaces/{namespace}/")},
             ],
         }
 
@@ -809,7 +809,7 @@ async def list_workflow_definitions(
                 for w in qs
             ],
             "monitor_urls": [
-                {"title": "Workflow Definitions", "url": _monitor_url("/definitions/")},
+                {"title": "Workflow Definitions", "url": _monitor_url("/workflow-definitions/")},
             ],
         }
 
@@ -879,7 +879,7 @@ async def list_workflow_executions(
         if executed_by:
             params.append(f"executed_by={executed_by}")
         query_string = "&".join(params)
-        url = _monitor_url(f"/executions/?{query_string}" if query_string else "/executions/")
+        url = _monitor_url(f"/workflow-executions/?{query_string}" if query_string else "/workflow-executions/")
 
         return {
             "items": [
@@ -935,7 +935,7 @@ async def get_workflow_execution(execution_id: str) -> dict:
                 "parameter_values": e.parameter_values,
                 "performance_metrics": e.performance_metrics,
                 "monitor_urls": [
-                    {"title": "Execution Detail", "url": _monitor_url(f"/executions/{e.execution_id}/")},
+                    {"title": "Execution Detail", "url": _monitor_url(f"/workflow-executions/{e.execution_id}/")},
                 ],
             }
         except WorkflowExecution.DoesNotExist:
@@ -1013,7 +1013,7 @@ async def list_messages(
         if message_type:
             params.append(f"message_type={message_type}")
         query_string = "&".join(params)
-        url = _monitor_url(f"/messages/?{query_string}" if query_string else "/messages/")
+        url = _monitor_url(f"/workflow/messages/?{query_string}" if query_string else "/workflow/messages/")
 
         return {
             "items": [
@@ -2368,7 +2368,7 @@ async def get_workflow_monitor(execution_id: str) -> dict:
             "end_time": db_end_time.isoformat() if db_end_time else None,
             "duration_seconds": duration_seconds,
             "monitor_urls": [
-                {"title": "Execution Detail", "url": _monitor_url(f"/executions/{execution_id}/")},
+                {"title": "Execution Detail", "url": _monitor_url(f"/workflow-executions/{execution_id}/")},
             ],
         }
 
@@ -2413,7 +2413,7 @@ async def list_workflow_monitors() -> list:
         return {
             "items": items,
             "monitor_urls": [
-                {"title": "Executions List", "url": _monitor_url("/executions/")},
+                {"title": "Executions List", "url": _monitor_url("/workflow-executions/")},
             ],
         }
 
