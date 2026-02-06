@@ -617,6 +617,41 @@ class RucioEndpoint(models.Model):
         return self.endpoint_name
 
 
+class AIMemory(models.Model):
+    """
+    AI dialogue history for cross-session context.
+
+    Records exchanges between developers and AI assistants (Claude Code)
+    to enable context continuity across sessions. Opt-in via SWF_DIALOGUE_TURNS env var.
+    """
+    id = models.AutoField(primary_key=True)
+    username = models.CharField(max_length=100, db_index=True,
+                                help_text="Developer username")
+    session_id = models.CharField(max_length=255, db_index=True,
+                                  help_text="Claude Code session ID")
+    role = models.CharField(max_length=20,
+                           help_text="'user' or 'assistant'")
+    content = models.TextField(help_text="Message content")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    # Optional context
+    namespace = models.CharField(max_length=100, null=True, blank=True,
+                                help_text="Testbed namespace if applicable")
+    project_path = models.CharField(max_length=500, null=True, blank=True,
+                                   help_text="Project directory path")
+
+    class Meta:
+        db_table = 'swf_ai_memory'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['username', '-created_at']),
+        ]
+
+    def __str__(self):
+        preview = self.content[:50] + '...' if len(self.content) > 50 else self.content
+        return f"{self.username}/{self.role}: {preview}"
+
+
 # Import workflow models to register them with Django
 from .workflow_models import (
     STFWorkflow,
