@@ -2156,6 +2156,103 @@ def ensure_namespace(request):
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+# ==================== AI MEMORY REST ENDPOINTS ====================
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def ai_memory_record(request):
+    """Record a dialogue exchange for AI memory persistence.
+
+    Called by Claude Code hooks (not MCP clients) to store dialogue.
+    No auth required — local hook scripts only.
+    """
+    from .models import AIMemory
+
+    username = request.data.get('username')
+    session_id = request.data.get('session_id')
+    role = request.data.get('role')
+    content = request.data.get('content')
+
+    if not all([username, session_id, role, content]):
+        return Response(
+            {'error': 'username, session_id, role, and content are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if role not in ('user', 'assistant'):
+        return Response(
+            {'error': f"Invalid role '{role}'. Must be 'user' or 'assistant'."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        record = AIMemory.objects.create(
+            username=username,
+            session_id=session_id,
+            role=role,
+            content=content,
+            namespace=request.data.get('namespace'),
+            project_path=request.data.get('project_path'),
+        )
+        return Response({
+            'id': record.id,
+            'status': 'success',
+        })
+    except Exception as e:
+        return Response(
+            {'error': str(e), 'status': 'error'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def ai_memory_load(request):
+    """Load recent dialogue history for session context.
+
+    Called by Claude Code hooks at session start.
+    No auth required — local hook scripts only.
+    """
+    from .models import AIMemory
+
+    username = request.query_params.get('username')
+    if not username:
+        return Response(
+            {'error': 'username query parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        turns = int(request.query_params.get('turns', '20'))
+    except ValueError:
+        turns = 20
+
+    namespace = request.query_params.get('namespace')
+    max_messages = turns * 2
+
+    qs = AIMemory.objects.filter(username=username)
+    if namespace:
+        qs = qs.filter(namespace=namespace)
+
+    recent = qs.order_by('-created_at')[:max_messages]
+    messages = list(reversed([
+        {
+            'role': m.role,
+            'content': m.content,
+            'created_at': m.created_at.isoformat() if m.created_at else None,
+            'session_id': m.session_id,
+        }
+        for m in recent
+    ]))
+
+    return Response({
+        'items': messages,
+        'count': len(messages),
+    })
+
+
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
 
 @login_required
