@@ -750,8 +750,11 @@ async def swf_check_agent_manager(username: str = None) -> dict:
                 "namespace": agent.namespace,
                 "last_heartbeat": agent.last_heartbeat.isoformat() if agent.last_heartbeat else None,
                 "operational_state": agent.operational_state,
+                "status": agent.status,
+                "description": agent.description,
                 "control_queue": control_queue,
                 "agents_running": metadata.get('agents_running', False),
+                "supervisord_healthy": metadata.get('supervisord_healthy'),
             }
         except SystemAgent.DoesNotExist:
             return {
@@ -1031,19 +1034,34 @@ async def swf_get_testbed_status(username: str = None) -> dict:
 
     agents_data = await fetch_agents()
 
-    return {
+    alive = manager_status.get('alive', False)
+    sv_healthy = manager_status.get('supervisord_healthy')
+    manager_error = manager_status.get('status') == 'ERROR'
+    ready = alive and not manager_error and agents_data['running'] == 0
+
+    result = {
         'username': username,
         'agent_manager': {
-            'alive': manager_status.get('alive'),
+            'alive': alive,
             'namespace': namespace,
             'operational_state': manager_status.get('operational_state'),
+            'status': manager_status.get('status'),
             'last_heartbeat': manager_status.get('last_heartbeat'),
+            'supervisord_healthy': sv_healthy,
         },
         'agents': agents_data['agents'],
         'summary': {
             'running': agents_data['running'],
             'stopped': agents_data['stopped'],
         },
-        'ready': manager_status.get('alive', False) and agents_data['running'] == 0,
-        'note': 'ready=True means testbed is idle and ready to start' if agents_data['running'] == 0 else None,
+        'ready': ready,
     }
+
+    if not alive:
+        result['error'] = 'Agent manager is not running. Run /check-testbed to bootstrap infrastructure.'
+    elif manager_error:
+        result['error'] = f"Agent manager reports ERROR: {manager_status.get('description', 'unknown')}"
+    elif agents_data['running'] == 0:
+        result['note'] = 'Testbed is idle and ready to start'
+
+    return result
