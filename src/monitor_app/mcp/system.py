@@ -773,7 +773,7 @@ async def swf_check_agent_manager(username: str = None) -> dict:
 
 
 @mcp.tool()
-async def swf_start_user_testbed(username: str = None, config_name: str = "testbed.toml") -> dict:
+async def swf_start_user_testbed(username: str = None, config_name: str = None) -> dict:
     """
     Start a user's testbed via their agent manager daemon.
 
@@ -786,6 +786,8 @@ async def swf_start_user_testbed(username: str = None, config_name: str = "testb
     Args:
         username: The username whose testbed to start. If not provided, uses current user.
         config_name: Config file name in workflows/ directory (default: testbed.toml).
+                     If not provided, agent manager uses its already-loaded config
+                     (from SWF_TESTBED_CONFIG env var or default).
 
     Returns:
         Success/failure status. If agent manager is not running, provides instructions.
@@ -818,86 +820,34 @@ async def swf_start_user_testbed(username: str = None, config_name: str = "testb
         }
 
     control_queue = f'/queue/agent_control.{username}'
-    instance_name = f'agent-manager-{username}'
 
     @sync_to_async
-    def send_commands():
-        import time
+    def send_command():
         from ..activemq_connection import ActiveMQConnectionManager
         mq = ActiveMQConnectionManager()
 
-        old_pid = None
-        try:
-            old_agent = SystemAgent.objects.get(instance_name=instance_name)
-            old_pid = old_agent.pid
-            old_heartbeat = old_agent.last_heartbeat
-        except SystemAgent.DoesNotExist:
-            old_heartbeat = None
-
-        restart_msg = {
-            'command': 'restart',
-            'timestamp': datetime.now().isoformat(),
-            'source': 'mcp'
-        }
-        if not mq.send_message(control_queue, json.dumps(restart_msg)):
-            return {
-                "success": False,
-                "error": "Failed to send restart command to ActiveMQ",
-                "username": username,
-            }
-
-        logger.info(f"MCP start_user_testbed: sent restart command, waiting for new agent manager")
-
-        max_wait = 15
-        poll_interval = 1
-        waited = 0
-        new_agent_ready = False
-
-        while waited < max_wait:
-            time.sleep(poll_interval)
-            waited += poll_interval
-            try:
-                agent = SystemAgent.objects.get(instance_name=instance_name)
-                now = timezone.now()
-                is_new = (
-                    (old_pid and agent.pid and agent.pid != old_pid) or
-                    (agent.last_heartbeat and old_heartbeat and agent.last_heartbeat > old_heartbeat)
-                )
-                is_healthy = (
-                    agent.operational_state == 'READY' and
-                    agent.last_heartbeat and
-                    (now - agent.last_heartbeat).total_seconds() < 60
-                )
-                if is_new and is_healthy:
-                    new_agent_ready = True
-                    logger.info(f"MCP start_user_testbed: new agent manager ready (pid={agent.pid})")
-                    break
-            except SystemAgent.DoesNotExist:
-                pass
-
-        if not new_agent_ready:
-            logger.warning(f"MCP start_user_testbed: agent manager not confirmed ready after {max_wait}s")
-
         start_msg = {
             'command': 'start_testbed',
-            'config_name': config_name,
             'timestamp': datetime.now().isoformat(),
             'source': 'mcp'
         }
+        if config_name:
+            start_msg['config_name'] = config_name
+
+        config_desc = config_name or 'agent manager default'
 
         if mq.send_message(control_queue, json.dumps(start_msg)):
             logger.info(
-                f"MCP start_user_testbed: sent start_testbed command for user '{username}' "
-                f"(config={config_name})"
+                f"MCP start_user_testbed: sent start_testbed for '{username}' "
+                f"(config={config_desc})"
             )
             return {
                 "success": True,
-                "message": f"Agent manager restarted and start command sent",
+                "message": "Start command sent to agent manager",
                 "username": username,
-                "config_name": config_name,
+                "config": config_desc,
                 "control_queue": control_queue,
-                "new_agent_ready": new_agent_ready,
-                "note": "Agents will start asynchronously. Use swf_list_agents to verify.",
+                "note": "Agents will start asynchronously. Use swf_get_testbed_status to verify.",
             }
         else:
             return {
@@ -906,7 +856,7 @@ async def swf_start_user_testbed(username: str = None, config_name: str = "testb
                 "username": username,
             }
 
-    return await send_commands()
+    return await send_command()
 
 
 @mcp.tool()
