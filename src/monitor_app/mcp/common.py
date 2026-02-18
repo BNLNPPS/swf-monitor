@@ -25,6 +25,17 @@ def _default_start_time(hours=24):
     return timezone.now() - timedelta(hours=hours)
 
 
+def _get_username(username: str = None) -> str:
+    """Resolve the testbed username: explicit param > SWF_HOME owner > OS user."""
+    if username:
+        return username
+    import os, pwd, getpass
+    swf_home = os.getenv('SWF_HOME', '')
+    if swf_home and os.path.isdir(swf_home):
+        return pwd.getpwuid(os.stat(swf_home).st_uid).pw_name
+    return getpass.getuser()
+
+
 def _monitor_url(path: str) -> str:
     """Build a full monitor URL from a path."""
     import os

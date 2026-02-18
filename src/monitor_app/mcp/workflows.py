@@ -15,7 +15,7 @@ from mcp_server import mcp_server as mcp
 
 from ..models import Run, StfFile, TFSlice, AppLog
 from ..workflow_models import WorkflowDefinition, WorkflowExecution, WorkflowMessage
-from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path
+from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username
 
 logger = logging.getLogger(__name__)
 
@@ -1082,14 +1082,13 @@ async def swf_send_message(message: str, message_type: str = "announcement", met
         Success/failure status with message details
     """
     import json
-    import getpass
     from datetime import datetime
 
     @sync_to_async
     def do_send():
         from ..activemq_connection import ActiveMQConnectionManager
 
-        username = getpass.getuser()
+        username = _get_username()
         sender = f"{username}-personal-agent"
 
         namespace = None

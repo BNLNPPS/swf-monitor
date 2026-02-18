@@ -13,7 +13,7 @@ from mcp_server import mcp_server as mcp
 
 from ..models import SystemAgent, RunState, PersistentState, SystemStateEvent, AppLog
 from ..workflow_models import WorkflowExecution, WorkflowMessage, Namespace
-from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path
+from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username
 
 logger = logging.getLogger(__name__)
 
@@ -52,22 +52,8 @@ async def swf_get_system_state(username: str = None) -> dict:
     import os
     from pathlib import Path
 
-    # Determine username and SWF_HOME path
-    if username:
-        swf_home = f'/data/{username}/github'
-    else:
-        swf_home = os.getenv('SWF_HOME', '')
-        if swf_home and '/data/' in swf_home:
-            parts = swf_home.split('/')
-            try:
-                idx = parts.index('data')
-                if idx + 1 < len(parts):
-                    username = parts[idx + 1]
-            except (ValueError, IndexError):
-                pass
-        if not username:
-            import getpass
-            username = getpass.getuser()
+    username = _get_username(username)
+    swf_home = os.getenv('SWF_HOME', f'/data/{username}/github')
 
     @sync_to_async
     def fetch():
@@ -737,10 +723,7 @@ async def swf_check_agent_manager(username: str = None) -> dict:
         - agents_running: Whether testbed agents are running
         - how_to_start: Instructions if not alive
     """
-    import getpass
-
-    if not username:
-        username = getpass.getuser()
+    username = _get_username(username)
 
     instance_name = f'agent-manager-{username}'
     control_queue = f'/queue/agent_control.{username}'
@@ -805,11 +788,9 @@ async def swf_start_user_testbed(username: str = None, config_name: str = "testb
         Success/failure status. If agent manager is not running, provides instructions.
     """
     import json
-    import getpass
     from datetime import datetime
 
-    if not username:
-        username = getpass.getuser()
+    username = _get_username(username)
 
     # First check if agent manager is alive
     manager_status = await swf_check_agent_manager(username)
@@ -940,11 +921,9 @@ async def swf_stop_user_testbed(username: str = None) -> dict:
         Success/failure status.
     """
     import json
-    import getpass
     from datetime import datetime
 
-    if not username:
-        username = getpass.getuser()
+    username = _get_username(username)
 
     manager_status = await swf_check_agent_manager(username)
     if not manager_status.get('alive'):
@@ -1004,10 +983,7 @@ async def swf_get_testbed_status(username: str = None) -> dict:
         - agents: List of workflow agents with status
         - summary: Quick counts of running/stopped agents
     """
-    import getpass
-
-    if not username:
-        username = getpass.getuser()
+    username = _get_username(username)
 
     manager_status = await swf_check_agent_manager(username)
     namespace = manager_status.get('namespace')
