@@ -434,11 +434,10 @@ All parameters are optional - defaults are read from the user's `testbed.toml`:
 
 **Returns:** Success/failure status with execution details. Workflow runs asynchronously.
 
-**After starting, monitor with:**
-- `get_workflow_execution(execution_id)` -> status: running/completed/failed/terminated
-- `swf_list_messages(execution_id='...')` -> progress events
-- `swf_list_logs(execution_id='...')` -> workflow logs including errors
-- `get_workflow_monitor(execution_id)` -> aggregated status and events
+**After starting — ACTIVELY POLL, do not sleep:**
+- Poll `swf_get_workflow_monitor(execution_id)` every 10-15s until completion
+- Report progress to user as it evolves
+- Check `swf_list_logs(level='ERROR')` after completion
 
 **`swf_stop_workflow`:** Sends a stop command to the DAQ Simulator agent. The workflow stops gracefully at the next checkpoint. Use `swf_list_workflow_executions(currently_running=True)` to find running execution IDs.
 
@@ -474,6 +473,7 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 | Tool | Parameters | Description |
 |------|------------|-------------|
 | `swf_check_agent_manager` | `username` | Check if a user's agent manager daemon is alive. |
+| `swf_get_testbed_status` | `username` | Comprehensive testbed status: agent manager, agents, running workflows, readiness. |
 | `swf_start_user_testbed` | `username`, `config_name` | Start a user's testbed via their agent manager. |
 | `swf_stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
 
@@ -486,6 +486,14 @@ The User Agent Manager is a per-user daemon that enables MCP-driven testbed cont
 - `control_queue`: The queue to send commands to (e.g., '/queue/agent_control.wenauseic')
 - `agents_running`: Whether testbed agents are currently running
 - `how_to_start`: Instructions if not alive
+
+**`swf_get_testbed_status` returns:**
+- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat
+- `agents`: List of workflow agents with running/stopped status
+- `summary`: Running and stopped agent counts
+- `running_workflows`: Count of currently executing workflows
+- `ready`: True when agent manager alive, agents running, and no workflow executing
+- `note`: Human-readable status summary
 
 **`swf_start_user_testbed`:**
 - Sends `start_testbed` command to the user's agent manager
@@ -549,9 +557,9 @@ This tool aggregates information from workflow messages and logs, providing a si
 | Logs | `swf_list_logs`, `swf_get_log_entry` | 2 |
 | Workflow Control | `swf_start_workflow`, `swf_stop_workflow`, `swf_end_execution` | 3 |
 | Agent Management | `swf_kill_agent` | 1 |
-| User Agent Manager | `swf_check_agent_manager`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 3 |
+| User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| **Total** | | **28** |
+| **Total** | | **29** |
 
 ---
 
@@ -708,7 +716,12 @@ swf-monitor/
 │   └── MCP.md                              # This documentation
 ├── src/
 │   ├── monitor_app/
-│   │   ├── mcp.py                          # Tool definitions (API code)
+│   │   ├── mcp/                            # MCP tool definitions (package)
+│   │   │   ├── __init__.py                 # Tool registration
+│   │   │   ├── system.py                   # System, agent, namespace tools
+│   │   │   ├── workflows.py               # Workflow, message, run, STF tools
+│   │   │   ├── ai_memory.py               # AI memory tools
+│   │   │   └── common.py                  # Shared utilities
 │   │   ├── auth0.py                        # JWT validation with Auth0 JWKS
 │   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
 │   │   └── views.py                        # OAuth protected resource metadata
@@ -719,7 +732,7 @@ swf-monitor/
 
 | File | Purpose |
 |------|---------|
-| `src/monitor_app/mcp.py` | **Tool definitions** - all MCP tool functions with docstrings |
+| `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, common.py) |
 | `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
 | `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |
 | `src/swf_monitor_project/settings.py` | **Server config** - MCP config, Auth0 settings |
@@ -736,9 +749,9 @@ MCP is integrated directly into Django rather than as a separate service:
 
 ### Tool Registration
 
-Tools are defined in `monitor_app/mcp.py` using the `@mcp.tool()` decorator on async functions. Each function becomes an MCP tool that LLMs can discover and call.
+Tools are defined in `monitor_app/mcp/` using the `@mcp.tool()` decorator on async functions. Each function becomes an MCP tool that LLMs can discover and call.
 
-The module is auto-discovered by django-mcp-server (must be named `mcp.py`).
+The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init__.py`.
 
 **Tool docstrings are critical** - they are the only documentation the LLM sees when deciding which tool to use and how to call it.
 
@@ -802,7 +815,7 @@ async def my_new_tool(param: str, start_time: str = None, end_time: str = None) 
 ```
 
 **IMPORTANT:** After adding a new `@mcp.tool()`, you MUST also:
-1. Add the tool to the hardcoded list in `list_available_tools()` at the top of `mcp.py`
+1. Add the tool to the hardcoded list in `swf_list_available_tools()` in `mcp/common.py`
 2. Update the server instructions in `settings.py` (`DJANGO_MCP_GLOBAL_SERVER_CONFIG`)
 3. Update this documentation (`docs/MCP.md`)
 

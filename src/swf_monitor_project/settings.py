@@ -268,10 +268,9 @@ COMMON QUERIES:
 - Failed workflows? → swf_list_workflow_executions(status='failed')
 - Send announcement/test message? → swf_send_message(message='...', message_type='announcement')
 
-AFTER swf_start_workflow:
-1. swf_get_workflow_execution(execution_id) → status: running/completed/failed/terminated
-2. swf_list_messages(execution_id='...') → progress: run_imminent, start_run, stf_gen, end_run
-3. swf_list_logs(execution_id='...') → workflow logs including errors
+AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
+Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.
+Report progress to user as it evolves. Check swf_list_logs(level='ERROR') after.
 
 FILTERING:
 - All list tools support start_time/end_time parameters (ISO datetime strings)

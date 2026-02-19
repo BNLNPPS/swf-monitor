@@ -166,11 +166,12 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             'description': request.data.get('description', ''),
             'status': request.data.get('status', 'OK'),
             'agent_url': request.data.get('agent_url', None),
-            'workflow_enabled': request.data.get('workflow_enabled', False),
             'namespace': request.data.get('namespace'),
             'last_heartbeat': timezone.now(),
         }
-        # Include process identification fields if provided
+        # Only update optional fields if explicitly provided in the heartbeat
+        if 'workflow_enabled' in request.data:
+            defaults['workflow_enabled'] = request.data['workflow_enabled']
         if 'operational_state' in request.data:
             defaults['operational_state'] = request.data['operational_state']
         if 'pid' in request.data:
@@ -182,11 +183,6 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             instance_name=instance_name,
             defaults=defaults
         )
-        
-        # Explicitly update workflow_enabled if it was provided (to handle existing records)
-        if not created and 'workflow_enabled' in request.data:
-            agent.workflow_enabled = request.data.get('workflow_enabled', False)
-            agent.save(update_fields=['workflow_enabled'])
         
         # Return the full agent data
         return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
@@ -2154,6 +2150,103 @@ def ensure_namespace(request):
             'error': str(e),
             'status': 'error'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==================== AI MEMORY REST ENDPOINTS ====================
+
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def ai_memory_record(request):
+    """Record a dialogue exchange for AI memory persistence.
+
+    Called by Claude Code hooks (not MCP clients) to store dialogue.
+    No auth required — local hook scripts only.
+    """
+    from .models import AIMemory
+
+    username = request.data.get('username')
+    session_id = request.data.get('session_id')
+    role = request.data.get('role')
+    content = request.data.get('content')
+
+    if not all([username, session_id, role, content]):
+        return Response(
+            {'error': 'username, session_id, role, and content are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if role not in ('user', 'assistant'):
+        return Response(
+            {'error': f"Invalid role '{role}'. Must be 'user' or 'assistant'."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        record = AIMemory.objects.create(
+            username=username,
+            session_id=session_id,
+            role=role,
+            content=content,
+            namespace=request.data.get('namespace'),
+            project_path=request.data.get('project_path'),
+        )
+        return Response({
+            'id': record.id,
+            'status': 'success',
+        })
+    except Exception as e:
+        return Response(
+            {'error': str(e), 'status': 'error'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+@api_view(['GET'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def ai_memory_load(request):
+    """Load recent dialogue history for session context.
+
+    Called by Claude Code hooks at session start.
+    No auth required — local hook scripts only.
+    """
+    from .models import AIMemory
+
+    username = request.query_params.get('username')
+    if not username:
+        return Response(
+            {'error': 'username query parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        turns = int(request.query_params.get('turns', '20'))
+    except ValueError:
+        turns = 20
+
+    namespace = request.query_params.get('namespace')
+    max_messages = turns * 2
+
+    qs = AIMemory.objects.filter(username=username)
+    if namespace:
+        qs = qs.filter(namespace=namespace)
+
+    recent = qs.order_by('-created_at')[:max_messages]
+    messages = list(reversed([
+        {
+            'role': m.role,
+            'content': m.content,
+            'created_at': m.created_at.isoformat() if m.created_at else None,
+            'session_id': m.session_id,
+        }
+        for m in recent
+    ]))
+
+    return Response({
+        'items': messages,
+        'count': len(messages),
+    })
 
 
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
