@@ -234,4 +234,15 @@ def get_available_tools_list() -> list:
             "description": "Get recent dialogue history for session context",
             "parameters": ["username", "turns", "namespace"],
         },
+        # PanDA Monitor tools
+        {
+            "name": "panda_list_jobs",
+            "description": "List PanDA jobs from ePIC production DB with summary stats. Cursor-based pagination via before_id.",
+            "parameters": ["days", "status", "username", "site", "taskid", "reqid", "limit", "before_id"],
+        },
+        {
+            "name": "panda_diagnose_jobs",
+            "description": "Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id.",
+            "parameters": ["days", "username", "site", "taskid", "reqid", "error_component", "limit", "before_id"],
+        },
     ]
