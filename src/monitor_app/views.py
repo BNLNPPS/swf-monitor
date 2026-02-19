@@ -166,11 +166,12 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             'description': request.data.get('description', ''),
             'status': request.data.get('status', 'OK'),
             'agent_url': request.data.get('agent_url', None),
-            'workflow_enabled': request.data.get('workflow_enabled', False),
             'namespace': request.data.get('namespace'),
             'last_heartbeat': timezone.now(),
         }
-        # Include process identification fields if provided
+        # Only update optional fields if explicitly provided in the heartbeat
+        if 'workflow_enabled' in request.data:
+            defaults['workflow_enabled'] = request.data['workflow_enabled']
         if 'operational_state' in request.data:
             defaults['operational_state'] = request.data['operational_state']
         if 'pid' in request.data:
@@ -182,11 +183,6 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             instance_name=instance_name,
             defaults=defaults
         )
-        
-        # Explicitly update workflow_enabled if it was provided (to handle existing records)
-        if not created and 'workflow_enabled' in request.data:
-            agent.workflow_enabled = request.data.get('workflow_enabled', False)
-            agent.save(update_fields=['workflow_enabled'])
         
         # Return the full agent data
         return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
