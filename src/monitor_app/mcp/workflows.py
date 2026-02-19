@@ -702,10 +702,10 @@ async def swf_start_workflow(
     Returns:
         Success/failure status with execution_id if started.
 
-    After starting, monitor with:
-        get_workflow_execution(execution_id) → status: running/completed/failed/terminated
-        list_messages(execution_id='...') → progress events
-        list_logs(execution_id='...') → workflow logs including errors
+    After starting, ACTIVELY POLL — do not sleep:
+        get_workflow_monitor(execution_id) every 10-15s until completion
+        Report progress to user as it evolves
+        list_logs(level='ERROR') after completion
     """
     import json
     from datetime import datetime

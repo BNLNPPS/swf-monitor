@@ -434,11 +434,10 @@ All parameters are optional - defaults are read from the user's `testbed.toml`:
 
 **Returns:** Success/failure status with execution details. Workflow runs asynchronously.
 
-**After starting, monitor with:**
-- `get_workflow_execution(execution_id)` -> status: running/completed/failed/terminated
-- `swf_list_messages(execution_id='...')` -> progress events
-- `swf_list_logs(execution_id='...')` -> workflow logs including errors
-- `get_workflow_monitor(execution_id)` -> aggregated status and events
+**After starting — ACTIVELY POLL, do not sleep:**
+- Poll `swf_get_workflow_monitor(execution_id)` every 10-15s until completion
+- Report progress to user as it evolves
+- Check `swf_list_logs(level='ERROR')` after completion
 
 **`swf_stop_workflow`:** Sends a stop command to the DAQ Simulator agent. The workflow stops gracefully at the next checkpoint. Use `swf_list_workflow_executions(currently_running=True)` to find running execution IDs.
 
