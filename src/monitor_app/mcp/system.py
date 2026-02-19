@@ -987,7 +987,18 @@ async def swf_get_testbed_status(username: str = None) -> dict:
     alive = manager_status.get('alive', False)
     sv_healthy = manager_status.get('supervisord_healthy')
     manager_error = manager_status.get('status') == 'ERROR'
-    ready = alive and not manager_error and agents_data['running'] == 0
+
+    @sync_to_async
+    def check_running_workflows():
+        if not namespace:
+            return 0
+        return WorkflowExecution.objects.filter(
+            namespace=namespace, status='running'
+        ).count()
+
+    running_workflows = await check_running_workflows()
+    has_agents = agents_data['running'] > 0
+    ready = alive and not manager_error and has_agents and running_workflows == 0
 
     result = {
         'username': username,
@@ -1004,6 +1015,7 @@ async def swf_get_testbed_status(username: str = None) -> dict:
             'running': agents_data['running'],
             'stopped': agents_data['stopped'],
         },
+        'running_workflows': running_workflows,
         'ready': ready,
     }
 
@@ -1011,7 +1023,11 @@ async def swf_get_testbed_status(username: str = None) -> dict:
         result['error'] = 'Agent manager is not running. Run /check-testbed to bootstrap infrastructure.'
     elif manager_error:
         result['error'] = f"Agent manager reports ERROR: {manager_status.get('description', 'unknown')}"
-    elif agents_data['running'] == 0:
-        result['note'] = 'Testbed is idle and ready to start'
+    elif running_workflows > 0:
+        result['note'] = f'{running_workflows} workflow(s) currently running'
+    elif has_agents:
+        result['note'] = 'Testbed is idle and ready to run a workflow'
+    else:
+        result['note'] = 'No agents running. Start testbed first.'
 
     return result
