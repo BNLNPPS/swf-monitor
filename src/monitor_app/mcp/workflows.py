@@ -13,7 +13,7 @@ from asgiref.sync import sync_to_async
 
 from mcp_server import mcp_server as mcp
 
-from ..models import Run, StfFile, TFSlice, AppLog
+from ..models import Run, StfFile, TFSlice, AppLog, SystemAgent
 from ..workflow_models import WorkflowDefinition, WorkflowExecution, WorkflowMessage
 from .common import _parse_time, _default_start_time, _monitor_url, _get_testbed_config_path, _get_username
 
@@ -740,8 +740,25 @@ async def swf_start_workflow(
                 logger.warning(f"Failed to read {testbed_toml}: {e}")
 
         actual_workflow_name = workflow_name or toml_workflow_name or 'stf_datataking'
-        actual_namespace = namespace or toml_namespace or 'torre1'
+        actual_namespace = namespace or toml_namespace
         actual_config = config or toml_config or 'fast_processing_default'
+
+        # If namespace not from caller or TOML, use the running agent manager's
+        # namespace from DB — it reflects the actual loaded config
+        if not actual_namespace:
+            try:
+                cutoff = timezone.now() - timedelta(minutes=5)
+                am = SystemAgent.objects.filter(
+                    agent_type='agent_manager',
+                    last_heartbeat__gte=cutoff
+                ).order_by('-last_heartbeat').first()
+                if am and am.namespace:
+                    actual_namespace = am.namespace
+                    logger.info(f"Using namespace '{am.namespace}' from agent manager '{am.instance_name}'")
+            except Exception:
+                pass
+        if not actual_namespace:
+            actual_namespace = 'torre1'
         actual_realtime = realtime if realtime is not None else (toml_realtime if toml_realtime is not None else True)
 
         params = dict(toml_params)
