@@ -267,6 +267,9 @@ COMMON QUERIES:
 - Activity in a namespace? → swf_get_namespace(namespace='name')
 - Failed workflows? → swf_list_workflow_executions(status='failed')
 - Send announcement/test message? → swf_send_message(message='...', message_type='announcement')
+- PanDA task overview? → panda_list_tasks(days=7)
+- Failed PanDA tasks? → panda_list_tasks(status='failed')
+- Tasks for a user? → panda_list_tasks(username='someone')
 
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.

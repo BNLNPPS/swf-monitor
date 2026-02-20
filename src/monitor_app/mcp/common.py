@@ -245,4 +245,9 @@ def get_available_tools_list() -> list:
             "description": "Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id.",
             "parameters": ["days", "username", "site", "taskid", "reqid", "error_component", "limit", "before_id"],
         },
+        {
+            "name": "panda_list_tasks",
+            "description": "List JEDI tasks from ePIC production DB with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id.",
+            "parameters": ["days", "status", "username", "taskname", "reqid", "campaign", "taskid", "limit", "before_id"],
+        },
     ]

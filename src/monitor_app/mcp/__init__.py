@@ -78,6 +78,7 @@ from .ai_memory import (
 from .pandamon import (
     panda_list_jobs,
     panda_diagnose_jobs,
+    panda_list_tasks,
 )
 
 
@@ -135,4 +136,5 @@ __all__ = [
     # PanDA Monitor
     'panda_list_jobs',
     'panda_diagnose_jobs',
+    'panda_list_tasks',
 ]

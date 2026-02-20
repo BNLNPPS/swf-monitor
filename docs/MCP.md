@@ -540,6 +540,43 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 ---
 
+### PanDA Production Monitoring
+
+Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs from ePIC production DB with summary stats. Cursor-based pagination via before_id. |
+| `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
+| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `campaign`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id. |
+
+**`panda_list_tasks` filters:**
+- `days`: Time window in days (default 7)
+- `status`: Task status (done, failed, running, ready, broken, aborted, pending, finished)
+- `username`: Task owner (supports SQL LIKE with %)
+- `taskname`: Task name (supports SQL LIKE with %)
+- `reqid`: Request ID
+- `campaign`: Campaign name (supports SQL LIKE with %)
+- `taskid`: Specific JEDI task ID
+- `limit`: Max tasks to return (default 100)
+- `before_id`: Pagination cursor
+
+**Returns per task:**
+- `jeditaskid`, `taskname`, `status`, `superstatus`, `username`
+- `creationdate`, `starttime`, `endtime`, `modificationtime`
+- `reqid`, `campaign`, `processingtype`, `transpath`
+- `progress`, `failurerate`, `errordialog`
+- `site`, `corecount`, `taskpriority`, `currentpriority`
+- `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
+
+**Diagnostic use cases:**
+- Task overview: `panda_list_tasks(days=7)`
+- Failed tasks: `panda_list_tasks(status='failed')`
+- Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
+- Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
+
+---
+
 ## Tool Summary
 
 | Category | Tools | Count |
@@ -559,7 +596,8 @@ This tool aggregates information from workflow messages and logs, providing a si
 | Agent Management | `swf_kill_agent` | 1 |
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| **Total** | | **29** |
+| PanDA Production | `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks` | 3 |
+| **Total** | | **32** |
 
 ---
 

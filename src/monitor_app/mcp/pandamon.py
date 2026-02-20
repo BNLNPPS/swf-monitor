@@ -1,9 +1,10 @@
 """
 PanDA Monitor MCP tools.
 
-Provides LLM access to the PanDA job database (doma_panda schema) for
-ePIC production monitoring. Queries jobsactive4 (current jobs) and
-jobsarchived4 (recently completed jobs) via the 'panda' database connection.
+Provides LLM access to the PanDA database (doma_panda schema) for
+ePIC production monitoring:
+- Jobs: queries jobsactive4 + jobsarchived4 via UNION ALL
+- Tasks: queries jedi_tasks (single table)
 
 Error diagnostics are the core value — 7 error components (pilot, executor,
 DDM, brokerage, dispatcher, supervisor, taskbuffer) each with code + diag text.
@@ -422,6 +423,188 @@ async def panda_diagnose_jobs(
                 "taskid": taskid,
                 "reqid": reqid,
                 "error_component": error_component,
+            },
+        }
+
+    return await fetch()
+
+
+# -----------------------------------------------------------------------------
+# JEDI Tasks
+# -----------------------------------------------------------------------------
+
+# Fields for task listing — useful subset of 82 columns
+TASK_LIST_FIELDS = [
+    'jeditaskid', 'taskname', 'status', 'superstatus', 'username',
+    'creationdate', 'starttime', 'endtime', 'modificationtime',
+    'reqid', 'campaign', 'processingtype', 'transpath',
+    'progress', 'failurerate', 'errordialog',
+    'site', 'corecount', 'taskpriority', 'currentpriority',
+    'gshare', 'attemptnr', 'parent_tid', 'workinggroup',
+]
+
+
+def _build_task_query(fields, where_clauses, params, order_by, limit):
+    """Build a query against the jedi_tasks table. Returns (sql, params)."""
+    field_list = ', '.join(f'"{f}"' for f in fields)
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+    sql = f"""
+        SELECT {field_list}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+        ORDER BY {order_by}
+        LIMIT {limit}
+    """
+    return sql, list(params)
+
+
+def _build_task_count_query(where_clauses, params):
+    """Build a count-by-status query for jedi_tasks."""
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+    sql = f"""
+        SELECT "status", COUNT(*)
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+        GROUP BY "status"
+        ORDER BY COUNT(*) DESC
+    """
+    return sql, list(params)
+
+
+@mcp.tool()
+async def panda_list_tasks(
+    days: int = 7,
+    status: str = None,
+    username: str = None,
+    taskname: str = None,
+    reqid: int = None,
+    campaign: str = None,
+    taskid: int = None,
+    limit: int = 100,
+    before_id: int = None,
+) -> dict:
+    """
+    List JEDI tasks from the ePIC production database with summary statistics.
+
+    Tasks are higher-level units than jobs — each task spawns one or more jobs.
+    Returns tasks in reverse ID order (newest first) with cursor-based pagination.
+
+    Args:
+        days: Time window in days (default 7). Tasks with modificationtime within this window.
+        status: Filter by task status (e.g. 'done', 'failed', 'running', 'ready', 'broken', 'aborted').
+        username: Filter by task owner. Supports SQL LIKE with %.
+        taskname: Filter by task name. Supports SQL LIKE with %.
+        reqid: Filter by request ID.
+        campaign: Filter by campaign name. Supports SQL LIKE with %.
+        taskid: Filter by specific JEDI task ID (jeditaskid).
+        limit: Maximum tasks to return (default 100).
+        before_id: Pagination cursor — return tasks with jeditaskid < this value.
+
+    Returns:
+        summary: Task counts by status for the full query (not just this page).
+        tasks: List of task records with key fields.
+        pagination: {before_id, has_more, next_before_id} for incremental pulling.
+        total_in_window: Total tasks matching filters in the time window.
+    """
+    @sync_to_async
+    def fetch():
+        cutoff = timezone.now() - timedelta(days=days)
+        where = ['"modificationtime" >= %s']
+        params = [cutoff]
+
+        if status:
+            where.append('"status" = %s')
+            params.append(status)
+        if username:
+            if '%' in username:
+                where.append('"username" LIKE %s')
+            else:
+                where.append('"username" = %s')
+            params.append(username)
+        if taskname:
+            if '%' in taskname:
+                where.append('"taskname" LIKE %s')
+            else:
+                where.append('"taskname" = %s')
+            params.append(taskname)
+        if reqid:
+            where.append('"reqid" = %s')
+            params.append(reqid)
+        if campaign:
+            if '%' in campaign:
+                where.append('"campaign" LIKE %s')
+            else:
+                where.append('"campaign" = %s')
+            params.append(campaign)
+        if taskid:
+            where.append('"jeditaskid" = %s')
+            params.append(taskid)
+        if before_id:
+            where.append('"jeditaskid" < %s')
+            params.append(before_id)
+
+        conn = connections['panda']
+
+        # Summary counts (without pagination cursor)
+        count_where = [w for w in where if '"jeditaskid" <' not in w]
+        count_params = [p for i, p in enumerate(params) if '"jeditaskid" <' not in where[i]]
+        count_sql, count_full_params = _build_task_count_query(count_where, count_params)
+
+        summary = {}
+        total = 0
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(count_sql, count_full_params)
+                for row in cursor.fetchall():
+                    summary[row[0]] = row[1]
+                    total += row[1]
+        except Exception as e:
+            logger.error(f"panda_list_tasks count query failed: {e}")
+            return {"error": str(e)}
+
+        # Fetch task rows (with pagination)
+        fetch_limit = limit + 1
+        sql, full_params = _build_task_query(
+            TASK_LIST_FIELDS, where, params,
+            order_by='"jeditaskid" DESC',
+            limit=fetch_limit,
+        )
+
+        tasks = []
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, full_params)
+                rows = cursor.fetchall()
+                for row in rows[:limit]:
+                    tasks.append(_row_to_dict(row, TASK_LIST_FIELDS))
+        except Exception as e:
+            logger.error(f"panda_list_tasks query failed: {e}")
+            return {"error": str(e)}
+
+        has_more = len(rows) > limit
+        next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
+
+        return {
+            "summary": summary,
+            "total_in_window": total,
+            "tasks": tasks,
+            "count": len(tasks),
+            "pagination": {
+                "before_id": before_id,
+                "has_more": has_more,
+                "next_before_id": next_before_id,
+                "limit": limit,
+            },
+            "filters": {
+                "days": days,
+                "status": status,
+                "username": username,
+                "taskname": taskname,
+                "reqid": reqid,
+                "campaign": campaign,
+                "taskid": taskid,
             },
         }
 
