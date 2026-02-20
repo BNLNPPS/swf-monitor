@@ -250,4 +250,9 @@ def get_available_tools_list() -> list:
             "description": "List JEDI tasks from ePIC production DB with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id.",
             "parameters": ["days", "status", "username", "taskname", "reqid", "workinggroup", "taskid", "limit", "before_id"],
         },
+        {
+            "name": "panda_error_summary",
+            "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows most common errors with affected tasks, users, sites.",
+            "parameters": ["days", "username", "site", "taskid", "error_source", "limit"],
+        },
     ]

@@ -549,6 +549,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs from ePIC production DB with summary stats. Cursor-based pagination via before_id. |
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id. |
+| `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
 
 **`panda_list_tasks` filters:**
 - `days`: Time window in days (default 7)
@@ -576,6 +577,29 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 - EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
 - Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
 
+**`panda_error_summary` filters:**
+- `days`: Time window in days (default 10)
+- `username`: Filter by job owner (supports SQL LIKE with %)
+- `site`: Filter by computing site (supports SQL LIKE with %)
+- `taskid`: Filter by JEDI task ID
+- `error_source`: Filter to one component (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer)
+- `limit`: Max error patterns to return (default 20)
+
+**Returns per error pattern:**
+- `error_source`: Component name (pilot, executor, ddm, etc.)
+- `error_code`: Numeric error code
+- `error_diag`: Diagnostic message (truncated to 256 chars)
+- `count`: Number of affected jobs
+- `task_count`: Number of affected tasks
+- `users`: List of affected users
+- `sites`: List of affected sites
+
+**Diagnostic use cases:**
+- Top errors this week: `panda_error_summary(days=7)`
+- Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
+- Pilot errors only: `panda_error_summary(error_source='pilot')`
+- Errors for a specific task: `panda_error_summary(taskid=33824)`
+
 ---
 
 ## Tool Summary
@@ -597,8 +621,8 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | Agent Management | `swf_kill_agent` | 1 |
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| PanDA Production | `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks` | 3 |
-| **Total** | | **32** |
+| PanDA Production | `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary` | 4 |
+| **Total** | | **33** |
 
 ---
 

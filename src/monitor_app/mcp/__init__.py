@@ -79,6 +79,7 @@ from .pandamon import (
     panda_list_jobs,
     panda_diagnose_jobs,
     panda_list_tasks,
+    panda_error_summary,
 )
 
 
@@ -137,4 +138,5 @@ __all__ = [
     'panda_list_jobs',
     'panda_diagnose_jobs',
     'panda_list_tasks',
+    'panda_error_summary',
 ]

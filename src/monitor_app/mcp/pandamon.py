@@ -607,3 +607,150 @@ async def panda_list_tasks(
         }
 
     return await fetch()
+
+
+# -----------------------------------------------------------------------------
+# panda_error_summary
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+async def panda_error_summary(
+    days: int = 10,
+    username: str = None,
+    site: str = None,
+    taskid: int = None,
+    error_source: str = None,
+    limit: int = 20,
+) -> dict:
+    """
+    Aggregate error summary across failed PanDA jobs, ranked by frequency.
+
+    Extracts non-zero errors from all 7 error components (pilot, executor, DDM,
+    brokerage, dispatcher, supervisor, taskbuffer) across failed/cancelled/closed
+    jobs, groups by (component, code, diagnostic), and ranks by occurrence count.
+
+    Unlike panda_diagnose_jobs (per-job detail), this tool gives the big picture:
+    "What are the most common errors and who do they affect?"
+
+    Args:
+        days: Time window in days (default 10).
+        username: Filter by job owner (produsername). Supports SQL LIKE with %.
+        site: Filter by computing site. Supports SQL LIKE with %.
+        taskid: Filter by JEDI task ID.
+        error_source: Filter to errors from one component
+                      (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).
+        limit: Maximum error patterns to return (default 20).
+
+    Returns:
+        total_errors: Total error occurrences across all components.
+        errors: Ranked list of error patterns, each with:
+            error_source, error_code, error_diag, count,
+            task_count, users, sites.
+    """
+    @sync_to_async
+    def fetch():
+        cutoff = timezone.now() - timedelta(days=days)
+
+        user_filter = ''
+        site_filter = ''
+        task_filter = ''
+        extra_params = []
+
+        if username:
+            if '%' in username:
+                user_filter = ' AND "produsername" LIKE %s'
+            else:
+                user_filter = ' AND "produsername" = %s'
+            extra_params.append(username)
+        if site:
+            if '%' in site:
+                site_filter = ' AND "computingsite" LIKE %s'
+            else:
+                site_filter = ' AND "computingsite" = %s'
+            extra_params.append(site)
+        if taskid:
+            task_filter = ' AND "jeditaskid" = %s'
+            extra_params.append(taskid)
+
+        filters = user_filter + site_filter + task_filter
+
+        components_to_query = ERROR_COMPONENTS
+        if error_source:
+            components_to_query = [c for c in ERROR_COMPONENTS if c['name'] == error_source]
+            if not components_to_query:
+                return {"error": f"Unknown error_source '{error_source}'. Valid: {[c['name'] for c in ERROR_COMPONENTS]}"}
+
+        parts = []
+        all_params = []
+        for comp in components_to_query:
+            for table in ['jobsactive4', 'jobsarchived4']:
+                parts.append(f"""
+                    SELECT '{comp['name']}' as error_source,
+                           "{comp['code']}" as error_code,
+                           "{comp['diag']}" as error_diag,
+                           "jeditaskid",
+                           "produsername",
+                           "computingsite"
+                    FROM "{PANDA_SCHEMA}"."{table}"
+                    WHERE "modificationtime" >= %s
+                      AND "jobstatus" IN ('failed','cancelled','closed')
+                      AND "{comp['code']}" IS NOT NULL
+                      AND "{comp['code']}" != 0
+                      {filters}
+                """)
+                all_params.extend([cutoff] + extra_params)
+
+        union_sql = ' UNION ALL '.join(parts)
+        sql = f"""
+            SELECT error_source, error_code,
+                   LEFT(error_diag, 256) as error_diag,
+                   COUNT(*) as count,
+                   COUNT(DISTINCT jeditaskid) as task_count,
+                   array_agg(DISTINCT produsername) as users,
+                   array_agg(DISTINCT computingsite) as sites
+            FROM ({union_sql}) errs
+            GROUP BY error_source, error_code, LEFT(error_diag, 256)
+            ORDER BY count DESC
+            LIMIT %s
+        """
+        all_params.append(limit)
+
+        conn = connections['panda']
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, all_params)
+                cols = [d[0] for d in cursor.description]
+                rows = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"panda_error_summary query failed: {e}")
+            return {"error": str(e)}
+
+        errors = []
+        total = 0
+        for row in rows:
+            entry = {
+                'error_source': row[0],
+                'error_code': row[1],
+                'error_diag': row[2] or '',
+                'count': row[3],
+                'task_count': row[4],
+                'users': row[5],
+                'sites': row[6],
+            }
+            total += row[3]
+            errors.append(entry)
+
+        return {
+            "total_errors": total,
+            "errors": errors,
+            "count": len(errors),
+            "filters": {
+                "days": days,
+                "username": username,
+                "site": site,
+                "taskid": taskid,
+                "error_source": error_source,
+            },
+        }
+
+    return await fetch()
