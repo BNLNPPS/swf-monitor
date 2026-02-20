@@ -546,10 +546,26 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs from ePIC production DB with summary stats. Cursor-based pagination via before_id. |
+| `panda_get_activity` | `days`, `username`, `site`, `workinggroup` | Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first for "What is PanDA doing?" |
+| `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
-| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id. |
+| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats (default 25 tasks). Cursor-based pagination via before_id. |
 | `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
+
+**`panda_get_activity`** — Pre-digested overview, no individual records:
+- `days`: Time window in days (default 1)
+- `username`: Filter by job owner / task owner (supports SQL LIKE with %)
+- `site`: Filter by computing site (supports SQL LIKE with %)
+- `workinggroup`: Filter tasks by working group (e.g. 'EIC')
+
+Returns:
+- `jobs`: `{total, by_status, by_user, by_site}` — each with status breakdown
+- `tasks`: `{total, by_status, by_user}` — each with status breakdown
+
+Use cases:
+- What's PanDA doing right now? `panda_get_activity()`
+- EIC activity this week? `panda_get_activity(days=7, workinggroup='EIC')`
+- Activity for a user? `panda_get_activity(username='Dmitrii Kalinkin')`
 
 **`panda_list_tasks` filters:**
 - `days`: Time window in days (default 7)
@@ -559,7 +575,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 - `reqid`: Request ID
 - `workinggroup`: Experiment affiliation (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
 - `taskid`: Specific JEDI task ID
-- `limit`: Max tasks to return (default 100)
+- `limit`: Max tasks to return (default 25)
 - `before_id`: Pagination cursor
 
 **Returns per task:**
@@ -621,8 +637,8 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | Agent Management | `swf_kill_agent` | 1 |
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| PanDA Production | `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary` | 4 |
-| **Total** | | **33** |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary` | 5 |
+| **Total** | | **34** |
 
 ---
 

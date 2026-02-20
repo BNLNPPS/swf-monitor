@@ -23,13 +23,12 @@ logger = logging.getLogger(__name__)
 
 PANDA_SCHEMA = 'doma_panda'
 
-# Fields for list_jobs overview
+# Fields for list_jobs overview (trimmed for context efficiency)
 LIST_FIELDS = [
     'pandaid', 'jeditaskid', 'reqid', 'produsername', 'jobstatus',
-    'jobsubstatus', 'computingsite', 'transformation', 'processingtype',
-    'currentpriority', 'creationtime', 'starttime', 'endtime',
-    'modificationtime', 'attemptnr', 'maxattempt', 'corecount',
-    'cpuconsumptiontime', 'nevents', 'transexitcode',
+    'computingsite', 'transformation', 'processingtype',
+    'creationtime', 'starttime', 'endtime', 'modificationtime',
+    'corecount', 'nevents',
 ]
 
 # Error diagnostic fields — the 80% of the point
@@ -153,7 +152,7 @@ async def panda_list_jobs(
     site: str = None,
     taskid: int = None,
     reqid: int = None,
-    limit: int = 500,
+    limit: int = 200,
     before_id: int = None,
 ) -> dict:
     """
@@ -163,6 +162,7 @@ async def panda_list_jobs(
     Use before_id to page through results: pass the last pandaid from the previous
     call to get the next batch.
 
+    For a quick overview without individual records, use panda_get_activity instead.
     For error diagnostics on failed jobs, use panda_diagnose_jobs instead.
 
     Args:
@@ -172,7 +172,7 @@ async def panda_list_jobs(
         site: Filter by computing site (computingsite). Supports SQL LIKE with %.
         taskid: Filter by JEDI task ID (jeditaskid).
         reqid: Filter by request ID.
-        limit: Maximum jobs to return (default 500).
+        limit: Maximum jobs to return (default 200).
         before_id: Pagination cursor — return jobs with pandaid < this value.
 
     Returns:
@@ -483,7 +483,7 @@ async def panda_list_tasks(
     reqid: int = None,
     workinggroup: str = None,
     taskid: int = None,
-    limit: int = 100,
+    limit: int = 25,
     before_id: int = None,
 ) -> dict:
     """
@@ -500,7 +500,7 @@ async def panda_list_tasks(
         reqid: Filter by request ID.
         workinggroup: Filter by working group (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
         taskid: Filter by specific JEDI task ID (jeditaskid).
-        limit: Maximum tasks to return (default 100).
+        limit: Maximum tasks to return (default 25).
         before_id: Pagination cursor — return tasks with jeditaskid < this value.
 
     Returns:
@@ -750,6 +750,199 @@ async def panda_error_summary(
                 "site": site,
                 "taskid": taskid,
                 "error_source": error_source,
+            },
+        }
+
+    return await fetch()
+
+
+# -----------------------------------------------------------------------------
+# panda_get_activity
+# -----------------------------------------------------------------------------
+
+@mcp.tool()
+async def panda_get_activity(
+    days: int = 1,
+    username: str = None,
+    site: str = None,
+    workinggroup: str = None,
+) -> dict:
+    """
+    Pre-digested overview of PanDA activity. No individual job/task records.
+
+    Use this first to answer "What is PanDA doing?" before drilling into
+    panda_list_jobs or panda_list_tasks for individual records.
+
+    Args:
+        days: Time window in days (default 1).
+        username: Filter by job owner (produsername). Supports SQL LIKE with %.
+        site: Filter by computing site (computingsite). Supports SQL LIKE with %.
+        workinggroup: Filter tasks by working group (e.g. 'EIC').
+
+    Returns:
+        jobs: {total, by_status, by_user, by_site} — aggregate counts only.
+        tasks: {total, by_status, by_user} — aggregate counts only.
+        filters: Applied filter values.
+    """
+    @sync_to_async
+    def fetch():
+        cutoff = timezone.now() - timedelta(days=days)
+        conn = connections['panda']
+
+        # --- Job filters ---
+        job_where = '"modificationtime" >= %s'
+        job_params = [cutoff]
+        job_filters = ''
+
+        if username:
+            if '%' in username:
+                job_filters += ' AND "produsername" LIKE %s'
+            else:
+                job_filters += ' AND "produsername" = %s'
+            job_params.append(username)
+        if site:
+            if '%' in site:
+                job_filters += ' AND "computingsite" LIKE %s'
+            else:
+                job_filters += ' AND "computingsite" = %s'
+            job_params.append(site)
+
+        base_job_where = f'{job_where}{job_filters}'
+
+        def _job_agg(group_col):
+            sql = f"""
+                SELECT "jobstatus", "{group_col}", COUNT(*) FROM (
+                    SELECT "jobstatus", "{group_col}"
+                    FROM "{PANDA_SCHEMA}"."jobsactive4"
+                    WHERE {base_job_where}
+                    UNION ALL
+                    SELECT "jobstatus", "{group_col}"
+                    FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                    WHERE {base_job_where}
+                ) combined
+                GROUP BY "jobstatus", "{group_col}"
+                ORDER BY COUNT(*) DESC
+            """
+            full_params = job_params + job_params
+            with conn.cursor() as cursor:
+                cursor.execute(sql, full_params)
+                return cursor.fetchall()
+
+        try:
+            # Jobs by status
+            status_sql = f"""
+                SELECT "jobstatus", COUNT(*) FROM (
+                    SELECT "jobstatus" FROM "{PANDA_SCHEMA}"."jobsactive4"
+                    WHERE {base_job_where}
+                    UNION ALL
+                    SELECT "jobstatus" FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                    WHERE {base_job_where}
+                ) combined
+                GROUP BY "jobstatus"
+                ORDER BY COUNT(*) DESC
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(status_sql, job_params + job_params)
+                job_by_status = {row[0]: row[1] for row in cursor.fetchall()}
+
+            job_total = sum(job_by_status.values())
+
+            # Jobs by user (pivot: user → {status: count})
+            user_rows = _job_agg('produsername')
+            user_map = {}
+            for status_val, user_val, count in user_rows:
+                if user_val not in user_map:
+                    user_map[user_val] = {'user': user_val, 'total': 0}
+                user_map[user_val][status_val] = count
+                user_map[user_val]['total'] += count
+            by_user = sorted(user_map.values(), key=lambda x: x['total'], reverse=True)
+
+            # Jobs by site (pivot: site → {status: count})
+            site_rows = _job_agg('computingsite')
+            site_map = {}
+            for status_val, site_val, count in site_rows:
+                if site_val not in site_map:
+                    site_map[site_val] = {'site': site_val, 'total': 0}
+                site_map[site_val][status_val] = count
+                site_map[site_val]['total'] += count
+            by_site = sorted(site_map.values(), key=lambda x: x['total'], reverse=True)
+
+        except Exception as e:
+            logger.error(f"panda_get_activity job queries failed: {e}")
+            return {"error": str(e)}
+
+        # --- Task aggregation ---
+        task_where = ['"modificationtime" >= %s']
+        task_params = [cutoff]
+
+        if username:
+            if '%' in username:
+                task_where.append('"username" LIKE %s')
+            else:
+                task_where.append('"username" = %s')
+            task_params.append(username)
+        if workinggroup:
+            task_where.append('"workinggroup" = %s')
+            task_params.append(workinggroup)
+
+        task_where_sql = ' AND '.join(task_where)
+
+        try:
+            # Tasks by status
+            task_status_sql = f"""
+                SELECT "status", COUNT(*)
+                FROM "{PANDA_SCHEMA}"."jedi_tasks"
+                WHERE {task_where_sql}
+                GROUP BY "status"
+                ORDER BY COUNT(*) DESC
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(task_status_sql, task_params)
+                task_by_status = {row[0]: row[1] for row in cursor.fetchall()}
+
+            task_total = sum(task_by_status.values())
+
+            # Tasks by user+status
+            task_user_sql = f"""
+                SELECT "status", "username", COUNT(*)
+                FROM "{PANDA_SCHEMA}"."jedi_tasks"
+                WHERE {task_where_sql}
+                GROUP BY "status", "username"
+                ORDER BY COUNT(*) DESC
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(task_user_sql, task_params)
+                task_user_rows = cursor.fetchall()
+
+            task_user_map = {}
+            for status_val, user_val, count in task_user_rows:
+                if user_val not in task_user_map:
+                    task_user_map[user_val] = {'user': user_val, 'total': 0}
+                task_user_map[user_val][status_val] = count
+                task_user_map[user_val]['total'] += count
+            task_by_user = sorted(task_user_map.values(), key=lambda x: x['total'], reverse=True)
+
+        except Exception as e:
+            logger.error(f"panda_get_activity task queries failed: {e}")
+            return {"error": str(e)}
+
+        return {
+            "jobs": {
+                "total": job_total,
+                "by_status": job_by_status,
+                "by_user": by_user,
+                "by_site": by_site,
+            },
+            "tasks": {
+                "total": task_total,
+                "by_status": task_by_status,
+                "by_user": task_by_user,
+            },
+            "filters": {
+                "days": days,
+                "username": username,
+                "site": site,
+                "workinggroup": workinggroup,
             },
         }
 

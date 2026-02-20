@@ -255,4 +255,9 @@ def get_available_tools_list() -> list:
             "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows most common errors with affected tasks, users, sites.",
             "parameters": ["days", "username", "site", "taskid", "error_source", "limit"],
         },
+        {
+            "name": "panda_get_activity",
+            "description": "Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first to answer 'What is PanDA doing?'",
+            "parameters": ["days", "username", "site", "workinggroup"],
+        },
     ]
