@@ -1,9 +1,6 @@
 """
 PanDA database query functions for ePIC production monitoring.
 
-Queries jobsactive4 + jobsarchived4 (via UNION ALL) for jobs, and
-jedi_tasks for tasks, all in the doma_panda schema.
-
 All functions are synchronous — they use django.db.connections['panda']
 directly. Callers in async contexts should wrap with sync_to_async.
 """
@@ -13,169 +10,18 @@ from datetime import timedelta
 from django.utils import timezone
 from django.db import connections
 
+from .constants import (
+    PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
+    ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
+)
+from .sql import (
+    build_union_query, build_count_query,
+    build_task_query, build_task_count_query,
+    row_to_dict, extract_errors, like_or_eq,
+)
+
 logger = logging.getLogger(__name__)
 
-PANDA_SCHEMA = 'doma_panda'
-
-# ── Field lists ──────────────────────────────────────────────────────────────
-
-LIST_FIELDS = [
-    'pandaid', 'jeditaskid', 'reqid', 'produsername', 'jobstatus',
-    'computingsite', 'transformation', 'processingtype',
-    'creationtime', 'starttime', 'endtime', 'modificationtime',
-    'corecount', 'nevents',
-]
-
-ERROR_FIELDS = [
-    'brokerageerrorcode', 'brokerageerrordiag',
-    'ddmerrorcode', 'ddmerrordiag',
-    'exeerrorcode', 'exeerrordiag',
-    'jobdispatchererrorcode', 'jobdispatchererrordiag',
-    'piloterrorcode', 'piloterrordiag',
-    'superrorcode', 'superrordiag',
-    'taskbuffererrorcode', 'taskbuffererrordiag',
-    'transexitcode',
-]
-
-DIAGNOSE_EXTRA_FIELDS = [
-    'jobname', 'pilotid', 'computingelement', 'jobmetrics',
-    'specialhandling', 'commandtopilot', 'maxrss', 'maxpss',
-]
-
-ERROR_COMPONENTS = [
-    {'name': 'brokerage', 'code': 'brokerageerrorcode', 'diag': 'brokerageerrordiag'},
-    {'name': 'ddm', 'code': 'ddmerrorcode', 'diag': 'ddmerrordiag'},
-    {'name': 'executor', 'code': 'exeerrorcode', 'diag': 'exeerrordiag'},
-    {'name': 'dispatcher', 'code': 'jobdispatchererrorcode', 'diag': 'jobdispatchererrordiag'},
-    {'name': 'pilot', 'code': 'piloterrorcode', 'diag': 'piloterrordiag'},
-    {'name': 'supervisor', 'code': 'superrorcode', 'diag': 'superrordiag'},
-    {'name': 'taskbuffer', 'code': 'taskbuffererrorcode', 'diag': 'taskbuffererrordiag'},
-]
-
-FAULTY_STATUSES = ('failed', 'cancelled', 'closed')
-
-TASK_LIST_FIELDS = [
-    'jeditaskid', 'taskname', 'status', 'username',
-    'creationdate', 'starttime', 'endtime', 'modificationtime',
-    'reqid', 'processingtype', 'transpath',
-    'progress', 'failurerate', 'errordialog',
-    'site', 'corecount', 'taskpriority', 'currentpriority',
-    'gshare', 'attemptnr', 'parent_tid', 'workinggroup',
-]
-
-
-# ── SQL builders ─────────────────────────────────────────────────────────────
-
-def _build_union_query(fields, where_clauses, params, order_by, limit):
-    """Build a UNION ALL query across jobsactive4 and jobsarchived4."""
-    field_list = ', '.join(f'"{f}"' for f in fields)
-    where_sql = ''
-    if where_clauses:
-        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
-
-    sql = f"""
-        SELECT * FROM (
-            SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsactive4"{where_sql}
-            UNION ALL
-            SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsarchived4"{where_sql}
-        ) combined
-        ORDER BY {order_by}
-        LIMIT {limit}
-    """
-    full_params = list(params) + list(params)
-    return sql, full_params
-
-
-def _build_count_query(where_clauses, params):
-    """Build a count-by-status query across both job tables."""
-    where_sql = ''
-    if where_clauses:
-        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
-
-    sql = f"""
-        SELECT "jobstatus", COUNT(*) FROM (
-            SELECT "jobstatus" FROM "{PANDA_SCHEMA}"."jobsactive4"{where_sql}
-            UNION ALL
-            SELECT "jobstatus" FROM "{PANDA_SCHEMA}"."jobsarchived4"{where_sql}
-        ) combined
-        GROUP BY "jobstatus"
-        ORDER BY COUNT(*) DESC
-    """
-    full_params = list(params) + list(params)
-    return sql, full_params
-
-
-def _build_task_query(fields, where_clauses, params, order_by, limit):
-    """Build a query against the jedi_tasks table."""
-    field_list = ', '.join(f'"{f}"' for f in fields)
-    where_sql = ''
-    if where_clauses:
-        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
-    sql = f"""
-        SELECT {field_list}
-        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
-        ORDER BY {order_by}
-        LIMIT {limit}
-    """
-    return sql, list(params)
-
-
-def _build_task_count_query(where_clauses, params):
-    """Build a count-by-status query for jedi_tasks."""
-    where_sql = ''
-    if where_clauses:
-        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
-    sql = f"""
-        SELECT "status", COUNT(*)
-        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
-        GROUP BY "status"
-        ORDER BY COUNT(*) DESC
-    """
-    return sql, list(params)
-
-
-# ── Row helpers ──────────────────────────────────────────────────────────────
-
-def _row_to_dict(row, fields):
-    """Convert a database row to a dict, formatting datetimes."""
-    result = {}
-    for i, field in enumerate(fields):
-        val = row[i]
-        if val is not None and hasattr(val, 'isoformat'):
-            val = val.isoformat()
-        result[field] = val
-    return result
-
-
-def _extract_errors(job_dict):
-    """Extract non-zero error components from a job dict."""
-    errors = []
-    for comp in ERROR_COMPONENTS:
-        code = job_dict.get(comp['code'])
-        if code and int(code) != 0:
-            errors.append({
-                'component': comp['name'],
-                'code': int(code),
-                'diag': job_dict.get(comp['diag'], ''),
-            })
-    transexitcode = job_dict.get('transexitcode')
-    if transexitcode and str(transexitcode).strip() not in ('', '0'):
-        errors.append({
-            'component': 'transformation',
-            'code': transexitcode,
-            'diag': '',
-        })
-    return errors
-
-
-def _like_or_eq(field, value):
-    """Return (where_clause, param) using LIKE if value contains %, else =."""
-    if '%' in value:
-        return f'"{field}" LIKE %s', value
-    return f'"{field}" = %s', value
-
-
-# ── Query functions ──────────────────────────────────────────────────────────
 
 def list_jobs(days=7, status=None, username=None, site=None,
               taskid=None, reqid=None, limit=200, before_id=None):
@@ -188,11 +34,11 @@ def list_jobs(days=7, status=None, username=None, site=None,
         where.append('"jobstatus" = %s')
         params.append(status)
     if username:
-        clause, val = _like_or_eq('produsername', username)
+        clause, val = like_or_eq('produsername', username)
         where.append(clause)
         params.append(val)
     if site:
-        clause, val = _like_or_eq('computingsite', site)
+        clause, val = like_or_eq('computingsite', site)
         where.append(clause)
         params.append(val)
     if taskid:
@@ -210,7 +56,7 @@ def list_jobs(days=7, status=None, username=None, site=None,
     # Summary counts (without pagination cursor)
     count_where = [w for w in where if '"pandaid" <' not in w]
     count_params = [p for i, p in enumerate(params) if '"pandaid" <' not in where[i]]
-    count_sql, count_full_params = _build_count_query(count_where, count_params)
+    count_sql, count_full_params = build_count_query(count_where, count_params)
 
     summary = {}
     total = 0
@@ -225,7 +71,7 @@ def list_jobs(days=7, status=None, username=None, site=None,
         return {"error": str(e)}
 
     fetch_limit = limit + 1
-    sql, full_params = _build_union_query(
+    sql, full_params = build_union_query(
         LIST_FIELDS, where, params,
         order_by='"pandaid" DESC',
         limit=fetch_limit,
@@ -237,7 +83,7 @@ def list_jobs(days=7, status=None, username=None, site=None,
             cursor.execute(sql, full_params)
             rows = cursor.fetchall()
             for row in rows[:limit]:
-                jobs.append(_row_to_dict(row, LIST_FIELDS))
+                jobs.append(row_to_dict(row, LIST_FIELDS))
     except Exception as e:
         logger.error(f"list_jobs query failed: {e}")
         return {"error": str(e)}
@@ -278,11 +124,11 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
     params = [cutoff, tuple(FAULTY_STATUSES)]
 
     if username:
-        clause, val = _like_or_eq('produsername', username)
+        clause, val = like_or_eq('produsername', username)
         where.append(clause)
         params.append(val)
     if site:
-        clause, val = _like_or_eq('computingsite', site)
+        clause, val = like_or_eq('computingsite', site)
         where.append(clause)
         params.append(val)
     if taskid:
@@ -310,7 +156,7 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
             fields.append(f)
 
     fetch_limit = limit + 1
-    sql, full_params = _build_union_query(
+    sql, full_params = build_union_query(
         fields, where, params,
         order_by='"pandaid" DESC',
         limit=fetch_limit,
@@ -322,8 +168,8 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
             cursor.execute(sql, full_params)
             rows = cursor.fetchall()
             for row in rows[:limit]:
-                job = _row_to_dict(row, fields)
-                job['errors'] = _extract_errors(job)
+                job = row_to_dict(row, fields)
+                job['errors'] = extract_errors(job)
                 jobs.append(job)
     except Exception as e:
         logger.error(f"diagnose_jobs query failed: {e}")
@@ -383,11 +229,11 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         where.append('"status" = %s')
         params.append(status)
     if username:
-        clause, val = _like_or_eq('username', username)
+        clause, val = like_or_eq('username', username)
         where.append(clause)
         params.append(val)
     if taskname:
-        clause, val = _like_or_eq('taskname', taskname)
+        clause, val = like_or_eq('taskname', taskname)
         where.append(clause)
         params.append(val)
     if reqid:
@@ -408,7 +254,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     # Summary counts (without pagination cursor)
     count_where = [w for w in where if '"jeditaskid" <' not in w]
     count_params = [p for i, p in enumerate(params) if '"jeditaskid" <' not in where[i]]
-    count_sql, count_full_params = _build_task_count_query(count_where, count_params)
+    count_sql, count_full_params = build_task_count_query(count_where, count_params)
 
     summary = {}
     total = 0
@@ -423,7 +269,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         return {"error": str(e)}
 
     fetch_limit = limit + 1
-    sql, full_params = _build_task_query(
+    sql, full_params = build_task_query(
         TASK_LIST_FIELDS, where, params,
         order_by='"jeditaskid" DESC',
         limit=fetch_limit,
@@ -435,7 +281,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
             cursor.execute(sql, full_params)
             rows = cursor.fetchall()
             for row in rows[:limit]:
-                tasks.append(_row_to_dict(row, TASK_LIST_FIELDS))
+                tasks.append(row_to_dict(row, TASK_LIST_FIELDS))
     except Exception as e:
         logger.error(f"list_tasks query failed: {e}")
         return {"error": str(e)}
