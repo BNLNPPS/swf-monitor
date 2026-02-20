@@ -548,7 +548,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 |------|------------|-------------|
 | `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs from ePIC production DB with summary stats. Cursor-based pagination via before_id. |
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
-| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `campaign`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id. |
+| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id. |
 
 **`panda_list_tasks` filters:**
 - `days`: Time window in days (default 7)
@@ -556,15 +556,15 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 - `username`: Task owner (supports SQL LIKE with %)
 - `taskname`: Task name (supports SQL LIKE with %)
 - `reqid`: Request ID
-- `campaign`: Campaign name (supports SQL LIKE with %)
+- `workinggroup`: Experiment affiliation (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
 - `taskid`: Specific JEDI task ID
 - `limit`: Max tasks to return (default 100)
 - `before_id`: Pagination cursor
 
 **Returns per task:**
-- `jeditaskid`, `taskname`, `status`, `superstatus`, `username`
+- `jeditaskid`, `taskname`, `status`, `username`
 - `creationdate`, `starttime`, `endtime`, `modificationtime`
-- `reqid`, `campaign`, `processingtype`, `transpath`
+- `reqid`, `processingtype`, `transpath`
 - `progress`, `failurerate`, `errordialog`
 - `site`, `corecount`, `taskpriority`, `currentpriority`
 - `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
@@ -573,6 +573,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 - Task overview: `panda_list_tasks(days=7)`
 - Failed tasks: `panda_list_tasks(status='failed')`
 - Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
+- EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
 - Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
 
 ---

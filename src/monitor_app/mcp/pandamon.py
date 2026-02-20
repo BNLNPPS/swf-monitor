@@ -434,10 +434,11 @@ async def panda_diagnose_jobs(
 # -----------------------------------------------------------------------------
 
 # Fields for task listing — useful subset of 82 columns
+# Omitted: superstatus (duplicates status in ePIC), campaign (always NULL in ePIC)
 TASK_LIST_FIELDS = [
-    'jeditaskid', 'taskname', 'status', 'superstatus', 'username',
+    'jeditaskid', 'taskname', 'status', 'username',
     'creationdate', 'starttime', 'endtime', 'modificationtime',
-    'reqid', 'campaign', 'processingtype', 'transpath',
+    'reqid', 'processingtype', 'transpath',
     'progress', 'failurerate', 'errordialog',
     'site', 'corecount', 'taskpriority', 'currentpriority',
     'gshare', 'attemptnr', 'parent_tid', 'workinggroup',
@@ -480,7 +481,7 @@ async def panda_list_tasks(
     username: str = None,
     taskname: str = None,
     reqid: int = None,
-    campaign: str = None,
+    workinggroup: str = None,
     taskid: int = None,
     limit: int = 100,
     before_id: int = None,
@@ -497,7 +498,7 @@ async def panda_list_tasks(
         username: Filter by task owner. Supports SQL LIKE with %.
         taskname: Filter by task name. Supports SQL LIKE with %.
         reqid: Filter by request ID.
-        campaign: Filter by campaign name. Supports SQL LIKE with %.
+        workinggroup: Filter by working group (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
         taskid: Filter by specific JEDI task ID (jeditaskid).
         limit: Maximum tasks to return (default 100).
         before_id: Pagination cursor — return tasks with jeditaskid < this value.
@@ -532,12 +533,9 @@ async def panda_list_tasks(
         if reqid:
             where.append('"reqid" = %s')
             params.append(reqid)
-        if campaign:
-            if '%' in campaign:
-                where.append('"campaign" LIKE %s')
-            else:
-                where.append('"campaign" = %s')
-            params.append(campaign)
+        if workinggroup:
+            where.append('"workinggroup" = %s')
+            params.append(workinggroup)
         if taskid:
             where.append('"jeditaskid" = %s')
             params.append(taskid)
@@ -603,7 +601,7 @@ async def panda_list_tasks(
                 "username": username,
                 "taskname": taskname,
                 "reqid": reqid,
-                "campaign": campaign,
+                "workinggroup": workinggroup,
                 "taskid": taskid,
             },
         }
