@@ -11,6 +11,7 @@ from .queries import (
     list_tasks,
     error_summary,
     get_activity,
+    study_job,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     'list_tasks',
     'error_summary',
     'get_activity',
+    'study_job',
 ]

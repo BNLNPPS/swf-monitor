@@ -13,6 +13,7 @@ from django.db import connections
 from .constants import (
     PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
+    STUDY_FIELDS, FILE_FIELDS,
 )
 from .sql import (
     build_union_query, build_count_query,
@@ -571,3 +572,145 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             "workinggroup": workinggroup,
         },
     }
+
+
+def study_job(pandaid):
+    """Deep study of a single PanDA job — full record, files, harvester logs, errors."""
+    conn = connections['panda']
+
+    # 1. Full job record from both tables
+    field_list = ', '.join(f'"{f}"' for f in STUDY_FIELDS)
+    job_sql = f"""
+        SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE "pandaid" = %s
+        UNION ALL
+        SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE "pandaid" = %s
+    """
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(job_sql, [pandaid, pandaid])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"study_job query failed: {e}")
+        return {"error": str(e)}
+
+    if not row:
+        return {"error": f"Job {pandaid} not found"}
+
+    job = row_to_dict(row, STUDY_FIELDS)
+    job['errors'] = extract_errors(job)
+
+    # Strip null fields for readability
+    job = {k: v for k, v in job.items() if v is not None}
+
+    # Parse pilotid for log URLs
+    log_urls = {}
+    pilotid = job.get('pilotid', '')
+    if pilotid and '|' in pilotid:
+        parts = pilotid.split('|')
+        stdout_url = parts[0]
+        log_urls['pilot_stdout'] = stdout_url
+        log_urls['pilot_stderr'] = stdout_url.replace('.out', '.err')
+        log_urls['batch_log'] = stdout_url.replace('.out', '.log')
+        if len(parts) >= 4:
+            job['pilot_type'] = parts[1]
+            job['pilot_version'] = parts[3]
+
+    # 2. Files from filestable4
+    file_field_list = ', '.join(f'"{f}"' for f in FILE_FIELDS)
+    files_sql = f"""
+        SELECT {file_field_list}
+        FROM "{PANDA_SCHEMA}"."filestable4"
+        WHERE "pandaid" = %s
+        ORDER BY "type", "lfn"
+    """
+
+    files = []
+    log_file = None
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(files_sql, [pandaid])
+            for frow in cursor.fetchall():
+                fd = row_to_dict(frow, FILE_FIELDS)
+                fd = {k: v for k, v in fd.items() if v is not None}
+                files.append(fd)
+                if fd.get('type') == 'log':
+                    log_file = fd
+    except Exception as e:
+        logger.error(f"study_job files query failed: {e}")
+        # Non-fatal — continue with what we have
+
+    # 3. Harvester worker info (condor log URLs)
+    harvester = None
+    harvester_sql = f"""
+        SELECT w."workerid", w."harvesterid", w."stdout", w."stderr", w."batchlog",
+               w."errorcode", w."diagmessage", w."status"
+        FROM "{PANDA_SCHEMA}"."harvester_workers" w
+        JOIN "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r
+            ON w."workerid" = r."workerid" AND w."harvesterid" = r."harvesterid"
+        WHERE r."pandaid" = %s
+    """
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(harvester_sql, [pandaid])
+            hrow = cursor.fetchone()
+            if hrow:
+                hcols = ['workerid', 'harvesterid', 'stdout', 'stderr', 'batchlog',
+                         'errorcode', 'diagmessage', 'status']
+                harvester = row_to_dict(hrow, hcols)
+                harvester = {k: v for k, v in harvester.items() if v is not None}
+                # Use harvester URLs if available (more authoritative than parsed pilotid)
+                if harvester.get('stdout'):
+                    log_urls['pilot_stdout'] = harvester['stdout']
+                if harvester.get('stderr'):
+                    log_urls['pilot_stderr'] = harvester['stderr']
+                if harvester.get('batchlog'):
+                    log_urls['batch_log'] = harvester['batchlog']
+    except Exception as e:
+        logger.error(f"study_job harvester query failed: {e}")
+        # Non-fatal
+
+    # 4. Task context (parent task name and status)
+    task_info = None
+    jeditaskid = job.get('jeditaskid')
+    if jeditaskid:
+        task_sql = f"""
+            SELECT "jeditaskid", "taskname", "status", "username", "errordialog",
+                   "failurerate", "workinggroup"
+            FROM "{PANDA_SCHEMA}"."jedi_tasks"
+            WHERE "jeditaskid" = %s
+        """
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(task_sql, [jeditaskid])
+                trow = cursor.fetchone()
+                if trow:
+                    tcols = ['jeditaskid', 'taskname', 'status', 'username',
+                             'errordialog', 'failurerate', 'workinggroup']
+                    task_info = row_to_dict(trow, tcols)
+                    task_info = {k: v for k, v in task_info.items() if v is not None}
+        except Exception as e:
+            logger.error(f"study_job task query failed: {e}")
+
+    # Assemble result
+    result = {
+        "pandaid": pandaid,
+        "job": job,
+        "files": files,
+        "log_urls": log_urls,
+    }
+
+    if log_file:
+        result["log_file"] = log_file
+
+    if harvester:
+        result["harvester"] = harvester
+
+    if task_info:
+        result["task"] = task_info
+
+    # Monitoring page URL
+    result["monitor_url"] = f"https://pandamon01.sdcc.bnl.gov/job?pandaid={pandaid}"
+
+    return result

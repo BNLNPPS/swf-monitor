@@ -14,6 +14,7 @@ LIST_FIELDS = [
     'computingsite', 'transformation', 'processingtype',
     'creationtime', 'starttime', 'endtime', 'modificationtime',
     'corecount', 'nevents',
+    'noutputdatafiles', 'outputfilebytes',
 ]
 
 ERROR_FIELDS = [
@@ -43,6 +44,43 @@ ERROR_COMPONENTS = [
 ]
 
 FAULTY_STATUSES = ('failed', 'cancelled', 'closed')
+
+# Expanded field list for single-job deep study
+STUDY_FIELDS = [
+    # Identity
+    'pandaid', 'jeditaskid', 'reqid', 'jobname', 'produsername', 'jobstatus',
+    # Execution
+    'computingsite', 'computingelement', 'transformation', 'processingtype',
+    'creationtime', 'starttime', 'endtime', 'modificationtime',
+    'corecount', 'actualcorecount', 'nevents',
+    # Resources
+    'maxrss', 'maxpss', 'maxvmem', 'maxswap', 'maxwalltime',
+    'cpuconsumptiontime', 'cpuconsumptionunit',
+    # I/O
+    'inputfilebytes', 'ninputfiles', 'ninputdatafiles',
+    'outputfilebytes', 'noutputdatafiles',
+    'destinationdblock', 'destinationse',
+    # Pilot / batch
+    'pilotid', 'pilottiming', 'batchid',
+    'container_name', 'specialhandling', 'commandtopilot',
+    # All error fields
+    'brokerageerrorcode', 'brokerageerrordiag',
+    'ddmerrorcode', 'ddmerrordiag',
+    'exeerrorcode', 'exeerrordiag',
+    'jobdispatchererrorcode', 'jobdispatchererrordiag',
+    'piloterrorcode', 'piloterrordiag',
+    'superrorcode', 'superrordiag',
+    'taskbuffererrorcode', 'taskbuffererrordiag',
+    'transexitcode',
+    # Metadata
+    'jobmetrics', 'metadata',
+]
+
+# File table fields for study_job
+FILE_FIELDS = [
+    'lfn', 'type', 'guid', 'scope', 'fsize', 'status',
+    'dataset', 'destinationdblock', 'checksum',
+]
 
 # Task field lists
 

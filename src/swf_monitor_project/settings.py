@@ -273,6 +273,7 @@ COMMON QUERIES:
 - EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
 - Top errors? → panda_error_summary(days=7)
 - Errors for a user? → panda_error_summary(username='someone')
+- Deep dive on a failed job? → panda_study_job(pandaid=130497)
 
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.

@@ -260,4 +260,9 @@ def get_available_tools_list() -> list:
             "description": "Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first to answer 'What is PanDA doing?'",
             "parameters": ["days", "username", "site", "workinggroup"],
         },
+        {
+            "name": "panda_study_job",
+            "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
+            "parameters": ["pandaid"],
+        },
     ]

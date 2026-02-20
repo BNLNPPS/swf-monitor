@@ -206,3 +206,36 @@ async def panda_get_activity(
     return await sync_to_async(queries.get_activity)(
         days=days, username=username, site=site, workinggroup=workinggroup,
     )
+
+
+@mcp.tool()
+async def panda_study_job(
+    pandaid: int,
+) -> dict:
+    """
+    Deep study of a single PanDA job — full record, files, errors, log URLs.
+
+    Gathers everything available from the database for a single job:
+    - Full job record with all error fields and resource usage
+    - Associated files from filestable4 (input, output, log)
+    - Harvester worker info with condor log URLs
+    - Parent task context (name, status, error dialog)
+    - Structured error extraction across all 7 components
+
+    Use this after panda_diagnose_jobs identifies a failed job you want to
+    understand in detail. Returns log URLs for manual inspection even when
+    programmatic log retrieval is not yet available.
+
+    Args:
+        pandaid: The PanDA job ID to study (required).
+
+    Returns:
+        job: Full job record (null fields stripped) with structured errors list.
+        files: All associated files (log, output, input) with lfn, guid, scope, status.
+        log_urls: URLs for pilot stdout, stderr, batch log (require CILogon auth).
+        log_file: Log tarball metadata if registered (lfn, guid, scope for rucio retrieval).
+        harvester: Condor worker details if available.
+        task: Parent JEDI task context.
+        monitor_url: Link to PanDA monitoring page.
+    """
+    return await sync_to_async(queries.study_job)(pandaid=pandaid)

@@ -551,6 +551,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats (default 25 tasks). Cursor-based pagination via before_id. |
 | `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
+| `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -616,6 +617,22 @@ Use cases:
 - Pilot errors only: `panda_error_summary(error_source='pilot')`
 - Errors for a specific task: `panda_error_summary(taskid=33824)`
 
+**`panda_study_job`** — Deep study of a single job:
+- `pandaid`: PanDA job ID (required)
+
+Returns:
+- `job`: Full record (~40 fields, nulls stripped) with structured `errors` list
+- `files`: All associated files from `filestable4` (log, output, input) with lfn, guid, scope, status
+- `log_urls`: Harvester log URLs — `pilot_stdout`, `pilot_stderr`, `batch_log` (require CILogon auth)
+- `log_file`: Log tarball metadata if registered (lfn, guid, scope for future rucio retrieval)
+- `harvester`: Condor worker details (workerid, status, error info)
+- `task`: Parent JEDI task context (name, status, error dialog)
+- `monitor_url`: Link to PanDA monitoring page
+
+Use cases:
+- Study a failed job: `panda_study_job(pandaid=130497)`
+- After `panda_diagnose_jobs` identifies failures, drill into specific jobs
+
 ---
 
 ## Tool Summary
@@ -637,8 +654,8 @@ Use cases:
 | Agent Management | `swf_kill_agent` | 1 |
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary` | 5 |
-| **Total** | | **34** |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job` | 6 |
+| **Total** | | **35** |
 
 ---
 
