@@ -7,7 +7,7 @@ and delegates to the synchronous query function via sync_to_async.
 
 from asgiref.sync import sync_to_async
 from mcp_server import mcp_server as mcp
-from panda import queries
+from monitor_app.panda import queries
 
 
 @mcp.tool()
