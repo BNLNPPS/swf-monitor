@@ -5,6 +5,7 @@ Connects to Mattermost via WebSocket, listens for messages in a target channel,
 and responds using Claude Sonnet with direct access to PanDA query functions.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -428,7 +429,7 @@ class PandaBot:
         logger.info(f"Message from {post_user}: {message_text[:100]}")
 
         try:
-            reply = ask_claude(self.claude, message_text)
+            reply = await asyncio.to_thread(ask_claude, self.claude, message_text)
         except Exception:
             logger.exception("Claude API call failed")
             reply = "Sorry, I encountered an error processing your question."
@@ -438,10 +439,13 @@ class PandaBot:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
         try:
-            self.driver.posts.create_post(options={
-                'channel_id': self.channel_id,
-                'message': reply,
-                'root_id': post_id,
-            })
+            await asyncio.to_thread(
+                self.driver.posts.create_post,
+                options={
+                    'channel_id': self.channel_id,
+                    'message': reply,
+                    'root_id': post_id,
+                },
+            )
         except Exception:
             logger.exception("Failed to post reply")
