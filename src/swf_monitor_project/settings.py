@@ -271,6 +271,7 @@ COMMON QUERIES:
 - PanDA task overview? → panda_list_tasks(days=7)
 - Failed PanDA tasks? → panda_list_tasks(status='failed')
 - EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
+- Production tasks? → panda_list_tasks(processingtype='epicproduction')
 - Top errors? → panda_error_summary(days=7)
 - Errors for a user? → panda_error_summary(username='someone')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)

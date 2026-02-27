@@ -2,325 +2,137 @@
 PanDA Mattermost bot — answers production monitoring questions using Claude with tool use.
 
 Connects to Mattermost via WebSocket, listens for messages in a target channel,
-and responds using Claude Sonnet with direct access to PanDA query functions.
+and responds using Claude with PanDA monitoring tools discovered via MCP.
 """
 
 import json
 import logging
 import os
 
-os.environ["DJANGO_ALLOW_ASYNC_UNSAFE"] = "true"
-
 import anthropic
 from mattermostdriver import Driver
-
-from monitor_app.panda import queries
+from mcp.client.session import ClientSession
+from mcp.client.streamable_http import streamable_http_client
 
 logger = logging.getLogger('panda_bot')
 
 MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
+MCP_URL = os.environ.get(
+    'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
+)
+PANDA_TOOL_PREFIX = 'panda_'
 
 SYSTEM_PROMPT = """\
 You are a PanDA production monitoring assistant for the ePIC experiment at the \
-Electron Ion Collider. You answer questions about PanDA job and task status by \
-querying the production database.
+Electron Ion Collider. You answer questions about PanDA job and task status \
+using MCP tools that query the production database.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
 - When showing job/task counts, summarize by status.
 - For errors, show the top patterns with counts.
-- When a user asks "what's happening" or "what's PanDA doing", start with get_activity.
-- For error investigation, use error_summary first, then diagnose_jobs for details.
-- For a specific job, use study_job.
+- When a user asks "what's happening" or "what's PanDA doing", start with panda_get_activity.
+- For error investigation, use panda_error_summary first, then panda_diagnose_jobs for details.
+- For a specific job, use panda_study_job.
 - Default to 7 days unless the user specifies a time range.
 - Keep responses focused — don't dump raw JSON, extract and present the key information.
-- If a query returns no results, say so clearly.
 - Use smaller limits (50 jobs, 20 tasks) unless the user asks for more.
+
+When a query returns no results, do NOT just report "no results found." Instead:
+- Consider whether the user's term might match a different field. For example, \
+"epicproduction" is a processingtype, not a username. A term could be a username, \
+taskname pattern, site name, working group, or processing type.
+- Try a broader query (e.g. panda_get_activity or panda_list_tasks with fewer filters) \
+to see what data exists, then narrow down.
+- If you still find nothing after retrying, explain what you searched and suggest \
+what the user might mean.
 """
 
-PANDA_TOOLS = [
-    {
-        "name": "get_activity",
-        "description": (
-            "Quick overview of PanDA activity — aggregate job and task counts "
-            "by status, user, and site. No individual records. Use this first "
-            "to answer 'what is PanDA doing?'"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "Time window in days (default 1)",
-                    "default": 1,
-                },
-                "username": {
-                    "type": "string",
-                    "description": "Filter by job owner. Supports SQL LIKE with %.",
-                },
-                "site": {
-                    "type": "string",
-                    "description": "Filter by computing site. Supports SQL LIKE with %.",
-                },
-                "workinggroup": {
-                    "type": "string",
-                    "description": "Filter tasks by working group (e.g. 'EIC').",
-                },
-            },
-        },
-    },
-    {
-        "name": "list_jobs",
-        "description": (
-            "List individual PanDA job records with summary statistics. "
-            "Returns job details including pandaid, status, site, user, task ID."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "Time window in days (default 7)",
-                    "default": 7,
-                },
-                "status": {
-                    "type": "string",
-                    "description": "Filter by jobstatus (e.g. 'failed', 'finished', 'running').",
-                },
-                "username": {
-                    "type": "string",
-                    "description": "Filter by job owner. Supports SQL LIKE with %.",
-                },
-                "site": {
-                    "type": "string",
-                    "description": "Filter by computing site. Supports SQL LIKE with %.",
-                },
-                "taskid": {
-                    "type": "integer",
-                    "description": "Filter by JEDI task ID.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max jobs to return (default 50).",
-                    "default": 50,
-                },
-            },
-        },
-    },
-    {
-        "name": "diagnose_jobs",
-        "description": (
-            "Get failed/cancelled PanDA jobs with full error details. "
-            "Shows error components (pilot, executor, DDM, etc.) and diagnostics."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "Time window in days (default 7)",
-                    "default": 7,
-                },
-                "username": {
-                    "type": "string",
-                    "description": "Filter by job owner. Supports SQL LIKE with %.",
-                },
-                "site": {
-                    "type": "string",
-                    "description": "Filter by computing site. Supports SQL LIKE with %.",
-                },
-                "taskid": {
-                    "type": "integer",
-                    "description": "Filter by JEDI task ID.",
-                },
-                "error_component": {
-                    "type": "string",
-                    "description": "Filter to errors in this component (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max jobs to return (default 50).",
-                    "default": 50,
-                },
-            },
-        },
-    },
-    {
-        "name": "list_tasks",
-        "description": (
-            "List JEDI task records with summary statistics. "
-            "Tasks are higher-level units — each spawns one or more jobs."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "Time window in days (default 7)",
-                    "default": 7,
-                },
-                "status": {
-                    "type": "string",
-                    "description": "Filter by task status (e.g. 'done', 'failed', 'running').",
-                },
-                "username": {
-                    "type": "string",
-                    "description": "Filter by task owner. Supports SQL LIKE with %.",
-                },
-                "taskname": {
-                    "type": "string",
-                    "description": "Filter by task name. Supports SQL LIKE with %.",
-                },
-                "workinggroup": {
-                    "type": "string",
-                    "description": "Filter by working group (e.g. 'EIC').",
-                },
-                "taskid": {
-                    "type": "integer",
-                    "description": "Filter by specific JEDI task ID.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max tasks to return (default 20).",
-                    "default": 20,
-                },
-            },
-        },
-    },
-    {
-        "name": "error_summary",
-        "description": (
-            "Aggregate error summary across failed PanDA jobs, ranked by frequency. "
-            "Shows top error patterns with counts, affected tasks, users, and sites."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "days": {
-                    "type": "integer",
-                    "description": "Time window in days (default 10)",
-                    "default": 10,
-                },
-                "username": {
-                    "type": "string",
-                    "description": "Filter by job owner. Supports SQL LIKE with %.",
-                },
-                "site": {
-                    "type": "string",
-                    "description": "Filter by computing site. Supports SQL LIKE with %.",
-                },
-                "taskid": {
-                    "type": "integer",
-                    "description": "Filter by JEDI task ID.",
-                },
-                "error_source": {
-                    "type": "string",
-                    "description": "Filter to one component (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max error patterns to return (default 20).",
-                    "default": 20,
-                },
-            },
-        },
-    },
-    {
-        "name": "study_job",
-        "description": (
-            "Deep study of a single PanDA job — full record, files, errors, "
-            "log URLs, harvester worker info, and parent task context."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pandaid": {
-                    "type": "integer",
-                    "description": "The PanDA job ID to study.",
-                },
-            },
-            "required": ["pandaid"],
-        },
-    },
-]
 
-TOOL_DISPATCH = {
-    "get_activity": queries.get_activity,
-    "list_jobs": queries.list_jobs,
-    "diagnose_jobs": queries.diagnose_jobs,
-    "list_tasks": queries.list_tasks,
-    "error_summary": queries.error_summary,
-    "study_job": queries.study_job,
-}
+def mcp_tool_to_anthropic(tool):
+    """Convert an MCP tool definition to Anthropic Messages API format."""
+    return {
+        "name": tool.name,
+        "description": tool.description or "",
+        "input_schema": tool.inputSchema,
+    }
 
 
-def _json_default(obj):
-    """JSON serializer for objects not serializable by default."""
-    if hasattr(obj, 'isoformat'):
-        return obj.isoformat()
-    return str(obj)
-
-
-def execute_tool(name, tool_input):
-    """Call a PanDA query function and return JSON string result."""
-    func = TOOL_DISPATCH.get(name)
-    if not func:
-        return json.dumps({"error": f"Unknown tool: {name}"})
-
-    try:
-        result = func(**tool_input)
-        text = json.dumps(result, default=_json_default)
-        if len(text) > MAX_RESULT_LEN:
-            text = text[:MAX_RESULT_LEN] + '\n... (truncated)'
-        return text
-    except Exception as e:
-        logger.exception(f"Tool {name} failed")
-        return json.dumps({"error": str(e)})
-
-
-def ask_claude(client, message_text, conversation=None):
-    """Send a message to Claude and handle the tool-use loop. Returns final text."""
-    if conversation is None:
-        messages = [{"role": "user", "content": message_text}]
-    else:
+async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
+    """Send a message to Claude, using MCP for tool execution. Returns final text."""
+    if conversation is not None:
         messages = conversation
+    else:
+        messages = [{"role": "user", "content": message_text}]
 
-    for round_num in range(MAX_TOOL_ROUNDS):
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=PANDA_TOOLS,
-            messages=messages,
-        )
+    async with streamable_http_client(mcp_url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
 
-        logger.info(f"Claude response: stop_reason={response.stop_reason}")
+            tools_result = await session.list_tools()
+            anthropic_tools = [
+                mcp_tool_to_anthropic(t)
+                for t in tools_result.tools
+                if t.name.startswith(PANDA_TOOL_PREFIX)
+            ]
+            logger.info(f"Discovered {len(anthropic_tools)} PanDA tools via MCP")
 
-        if response.stop_reason != "tool_use":
-            text_parts = [b.text for b in response.content if b.type == "text"]
-            reply = "\n".join(text_parts)
-            logger.info(f"Final reply: {len(reply)} chars")
-            return reply
+            for round_num in range(MAX_TOOL_ROUNDS):
+                response = await claude_client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=4096,
+                    system=SYSTEM_PROMPT,
+                    tools=anthropic_tools,
+                    messages=messages,
+                )
 
-        # Process tool calls
-        messages.append({"role": "assistant", "content": response.content})
+                logger.info(f"Claude response: stop_reason={response.stop_reason}")
 
-        tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                logger.info(f"Tool call: {block.name}({block.input})")
-                result_text = execute_tool(block.name, block.input)
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result_text,
-                })
+                if response.stop_reason != "tool_use":
+                    text_parts = [
+                        b.text for b in response.content if b.type == "text"
+                    ]
+                    reply = "\n".join(text_parts)
+                    logger.info(f"Final reply: {len(reply)} chars")
+                    return reply
 
-        messages.append({"role": "user", "content": tool_results})
+                messages.append({"role": "assistant", "content": response.content})
 
-    return "I hit the maximum number of tool calls. Here's what I found so far — please try a more specific question."
+                tool_results = []
+                for block in response.content:
+                    if block.type == "tool_use":
+                        logger.info(f"Tool call: {block.name}({block.input})")
+                        try:
+                            result = await session.call_tool(
+                                block.name, block.input
+                            )
+                            result_text = ""
+                            for content in result.content:
+                                if hasattr(content, 'text'):
+                                    result_text += content.text
+                            if len(result_text) > MAX_RESULT_LEN:
+                                result_text = (
+                                    result_text[:MAX_RESULT_LEN]
+                                    + '\n... (truncated)'
+                                )
+                        except Exception as e:
+                            logger.exception(f"MCP tool {block.name} failed")
+                            result_text = json.dumps({"error": str(e)})
+
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result_text,
+                        })
+
+                messages.append({"role": "user", "content": tool_results})
+
+    return (
+        "I hit the maximum number of tool calls. "
+        "Please try a more specific question."
+    )
 
 
 class PandaBot:
@@ -331,8 +143,9 @@ class PandaBot:
         self.mm_token = os.environ['MATTERMOST_TOKEN']
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
         self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
+        self.mcp_url = MCP_URL
 
-        self.claude = anthropic.Anthropic()
+        self.claude = anthropic.AsyncAnthropic()
 
         self.driver = Driver({
             'url': self.mm_url,
@@ -357,7 +170,6 @@ class PandaBot:
         )
         self.channel_id = channel['id']
 
-        # Ensure bot user is a member of the channel
         try:
             self.driver.channels.add_user(self.channel_id, options={
                 'user_id': self.bot_user_id,
@@ -368,10 +180,38 @@ class PandaBot:
 
         logger.info(
             f"Listening on #{self.mm_channel_name} "
-            f"(channel {self.channel_id}) in team {self.mm_team}"
+            f"(channel {self.channel_id}) in team {self.mm_team} "
+            f"(MCP: {self.mcp_url})"
         )
 
         self.driver.init_websocket(self._handle_event)
+
+    def _build_thread_conversation(self, root_id):
+        """Fetch a Mattermost thread and build a Claude conversation from it."""
+        thread = self.driver.posts.get_post_thread(root_id)
+        posts = thread.get('posts', {})
+        order = thread.get('order', [])
+
+        messages = []
+        for pid in order:
+            p = posts.get(pid)
+            if not p or not p.get('message', '').strip():
+                continue
+            role = "assistant" if p['user_id'] == self.bot_user_id else "user"
+            # Merge consecutive same-role messages
+            if messages and messages[-1]['role'] == role:
+                messages[-1]['content'] += "\n\n" + p['message'].strip()
+            else:
+                messages.append({
+                    "role": role,
+                    "content": p['message'].strip(),
+                })
+
+        # Conversation must start with user and alternate properly
+        if messages and messages[0]['role'] != 'user':
+            messages = messages[1:]
+
+        return messages if messages else None
 
     async def _handle_event(self, raw):
         """WebSocket event handler."""
@@ -405,24 +245,16 @@ class PandaBot:
             f"type={post_type} root_id={post.get('root_id', '')}"
         )
 
-        # Ignore own messages
         if post_user == self.bot_user_id:
             logger.debug("Skipping own message")
             return
 
-        # Only target channel
         if post_channel != self.channel_id:
             logger.debug(f"Skipping: channel {post_channel} != {self.channel_id}")
             return
 
-        # Ignore system messages (joins, leaves, etc.)
         if post_type:
             logger.debug(f"Skipping system message type={post_type}")
-            return
-
-        # Ignore thread replies (only respond to root posts)
-        if post.get('root_id'):
-            logger.debug("Skipping thread reply")
             return
 
         message_text = post.get('message', '').strip()
@@ -430,16 +262,21 @@ class PandaBot:
             return
 
         post_id = post.get('id')
+        root_id = post.get('root_id')
         logger.info(f"Message from {post_user}: {message_text[:100]}")
 
         try:
-            reply = ask_claude(self.claude, message_text)
+            conversation = None
+            if root_id:
+                conversation = self._build_thread_conversation(root_id)
+            reply = await ask_claude(
+                self.claude, self.mcp_url, message_text, conversation
+            )
             logger.info(f"Got reply: {len(reply)} chars")
         except Exception:
-            logger.exception("Claude API call failed")
+            logger.exception("ask_claude failed")
             reply = "Sorry, I encountered an error processing your question."
 
-        # Truncate for Mattermost post limit
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
@@ -448,7 +285,7 @@ class PandaBot:
             self.driver.posts.create_post(options={
                 'channel_id': self.channel_id,
                 'message': reply,
-                'root_id': post_id,
+                'root_id': root_id or post_id,
             })
             logger.info("Reply posted successfully")
         except Exception:

@@ -549,7 +549,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_get_activity` | `days`, `username`, `site`, `workinggroup` | Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first for "What is PanDA doing?" |
 | `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
 | `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
-| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `limit`, `before_id` | List JEDI tasks with summary stats (default 25 tasks). Cursor-based pagination via before_id. |
+| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 25 tasks). Cursor-based pagination via before_id. |
 | `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
 
@@ -575,6 +575,7 @@ Use cases:
 - `taskname`: Task name (supports SQL LIKE with %)
 - `reqid`: Request ID
 - `workinggroup`: Experiment affiliation (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
+- `processingtype`: Processing type (e.g. 'epicproduction'). Supports SQL LIKE with %.
 - `taskid`: Specific JEDI task ID
 - `limit`: Max tasks to return (default 25)
 - `before_id`: Pagination cursor

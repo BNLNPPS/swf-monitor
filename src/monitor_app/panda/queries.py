@@ -223,7 +223,7 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
 
 def list_tasks(days=7, status=None, username=None, taskname=None,
                reqid=None, workinggroup=None, taskid=None,
-               limit=25, before_id=None):
+               processingtype=None, limit=25, before_id=None):
     """List JEDI tasks with summary statistics and cursor-based pagination."""
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
@@ -249,6 +249,10 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     if taskid:
         where.append('"jeditaskid" = %s')
         params.append(taskid)
+    if processingtype:
+        clause, val = like_or_eq('processingtype', processingtype)
+        where.append(clause)
+        params.append(val)
     if before_id:
         where.append('"jeditaskid" < %s')
         params.append(before_id)
