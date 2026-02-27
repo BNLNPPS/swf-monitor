@@ -8,6 +8,7 @@ MCP transport: HTTP POST (JSON-RPC) to the Django MCP endpoint — the same
 transport Claude Code uses. No SSE, no GET streams, no subprocesses.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -310,6 +311,10 @@ class PandaBot:
         root_id = post.get('root_id')
         logger.info(f"Message from {post_user}: {message_text[:100]}")
 
+        asyncio.create_task(self._respond(message_text, post_id, root_id))
+
+    async def _respond(self, message_text, post_id, root_id):
+        """Process a message and post the reply. Runs as a background task."""
         try:
             conversation = None
             if root_id:
