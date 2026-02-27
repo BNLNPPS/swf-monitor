@@ -65,7 +65,7 @@ The MCP endpoint supports two authentication modes:
 
 ### Claude Code (Local)
 
-POST requests (used by Claude Code) pass through without authentication. This enables local development and CLI-based MCP access without OAuth setup.
+POST requests pass through without authentication. This enables local clients (Claude Code, the PanDA Mattermost bot, scripts) to access MCP without OAuth setup.
 
 ### Claude.ai (Remote)
 
@@ -636,6 +636,30 @@ Use cases:
 
 ---
 
+### PanDA Mattermost Bot
+
+The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client** — it connects to the MCP endpoint via HTTP POST and uses the `panda_*` tools to answer production monitoring questions in Mattermost.
+
+**Architecture:**
+- Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
+- Sends user questions to Claude Haiku with discovered PanDA tools
+- Executes tool calls via HTTP POST JSON-RPC to the MCP endpoint
+- Posts Claude's response back to the Mattermost thread
+
+**Running:** `manage.py panda_bot`
+
+**Environment variables:**
+- `MATTERMOST_URL` (default: `chat.epic-eic.org`)
+- `MATTERMOST_TOKEN` (required)
+- `MATTERMOST_TEAM` (default: `main`)
+- `MATTERMOST_CHANNEL` (default: `pandabot`)
+- `MCP_URL` (default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/`)
+- `ANTHROPIC_API_KEY` (required, used by the Anthropic SDK)
+
+**MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the MCP endpoint — the same transport Claude Code uses. Each user question gets a fresh MCP session (initialize, discover tools, tool-use loop, close).
+
+---
+
 ## Tool Summary
 
 | Category | Tools | Count |
@@ -819,6 +843,10 @@ swf-monitor/
 │   │   │   ├── workflows.py               # Workflow, message, run, STF tools
 │   │   │   ├── ai_memory.py               # AI memory tools
 │   │   │   └── common.py                  # Shared utilities
+│   │   ├── panda/                          # PanDA Mattermost bot (MCP client)
+│   │   │   └── bot.py                      # Bot logic, MCPClient, Claude integration
+│   │   ├── management/commands/
+│   │   │   └── panda_bot.py                # `manage.py panda_bot` management command
 │   │   ├── auth0.py                        # JWT validation with Auth0 JWKS
 │   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
 │   │   └── views.py                        # OAuth protected resource metadata
@@ -830,6 +858,7 @@ swf-monitor/
 | File | Purpose |
 |------|---------|
 | `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, common.py) |
+| `src/monitor_app/panda/bot.py` | **PanDA Mattermost bot** - MCP client using HTTP POST, Claude Haiku for responses |
 | `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
 | `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |
 | `src/swf_monitor_project/settings.py` | **Server config** - MCP config, Auth0 settings |
@@ -854,7 +883,7 @@ The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init_
 
 ### Transport
 
-HTTP/REST transport (Streamable HTTP). The MCP spec also supports stdio and SSE transports, but HTTP aligns with the existing REST architecture.
+HTTP POST transport (JSON-RPC over Streamable HTTP with `json_response=True`). All requests and responses are plain JSON — no SSE streaming, no GET listeners. The MCP spec also supports stdio and SSE transports, but HTTP POST aligns with the existing REST architecture and Django WSGI deployment.
 
 ### Settings
 
@@ -876,7 +905,7 @@ AUTH0_ALGORITHMS = ["RS256"]
 ### Adding New Tools
 
 ```python
-# In monitor_app/mcp.py
+# In monitor_app/mcp/system.py, workflows.py, or new file in the mcp/ package
 
 from mcp_server import mcp_server as mcp
 

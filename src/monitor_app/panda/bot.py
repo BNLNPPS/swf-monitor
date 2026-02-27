@@ -151,8 +151,7 @@ async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
                 if block.type == "tool_use":
                     logger.info(f"Tool call: {block.name}({block.input})")
                     try:
-                        result = mcp.call_tool(block.name, block.input)
-                        result = await result
+                        result = await mcp.call_tool(block.name, block.input)
                         content = result.get("content", [])
                         result_text = ""
                         for item in content:
