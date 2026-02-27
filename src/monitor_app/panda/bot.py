@@ -8,21 +8,28 @@ and responds using Claude with PanDA monitoring tools discovered via MCP.
 import json
 import logging
 import os
+import sys
+from pathlib import Path
 
 import anthropic
 from mattermostdriver import Driver
 from mcp.client.session import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 logger = logging.getLogger('panda_bot')
 
 MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
-MCP_URL = os.environ.get(
-    'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
-)
 PANDA_TOOL_PREFIX = 'panda_'
+
+MANAGE_PY = str(Path(__file__).resolve().parents[2] / "manage.py")
+
+MCP_SERVER_PARAMS = StdioServerParameters(
+    command=sys.executable,
+    args=[MANAGE_PY, "stdio_server"],
+    env=dict(os.environ),
+)
 
 SYSTEM_PROMPT = """\
 You are a PanDA production monitoring assistant for the ePIC experiment at the \
@@ -60,14 +67,14 @@ def mcp_tool_to_anthropic(tool):
     }
 
 
-async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
+async def ask_claude(claude_client, message_text, conversation=None):
     """Send a message to Claude, using MCP for tool execution. Returns final text."""
     if conversation is not None:
         messages = conversation
     else:
         messages = [{"role": "user", "content": message_text}]
 
-    async with streamable_http_client(mcp_url) as (read, write, _):
+    async with stdio_client(MCP_SERVER_PARAMS) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
 
@@ -143,7 +150,6 @@ class PandaBot:
         self.mm_token = os.environ['MATTERMOST_TOKEN']
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
         self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
-        self.mcp_url = MCP_URL
 
         self.claude = anthropic.AsyncAnthropic()
 
@@ -181,7 +187,7 @@ class PandaBot:
         logger.info(
             f"Listening on #{self.mm_channel_name} "
             f"(channel {self.channel_id}) in team {self.mm_team} "
-            f"(MCP: {self.mcp_url})"
+            f"(MCP: stdio)"
         )
 
         self.driver.init_websocket(self._handle_event)
@@ -270,7 +276,7 @@ class PandaBot:
             if root_id:
                 conversation = self._build_thread_conversation(root_id)
             reply = await ask_claude(
-                self.claude, self.mcp_url, message_text, conversation
+                self.claude, message_text, conversation
             )
             logger.info(f"Got reply: {len(reply)} chars")
         except Exception:

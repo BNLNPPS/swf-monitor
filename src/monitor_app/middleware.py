@@ -14,57 +14,33 @@ class MCPAuthMiddleware:
     """
     Middleware for MCP endpoint authentication.
 
-    Authentication modes:
-    1. Bearer token present: Validate via Auth0, allow if valid
-    2. No token + MCP path: Return 401 with OAuth metadata for discovery
-    3. No token + other paths: Pass through (existing behavior)
-
-    This allows:
-    - Claude.ai: OAuth flow via Auth0
-    - Claude Code: Direct access without auth (local config)
+    Bearer token present: validate via Auth0, reject if invalid.
+    No token: allow through (Claude Code, local clients).
+    Non-MCP paths: pass through.
     """
 
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        # Build the MCP path prefix accounting for FORCE_SCRIPT_NAME
         script_name = getattr(settings, 'FORCE_SCRIPT_NAME', None) or ""
         mcp_path = f"{script_name}/mcp"
 
-        # Only apply to MCP endpoints (with or without trailing slash)
         if not (request.path == mcp_path or request.path.startswith(mcp_path + "/")):
             return self.get_response(request)
 
-        # Check for Bearer token
         token = get_bearer_token(request)
 
         if token:
-            # Validate the token
             payload = validate_token(token)
             if payload:
-                # Token valid - attach user info to request and proceed
                 request.auth0_payload = payload
                 request.auth0_user = payload.get("sub")
                 return self.get_response(request)
             else:
-                # Invalid token - return 401
                 return self._unauthorized_response(request, "Invalid or expired token")
 
-        # No token present - determine behavior:
-        # - POST/DELETE: Allow through (tool calls + session cleanup)
-        # - GET: Always 401. WSGI can't serve SSE streams — letting GET through
-        #   holds a WSGI thread forever and starves the server. The MCP client's
-        #   GET stream retries twice then gives up harmlessly.
-        if request.method in ("POST", "DELETE"):
-            return self.get_response(request)
-
-        # No session, non-POST - if Auth0 configured, trigger OAuth discovery
-        auth0_domain = getattr(settings, 'AUTH0_DOMAIN', None)
-        if auth0_domain:
-            return self._oauth_required_response(request)
-
-        # Auth0 not configured - allow all through
+        # No token — allow through (Claude Code, local clients)
         return self.get_response(request)
 
     def _unauthorized_response(self, request, message: str):
@@ -73,21 +49,8 @@ class MCPAuthMiddleware:
         response["WWW-Authenticate"] = self._www_authenticate_header(request)
         return response
 
-    def _oauth_required_response(self, request):
-        """Return 401 with OAuth metadata for discovery."""
-        response = JsonResponse(
-            {
-                "error": "authorization_required",
-                "message": "OAuth 2.1 authentication required",
-            },
-            status=401,
-        )
-        response["WWW-Authenticate"] = self._www_authenticate_header(request)
-        return response
-
     def _www_authenticate_header(self, request) -> str:
-        """Build WWW-Authenticate header for OAuth discovery."""
-        # Get the base URL for resource metadata
+        """Build WWW-Authenticate header."""
         scheme = "https" if request.is_secure() else "http"
         host = request.get_host()
         script_name = getattr(settings, 'FORCE_SCRIPT_NAME', None) or ""
