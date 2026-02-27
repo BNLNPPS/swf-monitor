@@ -351,6 +351,16 @@ class PandaBot:
             team['id'], self.mm_channel_name
         )
         self.channel_id = channel['id']
+
+        # Ensure bot user is a member of the channel
+        try:
+            self.driver.channels.add_user(self.channel_id, options={
+                'user_id': self.bot_user_id,
+            })
+            logger.info(f"Joined #{self.mm_channel_name}")
+        except Exception:
+            logger.info(f"Already a member of #{self.mm_channel_name}")
+
         logger.info(
             f"Listening on #{self.mm_channel_name} "
             f"(channel {self.channel_id}) in team {self.mm_team}"
@@ -365,7 +375,11 @@ class PandaBot:
         except (json.JSONDecodeError, TypeError):
             return
 
-        if event.get('event') != 'posted':
+        event_type = event.get('event', '')
+        if event_type and event_type != 'typing':
+            logger.debug(f"WS event: {event_type}")
+
+        if event_type != 'posted':
             return
 
         data = event.get('data', {})

@@ -12,6 +12,7 @@ class Command(BaseCommand):
             level=logging.INFO,
             format='%(asctime)s %(name)s %(levelname)s %(message)s',
         )
+        logging.getLogger('panda_bot').setLevel(logging.DEBUG)
 
         from monitor_app.panda.bot import PandaBot
 
