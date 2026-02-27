@@ -3,33 +3,28 @@ PanDA Mattermost bot — answers production monitoring questions using Claude wi
 
 Connects to Mattermost via WebSocket, listens for messages in a target channel,
 and responds using Claude with PanDA monitoring tools discovered via MCP.
+
+MCP transport: HTTP POST (JSON-RPC) to the Django MCP endpoint — the same
+transport Claude Code uses. No SSE, no GET streams, no subprocesses.
 """
 
 import json
 import logging
 import os
-import sys
-from pathlib import Path
 
 import anthropic
+import httpx
 from mattermostdriver import Driver
-from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
 
 logger = logging.getLogger('panda_bot')
 
 MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
-PANDA_TOOL_PREFIX = 'panda_'
-
-MANAGE_PY = str(Path(__file__).resolve().parents[2] / "manage.py")
-
-MCP_SERVER_PARAMS = StdioServerParameters(
-    command=sys.executable,
-    args=[MANAGE_PY, "stdio_server"],
-    env=dict(os.environ),
+MCP_URL = os.environ.get(
+    'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
+PANDA_TOOL_PREFIX = 'panda_'
 
 SYSTEM_PROMPT = """\
 You are a PanDA production monitoring assistant for the ePIC experiment at the \
@@ -58,83 +53,128 @@ what the user might mean.
 """
 
 
+class MCPClient:
+    """Minimal MCP client using HTTP POST only — no SSE, no GET streams."""
+
+    def __init__(self, url: str):
+        self.url = url
+        self.session_id = None
+        self._request_id = 0
+        self._http = httpx.AsyncClient(timeout=60)
+
+    async def _post(self, method: str, params: dict | None = None):
+        self._request_id += 1
+        body = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
+        if params:
+            body["params"] = params
+        headers = {"Content-Type": "application/json"}
+        if self.session_id:
+            headers["Mcp-Session-Id"] = self.session_id
+        resp = await self._http.post(self.url, json=body, headers=headers)
+        resp.raise_for_status()
+        if "Mcp-Session-Id" in resp.headers:
+            self.session_id = resp.headers["Mcp-Session-Id"]
+        return resp.json()
+
+    async def initialize(self):
+        return await self._post("initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "panda-bot", "version": "1.0"},
+        })
+
+    async def list_tools(self):
+        result = await self._post("tools/list")
+        return result.get("result", {}).get("tools", [])
+
+    async def call_tool(self, name: str, arguments: dict):
+        result = await self._post("tools/call", {
+            "name": name, "arguments": arguments,
+        })
+        return result.get("result", {})
+
+    async def close(self):
+        await self._http.aclose()
+
+
 def mcp_tool_to_anthropic(tool):
     """Convert an MCP tool definition to Anthropic Messages API format."""
     return {
-        "name": tool.name,
-        "description": tool.description or "",
-        "input_schema": tool.inputSchema,
+        "name": tool["name"],
+        "description": tool.get("description", ""),
+        "input_schema": tool["inputSchema"],
     }
 
 
-async def ask_claude(claude_client, message_text, conversation=None):
+async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
     """Send a message to Claude, using MCP for tool execution. Returns final text."""
     if conversation is not None:
         messages = conversation
     else:
         messages = [{"role": "user", "content": message_text}]
 
-    async with stdio_client(MCP_SERVER_PARAMS) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
+    mcp = MCPClient(mcp_url)
+    try:
+        await mcp.initialize()
 
-            tools_result = await session.list_tools()
-            anthropic_tools = [
-                mcp_tool_to_anthropic(t)
-                for t in tools_result.tools
-                if t.name.startswith(PANDA_TOOL_PREFIX)
-            ]
-            logger.info(f"Discovered {len(anthropic_tools)} PanDA tools via MCP")
+        tools = await mcp.list_tools()
+        anthropic_tools = [
+            mcp_tool_to_anthropic(t) for t in tools
+            if t["name"].startswith(PANDA_TOOL_PREFIX)
+        ]
+        logger.info(f"Discovered {len(anthropic_tools)} PanDA tools via MCP")
 
-            for round_num in range(MAX_TOOL_ROUNDS):
-                response = await claude_client.messages.create(
-                    model="claude-haiku-4-5-20251001",
-                    max_tokens=4096,
-                    system=SYSTEM_PROMPT,
-                    tools=anthropic_tools,
-                    messages=messages,
-                )
+        for round_num in range(MAX_TOOL_ROUNDS):
+            response = await claude_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                tools=anthropic_tools,
+                messages=messages,
+            )
 
-                logger.info(f"Claude response: stop_reason={response.stop_reason}")
+            logger.info(f"Claude response: stop_reason={response.stop_reason}")
 
-                if response.stop_reason != "tool_use":
-                    text_parts = [
-                        b.text for b in response.content if b.type == "text"
-                    ]
-                    reply = "\n".join(text_parts)
-                    logger.info(f"Final reply: {len(reply)} chars")
-                    return reply
+            if response.stop_reason != "tool_use":
+                text_parts = [
+                    b.text for b in response.content if b.type == "text"
+                ]
+                reply = "\n".join(text_parts)
+                logger.info(f"Final reply: {len(reply)} chars")
+                return reply
 
-                messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "assistant", "content": response.content})
 
-                tool_results = []
-                for block in response.content:
-                    if block.type == "tool_use":
-                        logger.info(f"Tool call: {block.name}({block.input})")
-                        try:
-                            result = await session.call_tool(
-                                block.name, block.input
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    logger.info(f"Tool call: {block.name}({block.input})")
+                    try:
+                        result = mcp.call_tool(block.name, block.input)
+                        result = await result
+                        content = result.get("content", [])
+                        result_text = ""
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                result_text += item["text"]
+                        if len(result_text) > MAX_RESULT_LEN:
+                            result_text = (
+                                result_text[:MAX_RESULT_LEN]
+                                + '\n... (truncated)'
                             )
-                            result_text = ""
-                            for content in result.content:
-                                if hasattr(content, 'text'):
-                                    result_text += content.text
-                            if len(result_text) > MAX_RESULT_LEN:
-                                result_text = (
-                                    result_text[:MAX_RESULT_LEN]
-                                    + '\n... (truncated)'
-                                )
-                        except Exception as e:
-                            logger.exception(f"MCP tool {block.name} failed")
-                            result_text = json.dumps({"error": str(e)})
+                    except Exception as e:
+                        logger.exception(f"MCP tool {block.name} failed")
+                        result_text = json.dumps({"error": str(e)})
 
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result_text,
-                        })
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_text,
+                    })
 
-                messages.append({"role": "user", "content": tool_results})
+            messages.append({"role": "user", "content": tool_results})
+    finally:
+        await mcp.close()
 
     return (
         "I hit the maximum number of tool calls. "
@@ -150,6 +190,7 @@ class PandaBot:
         self.mm_token = os.environ['MATTERMOST_TOKEN']
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
         self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
+        self.mcp_url = MCP_URL
 
         self.claude = anthropic.AsyncAnthropic()
 
@@ -187,7 +228,7 @@ class PandaBot:
         logger.info(
             f"Listening on #{self.mm_channel_name} "
             f"(channel {self.channel_id}) in team {self.mm_team} "
-            f"(MCP: stdio)"
+            f"(MCP: {self.mcp_url})"
         )
 
         self.driver.init_websocket(self._handle_event)
@@ -204,7 +245,6 @@ class PandaBot:
             if not p or not p.get('message', '').strip():
                 continue
             role = "assistant" if p['user_id'] == self.bot_user_id else "user"
-            # Merge consecutive same-role messages
             if messages and messages[-1]['role'] == role:
                 messages[-1]['content'] += "\n\n" + p['message'].strip()
             else:
@@ -213,7 +253,6 @@ class PandaBot:
                     "content": p['message'].strip(),
                 })
 
-        # Conversation must start with user and alternate properly
         if messages and messages[0]['role'] != 'user':
             messages = messages[1:]
 
@@ -276,7 +315,7 @@ class PandaBot:
             if root_id:
                 conversation = self._build_thread_conversation(root_id)
             reply = await ask_claude(
-                self.claude, message_text, conversation
+                self.claude, self.mcp_url, message_text, conversation
             )
             logger.info(f"Got reply: {len(reply)} chars")
         except Exception:
