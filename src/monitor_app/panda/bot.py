@@ -8,7 +8,6 @@ and responds using Claude Sonnet with direct access to PanDA query functions.
 import json
 import logging
 import os
-import ssl
 
 import anthropic
 from mattermostdriver import Driver
@@ -335,9 +334,6 @@ class PandaBot:
             'token': self.mm_token,
             'scheme': 'https',
             'port': 443,
-            'websocket_kw_args': {
-                'ssl': ssl.create_default_context(),
-            },
         })
 
         self.bot_user_id = None
