@@ -188,7 +188,7 @@ class PandaBot:
 
     def _build_thread_conversation(self, root_id):
         """Fetch a Mattermost thread and build a Claude conversation from it."""
-        thread = self.driver.posts.get_post_thread(root_id)
+        thread = self.driver.posts.get_thread(root_id)
         posts = thread.get('posts', {})
         order = thread.get('order', [])
 
