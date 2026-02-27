@@ -52,12 +52,11 @@ class MCPAuthMiddleware:
                 return self._unauthorized_response(request, "Invalid or expired token")
 
         # No token present - determine behavior:
-        # - POST: Allow through (Claude Code tool calls, bot establishing sessions)
-        # - GET/DELETE with session ID: Allow through (established MCP sessions
-        #   need GET for SSE stream and DELETE for cleanup)
-        # - GET/DELETE without session: Return 401 for OAuth discovery (Claude.ai)
-        session_id = request.headers.get('Mcp-Session-Id')
-        if request.method == "POST" or session_id:
+        # - POST/DELETE: Allow through (tool calls + session cleanup)
+        # - GET: Always 401. WSGI can't serve SSE streams — letting GET through
+        #   holds a WSGI thread forever and starves the server. The MCP client's
+        #   GET stream retries twice then gives up harmlessly.
+        if request.method in ("POST", "DELETE"):
             return self.get_response(request)
 
         # No session, non-POST - if Auth0 configured, trigger OAuth discovery
