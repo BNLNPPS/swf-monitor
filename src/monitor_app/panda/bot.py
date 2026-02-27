@@ -392,16 +392,32 @@ class PandaBot:
         except (json.JSONDecodeError, TypeError):
             return
 
+        post_channel = post.get('channel_id')
+        post_user = post.get('user_id')
+        post_type = post.get('type', '')
+        logger.debug(
+            f"Posted: channel={post_channel} user={post_user} "
+            f"type={post_type} root_id={post.get('root_id', '')}"
+        )
+
         # Ignore own messages
-        if post.get('user_id') == self.bot_user_id:
+        if post_user == self.bot_user_id:
+            logger.debug("Skipping own message")
             return
 
         # Only target channel
-        if post.get('channel_id') != self.channel_id:
+        if post_channel != self.channel_id:
+            logger.debug(f"Skipping: channel {post_channel} != {self.channel_id}")
+            return
+
+        # Ignore system messages (joins, leaves, etc.)
+        if post_type:
+            logger.debug(f"Skipping system message type={post_type}")
             return
 
         # Ignore thread replies (only respond to root posts)
         if post.get('root_id'):
+            logger.debug("Skipping thread reply")
             return
 
         message_text = post.get('message', '').strip()
@@ -409,7 +425,7 @@ class PandaBot:
             return
 
         post_id = post.get('id')
-        logger.info(f"Message from {post.get('user_id')}: {message_text[:100]}")
+        logger.info(f"Message from {post_user}: {message_text[:100]}")
 
         try:
             reply = ask_claude(self.claude, message_text)
