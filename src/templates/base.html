@@ -99,6 +99,11 @@
                 <button class="dropbtn">PanDA/Rucio</button>
                 <div class="dropdown-content">
                     <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio Hub</a>
+                    <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
+                    <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
+                    <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
+                    <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
+                    <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
                     <a href="{% url 'monitor_app:panda_queues_list' %}">PanDA Queues</a>
                     <a href="{% url 'monitor_app:panda_database_tables_list' %}">PanDA Database</a>
                     <a href="{% url 'monitor_app:idds_database_tables_list' %}">iDDS Database</a>

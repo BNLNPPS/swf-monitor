@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+
+{% block title %}Task {{ jeditaskid }} - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Task {{ jeditaskid }}</h2>
+        <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% else %}
+
+    <div class="row">
+        <!-- Task Info -->
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Task Information</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        <tr><td><strong>Task ID</strong></td><td>{{ task.jeditaskid }}</td></tr>
+                        {% if task.taskname %}<tr><td><strong>Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>{% endif %}
+                        <tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>
+                        {% if task.username %}
+                        <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_tasks_list' %}?username={{ task.username }}">{{ task.username }}</a></td></tr>
+                        {% endif %}
+                        {% if task.workinggroup %}<tr><td><strong>Working Group</strong></td><td>{{ task.workinggroup }}</td></tr>{% endif %}
+                        {% if task.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ task.processingtype }}</td></tr>{% endif %}
+                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td><code>{{ task.transpath }}</code></td></tr>{% endif %}
+                        {% if task.reqid %}<tr><td><strong>Request ID</strong></td><td>{{ task.reqid }}</td></tr>{% endif %}
+                        {% if task.parent_tid %}<tr><td><strong>Parent Task</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.parent_tid %}">{{ task.parent_tid }}</a></td></tr>{% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timing & Progress -->
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Timing & Progress</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        {% if task.creationdate %}<tr><td><strong>Created</strong></td><td>{{ task.creationdate }}</td></tr>{% endif %}
+                        {% if task.starttime %}<tr><td><strong>Started</strong></td><td>{{ task.starttime }}</td></tr>{% endif %}
+                        {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime }}</td></tr>{% endif %}
+                        {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime }}</td></tr>{% endif %}
+                        {% if task.progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.progress }}%</td></tr>{% endif %}
+                        {% if task.failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.failurerate }}%</td></tr>{% endif %}
+                        {% if task.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ task.attemptnr }}</td></tr>{% endif %}
+                        {% if task.corecount %}<tr><td><strong>Cores</strong></td><td>{{ task.corecount }}</td></tr>{% endif %}
+                        {% if task.taskpriority %}<tr><td><strong>Priority</strong></td><td>{{ task.taskpriority }}{% if task.currentpriority %} (current: {{ task.currentpriority }}){% endif %}</td></tr>{% endif %}
+                        {% if task.site %}<tr><td><strong>Site</strong></td><td>{{ task.site }}</td></tr>{% endif %}
+                        {% if task.gshare %}<tr><td><strong>Global Share</strong></td><td>{{ task.gshare }}</td></tr>{% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error dialog -->
+    {% if task.errordialog %}
+    <div class="card mb-3">
+        <div class="card-header" style="background:#f8d7da;"><strong>Error</strong></div>
+        <div class="card-body">
+            <pre style="white-space:pre-wrap;margin:0;">{{ task.errordialog }}</pre>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Jobs for this task -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <strong>Jobs ({{ job_count }})</strong>
+            {% if job_summary %}
+            <span style="margin-left:1em;font-weight:normal;">
+                {% for status, count in job_summary.items %}
+                {{ status }}: {{ count }}{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+            </span>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            {% if jobs %}
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered table-striped mb-0">
+                    <thead>
+                        <tr>
+                            <th>PanDA ID</th>
+                            <th>Status</th>
+                            <th>Site</th>
+                            <th>Created</th>
+                            <th>Ended</th>
+                            <th>Cores</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for job in jobs %}
+                    <tr>
+                        <td><a href="{% url 'monitor_app:panda_job_detail' job.pandaid %}">{{ job.pandaid }}</a></td>
+                        <td>{{ job.jobstatus }}</td>
+                        <td>{{ job.computingsite|default:"" }}</td>
+                        <td>{{ job.creationtime|default:"" }}</td>
+                        <td>{{ job.endtime|default:"" }}</td>
+                        <td>{{ job.corecount|default:"" }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if job_count >= 200 %}
+            <p class="mt-2 text-muted">Showing first 200 jobs. <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90">View all in job list</a></p>
+            {% endif %}
+            {% else %}
+            <p class="text-muted mb-0">No jobs found for this task.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- External links -->
+    <div class="mb-3">
+        <a href="https://pandamon01.sdcc.bnl.gov/task?jeditaskid={{ jeditaskid }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
+        <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90" class="btn btn-outline-secondary btn-sm">All Jobs for Task</a>
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+
+{% block title %}PanDA Activity - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>PanDA Activity</h2>
+    <p>Production activity overview for the last {{ days }} day{{ days|pluralize }}.</p>
+
+    <!-- Days selector -->
+    <div style="margin-bottom:1em;">
+        <strong>Time window:</strong>
+        {% for opt in days_options %}
+        {% if opt.active %}
+        <a href="?days={{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
+        {% else %}
+        <a href="?days={{ opt.value }}" style="margin-right:0.8em;">{{ opt.value }}d</a>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% else %}
+
+    <!-- Summary cards -->
+    <div class="row mb-4">
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Jobs</strong></div>
+                <div class="card-body">
+                    <h3>{{ jobs.total|default:"0" }}</h3>
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead><tr><th>Status</th><th>Count</th></tr></thead>
+                        <tbody>
+                        {% for status, count in jobs.by_status.items %}
+                        <tr>
+                            <td><a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&status={{ status }}">{{ status }}</a></td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Tasks</strong></div>
+                <div class="card-body">
+                    <h3>{{ tasks.total|default:"0" }}</h3>
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead><tr><th>Status</th><th>Count</th></tr></thead>
+                        <tbody>
+                        {% for status, count in tasks.by_status.items %}
+                        <tr>
+                            <td><a href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}&status={{ status }}">{{ status }}</a></td>
+                            <td>{{ count }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- By user -->
+    <div class="row mb-4">
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Jobs by User</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead><tr><th>User</th><th>Total</th><th>Breakdown</th></tr></thead>
+                        <tbody>
+                        {% for entry in jobs.by_user %}
+                        <tr>
+                            <td><a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&username={{ entry.user }}">{{ entry.user }}</a></td>
+                            <td>{{ entry.total }}</td>
+                            <td>
+                                {% for key, val in entry.items %}{% if key != 'user' and key != 'total' %}{{ key }}:{{ val }} {% endif %}{% endfor %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Tasks by User</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead><tr><th>User</th><th>Total</th><th>Breakdown</th></tr></thead>
+                        <tbody>
+                        {% for entry in tasks.by_user %}
+                        <tr>
+                            <td><a href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}&username={{ entry.user }}">{{ entry.user }}</a></td>
+                            <td>{{ entry.total }}</td>
+                            <td>
+                                {% for key, val in entry.items %}{% if key != 'user' and key != 'total' %}{{ key }}:{{ val }} {% endif %}{% endfor %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- By site -->
+    <div class="row mb-4">
+        <div class="col-md-12 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Jobs by Site</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead><tr><th>Site</th><th>Total</th><th>Breakdown</th></tr></thead>
+                        <tbody>
+                        {% for entry in jobs.by_site %}
+                        <tr>
+                            <td><a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&site={{ entry.site }}">{{ entry.site }}</a></td>
+                            <td>{{ entry.total }}</td>
+                            <td>
+                                {% for key, val in entry.items %}{% if key != 'site' and key != 'total' %}{{ key }}:{{ val }} {% endif %}{% endfor %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick links -->
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}" class="btn btn-outline-primary me-2">All Jobs</a>
+            <a href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}" class="btn btn-outline-primary me-2">All Tasks</a>
+            <a href="{% url 'monitor_app:panda_errors_list' %}?days={{ days }}" class="btn btn-outline-danger me-2">Error Summary</a>
+            <a href="{% url 'monitor_app:panda_diagnostics_list' %}?days={{ days }}" class="btn btn-outline-warning me-2">Diagnostics</a>
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}

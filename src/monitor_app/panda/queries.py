@@ -18,6 +18,9 @@ from .constants import (
 from .sql import (
     build_union_query, build_count_query,
     build_task_query, build_task_count_query,
+    build_union_query_dt, build_union_count, build_union_count_by_field,
+    build_task_query_dt, build_task_count, build_task_count_by_field,
+    build_search_clauses,
     row_to_dict, extract_errors, like_or_eq,
 )
 
@@ -714,3 +717,273 @@ def study_job(pandaid):
     result["monitor_url"] = f"https://pandamon01.sdcc.bnl.gov/job?pandaid={pandaid}"
 
     return result
+
+
+# ── DataTables query functions ───────────────────────────────────────────────
+
+# Orderable columns for jobs and tasks (maps column name to SQL expression)
+JOB_ORDER_COLUMNS = {f: f'"{f}"' for f in LIST_FIELDS}
+TASK_ORDER_COLUMNS = {f: f'"{f}"' for f in TASK_LIST_FIELDS}
+
+# Searchable columns for DataTables global search
+JOB_SEARCH_FIELDS = ['pandaid', 'jeditaskid', 'produsername', 'jobstatus',
+                     'computingsite', 'transformation']
+TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
+                      'workinggroup', 'transpath']
+
+
+def list_jobs_dt(days=7, status=None, username=None, site=None,
+                 taskid=None, reqid=None,
+                 order_by='"pandaid" DESC', limit=100, offset=0, search=None):
+    """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
+    cutoff = timezone.now() - timedelta(days=days)
+    where = ['"modificationtime" >= %s']
+    params = [cutoff]
+
+    if status:
+        where.append('"jobstatus" = %s')
+        params.append(status)
+    if username:
+        clause, val = like_or_eq('produsername', username)
+        where.append(clause)
+        params.append(val)
+    if site:
+        clause, val = like_or_eq('computingsite', site)
+        where.append(clause)
+        params.append(val)
+    if taskid:
+        where.append('"jeditaskid" = %s')
+        params.append(int(taskid))
+    if reqid:
+        where.append('"reqid" = %s')
+        params.append(int(reqid))
+
+    conn = connections['panda']
+
+    # Total count (no search filter)
+    count_sql, count_params = build_union_count(where, params)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(count_sql, count_params)
+            total = cursor.fetchone()[0]
+    except Exception as e:
+        logger.error(f"list_jobs_dt count failed: {e}")
+        return [], 0, 0
+
+    # Apply search filter
+    filtered_where = list(where)
+    filtered_params = list(params)
+    if search:
+        search_clause, search_params = build_search_clauses(JOB_SEARCH_FIELDS, search)
+        filtered_where.append(search_clause)
+        filtered_params.extend(search_params)
+
+    # Filtered count
+    if search:
+        fcount_sql, fcount_params = build_union_count(filtered_where, filtered_params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(fcount_sql, fcount_params)
+                filtered = cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"list_jobs_dt filtered count failed: {e}")
+            return [], total, 0
+    else:
+        filtered = total
+
+    # Data query
+    sql, full_params = build_union_query_dt(
+        LIST_FIELDS, filtered_where, filtered_params,
+        order_by=order_by, limit=limit, offset=offset,
+    )
+
+    rows = []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, full_params)
+            for row in cursor.fetchall():
+                rows.append(row_to_dict(row, LIST_FIELDS))
+    except Exception as e:
+        logger.error(f"list_jobs_dt query failed: {e}")
+        return [], total, filtered
+
+    return rows, total, filtered
+
+
+def list_tasks_dt(days=7, status=None, username=None, taskname=None,
+                  workinggroup=None, order_by='"jeditaskid" DESC',
+                  limit=100, offset=0, search=None):
+    """List JEDI tasks for DataTables (returns rows, total, filtered counts)."""
+    cutoff = timezone.now() - timedelta(days=days)
+    where = ['"modificationtime" >= %s']
+    params = [cutoff]
+
+    if status:
+        where.append('"status" = %s')
+        params.append(status)
+    if username:
+        clause, val = like_or_eq('username', username)
+        where.append(clause)
+        params.append(val)
+    if taskname:
+        clause, val = like_or_eq('taskname', taskname)
+        where.append(clause)
+        params.append(val)
+    if workinggroup:
+        where.append('"workinggroup" = %s')
+        params.append(workinggroup)
+
+    conn = connections['panda']
+
+    # Total count
+    count_sql, count_params = build_task_count(where, params)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(count_sql, count_params)
+            total = cursor.fetchone()[0]
+    except Exception as e:
+        logger.error(f"list_tasks_dt count failed: {e}")
+        return [], 0, 0
+
+    # Apply search filter
+    filtered_where = list(where)
+    filtered_params = list(params)
+    if search:
+        search_clause, search_params = build_search_clauses(TASK_SEARCH_FIELDS, search)
+        filtered_where.append(search_clause)
+        filtered_params.extend(search_params)
+
+    # Filtered count
+    if search:
+        fcount_sql, fcount_params = build_task_count(filtered_where, filtered_params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(fcount_sql, fcount_params)
+                filtered = cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"list_tasks_dt filtered count failed: {e}")
+            return [], total, 0
+    else:
+        filtered = total
+
+    # Data query
+    sql, full_params = build_task_query_dt(
+        TASK_LIST_FIELDS, filtered_where, filtered_params,
+        order_by=order_by, limit=limit, offset=offset,
+    )
+
+    rows = []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, full_params)
+            for row in cursor.fetchall():
+                rows.append(row_to_dict(row, TASK_LIST_FIELDS))
+    except Exception as e:
+        logger.error(f"list_tasks_dt query failed: {e}")
+        return [], total, filtered
+
+    return rows, total, filtered
+
+
+def job_filter_counts(days=7, status=None, username=None, site=None,
+                      taskid=None, reqid=None):
+    """Get filter option counts for job list (status, user, site)."""
+    cutoff = timezone.now() - timedelta(days=days)
+    base_where = ['"modificationtime" >= %s']
+    base_params = [cutoff]
+
+    if taskid:
+        base_where.append('"jeditaskid" = %s')
+        base_params.append(int(taskid))
+    if reqid:
+        base_where.append('"reqid" = %s')
+        base_params.append(int(reqid))
+
+    conn = connections['panda']
+    result = {}
+
+    filter_config = [
+        ('jobstatus', 'status', status),
+        ('produsername', 'username', username),
+        ('computingsite', 'site', site),
+    ]
+
+    for db_field, filter_name, current_value in filter_config:
+        # Apply all other filters except this one
+        where = list(base_where)
+        params = list(base_params)
+        for other_db_field, other_name, other_value in filter_config:
+            if other_name != filter_name and other_value:
+                clause, val = like_or_eq(other_db_field, other_value)
+                where.append(clause)
+                params.append(val)
+
+        sql, full_params = build_union_count_by_field(db_field, where, params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, full_params)
+                result[filter_name] = [(row[0], row[1]) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"job_filter_counts {filter_name} failed: {e}")
+            result[filter_name] = []
+
+    return result
+
+
+def task_filter_counts(days=7, status=None, username=None, workinggroup=None):
+    """Get filter option counts for task list (status, username, workinggroup)."""
+    cutoff = timezone.now() - timedelta(days=days)
+    base_where = ['"modificationtime" >= %s']
+    base_params = [cutoff]
+
+    conn = connections['panda']
+    result = {}
+
+    filter_config = [
+        ('status', 'status', status),
+        ('username', 'username', username),
+        ('workinggroup', 'workinggroup', workinggroup),
+    ]
+
+    for db_field, filter_name, current_value in filter_config:
+        where = list(base_where)
+        params = list(base_params)
+        for other_db_field, other_name, other_value in filter_config:
+            if other_name != filter_name and other_value:
+                where.append(f'"{other_db_field}" = %s')
+                params.append(other_value)
+
+        sql, full_params = build_task_count_by_field(db_field, where, params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, full_params)
+                result[filter_name] = [(row[0], row[1]) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"task_filter_counts {filter_name} failed: {e}")
+            result[filter_name] = []
+
+    return result
+
+
+def get_task(jeditaskid):
+    """Get a single JEDI task record."""
+    conn = connections['panda']
+    field_list = ', '.join(f'"{f}"' for f in TASK_LIST_FIELDS)
+    sql = f"""
+        SELECT {field_list}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE "jeditaskid" = %s
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [jeditaskid])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"get_task query failed: {e}")
+        return {"error": str(e)}
+
+    if not row:
+        return {"error": f"Task {jeditaskid} not found"}
+
+    task = row_to_dict(row, TASK_LIST_FIELDS)
+    return task

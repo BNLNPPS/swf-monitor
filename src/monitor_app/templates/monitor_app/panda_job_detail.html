@@ -1,0 +1,177 @@
+{% extends 'base.html' %}
+
+{% block title %}Job {{ pandaid }} - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Job {{ pandaid }}</h2>
+        <a href="{% url 'monitor_app:panda_jobs_list' %}" class="btn btn-outline-secondary btn-sm">Back to Jobs</a>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% else %}
+
+    <div class="row">
+        <!-- Job Info -->
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Job Information</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }}</td></tr>
+                        {% if job.jeditaskid %}
+                        <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' job.jeditaskid %}">{{ job.jeditaskid }}</a></td></tr>
+                        {% endif %}
+                        {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td><code>{{ job.jobname }}</code></td></tr>{% endif %}
+                        <tr><td><strong>Status</strong></td><td>{{ job.jobstatus }}</td></tr>
+                        {% if job.produsername %}
+                        <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?username={{ job.produsername }}">{{ job.produsername }}</a></td></tr>
+                        {% endif %}
+                        {% if job.computingsite %}
+                        <tr><td><strong>Site</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ job.computingsite }}">{{ job.computingsite }}</a></td></tr>
+                        {% endif %}
+                        {% if job.computingelement %}<tr><td><strong>CE</strong></td><td>{{ job.computingelement }}</td></tr>{% endif %}
+                        {% if job.transformation %}<tr><td><strong>Transformation</strong></td><td><code>{{ job.transformation }}</code></td></tr>{% endif %}
+                        {% if job.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ job.processingtype }}</td></tr>{% endif %}
+                        {% if job.reqid %}<tr><td><strong>Request ID</strong></td><td>{{ job.reqid }}</td></tr>{% endif %}
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Timing -->
+        <div class="col-md-6 mb-3">
+            <div class="card">
+                <div class="card-header"><strong>Timing</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        {% if job.creationtime %}<tr><td><strong>Created</strong></td><td>{{ job.creationtime }}</td></tr>{% endif %}
+                        {% if job.starttime %}<tr><td><strong>Started</strong></td><td>{{ job.starttime }}</td></tr>{% endif %}
+                        {% if job.endtime %}<tr><td><strong>Ended</strong></td><td>{{ job.endtime }}</td></tr>{% endif %}
+                        {% if job.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ job.modificationtime }}</td></tr>{% endif %}
+                    </table>
+                </div>
+            </div>
+
+            {% if job.corecount or job.nevents or job.maxrss %}
+            <div class="card mt-3">
+                <div class="card-header"><strong>Resources</strong></div>
+                <div class="card-body">
+                    <table class="table table-sm mb-0">
+                        {% if job.corecount %}<tr><td><strong>Cores</strong></td><td>{{ job.corecount }}{% if job.actualcorecount %} (actual: {{ job.actualcorecount }}){% endif %}</td></tr>{% endif %}
+                        {% if job.nevents %}<tr><td><strong>Events</strong></td><td>{{ job.nevents }}</td></tr>{% endif %}
+                        {% if job.cpuconsumptiontime %}<tr><td><strong>CPU Time</strong></td><td>{{ job.cpuconsumptiontime }} {{ job.cpuconsumptionunit }}</td></tr>{% endif %}
+                        {% if job.maxrss %}<tr><td><strong>Max RSS</strong></td><td>{{ job.maxrss }} KB</td></tr>{% endif %}
+                        {% if job.maxvmem %}<tr><td><strong>Max VMem</strong></td><td>{{ job.maxvmem }} KB</td></tr>{% endif %}
+                        {% if job.maxwalltime %}<tr><td><strong>Max Walltime</strong></td><td>{{ job.maxwalltime }}s</td></tr>{% endif %}
+                        {% if job.inputfilebytes %}<tr><td><strong>Input Size</strong></td><td>{{ job.inputfilebytes }} bytes</td></tr>{% endif %}
+                        {% if job.outputfilebytes %}<tr><td><strong>Output Size</strong></td><td>{{ job.outputfilebytes }} bytes</td></tr>{% endif %}
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Errors -->
+    {% if job.errors %}
+    <div class="card mb-3">
+        <div class="card-header" style="background:#f8d7da;"><strong>Errors</strong></div>
+        <div class="card-body">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Component</th><th>Code</th><th>Diagnostic</th></tr></thead>
+                <tbody>
+                {% for err in job.errors %}
+                <tr>
+                    <td><a href="{% url 'monitor_app:panda_diagnostics_list' %}?error_source={{ err.component }}">{{ err.component }}</a></td>
+                    <td>{{ err.code }}</td>
+                    <td>{{ err.diag }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Task context -->
+    {% if task %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Parent Task</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.jeditaskid %}">{{ task.jeditaskid }}</a></td></tr>
+                {% if task.taskname %}<tr><td><strong>Name</strong></td><td><code>{{ task.taskname }}</code></td></tr>{% endif %}
+                {% if task.status %}<tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>{% endif %}
+                {% if task.username %}<tr><td><strong>User</strong></td><td>{{ task.username }}</td></tr>{% endif %}
+                {% if task.errordialog %}<tr><td><strong>Error</strong></td><td style="color:#dc3545;">{{ task.errordialog }}</td></tr>{% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Files -->
+    {% if files %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Files ({{ files|length }})</strong></div>
+        <div class="card-body">
+            <table class="table table-sm table-bordered mb-0">
+                <thead><tr><th>Type</th><th>LFN</th><th>Size</th><th>Status</th></tr></thead>
+                <tbody>
+                {% for f in files %}
+                <tr>
+                    <td>{{ f.type }}</td>
+                    <td style="word-break:break-all;"><code>{{ f.lfn }}</code></td>
+                    <td>{{ f.fsize|default:"" }}</td>
+                    <td>{{ f.status|default:"" }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Log URLs -->
+    {% if log_urls %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Log URLs</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                {% for label, url in log_urls.items %}
+                <tr>
+                    <td><strong>{{ label }}</strong></td>
+                    <td><a href="{{ url }}" target="_blank" rel="noopener">{{ url }}</a></td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Harvester info -->
+    {% if harvester %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Harvester Worker</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                {% for key, val in harvester.items %}
+                <tr><td><strong>{{ key }}</strong></td><td>{{ val }}</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- External links -->
+    <div class="mb-3">
+        {% if monitor_url %}
+        <a href="{{ monitor_url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
+        {% endif %}
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}

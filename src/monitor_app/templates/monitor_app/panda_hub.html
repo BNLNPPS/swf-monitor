@@ -7,6 +7,51 @@
     <h1 class="mb-4">PanDA & Rucio Hub</h1>
     <p class="lead mb-5">Centralized access to PanDA workload management, Rucio data management, and database browsing</p>
 
+    <h3 class="mb-3">Production Monitor</h3>
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_activity' %}" class="text-decoration-none">Activity</a></strong></p>
+                    <p class="card-text">Overview of PanDA production activity with job and task counts by status, user, and site.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_jobs_list' %}" class="text-decoration-none">Jobs</a></strong></p>
+                    <p class="card-text">Browse and filter production jobs with drill-down to job details, errors, and log files.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_tasks_list' %}" class="text-decoration-none">Tasks</a></strong></p>
+                    <p class="card-text">Browse and filter JEDI tasks with drill-down to task details and constituent jobs.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_errors_list' %}" class="text-decoration-none">Error Summary</a></strong></p>
+                    <p class="card-text">Top error patterns ranked by frequency across all failed jobs.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong></p>
+                    <p class="card-text">Failed jobs with full error details for debugging production issues.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="mb-3">Configuration & Databases</h3>
     <div class="row">
         <div class="col-md-6 mb-4">
             <div class="card h-100">

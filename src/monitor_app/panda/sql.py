@@ -117,3 +117,112 @@ def like_or_eq(field, value):
     if '%' in value:
         return f'"{field}" LIKE %s', value
     return f'"{field}" = %s', value
+
+
+# ── DataTables SQL builders ──────────────────────────────────────────────────
+
+def build_union_query_dt(fields, where_clauses, params, order_by, limit, offset):
+    """Build a UNION ALL query with OFFSET for DataTables pagination."""
+    field_list = ', '.join(f'"{f}"' for f in fields)
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+
+    sql = f"""
+        SELECT * FROM (
+            SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsactive4"{where_sql}
+            UNION ALL
+            SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsarchived4"{where_sql}
+        ) combined
+        ORDER BY {order_by}
+        LIMIT {limit} OFFSET {offset}
+    """
+    full_params = list(params) + list(params)
+    return sql, full_params
+
+
+def build_union_count(where_clauses, params):
+    """Build a total count query across both job tables."""
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+
+    sql = f"""
+        SELECT COUNT(*) FROM (
+            SELECT 1 FROM "{PANDA_SCHEMA}"."jobsactive4"{where_sql}
+            UNION ALL
+            SELECT 1 FROM "{PANDA_SCHEMA}"."jobsarchived4"{where_sql}
+        ) combined
+    """
+    full_params = list(params) + list(params)
+    return sql, full_params
+
+
+def build_union_count_by_field(field, where_clauses, params):
+    """Build a GROUP BY count for a single field across both job tables."""
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+
+    sql = f"""
+        SELECT "{field}", COUNT(*) FROM (
+            SELECT "{field}" FROM "{PANDA_SCHEMA}"."jobsactive4"{where_sql}
+            UNION ALL
+            SELECT "{field}" FROM "{PANDA_SCHEMA}"."jobsarchived4"{where_sql}
+        ) combined
+        WHERE "{field}" IS NOT NULL
+        GROUP BY "{field}"
+        ORDER BY COUNT(*) DESC
+    """
+    full_params = list(params) + list(params)
+    return sql, full_params
+
+
+def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
+    """Build a task query with OFFSET for DataTables pagination."""
+    field_list = ', '.join(f'"{f}"' for f in fields)
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+    sql = f"""
+        SELECT {field_list}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+        ORDER BY {order_by}
+        LIMIT {limit} OFFSET {offset}
+    """
+    return sql, list(params)
+
+
+def build_task_count(where_clauses, params):
+    """Build a total count query for jedi_tasks."""
+    where_sql = ''
+    if where_clauses:
+        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+    sql = f"""
+        SELECT COUNT(*)
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+    """
+    return sql, list(params)
+
+
+def build_task_count_by_field(field, where_clauses, params):
+    """Build a GROUP BY count for a single field in jedi_tasks."""
+    all_clauses = list(where_clauses) + [f'"{field}" IS NOT NULL']
+    where_sql = ' WHERE ' + ' AND '.join(all_clauses)
+    sql = f"""
+        SELECT "{field}", COUNT(*)
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+        GROUP BY "{field}"
+        ORDER BY COUNT(*) DESC
+    """
+    return sql, list(params)
+
+
+def build_search_clauses(fields, search_value):
+    """Build ILIKE search clauses across multiple fields."""
+    clauses = []
+    params = []
+    for f in fields:
+        clauses.append(f'CAST("{f}" AS TEXT) ILIKE %s')
+        params.append(f'%{search_value}%')
+    return f"({' OR '.join(clauses)})", params
