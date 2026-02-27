@@ -51,14 +51,16 @@ class MCPAuthMiddleware:
                 # Invalid token - return 401
                 return self._unauthorized_response(request, "Invalid or expired token")
 
-        # No token present - determine behavior by request method:
-        # - POST: Claude Code making tool calls, allow through
-        # - GET: Claude.ai doing OAuth discovery, return 401 with metadata
-        if request.method == "POST":
-            # Claude Code - allow through without auth
+        # No token present - determine behavior:
+        # - POST: Allow through (Claude Code tool calls, bot establishing sessions)
+        # - GET/DELETE with session ID: Allow through (established MCP sessions
+        #   need GET for SSE stream and DELETE for cleanup)
+        # - GET/DELETE without session: Return 401 for OAuth discovery (Claude.ai)
+        session_id = request.headers.get('Mcp-Session-Id')
+        if request.method == "POST" or session_id:
             return self.get_response(request)
 
-        # GET request - if Auth0 configured, trigger OAuth discovery
+        # No session, non-POST - if Auth0 configured, trigger OAuth discovery
         auth0_domain = getattr(settings, 'AUTH0_DOMAIN', None)
         if auth0_domain:
             return self._oauth_required_response(request)
