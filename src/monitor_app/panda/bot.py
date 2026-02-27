@@ -67,7 +67,7 @@ class MCPClient:
         body = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
         if params:
             body["params"] = params
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         resp = await self._http.post(self.url, json=body, headers=headers)
