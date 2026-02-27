@@ -18,7 +18,7 @@ from monitor_app.panda import queries
 logger = logging.getLogger('panda_bot')
 
 MAX_TOOL_ROUNDS = 10
-MAX_RESULT_LEN = 30000
+MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
 
 SYSTEM_PROMPT = """\
@@ -295,10 +295,13 @@ def ask_claude(client, message_text, conversation=None):
             messages=messages,
         )
 
+        logger.info(f"Claude response: stop_reason={response.stop_reason}")
+
         if response.stop_reason != "tool_use":
-            # Extract text from response
             text_parts = [b.text for b in response.content if b.type == "text"]
-            return "\n".join(text_parts)
+            reply = "\n".join(text_parts)
+            logger.info(f"Final reply: {len(reply)} chars")
+            return reply
 
         # Process tool calls
         messages.append({"role": "assistant", "content": response.content})
@@ -430,6 +433,7 @@ class PandaBot:
 
         try:
             reply = await asyncio.to_thread(ask_claude, self.claude, message_text)
+            logger.info(f"Got reply: {len(reply)} chars")
         except Exception:
             logger.exception("Claude API call failed")
             reply = "Sorry, I encountered an error processing your question."
@@ -439,6 +443,7 @@ class PandaBot:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
         try:
+            logger.info("Posting reply to Mattermost...")
             await asyncio.to_thread(
                 self.driver.posts.create_post,
                 options={
@@ -447,5 +452,6 @@ class PandaBot:
                     'root_id': post_id,
                 },
             )
+            logger.info("Reply posted successfully")
         except Exception:
             logger.exception("Failed to post reply")
