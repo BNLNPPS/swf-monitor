@@ -92,6 +92,13 @@ DIAG_COLUMNS = [
 _EASTERN = ZoneInfo('America/New_York')
 
 
+def _linkify(text):
+    """Wrap text in an <a> tag if it looks like a URL."""
+    if text and text.startswith(('http://', 'https://')):
+        return f'<a href="{text}" target="_blank" rel="noopener">{text}</a>'
+    return text
+
+
 def _fmt_dt(val):
     """Format an ISO datetime string or datetime object for display."""
     if not val:
@@ -218,7 +225,7 @@ def panda_jobs_datatable_ajax(request):
             f'<a href="{jobs_by_user_url}">{job["produsername"]}</a>' if jobs_by_user_url else '',
             _status_badge(job['jobstatus'], jobs_by_status_url) if job.get('jobstatus') else '',
             f'<a href="{jobs_by_site_url}">{job["computingsite"]}</a>' if jobs_by_site_url else '',
-            job.get('transformation', '') or '',
+            _linkify(job.get('transformation', '') or ''),
             _fmt_dt(job.get('creationtime')),
             _fmt_dt(job.get('endtime')),
             str(job.get('corecount', '') or ''),
@@ -340,6 +347,8 @@ def panda_job_detail(request, pandaid):
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
     data['pandaid'] = pandaid
+    job = data.get('job') or {}
+    job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
     return render(request, 'monitor_app/panda_job_detail.html', data)
 
 

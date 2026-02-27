@@ -33,7 +33,7 @@
                         <tr><td><strong>Site</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ job.computingsite }}">{{ job.computingsite }}</a></td></tr>
                         {% endif %}
                         {% if job.computingelement %}<tr><td><strong>CE</strong></td><td>{{ job.computingelement }}</td></tr>{% endif %}
-                        {% if job.transformation %}<tr><td><strong>Transformation</strong></td><td><code>{{ job.transformation }}</code></td></tr>{% endif %}
+                        {% if job.transformation %}<tr><td><strong>Transformation</strong></td><td>{% if job.transformation_is_url %}<a href="{{ job.transformation }}" target="_blank" rel="noopener"><code>{{ job.transformation }}</code></a>{% else %}<code>{{ job.transformation }}</code>{% endif %}</td></tr>{% endif %}
                         {% if job.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ job.processingtype }}</td></tr>{% endif %}
                         {% if job.reqid %}<tr><td><strong>Request ID</strong></td><td>{{ job.reqid }}</td></tr>{% endif %}
                     </table>
