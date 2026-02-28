@@ -241,6 +241,7 @@ def tag_compose(request, tag_type):
         FormClass = SimpleTagForm
         form_kwargs = {'tag_type': tag_type}
 
+    selected_tag = None
     if request.method == 'POST':
         form = FormClass(request.POST, **form_kwargs)
         if form.is_valid():
@@ -265,9 +266,11 @@ def tag_compose(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
-            return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag.tag_number)
+            compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+            return redirect(f'{compose_url}?selected={tag.tag_number}')
     else:
         form = FormClass(**form_kwargs)
+        selected_tag = request.GET.get('selected')
 
     qs = model.objects.all()
     if tag_type == 'p':
@@ -294,6 +297,7 @@ def tag_compose(request, tag_type):
         'tags_json': json.dumps(tags_data, default=str),
         'choices_json': json.dumps(schema.get('choices', {})),
         'username': request.user.username if request.user.is_authenticated else '',
+        'selected_tag': selected_tag,
     }
     return render(request, 'emi/tag_compose_physics.html', context)
 

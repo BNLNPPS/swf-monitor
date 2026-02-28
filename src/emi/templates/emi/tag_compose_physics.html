@@ -172,6 +172,7 @@
 (function() {
     const allTags = {{ tags_json|safe }};
     const fieldChoices = {{ choices_json|safe }};
+    const initialSelected = {{ selected_tag|default:"null" }};
     const tagList = document.getElementById('tag-list');
     const searchInput = document.getElementById('tag-search');
     let statusFilter = 'all';
@@ -373,6 +374,14 @@
         });
     });
     renderTagList();
+
+    // Auto-select a tag if redirected after save
+    if (initialSelected) {
+        onTagClick(initialSelected);
+        // Scroll it into view
+        const el = tagList.querySelector(`[data-tag="${initialSelected}"]`);
+        if (el) el.scrollIntoView({block: 'nearest'});
+    }
 })();
 </script>
 {% endblock %}
