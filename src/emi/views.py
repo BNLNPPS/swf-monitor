@@ -228,9 +228,8 @@ def tag_create(request, tag_type):
     return render(request, template, context)
 
 
-@login_required
 def tag_compose(request, tag_type):
-    """Split-panel composition UI for creating tags from existing ones."""
+    """Split-panel browse + compose UI for physics tags."""
     schema = TAG_SCHEMAS[tag_type]
     model = TAG_MODELS[tag_type]
 
@@ -243,6 +242,9 @@ def tag_compose(request, tag_type):
 
     selected_tag = None
     if request.method == 'POST':
+        if not request.user.is_authenticated:
+            from django.contrib.auth.views import redirect_to_login
+            return redirect_to_login(request.get_full_path())
         form = FormClass(request.POST, **form_kwargs)
         if form.is_valid():
             params = form.get_parameters()
@@ -300,6 +302,24 @@ def tag_compose(request, tag_type):
         'selected_tag': selected_tag,
     }
     return render(request, 'emi/tag_compose_physics.html', context)
+
+
+@login_required
+def tag_delete(request, tag_type, tag_number):
+    if request.method != 'POST':
+        return redirect('emi:tag_compose', tag_type=tag_type)
+    model = TAG_MODELS[tag_type]
+    tag = get_object_or_404(model, tag_number=tag_number)
+    if tag.status == 'locked':
+        messages.error(request, f"Tag {tag.tag_label} is locked and cannot be deleted.")
+        return redirect('emi:tag_compose', tag_type=tag_type)
+    if tag.created_by != request.user.username:
+        messages.error(request, f"Only the creator ({tag.created_by}) can delete {tag.tag_label}.")
+        return redirect('emi:tag_compose', tag_type=tag_type)
+    label = tag.tag_label
+    tag.delete()
+    messages.success(request, f"Tag {label} deleted.")
+    return redirect('emi:tag_compose', tag_type=tag_type)
 
 
 @login_required
