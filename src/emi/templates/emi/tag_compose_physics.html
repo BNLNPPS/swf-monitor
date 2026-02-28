@@ -1,0 +1,413 @@
+{% extends 'base.html' %}
+
+{% block title %}Create Physics Tag - EMI{% endblock %}
+
+{% block content %}
+<style>
+    .compose-wrap {
+        display: flex;
+        gap: 1.5rem;
+        padding: 1rem 1.5rem;
+        height: calc(100vh - 80px);
+    }
+    /* Left panel */
+    .tag-browser {
+        flex: 0 0 38%;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+    .tag-browser-header {
+        margin-bottom: .75rem;
+    }
+    .tag-search {
+        width: 100%;
+        padding: .4rem .75rem;
+        border: 1px solid #dee2e6;
+        border-radius: .375rem;
+        font-size: .875rem;
+        margin-bottom: .5rem;
+    }
+    .status-pills {
+        display: flex;
+        gap: .375rem;
+        margin-bottom: .75rem;
+    }
+    .status-pill {
+        padding: .25rem .75rem;
+        border: 1px solid #dee2e6;
+        border-radius: 1rem;
+        background: #fff;
+        font-size: .8rem;
+        cursor: pointer;
+        color: #495057;
+    }
+    .status-pill.active {
+        background: #0d6efd;
+        color: #fff;
+        border-color: #0d6efd;
+    }
+    .tag-list {
+        flex: 1;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: .375rem;
+        background: #fff;
+    }
+    .tag-item {
+        padding: .6rem .85rem;
+        border-bottom: 1px solid #f0f0f0;
+        cursor: pointer;
+        transition: background .1s;
+    }
+    .tag-item:last-child { border-bottom: none; }
+    .tag-item:hover { background: #f8f9fa; }
+    .tag-item.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
+    .tag-item-label {
+        font-weight: 600;
+        font-size: .9rem;
+        color: #212529;
+    }
+    .tag-item-cat {
+        font-size: .75rem;
+        color: #6c757d;
+        margin-left: .5rem;
+    }
+    .tag-item-desc {
+        font-size: .8rem;
+        color: #6c757d;
+        margin-top: .15rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .tag-item-status {
+        float: right;
+        font-size: .7rem;
+        padding: .15rem .5rem;
+        border-radius: .75rem;
+    }
+    .tag-list-empty {
+        padding: 2rem;
+        text-align: center;
+        color: #6c757d;
+    }
+
+    /* Right panel */
+    .compose-form {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+    .compose-form-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    .compose-form-header h4 { margin: 0; }
+    .compose-form-body {
+        flex: 1;
+        overflow-y: auto;
+        padding-right: .5rem;
+    }
+    .field-group {
+        margin-bottom: .85rem;
+    }
+    .field-group label {
+        display: block;
+        font-size: .8rem;
+        font-weight: 600;
+        color: #495057;
+        margin-bottom: .2rem;
+    }
+    .field-group label code {
+        font-weight: 600;
+        color: #495057;
+    }
+    .field-group .form-control,
+    .field-group .form-select {
+        font-size: .875rem;
+    }
+    .field-group textarea.form-control {
+        resize: vertical;
+    }
+
+    /* Suggestion bar */
+    .suggestion-bar {
+        display: none;
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: .3rem;
+        padding: .25rem .6rem;
+        margin-bottom: .3rem;
+        font-size: .8rem;
+        align-items: center;
+        gap: .5rem;
+    }
+    .suggestion-bar.visible { display: flex; }
+    .suggestion-bar .suggestion-source {
+        color: #856404;
+        font-weight: 500;
+    }
+    .suggestion-bar .suggestion-value {
+        flex: 1;
+        font-family: monospace;
+        color: #664d03;
+    }
+    .suggestion-bar .btn-apply {
+        padding: .1rem .5rem;
+        font-size: .75rem;
+        border-radius: .25rem;
+        white-space: nowrap;
+    }
+
+    /* Suggested styling on inputs */
+    .form-control.suggested,
+    .form-select.suggested {
+        color: #6c757d;
+        font-style: italic;
+    }
+
+    .params-header {
+        font-size: .9rem;
+        font-weight: 600;
+        color: #212529;
+        border-bottom: 1px solid #dee2e6;
+        padding-bottom: .35rem;
+        margin-bottom: .75rem;
+        margin-top: 1rem;
+    }
+    .required-star { color: #dc3545; }
+</style>
+
+<form method="post" id="compose-form">
+{% csrf_token %}
+<div class="compose-wrap">
+    <!-- Left: Tag Browser -->
+    <div class="tag-browser">
+        <div class="tag-browser-header">
+            <h5 style="margin-bottom:.5rem">Physics Tags</h5>
+            <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
+            <div class="status-pills">
+                <span class="status-pill active" data-status="all">All</span>
+                <span class="status-pill" data-status="draft">Draft</span>
+                <span class="status-pill" data-status="locked">Locked</span>
+            </div>
+        </div>
+        <div class="tag-list" id="tag-list">
+            <!-- populated by JS -->
+        </div>
+    </div>
+
+    <!-- Right: Compose Form -->
+    <div class="compose-form">
+        <div class="compose-form-header">
+            <h4>New Physics Tag</h4>
+            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+        <div class="compose-form-body">
+            <div class="field-group">
+                <label>Category <span class="required-star">*</span></label>
+                <div class="suggestion-bar" data-field="category"></div>
+                <select name="category" id="id_category" class="form-select">
+                    <option value="">Select category</option>
+                    {% for cat in form.category.field.queryset %}
+                    <option value="{{ cat.pk }}" {% if form.category.value|stringformat:"s" == cat.pk|stringformat:"s" %}selected{% endif %}>{{ cat.digit }}: {{ cat.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="field-group">
+                <label>Description</label>
+                <div class="suggestion-bar" data-field="description"></div>
+                <textarea name="description" id="id_description" class="form-control" rows="2">{{ form.description.value|default:"" }}</textarea>
+            </div>
+
+            <div class="field-group">
+                <label>Created By</label>
+                <div class="suggestion-bar" data-field="created_by"></div>
+                <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ form.created_by.value|default:"" }}">
+            </div>
+
+            <div class="params-header">Parameters</div>
+
+            {% for field in form %}
+                {% if field.name|slice:":6" == "param_" %}
+                <div class="field-group">
+                    <label>
+                        <code>{{ field.label }}</code>
+                        {% if field.field.required %}<span class="required-star">*</span>{% endif %}
+                    </label>
+                    <div class="suggestion-bar" data-field="{{ field.name }}"></div>
+                    <input type="text" name="{{ field.name }}" id="{{ field.id_for_label }}" class="form-control" value="{{ field.value|default:"" }}" {% if field.field.required %}required{% endif %}>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+</div>
+</form>
+
+<script>
+(function() {
+    const allTags = {{ tags_json|safe }};
+    const tagList = document.getElementById('tag-list');
+    const searchInput = document.getElementById('tag-search');
+    let statusFilter = 'all';
+    let selectedTagNumber = null;
+
+    // Track which fields the user has manually edited
+    const userEdited = {};
+
+    // Mark field as user-edited on input
+    document.querySelectorAll('.compose-form .form-control, .compose-form .form-select').forEach(el => {
+        el.addEventListener('input', function() {
+            userEdited[this.name] = true;
+            this.classList.remove('suggested');
+        });
+        el.addEventListener('change', function() {
+            userEdited[this.name] = true;
+            this.classList.remove('suggested');
+        });
+    });
+
+    function renderTagList() {
+        const q = searchInput.value.toLowerCase();
+        const filtered = allTags.filter(t => {
+            if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+            if (!q) return true;
+            const searchable = [
+                t.tag_label, t.description, t.category_name || '',
+                ...Object.values(t.parameters || {})
+            ].join(' ').toLowerCase();
+            return searchable.includes(q);
+        });
+
+        if (filtered.length === 0) {
+            tagList.innerHTML = '<div class="tag-list-empty">No tags found</div>';
+            return;
+        }
+
+        tagList.innerHTML = filtered.map(t => {
+            const sel = t.tag_number === selectedTagNumber ? ' selected' : '';
+            const statusCls = t.status === 'locked' ? 'bg-success text-white' : 'bg-secondary text-white';
+            const desc = t.description ? (t.description.length > 60 ? t.description.slice(0, 60) + '...' : t.description) : '';
+            return `<div class="tag-item${sel}" data-tag="${t.tag_number}">
+                <span class="tag-item-status badge ${statusCls}">${t.status}</span>
+                <span class="tag-item-label">${t.tag_label}</span>
+                <span class="tag-item-cat">${t.category_name || ''}</span>
+                <div class="tag-item-desc">${desc}</div>
+            </div>`;
+        }).join('');
+
+        tagList.querySelectorAll('.tag-item').forEach(el => {
+            el.addEventListener('click', () => onTagClick(parseInt(el.dataset.tag)));
+        });
+    }
+
+    function getFieldEl(name) {
+        return document.querySelector(`[name="${name}"]`);
+    }
+
+    function getSuggestionBar(name) {
+        return document.querySelector(`.suggestion-bar[data-field="${name}"]`);
+    }
+
+    function showSuggestion(fieldName, value, sourceLabel) {
+        const bar = getSuggestionBar(fieldName);
+        if (!bar) return;
+        bar.innerHTML = `<span class="suggestion-source">${sourceLabel}:</span>
+            <span class="suggestion-value">${value}</span>
+            <button type="button" class="btn btn-warning btn-apply">Apply</button>`;
+        bar.classList.add('visible');
+        bar.querySelector('.btn-apply').addEventListener('click', () => {
+            applyValue(fieldName, value);
+            bar.classList.remove('visible');
+        });
+    }
+
+    function applyValue(fieldName, value) {
+        const el = getFieldEl(fieldName);
+        if (!el) return;
+        el.value = value;
+        el.classList.remove('suggested');
+        userEdited[fieldName] = true;
+    }
+
+    function setSuggested(fieldName, value) {
+        const el = getFieldEl(fieldName);
+        if (!el) return;
+        el.value = value;
+        el.classList.add('suggested');
+    }
+
+    function onTagClick(tagNumber) {
+        selectedTagNumber = tagNumber;
+        const tag = allTags.find(t => t.tag_number === tagNumber);
+        if (!tag) return;
+
+        // Highlight in list
+        tagList.querySelectorAll('.tag-item').forEach(el => {
+            el.classList.toggle('selected', parseInt(el.dataset.tag) === tagNumber);
+        });
+
+        // Hide all suggestion bars first
+        document.querySelectorAll('.suggestion-bar').forEach(b => b.classList.remove('visible'));
+
+        // Category
+        handleField('category', String(tag.category_digit || ''), tag.tag_label);
+
+        // Description
+        handleField('description', tag.description || '', tag.tag_label);
+
+        // Created by
+        handleField('created_by', tag.created_by || '', tag.tag_label);
+
+        // Parameters
+        const params = tag.parameters || {};
+        document.querySelectorAll('.compose-form input[name^="param_"]').forEach(el => {
+            const paramKey = el.name.replace('param_', '');
+            const val = params[paramKey] || '';
+            handleField(el.name, val, tag.tag_label);
+        });
+    }
+
+    function handleField(fieldName, newValue, sourceLabel) {
+        const el = getFieldEl(fieldName);
+        if (!el) return;
+        const currentVal = el.value.trim();
+
+        if (!newValue) return; // nothing to suggest
+
+        if (!currentVal || (!userEdited[fieldName] && el.classList.contains('suggested'))) {
+            // Field empty or previously suggested — fill as suggested
+            setSuggested(fieldName, newValue);
+            const bar = getSuggestionBar(fieldName);
+            if (bar) bar.classList.remove('visible');
+        } else if (currentVal === newValue) {
+            // Same value — nothing to do
+        } else {
+            // Field has a user value — show suggestion bar
+            showSuggestion(fieldName, newValue, sourceLabel);
+        }
+    }
+
+    // Search
+    searchInput.addEventListener('input', renderTagList);
+
+    // Status pills
+    document.querySelectorAll('.status-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            document.querySelectorAll('.status-pill').forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+            statusFilter = pill.dataset.status;
+            renderTagList();
+        });
+    });
+
+    renderTagList();
+})();
+</script>
+{% endblock %}

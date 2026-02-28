@@ -5,6 +5,7 @@ Views are generic across tag types (p/e/s/r) where possible, parameterized by ta
 Tag list views use server-side DataTables via monitor_app._datatable_base.html.
 Read operations are public; create/edit/lock require login.
 """
+import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
@@ -225,6 +226,74 @@ def tag_create(request, tag_type):
     }
     template = 'emi/tag_create_physics.html' if tag_type == 'p' else 'emi/tag_create.html'
     return render(request, template, context)
+
+
+@login_required
+def tag_compose(request, tag_type):
+    """Split-panel composition UI for creating tags from existing ones."""
+    schema = TAG_SCHEMAS[tag_type]
+    model = TAG_MODELS[tag_type]
+
+    if tag_type == 'p':
+        FormClass = PhysicsTagForm
+        form_kwargs = {}
+    else:
+        FormClass = SimpleTagForm
+        form_kwargs = {'tag_type': tag_type}
+
+    if request.method == 'POST':
+        form = FormClass(request.POST, **form_kwargs)
+        if form.is_valid():
+            params = form.get_parameters()
+            if tag_type == 'p':
+                category = form.cleaned_data['category']
+                tag_number = PhysicsTag.allocate_next(category)
+                tag = PhysicsTag(
+                    tag_number=tag_number,
+                    category=category,
+                    description=form.cleaned_data['description'],
+                    parameters=params,
+                    created_by=form.cleaned_data['created_by'],
+                )
+            else:
+                tag_number = model.allocate_next()
+                tag = model(
+                    tag_number=tag_number,
+                    description=form.cleaned_data['description'],
+                    parameters=params,
+                    created_by=form.cleaned_data['created_by'],
+                )
+            tag.save()
+            messages.success(request, f"Tag {tag.tag_label} created.")
+            return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag.tag_number)
+    else:
+        form = FormClass(**form_kwargs)
+
+    qs = model.objects.all()
+    if tag_type == 'p':
+        qs = qs.select_related('category')
+    tags_data = []
+    for t in qs:
+        entry = {
+            'tag_number': t.tag_number,
+            'tag_label': t.tag_label,
+            'status': t.status,
+            'description': t.description,
+            'parameters': t.parameters,
+            'created_by': t.created_by,
+        }
+        if tag_type == 'p':
+            entry['category_digit'] = t.category.digit
+            entry['category_name'] = t.category.name
+        tags_data.append(entry)
+
+    context = {
+        'form': form,
+        'tag_type': tag_type,
+        'schema': schema,
+        'tags_json': json.dumps(tags_data, default=str),
+    }
+    return render(request, 'emi/tag_compose_physics.html', context)
 
 
 @login_required
