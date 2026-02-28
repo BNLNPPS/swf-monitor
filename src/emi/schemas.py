@@ -13,6 +13,12 @@ TAG_SCHEMAS = {
         'label': 'Physics',
         'prefix': 'p',
         'model': 'PhysicsTag',
+        'choices': {
+            'process': ['SINGLE', 'DIS', 'DVCS', 'SIDIS', 'EXCL_JPSI', 'EXCL_PHI', 'EXCL_RHO'],
+            'beam_energy_electron': ['5', '10', '18', 'N/A'],
+            'beam_energy_hadron': ['41', '100', '110', '275', 'N/A'],
+            'generator': ['pythia8', 'estarlight', 'sartre', 'particle_gun', 'dire'],
+        },
     },
     'e': {
         'required': ['signal_freq', 'signal_status'],

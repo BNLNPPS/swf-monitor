@@ -292,6 +292,8 @@ def tag_compose(request, tag_type):
         'tag_type': tag_type,
         'schema': schema,
         'tags_json': json.dumps(tags_data, default=str),
+        'choices_json': json.dumps(schema.get('choices', {})),
+        'username': request.user.username if request.user.is_authenticated else '',
     }
     return render(request, 'emi/tag_compose_physics.html', context)
 
