@@ -96,6 +96,18 @@
             <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
             <a href="{% url 'monitor_app:persistent_state' %}">State</a>
             <div class="dropdown">
+                <button class="dropbtn">EMI</button>
+                <div class="dropdown-content">
+                    <a href="{% url 'emi:emi_hub' %}">EMI Hub</a>
+                    <a href="{% url 'emi:tags_list' tag_type='p' %}">Physics Tags</a>
+                    <a href="{% url 'emi:tags_list' tag_type='e' %}">EvGen Tags</a>
+                    <a href="{% url 'emi:tags_list' tag_type='s' %}">Simu Tags</a>
+                    <a href="{% url 'emi:tags_list' tag_type='r' %}">Reco Tags</a>
+                    <a href="{% url 'emi:datasets_list' %}">Datasets</a>
+                    <a href="{% url 'emi:prod_configs_list' %}">Prod Configs</a>
+                </div>
+            </div>
+            <div class="dropdown">
                 <button class="dropbtn">PanDA/Rucio</button>
                 <div class="dropdown-content">
                     <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio Hub</a>

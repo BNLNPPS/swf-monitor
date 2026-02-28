@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+
+{% block title %}Create Dataset - EMI{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'emi:datasets_list' %}">Datasets</a></li>
+            <li class="breadcrumb-item active">Create</li>
+        </ol>
+    </nav>
+
+    <h2>Create Dataset</h2>
+    <p>Compose a dataset from locked tags. Block 1 is created automatically. Only locked tags appear in the dropdowns.</p>
+
+    <form method="post" class="mt-3" style="max-width: 700px;" id="dataset-form">
+        {% csrf_token %}
+
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <label for="id_scope" class="form-label"><strong>Scope</strong></label>
+                <input type="text" name="scope" id="id_scope" class="form-control" value="{{ form.scope.value|default:"group.EIC" }}">
+            </div>
+            <div class="col-md-4">
+                <label for="id_detector_version" class="form-label"><strong>Detector Version</strong></label>
+                <input type="text" name="detector_version" id="id_detector_version" class="form-control" value="{{ form.detector_version.value|default:"" }}" placeholder="e.g. 26.02.0">
+            </div>
+            <div class="col-md-4">
+                <label for="id_detector_config" class="form-label"><strong>Detector Config</strong></label>
+                <input type="text" name="detector_config" id="id_detector_config" class="form-control" value="{{ form.detector_config.value|default:"" }}" placeholder="e.g. epic_craterlake">
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label for="id_physics_tag" class="form-label"><strong>Physics Tag</strong></label>
+                <select name="physics_tag" id="id_physics_tag" class="form-select" onchange="updatePreview()">
+                    <option value="">Select physics tag</option>
+                    {% for tag in form.physics_tag.field.queryset %}
+                    <option value="{{ tag.pk }}" data-label="{{ tag.tag_label }}" {% if form.physics_tag.value|stringformat:"s" == tag.pk|stringformat:"s" %}selected{% endif %}>{{ tag.tag_label }} — {{ tag.description|truncatewords:8 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="id_evgen_tag" class="form-label"><strong>EvGen Tag</strong></label>
+                <select name="evgen_tag" id="id_evgen_tag" class="form-select" onchange="updatePreview()">
+                    <option value="">Select evgen tag</option>
+                    {% for tag in form.evgen_tag.field.queryset %}
+                    <option value="{{ tag.pk }}" data-label="{{ tag.tag_label }}" {% if form.evgen_tag.value|stringformat:"s" == tag.pk|stringformat:"s" %}selected{% endif %}>{{ tag.tag_label }} — {{ tag.description|truncatewords:8 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label for="id_simu_tag" class="form-label"><strong>Simu Tag</strong></label>
+                <select name="simu_tag" id="id_simu_tag" class="form-select" onchange="updatePreview()">
+                    <option value="">Select simu tag</option>
+                    {% for tag in form.simu_tag.field.queryset %}
+                    <option value="{{ tag.pk }}" data-label="{{ tag.tag_label }}" {% if form.simu_tag.value|stringformat:"s" == tag.pk|stringformat:"s" %}selected{% endif %}>{{ tag.tag_label }} — {{ tag.description|truncatewords:8 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label for="id_reco_tag" class="form-label"><strong>Reco Tag</strong></label>
+                <select name="reco_tag" id="id_reco_tag" class="form-select" onchange="updatePreview()">
+                    <option value="">Select reco tag</option>
+                    {% for tag in form.reco_tag.field.queryset %}
+                    <option value="{{ tag.pk }}" data-label="{{ tag.tag_label }}" {% if form.reco_tag.value|stringformat:"s" == tag.pk|stringformat:"s" %}selected{% endif %}>{{ tag.tag_label }} — {{ tag.description|truncatewords:8 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label"><strong>Dataset Name Preview</strong></label>
+            <div id="name-preview" class="form-control bg-light" style="font-family: monospace; min-height: 38px;"></div>
+            <small class="text-muted">Max 255 characters. <span id="char-count"></span></small>
+        </div>
+
+        <div class="mb-3">
+            <label for="id_description" class="form-label"><strong>Description</strong></label>
+            <textarea name="description" id="id_description" class="form-control" rows="3">{{ form.description.value|default:"" }}</textarea>
+        </div>
+
+        <div class="mb-3">
+            <label for="id_created_by" class="form-label"><strong>Created By</strong></label>
+            <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ form.created_by.value|default:"" }}">
+        </div>
+
+        {% if form.errors %}
+        <div class="alert alert-danger">
+            {% for field, errors in form.errors.items %}
+            <p><strong>{{ field }}:</strong> {{ errors|join:", " }}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary">Create Dataset</button>
+        <a href="{% url 'emi:datasets_list' %}" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
+
+<script>
+function getSelectedLabel(selectId) {
+    const sel = document.getElementById(selectId);
+    const opt = sel.options[sel.selectedIndex];
+    return opt && opt.dataset.label ? opt.dataset.label : '?';
+}
+
+function updatePreview() {
+    const scope = document.getElementById('id_scope').value || '?';
+    const version = document.getElementById('id_detector_version').value || '?';
+    const config = document.getElementById('id_detector_config').value || '?';
+    const p = getSelectedLabel('id_physics_tag');
+    const e = getSelectedLabel('id_evgen_tag');
+    const s = getSelectedLabel('id_simu_tag');
+    const r = getSelectedLabel('id_reco_tag');
+    const name = `${scope}.${version}.${config}.${p}.${e}.${s}.${r}`;
+    document.getElementById('name-preview').textContent = name;
+    const len = name.length;
+    const counter = document.getElementById('char-count');
+    counter.textContent = `${len}/255`;
+    counter.style.color = len > 255 ? 'red' : 'inherit';
+}
+
+document.getElementById('id_scope').addEventListener('input', updatePreview);
+document.getElementById('id_detector_version').addEventListener('input', updatePreview);
+document.getElementById('id_detector_config').addEventListener('input', updatePreview);
+updatePreview();
+</script>
+{% endblock %}

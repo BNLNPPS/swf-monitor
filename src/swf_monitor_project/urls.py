@@ -27,6 +27,7 @@ urlpatterns = [
     path("o/", include("oauth2_provider.urls", namespace="oauth2_provider")),  # OAuth2 for MCP
     path("api-auth/", include("rest_framework.urls")),
     path("accounts/", include("django.contrib.auth.urls")),  # Add this line
+    path("emi/", include("emi.urls")),  # ePIC Metadata Interface
     path("", include("monitor_app.urls")),  # Include monitor_app URLs for the root path
     # API Schema and Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

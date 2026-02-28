@@ -1,0 +1,88 @@
+{% extends 'base.html' %}
+
+{% block title %}EMI Hub - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">ePIC Metadata Interface (EMI)</h1>
+    <p class="lead mb-5">Manage production metadata: physics, event generation, simulation, and reconstruction tags. Compose datasets with validated, immutable tag configurations.</p>
+
+    <h3 class="mb-3">Tags</h3>
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='p' %}" class="text-decoration-none">Physics Tags</a></strong>
+                    <span class="badge bg-info">{{ physics_tags_count }}</span></p>
+                    <p class="card-text">Physics process configurations (beam energies, process type, cross-sections).</p>
+                    <a href="{% url 'emi:tag_create' tag_type='p' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='e' %}" class="text-decoration-none">EvGen Tags</a></strong>
+                    <span class="badge bg-info">{{ evgen_tags_count }}</span></p>
+                    <p class="card-text">Event generation configurations (signal frequency, generator settings).</p>
+                    <a href="{% url 'emi:tag_create' tag_type='e' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='s' %}" class="text-decoration-none">Simu Tags</a></strong>
+                    <span class="badge bg-info">{{ simu_tags_count }}</span></p>
+                    <p class="card-text">Simulation configurations (detector sim, digitization, backgrounds).</p>
+                    <a href="{% url 'emi:tag_create' tag_type='s' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='r' %}" class="text-decoration-none">Reco Tags</a></strong>
+                    <span class="badge bg-info">{{ reco_tags_count }}</span></p>
+                    <p class="card-text">Reconstruction configurations (version, calibration, alignment).</p>
+                    <a href="{% url 'emi:tag_create' tag_type='r' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="mb-3">Organization</h3>
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:physics_categories_list' %}" class="text-decoration-none">Physics Categories</a></strong>
+                    <span class="badge bg-info">{{ categories_count }}</span></p>
+                    <p class="card-text">Physics areas (DVCS, DIS, SIDIS...) that organize physics tag numbering.</p>
+                    <a href="{% url 'emi:physics_category_create' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:datasets_list' %}" class="text-decoration-none">Datasets</a></strong>
+                    <span class="badge bg-info">{{ datasets_count }}</span></p>
+                    <p class="card-text">Production datasets composed from locked tags, with automatic block management.</p>
+                    <a href="{% url 'emi:dataset_create' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'emi:prod_configs_list' %}" class="text-decoration-none">Prod Configs</a></strong>
+                    <span class="badge bg-info">{{ prod_configs_count }}</span></p>
+                    <p class="card-text">Reusable production submission templates: background mixing, output control, PanDA/Rucio settings.</p>
+                    <a href="{% url 'emi:prod_config_create' %}" class="btn btn-sm btn-outline-primary">Create</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
