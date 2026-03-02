@@ -330,14 +330,14 @@
     const btnCopy = document.getElementById('btn-copy-tag');
 
     function fillFormFromTag(tag) {
-        if (tagType === 'p') setFieldValue('category', String(tag.category_digit || ''), false);
-        setFieldValue('description', tag.description || '', false);
-        setFieldValue('created_by', tag.created_by || '', false);
+        if (tagType === 'p') { setFieldValue('category', String(tag.category_digit || ''), false); userEdited['category'] = true; }
+        setFieldValue('description', tag.description || '', false); userEdited['description'] = true;
+        setFieldValue('created_by', tag.created_by || '', false); userEdited['created_by'] = true;
         const params = tag.parameters || {};
         createPanel.querySelectorAll('.choice-wrap').forEach(wrap => {
             const fname = wrap.dataset.fieldName;
             const paramKey = fname.replace('param_', '');
-            if (params[paramKey]) setFieldValue(fname, params[paramKey], false);
+            if (params[paramKey]) { setFieldValue(fname, params[paramKey], false); userEdited[fname] = true; }
         });
     }
 
