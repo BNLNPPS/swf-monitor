@@ -133,7 +133,7 @@
         <form method="post" id="create-panel" style="display:none; flex-direction:column; flex:1;">
             {% csrf_token %}
             <div class="panel-header">
-                <h4>New {{ schema.label }} Tag</h4>
+                <h4 id="create-title">New {{ schema.label }} Tag</h4>
                 <div class="btn-group">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-cancel-create">Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Save</button>
@@ -190,6 +190,8 @@
     const initialSelected = {{ selected_tag|default:"null" }};
     const currentUser = '{{ username }}';
     const tagType = '{{ tag_type }}';
+    const tagPrefix = '{{ schema.prefix }}';
+    const createTitle = document.getElementById('create-title');
     const tagList = document.getElementById('tag-list');
     const searchInput = document.getElementById('tag-search');
     const viewPanel = document.getElementById('view-panel');
@@ -221,11 +223,26 @@
         });
     }
 
+    // ── Next tag number prediction ──
+    function predictNextLabel(categoryDigit) {
+        if (tagType === 'p' && categoryDigit) {
+            const base = categoryDigit * 1000;
+            const maxInCat = allTags.filter(t => t.category_digit === categoryDigit)
+                .reduce((mx, t) => Math.max(mx, t.tag_number), base);
+            return tagPrefix + (maxInCat + 1);
+        }
+        const maxNum = allTags.reduce((mx, t) => Math.max(mx, t.tag_number), 0);
+        return tagPrefix + (maxNum + 1);
+    }
+
     // ── Mode switching ──
-    function enterCreateMode() {
+    function enterCreateMode(categoryDigit) {
         mode = 'create';
         viewPanel.style.display = 'none';
         createPanel.style.display = 'flex';
+        createTitle.textContent = categoryDigit
+            ? 'New Tag ' + predictNextLabel(categoryDigit)
+            : 'New Tag ' + predictNextLabel();
         // Clear form
         createPanel.querySelectorAll('input.form-control, textarea.form-control').forEach(el => {
             if (el.name === 'created_by') el.value = currentUser;
@@ -257,7 +274,7 @@
         if (!selectedTagNumber) return;
         const tag = allTags.find(t => t.tag_number === selectedTagNumber);
         if (!tag) return;
-        enterCreateMode();
+        enterCreateMode(tag.category_digit);
         // Fill all fields directly (not as suggestions)
         if (tagType === 'p') setFieldValue('category', String(tag.category_digit || ''), false);
         setFieldValue('description', tag.description || '', false);
@@ -353,6 +370,12 @@
     createPanel.querySelectorAll('.field-group > .form-control, .field-group > .form-select').forEach(el => {
         el.addEventListener('input', function() { userEdited[this.name] = true; this.classList.remove('suggested'); });
         el.addEventListener('change', function() { userEdited[this.name] = true; this.classList.remove('suggested'); });
+    });
+    // Update predicted tag number when category changes (physics)
+    const catSelect = document.getElementById('id_category');
+    if (catSelect) catSelect.addEventListener('change', function() {
+        const digit = parseInt(this.value);
+        if (digit) createTitle.textContent = 'New Tag ' + predictNextLabel(digit);
     });
 
     // ── Tag list rendering ──
