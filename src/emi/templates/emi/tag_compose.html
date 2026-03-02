@@ -70,9 +70,10 @@
     .field-group textarea.form-control { resize: vertical; }
     .suggestion-bar {
         display: none; background: #fff3cd; border: 1px solid #ffc107; border-radius: .3rem;
-        padding: .25rem .6rem; margin-bottom: .3rem; font-size: .8rem; align-items: center; gap: .5rem;
+        padding: .15rem .5rem; margin-bottom: .3rem; font-size: .78rem; align-items: center; gap: .35rem;
+        width: fit-content;
     }
-    .suggestion-bar.visible { display: flex; }
+    .suggestion-bar.visible { display: inline-flex; }
     .suggestion-bar .suggestion-source { color: #856404; font-weight: 500; }
     .suggestion-bar .suggestion-value { flex: 1; font-family: monospace; color: #664d03; }
     .suggestion-bar .btn-apply { padding: .1rem .5rem; font-size: .75rem; border-radius: .25rem; white-space: nowrap; }
@@ -174,8 +175,7 @@
                 </div>
                 <div class="field-group">
                     <label>Created By</label>
-                    <div class="suggestion-bar" data-field="created_by"></div>
-                    <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ username }}">
+                    <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ username }}" readonly>
                 </div>
                 <div class="params-header">Parameters</div>
                 {% for field in form %}
@@ -332,7 +332,6 @@
     function fillFormFromTag(tag) {
         if (tagType === 'p') { setFieldValue('category', String(tag.category_digit || ''), false); userEdited['category'] = true; }
         setFieldValue('description', tag.description || '', false); userEdited['description'] = true;
-        setFieldValue('created_by', tag.created_by || '', false); userEdited['created_by'] = true;
         const params = tag.parameters || {};
         createPanel.querySelectorAll('.choice-wrap').forEach(wrap => {
             const fname = wrap.dataset.fieldName;
@@ -510,7 +509,6 @@
         createPanel.querySelectorAll('.suggestion-bar').forEach(b => b.classList.remove('visible'));
         if (tagType === 'p') handleField('category', String(tag.category_digit || ''), tag.tag_label);
         handleField('description', tag.description || '', tag.tag_label);
-        handleField('created_by', tag.created_by || '', tag.tag_label);
         const params = tag.parameters || {};
         createPanel.querySelectorAll('.choice-wrap').forEach(wrap => {
             const fname = wrap.dataset.fieldName;
