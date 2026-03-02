@@ -25,30 +25,22 @@ MM_POST_LIMIT = 16383
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
-PANDA_TOOL_PREFIX = 'panda_'
+BOT_TOOL_PREFIXES = ('panda_', 'emi_')
 
-SYSTEM_PROMPT = """\
-You are a PanDA production monitoring assistant for the ePIC experiment at the \
-Electron Ion Collider. You answer questions about PanDA job and task status \
-using MCP tools that query the production database.
+SYSTEM_PREAMBLE = """\
+You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
+You answer questions about PanDA production and ePIC metadata using MCP tools.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
 - When showing job/task counts, summarize by status.
 - For errors, show the top patterns with counts.
-- When a user asks "what's happening" or "what's PanDA doing", start with panda_get_activity.
-- For error investigation, use panda_error_summary first, then panda_diagnose_jobs for details.
-- For a specific job, use panda_study_job.
 - Default to 7 days unless the user specifies a time range.
 - Keep responses focused — don't dump raw JSON, extract and present the key information.
-- Use smaller limits (50 jobs, 20 tasks) unless the user asks for more.
 
 When a query returns no results, do NOT just report "no results found." Instead:
-- Consider whether the user's term might match a different field. For example, \
-"epicproduction" is a processingtype, not a username. A term could be a username, \
-taskname pattern, site name, working group, or processing type.
-- Try a broader query (e.g. panda_get_activity or panda_list_tasks with fewer filters) \
-to see what data exists, then narrow down.
+- Consider whether the user's term might match a different field.
+- Try a broader query to see what data exists, then narrow down.
 - If you still find nothing after retrying, explain what you searched and suggest \
 what the user might mean.
 """
@@ -78,11 +70,15 @@ class MCPClient:
         return resp.json()
 
     async def initialize(self):
-        return await self._post("initialize", {
+        resp = await self._post("initialize", {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
             "clientInfo": {"name": "panda-bot", "version": "1.0"},
         })
+        self.server_instructions = (
+            resp.get("result", {}).get("instructions", "")
+        )
+        return resp
 
     async def list_tools(self):
         result = await self._post("tools/list")
@@ -121,15 +117,19 @@ async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
         tools = await mcp.list_tools()
         anthropic_tools = [
             mcp_tool_to_anthropic(t) for t in tools
-            if t["name"].startswith(PANDA_TOOL_PREFIX)
+            if t["name"].startswith(BOT_TOOL_PREFIXES)
         ]
-        logger.info(f"Discovered {len(anthropic_tools)} PanDA tools via MCP")
+        logger.info(f"Discovered {len(anthropic_tools)} tools via MCP")
+
+        system_prompt = SYSTEM_PREAMBLE
+        if mcp.server_instructions:
+            system_prompt += "\n" + mcp.server_instructions
 
         for round_num in range(MAX_TOOL_ROUNDS):
             response = await claude_client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=4096,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 tools=anthropic_tools,
                 messages=messages,
             )
