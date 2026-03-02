@@ -128,6 +128,7 @@
                 <div class="btn-group">
                     <span id="view-status-badge"></span>
                     {% if user.is_authenticated %}
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
                     <button type="button" class="btn btn-outline-primary btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
                     {% endif %}
                     <form id="lock-form" method="post" style="display:none; margin:0;">{% csrf_token %}
@@ -231,7 +232,7 @@
         const sel = document.createElement('select');
         sel.dataset.param = field;
         const label = field.replace(/_/g, ' ');
-        sel.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option value="${v}">${v}</option>`).join('');
+        sel.innerHTML = `<option value="">${label}: all</option>` + vals.map(v => `<option value="${v}">${v}</option>`).join('');
         sel.addEventListener('change', function() {
             if (this.value) paramFilters[field] = this.value;
             else delete paramFilters[field];
@@ -287,9 +288,13 @@
         return tagPrefix + (maxNum + 1);
     }
 
+    let editingTagNumber = null;
+
     // ── Mode switching ──
     function enterCreateMode(categoryDigit) {
         mode = 'create';
+        editingTagNumber = null;
+        createPanel.action = '';
         viewPanel.style.display = 'none';
         createPanel.style.display = 'flex';
         createTitle.textContent = categoryDigit
@@ -321,21 +326,39 @@
 
     const btnNew = document.getElementById('btn-new-tag');
     if (btnNew) btnNew.addEventListener('click', enterCreateMode);
+    const btnEdit = document.getElementById('btn-edit-tag');
     const btnCopy = document.getElementById('btn-copy-tag');
-    if (btnCopy) btnCopy.addEventListener('click', () => {
-        if (!selectedTagNumber) return;
-        const tag = allTags.find(t => t.tag_number === selectedTagNumber);
-        if (!tag) return;
-        enterCreateMode(tag.category_digit);
-        // Fill all fields directly (not as suggestions)
+
+    function fillFormFromTag(tag) {
         if (tagType === 'p') setFieldValue('category', String(tag.category_digit || ''), false);
         setFieldValue('description', tag.description || '', false);
+        setFieldValue('created_by', tag.created_by || '', false);
         const params = tag.parameters || {};
         createPanel.querySelectorAll('.choice-wrap').forEach(wrap => {
             const fname = wrap.dataset.fieldName;
             const paramKey = fname.replace('param_', '');
             if (params[paramKey]) setFieldValue(fname, params[paramKey], false);
         });
+    }
+
+    if (btnEdit) btnEdit.addEventListener('click', () => {
+        if (!selectedTagNumber) return;
+        const tag = allTags.find(t => t.tag_number === selectedTagNumber);
+        if (!tag) return;
+        enterCreateMode(tag.category_digit);
+        editingTagNumber = tag.tag_number;
+        createPanel.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/edit/`;
+        createTitle.textContent = 'Edit ' + tag.tag_label;
+        fillFormFromTag(tag);
+    });
+
+    if (btnCopy) btnCopy.addEventListener('click', () => {
+        if (!selectedTagNumber) return;
+        const tag = allTags.find(t => t.tag_number === selectedTagNumber);
+        if (!tag) return;
+        enterCreateMode(tag.category_digit);
+        fillFormFromTag(tag);
+        setFieldValue('created_by', currentUser, false);
     });
     document.getElementById('btn-cancel-create').addEventListener('click', () => enterViewMode(selectedTagNumber));
 
@@ -345,6 +368,7 @@
             viewTitle.textContent = 'Select a tag';
             viewBody.innerHTML = '<div class="detail-empty">Click a tag on the left to view details.</div>';
             viewStatusBadge.innerHTML = '';
+            if (btnEdit) btnEdit.style.display = 'none';
             if (btnCopy) btnCopy.style.display = 'none';
             lockForm.style.display = 'none';
             deleteForm.style.display = 'none';
@@ -354,11 +378,11 @@
         const statusCls = tag.status === 'locked' ? 'bg-success' : 'bg-secondary';
         viewStatusBadge.innerHTML = `<span class="badge ${statusCls}">${tag.status}</span>`;
 
+        const ownerDraft = currentUser && tag.created_by === currentUser && tag.status === 'draft';
+        // Edit: owner's drafts only
+        if (btnEdit) btnEdit.style.display = ownerDraft ? 'inline-block' : 'none';
         // Copy: always visible when logged in
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
-
-        // Lock/Delete: only for owner's drafts
-        const ownerDraft = currentUser && tag.created_by === currentUser && tag.status === 'draft';
         lockForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/lock/`;
         lockForm.style.display = ownerDraft ? 'inline' : 'none';
         deleteForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/delete/`;
