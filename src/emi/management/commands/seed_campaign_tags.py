@@ -208,6 +208,13 @@ class Command(BaseCommand):
                 'tag_number', flat=True).first() or 0
             max_reco = RecoTag.objects.order_by('-tag_number').values_list(
                 'tag_number', flat=True).first() or 0
+            # Physics: max suffix (tag_number % 1000) across all categories
+            max_suffix = 0
+            for pt in PhysicsTag.objects.all():
+                suffix = pt.tag_number % 1000
+                if suffix > max_suffix:
+                    max_suffix = suffix
+            obj.state_data['emi_next_physics'] = max_suffix + 1
             obj.state_data['emi_next_evgen'] = max_evgen + 1
             obj.state_data['emi_next_simu'] = max_simu + 1
             obj.state_data['emi_next_reco'] = max_reco + 1

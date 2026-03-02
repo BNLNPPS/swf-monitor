@@ -298,6 +298,16 @@ def tag_compose(request, tag_type):
     filter_fields = [f for f in schema['required'] + schema['optional']
                       if f not in ('notes', 'description')]
 
+    # Peek at next tag suffix from PersistentState (read-only, no increment)
+    from monitor_app.models import PersistentState
+    state_keys = {'p': 'emi_next_physics', 'e': 'emi_next_evgen',
+                  's': 'emi_next_simu', 'r': 'emi_next_reco'}
+    try:
+        ps = PersistentState.objects.get(id=1)
+        next_suffix = ps.state_data.get(state_keys[tag_type], 1)
+    except PersistentState.DoesNotExist:
+        next_suffix = 1
+
     context = {
         'form': form,
         'tag_type': tag_type,
@@ -305,6 +315,7 @@ def tag_compose(request, tag_type):
         'tags_json': json.dumps(tags_data, default=str),
         'choices_json': json.dumps(schema.get('choices', {})),
         'filter_fields_json': json.dumps(filter_fields),
+        'next_suffix': next_suffix,
         'username': request.user.username if request.user.is_authenticated else '',
         'selected_tag': selected_tag,
     }

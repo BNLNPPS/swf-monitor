@@ -64,15 +64,9 @@ class PhysicsTag(models.Model):
 
     @classmethod
     def allocate_next(cls, category):
-        """Atomically allocate the next tag number for the given category."""
-        with transaction.atomic():
-            base = category.digit * 1000
-            last = (cls.objects.select_for_update()
-                    .filter(category=category)
-                    .order_by('-tag_number')
-                    .values_list('tag_number', flat=True)
-                    .first())
-            return (last + 1) if last else base + 1
+        """Atomically allocate the next tag number: category.digit * 1000 + global suffix."""
+        suffix = _allocate_simple_tag('emi_next_physics')
+        return category.digit * 1000 + suffix
 
 
 class EvgenTag(models.Model):

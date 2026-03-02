@@ -204,6 +204,7 @@
     const allTags = {{ tags_json|safe }};
     const fieldChoices = {{ choices_json|safe }};
     const filterFields = {{ filter_fields_json|safe }};
+    const nextSuffix = {{ next_suffix }};
     const initialSelected = {{ selected_tag|default:"null" }};
     const currentUser = '{{ username }}';
     const tagType = '{{ tag_type }}';
@@ -277,16 +278,12 @@
         });
     }
 
-    // ── Next tag number prediction ──
+    // ── Next tag number prediction (from PersistentState, read-only) ──
     function predictNextLabel(categoryDigit) {
         if (tagType === 'p' && categoryDigit) {
-            const base = categoryDigit * 1000;
-            const maxInCat = allTags.filter(t => t.category_digit === categoryDigit)
-                .reduce((mx, t) => Math.max(mx, t.tag_number), base);
-            return tagPrefix + (maxInCat + 1);
+            return tagPrefix + (categoryDigit * 1000 + nextSuffix);
         }
-        const maxNum = allTags.reduce((mx, t) => Math.max(mx, t.tag_number), 0);
-        return tagPrefix + (maxNum + 1);
+        return tagPrefix + nextSuffix;
     }
 
     let editingTagNumber = null;
