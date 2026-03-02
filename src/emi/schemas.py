@@ -62,6 +62,17 @@ TAG_SCHEMAS = {
                 'pythia8', 'EpIC', 'BeAGLE', 'eSTARlight', 'sartre',
                 'DEMPgen', 'lAger', 'rapgap', 'particle_gun',
             ],
+            'generator_version': [
+                '8.310', '8.306-1.0', '8.306-1.1',
+                'v1.1.6-1.2', '1.1.6-1.0',
+                '1.03.02-1.2', '1.03.02-2.0', '1.03.02-1.1',
+                '1.3.0-1.0', '1.39-1.1', '1.2.4',
+                '3.6.1-1.0', '3.310-1.0',
+            ],
+            'bg_tag_prefix': [
+                'Bkg_Exact1S_2us/GoldCt/5um',
+                'Bkg_Exact1S_2us/GoldCt/10um',
+            ],
         },
     },
     's': {
@@ -72,6 +83,12 @@ TAG_SCHEMAS = {
         'model': 'SimuTag',
         'choices': {
             'detector_sim': ['npsim'],
+            'sim_version': ['26.02.0'],
+            'background_config': [
+                'none',
+                'Bkg_Exact1S_2us/GoldCt/5um',
+                'Bkg_Exact1S_2us/GoldCt/10um',
+            ],
         },
     },
     'r': {
@@ -81,6 +98,7 @@ TAG_SCHEMAS = {
         'prefix': 'r',
         'model': 'RecoTag',
         'choices': {
+            'reco_version': ['26.02.0'],
             'reco_config': ['standard'],
         },
     },
