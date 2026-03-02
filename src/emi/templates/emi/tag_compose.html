@@ -30,13 +30,12 @@
     .tag-item:last-child { border-bottom: none; }
     .tag-item:hover { background: #f8f9fa; }
     .tag-item.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
-    .tag-item-label { font-weight: 600; font-size: .9rem; color: #212529; }
-    .tag-item-cat { font-size: .75rem; color: #6c757d; margin-left: .5rem; }
-    .tag-item-desc {
-        font-size: .8rem; color: #6c757d; margin-top: .15rem;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    }
-    .tag-item-status { float: right; font-size: .7rem; padding: .15rem .5rem; border-radius: .75rem; }
+    .tag-item-line1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag-item-label { font-weight: 600; font-size: .85rem; color: #212529; }
+    .tag-item-cat { font-size: .8rem; color: #6c757d; margin-left: .35rem; }
+    .tag-item-desc { font-size: .8rem; color: #6c757d; margin-left: .35rem; }
+    .tag-item-line2 { font-size: .75rem; color: #999; margin-top: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag-item-status { font-size: .65rem; padding: .1rem .4rem; border-radius: .75rem; margin-left: .4rem; }
     .tag-list-empty { padding: 2rem; text-align: center; color: #6c757d; }
 
     /* Right panel shared */
@@ -52,7 +51,7 @@
     .detail-field { margin-bottom: .75rem; }
     .detail-label { font-size: .75rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: .03em; }
     .detail-value { font-size: .9rem; color: #212529; margin-top: .1rem; }
-    .detail-value code { font-size: .85rem; }
+    .detail-value code { font-size: .85rem; color: #1a6b3c; }
     .params-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem .75rem; }
     .detail-empty { padding: 3rem; text-align: center; color: #6c757d; }
 
@@ -114,13 +113,14 @@
                 <h4 id="view-title">Select a tag</h4>
                 <div class="btn-group">
                     <span id="view-status-badge"></span>
+                    {% if user.is_authenticated %}
+                    <button type="button" class="btn btn-outline-primary btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
+                    {% endif %}
                     <form id="lock-form" method="post" style="display:none; margin:0;">{% csrf_token %}
-                        <button type="submit" class="btn btn-outline-success btn-sm"
-                            onclick="return confirm('Lock this tag? This cannot be undone.')">Lock</button>
+                        <button type="submit" class="btn btn-outline-success btn-sm" onclick="return confirm('Lock this tag? This cannot be undone.')">Lock</button>
                     </form>
                     <form id="delete-form" method="post" style="display:none; margin:0;">{% csrf_token %}
-                        <button type="submit" class="btn btn-outline-danger btn-sm"
-                            onclick="return confirm('Delete this tag?')">Delete</button>
+                        <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('Delete this tag?')">Delete</button>
                     </form>
                 </div>
             </div>
@@ -252,6 +252,22 @@
 
     const btnNew = document.getElementById('btn-new-tag');
     if (btnNew) btnNew.addEventListener('click', enterCreateMode);
+    const btnCopy = document.getElementById('btn-copy-tag');
+    if (btnCopy) btnCopy.addEventListener('click', () => {
+        if (!selectedTagNumber) return;
+        const tag = allTags.find(t => t.tag_number === selectedTagNumber);
+        if (!tag) return;
+        enterCreateMode();
+        // Fill all fields directly (not as suggestions)
+        if (tagType === 'p') setFieldValue('category', String(tag.category_digit || ''), false);
+        setFieldValue('description', tag.description || '', false);
+        const params = tag.parameters || {};
+        createPanel.querySelectorAll('.choice-wrap').forEach(wrap => {
+            const fname = wrap.dataset.fieldName;
+            const paramKey = fname.replace('param_', '');
+            if (params[paramKey]) setFieldValue(fname, params[paramKey], false);
+        });
+    });
     document.getElementById('btn-cancel-create').addEventListener('click', () => enterViewMode(selectedTagNumber));
 
     function showTagDetail(tagNumber) {
@@ -260,6 +276,7 @@
             viewTitle.textContent = 'Select a tag';
             viewBody.innerHTML = '<div class="detail-empty">Click a tag on the left to view details.</div>';
             viewStatusBadge.innerHTML = '';
+            if (btnCopy) btnCopy.style.display = 'none';
             lockForm.style.display = 'none';
             deleteForm.style.display = 'none';
             return;
@@ -268,21 +285,15 @@
         const statusCls = tag.status === 'locked' ? 'bg-success' : 'bg-secondary';
         viewStatusBadge.innerHTML = `<span class="badge ${statusCls}">${tag.status}</span>`;
 
-        // Lock button: show if current user owns it and it's draft
-        if (currentUser && tag.created_by === currentUser && tag.status === 'draft') {
-            lockForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/lock/`;
-            lockForm.style.display = 'inline';
-        } else {
-            lockForm.style.display = 'none';
-        }
+        // Copy: always visible when logged in
+        if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
 
-        // Delete button: show if current user owns it and it's draft
-        if (currentUser && tag.created_by === currentUser && tag.status === 'draft') {
-            deleteForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/delete/`;
-            deleteForm.style.display = 'inline';
-        } else {
-            deleteForm.style.display = 'none';
-        }
+        // Lock/Delete: only for owner's drafts
+        const ownerDraft = currentUser && tag.created_by === currentUser && tag.status === 'draft';
+        lockForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/lock/`;
+        lockForm.style.display = ownerDraft ? 'inline' : 'none';
+        deleteForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/delete/`;
+        deleteForm.style.display = ownerDraft ? 'inline' : 'none';
 
         const params = tag.parameters || {};
         const paramHtml = Object.keys(params).length > 0
@@ -364,12 +375,11 @@
         tagList.innerHTML = filtered.map(t => {
             const sel = t.tag_number === selectedTagNumber ? ' selected' : '';
             const statusCls = t.status === 'locked' ? 'bg-success text-white' : 'bg-secondary text-white';
-            const desc = t.description ? (t.description.length > 60 ? t.description.slice(0, 60) + '...' : t.description) : '';
+            const cat = t.category_name ? `<span class="tag-item-cat">${t.category_name}</span>` : '';
+            const desc = t.description ? `<span class="tag-item-desc">${t.description}</span>` : '';
             return `<div class="tag-item${sel}" data-tag="${t.tag_number}">
-                <span class="tag-item-status badge ${statusCls}">${t.status}</span>
-                <span class="tag-item-label">${t.tag_label}</span>
-                <span class="tag-item-cat">${t.category_name || ''}</span>
-                <div class="tag-item-desc">${desc}</div>
+                <div class="tag-item-line1"><span class="tag-item-label">${t.tag_label}</span>${cat} ${desc}</div>
+                <div class="tag-item-line2">${t.created_at} &middot; ${t.created_by}<span class="tag-item-status badge ${statusCls}">${t.status}</span></div>
             </div>`;
         }).join('');
         tagList.querySelectorAll('.tag-item').forEach(el => {

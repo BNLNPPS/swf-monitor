@@ -288,6 +288,7 @@ def tag_compose(request, tag_type):
             'description': t.description,
             'parameters': t.parameters,
             'created_by': t.created_by,
+            'created_at': t.created_at.strftime('%Y-%m-%d %H:%M'),
         }
         if tag_type == 'p':
             entry['category_digit'] = t.category.digit

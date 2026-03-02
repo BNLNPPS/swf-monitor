@@ -7,7 +7,7 @@ Source: https://eic.github.io/epic-prod/FULL/26.02.0/ and RECO/26.02.0/
 from django.core.management.base import BaseCommand
 from emi.models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag
 
-CREATED_BY = 'emi-seed'
+CREATED_BY = 'srahman1'
 
 CATEGORIES = [
     (1, 'DIS'),
