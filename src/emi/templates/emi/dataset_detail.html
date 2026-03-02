@@ -38,25 +38,25 @@
                 <tbody>
                     <tr>
                         <td>Physics</td>
-                        <td><a href="{% url 'emi:tag_detail' tag_type='p' tag_number=dataset.physics_tag.tag_number %}" title="{{ dataset.physics_tag.description }}">{{ dataset.physics_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'emi:tag_compose' tag_type='p' %}?selected={{ dataset.physics_tag.tag_number }}" title="{{ dataset.physics_tag.description }}">{{ dataset.physics_tag.tag_label }}</a></td>
                         <td>{{ dataset.physics_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.physics_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>EvGen</td>
-                        <td><a href="{% url 'emi:tag_detail' tag_type='e' tag_number=dataset.evgen_tag.tag_number %}" title="{{ dataset.evgen_tag.description }}">{{ dataset.evgen_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'emi:tag_compose' tag_type='e' %}?selected={{ dataset.evgen_tag.tag_number }}" title="{{ dataset.evgen_tag.description }}">{{ dataset.evgen_tag.tag_label }}</a></td>
                         <td>{{ dataset.evgen_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.evgen_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Simulation</td>
-                        <td><a href="{% url 'emi:tag_detail' tag_type='s' tag_number=dataset.simu_tag.tag_number %}" title="{{ dataset.simu_tag.description }}">{{ dataset.simu_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'emi:tag_compose' tag_type='s' %}?selected={{ dataset.simu_tag.tag_number }}" title="{{ dataset.simu_tag.description }}">{{ dataset.simu_tag.tag_label }}</a></td>
                         <td>{{ dataset.simu_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.simu_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Reconstruction</td>
-                        <td><a href="{% url 'emi:tag_detail' tag_type='r' tag_number=dataset.reco_tag.tag_number %}" title="{{ dataset.reco_tag.description }}">{{ dataset.reco_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'emi:tag_compose' tag_type='r' %}?selected={{ dataset.reco_tag.tag_number }}" title="{{ dataset.reco_tag.description }}">{{ dataset.reco_tag.tag_label }}</a></td>
                         <td>{{ dataset.reco_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.reco_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>

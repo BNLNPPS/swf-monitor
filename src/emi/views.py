@@ -109,7 +109,7 @@ def tags_datatable_ajax(request, tag_type):
     else:
         col_names = ['tag_label', 'description', 'status', 'created_by', 'created_at', 'actions']
 
-    dt = DataTablesProcessor(request, col_names, default_order_column=0, default_order_direction='asc')
+    dt = DataTablesProcessor(request, col_names, default_order_column=0, default_order_direction='desc')
 
     qs = model.objects.all()
     if tag_type == 'p':
@@ -133,8 +133,9 @@ def tags_datatable_ajax(request, tag_type):
 
     data = []
     for tag in page:
-        detail_url = reverse('emi:tag_detail', args=[tag_type, tag.tag_number])
-        tag_link = f'<a href="{detail_url}">{tag.tag_label}</a>'
+        compose_url = reverse('emi:tag_compose', args=[tag_type])
+        tag_url = f'{compose_url}?selected={tag.tag_number}'
+        tag_link = f'<a href="{tag_url}">{tag.tag_label}</a>'
         status_badge = (
             f'<span class="badge bg-secondary">{tag.status}</span>'
             if tag.status == 'draft'
@@ -148,7 +149,7 @@ def tags_datatable_ajax(request, tag_type):
             status_badge,
             tag.created_by,
             format_datetime(tag.created_at),
-            f'<a href="{detail_url}">View</a>',
+            f'<a href="{tag_url}">View</a>',
         ]
         data.append(row)
 
@@ -275,7 +276,7 @@ def tag_compose(request, tag_type):
         form = FormClass(**form_kwargs)
         selected_tag = request.GET.get('selected')
 
-    qs = model.objects.all()
+    qs = model.objects.order_by('-tag_number')
     if tag_type == 'p':
         qs = qs.select_related('category')
     tags_data = []
@@ -437,10 +438,10 @@ def datasets_datatable_ajax(request):
     data = []
     for ds in page:
         detail_url = reverse('emi:dataset_detail', args=[ds.id])
-        p_url = reverse('emi:tag_detail', args=['p', ds.physics_tag.tag_number])
-        e_url = reverse('emi:tag_detail', args=['e', ds.evgen_tag.tag_number])
-        s_url = reverse('emi:tag_detail', args=['s', ds.simu_tag.tag_number])
-        r_url = reverse('emi:tag_detail', args=['r', ds.reco_tag.tag_number])
+        p_url = f"{reverse('emi:tag_compose', args=['p'])}?selected={ds.physics_tag.tag_number}"
+        e_url = f"{reverse('emi:tag_compose', args=['e'])}?selected={ds.evgen_tag.tag_number}"
+        s_url = f"{reverse('emi:tag_compose', args=['s'])}?selected={ds.simu_tag.tag_number}"
+        r_url = f"{reverse('emi:tag_compose', args=['r'])}?selected={ds.reco_tag.tag_number}"
         data.append([
             f'<a href="{detail_url}">{ds.dataset_name}</a>',
             f'<a href="{p_url}" title="{ds.physics_tag.description}">{ds.physics_tag.tag_label}</a>',

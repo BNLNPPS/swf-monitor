@@ -12,52 +12,36 @@
         <div class="col-md-3 mb-3">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
-                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='p' %}" class="text-decoration-none">Physics Tags</a></strong>
+                    <p class="mb-2"><strong><a href="{% url 'emi:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics Tags</a></strong>
                     <span class="badge bg-info">{{ physics_tags_count }}</span></p>
                     <p class="card-text">Physics process configurations (beam energies, process type, cross-sections).</p>
-                    <div class="mt-auto align-self-end">
-                        <a href="{% url 'emi:tags_list' tag_type='p' %}" class="btn btn-sm btn-outline-secondary">List</a>
-                        <a href="{% url 'emi:tag_compose' tag_type='p' %}" class="btn btn-sm btn-outline-primary">Create</a>
-                    </div>
                 </div>
             </div>
         </div>
         <div class="col-md-3 mb-3">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
-                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='e' %}" class="text-decoration-none">EvGen Tags</a></strong>
+                    <p class="mb-2"><strong><a href="{% url 'emi:tag_compose' tag_type='e' %}" class="text-decoration-none">EvGen Tags</a></strong>
                     <span class="badge bg-info">{{ evgen_tags_count }}</span></p>
                     <p class="card-text">Event generation configurations (signal frequency, generator settings).</p>
-                    <div class="mt-auto align-self-end">
-                        <a href="{% url 'emi:tags_list' tag_type='e' %}" class="btn btn-sm btn-outline-secondary">List</a>
-                        <a href="{% url 'emi:tag_compose' tag_type='e' %}" class="btn btn-sm btn-outline-primary">Create</a>
-                    </div>
                 </div>
             </div>
         </div>
         <div class="col-md-3 mb-3">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
-                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='s' %}" class="text-decoration-none">Simu Tags</a></strong>
+                    <p class="mb-2"><strong><a href="{% url 'emi:tag_compose' tag_type='s' %}" class="text-decoration-none">Simu Tags</a></strong>
                     <span class="badge bg-info">{{ simu_tags_count }}</span></p>
                     <p class="card-text">Simulation configurations (detector sim, digitization, backgrounds).</p>
-                    <div class="mt-auto align-self-end">
-                        <a href="{% url 'emi:tags_list' tag_type='s' %}" class="btn btn-sm btn-outline-secondary">List</a>
-                        <a href="{% url 'emi:tag_compose' tag_type='s' %}" class="btn btn-sm btn-outline-primary">Create</a>
-                    </div>
                 </div>
             </div>
         </div>
         <div class="col-md-3 mb-3">
             <div class="card h-100">
                 <div class="card-body d-flex flex-column">
-                    <p class="mb-2"><strong><a href="{% url 'emi:tags_list' tag_type='r' %}" class="text-decoration-none">Reco Tags</a></strong>
+                    <p class="mb-2"><strong><a href="{% url 'emi:tag_compose' tag_type='r' %}" class="text-decoration-none">Reco Tags</a></strong>
                     <span class="badge bg-info">{{ reco_tags_count }}</span></p>
                     <p class="card-text">Reconstruction configurations (version, calibration, alignment).</p>
-                    <div class="mt-auto align-self-end">
-                        <a href="{% url 'emi:tags_list' tag_type='r' %}" class="btn btn-sm btn-outline-secondary">List</a>
-                        <a href="{% url 'emi:tag_compose' tag_type='r' %}" class="btn btn-sm btn-outline-primary">Create</a>
-                    </div>
                 </div>
             </div>
         </div>
