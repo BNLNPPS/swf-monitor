@@ -659,9 +659,10 @@
 
     // ── Init ──
     renderTagList();
-    if (initialSelected) {
-        onTagClick(initialSelected);
-        const el = tagList.querySelector(`[data-tag="${initialSelected}"]`);
+    const autoSelect = initialSelected || (allTags.length > 0 ? allTags[0].tag_number : null);
+    if (autoSelect) {
+        onTagClick(autoSelect);
+        const el = tagList.querySelector(`[data-tag="${autoSelect}"]`);
         if (el) el.scrollIntoView({block: 'nearest'});
     }
 })();
