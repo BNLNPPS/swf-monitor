@@ -12,7 +12,14 @@ class Command(BaseCommand):
             level=logging.INFO,
             format='%(asctime)s %(name)s %(levelname)s %(message)s',
         )
-        logging.getLogger('panda_bot').setLevel(logging.DEBUG)
+
+        from monitor_app.db_log_handler import DbLogHandler
+
+        bot_logger = logging.getLogger('panda_bot')
+        bot_logger.setLevel(logging.DEBUG)
+        db_handler = DbLogHandler(app_name='panda_bot', instance_name='panda-bot-mattermost')
+        db_handler.setLevel(logging.INFO)
+        bot_logger.addHandler(db_handler)
 
         from monitor_app.panda.bot import PandaBot
 
