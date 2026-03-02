@@ -276,6 +276,23 @@ COMMON QUERIES:
 - Top errors? → panda_error_summary(days=7)
 - Errors for a user? → panda_error_summary(username='someone')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
+- What is EMI? → EMI = ePIC Metadata Interface, manages production metadata tags for MC simulation campaigns
+- List physics tags? → emi_list_tags(tag_type='p')
+- What is tag p1001? → emi_get_tag(tag_label='p1001')
+- Reco tags? → emi_list_tags(tag_type='r')
+- Photoproduction tags? → emi_search_tags(query='photoproduction')
+- DIS tags? → emi_list_tags(tag_type='p', category='DIS')
+- Tags using pythia8? → emi_search_tags(query='pythia8')
+
+EMI (ePIC Metadata Interface):
+EMI manages production metadata for ePIC Monte Carlo simulation campaigns. Metadata is
+organized as tags — named parameter sets for each pipeline stage:
+- Physics tags (p): process, beam energies, species, Q2 range (e.g. p1001 = DIS NC 10x100 ep)
+- EvGen tags (e): event generator and version (e.g. e1 = pythia8 8.310)
+- Simu tags (s): detector simulation config (e.g. s1 = npsim 26.02.0)
+- Reco tags (r): reconstruction config (e.g. r1 = eicrecon 26.02.0)
+Physics tags are grouped by category: DIS (p1xxx), DVCS (p2xxx), SIDIS (p3xxx), EXCLUSIVE (p4xxx).
+Tags are draft (editable) or locked (immutable, for production use).
 
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.

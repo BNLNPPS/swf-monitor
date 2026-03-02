@@ -18,6 +18,7 @@ Module structure:
 - workflows.py: Workflow definitions, executions, messages, runs, files, slices
 - ai_memory.py: AI dialogue recording and retrieval for session context
 - pandamon.py: PanDA job monitoring and error diagnostics for ePIC production
+- emi.py: EMI (ePIC Metadata Interface) tag browsing and lookup
 """
 
 from mcp_server import mcp_server as mcp
@@ -84,6 +85,13 @@ from .pandamon import (
     panda_study_job,
 )
 
+# EMI tools
+from .emi import (
+    emi_list_tags,
+    emi_get_tag,
+    emi_search_tags,
+)
+
 
 # Tool discovery - registered as MCP tool
 @mcp.tool()
@@ -143,4 +151,8 @@ __all__ = [
     'panda_error_summary',
     'panda_get_activity',
     'panda_study_job',
+    # EMI
+    'emi_list_tags',
+    'emi_get_tag',
+    'emi_search_tags',
 ]

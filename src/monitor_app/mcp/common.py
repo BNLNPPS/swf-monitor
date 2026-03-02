@@ -265,4 +265,20 @@ def get_available_tools_list() -> list:
             "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
             "parameters": ["pandaid"],
         },
+        # EMI (ePIC Metadata Interface) tools
+        {
+            "name": "emi_list_tags",
+            "description": "List EMI (ePIC Metadata Interface) tags — production metadata for MC campaigns. Filter by type (p/e/s/r), category, status, creator, or text.",
+            "parameters": ["tag_type", "category", "status", "creator", "search", "limit"],
+        },
+        {
+            "name": "emi_get_tag",
+            "description": "Get full details of a single EMI tag by label (e.g. 'p1001', 'e3', 'r1').",
+            "parameters": ["tag_label"],
+        },
+        {
+            "name": "emi_search_tags",
+            "description": "Search EMI tags by keyword in label, description, or parameter values (e.g. 'photoproduction', 'eAu', 'pythia8').",
+            "parameters": ["query", "tag_type", "limit"],
+        },
     ]

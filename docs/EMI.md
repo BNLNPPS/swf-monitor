@@ -1,128 +1,94 @@
-# ePIC Metadata Interface (EMI)
+# EMI — ePIC Metadata Interface
 
-## Overview
+EMI manages production metadata for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the metadata configurations that drive Monte Carlo production.
 
-EMI is a metadata management system for ePIC production at the Electron Ion Collider. It provides a central service to define, browse, reuse, and compose metadata configurations that drive Monte Carlo simulation campaigns.
+**URL:** `/swf-monitor/emi/`
 
-Production metadata is organized as **tags** — named, versioned parameter sets that capture physics process definitions, event generation settings, simulation configurations, and reconstruction options. Tags are composed into **datasets** with standardized names suitable for Rucio data management. **Production configs** capture operational settings for job submission: background mixing, output control, software stack, resource targets, and PanDA/Rucio overrides.
+## What It Does
 
-**Location:** Django app `emi` within swf-monitor
-**Web UI:** `/swf-monitor/emi/`
-**REST API:** `/swf-monitor/emi/api/`
+Production metadata is organized as **tags** — named parameter sets that capture the settings for each stage of the simulation pipeline:
 
-## Concepts
+| Tag Type | Prefix | What It Captures | Example |
+|----------|--------|-----------------|---------|
+| **Physics** | p | Process, beam energies, species, Q2 range | p1001 — DIS NC 10x100 ep minQ2=1 |
+| **EvGen** | e | Generator name and version, backgrounds | e1 — pythia8 8.310 |
+| **Simulation** | s | Detector sim version, background config | s1 — npsim 26.02.0 |
+| **Reconstruction** | r | Reco version, calibration, alignment | r1 — eicrecon 26.02.0 |
 
-### Tags
+Physics tags are grouped by **category** (DIS, DVCS, SIDIS, EXCLUSIVE), reflected in their numbering: DIS tags are p1xxx, DVCS are p2xxx, etc.
 
-A tag is a named parameter set identified by a type prefix and number:
+The system is seeded with configurations from the [26.02.0 production campaign](https://eic.github.io/epic-prod/FULL/26.02.0/) — 47 physics tags, 15 evgen tags, 1 simu tag, and 1 reco tag.
 
-| Type | Prefix | Example | Description |
-|------|--------|---------|-------------|
-| Physics | p | p3001 | Physics process (beam energies, process type, cross-section) |
-| EvGen | e | e1 | Event generation (signal frequency, generator settings) |
-| Simulation | s | s1 | Detector simulation (sim version, backgrounds, digitization) |
-| Reconstruction | r | r1 | Reconstruction (version, calibration, alignment) |
-
-### Tag Lifecycle
-
-Tags follow a two-state lifecycle:
+## Tag Lifecycle
 
 ```
-draft  ──────►  locked
-(editable)      (immutable, usable in datasets)
+draft  ──►  locked
 ```
 
-- **Draft**: Parameters can be edited. Cannot be used in datasets.
-- **Locked**: Immutable. One-way transition from draft. Required for dataset creation. Ensures reproducibility — once a tag is used in production, its meaning never changes.
+- **Draft** — editable. You can modify parameters, copy from other tags, or delete.
+- **Locked** — immutable. One-way transition. Ensures reproducibility: once a tag is used in production, its meaning never changes.
 
-### Physics Categories
+Only the tag creator can edit, lock, or delete their own drafts. Anyone can copy any tag to create their own variant.
 
-Physics tags use a hierarchical numbering scheme. Each physics area (DVCS, DIS, SIDIS, etc.) is assigned a single digit (1-9). Tag numbers within that area start at `digit * 1000 + 1`:
+## Using the Tag Panel
 
-| Category | Digit | Tag Range |
-|----------|-------|-----------|
-| DVCS | 3 | p3001, p3002, p3003... |
-| DIS | 4 | p4001, p4002, p4003... |
+The main interface is the **panel view** — a split-pane layout with a tag browser on the left and detail/edit panel on the right. Access it from the EMI dropdown in the nav bar (Physics Tags, EvGen Tags, Simu Tags, Reco Tags).
 
-EvGen, Simulation, and Reconstruction tags simply increment from 1 (e1, e2, ... / s1, s2, ... / r1, r2, ...).
+### Browsing
 
-### Tag Number Allocation
+- **Arrow keys** navigate the tag list (keyboard focus is on the list at page load)
+- **Search box** filters by any text in tag name, description, category, or parameter values
+- **Status pills** filter by draft/locked
+- **Creator pills** filter by who created the tag (appears when multiple creators exist)
+- **Parameter dropdowns** filter by distinct values of each parameter (e.g. filter physics tags to only `beam_species=eAu`)
+- **Clear** button appears when any filter is active; resets everything
 
-All tag numbers are auto-assigned atomically:
+### Viewing
 
-- **Physics tags**: `MAX(tag_number) + 1` within the category, using `select_for_update()` for thread safety.
-- **e/s/r tags**: Atomic increment of keys in `PersistentState.state_data` (`emi_next_evgen`, `emi_next_simu`, `emi_next_reco`).
+Click any tag to see its full detail on the right: description, creator, and all parameters.
 
-Users never pick tag numbers manually — EMI assigns them.
+### Creating
 
-### Datasets
+Click **New Tag** to enter create mode. The form shows required fields (marked with *) and optional fields. For fields with known values, a dropdown offers choices; select "Other..." to enter a free value.
 
-A dataset composes four locked tags with detector version information into a standardized name:
+While creating, click any existing tag in the list — its values fill in as suggestions (grey italic). Fields you've already edited show a yellow suggestion bar instead of overwriting, so you can compose a new tag from pieces of existing ones.
 
-```
-{scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}
-```
+The title shows the predicted next tag number (e.g. "New Tag p1020"). The actual number is assigned on save.
 
-Example:
-```
-group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1
-```
+### Editing
 
-The Rucio DID (Data Identifier) adds scope prefix and block suffix:
-```
-group.EIC:group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1.b1
-```
+Your own draft tags show an **Edit** button. Editing works in the same panel — no separate page. Changed fields appear in dark green. The Save button stays disabled until you actually change something, and re-disables if you revert all changes.
 
-Dataset names are validated to not exceed 255 characters (Rucio limit).
+While editing, click other tags to see suggestion bars for differing values. Click "Apply" to adopt a suggested value.
 
-### Blocks
+### Copying
 
-Rucio limits datasets to 100k files. EMI manages automatic subdivision:
+Any tag (yours or others') has a **Copy** button. This fills the create form with all values from the source tag, sets you as creator, and lets you modify before saving. Useful for creating variants of existing configurations.
 
-- Block 1 (`.b1`) always exists, created with the dataset.
-- When a dataset exceeds the file limit, add a new block — EMI creates `.b2`, `.b3`, etc.
-- All blocks share the same base dataset name and tag composition.
-- The `blocks` count is maintained across all rows of the same dataset.
+### Locking and Deleting
 
-### Production Configs
+Your own drafts show **Lock** and **Delete** buttons. Locking is permanent — confirm carefully. Deletion removes the tag.
 
-A production config is a reusable template capturing everything needed to build a submit command beyond what tags and datasets define:
+## Tag Numbering
 
-- **Background mixing**: Enable/disable, cross section, EvtGen file
-- **Output control**: Which output files to copy (reco, full, log), Rucio usage
-- **Software stack**: JUG_XL tag, container image
-- **Resource targets**: Target walltime per job, events per task
-- **Condor template**: HTCondor submission template text
-- **PanDA overrides**: Site, queue, working group, resource type (nullable — PanDA decides defaults)
-- **Rucio overrides**: RSE, replication rules (nullable)
+Tag numbers are auto-assigned. You never pick a number manually.
 
-Production configs are **always mutable** — they are working templates, not reproducibility records. The PanDA task/job spec is the immutable record of what actually ran.
+- **Physics tags**: `category digit * 1000 + global suffix`. The suffix increments globally across all categories, so numbers within a category may have gaps (e.g. p2001, p2005, p2020). This is expected.
+- **EvGen/Simu/Reco tags**: Simple sequential increment (e1, e2, ... / s1, s2, ... / r1, r2, ...).
 
-## Data Model
+All counters are managed atomically via PersistentState to prevent conflicts.
 
-### Tables
+## Parameter Schemas
 
-| Table | Description |
-|-------|-------------|
-| `emi_physics_category` | Physics areas with digit-based numbering |
-| `emi_physics_tag` | Physics process tags (p####) |
-| `emi_evgen_tag` | Event generation tags (e#) |
-| `emi_simu_tag` | Simulation tags (s#) |
-| `emi_reco_tag` | Reconstruction tags (r#) |
-| `emi_dataset` | Datasets with block management |
-| `emi_prod_config` | Production configuration templates |
-
-### Tag Parameter Schemas
-
-Each tag type has required and optional parameter fields defined in `emi/schemas.py`:
+Each tag type has required and optional parameters defined in `emi/schemas.py`. Adding a field there makes it appear in forms and validation — no database migration needed.
 
 **Physics (p):**
 - Required: `process`, `beam_energy_electron`, `beam_energy_hadron`
-- Optional: `crosssection`, `generator`, `luminosity`, `notes`
+- Optional: `beam_species`, `q2_range`, `decay_mode`, `hadron_charge`, `coherence`, `model`, `polarization`, `notes`
 
 **EvGen (e):**
-- Required: `signal_freq`, `signal_status`
-- Optional: `generator_version`, `decay_mode`, `notes`
+- Required: `generator`, `generator_version`
+- Optional: `signal_freq`, `signal_status`, `bg_tag_prefix`, `bg_files`, `notes`
 
 **Simulation (s):**
 - Required: `detector_sim`, `sim_version`
@@ -132,226 +98,57 @@ Each tag type has required and optional parameter fields defined in `emi/schemas
 - Required: `reco_version`, `reco_config`
 - Optional: `calibration_tag`, `alignment_tag`, `notes`
 
-Schemas are extensible — add fields to `TAG_SCHEMAS` in `schemas.py` without migration.
-
 ## REST API
 
-Base URL: `/emi/api/`
+Base URL: `/swf-monitor/emi/api/`
 
-All endpoints support JSON. No DELETE on tags or datasets — they are permanent. Prod configs support full CRUD.
-
-### Physics Categories
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/physics-categories/` | List all categories with tag counts |
-| POST | `/physics-categories/` | Create a category |
-| GET | `/physics-categories/{digit}/` | Get category detail |
-| PATCH | `/physics-categories/{digit}/` | Update category |
-
-### Tags (same pattern for all four types)
-
-Replace `{type}` with `physics-tags`, `evgen-tags`, `simu-tags`, or `reco-tags`.
+Tags support list, create, get, update (draft only), and lock. Replace `{type}` with `physics-tags`, `evgen-tags`, `simu-tags`, or `reco-tags`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/{type}/` | List tags |
 | POST | `/{type}/` | Create tag (number auto-assigned) |
-| GET | `/{type}/{tag_number}/` | Get tag detail |
-| PATCH | `/{type}/{tag_number}/` | Update tag (draft only) |
-| POST | `/{type}/{tag_number}/lock/` | Lock tag (one-way) |
+| GET | `/{type}/{number}/` | Tag detail |
+| PATCH | `/{type}/{number}/` | Update draft tag |
+| POST | `/{type}/{number}/lock/` | Lock tag (permanent) |
 
-**POST physics-tags** requires `category` (digit). Other tag types do not.
+Physics tag creation requires a `category` field (digit). Tag numbers are always auto-assigned.
 
-**PATCH** returns 400 if the tag is locked.
+## Datasets (TBD)
 
-### Datasets
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/datasets/` | List datasets |
-| POST | `/datasets/` | Create dataset (all tags must be locked) |
-| GET | `/datasets/{id}/` | Get dataset detail |
-| POST | `/datasets/{id}/add-block/` | Add next block |
-
-### Examples
-
-Create a physics category:
-```bash
-curl -X POST /emi/api/physics-categories/ \
-  -H "Content-Type: application/json" \
-  -d '{"digit": 3, "name": "DVCS", "description": "Deeply Virtual Compton Scattering", "created_by": "torre"}'
-```
-
-Create a physics tag:
-```bash
-curl -X POST /emi/api/physics-tags/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "category": 3,
-    "description": "DVCS 10x100 GeV",
-    "parameters": {
-      "process": "DVCS",
-      "beam_energy_electron": "10",
-      "beam_energy_hadron": "100"
-    },
-    "created_by": "torre"
-  }'
-# Returns: {"tag_number": 3001, "tag_label": "p3001", ...}
-```
-
-Lock a tag:
-```bash
-curl -X POST /emi/api/physics-tags/3001/lock/
-```
-
-Create a dataset:
-```bash
-curl -X POST /emi/api/datasets/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "scope": "group.EIC",
-    "detector_version": "26.02.0",
-    "detector_config": "epic_craterlake",
-    "physics_tag": 1,
-    "evgen_tag": 1,
-    "simu_tag": 1,
-    "reco_tag": 1,
-    "created_by": "torre"
-  }'
-# Returns: {"did": "group.EIC:group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1.b1", ...}
-```
-
-Add a block when dataset exceeds 100k files:
-```bash
-curl -X POST /emi/api/datasets/1/add-block/
-# Returns: {"did": "...b2", "block_num": 2, "blocks": 2, ...}
-```
-
-### Production Configs
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/prod-configs/` | List all prod configs |
-| POST | `/prod-configs/` | Create a prod config |
-| GET | `/prod-configs/{id}/` | Get config detail |
-| PATCH | `/prod-configs/{id}/` | Update config |
-| DELETE | `/prod-configs/{id}/` | Delete config |
-
-Create a production config:
-```bash
-curl -X POST /emi/api/prod-configs/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "DVCS 10x100 standard",
-    "description": "Standard DVCS production at 10x100 GeV",
-    "bg_mixing": true,
-    "bg_cross_section": "1.0e-3",
-    "copy_reco": true,
-    "copy_full": false,
-    "copy_log": true,
-    "use_rucio": true,
-    "jug_xl_tag": "26.02.0-stable",
-    "target_hours_per_job": 4.0,
-    "events_per_task": 100000,
-    "panda_working_group": "EIC",
-    "created_by": "torre"
-  }'
-```
-
-## Web UI
-
-### Pages
-
-| URL | Page | Description |
-|-----|------|-------------|
-| `/emi/` | EMI Hub | Overview with counts and quick links |
-| `/emi/categories/` | Physics Categories | Table of categories with tag counts |
-| `/emi/categories/create/` | Create Category | Form for new physics area |
-| `/emi/tags/p/` | Physics Tags | DataTable with status and category filters |
-| `/emi/tags/e/` | EvGen Tags | DataTable with status filter |
-| `/emi/tags/s/` | Simu Tags | DataTable with status filter |
-| `/emi/tags/r/` | Reco Tags | DataTable with status filter |
-| `/emi/tags/{type}/{N}/` | Tag Detail | Parameters, description, status, linked datasets |
-| `/emi/tags/{type}/create/` | Create Tag | Form with required/optional parameter fields |
-| `/emi/tags/{type}/{N}/edit/` | Edit Tag | Edit draft tag parameters |
-| `/emi/datasets/` | Datasets | DataTable with tag labels as links |
-| `/emi/datasets/create/` | Create Dataset | Dropdowns (locked tags only), live name preview |
-| `/emi/datasets/{id}/` | Dataset Detail | Tag breakdown, block management |
-| `/emi/configs/` | Prod Configs | DataTable of production configs |
-| `/emi/configs/create/` | Create Config | Form with grouped fieldsets |
-| `/emi/configs/{id}/` | Config Detail | All settings in organized cards |
-| `/emi/configs/{id}/edit/` | Edit Config | Pre-populated form |
-
-### Navigation
-
-EMI appears in the main nav bar as a dropdown between "State" and "PanDA/Rucio":
-
-- EMI Hub
-- Physics Tags
-- EvGen Tags
-- Simu Tags
-- Reco Tags
-- Datasets
-- Prod Configs
-
-### Tag-to-Meaning Translation
-
-Tag labels everywhere are hyperlinks to tag detail pages. Dataset detail shows each tag with its description and key parameters inline. Dataset list shows tag labels with tooltip descriptions on hover.
-
-## File Structure
+A dataset composes four locked tags with detector version information into a standardized name:
 
 ```
-src/emi/
-├── __init__.py
-├── apps.py              # Django app config
-├── models.py            # PhysicsCategory, *Tag, Dataset, ProdConfig models
-├── schemas.py           # Required/optional fields per tag type
-├── forms.py             # Django forms for web UI
-├── serializers.py       # DRF serializers
-├── api_views.py         # REST API ViewSets
-├── api_urls.py          # DRF router
-├── views.py             # Web UI views + DataTable AJAX
-├── urls.py              # All URL routing
-├── admin.py             # Admin registration
-├── migrations/
-│   ├── 0001_initial.py
-│   └── 0002_prodconfig.py
-└── templates/emi/
-    ├── emi_hub.html
-    ├── physics_categories_list.html
-    ├── physics_category_create.html
-    ├── tag_list.html             # Generic, parameterized by tag type
-    ├── tag_detail.html           # Generic
-    ├── tag_create_physics.html   # Physics-specific (category selector)
-    ├── tag_create.html           # Generic for e, s, r
-    ├── datasets_list.html
-    ├── dataset_detail.html
-    ├── dataset_create.html
-    ├── prod_configs_list.html
-    ├── prod_config_detail.html
-    └── prod_config_form.html   # Shared create/edit form
+{scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}
 ```
 
-## Integration Points
+Example: `group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1`
 
-### Modified Files
+The Rucio DID adds scope prefix and block suffix: `group.EIC:...b1`
 
-| File | Change |
-|------|--------|
-| `swf_monitor_project/settings.py` | `"emi"` added to INSTALLED_APPS |
-| `swf_monitor_project/urls.py` | `path("emi/", include("emi.urls"))` added before monitor_app |
-| `templates/base.html` | EMI dropdown added to navigation |
+Rucio limits datasets to 100k files. EMI manages automatic subdivision into blocks (`.b1`, `.b2`, etc.).
 
-### Dependencies
+The data model is in place but the dataset composition UI and workflows are not yet built.
 
-- Uses `monitor_app.models.PersistentState` for e/s/r tag number allocation
-- Uses `monitor_app.utils.DataTablesProcessor` for server-side DataTable views
-- Tag list templates extend `monitor_app/_datatable_base.html`
+## Production Configs (TBD)
 
-### Future: MCP Tools
+A production config is a reusable template capturing everything needed to build a submit command beyond what tags and datasets define:
 
-Designed for addition of MCP tools:
+- **Background mixing**: Enable/disable, cross section, EvtGen file
+- **Output control**: Which output files to copy (reco, full, log), Rucio usage
+- **Software stack**: JUG_XL tag, container image
+- **Resource targets**: Target walltime per job, events per task
+- **Condor template**: HTCondor submission template text
+- **PanDA overrides**: Site, queue, working group, resource type
+- **Rucio overrides**: RSE, replication rules
+
+Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
+
+The data model and basic CRUD API are in place but the production workflow UI is not yet built.
+
+## MCP Tools (TBD)
+
+Designed for addition of MCP tools for AI-assisted tag and dataset management:
 
 | Tool | Description |
 |------|-------------|
@@ -360,4 +157,3 @@ Designed for addition of MCP tools:
 | `emi_create_tag(tag_type, ...)` | Create tag with auto-assigned number |
 | `emi_list_datasets(...)` | Dataset list with tag filters |
 | `emi_create_dataset(...)` | Create dataset from tag labels |
-| `emi_list_physics_categories()` | Categories with counts |
