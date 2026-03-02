@@ -9,7 +9,7 @@ from mcp_server import mcp_server as mcp
 
 
 def _list_tags_sync(tag_type, category=None, status=None, creator=None,
-                    search=None, limit=50):
+                    search=None):
     """List tags with filtering. Returns list of tag summaries."""
     from emi.schemas import TAG_SCHEMAS, get_tag_model
 
@@ -35,7 +35,7 @@ def _list_tags_sync(tag_type, category=None, status=None, creator=None,
         qs = qs.filter(q)
 
     tags = []
-    for t in qs[:limit]:
+    for t in qs:
         entry = {
             'tag_label': t.tag_label,
             'status': t.status,
@@ -93,10 +93,9 @@ def _get_tag_sync(tag_label):
     return result
 
 
-def _search_tags_sync(query, tag_type=None, limit=50):
+def _search_tags_sync(query, tag_type=None):
     """Search across tag descriptions and parameters."""
     from emi.schemas import TAG_SCHEMAS, get_tag_model
-    from django.db.models import Q
 
     types = [tag_type] if tag_type else ['p', 'e', 's', 'r']
     results = []
@@ -105,13 +104,11 @@ def _search_tags_sync(query, tag_type=None, limit=50):
         if tt not in TAG_SCHEMAS:
             continue
         model = get_tag_model(tt)
-        schema = TAG_SCHEMAS[tt]
         qs = model.objects.order_by('-tag_number')
         if tt == 'p':
             qs = qs.select_related('category')
 
         q_lower = query.lower()
-        matched = []
         for t in qs:
             searchable = ' '.join([
                 t.tag_label, t.description,
@@ -126,15 +123,12 @@ def _search_tags_sync(query, tag_type=None, limit=50):
                 }
                 if tt == 'p':
                     entry['category'] = t.category.name
-                matched.append(entry)
-                if len(matched) >= limit:
-                    break
-        results.extend(matched)
+                results.append(entry)
 
     return {
         'query': query,
         'count': len(results),
-        'tags': results[:limit],
+        'tags': results,
     }
 
 
@@ -145,7 +139,6 @@ async def emi_list_tags(
     status: str = None,
     creator: str = None,
     search: str = None,
-    limit: int = 50,
 ) -> dict:
     """
     List EMI tags (production metadata) with optional filtering.
@@ -159,7 +152,6 @@ async def emi_list_tags(
         status: Filter by status: 'draft' or 'locked'.
         creator: Filter by creator username.
         search: Text search in tag label and description.
-        limit: Maximum tags to return (default 50).
 
     Returns:
         tag_type, label, count, and list of tags with: tag_label, status,
@@ -167,7 +159,7 @@ async def emi_list_tags(
     """
     return await sync_to_async(_list_tags_sync)(
         tag_type=tag_type, category=category, status=status,
-        creator=creator, search=search, limit=limit,
+        creator=creator, search=search,
     )
 
 
@@ -191,7 +183,6 @@ async def emi_get_tag(tag_label: str) -> dict:
 async def emi_search_tags(
     query: str,
     tag_type: str = None,
-    limit: int = 50,
 ) -> dict:
     """
     Search across EMI tags by text in label, description, or parameter values.
@@ -204,12 +195,11 @@ async def emi_search_tags(
                description, and all parameter values.
         tag_type: Optional — restrict to one type: 'p', 'e', 's', 'r'.
                   If omitted, searches all tag types.
-        limit: Maximum results (default 50).
 
     Returns:
         query, count, and list of matching tags with: tag_label, status,
         description, parameters, category (physics only).
     """
     return await sync_to_async(_search_tags_sync)(
-        query=query, tag_type=tag_type, limit=limit,
+        query=query, tag_type=tag_type,
     )
