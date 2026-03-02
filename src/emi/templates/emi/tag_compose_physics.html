@@ -96,6 +96,9 @@
             </div>
             <div class="filter-row" id="creator-filters">
             </div>
+            {% if user.is_authenticated %}
+            <button type="button" class="btn btn-primary btn-sm mt-2" id="btn-new-tag" style="align-self:flex-start;">New Tag</button>
+            {% endif %}
         </div>
         <div class="tag-list" id="tag-list" tabindex="0"></div>
     </div>
@@ -109,13 +112,14 @@
                 <h4 id="view-title">Select a tag</h4>
                 <div class="btn-group">
                     <span id="view-status-badge"></span>
+                    <form id="lock-form" method="post" style="display:none; margin:0;">{% csrf_token %}
+                        <button type="submit" class="btn btn-outline-success btn-sm"
+                            onclick="return confirm('Lock this tag? This cannot be undone.')">Lock</button>
+                    </form>
                     <form id="delete-form" method="post" style="display:none; margin:0;">{% csrf_token %}
                         <button type="submit" class="btn btn-outline-danger btn-sm"
                             onclick="return confirm('Delete this tag?')">Delete</button>
                     </form>
-                    {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag">New Tag</button>
-                    {% endif %}
                 </div>
             </div>
             <div class="panel-body" id="view-body">
@@ -188,6 +192,7 @@
     const viewTitle = document.getElementById('view-title');
     const viewBody = document.getElementById('view-body');
     const viewStatusBadge = document.getElementById('view-status-badge');
+    const lockForm = document.getElementById('lock-form');
     const deleteForm = document.getElementById('delete-form');
     let statusFilter = 'all';
     let creatorFilter = null;
@@ -250,12 +255,21 @@
             viewTitle.textContent = 'Select a tag';
             viewBody.innerHTML = '<div class="detail-empty">Click a tag on the left to view details.</div>';
             viewStatusBadge.innerHTML = '';
+            lockForm.style.display = 'none';
             deleteForm.style.display = 'none';
             return;
         }
         viewTitle.textContent = tag.tag_label + ' — ' + (tag.category_name || '');
         const statusCls = tag.status === 'locked' ? 'bg-success' : 'bg-secondary';
         viewStatusBadge.innerHTML = `<span class="badge ${statusCls}">${tag.status}</span>`;
+
+        // Lock button: show for draft tags if authenticated
+        if (currentUser && tag.status === 'draft') {
+            lockForm.action = `/swf-monitor/emi/tags/p/${tag.tag_number}/lock/`;
+            lockForm.style.display = 'inline';
+        } else {
+            lockForm.style.display = 'none';
+        }
 
         // Delete button: show if current user owns it and it's draft
         if (currentUser && tag.created_by === currentUser && tag.status === 'draft') {
