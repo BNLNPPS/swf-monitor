@@ -87,7 +87,12 @@
     <!-- Left: Tag Browser -->
     <div class="tag-browser">
         <div class="tag-browser-header">
-            <h5 style="margin-bottom:.5rem">Physics Tags</h5>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
+                <h5 style="margin:0">Physics Tags</h5>
+                {% if user.is_authenticated %}
+                <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag">New Tag</button>
+                {% endif %}
+            </div>
             <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
             <div class="filter-row" id="status-filters">
                 <span class="filter-pill active" data-status="all">All</span>
@@ -96,9 +101,6 @@
             </div>
             <div class="filter-row" id="creator-filters">
             </div>
-            {% if user.is_authenticated %}
-            <button type="button" class="btn btn-primary btn-sm mt-2" id="btn-new-tag" style="align-self:flex-start;">New Tag</button>
-            {% endif %}
         </div>
         <div class="tag-list" id="tag-list" tabindex="0"></div>
     </div>
@@ -263,8 +265,8 @@
         const statusCls = tag.status === 'locked' ? 'bg-success' : 'bg-secondary';
         viewStatusBadge.innerHTML = `<span class="badge ${statusCls}">${tag.status}</span>`;
 
-        // Lock button: show for draft tags if authenticated
-        if (currentUser && tag.status === 'draft') {
+        // Lock button: show if current user owns it and it's draft
+        if (currentUser && tag.created_by === currentUser && tag.status === 'draft') {
             lockForm.action = `/swf-monitor/emi/tags/p/${tag.tag_number}/lock/`;
             lockForm.style.display = 'inline';
         } else {

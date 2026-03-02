@@ -19,7 +19,6 @@ urlpatterns = [
     # Tags (parameterized by type)
     path('tags/<str:tag_type>/', views.tags_list, name='tags_list'),
     path('tags/<str:tag_type>/datatable/', views.tags_datatable_ajax, name='tags_datatable_ajax'),
-    path('tags/<str:tag_type>/create/', views.tag_create, name='tag_create'),
     path('tags/<str:tag_type>/<int:tag_number>/', views.tag_detail, name='tag_detail'),
     path('tags/<str:tag_type>/<int:tag_number>/edit/', views.tag_edit, name='tag_edit'),
     path('tags/<str:tag_type>/<int:tag_number>/lock/', views.tag_lock, name='tag_lock'),

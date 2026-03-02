@@ -215,7 +215,8 @@ def tag_create(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
-            return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag.tag_number)
+            compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+            return redirect(f'{compose_url}?selected={tag.tag_number}')
     else:
         form = FormClass(**form_kwargs)
 
@@ -324,17 +325,21 @@ def tag_delete(request, tag_type, tag_number):
 
 @login_required
 def tag_lock(request, tag_type, tag_number):
+    compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+    selected_url = f'{compose_url}?selected={tag_number}'
     if request.method != 'POST':
-        return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag_number)
+        return redirect(selected_url)
     model = TAG_MODELS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
-    if tag.status == 'locked':
+    if tag.created_by != request.user.username:
+        messages.error(request, f"Only the creator ({tag.created_by}) can lock this tag.")
+    elif tag.status == 'locked':
         messages.warning(request, f"Tag {tag.tag_label} is already locked.")
     else:
         tag.status = 'locked'
         tag.save(update_fields=['status', 'updated_at'])
         messages.success(request, f"Tag {tag.tag_label} locked. It can now be used in datasets.")
-    return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag_number)
+    return redirect(selected_url)
 
 
 @login_required
@@ -343,9 +348,11 @@ def tag_edit(request, tag_type, tag_number):
     schema = TAG_SCHEMAS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
 
+    compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+    selected_url = f'{compose_url}?selected={tag_number}'
     if tag.status == 'locked':
         messages.error(request, f"Tag {tag.tag_label} is locked and cannot be edited.")
-        return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag_number)
+        return redirect(selected_url)
 
     if tag_type == 'p':
         FormClass = PhysicsTagForm
@@ -363,7 +370,7 @@ def tag_edit(request, tag_type, tag_number):
                 tag.category = form.cleaned_data['category']
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} updated.")
-            return redirect('emi:tag_detail', tag_type=tag_type, tag_number=tag_number)
+            return redirect(selected_url)
     else:
         initial = {
             'description': tag.description,
