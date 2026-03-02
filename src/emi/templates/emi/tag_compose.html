@@ -413,7 +413,7 @@
             deleteForm.style.display = 'none';
             return;
         }
-        viewTitle.textContent = tag.tag_label + ' — ' + (tag.category_name || '');
+        viewTitle.textContent = tag.tag_label + ' — ' + (tag.description || tag.category_name || '');
         const statusCls = tag.status === 'locked' ? 'bg-success' : 'bg-secondary';
         viewStatusBadge.innerHTML = `<span class="badge ${statusCls}">${tag.status}</span>`;
 
