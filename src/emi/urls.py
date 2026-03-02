@@ -11,9 +11,8 @@ urlpatterns = [
     path('categories/', views.physics_categories_list, name='physics_categories_list'),
     path('categories/create/', views.physics_category_create, name='physics_category_create'),
 
-    # Physics tags — 2-panel browse + compose (before generic routes)
-    path('tags/p/', views.tag_compose, kwargs={'tag_type': 'p'}, name='tag_compose'),
-    path('tags/p/create/', views.tag_compose, kwargs={'tag_type': 'p'}, name='tag_compose_create'),
+    # Tag compose — 2-panel browse + create (before generic list routes)
+    path('tags/<str:tag_type>/compose/', views.tag_compose, name='tag_compose'),
     path('tags/<str:tag_type>/<int:tag_number>/delete/', views.tag_delete, name='tag_delete'),
 
     # Tags (parameterized by type)

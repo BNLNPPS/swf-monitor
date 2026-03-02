@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Physics Tags - EMI{% endblock %}
+{% block title %}{{ schema.label }} Tags - EMI{% endblock %}
 
 {% block content %}
 <style>
@@ -88,7 +88,7 @@
     <div class="tag-browser">
         <div class="tag-browser-header">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
-                <h5 style="margin:0">Physics Tags</h5>
+                <h5 style="margin:0">{{ schema.label }} Tags</h5>
                 {% if user.is_authenticated %}
                 <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag">New Tag</button>
                 {% endif %}
@@ -133,13 +133,14 @@
         <form method="post" id="create-panel" style="display:none; flex-direction:column; flex:1;">
             {% csrf_token %}
             <div class="panel-header">
-                <h4>New Physics Tag</h4>
+                <h4>New {{ schema.label }} Tag</h4>
                 <div class="btn-group">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-cancel-create">Cancel</button>
                     <button type="submit" class="btn btn-primary btn-sm">Save</button>
                 </div>
             </div>
             <div class="panel-body">
+                {% if tag_type == 'p' %}
                 <div class="field-group">
                     <label>Category <span class="required-star">*</span></label>
                     <div class="suggestion-bar" data-field="category"></div>
@@ -150,6 +151,7 @@
                         {% endfor %}
                     </select>
                 </div>
+                {% endif %}
                 <div class="field-group">
                     <label>Description</label>
                     <div class="suggestion-bar" data-field="description"></div>
@@ -187,6 +189,7 @@
     const fieldChoices = {{ choices_json|safe }};
     const initialSelected = {{ selected_tag|default:"null" }};
     const currentUser = '{{ username }}';
+    const tagType = '{{ tag_type }}';
     const tagList = document.getElementById('tag-list');
     const searchInput = document.getElementById('tag-search');
     const viewPanel = document.getElementById('view-panel');
@@ -267,7 +270,7 @@
 
         // Lock button: show if current user owns it and it's draft
         if (currentUser && tag.created_by === currentUser && tag.status === 'draft') {
-            lockForm.action = `/swf-monitor/emi/tags/p/${tag.tag_number}/lock/`;
+            lockForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/lock/`;
             lockForm.style.display = 'inline';
         } else {
             lockForm.style.display = 'none';
@@ -275,7 +278,7 @@
 
         // Delete button: show if current user owns it and it's draft
         if (currentUser && tag.created_by === currentUser && tag.status === 'draft') {
-            deleteForm.action = `/swf-monitor/emi/tags/p/${tag.tag_number}/delete/`;
+            deleteForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/delete/`;
             deleteForm.style.display = 'inline';
         } else {
             deleteForm.style.display = 'none';
@@ -392,7 +395,7 @@
         const tag = allTags.find(t => t.tag_number === tagNumber);
         if (!tag) return;
         createPanel.querySelectorAll('.suggestion-bar').forEach(b => b.classList.remove('visible'));
-        handleField('category', String(tag.category_digit || ''), tag.tag_label);
+        if (tagType === 'p') handleField('category', String(tag.category_digit || ''), tag.tag_label);
         handleField('description', tag.description || '', tag.tag_label);
         handleField('created_by', tag.created_by || '', tag.tag_label);
         const params = tag.parameters || {};

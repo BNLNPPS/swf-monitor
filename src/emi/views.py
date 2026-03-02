@@ -302,7 +302,7 @@ def tag_compose(request, tag_type):
         'username': request.user.username if request.user.is_authenticated else '',
         'selected_tag': selected_tag,
     }
-    return render(request, 'emi/tag_compose_physics.html', context)
+    return render(request, 'emi/tag_compose.html', context)
 
 
 @login_required
