@@ -239,6 +239,7 @@
             if (this.value) paramFilters[field] = this.value;
             else delete paramFilters[field];
             renderTagList();
+            updateClearBtn();
         });
         paramRow.appendChild(sel);
     });
@@ -246,6 +247,7 @@
     clearBtn.type = 'button';
     clearBtn.className = 'clear-filters';
     clearBtn.textContent = 'Clear';
+    clearBtn.style.display = 'none';
     clearBtn.addEventListener('click', () => {
         paramRow.querySelectorAll('select').forEach(s => s.value = '');
         Object.keys(paramFilters).forEach(k => delete paramFilters[k]);
@@ -259,8 +261,14 @@
         if (allCreator) allCreator.classList.add('active');
         searchInput.value = '';
         renderTagList();
+        updateClearBtn();
     });
     paramRow.appendChild(clearBtn);
+
+    function updateClearBtn() {
+        const active = searchInput.value || statusFilter !== 'all' || creatorFilter || Object.keys(paramFilters).length > 0;
+        clearBtn.style.display = active ? '' : 'none';
+    }
 
     // Build creator filter pills
     const creators = [...new Set(allTags.map(t => t.created_by))].sort();
@@ -274,6 +282,7 @@
                 pill.classList.add('active');
                 creatorFilter = pill.dataset.creator || null;
                 renderTagList();
+                updateClearBtn();
             });
         });
     }
@@ -641,8 +650,12 @@
             pill.classList.add('active');
             statusFilter = pill.dataset.status;
             renderTagList();
+            updateClearBtn();
         });
     });
+
+    // ── Filters ──
+    searchInput.addEventListener('input', updateClearBtn);
 
     // ── Init ──
     renderTagList();
