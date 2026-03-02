@@ -100,10 +100,10 @@
                 <button class="dropbtn">EMI</button>
                 <div class="dropdown-content">
                     <a href="{% url 'emi:emi_hub' %}">EMI Hub</a>
-                    <a href="{% url 'emi:tags_list' tag_type='p' %}">Physics Tags</a>
-                    <a href="{% url 'emi:tags_list' tag_type='e' %}">EvGen Tags</a>
-                    <a href="{% url 'emi:tags_list' tag_type='s' %}">Simu Tags</a>
-                    <a href="{% url 'emi:tags_list' tag_type='r' %}">Reco Tags</a>
+                    <a href="{% url 'emi:tag_compose' tag_type='p' %}">Physics Tags</a>
+                    <a href="{% url 'emi:tag_compose' tag_type='e' %}">EvGen Tags</a>
+                    <a href="{% url 'emi:tag_compose' tag_type='s' %}">Simu Tags</a>
+                    <a href="{% url 'emi:tag_compose' tag_type='r' %}">Reco Tags</a>
                     <a href="{% url 'emi:datasets_list' %}">Datasets</a>
                     <a href="{% url 'emi:prod_configs_list' %}">Prod Configs</a>
                 </div>

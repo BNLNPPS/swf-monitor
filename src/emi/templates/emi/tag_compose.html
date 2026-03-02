@@ -36,7 +36,14 @@
     .tag-item-desc { font-size: .8rem; color: #6c757d; margin-left: .35rem; }
     .tag-item-line2 { font-size: .75rem; color: #999; margin-top: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tag-item-status { font-size: .65rem; padding: .1rem .4rem; border-radius: .75rem; margin-left: .4rem; }
+    .tag-nav { margin-bottom: .5rem; font-size: .8rem; display: flex; gap: .75rem; }
+    .tag-nav a { color: #0d6efd; text-decoration: none; }
+    .tag-nav a:hover { text-decoration: underline; }
+    .tag-nav .current { font-weight: 600; color: #212529; }
     .tag-list-empty { padding: 2rem; text-align: center; color: #6c757d; }
+    #param-filters { flex-wrap: wrap; gap: .3rem; align-items: center; }
+    #param-filters select { font-size: .75rem; padding: .15rem .4rem; border: 1px solid #dee2e6; border-radius: .25rem; background: #fff; color: #495057; max-width: 130px; }
+    #param-filters .clear-filters { font-size: .75rem; padding: .15rem .5rem; cursor: pointer; color: #dc3545; border: none; background: none; }
 
     /* Right panel shared */
     .right-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -86,6 +93,12 @@
     <!-- Left: Tag Browser -->
     <div class="tag-browser">
         <div class="tag-browser-header">
+            <div class="tag-nav">
+                {% if tag_type != 'p' %}<a href="{% url 'emi:tag_compose' tag_type='p' %}">Physics</a>{% else %}<span class="current">Physics</span>{% endif %}
+                {% if tag_type != 'e' %}<a href="{% url 'emi:tag_compose' tag_type='e' %}">EvGen</a>{% else %}<span class="current">EvGen</span>{% endif %}
+                {% if tag_type != 's' %}<a href="{% url 'emi:tag_compose' tag_type='s' %}">Simu</a>{% else %}<span class="current">Simu</span>{% endif %}
+                {% if tag_type != 'r' %}<a href="{% url 'emi:tag_compose' tag_type='r' %}">Reco</a>{% else %}<span class="current">Reco</span>{% endif %}
+            </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
                 <h5 style="margin:0">{{ schema.label }} Tags</h5>
                 {% if user.is_authenticated %}
@@ -100,6 +113,7 @@
             </div>
             <div class="filter-row" id="creator-filters">
             </div>
+            <div class="filter-row" id="param-filters"></div>
         </div>
         <div class="tag-list" id="tag-list" tabindex="0"></div>
     </div>
@@ -187,6 +201,7 @@
 (function() {
     const allTags = {{ tags_json|safe }};
     const fieldChoices = {{ choices_json|safe }};
+    const filterFields = {{ filter_fields_json|safe }};
     const initialSelected = {{ selected_tag|default:"null" }};
     const currentUser = '{{ username }}';
     const tagType = '{{ tag_type }}';
@@ -203,9 +218,46 @@
     const deleteForm = document.getElementById('delete-form');
     let statusFilter = 'all';
     let creatorFilter = null;
+    const paramFilters = {};
     let selectedTagNumber = null;
     let mode = 'view'; // 'view' or 'create'
     const userEdited = {};
+
+    // Build param filter dropdowns
+    const paramRow = document.getElementById('param-filters');
+    filterFields.forEach(field => {
+        const vals = [...new Set(allTags.map(t => (t.parameters || {})[field]).filter(Boolean))].sort();
+        if (vals.length < 2) return;
+        const sel = document.createElement('select');
+        sel.dataset.param = field;
+        const label = field.replace(/_/g, ' ');
+        sel.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option value="${v}">${v}</option>`).join('');
+        sel.addEventListener('change', function() {
+            if (this.value) paramFilters[field] = this.value;
+            else delete paramFilters[field];
+            renderTagList();
+        });
+        paramRow.appendChild(sel);
+    });
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'clear-filters';
+    clearBtn.textContent = 'Clear';
+    clearBtn.addEventListener('click', () => {
+        paramRow.querySelectorAll('select').forEach(s => s.value = '');
+        Object.keys(paramFilters).forEach(k => delete paramFilters[k]);
+        statusFilter = 'all';
+        document.querySelectorAll('#status-filters .filter-pill').forEach(p => p.classList.remove('active'));
+        document.querySelector('#status-filters .filter-pill[data-status="all"]').classList.add('active');
+        creatorFilter = null;
+        const creatorRow = document.getElementById('creator-filters');
+        creatorRow.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
+        const allCreator = creatorRow.querySelector('.filter-pill[data-creator=""]');
+        if (allCreator) allCreator.classList.add('active');
+        searchInput.value = '';
+        renderTagList();
+    });
+    paramRow.appendChild(clearBtn);
 
     // Build creator filter pills
     const creators = [...new Set(allTags.map(t => t.created_by))].sort();
@@ -384,10 +436,14 @@
         const filtered = allTags.filter(t => {
             if (statusFilter !== 'all' && t.status !== statusFilter) return false;
             if (creatorFilter && t.created_by !== creatorFilter) return false;
+            const params = t.parameters || {};
+            for (const [k, v] of Object.entries(paramFilters)) {
+                if (params[k] !== v) return false;
+            }
             if (!q) return true;
             const searchable = [
                 t.tag_label, t.description, t.category_name || '',
-                ...Object.values(t.parameters || {})
+                ...Object.values(params)
             ].join(' ').toLowerCase();
             return searchable.includes(q);
         });

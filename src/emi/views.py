@@ -295,12 +295,16 @@ def tag_compose(request, tag_type):
             entry['category_name'] = t.category.name
         tags_data.append(entry)
 
+    filter_fields = [f for f in schema['required'] + schema['optional']
+                      if f not in ('notes', 'description')]
+
     context = {
         'form': form,
         'tag_type': tag_type,
         'schema': schema,
         'tags_json': json.dumps(tags_data, default=str),
         'choices_json': json.dumps(schema.get('choices', {})),
+        'filter_fields_json': json.dumps(filter_fields),
         'username': request.user.username if request.user.is_authenticated else '',
         'selected_tag': selected_tag,
     }
