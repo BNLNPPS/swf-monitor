@@ -665,6 +665,7 @@
         const el = tagList.querySelector(`[data-tag="${autoSelect}"]`);
         if (el) el.scrollIntoView({block: 'nearest'});
     }
+    tagList.focus();
 })();
 </script>
 {% endblock %}
