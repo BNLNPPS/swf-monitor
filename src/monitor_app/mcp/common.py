@@ -234,4 +234,51 @@ def get_available_tools_list() -> list:
             "description": "Get recent dialogue history for session context",
             "parameters": ["username", "turns", "namespace"],
         },
+        # PanDA Monitor tools
+        {
+            "name": "panda_list_jobs",
+            "description": "List PanDA jobs from ePIC production DB with summary stats. Cursor-based pagination via before_id.",
+            "parameters": ["days", "status", "username", "site", "taskid", "reqid", "limit", "before_id"],
+        },
+        {
+            "name": "panda_diagnose_jobs",
+            "description": "Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id.",
+            "parameters": ["days", "username", "site", "taskid", "reqid", "error_component", "limit", "before_id"],
+        },
+        {
+            "name": "panda_list_tasks",
+            "description": "List JEDI tasks from ePIC production DB with summary stats. Tasks are higher-level than jobs. Cursor-based pagination via before_id.",
+            "parameters": ["days", "status", "username", "taskname", "reqid", "workinggroup", "taskid", "processingtype", "limit", "before_id"],
+        },
+        {
+            "name": "panda_error_summary",
+            "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows most common errors with affected tasks, users, sites.",
+            "parameters": ["days", "username", "site", "taskid", "error_source", "limit"],
+        },
+        {
+            "name": "panda_get_activity",
+            "description": "Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first to answer 'What is PanDA doing?'",
+            "parameters": ["days", "username", "site", "workinggroup"],
+        },
+        {
+            "name": "panda_study_job",
+            "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
+            "parameters": ["pandaid"],
+        },
+        # EMI (ePIC Metadata Interface) tools
+        {
+            "name": "emi_list_tags",
+            "description": "List EMI (ePIC Metadata Interface) tags — production metadata for MC campaigns. Filter by type (p/e/s/r), category, status, creator, or text.",
+            "parameters": ["tag_type", "category", "status", "creator", "search", "limit"],
+        },
+        {
+            "name": "emi_get_tag",
+            "description": "Get full details of a single EMI tag by label (e.g. 'p1001', 'e3', 'r1').",
+            "parameters": ["tag_label"],
+        },
+        {
+            "name": "emi_search_tags",
+            "description": "Search EMI tags by keyword in label, description, or parameter values (e.g. 'photoproduction', 'eAu', 'pythia8').",
+            "parameters": ["query", "tag_type", "limit"],
+        },
     ]

@@ -66,6 +66,23 @@ from .viewdir.panda_database import (
     panda_database_table_row_detail,
 )
 
+# Import PanDA production monitor views
+from .viewdir.pandamon import (
+    panda_activity,
+    panda_jobs_list,
+    panda_jobs_datatable_ajax,
+    panda_jobs_filter_counts,
+    panda_tasks_list,
+    panda_tasks_datatable_ajax,
+    panda_tasks_filter_counts,
+    panda_job_detail,
+    panda_task_detail,
+    panda_errors_list,
+    panda_errors_datatable_ajax,
+    panda_diagnostics_list,
+    panda_diagnostics_datatable_ajax,
+)
+
 # Import iDDS database views from new dedicated module
 from .viewdir.idds_database import (
     idds_database_tables_list,
@@ -189,7 +206,22 @@ urlpatterns = [
     
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
-    
+
+    # PanDA Production Monitor
+    path('panda/activity/', panda_activity, name='panda_activity'),
+    path('panda/jobs/', panda_jobs_list, name='panda_jobs_list'),
+    path('panda/jobs/datatable/', panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),
+    path('panda/jobs/filter-counts/', panda_jobs_filter_counts, name='panda_jobs_filter_counts'),
+    path('panda/jobs/<int:pandaid>/', panda_job_detail, name='panda_job_detail'),
+    path('panda/tasks/', panda_tasks_list, name='panda_tasks_list'),
+    path('panda/tasks/datatable/', panda_tasks_datatable_ajax, name='panda_tasks_datatable_ajax'),
+    path('panda/tasks/filter-counts/', panda_tasks_filter_counts, name='panda_tasks_filter_counts'),
+    path('panda/tasks/<int:jeditaskid>/', panda_task_detail, name='panda_task_detail'),
+    path('panda/errors/', panda_errors_list, name='panda_errors_list'),
+    path('panda/errors/datatable/', panda_errors_datatable_ajax, name='panda_errors_datatable_ajax'),
+    path('panda/diagnostics/', panda_diagnostics_list, name='panda_diagnostics_list'),
+    path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
+
     # PanDA Database
     path('panda-database/', panda_database_tables_list, name='panda_database_tables_list'),
     path('panda-database/datatable/', panda_database_tables_datatable_ajax, name='panda_database_tables_datatable_ajax'),

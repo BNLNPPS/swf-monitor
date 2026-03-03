@@ -1,0 +1,176 @@
+{% extends 'base.html' %}
+
+{% block title %}{% if editing %}Edit {{ config.name }}{% else %}Create Prod Config{% endif %} - EMI{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'emi:prod_configs_list' %}">Prod Configs</a></li>
+            {% if editing %}
+            <li class="breadcrumb-item"><a href="{% url 'emi:prod_config_detail' pk=config.pk %}">{{ config.name }}</a></li>
+            <li class="breadcrumb-item active">Edit</li>
+            {% else %}
+            <li class="breadcrumb-item active">Create</li>
+            {% endif %}
+        </ol>
+    </nav>
+
+    <h2>{% if editing %}Edit {{ config.name }}{% else %}Create Production Config{% endif %}</h2>
+    <p>{% if editing %}Modify this production configuration template.{% else %}Define a reusable production submission template.{% endif %}</p>
+
+    <form method="post" class="mt-3" style="max-width: 900px;">
+        {% csrf_token %}
+
+        {% if form.errors %}
+        <div class="alert alert-danger">
+            {% for field, errors in form.errors.items %}
+            <p><strong>{{ field }}:</strong> {{ errors|join:", " }}</p>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <fieldset class="mb-4">
+            <legend class="h5">General</legend>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="id_name" class="form-label"><strong>Name</strong></label>
+                    {{ form.name }}
+                </div>
+                <div class="col-md-6">
+                    <label for="id_created_by" class="form-label"><strong>Created By</strong></label>
+                    {{ form.created_by }}
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="id_description" class="form-label"><strong>Description</strong></label>
+                {{ form.description }}
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">Background Mixing</legend>
+            <div class="row mb-3">
+                <div class="col-md-2">
+                    <div class="form-check mt-4">
+                        {{ form.bg_mixing }} <label for="id_bg_mixing" class="form-check-label">Enabled</label>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label for="id_bg_cross_section" class="form-label">Cross Section</label>
+                    {{ form.bg_cross_section }}
+                </div>
+                <div class="col-md-6">
+                    <label for="id_bg_evtgen_file" class="form-label">EvtGen File</label>
+                    {{ form.bg_evtgen_file }}
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">Output Control</legend>
+            <div class="row mb-3">
+                <div class="col-md-3">
+                    <div class="form-check">
+                        {{ form.copy_reco }} <label for="id_copy_reco" class="form-check-label">Copy Reco</label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check">
+                        {{ form.copy_full }} <label for="id_copy_full" class="form-check-label">Copy Full</label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check">
+                        {{ form.copy_log }} <label for="id_copy_log" class="form-check-label">Copy Log</label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-check">
+                        {{ form.use_rucio }} <label for="id_use_rucio" class="form-check-label">Use Rucio</label>
+                    </div>
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">Software Stack</legend>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label for="id_jug_xl_tag" class="form-label">JUG_XL Tag</label>
+                    {{ form.jug_xl_tag }}
+                </div>
+                <div class="col-md-8">
+                    <label for="id_container_image" class="form-label">Container Image</label>
+                    {{ form.container_image }}
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">Resource Targets</legend>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label for="id_target_hours_per_job" class="form-label">Target Hours/Job</label>
+                    {{ form.target_hours_per_job }}
+                </div>
+                <div class="col-md-4">
+                    <label for="id_events_per_task" class="form-label">Events/Task</label>
+                    {{ form.events_per_task }}
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">Condor Template</legend>
+            <div class="mb-3">
+                {{ form.condor_template }}
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">PanDA Overrides</legend>
+            <div class="row mb-3">
+                <div class="col-md-3">
+                    <label for="id_panda_site" class="form-label">Site</label>
+                    {{ form.panda_site }}
+                </div>
+                <div class="col-md-3">
+                    <label for="id_panda_queue" class="form-label">Queue</label>
+                    {{ form.panda_queue }}
+                </div>
+                <div class="col-md-3">
+                    <label for="id_panda_working_group" class="form-label">Working Group</label>
+                    {{ form.panda_working_group }}
+                </div>
+                <div class="col-md-3">
+                    <label for="id_panda_resource_type" class="form-label">Resource Type</label>
+                    {{ form.panda_resource_type }}
+                </div>
+            </div>
+        </fieldset>
+
+        <fieldset class="mb-4">
+            <legend class="h5">Rucio Overrides</legend>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label for="id_rucio_rse" class="form-label">RSE</label>
+                    {{ form.rucio_rse }}
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="id_rucio_replication_rules" class="form-label">Replication Rules (JSON)</label>
+                {{ form.rucio_replication_rules }}
+            </div>
+        </fieldset>
+
+        <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
+        {% if editing %}
+        <a href="{% url 'emi:prod_config_detail' pk=config.pk %}" class="btn btn-secondary">Cancel</a>
+        {% else %}
+        <a href="{% url 'emi:prod_configs_list' %}" class="btn btn-secondary">Cancel</a>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

@@ -183,8 +183,10 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             instance_name=instance_name,
             defaults=defaults
         )
-        
-        # Return the full agent data
+
+        # Piggyback: mark any stale agents as EXITED
+        SystemAgent.mark_stale_agents()
+
         return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 

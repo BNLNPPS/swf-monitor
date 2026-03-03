@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "emi",  # ePIC Metadata Interface
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "django_dbml",  # For schema diagram generation
     # Third-party apps
@@ -267,6 +268,31 @@ COMMON QUERIES:
 - Activity in a namespace? → swf_get_namespace(namespace='name')
 - Failed workflows? → swf_list_workflow_executions(status='failed')
 - Send announcement/test message? → swf_send_message(message='...', message_type='announcement')
+- What's PanDA doing? → panda_get_activity() — compact overview, no individual records
+- PanDA task overview? → panda_list_tasks(days=7)
+- Failed PanDA tasks? → panda_list_tasks(status='failed')
+- EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
+- Production tasks? → panda_list_tasks(processingtype='epicproduction')
+- Top errors? → panda_error_summary(days=7)
+- Errors for a user? → panda_error_summary(username='someone')
+- Deep dive on a failed job? → panda_study_job(pandaid=130497)
+- What is EMI? → EMI = ePIC Metadata Interface, manages production metadata tags for MC simulation campaigns
+- List physics tags? → emi_list_tags(tag_type='p')
+- What is tag p1001? → emi_get_tag(tag_label='p1001')
+- Reco tags? → emi_list_tags(tag_type='r')
+- Photoproduction tags? → emi_search_tags(query='photoproduction')
+- DIS tags? → emi_list_tags(tag_type='p', category='DIS')
+- Tags using pythia8? → emi_search_tags(query='pythia8')
+
+EMI (ePIC Metadata Interface):
+EMI manages production metadata for ePIC Monte Carlo simulation campaigns. Metadata is
+organized as tags — named parameter sets for each pipeline stage:
+- Physics tags (p): process, beam energies, species, Q2 range (e.g. p1001 = DIS NC 10x100 ep)
+- EvGen tags (e): event generator and version (e.g. e1 = pythia8 8.310)
+- Simu tags (s): detector simulation config (e.g. s1 = npsim 26.02.0)
+- Reco tags (r): reconstruction config (e.g. r1 = eicrecon 26.02.0)
+Physics tags are grouped by category: DIS (p1xxx), DVCS (p2xxx), SIDIS (p3xxx), EXCLUSIVE (p4xxx).
+Tags are draft (editable) or locked (immutable, for production use).
 
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.

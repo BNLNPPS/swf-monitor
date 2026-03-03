@@ -171,6 +171,12 @@ ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 log "Starting Apache..."
 systemctl start httpd
 
+# Restart PanDA Mattermost bot (if enabled)
+if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
+    log "Restarting PanDA Mattermost bot..."
+    systemctl restart swf-panda-bot.service
+fi
+
 # Health check
 log "Performing health check..."
 HEALTH_URL="https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/"
@@ -199,3 +205,12 @@ log "Current deployment status:"
 echo "  Release: $DEPLOY_NAME"
 echo "  Path: $RELEASE_DIR"
 echo "  Current: $(readlink $DEPLOY_ROOT/current)"
+
+# Check if deploy script in repo has diverged from production copy
+if [ -f "$RELEASE_DIR/deploy-swf-monitor.sh" ]; then
+    if ! diff -q "$DEPLOY_ROOT/bin/deploy-swf-monitor.sh" "$RELEASE_DIR/deploy-swf-monitor.sh" >/dev/null 2>&1; then
+        echo ""
+        echo "NOTE: deploy-swf-monitor.sh in repo differs from $DEPLOY_ROOT/bin/deploy-swf-monitor.sh"
+        echo "Review and update the production copy manually."
+    fi
+fi

@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import timedelta
 from django.db import models
 from django.utils import timezone
 
@@ -83,6 +84,22 @@ class SystemAgent(models.Model):
         """Check if this agent participates in STF workflow."""
         return self.agent_type in ['daqsim', 'data', 'processing', 'fastmon']
         
+    @classmethod
+    def mark_stale_agents(cls):
+        """Mark agents as EXITED if they haven't sent a heartbeat in 3+ minutes."""
+        threshold = timezone.now() - timedelta(minutes=3)
+        stale = cls.objects.filter(
+            last_heartbeat__lt=threshold,
+        ).exclude(
+            status='EXITED',
+        ).exclude(
+            operational_state='EXITED',
+        )
+        count = stale.update(status='EXITED', operational_state='EXITED')
+        if count:
+            logging.getLogger(__name__).info(f"Marked {count} stale agent(s) as EXITED")
+        return count
+
     def update_stf_stats(self, increment_current=0, increment_total=0):
         """Update STF processing statistics."""
         self.current_stf_count += increment_current

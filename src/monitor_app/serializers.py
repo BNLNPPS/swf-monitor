@@ -50,6 +50,11 @@ class SubscriberSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class FastMonFileSerializer(serializers.ModelSerializer):
+    stf_file = serializers.SlugRelatedField(
+        slug_field='stf_filename',
+        queryset=StfFile.objects.all(),
+    )
+
     class Meta:
         model = FastMonFile
         fields = '__all__'

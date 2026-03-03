@@ -1,0 +1,31 @@
+{% extends "monitor_app/_datatable_dynamic_base.html" %}
+
+{% block extra_filters %}
+<!-- Days selector -->
+<div style="margin-bottom:1em;">
+    <strong>Time window:</strong>
+    {% for opt in days_options %}
+    {% if opt.active %}
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
+    {% else %}
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="margin-right:0.8em;">{{ opt.value }}d</a>
+    {% endif %}
+    {% endfor %}
+    {% if selected_taskid %}
+    | <strong>Task:</strong> <a href="{% url 'monitor_app:panda_task_detail' selected_taskid %}">{{ selected_taskid }}</a>
+    <a href="?days={{ days }}" style="margin-left:0.5em;color:#dc3545;">[clear]</a>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block initial_filters %}
+{
+    status: '{{ selected_status|default:"" }}',
+    username: '{{ selected_username|default:"" }}',
+    site: '{{ selected_site|default:"" }}',
+    days: '{{ days }}',
+    taskid: '{{ selected_taskid|default:"" }}'
+}
+{% endblock %}
+
+{% block default_order %}[[0, 'desc']]{% endblock %}

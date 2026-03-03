@@ -29,8 +29,9 @@ class MonitorAppConfig(AppConfig):
         """
         # Don't connect during management commands that don't need ActiveMQ
         skip_commands = [
-            'migrate', 'makemigrations', 'test', 'collectstatic', 
-            'shell', 'dbshell', 'check', 'diffsettings', 'help'
+            'migrate', 'makemigrations', 'test', 'collectstatic',
+            'shell', 'dbshell', 'check', 'diffsettings', 'help',
+            'panda_bot',
         ]
         
         if len(sys.argv) > 1 and sys.argv[1] in skip_commands:

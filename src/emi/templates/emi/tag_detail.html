@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ tag.tag_label }} - EMI{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'emi:tags_list' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
+            <li class="breadcrumb-item active">{{ tag.tag_label }}</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h2>{{ tag.tag_label }}
+                {% if tag.status == 'draft' %}
+                <span class="badge bg-secondary">draft</span>
+                {% else %}
+                <span class="badge bg-success">locked</span>
+                {% endif %}
+            </h2>
+            <p class="text-muted">{{ schema.label }} Tag &middot; Created by {{ tag.created_by }} on {{ tag.created_at|date:"Y-m-d H:i" }}</p>
+        </div>
+        <div>
+            {% if tag.status == 'draft' %}
+            <a href="{% url 'emi:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-sm btn-outline-primary">Edit</a>
+            <form method="post" action="{% url 'emi:tag_lock' tag_type=tag_type tag_number=tag.tag_number %}" class="d-inline" onsubmit="return confirm('Lock this tag? This is irreversible — the tag will become immutable.');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-warning">Lock</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if tag.description %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Description</h5>
+            <p>{{ tag.description }}</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Parameters</h5>
+            <table class="table table-sm table-bordered" style="max-width: 600px;">
+                <thead>
+                    <tr><th>Parameter</th><th>Value</th><th>Required</th></tr>
+                </thead>
+                <tbody>
+                    {% for key, value in tag.parameters.items %}
+                    <tr>
+                        <td><code>{{ key }}</code></td>
+                        <td>{{ value }}</td>
+                        <td>{% if key in required_fields %}<span class="badge bg-primary">required</span>{% endif %}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3">No parameters set.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if tag_type == 'p' %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Category</h5>
+            <p><strong>{{ tag.category.digit }}: {{ tag.category.name }}</strong></p>
+            {% if tag.category.description %}<p>{{ tag.category.description }}</p>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if datasets %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Datasets using this tag</h5>
+            <table class="table table-sm table-bordered">
+                <thead><tr><th>Dataset</th><th>Blocks</th><th>Created</th></tr></thead>
+                <tbody>
+                    {% for ds in datasets %}
+                    <tr>
+                        <td><a href="{% url 'emi:dataset_detail' pk=ds.pk %}">{{ ds.dataset_name }}</a></td>
+                        <td>{{ ds.blocks }}</td>
+                        <td>{{ ds.created_at|date:"Y-m-d H:i" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

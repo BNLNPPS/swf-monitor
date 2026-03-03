@@ -4,7 +4,7 @@
 
 ## System Overview
 
-The application is built on Django infrastructure and comprises two main web apps, real-time messaging, and PostgreSQL backend.
+The application is built on Django infrastructure and comprises three main components, real-time messaging, and PostgreSQL backend.
 
 ### Core Components
 
@@ -13,11 +13,16 @@ The application is built on Django infrastructure and comprises two main web app
    * **REST API**: Programmatic interface with token-based authentication and OpenAPI schema
    * **MCP Integration**: Model Context Protocol endpoint for LLM interaction
 
-2. **ActiveMQ Integration**: Built-in message queue connectivity
+2. **EMI (`emi`)**: ePIC Metadata Interface for production metadata management
+   * **Tag System**: Immutable, versioned parameter sets for physics, event generation, simulation, and reconstruction
+   * **Dataset Composition**: Standardized naming from locked tags with automatic block management for Rucio
+   * **REST API + Web UI**: Full CRUD with draft/locked lifecycle enforcement
+
+3. **ActiveMQ Integration**: Built-in message queue connectivity
    * **Automatic Listening**: Connects to ActiveMQ automatically when Django starts
    * **SSE REST Forwarding**: Server-Sent Events streaming of ActiveMQ messages via HTTPS
 
-3. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, STF files, FastMon files, workflows, and application state
+4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, STF files, FastMon files, workflows, metadata tags, and application state
 
 ## Key Features
 
@@ -40,6 +45,7 @@ The application is built on Django infrastructure and comprises two main web app
 | **[Production Deployment](docs/PRODUCTION_DEPLOYMENT.md)** | Complete Apache production deployment guide | Production operations |
 | **[API Reference](docs/API_REFERENCE.md)** | REST API, WebSocket, database schema, authentication | Integration |
 | **[MCP Integration](docs/MCP.md)** | Model Context Protocol for LLM interaction | Natural language queries |
+| **[EMI](docs/EMI.md)** | ePIC Metadata Interface — tags, datasets, production metadata | Production metadata management |
 | **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 
 ### Quick Links
