@@ -4,6 +4,10 @@ PanDA Mattermost bot — answers production monitoring questions using Claude wi
 Connects to Mattermost via WebSocket, listens for messages in a target channel,
 and responds using Claude with PanDA monitoring tools discovered via MCP.
 
+Maintains a persistent conversation session — Claude sees the full channel dialog
+history, just like any chatbot. Cross-session memory is loaded at startup from
+the swf_ai_memory system and new exchanges are recorded for future sessions.
+
 MCP transport: HTTP POST (JSON-RPC) to the Django MCP endpoint — the same
 transport Claude Code uses. No SSE, no GET streams, no subprocesses.
 """
@@ -12,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 
 import anthropic
 import httpx
@@ -23,19 +28,30 @@ MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
 MEMORY_TURNS = 20
+MAX_SESSION_MESSAGES = 200
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'emi_')
+BOT_EXTRA_TOOLS = ('swf_get_ai_memory',)
 MEMORY_USERNAME = 'pandabot-community'
 
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
 You answer questions about PanDA production and ePIC metadata using MCP tools.
 
+You are in a shared Mattermost channel where multiple users ask questions. \
+You maintain full awareness of the ongoing conversation — refer back to earlier \
+questions and answers naturally.
+
 CRITICAL: ALWAYS call a tool to answer questions. NEVER answer from memory or from \
 examples in these instructions. The examples below show which tool to call, not what \
 the answer is. The data changes constantly — you MUST query it live.
+
+You have access to swf_get_ai_memory which retrieves conversation history from \
+previous sessions. Use it when someone references something from a past conversation \
+or when deeper context would help answer a question. Call it with \
+username='pandabot-community' and a turns count.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
@@ -109,90 +125,14 @@ def mcp_tool_to_anthropic(tool):
     }
 
 
-async def ask_claude(claude_client, mcp_url, message_text, conversation=None,
-                     memory_context=""):
-    """Send a message to Claude, using MCP for tool execution. Returns final text."""
-    if conversation is not None:
-        messages = conversation
-    else:
-        messages = [{"role": "user", "content": message_text}]
-
-    mcp = MCPClient(mcp_url)
-    try:
-        await mcp.initialize()
-
-        tools = await mcp.list_tools()
-        anthropic_tools = [
-            mcp_tool_to_anthropic(t) for t in tools
-            if t["name"].startswith(BOT_TOOL_PREFIXES)
-        ]
-        logger.info(f"Discovered {len(anthropic_tools)} tools via MCP")
-
-        system_prompt = SYSTEM_PREAMBLE
-        if mcp.server_instructions:
-            system_prompt += "\n" + mcp.server_instructions
-        if memory_context:
-            system_prompt += memory_context
-
-        for round_num in range(MAX_TOOL_ROUNDS):
-            response = await claude_client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=4096,
-                system=system_prompt,
-                tools=anthropic_tools,
-                messages=messages,
-            )
-
-            logger.info(f"Claude response: stop_reason={response.stop_reason}")
-
-            if response.stop_reason != "tool_use":
-                text_parts = [
-                    b.text for b in response.content if b.type == "text"
-                ]
-                reply = "\n".join(text_parts)
-                logger.info(f"Final reply: {len(reply)} chars")
-                return reply
-
-            messages.append({"role": "assistant", "content": response.content})
-
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    logger.info(f"Tool call: {block.name}({block.input})")
-                    try:
-                        result = await mcp.call_tool(block.name, block.input)
-                        content = result.get("content", [])
-                        result_text = ""
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                result_text += item["text"]
-                        if len(result_text) > MAX_RESULT_LEN:
-                            result_text = (
-                                result_text[:MAX_RESULT_LEN]
-                                + '\n... (truncated)'
-                            )
-                    except Exception as e:
-                        logger.exception(f"MCP tool {block.name} failed")
-                        result_text = json.dumps({"error": str(e)})
-
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result_text,
-                    })
-
-            messages.append({"role": "user", "content": tool_results})
-    finally:
-        await mcp.close()
-
-    return (
-        "I hit the maximum number of tool calls. "
-        "Please try a more specific question."
-    )
-
-
 class PandaBot:
-    """Mattermost bot that answers PanDA production questions via Claude."""
+    """Mattermost bot that answers PanDA production questions via Claude.
+
+    Maintains a persistent conversation session — every channel message and
+    response is appended to the messages list that Claude sees on each turn.
+    After each exchange, intermediate tool-use messages are consolidated down
+    to just the clean Q&A pair to keep context efficient.
+    """
 
     def __init__(self):
         self.mm_url = os.environ.get('MATTERMOST_URL', 'chat.epic-eic.org')
@@ -212,10 +152,39 @@ class PandaBot:
 
         self.bot_user_id = None
         self.channel_id = None
-        self.memory_context = ""
+        self.messages = []
+        self.system_prompt = SYSTEM_PREAMBLE
+        self.anthropic_tools = []
+        self._respond_lock = asyncio.Lock()
+
+    def _build_system_prompt(self):
+        """System prompt with current datetime."""
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        return f"Current date and time: {now}\n\n{self.system_prompt}"
+
+    async def _setup_mcp(self):
+        """Discover tools and build system prompt via MCP."""
+        mcp = MCPClient(self.mcp_url)
+        try:
+            await mcp.initialize()
+            tools = await mcp.list_tools()
+            self.anthropic_tools = [
+                mcp_tool_to_anthropic(t) for t in tools
+                if t["name"].startswith(BOT_TOOL_PREFIXES)
+                or t["name"] in BOT_EXTRA_TOOLS
+            ]
+            logger.info(f"Discovered {len(self.anthropic_tools)} tools via MCP")
+            if mcp.server_instructions:
+                self.system_prompt = (
+                    SYSTEM_PREAMBLE + "\n" + mcp.server_instructions
+                )
+        except Exception:
+            logger.exception("Failed MCP setup — will retry on first message")
+        finally:
+            await mcp.close()
 
     async def _load_memory(self):
-        """Load recent community Q&A history into system prompt context."""
+        """Load recent community Q&A history as conversation history."""
         mcp = MCPClient(self.mcp_url)
         try:
             await mcp.initialize()
@@ -234,18 +203,16 @@ class PandaBot:
             items = data.get('items', [])
             if not items:
                 return
-            lines = []
             for item in items:
-                role = 'Q' if item['role'] == 'user' else 'A'
-                lines.append(f"{role}: {item['content']}")
-            self.memory_context = (
-                "\n\nRecent community Q&A history (for context, NOT as data source — "
-                "always use tools for current data):\n"
-                + "\n".join(lines)
+                self.messages.append({
+                    "role": item['role'],
+                    "content": item['content'],
+                })
+            logger.info(
+                f"Loaded {len(items)} memory items as conversation history"
             )
-            logger.info(f"Loaded {len(items)} memory items into context")
         except Exception:
-            logger.exception("Failed to load memory — continuing without it")
+            logger.exception("Failed to load memory — starting fresh")
         finally:
             await mcp.close()
 
@@ -265,6 +232,42 @@ class PandaBot:
             logger.exception("Failed to record exchange to memory")
         finally:
             await mcp.close()
+
+    async def _build_thread_context(self, root_id):
+        """Fetch full Mattermost thread and format as context.
+
+        Thread replies are not visible in the main channel, so Claude
+        has no record of them in the session conversation. This provides
+        the full thread history for thread replies.
+        """
+        try:
+            thread = await asyncio.to_thread(
+                self.driver.posts.get_thread, root_id
+            )
+            posts = thread.get('posts', {})
+            order = thread.get('order', [])
+
+            lines = []
+            for pid in order:
+                p = posts.get(pid)
+                if not p or not p.get('message', '').strip():
+                    continue
+                speaker = "Bot" if p['user_id'] == self.bot_user_id else "User"
+                lines.append(f"{speaker}: {p['message'].strip()}")
+
+            return "\n".join(lines) if lines else None
+        except Exception:
+            logger.exception("Failed to fetch thread")
+            return None
+
+    def _trim_messages(self):
+        """Trim conversation to stay within context limits."""
+        if len(self.messages) <= MAX_SESSION_MESSAGES:
+            return
+        self.messages = self.messages[-MAX_SESSION_MESSAGES:]
+        if self.messages and self.messages[0]['role'] != 'user':
+            self.messages = self.messages[1:]
+        logger.info(f"Trimmed conversation to {len(self.messages)} messages")
 
     def start(self):
         """Connect to Mattermost and start listening."""
@@ -293,33 +296,10 @@ class PandaBot:
             f"(MCP: {self.mcp_url})"
         )
 
-        asyncio.get_event_loop().run_until_complete(self._load_memory())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(self._setup_mcp())
+        loop.run_until_complete(self._load_memory())
         self.driver.init_websocket(self._handle_event)
-
-    async def _build_thread_conversation(self, root_id):
-        """Fetch a Mattermost thread and build a Claude conversation from it."""
-        thread = await asyncio.to_thread(self.driver.posts.get_thread, root_id)
-        posts = thread.get('posts', {})
-        order = thread.get('order', [])
-
-        messages = []
-        for pid in order:
-            p = posts.get(pid)
-            if not p or not p.get('message', '').strip():
-                continue
-            role = "assistant" if p['user_id'] == self.bot_user_id else "user"
-            if messages and messages[-1]['role'] == role:
-                messages[-1]['content'] += "\n\n" + p['message'].strip()
-            else:
-                messages.append({
-                    "role": role,
-                    "content": p['message'].strip(),
-                })
-
-        if messages and messages[0]['role'] != 'user':
-            messages = messages[1:]
-
-        return messages if messages else None
 
     async def _handle_event(self, raw):
         """WebSocket event handler."""
@@ -358,7 +338,9 @@ class PandaBot:
             return
 
         if post_channel != self.channel_id:
-            logger.debug(f"Skipping: channel {post_channel} != {self.channel_id}")
+            logger.debug(
+                f"Skipping: channel {post_channel} != {self.channel_id}"
+            )
             return
 
         if post_type:
@@ -376,19 +358,13 @@ class PandaBot:
         asyncio.create_task(self._respond(message_text, post_id, root_id))
 
     async def _respond(self, message_text, post_id, root_id):
-        """Process a message and post the reply. Runs as a background task."""
-        try:
-            conversation = None
-            if root_id:
-                conversation = await self._build_thread_conversation(root_id)
-            reply = await ask_claude(
-                self.claude, self.mcp_url, message_text, conversation,
-                memory_context=self.memory_context,
-            )
-            logger.info(f"Got reply: {len(reply)} chars")
-        except Exception:
-            logger.exception("ask_claude failed")
-            reply = "Sorry, I encountered an error processing your question."
+        """Process a message and post the reply.
+
+        Serialized via _respond_lock so messages are processed in order
+        and the conversation state stays coherent.
+        """
+        async with self._respond_lock:
+            reply = await self._process_message(message_text, root_id)
 
         asyncio.create_task(self._record_exchange(message_text, reply))
 
@@ -408,3 +384,123 @@ class PandaBot:
             logger.info("Reply posted successfully")
         except Exception:
             logger.exception("Failed to post reply")
+
+    async def _process_message(self, message_text, root_id):
+        """Run the Claude conversation loop for one user message.
+
+        Returns the final reply text. Consolidates tool-use messages
+        afterward so the conversation history stays clean.
+        """
+        # Build user message with full thread context if it's a reply
+        user_content = message_text
+        if root_id:
+            thread_context = await self._build_thread_context(root_id)
+            if thread_context:
+                user_content = (
+                    f"[Thread conversation so far:\n{thread_context}\n]\n"
+                    f"New reply: {message_text}"
+                )
+
+        msg_start = len(self.messages)
+        self.messages.append({"role": "user", "content": user_content})
+        self._trim_messages()
+
+        reply = "Sorry, I encountered an error processing your question."
+
+        mcp = MCPClient(self.mcp_url)
+        try:
+            await mcp.initialize()
+
+            if not self.anthropic_tools:
+                tools = await mcp.list_tools()
+                self.anthropic_tools = [
+                    mcp_tool_to_anthropic(t) for t in tools
+                    if t["name"].startswith(BOT_TOOL_PREFIXES)
+                    or t["name"] in BOT_EXTRA_TOOLS
+                ]
+
+            system = self._build_system_prompt()
+
+            for _round in range(MAX_TOOL_ROUNDS):
+                response = await self.claude.beta.messages.create(
+                    model="claude-sonnet-4-6-20250514",
+                    max_tokens=4096,
+                    cache_control={"type": "ephemeral"},
+                    system=system,
+                    tools=self.anthropic_tools,
+                    messages=self.messages,
+                    betas=["context-management-2025-06-27"],
+                    context_management={
+                        "edits": [{
+                            "type": "clear_tool_uses_20250919",
+                            "trigger": {
+                                "type": "input_tokens",
+                                "value": 80000,
+                            },
+                            "keep": {"type": "tool_uses", "value": 3},
+                        }]
+                    },
+                )
+                logger.info(
+                    f"Claude response: stop_reason={response.stop_reason}"
+                )
+
+                if response.stop_reason != "tool_use":
+                    text_parts = [
+                        b.text for b in response.content if b.type == "text"
+                    ]
+                    reply = "\n".join(text_parts)
+                    break
+
+                # Tool use — append intermediate messages for this round
+                self.messages.append(
+                    {"role": "assistant", "content": response.content}
+                )
+                tool_results = []
+                for block in response.content:
+                    if block.type != "tool_use":
+                        continue
+                    logger.info(f"Tool call: {block.name}({block.input})")
+                    try:
+                        result = await mcp.call_tool(block.name, block.input)
+                        content = result.get("content", [])
+                        result_text = ""
+                        for item in content:
+                            if isinstance(item, dict) and "text" in item:
+                                result_text += item["text"]
+                        if len(result_text) > MAX_RESULT_LEN:
+                            result_text = (
+                                result_text[:MAX_RESULT_LEN]
+                                + '\n... (truncated)'
+                            )
+                    except Exception as e:
+                        logger.exception(f"MCP tool {block.name} failed")
+                        result_text = json.dumps({"error": str(e)})
+
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_text,
+                    })
+                self.messages.append(
+                    {"role": "user", "content": tool_results}
+                )
+            else:
+                reply = (
+                    "I hit the maximum number of tool calls. "
+                    "Please try a more specific question."
+                )
+
+            logger.info(f"Got reply: {len(reply)} chars")
+
+        except Exception:
+            logger.exception("ask_claude failed")
+        finally:
+            await mcp.close()
+
+        # Consolidate: replace all intermediate messages with clean Q&A pair
+        self.messages = self.messages[:msg_start]
+        self.messages.append({"role": "user", "content": user_content})
+        self.messages.append({"role": "assistant", "content": reply})
+
+        return reply
