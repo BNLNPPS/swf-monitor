@@ -237,9 +237,9 @@ class PandaBot:
 
         self.driver.init_websocket(self._handle_event)
 
-    def _build_thread_conversation(self, root_id):
+    async def _build_thread_conversation(self, root_id):
         """Fetch a Mattermost thread and build a Claude conversation from it."""
-        thread = self.driver.posts.get_thread(root_id)
+        thread = await asyncio.to_thread(self.driver.posts.get_thread, root_id)
         posts = thread.get('posts', {})
         order = thread.get('order', [])
 
@@ -321,7 +321,7 @@ class PandaBot:
         try:
             conversation = None
             if root_id:
-                conversation = self._build_thread_conversation(root_id)
+                conversation = await self._build_thread_conversation(root_id)
             reply = await ask_claude(
                 self.claude, self.mcp_url, message_text, conversation
             )
@@ -335,11 +335,14 @@ class PandaBot:
 
         try:
             logger.info("Posting reply to Mattermost...")
-            self.driver.posts.create_post(options={
-                'channel_id': self.channel_id,
-                'message': reply,
-                'root_id': root_id or post_id,
-            })
+            await asyncio.to_thread(
+                self.driver.posts.create_post,
+                options={
+                    'channel_id': self.channel_id,
+                    'message': reply,
+                    'root_id': root_id or post_id,
+                },
+            )
             logger.info("Reply posted successfully")
         except Exception:
             logger.exception("Failed to post reply")

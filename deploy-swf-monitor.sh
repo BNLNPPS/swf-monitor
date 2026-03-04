@@ -159,22 +159,33 @@ python manage.py migrate --settings=swf_monitor_project.settings
 log "Setting ownership..."
 chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 
-# Stop Apache
-log "Stopping Apache..."
-systemctl stop httpd
-
 # Update current symlink
 log "Updating current symlink..."
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 
-# Start Apache
-log "Starting Apache..."
-systemctl start httpd
+# Graceful Apache reload — finishes in-flight requests, picks up new code
+log "Reloading Apache (graceful)..."
+systemctl reload httpd
 
-# Restart PanDA Mattermost bot (if enabled)
+# Restart PanDA Mattermost bot only if bot code changed
 if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
-    log "Restarting PanDA Mattermost bot..."
-    systemctl restart swf-panda-bot.service
+    PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
+    BOT_CHANGED=false
+    if [ -z "$PREV_RELEASE" ]; then
+        BOT_CHANGED=true
+    elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/panda" \
+                     "$RELEASE_DIR/src/monitor_app/panda" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/panda_bot.py" \
+                    "$RELEASE_DIR/src/monitor_app/management/commands/panda_bot.py" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    fi
+    if [ "$BOT_CHANGED" = true ]; then
+        log "Bot code changed — restarting PanDA Mattermost bot..."
+        systemctl restart swf-panda-bot.service
+    else
+        log "Bot code unchanged — skipping bot restart"
+    fi
 fi
 
 # Health check
