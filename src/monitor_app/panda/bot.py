@@ -423,7 +423,8 @@ class PandaBot:
 
             for _round in range(MAX_TOOL_ROUNDS):
                 response = await self.claude.beta.messages.create(
-                    model="claude-sonnet-4-6-20250514",
+                    # DO NOT change model without user approval
+                    model="claude-haiku-4-5-20251001",
                     max_tokens=4096,
                     cache_control={"type": "ephemeral"},
                     system=system,
