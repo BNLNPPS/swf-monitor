@@ -645,6 +645,7 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client** — it connects 
 - Sends user questions to Claude Haiku with discovered PanDA tools
 - Executes tool calls via HTTP POST JSON-RPC to the MCP endpoint
 - Posts Claude's response back to the Mattermost thread
+- Remembers recent Q&A exchanges (via `swf_ai_memory`) to improve responses over time. Memory is collective — the bot does not track or remember who asked what
 
 **Running:** `manage.py panda_bot`
 

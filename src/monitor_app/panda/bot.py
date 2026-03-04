@@ -22,10 +22,12 @@ logger = logging.getLogger('panda_bot')
 MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
+MEMORY_TURNS = 20
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'emi_')
+MEMORY_USERNAME = 'pandabot-community'
 
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
@@ -107,7 +109,8 @@ def mcp_tool_to_anthropic(tool):
     }
 
 
-async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
+async def ask_claude(claude_client, mcp_url, message_text, conversation=None,
+                     memory_context=""):
     """Send a message to Claude, using MCP for tool execution. Returns final text."""
     if conversation is not None:
         messages = conversation
@@ -128,6 +131,8 @@ async def ask_claude(claude_client, mcp_url, message_text, conversation=None):
         system_prompt = SYSTEM_PREAMBLE
         if mcp.server_instructions:
             system_prompt += "\n" + mcp.server_instructions
+        if memory_context:
+            system_prompt += memory_context
 
         for round_num in range(MAX_TOOL_ROUNDS):
             response = await claude_client.messages.create(
@@ -207,6 +212,59 @@ class PandaBot:
 
         self.bot_user_id = None
         self.channel_id = None
+        self.memory_context = ""
+
+    async def _load_memory(self):
+        """Load recent community Q&A history into system prompt context."""
+        mcp = MCPClient(self.mcp_url)
+        try:
+            await mcp.initialize()
+            result = await mcp.call_tool('swf_get_ai_memory', {
+                'username': MEMORY_USERNAME,
+                'turns': MEMORY_TURNS,
+            })
+            content = result.get('content', [])
+            text = ''
+            for item in content:
+                if isinstance(item, dict) and 'text' in item:
+                    text += item['text']
+            if not text:
+                return
+            data = json.loads(text)
+            items = data.get('items', [])
+            if not items:
+                return
+            lines = []
+            for item in items:
+                role = 'Q' if item['role'] == 'user' else 'A'
+                lines.append(f"{role}: {item['content']}")
+            self.memory_context = (
+                "\n\nRecent community Q&A history (for context, NOT as data source — "
+                "always use tools for current data):\n"
+                + "\n".join(lines)
+            )
+            logger.info(f"Loaded {len(items)} memory items into context")
+        except Exception:
+            logger.exception("Failed to load memory — continuing without it")
+        finally:
+            await mcp.close()
+
+    async def _record_exchange(self, question, answer):
+        """Record a Q&A exchange to community memory."""
+        mcp = MCPClient(self.mcp_url)
+        try:
+            await mcp.initialize()
+            for role, content in [('user', question), ('assistant', answer)]:
+                await mcp.call_tool('swf_record_ai_memory', {
+                    'username': MEMORY_USERNAME,
+                    'session_id': 'mattermost',
+                    'role': role,
+                    'content': content,
+                })
+        except Exception:
+            logger.exception("Failed to record exchange to memory")
+        finally:
+            await mcp.close()
 
     def start(self):
         """Connect to Mattermost and start listening."""
@@ -235,6 +293,7 @@ class PandaBot:
             f"(MCP: {self.mcp_url})"
         )
 
+        asyncio.get_event_loop().run_until_complete(self._load_memory())
         self.driver.init_websocket(self._handle_event)
 
     async def _build_thread_conversation(self, root_id):
@@ -323,12 +382,15 @@ class PandaBot:
             if root_id:
                 conversation = await self._build_thread_conversation(root_id)
             reply = await ask_claude(
-                self.claude, self.mcp_url, message_text, conversation
+                self.claude, self.mcp_url, message_text, conversation,
+                memory_context=self.memory_context,
             )
             logger.info(f"Got reply: {len(reply)} chars")
         except Exception:
             logger.exception("ask_claude failed")
             reply = "Sorry, I encountered an error processing your question."
+
+        asyncio.create_task(self._record_exchange(message_text, reply))
 
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
