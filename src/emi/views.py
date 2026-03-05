@@ -326,12 +326,13 @@ def tag_compose(request, tag_type):
     return render(request, 'emi/tag_compose.html', context)
 
 
-@login_required
 def param_defs_api(request, tag_type):
     if tag_type not in TAG_SCHEMAS:
         return JsonResponse({'error': 'Invalid tag type'}, status=400)
     if request.method == 'GET':
         return JsonResponse({'defs': get_param_defs(tag_type)})
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Login required'}, status=403)
     if request.method == 'POST':
         try:
             data = json.loads(request.body)
