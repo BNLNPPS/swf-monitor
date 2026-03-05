@@ -89,6 +89,35 @@
     .choice-wrap .form-select { flex: 0 0 auto; width: auto; min-width: 140px; }
     .choice-wrap .form-control { flex: 1; }
     .choice-wrap .form-control.hidden-other { display: none; }
+
+    /* Param management modal */
+    .param-modal-backdrop {
+        position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1050;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .param-modal-backdrop.hidden { display: none; }
+    .param-modal {
+        background: #fff; border-radius: .5rem; width: 720px; max-width: 90vw;
+        max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,.25);
+    }
+    .param-modal-header {
+        padding: .75rem 1rem; border-bottom: 1px solid #dee2e6;
+        display: flex; justify-content: space-between; align-items: center;
+    }
+    .param-modal-header h5 { margin: 0; }
+    .param-modal-body { padding: 1rem; overflow-y: auto; flex: 1; }
+    .param-modal-footer { padding: .75rem 1rem; border-top: 1px solid #dee2e6; display: flex; gap: .5rem; justify-content: flex-end; }
+    .param-table { width: 100%; font-size: .82rem; border-collapse: collapse; }
+    .param-table th { background: #f8f9fa; padding: .4rem .5rem; text-align: left; border-bottom: 2px solid #dee2e6; font-size: .75rem; text-transform: uppercase; color: #6c757d; }
+    .param-table td { padding: .35rem .5rem; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+    .param-table input[type="text"], .param-table select { font-size: .82rem; padding: .2rem .4rem; border: 1px solid #dee2e6; border-radius: .25rem; }
+    .param-table input[type="text"] { width: 100%; }
+    .param-table .choices-input { width: 100%; font-size: .78rem; }
+    .param-table .btn-rm { border: none; background: none; color: #dc3545; cursor: pointer; font-size: .9rem; padding: .1rem .3rem; }
+    .param-table .btn-rm:hover { color: #a71d2a; }
+    .param-table tr.new-row td { border-top: 2px solid #0d6efd; background: #f0f7ff; }
+    .btn-gear { border: none; background: none; cursor: pointer; font-size: 1rem; color: #6c757d; padding: .1rem .4rem; }
+    .btn-gear:hover { color: #0d6efd; }
 </style>
 
 <div class="compose-wrap">
@@ -178,7 +207,11 @@
                     <label>Created By</label>
                     <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ username }}" readonly>
                 </div>
-                <div class="params-header">Parameters</div>
+                <div class="params-header">Parameters
+                    {% if user.is_authenticated %}
+                    <button type="button" class="btn-gear" id="btn-manage-params" title="Manage parameter definitions">&#9881;</button>
+                    {% endif %}
+                </div>
                 {% for field in form %}
                     {% if field.name|slice:":6" == "param_" %}
                     <div class="field-group" data-param="{{ field.label }}">
@@ -199,11 +232,44 @@
     </div>
 </div>
 
+<!-- Parameter Management Modal -->
+<div class="param-modal-backdrop hidden" id="param-modal-backdrop">
+    <div class="param-modal">
+        <div class="param-modal-header">
+            <h5>Manage <span id="pm-type-label">{{ schema.label }}</span> Parameters</h5>
+            <button type="button" class="btn-close" id="pm-close">&times;</button>
+        </div>
+        <div class="param-modal-body">
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th style="width:18%">Name</th>
+                        <th style="width:10%">Type</th>
+                        <th style="width:6%">Req</th>
+                        <th style="width:42%">Choices</th>
+                        <th style="width:8%">Allow Other</th>
+                        <th style="width:5%"></th>
+                    </tr>
+                </thead>
+                <tbody id="pm-tbody"></tbody>
+            </table>
+            <div style="margin-top:.5rem;">
+                <button type="button" class="btn btn-outline-primary btn-sm" id="pm-add">+ Add Parameter</button>
+            </div>
+        </div>
+        <div class="param-modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" id="pm-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary btn-sm" id="pm-save">Save</button>
+        </div>
+    </div>
+</div>
+
 <script>
 (function() {
     const allTags = {{ tags_json|safe }};
-    const fieldChoices = {{ choices_json|safe }};
+    let fieldChoices = {{ choices_json|safe }};
     const filterFields = {{ filter_fields_json|safe }};
+    let paramDefs = {{ param_defs_json|safe }};
     const nextSuffix = {{ next_suffix }};
     const initialSelected = {{ selected_tag|default:"null" }};
     const currentUser = '{{ username }}';
@@ -666,6 +732,99 @@
         if (el) el.scrollIntoView({block: 'nearest'});
     }
     tagList.focus();
+
+    // ── Parameter Management Modal ──
+    const pmBackdrop = document.getElementById('param-modal-backdrop');
+    const pmTbody = document.getElementById('pm-tbody');
+    const btnManageParams = document.getElementById('btn-manage-params');
+    let pmDefs = [];
+
+    function pmRenderRow(d, idx) {
+        const isNew = !d._existing;
+        const rowCls = isNew ? ' class="new-row"' : '';
+        const nameAttr = d._existing ? 'readonly' : '';
+        const typeOpts = ['string', 'integer', 'float', 'boolean'].map(
+            t => `<option value="${t}"${d.type === t ? ' selected' : ''}>${t}</option>`
+        ).join('');
+        return `<tr${rowCls} data-idx="${idx}">
+            <td><input type="text" value="${d.name}" data-field="name" ${nameAttr}></td>
+            <td><select data-field="type">${typeOpts}</select></td>
+            <td><input type="checkbox" data-field="required" ${d.required ? 'checked' : ''}></td>
+            <td><input type="text" class="choices-input" value="${(d.choices||[]).join(', ')}" data-field="choices" placeholder="comma-separated"></td>
+            <td style="text-align:center"><input type="checkbox" data-field="allow_other" ${d.allow_other !== false ? 'checked' : ''}></td>
+            <td><button type="button" class="btn-rm" data-idx="${idx}">&times;</button></td>
+        </tr>`;
+    }
+
+    function pmRender() {
+        pmTbody.innerHTML = pmDefs.map((d, i) => pmRenderRow(d, i)).join('');
+        pmTbody.querySelectorAll('.btn-rm').forEach(btn => {
+            btn.addEventListener('click', () => {
+                pmDefs.splice(parseInt(btn.dataset.idx), 1);
+                pmRender();
+            });
+        });
+    }
+
+    function pmReadFromDom() {
+        pmTbody.querySelectorAll('tr').forEach((tr, i) => {
+            if (i >= pmDefs.length) return;
+            const d = pmDefs[i];
+            d.name = tr.querySelector('[data-field="name"]').value.trim();
+            d.type = tr.querySelector('[data-field="type"]').value;
+            d.required = tr.querySelector('[data-field="required"]').checked;
+            const choicesStr = tr.querySelector('[data-field="choices"]').value.trim();
+            d.choices = choicesStr ? choicesStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+            d.allow_other = tr.querySelector('[data-field="allow_other"]').checked;
+        });
+    }
+
+    function pmOpen() {
+        pmDefs = paramDefs.map(d => ({...d, _existing: true}));
+        pmRender();
+        pmBackdrop.classList.remove('hidden');
+    }
+
+    function pmClose() {
+        pmBackdrop.classList.add('hidden');
+    }
+
+    if (btnManageParams) btnManageParams.addEventListener('click', pmOpen);
+    document.getElementById('pm-close').addEventListener('click', pmClose);
+    document.getElementById('pm-cancel').addEventListener('click', pmClose);
+    pmBackdrop.addEventListener('click', e => { if (e.target === pmBackdrop) pmClose(); });
+
+    document.getElementById('pm-add').addEventListener('click', () => {
+        pmReadFromDom();
+        pmDefs.push({name: '', type: 'string', required: false, choices: [], allow_other: true, sort_order: pmDefs.length});
+        pmRender();
+        const lastInput = pmTbody.querySelector('tr:last-child [data-field="name"]');
+        if (lastInput) lastInput.focus();
+    });
+
+    document.getElementById('pm-save').addEventListener('click', async () => {
+        pmReadFromDom();
+        const defsToSave = pmDefs.filter(d => d.name).map((d, i) => ({
+            name: d.name, type: d.type, required: d.required,
+            choices: d.choices, allow_other: d.allow_other, sort_order: i,
+        }));
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        try {
+            const resp = await fetch(`/swf-monitor/emi/tags/${tagType}/param-defs/`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                body: JSON.stringify({defs: defsToSave}),
+            });
+            const result = await resp.json();
+            if (result.error) {
+                alert('Error: ' + result.error);
+                return;
+            }
+            location.reload();
+        } catch (err) {
+            alert('Save failed: ' + err.message);
+        }
+    });
 })();
 </script>
 {% endblock %}

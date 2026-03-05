@@ -18,7 +18,7 @@ from monitor_app.utils import DataTablesProcessor, get_filter_params, format_dat
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, Dataset, ProdConfig,
 )
-from .schemas import TAG_SCHEMAS, get_tag_model
+from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
 
@@ -168,13 +168,14 @@ def tag_detail(request, tag_type, tag_number):
         field_map = {'p': 'physics_tag', 'e': 'evgen_tag', 's': 'simu_tag', 'r': 'reco_tag'}
         datasets = Dataset.objects.filter(**{field_map[tag_type]: tag}).order_by('-created_at')
 
+    defs = get_param_defs(tag_type)
     context = {
         'tag': tag,
         'tag_type': tag_type,
         'schema': schema,
         'datasets': datasets,
-        'required_fields': schema['required'],
-        'optional_fields': schema['optional'],
+        'required_fields': [d['name'] for d in defs if d.get('required')],
+        'optional_fields': [d['name'] for d in defs if not d.get('required')],
     }
     return render(request, 'emi/tag_detail.html', context)
 
@@ -295,8 +296,10 @@ def tag_compose(request, tag_type):
             entry['category_name'] = t.category.name
         tags_data.append(entry)
 
-    filter_fields = [f for f in schema['required'] + schema['optional']
-                      if f not in ('notes', 'description')]
+    param_defs = get_param_defs(tag_type)
+    choices_from_defs = {d['name']: d['choices'] for d in param_defs if d.get('choices')}
+    filter_fields = [d['name'] for d in param_defs
+                     if d['name'] not in ('notes', 'description')]
 
     # Peek at next tag suffix from PersistentState (read-only, no increment)
     from monitor_app.models import PersistentState
@@ -313,13 +316,47 @@ def tag_compose(request, tag_type):
         'tag_type': tag_type,
         'schema': schema,
         'tags_json': json.dumps(tags_data, default=str),
-        'choices_json': json.dumps(schema.get('choices', {})),
+        'choices_json': json.dumps(choices_from_defs),
         'filter_fields_json': json.dumps(filter_fields),
+        'param_defs_json': json.dumps(param_defs),
         'next_suffix': next_suffix,
         'username': request.user.username if request.user.is_authenticated else '',
         'selected_tag': selected_tag,
     }
     return render(request, 'emi/tag_compose.html', context)
+
+
+@login_required
+def param_defs_api(request, tag_type):
+    if tag_type not in TAG_SCHEMAS:
+        return JsonResponse({'error': 'Invalid tag type'}, status=400)
+    if request.method == 'GET':
+        return JsonResponse({'defs': get_param_defs(tag_type)})
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON'}, status=400)
+        defs = data.get('defs')
+        if not isinstance(defs, list):
+            return JsonResponse({'error': 'defs must be a list'}, status=400)
+        names_seen = set()
+        for i, d in enumerate(defs):
+            if not isinstance(d, dict) or not d.get('name'):
+                return JsonResponse({'error': f'Invalid param def at index {i}'}, status=400)
+            name = d['name'].strip()
+            if name in names_seen:
+                return JsonResponse({'error': f'Duplicate param name: {name}'}, status=400)
+            names_seen.add(name)
+            d['name'] = name
+            d.setdefault('type', 'string')
+            d.setdefault('required', False)
+            d.setdefault('choices', [])
+            d.setdefault('allow_other', True)
+            d['sort_order'] = i
+        save_param_defs(tag_type, defs)
+        return JsonResponse({'ok': True, 'defs': defs})
+    return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
 @login_required

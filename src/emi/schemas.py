@@ -110,9 +110,69 @@ def get_tag_model(tag_type):
     return getattr(models, TAG_SCHEMAS[tag_type]['model'])
 
 
-def validate_parameters(tag_type, parameters):
+def _schema_to_param_defs(tag_type):
     schema = TAG_SCHEMAS[tag_type]
-    missing = [f for f in schema['required'] if f not in parameters or not parameters[f]]
+    choices = schema.get('choices', {})
+    defs = []
+    for i, name in enumerate(schema['required']):
+        defs.append({
+            'name': name,
+            'type': 'string',
+            'required': True,
+            'choices': choices.get(name, []),
+            'allow_other': True,
+            'sort_order': i,
+        })
+    offset = len(schema['required'])
+    for i, name in enumerate(schema['optional']):
+        defs.append({
+            'name': name,
+            'type': 'string',
+            'required': False,
+            'choices': choices.get(name, []),
+            'allow_other': True,
+            'sort_order': offset + i,
+        })
+    return defs
+
+
+def _state_key(tag_type):
+    return f'emi_param_defs_{tag_type}'
+
+
+def get_param_defs(tag_type):
+    from monitor_app.models import PersistentState
+    key = _state_key(tag_type)
+    try:
+        ps = PersistentState.objects.get(id=1)
+        defs = ps.state_data.get(key)
+        if defs is not None:
+            return defs
+    except PersistentState.DoesNotExist:
+        pass
+    return seed_param_defs(tag_type)
+
+
+def seed_param_defs(tag_type):
+    from monitor_app.models import PersistentState
+    defs = _schema_to_param_defs(tag_type)
+    ps, _ = PersistentState.objects.get_or_create(id=1, defaults={'state_data': {}})
+    ps.state_data[_state_key(tag_type)] = defs
+    ps.save(update_fields=['state_data', 'updated_at'])
+    return defs
+
+
+def save_param_defs(tag_type, defs):
+    from monitor_app.models import PersistentState
+    ps, _ = PersistentState.objects.get_or_create(id=1, defaults={'state_data': {}})
+    ps.state_data[_state_key(tag_type)] = defs
+    ps.save(update_fields=['state_data', 'updated_at'])
+
+
+def validate_parameters(tag_type, parameters):
+    defs = get_param_defs(tag_type)
+    required = [d['name'] for d in defs if d.get('required')]
+    missing = [f for f in required if f not in parameters or not parameters[f]]
     if missing:
         return False, f"Missing required parameters: {', '.join(missing)}"
     return True, None

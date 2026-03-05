@@ -1,6 +1,6 @@
 from django import forms
 from .models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, Dataset, ProdConfig
-from .schemas import TAG_SCHEMAS
+from .schemas import TAG_SCHEMAS, get_param_defs
 
 
 class PhysicsCategoryForm(forms.ModelForm):
@@ -22,14 +22,9 @@ class PhysicsTagForm(forms.Form):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        schema = TAG_SCHEMAS['p']
-        for field_name in schema['required']:
-            self.fields[f'param_{field_name}'] = forms.CharField(
-                label=field_name, required=True,
-            )
-        for field_name in schema['optional']:
-            self.fields[f'param_{field_name}'] = forms.CharField(
-                label=field_name, required=False,
+        for pdef in get_param_defs('p'):
+            self.fields[f'param_{pdef["name"]}'] = forms.CharField(
+                label=pdef['name'], required=pdef.get('required', False),
             )
 
     def get_parameters(self):
@@ -48,14 +43,9 @@ class SimpleTagForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.tag_type = tag_type
         if tag_type:
-            schema = TAG_SCHEMAS[tag_type]
-            for field_name in schema['required']:
-                self.fields[f'param_{field_name}'] = forms.CharField(
-                    label=field_name, required=True,
-                )
-            for field_name in schema['optional']:
-                self.fields[f'param_{field_name}'] = forms.CharField(
-                    label=field_name, required=False,
+            for pdef in get_param_defs(tag_type):
+                self.fields[f'param_{pdef["name"]}'] = forms.CharField(
+                    label=pdef['name'], required=pdef.get('required', False),
                 )
 
     def get_parameters(self):

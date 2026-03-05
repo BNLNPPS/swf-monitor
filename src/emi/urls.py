@@ -13,6 +13,7 @@ urlpatterns = [
 
     # Tag compose — 2-panel browse + create (before generic list routes)
     path('tags/<str:tag_type>/compose/', views.tag_compose, name='tag_compose'),
+    path('tags/<str:tag_type>/param-defs/', views.param_defs_api, name='param_defs_api'),
     path('tags/<str:tag_type>/<int:tag_number>/delete/', views.tag_delete, name='tag_delete'),
 
     # Tags (parameterized by type)
