@@ -116,8 +116,7 @@
     .param-table .btn-rm { border: none; background: none; color: #dc3545; cursor: pointer; font-size: .9rem; padding: .1rem .3rem; }
     .param-table .btn-rm:hover { color: #a71d2a; }
     .param-table tr.new-row td { border-top: 2px solid #0d6efd; background: #f0f7ff; }
-    .btn-gear { border: none; background: none; cursor: pointer; font-size: 1rem; color: #6c757d; padding: .1rem .4rem; }
-    .btn-gear:hover { color: #0d6efd; }
+    .params-header .btn { margin-left: .75rem; font-size: .75rem; }
 </style>
 
 <div class="compose-wrap">
@@ -209,7 +208,7 @@
                 </div>
                 <div class="params-header">Parameters
                     {% if user.is_authenticated %}
-                    <button type="button" class="btn-gear" id="btn-manage-params" title="Manage parameter definitions">&#9881;</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-manage-params">Edit parameter fields</button>
                     {% endif %}
                 </div>
                 {% for field in form %}
@@ -725,11 +724,20 @@
 
     // ── Init ──
     renderTagList();
-    const autoSelect = initialSelected || (allTags.length > 0 ? allTags[0].tag_number : null);
-    if (autoSelect) {
-        onTagClick(autoSelect);
-        const el = tagList.querySelector(`[data-tag="${autoSelect}"]`);
-        if (el) el.scrollIntoView({block: 'nearest'});
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('mode') === 'create') {
+        enterCreateMode();
+        // Clean up the URL param
+        urlParams.delete('mode');
+        const cleanUrl = urlParams.toString() ? `${window.location.pathname}?${urlParams}` : window.location.pathname;
+        history.replaceState(null, '', cleanUrl);
+    } else {
+        const autoSelect = initialSelected || (allTags.length > 0 ? allTags[0].tag_number : null);
+        if (autoSelect) {
+            onTagClick(autoSelect);
+            const el = tagList.querySelector(`[data-tag="${autoSelect}"]`);
+            if (el) el.scrollIntoView({block: 'nearest'});
+        }
     }
     tagList.focus();
 
@@ -820,7 +828,10 @@
                 alert('Error: ' + result.error);
                 return;
             }
-            location.reload();
+            // Reload into create mode so new/changed fields are visible
+            const url = new URL(window.location.href);
+            url.searchParams.set('mode', 'create');
+            window.location.href = url.toString();
         } catch (err) {
             alert('Save failed: ' + err.message);
         }
