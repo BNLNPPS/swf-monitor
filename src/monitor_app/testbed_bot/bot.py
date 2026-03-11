@@ -39,6 +39,7 @@ MEMORY_USERNAME_PREFIX = 'testbedbot'
 # Loaded from TESTBED_USER_MAP env var (JSON) or defaults below
 DEFAULT_USER_MAP = {
     'wenaus': 'wenauseic',
+    'rahmans': 'srahman1',
 }
 
 SYSTEM_PREAMBLE = """\
