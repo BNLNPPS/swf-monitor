@@ -59,6 +59,12 @@ You have access to swf_get_ai_memory which retrieves conversation history from \
 previous sessions. Use it when someone references something from a past conversation. \
 Call it with username='testbedbot-{testbed_username}' and a turns count.
 
+Active commands (start/stop testbed, start/stop workflow, kill agent, etc.) require the user \
+to have a pandaserver02 account. Only execute active commands for the current user using \
+their testbed username '{testbed_username}'. NEVER execute active commands on behalf of \
+another user or with a different username. Read-only queries (status, list, logs, etc.) \
+are fine for any mapped user.
+
 Guidelines:
 - Be concise. Use markdown tables for structured data.
 - When a tool needs a username parameter, use '{testbed_username}'.
