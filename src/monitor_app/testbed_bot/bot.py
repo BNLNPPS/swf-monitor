@@ -170,7 +170,7 @@ class TestbedBot:
         self.mm_token = os.environ['TESTBED_BOT_TOKEN']
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
         self.mm_channel_name = os.environ.get(
-            'TESTBED_BOT_CHANNEL', 'testbedbot'
+            'TESTBED_BOT_CHANNEL', 'swf-testbed-bot'
         )
         self.mcp_url = MCP_URL
 
