@@ -167,9 +167,11 @@ ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 log "Reloading Apache (graceful)..."
 systemctl reload httpd
 
-# Restart PanDA Mattermost bot only if bot code changed
+# Restart bots only if their code changed
+PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
+
+# PanDA bot
 if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
-    PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
     BOT_CHANGED=false
     if [ -z "$PREV_RELEASE" ]; then
         BOT_CHANGED=true
@@ -184,7 +186,27 @@ if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
         log "Bot code changed — restarting PanDA Mattermost bot..."
         systemctl restart swf-panda-bot.service
     else
-        log "Bot code unchanged — skipping bot restart"
+        log "Bot code unchanged — skipping PanDA bot restart"
+    fi
+fi
+
+# Testbed bot
+if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
+    BOT_CHANGED=false
+    if [ -z "$PREV_RELEASE" ]; then
+        BOT_CHANGED=true
+    elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/testbed_bot" \
+                     "$RELEASE_DIR/src/monitor_app/testbed_bot" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/testbed_bot.py" \
+                    "$RELEASE_DIR/src/monitor_app/management/commands/testbed_bot.py" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    fi
+    if [ "$BOT_CHANGED" = true ]; then
+        log "Bot code changed — restarting Testbed Mattermost bot..."
+        systemctl restart swf-testbed-bot.service
+    else
+        log "Bot code unchanged — skipping Testbed bot restart"
     fi
 fi
 
