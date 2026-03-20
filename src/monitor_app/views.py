@@ -260,6 +260,7 @@ class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
     serializer_class = WorkflowDefinitionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
+    filterset_fields = ['workflow_name', 'version']
 
 
 class WorkflowExecutionViewSet(viewsets.ModelViewSet):

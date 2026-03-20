@@ -26,6 +26,17 @@ from .sql import (
 
 logger = logging.getLogger(__name__)
 
+TERMINAL_TASK_STATUSES = ('done', 'failed', 'aborted', 'broken', 'finished')
+STALE_TASK_DAYS = 60
+
+
+def _stale_task_filter():
+    """Exclude non-terminal tasks created more than STALE_TASK_DAYS ago."""
+    cutoff = timezone.now() - timedelta(days=STALE_TASK_DAYS)
+    placeholders = ', '.join(['%s'] * len(TERMINAL_TASK_STATUSES))
+    clause = f'NOT ("creationdate" < %s AND "status" NOT IN ({placeholders}))'
+    return {'clause': clause, 'params': [cutoff, *TERMINAL_TASK_STATUSES]}
+
 
 def list_jobs(days=7, status=None, username=None, site=None,
               taskid=None, reqid=None, limit=200, before_id=None):
@@ -228,6 +239,11 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
     params = [cutoff]
+
+    # Exclude stale non-terminal tasks (created >60 days ago, still pending)
+    _stale = _stale_task_filter()
+    where.append(_stale['clause'])
+    params.extend(_stale['params'])
 
     if status:
         where.append('"status" = %s')
@@ -510,6 +526,10 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
     # ── Task aggregation ──
     task_where = ['"modificationtime" >= %s']
     task_params = [cutoff]
+
+    _stale = _stale_task_filter()
+    task_where.append(_stale['clause'])
+    task_params.extend(_stale['params'])
 
     if username:
         if '%' in username:
@@ -822,6 +842,10 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
     where = ['"modificationtime" >= %s']
     params = [cutoff]
 
+    _stale = _stale_task_filter()
+    where.append(_stale['clause'])
+    params.extend(_stale['params'])
+
     if status:
         where.append('"status" = %s')
         params.append(status)
@@ -939,6 +963,10 @@ def task_filter_counts(days=7, status=None, username=None, workinggroup=None):
     cutoff = timezone.now() - timedelta(days=days)
     base_where = ['"modificationtime" >= %s']
     base_params = [cutoff]
+
+    _stale = _stale_task_filter()
+    base_where.append(_stale['clause'])
+    base_params.extend(_stale['params'])
 
     conn = connections['panda']
     result = {}
