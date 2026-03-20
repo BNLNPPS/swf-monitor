@@ -84,6 +84,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "monitor_app.middleware.MCPAuthMiddleware",  # Auth0 OAuth for MCP
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "monitor_app.middleware.TunnelAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]

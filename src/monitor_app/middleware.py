@@ -1,13 +1,40 @@
-"""Authentication middleware for MCP OAuth 2.1 integration."""
+"""Authentication middleware for MCP OAuth 2.1 and tunnel proxy."""
 
 import logging
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.http import JsonResponse
 
 from .auth0 import get_bearer_token, validate_token
 
 logger = logging.getLogger(__name__)
+
+LOCALHOST_IPS = {'127.0.0.1', '::1'}
+
+
+class TunnelAuthMiddleware:
+    """Auto-authenticate requests from localhost (SSH tunnel proxy).
+
+    Must be placed after AuthenticationMiddleware in MIDDLEWARE.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        if not request.user.is_authenticated and self._is_localhost(request):
+            User = get_user_model()
+            user, _ = User.objects.get_or_create(
+                username='swf-remote-proxy',
+                defaults={'is_active': True},
+            )
+            request.user = user
+        return self.get_response(request)
+
+    def _is_localhost(self, request):
+        ip = request.META.get('REMOTE_ADDR', '')
+        return ip in LOCALHOST_IPS
 
 
 class MCPAuthMiddleware:
