@@ -240,7 +240,8 @@ def workflow_executions_datatable_ajax(request):
             execution_id=execution.execution_id,
             run_id__isnull=False,
         ).values_list('run_id', flat=True).distinct()
-        stf_count = StfFile.objects.filter(run__run_number__in=run_ids).count()
+        run_numbers = [int(r) for r in run_ids if r]
+        stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
 
         # Format namespace as link
         if execution.namespace:

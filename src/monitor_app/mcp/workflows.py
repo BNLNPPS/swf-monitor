@@ -1009,7 +1009,8 @@ async def swf_get_workflow_monitor(execution_id: str) -> dict:
             run_ids = set(WorkflowMessage.objects.filter(
                 execution_id=execution_id, run_id__isnull=False,
             ).values_list('run_id', flat=True).distinct())
-        stf_count = StfFile.objects.filter(run__run_number__in=run_ids).count()
+        run_numbers = [int(r) for r in run_ids if r]
+        stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
 
         error_logs = AppLog.objects.filter(
             level__gte=py_logging.ERROR,
@@ -1067,7 +1068,8 @@ async def swf_list_workflow_monitors() -> list:
                 execution_id=e.execution_id,
                 run_id__isnull=False,
             ).values_list('run_id', flat=True).distinct()
-            stf_count = StfFile.objects.filter(run__run_number__in=run_ids).count()
+            run_numbers = [int(r) for r in run_ids if r]
+            stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
 
             items.append({
                 "execution_id": e.execution_id,
