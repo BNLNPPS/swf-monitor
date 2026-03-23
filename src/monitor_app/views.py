@@ -260,7 +260,16 @@ class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
     serializer_class = WorkflowDefinitionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
-    filterset_fields = ['workflow_name', 'version']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        workflow_name = self.request.query_params.get('workflow_name')
+        version = self.request.query_params.get('version')
+        if workflow_name:
+            qs = qs.filter(workflow_name=workflow_name)
+        if version:
+            qs = qs.filter(version=version)
+        return qs
 
 
 class WorkflowExecutionViewSet(viewsets.ModelViewSet):
