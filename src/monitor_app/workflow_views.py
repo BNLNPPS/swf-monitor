@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.db.models import Count
 from django.utils import timezone
 
+from .models import StfFile
 from .workflow_models import WorkflowDefinition, WorkflowExecution
 
 
@@ -234,11 +235,12 @@ def workflow_executions_datatable_ajax(request):
         else:
             duration_str = '-'
 
-        # Count STF messages for this execution
-        stf_count = WorkflowMessage.objects.filter(
+        # Count actual STF files via run_ids associated with this execution
+        run_ids = WorkflowMessage.objects.filter(
             execution_id=execution.execution_id,
-            message_type='stf_gen'
-        ).count()
+            run_id__isnull=False,
+        ).values_list('run_id', flat=True).distinct()
+        stf_count = StfFile.objects.filter(run__run_number__in=run_ids).count()
 
         # Format namespace as link
         if execution.namespace:

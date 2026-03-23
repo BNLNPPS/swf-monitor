@@ -25,29 +25,20 @@ class MonitorAppConfig(AppConfig):
     def _should_connect_activemq(self):
         """
         Determine if we should start the ActiveMQ connection.
-        Only connect during normal Django operation, not during admin tasks.
+        Only the production WSGI process should subscribe — not runserver,
+        management commands, or other dev instances. This prevents duplicate
+        message processing when multiple Django processes share the same DB.
         """
-        # Don't connect during management commands that don't need ActiveMQ
-        skip_commands = [
-            'migrate', 'makemigrations', 'test', 'collectstatic',
-            'shell', 'dbshell', 'check', 'diffsettings', 'help',
-            'panda_bot',
-        ]
-        
-        if len(sys.argv) > 1 and sys.argv[1] in skip_commands:
-            logger.debug(f"Skipping ActiveMQ connection during '{sys.argv[1]}' command")
+        # Only connect under mod_wsgi (the production Apache process)
+        if 'mod_wsgi' not in sys.modules:
+            context = sys.argv[1] if len(sys.argv) > 1 else 'unknown'
+            logger.info(f"ActiveMQ: skipping (not WSGI, context={context})")
             return False
-        
-        # Check if ActiveMQ is configured
+
         if not getattr(settings, 'ACTIVEMQ_HOST', None):
             logger.info("ActiveMQ not configured - listener will not start")
             return False
-        
-        # Check if we're in a test environment
-        if 'test' in sys.argv or hasattr(settings, 'TESTING'):
-            logger.debug("Skipping ActiveMQ connection during testing")
-            return False
-        
+
         return True
     
     def _initialize_activemq(self):
