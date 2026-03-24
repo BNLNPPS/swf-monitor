@@ -1,8 +1,8 @@
-# EMI — ePIC Metadata Interface
+# PCS — Physics Configuration System
 
-EMI manages production metadata for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the metadata configurations that drive Monte Carlo production.
+PCS manages production metadata for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the metadata configurations that drive Monte Carlo production.
 
-**URL:** `/swf-monitor/emi/`
+**URL:** `/swf-monitor/pcs/`
 
 ## What It Does
 
@@ -32,7 +32,7 @@ Only the tag creator can edit, lock, or delete their own drafts. Anyone can copy
 
 ## Using the Tag Panel
 
-The main interface is the **panel view** — a split-pane layout with a tag browser on the left and detail/edit panel on the right. Access it from the EMI dropdown in the nav bar (Physics Tags, EvGen Tags, Simu Tags, Reco Tags).
+The main interface is the **panel view** — a split-pane layout with a tag browser on the left and detail/edit panel on the right. Access it from the PCS dropdown in the nav bar (Physics Tags, EvGen Tags, Simu Tags, Reco Tags).
 
 ### Browsing
 
@@ -80,7 +80,7 @@ All counters are managed atomically via PersistentState to prevent conflicts.
 
 ## Parameter Schemas
 
-Each tag type has required and optional parameters defined in `emi/schemas.py`. Adding a field there makes it appear in forms and validation — no database migration needed.
+Each tag type has required and optional parameters defined in `pcs/schemas.py`. Adding a field there makes it appear in forms and validation — no database migration needed.
 
 **Physics (p):**
 - Required: `process`, `beam_energy_electron`, `beam_energy_hadron`
@@ -100,7 +100,7 @@ Each tag type has required and optional parameters defined in `emi/schemas.py`. 
 
 ## REST API
 
-Base URL: `/swf-monitor/emi/api/`
+Base URL: `/swf-monitor/pcs/api/`
 
 Tags support list, create, get, update (draft only), and lock. Replace `{type}` with `physics-tags`, `evgen-tags`, `simu-tags`, or `reco-tags`.
 
@@ -126,7 +126,7 @@ Example: `group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1`
 
 The Rucio DID adds scope prefix and block suffix: `group.EIC:...b1`
 
-Rucio limits datasets to 100k files. EMI manages automatic subdivision into blocks (`.b1`, `.b2`, etc.).
+Rucio limits datasets to 100k files. PCS manages automatic subdivision into blocks (`.b1`, `.b2`, etc.).
 
 The data model is in place but the dataset composition UI and workflows are not yet built.
 
@@ -152,8 +152,8 @@ Designed for addition of MCP tools for AI-assisted tag and dataset management:
 
 | Tool | Description |
 |------|-------------|
-| `emi_list_tags(tag_type)` | List tags with label, description, status, key params |
-| `emi_get_tag(tag_label)` | Full tag detail with all parameters |
-| `emi_create_tag(tag_type, ...)` | Create tag with auto-assigned number |
-| `emi_list_datasets(...)` | Dataset list with tag filters |
-| `emi_create_dataset(...)` | Create dataset from tag labels |
+| `pcs_list_tags(tag_type)` | List tags with label, description, status, key params |
+| `pcs_get_tag(tag_label)` | Full tag detail with all parameters |
+| `pcs_create_tag(tag_type, ...)` | Create tag with auto-assigned number |
+| `pcs_list_datasets(...)` | Dataset list with tag filters |
+| `pcs_create_dataset(...)` | Create dataset from tag labels |

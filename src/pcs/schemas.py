@@ -137,7 +137,7 @@ def _schema_to_param_defs(tag_type):
 
 
 def _state_key(tag_type):
-    return f'emi_param_defs_{tag_type}'
+    return f'pcs_param_defs_{tag_type}'
 
 
 def get_param_defs(tag_type):

@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 
-{% block title %}Physics Categories - EMI{% endblock %}
+{% block title %}Physics Categories - PCS{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
     <h2>Physics Categories</h2>
     <p>Physics areas that determine tag numbering ranges. Category digit N → tags p(N*1000+1), p(N*1000+2), ...</p>
 
-    <a href="{% url 'emi:physics_category_create' %}" class="btn btn-primary btn-sm mb-3">New Category</a>
+    <a href="{% url 'pcs:physics_category_create' %}" class="btn btn-primary btn-sm mb-3">New Category</a>
 
     <table class="table table-striped table-bordered table-sm">
         <thead class="thead-dark">
@@ -26,7 +26,7 @@
                 <td>{{ cat.digit }}</td>
                 <td>{{ cat.name }}</td>
                 <td>{{ cat.description }}</td>
-                <td><a href="{% url 'emi:tags_list' tag_type='p' %}?category={{ cat.name }}">{{ cat.tag_count }}</a></td>
+                <td><a href="{% url 'pcs:tags_list' tag_type='p' %}?category={{ cat.name }}">{{ cat.tag_count }}</a></td>
                 <td>{{ cat.created_by }}</td>
                 <td>{{ cat.created_at|date:"Y-m-d H:i" }}</td>
             </tr>

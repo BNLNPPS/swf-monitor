@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('emi', '0001_initial'),
+        ('pcs', '0001_initial'),
     ]
 
     operations = [
@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
                 ('updated_at', models.DateTimeField(auto_now=True)),
             ],
             options={
-                'db_table': 'emi_prod_config',
+                'db_table': 'pcs_prod_config',
                 'ordering': ['-updated_at'],
             },
         ),

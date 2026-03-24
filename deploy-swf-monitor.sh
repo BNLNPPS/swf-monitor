@@ -151,6 +151,20 @@ python manage.py collectstatic --noinput --clear --settings=swf_monitor_project.
 log "Copying static files to shared location..."
 rsync -a --delete "$RELEASE_DIR/src/staticfiles/" "$DEPLOY_ROOT/shared/static/"
 
+# Pre-migration: rename 'emi' app to 'pcs' in migration history and content types
+# This is idempotent — safe to run even after the rename is complete.
+log "Pre-migration: updating app label emi → pcs in migration history..."
+python -c "
+import django, os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
+django.setup()
+from django.db import connection
+with connection.cursor() as c:
+    c.execute(\"UPDATE django_migrations SET app = 'pcs' WHERE app = 'emi'\")
+    c.execute(\"UPDATE django_content_type SET app_label = 'pcs' WHERE app_label = 'emi'\")
+print('  Done (emi → pcs in django_migrations and django_content_type)')
+" 2>/dev/null || log "  (no emi records to update — already migrated)"
+
 # Run database migrations
 log "Running database migrations..."
 python manage.py migrate --settings=swf_monitor_project.settings

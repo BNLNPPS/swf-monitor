@@ -28,7 +28,7 @@ The system uses Django models to track agents, runs, data files, and messaging:
 - **PandaQueue**: PanDA queue configuration for job submission
 - **RucioEndpoint**: Rucio data management endpoint definitions
 
-### EMI Models (ePIC Metadata Interface)
+### PCS Models (Physics Configuration System)
 
 Production metadata management for Monte Carlo simulation campaigns:
 
@@ -40,7 +40,7 @@ Production metadata management for Monte Carlo simulation campaigns:
 - **Dataset**: Production datasets composed from locked tags with automatic block management
 - **ProdConfig**: Production configuration templates (background mixing, output control, software stack, PanDA/Rucio overrides)
 
-See **[EMI documentation](EMI.md)** for full details.
+See **[PCS documentation](PCS.md)** for full details.
 
 ## ActiveMQ Integration
 
@@ -171,21 +171,21 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 ### System State
 - `GET /api/state/next-run-number/` - Get next available run number
 
-### EMI - ePIC Metadata Interface
+### PCS - Physics Configuration System
 
-All EMI endpoints are under `/emi/api/`. See **[EMI documentation](EMI.md)** for full API reference with examples.
+All PCS endpoints are under `/pcs/api/`. See **[PCS documentation](PCS.md)** for full API reference with examples.
 
-- `GET/POST /emi/api/physics-categories/` - List/create physics categories
-- `GET/POST /emi/api/physics-tags/` - List/create physics tags (number auto-assigned)
-- `GET/PATCH /emi/api/physics-tags/{N}/` - Get/update physics tag (draft only)
-- `POST /emi/api/physics-tags/{N}/lock/` - Lock physics tag (one-way)
-- `GET/POST /emi/api/evgen-tags/` - List/create evgen tags
-- `GET/POST /emi/api/simu-tags/` - List/create simu tags
-- `GET/POST /emi/api/reco-tags/` - List/create reco tags
-- `GET/POST /emi/api/datasets/` - List/create datasets (all tags must be locked)
-- `POST /emi/api/datasets/{id}/add-block/` - Add next block to dataset
-- `GET/POST /emi/api/prod-configs/` - List/create production configs
-- `GET/PATCH/DELETE /emi/api/prod-configs/{id}/` - Get/update/delete production config
+- `GET/POST /pcs/api/physics-categories/` - List/create physics categories
+- `GET/POST /pcs/api/physics-tags/` - List/create physics tags (number auto-assigned)
+- `GET/PATCH /pcs/api/physics-tags/{N}/` - Get/update physics tag (draft only)
+- `POST /pcs/api/physics-tags/{N}/lock/` - Lock physics tag (one-way)
+- `GET/POST /pcs/api/evgen-tags/` - List/create evgen tags
+- `GET/POST /pcs/api/simu-tags/` - List/create simu tags
+- `GET/POST /pcs/api/reco-tags/` - List/create reco tags
+- `GET/POST /pcs/api/datasets/` - List/create datasets (all tags must be locked)
+- `POST /pcs/api/datasets/{id}/add-block/` - Add next block to dataset
+- `GET/POST /pcs/api/prod-configs/` - List/create production configs
+- `GET/PATCH/DELETE /pcs/api/prod-configs/{id}/` - Get/update/delete production config
 
 ## Server-Sent Events (SSE) Streaming
 

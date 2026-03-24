@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ tag.tag_label }} - EMI{% endblock %}
+{% block title %}{{ tag.tag_label }} - PCS{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'emi:tags_list' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:tags_list' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
             <li class="breadcrumb-item active">{{ tag.tag_label }}</li>
         </ol>
     </nav>
@@ -25,8 +25,8 @@
         </div>
         <div>
             {% if tag.status == 'draft' %}
-            <a href="{% url 'emi:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-sm btn-outline-primary">Edit</a>
-            <form method="post" action="{% url 'emi:tag_lock' tag_type=tag_type tag_number=tag.tag_number %}" class="d-inline" onsubmit="return confirm('Lock this tag? This is irreversible — the tag will become immutable.');">
+            <a href="{% url 'pcs:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-sm btn-outline-primary">Edit</a>
+            <form method="post" action="{% url 'pcs:tag_lock' tag_type=tag_type tag_number=tag.tag_number %}" class="d-inline" onsubmit="return confirm('Lock this tag? This is irreversible — the tag will become immutable.');">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-sm btn-warning">Lock</button>
             </form>
@@ -84,7 +84,7 @@
                 <tbody>
                     {% for ds in datasets %}
                     <tr>
-                        <td><a href="{% url 'emi:dataset_detail' pk=ds.pk %}">{{ ds.dataset_name }}</a></td>
+                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.dataset_name }}</a></td>
                         <td>{{ ds.blocks }}</td>
                         <td>{{ ds.created_at|date:"Y-m-d H:i" }}</td>
                     </tr>

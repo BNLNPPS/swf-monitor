@@ -31,7 +31,7 @@ MAX_SESSION_MESSAGES = 200
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
-BOT_TOOL_PREFIXES = ('swf_', 'panda_', 'emi_')
+BOT_TOOL_PREFIXES = ('swf_', 'panda_', 'pcs_')
 BOT_EXTRA_TOOLS = ()
 MEMORY_USERNAME_PREFIX = 'testbedbot'
 

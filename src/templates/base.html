@@ -97,15 +97,15 @@
             <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
             <a href="{% url 'monitor_app:persistent_state' %}">State</a>
             <div class="dropdown">
-                <button class="dropbtn">EMI</button>
+                <button class="dropbtn">PCS</button>
                 <div class="dropdown-content">
-                    <a href="{% url 'emi:emi_hub' %}">EMI Hub</a>
-                    <a href="{% url 'emi:tag_compose' tag_type='p' %}">Physics Tags</a>
-                    <a href="{% url 'emi:tag_compose' tag_type='e' %}">EvGen Tags</a>
-                    <a href="{% url 'emi:tag_compose' tag_type='s' %}">Simu Tags</a>
-                    <a href="{% url 'emi:tag_compose' tag_type='r' %}">Reco Tags</a>
-                    <a href="{% url 'emi:datasets_list' %}">Datasets</a>
-                    <a href="{% url 'emi:prod_configs_list' %}">Prod Configs</a>
+                    <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu Tags</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco Tags</a>
+                    <a href="{% url 'pcs:datasets_list' %}">Datasets</a>
+                    <a href="{% url 'pcs:prod_configs_list' %}">Prod Configs</a>
                 </div>
             </div>
             <div class="dropdown">

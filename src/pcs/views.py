@@ -1,5 +1,5 @@
 """
-EMI web UI views and DataTable AJAX endpoints.
+PCS web UI views and DataTable AJAX endpoints.
 
 Views are generic across tag types (p/e/s/r) where possible, parameterized by tag_type.
 Tag list views use server-side DataTables via monitor_app._datatable_base.html.
@@ -22,7 +22,7 @@ from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
 
-def emi_hub(request):
+def pcs_hub(request):
     context = {
         'categories_count': PhysicsCategory.objects.count(),
         'physics_tags_count': PhysicsTag.objects.count(),
@@ -32,14 +32,14 @@ def emi_hub(request):
         'datasets_count': Dataset.objects.values('dataset_name').distinct().count(),
         'prod_configs_count': ProdConfig.objects.count(),
     }
-    return render(request, 'emi/emi_hub.html', context)
+    return render(request, 'pcs/pcs_hub.html', context)
 
 
 # ── Physics Categories ────────────────────────────────────────────
 
 def physics_categories_list(request):
     categories = PhysicsCategory.objects.annotate(tag_count=Count('tags'))
-    return render(request, 'emi/physics_categories_list.html', {'categories': categories})
+    return render(request, 'pcs/physics_categories_list.html', {'categories': categories})
 
 
 @login_required
@@ -49,10 +49,10 @@ def physics_category_create(request):
         if form.is_valid():
             form.save()
             messages.success(request, f"Category {form.instance.digit}: {form.instance.name} created.")
-            return redirect('emi:physics_categories_list')
+            return redirect('pcs:physics_categories_list')
     else:
         form = PhysicsCategoryForm()
-    return render(request, 'emi/physics_category_create.html', {'form': form})
+    return render(request, 'pcs/physics_category_create.html', {'form': form})
 
 
 # ── Tag list/detail/create (generic across p/e/s/r) ──────────────
@@ -88,8 +88,8 @@ def tags_list(request, tag_type):
 
     context = {
         'table_title': f'{schema["label"]} Tags',
-        'table_description': f'All {schema["label"].lower()} tags registered in EMI.',
-        'ajax_url': reverse('emi:tags_datatable_ajax', args=[tag_type]),
+        'table_description': f'All {schema["label"].lower()} tags registered in PCS.',
+        'ajax_url': reverse('pcs:tags_datatable_ajax', args=[tag_type]),
         'columns': columns,
         'tag_type': tag_type,
         'schema': schema,
@@ -98,7 +98,7 @@ def tags_list(request, tag_type):
         'selected_status': status_filter,
         'selected_category': category_filter,
     }
-    return render(request, 'emi/tag_list.html', context)
+    return render(request, 'pcs/tag_list.html', context)
 
 
 def tags_datatable_ajax(request, tag_type):
@@ -133,7 +133,7 @@ def tags_datatable_ajax(request, tag_type):
 
     data = []
     for tag in page:
-        compose_url = reverse('emi:tag_compose', args=[tag_type])
+        compose_url = reverse('pcs:tag_compose', args=[tag_type])
         tag_url = f'{compose_url}?selected={tag.tag_number}'
         tag_link = f'<a href="{tag_url}">{tag.tag_label}</a>'
         status_badge = (
@@ -177,7 +177,7 @@ def tag_detail(request, tag_type, tag_number):
         'required_fields': [d['name'] for d in defs if d.get('required')],
         'optional_fields': [d['name'] for d in defs if not d.get('required')],
     }
-    return render(request, 'emi/tag_detail.html', context)
+    return render(request, 'pcs/tag_detail.html', context)
 
 
 @login_required
@@ -217,7 +217,7 @@ def tag_create(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
-            compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+            compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
             return redirect(f'{compose_url}?selected={tag.tag_number}')
     else:
         form = FormClass(**form_kwargs)
@@ -227,7 +227,7 @@ def tag_create(request, tag_type):
         'tag_type': tag_type,
         'schema': schema,
     }
-    template = 'emi/tag_create_physics.html' if tag_type == 'p' else 'emi/tag_create.html'
+    template = 'pcs/tag_create_physics.html' if tag_type == 'p' else 'pcs/tag_create.html'
     return render(request, template, context)
 
 
@@ -271,7 +271,7 @@ def tag_compose(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
-            compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+            compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
             return redirect(f'{compose_url}?selected={tag.tag_number}')
     else:
         form = FormClass(**form_kwargs)
@@ -303,8 +303,8 @@ def tag_compose(request, tag_type):
 
     # Peek at next tag suffix from PersistentState (read-only, no increment)
     from monitor_app.models import PersistentState
-    state_keys = {'p': 'emi_next_physics', 'e': 'emi_next_evgen',
-                  's': 'emi_next_simu', 'r': 'emi_next_reco'}
+    state_keys = {'p': 'pcs_next_physics', 'e': 'pcs_next_evgen',
+                  's': 'pcs_next_simu', 'r': 'pcs_next_reco'}
     try:
         ps = PersistentState.objects.get(id=1)
         next_suffix = ps.state_data.get(state_keys[tag_type], 1)
@@ -323,7 +323,7 @@ def tag_compose(request, tag_type):
         'username': request.user.username if request.user.is_authenticated else '',
         'selected_tag': selected_tag,
     }
-    return render(request, 'emi/tag_compose.html', context)
+    return render(request, 'pcs/tag_compose.html', context)
 
 
 def param_defs_api(request, tag_type):
@@ -363,24 +363,24 @@ def param_defs_api(request, tag_type):
 @login_required
 def tag_delete(request, tag_type, tag_number):
     if request.method != 'POST':
-        return redirect('emi:tag_compose', tag_type=tag_type)
+        return redirect('pcs:tag_compose', tag_type=tag_type)
     model = TAG_MODELS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
     if tag.status == 'locked':
         messages.error(request, f"Tag {tag.tag_label} is locked and cannot be deleted.")
-        return redirect('emi:tag_compose', tag_type=tag_type)
+        return redirect('pcs:tag_compose', tag_type=tag_type)
     if tag.created_by != request.user.username:
         messages.error(request, f"Only the creator ({tag.created_by}) can delete {tag.tag_label}.")
-        return redirect('emi:tag_compose', tag_type=tag_type)
+        return redirect('pcs:tag_compose', tag_type=tag_type)
     label = tag.tag_label
     tag.delete()
     messages.success(request, f"Tag {label} deleted.")
-    return redirect('emi:tag_compose', tag_type=tag_type)
+    return redirect('pcs:tag_compose', tag_type=tag_type)
 
 
 @login_required
 def tag_lock(request, tag_type, tag_number):
-    compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+    compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
     selected_url = f'{compose_url}?selected={tag_number}'
     if request.method != 'POST':
         return redirect(selected_url)
@@ -403,7 +403,7 @@ def tag_edit(request, tag_type, tag_number):
     schema = TAG_SCHEMAS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
 
-    compose_url = reverse('emi:tag_compose', kwargs={'tag_type': tag_type})
+    compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
     selected_url = f'{compose_url}?selected={tag_number}'
     if tag.status == 'locked':
         messages.error(request, f"Tag {tag.tag_label} is locked and cannot be edited.")
@@ -444,7 +444,7 @@ def tag_edit(request, tag_type, tag_number):
         'schema': schema,
         'editing': True,
     }
-    template = 'emi/tag_create_physics.html' if tag_type == 'p' else 'emi/tag_create.html'
+    template = 'pcs/tag_create_physics.html' if tag_type == 'p' else 'pcs/tag_create.html'
     return render(request, template, context)
 
 
@@ -462,11 +462,11 @@ def datasets_list(request):
     ]
     context = {
         'table_title': 'Datasets',
-        'table_description': 'All datasets registered in EMI.',
-        'ajax_url': reverse('emi:datasets_datatable_ajax'),
+        'table_description': 'All datasets registered in PCS.',
+        'ajax_url': reverse('pcs:datasets_datatable_ajax'),
         'columns': columns,
     }
-    return render(request, 'emi/datasets_list.html', context)
+    return render(request, 'pcs/datasets_list.html', context)
 
 
 def datasets_datatable_ajax(request):
@@ -491,11 +491,11 @@ def datasets_datatable_ajax(request):
 
     data = []
     for ds in page:
-        detail_url = reverse('emi:dataset_detail', args=[ds.id])
-        p_url = f"{reverse('emi:tag_compose', args=['p'])}?selected={ds.physics_tag.tag_number}"
-        e_url = f"{reverse('emi:tag_compose', args=['e'])}?selected={ds.evgen_tag.tag_number}"
-        s_url = f"{reverse('emi:tag_compose', args=['s'])}?selected={ds.simu_tag.tag_number}"
-        r_url = f"{reverse('emi:tag_compose', args=['r'])}?selected={ds.reco_tag.tag_number}"
+        detail_url = reverse('pcs:dataset_detail', args=[ds.id])
+        p_url = f"{reverse('pcs:tag_compose', args=['p'])}?selected={ds.physics_tag.tag_number}"
+        e_url = f"{reverse('pcs:tag_compose', args=['e'])}?selected={ds.evgen_tag.tag_number}"
+        s_url = f"{reverse('pcs:tag_compose', args=['s'])}?selected={ds.simu_tag.tag_number}"
+        r_url = f"{reverse('pcs:tag_compose', args=['r'])}?selected={ds.reco_tag.tag_number}"
         data.append([
             f'<a href="{detail_url}">{ds.dataset_name}</a>',
             f'<a href="{p_url}" title="{ds.physics_tag.description}">{ds.physics_tag.tag_label}</a>',
@@ -519,7 +519,7 @@ def dataset_detail(request, pk):
         'dataset': dataset,
         'blocks': blocks,
     }
-    return render(request, 'emi/dataset_detail.html', context)
+    return render(request, 'pcs/dataset_detail.html', context)
 
 
 @login_required
@@ -541,16 +541,16 @@ def dataset_create(request):
             )
             ds.save()
             messages.success(request, f"Dataset created: {ds.did}")
-            return redirect('emi:dataset_detail', pk=ds.pk)
+            return redirect('pcs:dataset_detail', pk=ds.pk)
     else:
         form = DatasetForm()
-    return render(request, 'emi/dataset_create.html', {'form': form})
+    return render(request, 'pcs/dataset_create.html', {'form': form})
 
 
 @login_required
 def dataset_add_block(request, pk):
     if request.method != 'POST':
-        return redirect('emi:dataset_detail', pk=pk)
+        return redirect('pcs:dataset_detail', pk=pk)
     dataset = get_object_or_404(Dataset, pk=pk)
     new_block_num = dataset.blocks + 1
     Dataset.objects.filter(dataset_name=dataset.dataset_name).update(blocks=new_block_num)
@@ -571,7 +571,7 @@ def dataset_add_block(request, pk):
         created_by=request.user.username if request.user.is_authenticated else 'unknown',
     )
     messages.success(request, f"Block {new_block_num} added: {new_block.did}")
-    return redirect('emi:dataset_detail', pk=dataset.pk)
+    return redirect('pcs:dataset_detail', pk=dataset.pk)
 
 
 # ── Production Configs ────────────────────────────────────────────
@@ -589,10 +589,10 @@ def prod_configs_list(request):
     context = {
         'table_title': 'Production Configs',
         'table_description': 'Reusable production configuration templates for job submission.',
-        'ajax_url': reverse('emi:prod_configs_datatable_ajax'),
+        'ajax_url': reverse('pcs:prod_configs_datatable_ajax'),
         'columns': columns,
     }
-    return render(request, 'emi/prod_configs_list.html', context)
+    return render(request, 'pcs/prod_configs_list.html', context)
 
 
 def prod_configs_datatable_ajax(request):
@@ -610,7 +610,7 @@ def prod_configs_datatable_ajax(request):
 
     data = []
     for pc in page:
-        detail_url = reverse('emi:prod_config_detail', args=[pc.pk])
+        detail_url = reverse('pcs:prod_config_detail', args=[pc.pk])
         data.append([
             f'<a href="{detail_url}">{pc.name}</a>',
             pc.description[:80] + ('...' if len(pc.description) > 80 else ''),
@@ -626,7 +626,7 @@ def prod_configs_datatable_ajax(request):
 
 def prod_config_detail(request, pk):
     config = get_object_or_404(ProdConfig, pk=pk)
-    return render(request, 'emi/prod_config_detail.html', {'config': config})
+    return render(request, 'pcs/prod_config_detail.html', {'config': config})
 
 
 @login_required
@@ -636,10 +636,10 @@ def prod_config_create(request):
         if form.is_valid():
             form.save()
             messages.success(request, f"Production config '{form.instance.name}' created.")
-            return redirect('emi:prod_config_detail', pk=form.instance.pk)
+            return redirect('pcs:prod_config_detail', pk=form.instance.pk)
     else:
         form = ProdConfigForm()
-    return render(request, 'emi/prod_config_form.html', {'form': form})
+    return render(request, 'pcs/prod_config_form.html', {'form': form})
 
 
 @login_required
@@ -650,7 +650,7 @@ def prod_config_edit(request, pk):
         if form.is_valid():
             form.save()
             messages.success(request, f"Production config '{config.name}' updated.")
-            return redirect('emi:prod_config_detail', pk=config.pk)
+            return redirect('pcs:prod_config_detail', pk=config.pk)
     else:
         form = ProdConfigForm(instance=config)
-    return render(request, 'emi/prod_config_form.html', {'form': form, 'editing': True, 'config': config})
+    return render(request, 'pcs/prod_config_form.html', {'form': form, 'editing': True, 'config': config})

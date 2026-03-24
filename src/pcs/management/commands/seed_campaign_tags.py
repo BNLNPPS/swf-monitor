@@ -1,11 +1,11 @@
 """
-Seed EMI tags from the 26.02.0 production campaign.
+Seed PCS tags from the 26.02.0 production campaign.
 
 Idempotent: skips records that already exist. Safe to run multiple times.
 Source: https://eic.github.io/epic-prod/FULL/26.02.0/ and RECO/26.02.0/
 """
 from django.core.management.base import BaseCommand
-from emi.models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag
+from pcs.models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag
 
 CREATED_BY = 'srahman1'
 
@@ -119,7 +119,7 @@ PHYSICS_TAGS = [
 
 
 class Command(BaseCommand):
-    help = 'Seed EMI tags from the 26.02.0 production campaign'
+    help = 'Seed PCS tags from the 26.02.0 production campaign'
 
     def handle(self, *args, **options):
         counts = {'categories': 0, 'evgen': 0, 'simu': 0, 'reco': 0, 'physics': 0}
@@ -214,10 +214,10 @@ class Command(BaseCommand):
                 suffix = pt.tag_number % 1000
                 if suffix > max_suffix:
                     max_suffix = suffix
-            obj.state_data['emi_next_physics'] = max_suffix + 1
-            obj.state_data['emi_next_evgen'] = max_evgen + 1
-            obj.state_data['emi_next_simu'] = max_simu + 1
-            obj.state_data['emi_next_reco'] = max_reco + 1
+            obj.state_data['pcs_next_physics'] = max_suffix + 1
+            obj.state_data['pcs_next_evgen'] = max_evgen + 1
+            obj.state_data['pcs_next_simu'] = max_simu + 1
+            obj.state_data['pcs_next_reco'] = max_reco + 1
             obj.save()
 
         self.stdout.write(self.style.SUCCESS(

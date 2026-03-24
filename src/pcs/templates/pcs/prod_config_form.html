@@ -1,15 +1,15 @@
 {% extends 'base.html' %}
 
-{% block title %}{% if editing %}Edit {{ config.name }}{% else %}Create Prod Config{% endif %} - EMI{% endblock %}
+{% block title %}{% if editing %}Edit {{ config.name }}{% else %}Create Prod Config{% endif %} - PCS{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'emi:prod_configs_list' %}">Prod Configs</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_list' %}">Prod Configs</a></li>
             {% if editing %}
-            <li class="breadcrumb-item"><a href="{% url 'emi:prod_config_detail' pk=config.pk %}">{{ config.name }}</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_config_detail' pk=config.pk %}">{{ config.name }}</a></li>
             <li class="breadcrumb-item active">Edit</li>
             {% else %}
             <li class="breadcrumb-item active">Create</li>
@@ -167,9 +167,9 @@
 
         <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
         {% if editing %}
-        <a href="{% url 'emi:prod_config_detail' pk=config.pk %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary">Cancel</a>
         {% else %}
-        <a href="{% url 'emi:prod_configs_list' %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'pcs:prod_configs_list' %}" class="btn btn-secondary">Cancel</a>
         {% endif %}
     </form>
 </div>

@@ -1,5 +1,5 @@
 """
-EMI (ePIC Metadata Interface) data models.
+PCS (Physics Configuration System) data models.
 
 Tag lifecycle: draft (editable) → locked (immutable, usable in datasets).
 Tag numbering: physics tags = category.digit * 1000 + N; e/s/r tags increment from 1 via PersistentState.
@@ -29,7 +29,7 @@ class PhysicsCategory(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'emi_physics_category'
+        db_table = 'pcs_physics_category'
         ordering = ['digit']
         verbose_name_plural = 'physics categories'
 
@@ -52,7 +52,7 @@ class PhysicsTag(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'emi_physics_tag'
+        db_table = 'pcs_physics_tag'
         ordering = ['tag_number']
 
     def __str__(self):
@@ -65,7 +65,7 @@ class PhysicsTag(models.Model):
     @classmethod
     def allocate_next(cls, category):
         """Atomically allocate the next tag number: category.digit * 1000 + global suffix."""
-        suffix = _allocate_simple_tag('emi_next_physics')
+        suffix = _allocate_simple_tag('pcs_next_physics')
         return category.digit * 1000 + suffix
 
 
@@ -81,7 +81,7 @@ class EvgenTag(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'emi_evgen_tag'
+        db_table = 'pcs_evgen_tag'
         ordering = ['tag_number']
 
     def __str__(self):
@@ -93,7 +93,7 @@ class EvgenTag(models.Model):
 
     @classmethod
     def allocate_next(cls):
-        return _allocate_simple_tag('emi_next_evgen')
+        return _allocate_simple_tag('pcs_next_evgen')
 
 
 class SimuTag(models.Model):
@@ -108,7 +108,7 @@ class SimuTag(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'emi_simu_tag'
+        db_table = 'pcs_simu_tag'
         ordering = ['tag_number']
 
     def __str__(self):
@@ -120,7 +120,7 @@ class SimuTag(models.Model):
 
     @classmethod
     def allocate_next(cls):
-        return _allocate_simple_tag('emi_next_simu')
+        return _allocate_simple_tag('pcs_next_simu')
 
 
 class RecoTag(models.Model):
@@ -135,7 +135,7 @@ class RecoTag(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'emi_reco_tag'
+        db_table = 'pcs_reco_tag'
         ordering = ['tag_number']
 
     def __str__(self):
@@ -147,7 +147,7 @@ class RecoTag(models.Model):
 
     @classmethod
     def allocate_next(cls):
-        return _allocate_simple_tag('emi_next_reco')
+        return _allocate_simple_tag('pcs_next_reco')
 
 
 class Dataset(models.Model):
@@ -177,7 +177,7 @@ class Dataset(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'emi_dataset'
+        db_table = 'pcs_dataset'
         ordering = ['-created_at']
         unique_together = [('dataset_name', 'block_num')]
 
@@ -267,7 +267,7 @@ class ProdConfig(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'emi_prod_config'
+        db_table = 'pcs_prod_config'
         ordering = ['-updated_at']
 
     def __str__(self):

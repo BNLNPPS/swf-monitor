@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ dataset.dataset_name }} - EMI{% endblock %}
+{% block title %}{{ dataset.dataset_name }} - PCS{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'emi:datasets_list' %}">Datasets</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:datasets_list' %}">Datasets</a></li>
             <li class="breadcrumb-item active">{{ dataset.dataset_name }}</li>
         </ol>
     </nav>
@@ -38,25 +38,25 @@
                 <tbody>
                     <tr>
                         <td>Physics</td>
-                        <td><a href="{% url 'emi:tag_compose' tag_type='p' %}?selected={{ dataset.physics_tag.tag_number }}" title="{{ dataset.physics_tag.description }}">{{ dataset.physics_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?selected={{ dataset.physics_tag.tag_number }}" title="{{ dataset.physics_tag.description }}">{{ dataset.physics_tag.tag_label }}</a></td>
                         <td>{{ dataset.physics_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.physics_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>EvGen</td>
-                        <td><a href="{% url 'emi:tag_compose' tag_type='e' %}?selected={{ dataset.evgen_tag.tag_number }}" title="{{ dataset.evgen_tag.description }}">{{ dataset.evgen_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='e' %}?selected={{ dataset.evgen_tag.tag_number }}" title="{{ dataset.evgen_tag.description }}">{{ dataset.evgen_tag.tag_label }}</a></td>
                         <td>{{ dataset.evgen_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.evgen_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Simulation</td>
-                        <td><a href="{% url 'emi:tag_compose' tag_type='s' %}?selected={{ dataset.simu_tag.tag_number }}" title="{{ dataset.simu_tag.description }}">{{ dataset.simu_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='s' %}?selected={{ dataset.simu_tag.tag_number }}" title="{{ dataset.simu_tag.description }}">{{ dataset.simu_tag.tag_label }}</a></td>
                         <td>{{ dataset.simu_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.simu_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Reconstruction</td>
-                        <td><a href="{% url 'emi:tag_compose' tag_type='r' %}?selected={{ dataset.reco_tag.tag_number }}" title="{{ dataset.reco_tag.description }}">{{ dataset.reco_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='r' %}?selected={{ dataset.reco_tag.tag_number }}" title="{{ dataset.reco_tag.description }}">{{ dataset.reco_tag.tag_label }}</a></td>
                         <td>{{ dataset.reco_tag.description|truncatewords:15 }}</td>
                         <td>{% for k, v in dataset.reco_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
@@ -69,7 +69,7 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">Blocks ({{ blocks|length }})</h5>
-                <form method="post" action="{% url 'emi:dataset_add_block' pk=dataset.pk %}" class="d-inline">
+                <form method="post" action="{% url 'pcs:dataset_add_block' pk=dataset.pk %}" class="d-inline">
                     {% csrf_token %}
                     <button type="submit" class="btn btn-sm btn-outline-primary">Add Block</button>
                 </form>

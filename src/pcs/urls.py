@@ -1,11 +1,11 @@
 from django.urls import path, include
 from . import views
 
-app_name = 'emi'
+app_name = 'pcs'
 
 urlpatterns = [
     # Hub
-    path('', views.emi_hub, name='emi_hub'),
+    path('', views.pcs_hub, name='pcs_hub'),
 
     # Physics Categories
     path('categories/', views.physics_categories_list, name='physics_categories_list'),
@@ -38,5 +38,5 @@ urlpatterns = [
     path('configs/<int:pk>/edit/', views.prod_config_edit, name='prod_config_edit'),
 
     # REST API
-    path('api/', include('emi.api_urls')),
+    path('api/', include('pcs.api_urls')),
 ]

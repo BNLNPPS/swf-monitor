@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 
-{% block title %}Create Dataset - EMI{% endblock %}
+{% block title %}Create Dataset - PCS{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="{% url 'emi:emi_hub' %}">EMI</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'emi:datasets_list' %}">Datasets</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:datasets_list' %}">Datasets</a></li>
             <li class="breadcrumb-item active">Create</li>
         </ol>
     </nav>
@@ -100,7 +100,7 @@
         {% endif %}
 
         <button type="submit" class="btn btn-primary">Create Dataset</button>
-        <a href="{% url 'emi:datasets_list' %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'pcs:datasets_list' %}" class="btn btn-secondary">Cancel</a>
     </form>
 </div>
 

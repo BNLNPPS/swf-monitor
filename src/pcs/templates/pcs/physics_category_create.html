@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Create Physics Category - EMI{% endblock %}
+{% block title %}Create Physics Category - PCS{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
@@ -19,7 +19,7 @@
         </div>
         {% endfor %}
         <button type="submit" class="btn btn-primary">Create Category</button>
-        <a href="{% url 'emi:physics_categories_list' %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'pcs:physics_categories_list' %}" class="btn btn-secondary">Cancel</a>
     </form>
 </div>
 {% endblock %}

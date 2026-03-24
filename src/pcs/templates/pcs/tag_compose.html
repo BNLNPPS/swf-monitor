@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}{{ schema.label }} Tags - EMI{% endblock %}
+{% block title %}{{ schema.label }} Tags - PCS{% endblock %}
 
 {% block content %}
 <style>
@@ -124,10 +124,10 @@
     <div class="tag-browser">
         <div class="tag-browser-header">
             <div class="tag-nav">
-                {% if tag_type != 'p' %}<a href="{% url 'emi:tag_compose' tag_type='p' %}">Physics</a>{% else %}<span class="current">Physics</span>{% endif %}
-                {% if tag_type != 'e' %}<a href="{% url 'emi:tag_compose' tag_type='e' %}">EvGen</a>{% else %}<span class="current">EvGen</span>{% endif %}
-                {% if tag_type != 's' %}<a href="{% url 'emi:tag_compose' tag_type='s' %}">Simu</a>{% else %}<span class="current">Simu</span>{% endif %}
-                {% if tag_type != 'r' %}<a href="{% url 'emi:tag_compose' tag_type='r' %}">Reco</a>{% else %}<span class="current">Reco</span>{% endif %}
+                {% if tag_type != 'p' %}<a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics</a>{% else %}<span class="current">Physics</span>{% endif %}
+                {% if tag_type != 'e' %}<a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen</a>{% else %}<span class="current">EvGen</span>{% endif %}
+                {% if tag_type != 's' %}<a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu</a>{% else %}<span class="current">Simu</span>{% endif %}
+                {% if tag_type != 'r' %}<a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco</a>{% else %}<span class="current">Reco</span>{% endif %}
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
                 <h5 style="margin:0">{{ schema.label }} Tags</h5>
@@ -458,7 +458,7 @@
         if (!tag) return;
         enterCreateMode(tag.category_digit);
         editingTagNumber = tag.tag_number;
-        createPanel.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/edit/`;
+        createPanel.action = `/swf-monitor/pcs/tags/${tagType}/${tag.tag_number}/edit/`;
         createTitle.textContent = 'Edit ' + tag.tag_label;
         fillFormFromTag(tag);
         snapshotOriginals();
@@ -496,9 +496,9 @@
         if (btnEdit) btnEdit.style.display = ownerDraft ? 'inline-block' : 'none';
         // Copy: always visible when logged in
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
-        lockForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/lock/`;
+        lockForm.action = `/swf-monitor/pcs/tags/${tagType}/${tag.tag_number}/lock/`;
         lockForm.style.display = ownerDraft ? 'inline' : 'none';
-        deleteForm.action = `/swf-monitor/emi/tags/${tagType}/${tag.tag_number}/delete/`;
+        deleteForm.action = `/swf-monitor/pcs/tags/${tagType}/${tag.tag_number}/delete/`;
         deleteForm.style.display = ownerDraft ? 'inline' : 'none';
 
         const params = tag.parameters || {};
@@ -818,7 +818,7 @@
         }));
         const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
         try {
-            const resp = await fetch(`/swf-monitor/emi/tags/${tagType}/param-defs/`, {
+            const resp = await fetch(`/swf-monitor/pcs/tags/${tagType}/param-defs/`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                 body: JSON.stringify({defs: defsToSave}),

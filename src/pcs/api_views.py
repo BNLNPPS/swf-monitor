@@ -1,7 +1,7 @@
 """
-EMI REST API ViewSets.
+PCS REST API ViewSets.
 
-Endpoints under /emi/api/. No DELETE on any endpoint — tags and datasets are permanent.
+Endpoints under /pcs/api/. No DELETE on any endpoint — tags and datasets are permanent.
 Tag immutability enforced: PATCH returns 400 on locked tags. Lock is one-way via POST /lock/.
 Tag numbers auto-assigned on POST: physics from category range, e/s/r from PersistentState.
 Dataset creation requires all four tags to be locked.

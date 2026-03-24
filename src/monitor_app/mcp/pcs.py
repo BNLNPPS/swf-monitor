@@ -1,5 +1,5 @@
 """
-EMI (ePIC Metadata Interface) MCP tools — tag browsing and lookup.
+PCS (Physics Configuration System) MCP tools — tag browsing and lookup.
 
 Each tool registers with the MCP server and queries Django ORM via sync_to_async.
 """
@@ -11,7 +11,7 @@ from mcp_server import mcp_server as mcp
 def _list_tags_sync(tag_type, category=None, status=None, creator=None,
                     search=None):
     """List tags with filtering. Returns list of tag summaries."""
-    from emi.schemas import TAG_SCHEMAS, get_tag_model
+    from pcs.schemas import TAG_SCHEMAS, get_tag_model
 
     if tag_type not in TAG_SCHEMAS:
         return {"error": f"Invalid tag_type '{tag_type}'. Use: p, e, s, r"}
@@ -68,7 +68,7 @@ def _get_tag_sync(tag_label):
     except ValueError:
         return {"error": f"Invalid tag number in '{tag_label}'"}
 
-    from emi.schemas import get_tag_model
+    from pcs.schemas import get_tag_model
     model = get_tag_model(prefix)
 
     try:
@@ -95,7 +95,7 @@ def _get_tag_sync(tag_label):
 
 def _search_tags_sync(query, tag_type=None):
     """Search across tag descriptions and parameters."""
-    from emi.schemas import TAG_SCHEMAS, get_tag_model
+    from pcs.schemas import TAG_SCHEMAS, get_tag_model
 
     types = [tag_type] if tag_type else ['p', 'e', 's', 'r']
     results = []
@@ -133,7 +133,7 @@ def _search_tags_sync(query, tag_type=None):
 
 
 @mcp.tool()
-async def emi_list_tags(
+async def pcs_list_tags(
     tag_type: str,
     category: str = None,
     status: str = None,
@@ -141,9 +141,9 @@ async def emi_list_tags(
     search: str = None,
 ) -> dict:
     """
-    List EMI tags (production metadata) with optional filtering.
+    List PCS tags (production metadata) with optional filtering.
 
-    EMI tags capture physics process, event generation, simulation, and
+    PCS tags capture physics process, event generation, simulation, and
     reconstruction configurations for ePIC Monte Carlo production campaigns.
 
     Args:
@@ -164,9 +164,9 @@ async def emi_list_tags(
 
 
 @mcp.tool()
-async def emi_get_tag(tag_label: str) -> dict:
+async def pcs_get_tag(tag_label: str) -> dict:
     """
-    Get full details of a single EMI tag by its label.
+    Get full details of a single PCS tag by its label.
 
     Args:
         tag_label: The tag label, e.g. 'p1001', 'e3', 's1', 'r1'.
@@ -180,12 +180,12 @@ async def emi_get_tag(tag_label: str) -> dict:
 
 
 @mcp.tool()
-async def emi_search_tags(
+async def pcs_search_tags(
     query: str,
     tag_type: str = None,
 ) -> dict:
     """
-    Search across EMI tags by text in label, description, or parameter values.
+    Search across PCS tags by text in label, description, or parameter values.
 
     Use this when you don't know the exact tag label but know a keyword like
     'photoproduction', 'pythia8', 'eAu', or 'minQ2=1000'.
