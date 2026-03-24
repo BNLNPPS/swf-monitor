@@ -1,12 +1,12 @@
 # PCS — Physics Configuration System
 
-PCS manages production metadata for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the metadata configurations that drive Monte Carlo production.
+PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production.
 
 **URL:** `/swf-monitor/pcs/`
 
 ## What It Does
 
-Production metadata is organized as **tags** — named parameter sets that capture the settings for each stage of the simulation pipeline:
+Production configuration is organized as **tags** — named parameter sets that capture the settings for each stage of the simulation pipeline:
 
 | Tag Type | Prefix | What It Captures | Example |
 |----------|--------|-----------------|---------|

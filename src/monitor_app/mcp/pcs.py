@@ -141,7 +141,7 @@ async def pcs_list_tags(
     search: str = None,
 ) -> dict:
     """
-    List PCS tags (production metadata) with optional filtering.
+    List PCS tags (production task configurations) with optional filtering.
 
     PCS tags capture physics process, event generation, simulation, and
     reconstruction configurations for ePIC Monte Carlo production campaigns.

@@ -277,7 +277,7 @@ COMMON QUERIES:
 - Top errors? → panda_error_summary(days=7)
 - Errors for a user? → panda_error_summary(username='someone')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
-- What is PCS? → PCS = Physics Configuration System, manages production metadata tags for MC simulation campaigns
+- What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
 - Reco tags? → pcs_list_tags(tag_type='r')
@@ -286,7 +286,7 @@ COMMON QUERIES:
 - Tags using pythia8? → pcs_search_tags(query='pythia8')
 
 PCS (Physics Configuration System):
-PCS manages production metadata for ePIC Monte Carlo simulation campaigns. Metadata is
+PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are
 organized as tags — named parameter sets for each pipeline stage:
 - Physics tags (p): process, beam energies, species, Q2 range (e.g. p1001 = DIS NC 10x100 ep)
 - EvGen tags (e): event generator and version (e.g. e1 = pythia8 8.310)

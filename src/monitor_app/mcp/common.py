@@ -268,7 +268,7 @@ def get_available_tools_list() -> list:
         # PCS (Physics Configuration System) tools
         {
             "name": "pcs_list_tags",
-            "description": "List PCS (Physics Configuration System) tags — production metadata for MC campaigns. Filter by type (p/e/s/r), category, status, creator, or text.",
+            "description": "List PCS (Physics Configuration System) tags — production task configurations for MC campaigns. Filter by type (p/e/s/r), category, status, creator, or text.",
             "parameters": ["tag_type", "category", "status", "creator", "search", "limit"],
         },
         {

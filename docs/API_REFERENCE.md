@@ -30,7 +30,7 @@ The system uses Django models to track agents, runs, data files, and messaging:
 
 ### PCS Models (Physics Configuration System)
 
-Production metadata management for Monte Carlo simulation campaigns:
+Production task configuration for Monte Carlo simulation campaigns:
 
 - **PhysicsCategory**: Physics areas (DVCS, DIS, SIDIS) with digit-based tag numbering
 - **PhysicsTag**: Physics process parameter sets (p3001, p3002...) with draft/locked lifecycle

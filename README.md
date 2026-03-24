@@ -13,7 +13,7 @@ The application is built on Django infrastructure and comprises three main compo
    * **REST API**: Programmatic interface with token-based authentication and OpenAPI schema
    * **MCP Integration**: Model Context Protocol endpoint for LLM interaction
 
-2. **PCS (`pcs`)**: Physics Configuration System for production metadata management
+2. **PCS (`pcs`)**: Physics Configuration System for production task configuration
    * **Tag System**: Immutable, versioned parameter sets for physics, event generation, simulation, and reconstruction
    * **Dataset Composition**: Standardized naming from locked tags with automatic block management for Rucio
    * **REST API + Web UI**: Full CRUD with draft/locked lifecycle enforcement
@@ -22,7 +22,7 @@ The application is built on Django infrastructure and comprises three main compo
    * **Automatic Listening**: Connects to ActiveMQ automatically when Django starts
    * **SSE REST Forwarding**: Server-Sent Events streaming of ActiveMQ messages via HTTPS
 
-4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, STF files, FastMon files, workflows, metadata tags, and application state
+4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, STF files, FastMon files, workflows, configuration tags, and application state
 
 ## Key Features
 
@@ -45,7 +45,7 @@ The application is built on Django infrastructure and comprises three main compo
 | **[Production Deployment](docs/PRODUCTION_DEPLOYMENT.md)** | Complete Apache production deployment guide | Production operations |
 | **[API Reference](docs/API_REFERENCE.md)** | REST API, WebSocket, database schema, authentication | Integration |
 | **[MCP Integration](docs/MCP.md)** | Model Context Protocol for LLM interaction | Natural language queries |
-| **[PCS](docs/PCS.md)** | Physics Configuration System — tags, datasets, production metadata | Production metadata management |
+| **[PCS](docs/PCS.md)** | Physics Configuration System — tags, datasets, production configuration | Production task configuration |
 | **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 
 ### Quick Links
