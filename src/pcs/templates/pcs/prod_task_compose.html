@@ -43,6 +43,13 @@
                  max-height: 200px; overflow-y: auto; margin-top: .5rem; }
 
 .empty-state { color: #6c757d; font-style: italic; padding: 1rem 0; }
+
+.suggestion-bar { display: none; background: #fff3cd; border: 1px solid #ffc107; border-radius: .3rem;
+    padding: .3rem .6rem; margin-bottom: .5rem; font-size: .8rem; align-items: center; gap: .5rem; }
+.suggestion-bar.visible { display: inline-flex; }
+.suggestion-bar .sg-source { font-weight: 600; color: #664d03; }
+.suggestion-bar .sg-value { color: #664d03; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggestion-bar .btn-apply { font-size: .72rem; padding: .1rem .5rem; }
 </style>
 
 <div class="compose-wrap">
@@ -99,7 +106,10 @@
                 </div>
                 <div class="spec-section" data-section="dataset">
                     <div class="spec-section-header">Dataset <span class="badge bg-secondary" id="dataset-badge">not selected</span></div>
-                    <div class="spec-section-body"><div id="dataset-display" class="empty-state">Select a dataset from the left pane.</div></div>
+                    <div class="spec-section-body">
+                        <div class="suggestion-bar" id="dataset-suggestion"></div>
+                        <div id="dataset-display" class="empty-state">Select a dataset from the left pane.</div>
+                    </div>
                 </div>
                 <div class="spec-section collapsed" data-section="physics">
                     <div class="spec-section-header">Physics Configuration <span class="badge bg-secondary" id="physics-badge">from dataset</span></div>
@@ -107,7 +117,10 @@
                 </div>
                 <div class="spec-section" data-section="config">
                     <div class="spec-section-header">Production Config <span class="badge bg-secondary" id="config-badge">not selected</span></div>
-                    <div class="spec-section-body"><div id="config-display" class="empty-state">Select a config from the left pane.</div></div>
+                    <div class="spec-section-body">
+                        <div class="suggestion-bar" id="config-suggestion"></div>
+                        <div id="config-display" class="empty-state">Select a config from the left pane.</div>
+                    </div>
                 </div>
                 <div class="spec-section" data-section="submission">
                     <div class="spec-section-header">Submission</div>
@@ -212,6 +225,8 @@
         document.getElementById('task-name').value = '';
         document.getElementById('task-description').value = '';
         document.getElementById('task-csv').value = '';
+        hideSuggestion(datasetSuggestion);
+        hideSuggestion(configSuggestion);
         document.getElementById('dataset-display').innerHTML = '<div class="empty-state">Select a dataset from the left pane.</div>';
         document.getElementById('config-display').innerHTML = '<div class="empty-state">Select a config from the left pane.</div>';
         document.getElementById('physics-display').innerHTML = '';
@@ -308,13 +323,49 @@
         });
     }
 
+    // ── Suggestion bars ──
+    const datasetSuggestion = document.getElementById('dataset-suggestion');
+    const configSuggestion = document.getElementById('config-suggestion');
+
+    function showSuggestion(barEl, sourceLabel, value, onApply) {
+        barEl.innerHTML = `<span class="sg-source">${sourceLabel}:</span>
+            <span class="sg-value">${value}</span>
+            <button type="button" class="btn btn-warning btn-sm btn-apply">Apply</button>`;
+        barEl.classList.add('visible');
+        barEl.querySelector('.btn-apply').addEventListener('click', () => {
+            onApply();
+            barEl.classList.remove('visible');
+        });
+    }
+
+    function hideSuggestion(barEl) { barEl.classList.remove('visible'); }
+
     // ── Item click ──
     function onItemClick(type, id) {
         selectedItemId = id;
         if (mode === 'compose') {
-            // In compose mode, clicks apply to the task being built
-            if (type === 'dataset') applyDatasetToCompose(id);
-            else if (type === 'config') applyConfigToCompose(id);
+            // In compose mode: show suggestion bars for deltas
+            if (type === 'dataset') {
+                if (!composeDatasetId) {
+                    // Nothing set yet, apply directly
+                    applyDatasetToCompose(id);
+                } else if (id !== composeDatasetId) {
+                    // Different dataset — show suggestion
+                    const ds = allDatasets.find(d => d.id === id);
+                    if (ds) showSuggestion(datasetSuggestion, ds.physics_tag.label,
+                        ds.dataset_name, () => applyDatasetToCompose(id));
+                }
+                // Same dataset — no-op
+            } else if (type === 'config') {
+                if (!composeConfigId) {
+                    applyConfigToCompose(id);
+                } else if (id !== composeConfigId) {
+                    const cfg = allConfigs.find(c => c.id === id);
+                    if (cfg) showSuggestion(configSuggestion, 'Config',
+                        cfg.name, () => applyConfigToCompose(id));
+                }
+            }
+            // task clicks in compose mode are no-ops
         } else {
             // In browse mode, show detail on right
             if (type === 'dataset') showDatasetDetail(id);
@@ -436,6 +487,7 @@
     function applyDatasetToCompose(id) {
         const ds = allDatasets.find(d => d.id === id);
         if (!ds) return;
+        hideSuggestion(datasetSuggestion);
         composeDatasetId = id; composeDataset = ds;
         document.getElementById('dataset-badge').textContent = ds.dataset_name;
         document.getElementById('dataset-badge').className = 'badge bg-success';
@@ -462,6 +514,7 @@
     function applyConfigToCompose(id) {
         const cfg = allConfigs.find(c => c.id === id);
         if (!cfg) return;
+        hideSuggestion(configSuggestion);
         composeConfigId = id; composeConfig = cfg;
         document.getElementById('config-badge').textContent = cfg.name;
         document.getElementById('config-badge').className = 'badge bg-success';
