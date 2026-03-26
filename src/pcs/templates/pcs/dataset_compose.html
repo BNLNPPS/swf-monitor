@@ -1,0 +1,304 @@
+{% extends 'base.html' %}
+
+{% block title %}Datasets - PCS{% endblock %}
+
+{% block content %}
+<style>
+.compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); }
+.browse-panel { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; }
+.right-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
+.panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; }
+
+.browser-search { width: 100%; padding: .35rem .6rem; border: 1px solid #dee2e6;
+                   border-radius: .375rem; font-size: .85rem; margin-bottom: .5rem; }
+.filter-row { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
+.filter-pill { padding: .2rem .6rem; border: 1px solid #dee2e6; border-radius: 1rem;
+               background: #fff; font-size: .75rem; cursor: pointer; color: #495057; user-select: none; }
+.filter-pill.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+
+.item-list { flex: 1; overflow-y: auto; border: 1px solid #dee2e6; border-radius: .375rem; }
+.item-entry { padding: .5rem .75rem; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: .82rem; }
+.item-entry:hover { background: #f8f9fa; }
+.item-entry.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
+.item-label { font-weight: 600; }
+.item-meta { color: #6c757d; font-size: .75rem; }
+.item-tags { font-size: .75rem; color: #0d6efd; }
+
+.detail-section { margin-bottom: 1rem; }
+.params-grid { display: grid; grid-template-columns: auto 1fr; gap: .2rem .75rem; font-size: .82rem; }
+.params-grid .pk { color: #6c757d; }
+.params-grid .pv { font-weight: 500; }
+.empty-state { color: #6c757d; font-style: italic; padding: 2rem 0; text-align: center; }
+</style>
+
+<div class="compose-wrap">
+    <!-- LEFT: Dataset Browser -->
+    <div class="browse-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+            <strong style="font-size:.9rem;">Datasets</strong>
+            <span class="badge bg-secondary" id="count-badge">0</span>
+        </div>
+        <input type="text" class="browser-search" id="search" placeholder="Search datasets...">
+        <div class="filter-row" id="filters"></div>
+        <div class="item-list" id="item-list" tabindex="0"></div>
+    </div>
+
+    <!-- RIGHT: Detail or Create -->
+    <div class="right-panel">
+        <div class="panel-header">
+            <h4 id="panel-title" style="margin:0;">Select a dataset</h4>
+            <div id="panel-buttons">
+                {% if username %}
+                <button class="btn btn-primary btn-sm" id="btn-new" style="display:inline-block;">New Dataset</button>
+                {% endif %}
+                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;">Create</button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <!-- VIEW MODE -->
+            <div id="view-panel">
+                <div class="empty-state" id="view-empty">Click a dataset on the left to view its details.</div>
+                <div id="view-content" style="display:none;"></div>
+            </div>
+            <!-- CREATE MODE -->
+            <div id="create-panel" style="display:none;">
+                <form id="create-form" method="post" action="{% url 'pcs:datasets_compose' %}">
+                    {% csrf_token %}
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Scope</strong></label>
+                            <input type="text" name="scope" class="form-control form-control-sm" value="group.EIC">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Detector Version</strong></label>
+                            <input type="text" name="detector_version" class="form-control form-control-sm" placeholder="26.02.0">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Detector Config</strong></label>
+                            <input type="text" name="detector_config" class="form-control form-control-sm" placeholder="epic_craterlake">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Physics Tag</strong></label>
+                            <select name="physics_tag" class="form-select form-select-sm" onchange="updatePreview()">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>EvGen Tag</strong></label>
+                            <select name="evgen_tag" class="form-select form-select-sm" onchange="updatePreview()">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Simu Tag</strong></label>
+                            <select name="simu_tag" class="form-select form-select-sm" onchange="updatePreview()">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Reco Tag</strong></label>
+                            <select name="reco_tag" class="form-select form-select-sm" onchange="updatePreview()">
+                                <option value="">Select...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Name Preview</strong></label>
+                        <div id="name-preview" class="form-control form-control-sm bg-light" style="font-family:monospace;min-height:32px;"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Description</strong></label>
+                        <textarea name="description" class="form-control form-control-sm" rows="2"></textarea>
+                    </div>
+                    <input type="hidden" name="created_by" value="{{ username }}">
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const allDatasets = {{ datasets_json|safe }};
+    const allTags = {{ tags_json|safe }};
+    const initialSelected = {{ selected|default:"null" }};
+    let selectedId = null;
+    let mode = 'view'; // 'view' or 'create'
+
+    const itemList = document.getElementById('item-list');
+    const searchBox = document.getElementById('search');
+    const filterRow = document.getElementById('filters');
+
+    // Build detector_config filters
+    const configs = [...new Set(allDatasets.map(d => d.detector_config))];
+    if (configs.length > 1) {
+        let filterHtml = '<span class="filter-pill active" data-filter="">All</span>';
+        configs.forEach(c => { filterHtml += `<span class="filter-pill" data-filter="${c}">${c}</span>`; });
+        filterRow.innerHTML = filterHtml;
+        filterRow.querySelectorAll('.filter-pill').forEach(p => {
+            p.addEventListener('click', function() {
+                filterRow.querySelectorAll('.filter-pill').forEach(x => x.classList.remove('active'));
+                this.classList.add('active');
+                renderList();
+            });
+        });
+    }
+
+    // Populate tag selects in create form
+    ['p','e','s','r'].forEach(tt => {
+        const nameMap = {p:'physics_tag', e:'evgen_tag', s:'simu_tag', r:'reco_tag'};
+        const sel = document.querySelector(`select[name="${nameMap[tt]}"]`);
+        if (!sel) return;
+        (allTags[tt] || []).forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.id;
+            opt.textContent = `${t.label} — ${t.description}`;
+            opt.dataset.label = t.label;
+            sel.appendChild(opt);
+        });
+    });
+
+    function getActiveFilter() {
+        const active = filterRow.querySelector('.filter-pill.active');
+        return active ? active.dataset.filter : '';
+    }
+
+    function renderList() {
+        const q = searchBox.value.toLowerCase();
+        const cf = getActiveFilter();
+        const filtered = allDatasets.filter(d => {
+            if (cf && d.detector_config !== cf) return false;
+            if (!q) return true;
+            return d.dataset_name.toLowerCase().includes(q) ||
+                   d.physics_tag.label.toLowerCase().includes(q) ||
+                   d.physics_tag.description.toLowerCase().includes(q) ||
+                   d.evgen_tag.label.toLowerCase().includes(q) ||
+                   d.description.toLowerCase().includes(q) ||
+                   d.created_by.toLowerCase().includes(q);
+        });
+        document.getElementById('count-badge').textContent = filtered.length;
+        itemList.innerHTML = filtered.map(d =>
+            `<div class="item-entry${d.id === selectedId ? ' selected' : ''}" data-id="${d.id}">
+                <div class="item-label">${d.dataset_name}</div>
+                <div class="item-tags">${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}</div>
+                <div class="item-meta">${d.created_by} | ${d.created_at}</div>
+            </div>`
+        ).join('') || '<div class="empty-state">No datasets found.</div>';
+        itemList.querySelectorAll('.item-entry').forEach(el => {
+            el.addEventListener('click', () => selectDataset(parseInt(el.dataset.id)));
+        });
+    }
+    searchBox.addEventListener('input', renderList);
+
+    function selectDataset(id) {
+        if (mode === 'create') return; // don't switch while creating
+        selectedId = id;
+        const ds = allDatasets.find(d => d.id === id);
+        if (!ds) return;
+        renderList();
+        document.getElementById('panel-title').textContent = ds.dataset_name;
+        document.getElementById('view-empty').style.display = 'none';
+        const vc = document.getElementById('view-content');
+        vc.style.display = 'block';
+
+        let tagsHtml = '';
+        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'],
+         ['Simulation', ds.simu_tag, 's'], ['Reconstruction', ds.reco_tag, 'r']].forEach(([label, tag, tt]) => {
+            let paramsHtml = Object.entries(tag.parameters || {}).filter(([,v])=>v).map(([k,v]) =>
+                `<code>${k}</code>=${v}`).join(', ');
+            tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td>
+                <td>${tag.description || ''}</td><td style="font-size:.78rem;">${paramsHtml}</td></tr>`;
+        });
+
+        vc.innerHTML = `
+            <div class="detail-section">
+                <table class="table table-sm table-bordered" style="font-size:.82rem;">
+                    <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                    <tr><td><strong>Scope</strong></td><td>${ds.scope}</td></tr>
+                    <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                    <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
+                    <tr><td><strong>Created By</strong></td><td>${ds.created_by}</td></tr>
+                    <tr><td><strong>Created</strong></td><td>${ds.created_at}</td></tr>
+                    ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
+                </table>
+            </div>
+            <div class="detail-section">
+                <h6>Tags</h6>
+                <table class="table table-sm table-bordered" style="font-size:.82rem;">
+                    <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+                    <tbody>${tagsHtml}</tbody>
+                </table>
+            </div>`;
+    }
+
+    // Mode switching
+    const btnNew = document.getElementById('btn-new');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnSave = document.getElementById('btn-save');
+    const viewPanel = document.getElementById('view-panel');
+    const createPanel = document.getElementById('create-panel');
+
+    if (btnNew) btnNew.addEventListener('click', () => enterCreateMode());
+    btnCancel.addEventListener('click', () => enterViewMode());
+    btnSave.addEventListener('click', () => document.getElementById('create-form').submit());
+
+    function enterCreateMode() {
+        mode = 'create';
+        viewPanel.style.display = 'none';
+        createPanel.style.display = 'block';
+        if (btnNew) btnNew.style.display = 'none';
+        btnCancel.style.display = 'inline-block';
+        btnSave.style.display = 'inline-block';
+        document.getElementById('panel-title').textContent = 'New Dataset';
+        updatePreview();
+    }
+
+    function enterViewMode() {
+        mode = 'view';
+        createPanel.style.display = 'none';
+        viewPanel.style.display = 'block';
+        if (btnNew) btnNew.style.display = 'inline-block';
+        btnCancel.style.display = 'none';
+        btnSave.style.display = 'none';
+        document.getElementById('panel-title').textContent = selectedId ? allDatasets.find(d=>d.id===selectedId)?.dataset_name || 'Select a dataset' : 'Select a dataset';
+    }
+
+    // Keyboard nav
+    itemList.addEventListener('keydown', function(e) {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        const entries = Array.from(itemList.querySelectorAll('.item-entry'));
+        if (!entries.length) return;
+        const idx = entries.findIndex(el => el.classList.contains('selected'));
+        let next = e.key === 'ArrowDown' ? (idx < entries.length - 1 ? idx + 1 : 0) : (idx > 0 ? idx - 1 : entries.length - 1);
+        selectDataset(parseInt(entries[next].dataset.id));
+        entries[next].scrollIntoView({block: 'nearest'});
+    });
+
+    // Init
+    renderList();
+    if (initialSelected) selectDataset(initialSelected);
+    else if (allDatasets.length) selectDataset(allDatasets[0].id);
+})();
+
+function updatePreview() {
+    function selLabel(name) {
+        const sel = document.querySelector(`select[name="${name}"]`);
+        const opt = sel.options[sel.selectedIndex];
+        return opt && opt.dataset.label ? opt.dataset.label : '?';
+    }
+    const scope = document.querySelector('input[name="scope"]').value || '?';
+    const ver = document.querySelector('input[name="detector_version"]').value || '?';
+    const cfg = document.querySelector('input[name="detector_config"]').value || '?';
+    document.getElementById('name-preview').textContent =
+        `${scope}.${ver}.${cfg}.${selLabel('physics_tag')}.${selLabel('evgen_tag')}.${selLabel('simu_tag')}.${selLabel('reco_tag')}`;
+}
+document.querySelectorAll('#create-panel input[type="text"]').forEach(el => el.addEventListener('input', updatePreview));
+</script>
+{% endblock %}

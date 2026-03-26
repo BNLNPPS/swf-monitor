@@ -452,6 +452,70 @@ def tag_edit(request, tag_type, tag_number):
 
 # ── Datasets ──────────────────────────────────────────────────────
 
+def datasets_compose(request):
+    """Two-pane browse/create UI for datasets."""
+    if request.method == 'POST' and request.user.is_authenticated:
+        form = DatasetForm(request.POST)
+        if form.is_valid():
+            cd = form.cleaned_data
+            ds = Dataset(
+                scope=cd['scope'],
+                detector_version=cd['detector_version'],
+                detector_config=cd['detector_config'],
+                physics_tag=cd['physics_tag'],
+                evgen_tag=cd['evgen_tag'],
+                simu_tag=cd['simu_tag'],
+                reco_tag=cd['reco_tag'],
+                description=cd.get('description', ''),
+                created_by=cd['created_by'],
+            )
+            ds.save()
+            messages.success(request, f"Dataset created: {ds.did}")
+            return redirect(f"{reverse('pcs:datasets_compose')}?selected={ds.pk}")
+
+    qs = Dataset.objects.filter(block_num=1).select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+    ).order_by('-created_at')
+    datasets_data = []
+    for ds in qs:
+        datasets_data.append({
+            'id': ds.id,
+            'dataset_name': ds.dataset_name,
+            'did': ds.did,
+            'scope': ds.scope,
+            'detector_version': ds.detector_version,
+            'detector_config': ds.detector_config,
+            'description': ds.description,
+            'blocks': ds.blocks,
+            'created_by': ds.created_by,
+            'created_at': ds.created_at.strftime('%Y-%m-%d %H:%M'),
+            'physics_tag': {'id': ds.physics_tag_id, 'label': ds.physics_tag.tag_label,
+                            'description': ds.physics_tag.description, 'parameters': ds.physics_tag.parameters},
+            'evgen_tag': {'id': ds.evgen_tag_id, 'label': ds.evgen_tag.tag_label,
+                          'description': ds.evgen_tag.description, 'parameters': ds.evgen_tag.parameters},
+            'simu_tag': {'id': ds.simu_tag_id, 'label': ds.simu_tag.tag_label,
+                         'description': ds.simu_tag.description, 'parameters': ds.simu_tag.parameters},
+            'reco_tag': {'id': ds.reco_tag_id, 'label': ds.reco_tag.tag_label,
+                         'description': ds.reco_tag.description, 'parameters': ds.reco_tag.parameters},
+        })
+
+    # Tag options for creation form
+    tags_data = {}
+    for ttype, model in TAG_MODELS_MAP.items():
+        tags_data[ttype] = [
+            {'id': t.id, 'label': t.tag_label, 'description': t.description, 'status': t.status}
+            for t in model.objects.order_by('tag_number')
+        ]
+
+    context = {
+        'datasets_json': json.dumps(datasets_data),
+        'tags_json': json.dumps(tags_data),
+        'selected': request.GET.get('selected'),
+        'username': request.user.username if request.user.is_authenticated else '',
+    }
+    return render(request, 'pcs/dataset_compose.html', context)
+
+
 def datasets_list(request):
     columns = [
         {'name': 'dataset_name', 'title': 'Dataset Name', 'orderable': True},
@@ -577,6 +641,59 @@ def dataset_add_block(request, pk):
 
 
 # ── Production Configs ────────────────────────────────────────────
+
+def prod_configs_compose(request):
+    """Two-pane browse/create/edit UI for production configs."""
+    if request.method == 'POST' and request.user.is_authenticated:
+        editing_pk = request.POST.get('editing_pk')
+        if editing_pk:
+            instance = get_object_or_404(ProdConfig, pk=editing_pk)
+            form = ProdConfigForm(request.POST, instance=instance)
+        else:
+            form = ProdConfigForm(request.POST)
+        if form.is_valid():
+            pc = form.save()
+            messages.success(request, f"Config '{pc.name}' {'updated' if editing_pk else 'created'}.")
+            return redirect(f"{reverse('pcs:prod_configs_compose')}?selected={pc.pk}")
+
+    qs = ProdConfig.objects.order_by('-updated_at')
+    configs_data = []
+    for pc in qs:
+        configs_data.append({
+            'id': pc.id,
+            'name': pc.name,
+            'description': pc.description,
+            'bg_mixing': pc.bg_mixing,
+            'bg_cross_section': pc.bg_cross_section,
+            'bg_evtgen_file': pc.bg_evtgen_file,
+            'copy_reco': pc.copy_reco,
+            'copy_full': pc.copy_full,
+            'copy_log': pc.copy_log,
+            'use_rucio': pc.use_rucio,
+            'jug_xl_tag': pc.jug_xl_tag,
+            'container_image': pc.container_image,
+            'target_hours_per_job': str(pc.target_hours_per_job) if pc.target_hours_per_job else '',
+            'events_per_task': pc.events_per_task,
+            'panda_site': pc.panda_site,
+            'panda_queue': pc.panda_queue,
+            'panda_working_group': pc.panda_working_group,
+            'panda_resource_type': pc.panda_resource_type,
+            'rucio_rse': pc.rucio_rse,
+            'rucio_replication_rules': pc.rucio_replication_rules,
+            'condor_template': pc.condor_template,
+            'data': pc.data or {},
+            'created_by': pc.created_by,
+            'created_at': pc.created_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': pc.updated_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    context = {
+        'configs_json': json.dumps(configs_data),
+        'selected': request.GET.get('selected'),
+        'username': request.user.username if request.user.is_authenticated else '',
+    }
+    return render(request, 'pcs/prod_config_compose.html', context)
+
 
 def prod_configs_list(request):
     columns = [

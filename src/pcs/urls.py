@@ -24,6 +24,7 @@ urlpatterns = [
     path('tags/<str:tag_type>/<int:tag_number>/lock/', views.tag_lock, name='tag_lock'),
 
     # Datasets
+    path('datasets/compose/', views.datasets_compose, name='datasets_compose'),
     path('datasets/', views.datasets_list, name='datasets_list'),
     path('datasets/datatable/', views.datasets_datatable_ajax, name='datasets_datatable_ajax'),
     path('datasets/create/', views.dataset_create, name='dataset_create'),
@@ -31,6 +32,7 @@ urlpatterns = [
     path('datasets/<int:pk>/add-block/', views.dataset_add_block, name='dataset_add_block'),
 
     # Production Configs
+    path('configs/compose/', views.prod_configs_compose, name='prod_configs_compose'),
     path('configs/', views.prod_configs_list, name='prod_configs_list'),
     path('configs/datatable/', views.prod_configs_datatable_ajax, name='prod_configs_datatable_ajax'),
     path('configs/create/', views.prod_config_create, name='prod_config_create'),
