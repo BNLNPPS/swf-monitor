@@ -108,6 +108,19 @@
         </div>
     </div>
 
+    {% if config.data %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Submission Parameters</h5>
+            <table class="table table-sm table-bordered mb-0">
+                {% for key, value in config.data.items %}
+                <tr><td style="width:40%"><strong>{{ key }}</strong></td><td><code>{{ value }}</code></td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     {% if config.condor_template %}
     <div class="card mb-3">
         <div class="card-body">

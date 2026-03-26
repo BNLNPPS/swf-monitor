@@ -165,6 +165,15 @@
             </div>
         </fieldset>
 
+        <fieldset class="mb-4">
+            <legend class="h5">Submission Parameters</legend>
+            <div class="mb-3">
+                <label for="id_data" class="form-label">Additional Parameters (JSON)</label>
+                {{ form.data }}
+                <small class="text-muted">Keys: transformation, processing_type, prod_source_label, vo, n_jobs, events_per_job, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope</small>
+            </div>
+        </fieldset>
+
         <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
         {% if editing %}
         <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary">Cancel</a>

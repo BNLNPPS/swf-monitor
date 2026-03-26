@@ -92,12 +92,15 @@ class ProdConfigForm(forms.ModelForm):
             'condor_template',
             'panda_site', 'panda_queue', 'panda_working_group', 'panda_resource_type',
             'rucio_rse', 'rucio_replication_rules',
+            'data',
             'created_by',
         ]
         widgets = {
             'description': forms.Textarea(attrs={'rows': 3}),
             'condor_template': forms.Textarea(attrs={'rows': 10, 'style': 'font-family: monospace;'}),
             'rucio_replication_rules': forms.Textarea(attrs={'rows': 4, 'style': 'font-family: monospace;'}),
+            'data': forms.Textarea(attrs={'rows': 8, 'style': 'font-family: monospace;',
+                                          'placeholder': '{\n  "transformation": "runGen-00-00-02",\n  "processing_type": "epicproduction",\n  "n_jobs": 1000,\n  "events_per_job": 100,\n  "corecount": 1\n}'}),
         }
 
     def __init__(self, *args, **kwargs):

@@ -114,7 +114,7 @@ Tags support list, create, get, update (draft only), and lock. Replace `{type}` 
 
 Physics tag creation requires a `category` field (digit). Tag numbers are always auto-assigned.
 
-## Datasets (TBD)
+## Datasets
 
 A dataset composes four locked tags with detector version information into a standardized name:
 
@@ -124,16 +124,17 @@ A dataset composes four locked tags with detector version information into a sta
 
 Example: `group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1`
 
-The Rucio DID adds scope prefix and block suffix: `group.EIC:...b1`
+The Rucio DID includes scope prefix and block suffix: `group.EIC:...p3001.e1.s1.r1.b1`
 
-Rucio limits datasets to 100k files. PCS manages automatic subdivision into blocks (`.b1`, `.b2`, etc.).
+Block `.b1` is always present. Rucio limits datasets to 100k files; PCS manages automatic subdivision into blocks (`.b1`, `.b2`, etc.) as needed.
 
-The data model is in place but the dataset composition UI and workflows are not yet built.
+The **task name** is the dataset name (without the `.bN` block suffix). This is what appears in PanDA as the task identifier.
 
-## Production Configs (TBD)
+## Production Configs
 
-A production config is a reusable template capturing everything needed to build a submit command beyond what tags and datasets define:
+A production config is a reusable template capturing everything needed to build a submit command beyond what tags and datasets define.
 
+**Dedicated fields** (DB columns):
 - **Background mixing**: Enable/disable, cross section, EvtGen file
 - **Output control**: Which output files to copy (reco, full, log), Rucio usage
 - **Software stack**: JUG_XL tag, container image
@@ -142,9 +143,25 @@ A production config is a reusable template capturing everything needed to build 
 - **PanDA overrides**: Site, queue, working group, resource type
 - **Rucio overrides**: RSE, replication rules
 
-Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
+**Submission parameters** (JSON `data` field, extensible without migrations):
 
-The data model and basic CRUD API are in place but the production workflow UI is not yet built.
+| Key | Example | Purpose |
+|-----|---------|---------|
+| `transformation` | `runGen-00-00-02` | PanDA TRF script name/version |
+| `processing_type` | `epicproduction` | PanDA classification |
+| `prod_source_label` | `managed` | PanDA authorization (managed/test) |
+| `vo` | `wlcg` | Virtual organization |
+| `n_jobs` | `1000` | Jobs per task submission |
+| `events_per_job` | `100` | Events per individual job |
+| `events_per_file` | `1000` | Events per output file |
+| `files_per_job` | `1` | Output files per job |
+| `corecount` | `1` | Cores per job |
+| `no_build` | `true` | Skip PanDA build step |
+| `skip_scout` | `true` | Skip scout jobs |
+| `exec_command` | `./run.sh` | Payload command (--exec) |
+| `scope` | `group.EIC` | Rucio scope for submission |
+
+Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
 
 ## MCP Tools (TBD)
 

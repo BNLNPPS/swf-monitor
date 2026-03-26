@@ -203,11 +203,17 @@ class Dataset(models.Model):
         super().save(*args, **kwargs)
 
     def build_dataset_name(self):
+        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}"""
         return (
             f"{self.scope}.{self.detector_version}.{self.detector_config}"
             f".{self.physics_tag.tag_label}.{self.evgen_tag.tag_label}"
             f".{self.simu_tag.tag_label}.{self.reco_tag.tag_label}"
         )
+
+    @property
+    def task_name(self):
+        """Task name = dataset_name (without .bN block suffix)."""
+        return self.dataset_name
 
 
 class ProdConfig(models.Model):
@@ -261,6 +267,13 @@ class ProdConfig(models.Model):
                                  help_text="Rucio Storage Element for output")
     rucio_replication_rules = models.JSONField(null=True, blank=True,
                                                help_text="Rucio replication rule definitions")
+
+    # Extensible submission parameters (no migration needed for new keys).
+    # Keys: transformation, processing_type, prod_source_label, vo,
+    # n_jobs, events_per_job, events_per_file, files_per_job,
+    # corecount, no_build, skip_scout, exec_command, scope
+    data = models.JSONField(null=True, blank=True,
+                            help_text="Additional submission parameters (JSON)")
 
     created_by = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
