@@ -575,19 +575,42 @@
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
         if (t.description) html += `<p>${t.description}</p>`;
-        html += `<div class="row"><div class="col-md-6">
-            <h6>Dataset</h6>
+
+        // Dataset + detector info
+        html += `<h6>Dataset</h6>
             <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                <tr><td style="width:35%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
-                ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
-                <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label} ${ds.evgen_tag.label} ${ds.simu_tag.label} ${ds.reco_tag.label}</td></tr>` : ''}
-            </table></div><div class="col-md-6">
-            <h6>Config</h6>
-            <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                <tr><td style="width:35%"><strong>Name</strong></td><td>${t.prod_config_name}</td></tr>
-                ${cfg ? `<tr><td><strong>JUG_XL</strong></td><td>${cfg.jug_xl_tag||'-'}</td></tr>
-                <tr><td><strong>BG Mixing</strong></td><td>${cfg.bg_mixing?'Yes':'No'}</td></tr>` : ''}
-            </table></div></div>`;
+                <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
+                ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
+            </table>`;
+
+        // Expanded tags with parameters
+        if (ds) {
+            let tagsHtml = '';
+            [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
+                const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
+                tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+            });
+            html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+                <tbody>${tagsHtml}</tbody></table>`;
+        }
+
+        // Config summary
+        html += `<h6>Config: ${t.prod_config_name}</h6>`;
+        if (cfg) {
+            function cfgRow(l,v) { return `<tr><td style="width:35%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
+            let cfgRows = cfgRow('JUG_XL', cfg.jug_xl_tag) + cfgRow('Container', cfg.container_image ? `<code>${cfg.container_image}</code>` : '-')
+                + cfgRow('BG Mixing', cfg.bg_mixing?'Yes':'No') + cfgRow('Copy', [cfg.copy_reco?'Reco':'', cfg.copy_full?'Full':'', cfg.copy_log?'Log':''].filter(Boolean).join(', ')||'-')
+                + cfgRow('Rucio', cfg.use_rucio?`Yes${cfg.rucio_rse?' ('+cfg.rucio_rse+')':''}` : 'No')
+                + cfgRow('Hours/Job', cfg.target_hours_per_job) + cfgRow('Events/Task', cfg.events_per_task);
+            if (cfg.panda_site) cfgRows += cfgRow('PanDA Site', cfg.panda_site);
+            if (cfg.panda_working_group) cfgRows += cfgRow('Working Group', cfg.panda_working_group);
+            if (cfg.data && Object.keys(cfg.data).length) {
+                Object.entries(cfg.data).forEach(([k,v]) => { cfgRows += cfgRow('data.'+k, `<code>${v}</code>`); });
+            }
+            html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">${cfgRows}</table>`;
+        }
+
         if (t.csv_file) html += `<p><strong>CSV:</strong> <code>${t.csv_file}</code></p>`;
         if (t.condor_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">Condor</strong>
             <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
