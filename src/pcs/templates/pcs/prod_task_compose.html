@@ -50,6 +50,15 @@
 .suggestion-bar .sg-source { font-weight: 600; color: #664d03; }
 .suggestion-bar .sg-value { color: #664d03; max-width: 350px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggestion-bar .btn-apply { font-size: .72rem; padding: .1rem .5rem; }
+
+.field-diff-container { margin-top: .25rem; }
+.field-diff { display: flex; align-items: center; gap: .4rem; padding: .2rem .5rem; margin-bottom: .2rem;
+    background: #fff3cd; border: 1px solid #ffeeba; border-radius: .25rem; font-size: .78rem; }
+.fd-label { font-weight: 600; color: #664d03; min-width: 100px; }
+.fd-current { color: #6c757d; text-decoration: line-through; }
+.fd-arrow { color: #664d03; }
+.fd-new { font-weight: 600; color: #664d03; }
+.fd-apply { font-size: .68rem; padding: .05rem .4rem; margin-left: auto; }
 </style>
 
 <div class="compose-wrap">
@@ -76,9 +85,10 @@
             <h4 id="panel-title" style="margin:0;">Select an item</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-outline-secondary btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 <button class="btn btn-outline-secondary btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 {% endif %}
+                <button class="btn btn-outline-warning btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Save Task</button>
             </div>
@@ -178,6 +188,7 @@
     const btnNewTask = document.getElementById('btn-new-task');
     const btnEditTask = document.getElementById('btn-edit-task');
     const btnCopyTask = document.getElementById('btn-copy-task');
+    const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
 
@@ -225,8 +236,7 @@
         document.getElementById('task-name').value = '';
         document.getElementById('task-description').value = '';
         document.getElementById('task-csv').value = '';
-        hideSuggestion(datasetSuggestion);
-        hideSuggestion(configSuggestion);
+        clearAllSuggestions();
         document.getElementById('dataset-display').innerHTML = '<div class="empty-state">Select a dataset from the left pane.</div>';
         document.getElementById('config-display').innerHTML = '<div class="empty-state">Select a config from the left pane.</div>';
         document.getElementById('physics-display').innerHTML = '';
@@ -323,49 +333,154 @@
         });
     }
 
-    // ── Suggestion bars ──
+    // ── Suggestion / diff system ──
     const datasetSuggestion = document.getElementById('dataset-suggestion');
     const configSuggestion = document.getElementById('config-suggestion');
 
-    function showSuggestion(barEl, sourceLabel, value, onApply) {
-        barEl.innerHTML = `<span class="sg-source">${sourceLabel}:</span>
-            <span class="sg-value">${value}</span>
-            <button type="button" class="btn btn-warning btn-sm btn-apply">Apply</button>`;
-        barEl.classList.add('visible');
-        barEl.querySelector('.btn-apply').addEventListener('click', () => {
-            onApply();
-            barEl.classList.remove('visible');
-        });
+    function clearAllSuggestions() {
+        datasetSuggestion.classList.remove('visible');
+        datasetSuggestion.innerHTML = '';
+        configSuggestion.classList.remove('visible');
+        configSuggestion.innerHTML = '';
+        // Remove inline diff highlights
+        document.querySelectorAll('.field-diff').forEach(el => el.remove());
+        btnClearSuggestions.style.display = 'none';
     }
 
-    function hideSuggestion(barEl) { barEl.classList.remove('visible'); }
+    function showClearButton() { btnClearSuggestions.style.display = 'inline-block'; }
+
+    // Show per-field config diffs with Apply buttons
+    function showConfigDiffs(browsedCfg) {
+        if (!composeConfig || !browsedCfg || browsedCfg.id === composeConfigId) return;
+        const cur = composeConfig;
+
+        // Top-level suggestion: replace entire config
+        configSuggestion.innerHTML = `<span class="sg-source">Replace with ${browsedCfg.name}:</span>
+            <button type="button" class="btn btn-warning btn-sm btn-apply" id="cfg-apply-all">Apply All</button>`;
+        configSuggestion.classList.add('visible');
+        document.getElementById('cfg-apply-all').addEventListener('click', () => {
+            applyConfigToCompose(browsedCfg.id);
+            clearAllSuggestions();
+        });
+
+        // Per-field diffs
+        const fields = [
+            ['jug_xl_tag', 'JUG_XL Tag'], ['container_image', 'Container'],
+            ['bg_mixing', 'BG Mixing'], ['copy_reco', 'Copy Reco'], ['copy_full', 'Copy Full'],
+            ['copy_log', 'Copy Log'], ['use_rucio', 'Use Rucio'],
+            ['target_hours_per_job', 'Hours/Job'], ['events_per_task', 'Events/Task'],
+            ['panda_site', 'PanDA Site'], ['panda_working_group', 'Working Group'], ['rucio_rse', 'Rucio RSE'],
+        ];
+        let diffHtml = '';
+        fields.forEach(([key, label]) => {
+            let curVal = cur[key], newVal = browsedCfg[key];
+            if (typeof curVal === 'boolean') { curVal = curVal ? 'Yes' : 'No'; newVal = newVal ? 'Yes' : 'No'; }
+            curVal = String(curVal || '-'); newVal = String(newVal || '-');
+            if (curVal !== newVal) {
+                diffHtml += `<div class="field-diff">
+                    <span class="fd-label">${label}:</span>
+                    <span class="fd-current">${curVal}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${newVal}</span>
+                    <button type="button" class="btn btn-warning btn-sm btn-apply fd-apply" data-key="${key}" data-val="${browsedCfg[key]}">Apply</button>
+                </div>`;
+            }
+        });
+        // Data field diffs
+        const curData = cur.data || {}, newData = browsedCfg.data || {};
+        const allKeys = new Set([...Object.keys(curData), ...Object.keys(newData)]);
+        allKeys.forEach(key => {
+            const cv = String(curData[key] ?? '-'), nv = String(newData[key] ?? '-');
+            if (cv !== nv) {
+                diffHtml += `<div class="field-diff">
+                    <span class="fd-label">data.${key}:</span>
+                    <span class="fd-current">${cv}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${nv}</span>
+                </div>`;
+            }
+        });
+
+        if (diffHtml) {
+            const container = document.createElement('div');
+            container.className = 'field-diff-container';
+            container.innerHTML = diffHtml;
+            configSuggestion.after(container);
+            // Wire up per-field apply buttons (applies whole config for now)
+            container.querySelectorAll('.fd-apply').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    applyConfigToCompose(browsedCfg.id);
+                    clearAllSuggestions();
+                });
+            });
+        }
+        showClearButton();
+    }
+
+    // Show dataset diffs (yellow highlight, no per-field apply)
+    function showDatasetDiffs(browsedDs) {
+        if (!composeDataset || !browsedDs || browsedDs.id === composeDatasetId) return;
+        const cur = composeDataset;
+
+        // Top-level suggestion
+        datasetSuggestion.innerHTML = `<span class="sg-source">Replace with:</span>
+            <span class="sg-value">${browsedDs.dataset_name}</span>
+            <button type="button" class="btn btn-warning btn-sm btn-apply" id="ds-apply-all">Apply</button>`;
+        datasetSuggestion.classList.add('visible');
+        document.getElementById('ds-apply-all').addEventListener('click', () => {
+            applyDatasetToCompose(browsedDs.id);
+            clearAllSuggestions();
+        });
+
+        // Per-field visual diffs (no apply buttons)
+        const fields = [
+            ['detector_version', 'Detector Version'], ['detector_config', 'Detector Config'],
+        ];
+        let diffHtml = '';
+        fields.forEach(([key, label]) => {
+            if (String(cur[key]||'') !== String(browsedDs[key]||'')) {
+                diffHtml += `<div class="field-diff">
+                    <span class="fd-label">${label}:</span>
+                    <span class="fd-current">${cur[key]||'-'}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${browsedDs[key]||'-'}</span></div>`;
+            }
+        });
+        // Tag diffs
+        [['physics_tag','Physics'], ['evgen_tag','EvGen'], ['simu_tag','Simu'], ['reco_tag','Reco']].forEach(([key, label]) => {
+            if (cur[key].label !== browsedDs[key].label) {
+                diffHtml += `<div class="field-diff">
+                    <span class="fd-label">${label}:</span>
+                    <span class="fd-current">${cur[key].label}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${browsedDs[key].label}</span></div>`;
+            }
+        });
+        if (diffHtml) {
+            const container = document.createElement('div');
+            container.className = 'field-diff-container';
+            container.innerHTML = diffHtml;
+            datasetSuggestion.after(container);
+        }
+        showClearButton();
+    }
 
     // ── Item click ──
     function onItemClick(type, id) {
         selectedItemId = id;
         if (mode === 'compose') {
-            // In compose mode: show suggestion bars for deltas
+            // Clear previous diffs before showing new ones
+            document.querySelectorAll('.field-diff-container').forEach(el => el.remove());
+
             if (type === 'dataset') {
                 if (!composeDatasetId) {
-                    // Nothing set yet, apply directly
                     applyDatasetToCompose(id);
                 } else if (id !== composeDatasetId) {
-                    // Different dataset — show suggestion
-                    const ds = allDatasets.find(d => d.id === id);
-                    if (ds) showSuggestion(datasetSuggestion, ds.physics_tag.label,
-                        ds.dataset_name, () => applyDatasetToCompose(id));
+                    showDatasetDiffs(allDatasets.find(d => d.id === id));
                 }
-                // Same dataset — no-op
             } else if (type === 'config') {
                 if (!composeConfigId) {
                     applyConfigToCompose(id);
                 } else if (id !== composeConfigId) {
-                    const cfg = allConfigs.find(c => c.id === id);
-                    if (cfg) showSuggestion(configSuggestion, 'Config',
-                        cfg.name, () => applyConfigToCompose(id));
+                    showConfigDiffs(allConfigs.find(c => c.id === id));
                 }
             }
-            // task clicks in compose mode are no-ops
         } else {
             // In browse mode, show detail on right
             if (type === 'dataset') showDatasetDetail(id);
@@ -487,7 +602,7 @@
     function applyDatasetToCompose(id) {
         const ds = allDatasets.find(d => d.id === id);
         if (!ds) return;
-        hideSuggestion(datasetSuggestion);
+        clearAllSuggestions();
         composeDatasetId = id; composeDataset = ds;
         document.getElementById('dataset-badge').textContent = ds.dataset_name;
         document.getElementById('dataset-badge').className = 'badge bg-success';
@@ -514,7 +629,7 @@
     function applyConfigToCompose(id) {
         const cfg = allConfigs.find(c => c.id === id);
         if (!cfg) return;
-        hideSuggestion(configSuggestion);
+        clearAllSuggestions();
         composeConfigId = id; composeConfig = cfg;
         document.getElementById('config-badge').textContent = cfg.name;
         document.getElementById('config-badge').className = 'badge bg-success';
@@ -617,6 +732,7 @@
             updateSaveButton();
         }
     });
+    btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 
     // ── Keyboard nav ──
