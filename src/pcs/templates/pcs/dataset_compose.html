@@ -498,7 +498,14 @@
         const desc = document.getElementById('ds-description').value;
         if (!ver || !cfg || !compose.p || !compose.e || !compose.s || !compose.r) return;
 
-        // Use the REST API
+        // Duplicate check: same name means same tag+detector combo already exists
+        const previewName = `${scope}.${ver}.${cfg}.${compose.p.label}.${compose.e.label}.${compose.s.label}.${compose.r.label}`;
+        const existing = allDatasets.find(d => d.dataset_name === previewName && d.id !== editingDatasetId);
+        if (existing) {
+            alert(`Dataset already exists: ${previewName}`);
+            return;
+        }
+
         const payload = { scope, detector_version: ver, detector_config: cfg, description: desc,
             physics_tag: compose.p.id, evgen_tag: compose.e.id, simu_tag: compose.s.id, reco_tag: compose.r.id,
             created_by: currentUser };
