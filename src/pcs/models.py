@@ -287,6 +287,85 @@ class ProdConfig(models.Model):
         return self.name
 
 
+PRODTASK_STATUS_CHOICES = [
+    ('draft', 'Draft'),
+    ('ready', 'Ready'),
+    ('submitted', 'Submitted'),
+    ('completed', 'Completed'),
+    ('failed', 'Failed'),
+]
+
+
+class ProdTask(models.Model):
+    """
+    A production task: Dataset + ProdConfig + submission-specific params.
+    Fully defines a production submission from which Condor and PanDA
+    commands can be generated.
+    """
+    name = models.CharField(max_length=255, unique=True,
+                            help_text="Task name (auto-derived from dataset or manual)")
+    description = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=PRODTASK_STATUS_CHOICES, default='draft')
+
+    # Core composition
+    dataset = models.ForeignKey(Dataset, on_delete=models.PROTECT, related_name='prod_tasks')
+    prod_config = models.ForeignKey(ProdConfig, on_delete=models.PROTECT, related_name='prod_tasks')
+
+    # Task-specific submission params
+    csv_file = models.CharField(max_length=500, blank=True, default='',
+                                help_text="CSV file path in simulation_campaign_datasets")
+    overrides = models.JSONField(null=True, blank=True,
+                                 help_text="Per-task overrides of ProdConfig fields (JSON)")
+
+    # Generated commands (cached on save)
+    condor_command = models.TextField(blank=True, default='',
+                                      help_text="Generated Condor submission command")
+    panda_command = models.TextField(blank=True, default='',
+                                     help_text="Generated PanDA submission command")
+
+    # Submission tracking
+    panda_task_id = models.BigIntegerField(null=True, blank=True,
+                                            help_text="PanDA task ID after submission")
+    condor_cluster_id = models.CharField(max_length=100, blank=True, default='',
+                                          help_text="Condor cluster ID after submission")
+
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_prod_task'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return self.name
+
+    def get_effective_config(self):
+        """Return ProdConfig field values with per-task overrides applied."""
+        config = self.prod_config
+        overrides = self.overrides or {}
+        result = {}
+        for field in config._meta.get_fields():
+            if not hasattr(field, 'attname'):
+                continue
+            name = field.name
+            if name in ('id', 'created_at', 'updated_at'):
+                continue
+            result[name] = overrides.get(name, getattr(config, name))
+        # Merge the data dicts specially (override keys, not replace entire dict)
+        base_data = config.data or {}
+        override_data = overrides.get('data', {})
+        if isinstance(override_data, dict):
+            result['data'] = {**base_data, **override_data}
+        return result
+
+    def generate_commands(self):
+        """Generate and cache both Condor and PanDA commands."""
+        from .commands import build_condor_command, build_panda_command
+        self.condor_command = build_condor_command(self)
+        self.panda_command = build_panda_command(self)
+
+
 def _allocate_simple_tag(state_key):
     """Atomically allocate the next tag number using PersistentState."""
     from monitor_app.models import PersistentState

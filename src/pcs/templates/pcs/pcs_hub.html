@@ -88,6 +88,19 @@
                 </div>
             </div>
         </div>
+        <div class="col-md-3 mb-3">
+            <div class="card h-100 border-primary">
+                <div class="card-body d-flex flex-column">
+                    <p class="mb-2"><strong><a href="{% url 'pcs:prod_task_compose' %}" class="text-decoration-none">Prod Tasks</a></strong>
+                    <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
+                    <p class="card-text">Compose Dataset + Config into full production task specs with submission commands.</p>
+                    <div class="mt-auto align-self-end">
+                        <a href="{% url 'pcs:prod_tasks_list' %}" class="btn btn-sm btn-outline-secondary">List</a>
+                        <a href="{% url 'pcs:prod_task_compose' %}" class="btn btn-sm btn-outline-primary">Compose</a>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

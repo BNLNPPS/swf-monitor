@@ -37,6 +37,14 @@ urlpatterns = [
     path('configs/<int:pk>/', views.prod_config_detail, name='prod_config_detail'),
     path('configs/<int:pk>/edit/', views.prod_config_edit, name='prod_config_edit'),
 
+    # Production Tasks
+    path('tasks/', views.prod_tasks_list, name='prod_tasks_list'),
+    path('tasks/datatable/', views.prod_tasks_datatable_ajax, name='prod_tasks_datatable_ajax'),
+    path('tasks/compose/', views.prod_task_compose, name='prod_task_compose'),
+    path('tasks/<int:pk>/', views.prod_task_detail, name='prod_task_detail'),
+    path('tasks/<int:pk>/delete/', views.prod_task_delete, name='prod_task_delete'),
+    path('tasks/<int:pk>/commands/', views.prod_task_generate_commands, name='prod_task_generate_commands'),
+
     # REST API
     path('api/', include('pcs.api_urls')),
 ]

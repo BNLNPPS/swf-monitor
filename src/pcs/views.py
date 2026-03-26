@@ -16,7 +16,8 @@ from django.db.models import Count
 from monitor_app.utils import DataTablesProcessor, get_filter_params, format_datetime
 
 from .models import (
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, Dataset, ProdConfig,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    Dataset, ProdConfig, ProdTask,
 )
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
@@ -31,6 +32,7 @@ def pcs_hub(request):
         'reco_tags_count': RecoTag.objects.count(),
         'datasets_count': Dataset.objects.values('dataset_name').distinct().count(),
         'prod_configs_count': ProdConfig.objects.count(),
+        'prod_tasks_count': ProdTask.objects.count(),
     }
     return render(request, 'pcs/pcs_hub.html', context)
 
@@ -654,3 +656,183 @@ def prod_config_edit(request, pk):
     else:
         form = ProdConfigForm(instance=config)
     return render(request, 'pcs/prod_config_form.html', {'form': form, 'editing': True, 'config': config})
+
+
+# ── Production Tasks ─────────────────────────────────────────────
+
+TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
+
+
+def prod_tasks_list(request):
+    columns = [
+        {'name': 'name', 'title': 'Name', 'orderable': True},
+        {'name': 'status', 'title': 'Status', 'orderable': True},
+        {'name': 'dataset__dataset_name', 'title': 'Dataset', 'orderable': True},
+        {'name': 'prod_config__name', 'title': 'Config', 'orderable': True},
+        {'name': 'created_by', 'title': 'Created By', 'orderable': True},
+        {'name': 'updated_at', 'title': 'Updated', 'orderable': True},
+    ]
+    context = {
+        'table_title': 'Production Tasks',
+        'table_description': 'Production task compositions (Dataset + Config).',
+        'ajax_url': reverse('pcs:prod_tasks_datatable_ajax'),
+        'columns': columns,
+    }
+    return render(request, 'pcs/prod_tasks_list.html', context)
+
+
+def prod_tasks_datatable_ajax(request):
+    col_names = ['name', 'status', 'dataset__dataset_name', 'prod_config__name',
+                 'created_by', 'updated_at']
+    dt = DataTablesProcessor(request, col_names, default_order_column=5, default_order_direction='desc')
+
+    qs = ProdTask.objects.select_related('dataset', 'prod_config')
+    records_total = qs.count()
+    search_fields = ['name', 'description', 'dataset__dataset_name', 'prod_config__name', 'created_by']
+    qs = dt.apply_search(qs, search_fields)
+    records_filtered = qs.count()
+    qs = qs.order_by(dt.get_order_by())
+    page = dt.apply_pagination(qs)
+
+    status_colors = {'draft': 'secondary', 'ready': 'primary', 'submitted': 'info',
+                     'completed': 'success', 'failed': 'danger'}
+    data = []
+    for t in page:
+        detail_url = reverse('pcs:prod_task_detail', args=[t.pk])
+        color = status_colors.get(t.status, 'secondary')
+        data.append([
+            f'<a href="{detail_url}">{t.name}</a>',
+            f'<span class="badge bg-{color}">{t.status}</span>',
+            t.dataset.dataset_name,
+            t.prod_config.name,
+            t.created_by,
+            format_datetime(t.updated_at),
+        ])
+
+    return dt.create_response(data, records_total, records_filtered)
+
+
+def prod_task_detail(request, pk):
+    task = get_object_or_404(
+        ProdTask.objects.select_related(
+            'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+        ),
+        pk=pk,
+    )
+    return render(request, 'pcs/prod_task_detail.html', {'task': task})
+
+
+def prod_task_compose(request):
+    """Two-pane compose UI for building production tasks."""
+    # Preload all component data as JSON for client-side browsing
+    datasets_qs = Dataset.objects.filter(block_num=1).select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+    ).order_by('-created_at')
+    datasets_data = []
+    for ds in datasets_qs:
+        datasets_data.append({
+            'id': ds.id,
+            'dataset_name': ds.dataset_name,
+            'did': ds.did,
+            'scope': ds.scope,
+            'detector_version': ds.detector_version,
+            'detector_config': ds.detector_config,
+            'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description,
+                            'parameters': ds.physics_tag.parameters},
+            'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description,
+                          'parameters': ds.evgen_tag.parameters},
+            'simu_tag': {'label': ds.simu_tag.tag_label, 'description': ds.simu_tag.description,
+                         'parameters': ds.simu_tag.parameters},
+            'reco_tag': {'label': ds.reco_tag.tag_label, 'description': ds.reco_tag.description,
+                         'parameters': ds.reco_tag.parameters},
+            'created_by': ds.created_by,
+            'created_at': ds.created_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    configs_qs = ProdConfig.objects.order_by('-updated_at')
+    configs_data = []
+    for pc in configs_qs:
+        configs_data.append({
+            'id': pc.id,
+            'name': pc.name,
+            'description': pc.description,
+            'jug_xl_tag': pc.jug_xl_tag,
+            'container_image': pc.container_image,
+            'bg_mixing': pc.bg_mixing,
+            'bg_cross_section': pc.bg_cross_section,
+            'bg_evtgen_file': pc.bg_evtgen_file,
+            'copy_reco': pc.copy_reco,
+            'copy_full': pc.copy_full,
+            'copy_log': pc.copy_log,
+            'use_rucio': pc.use_rucio,
+            'target_hours_per_job': str(pc.target_hours_per_job) if pc.target_hours_per_job else '',
+            'events_per_task': pc.events_per_task,
+            'panda_site': pc.panda_site,
+            'panda_queue': pc.panda_queue,
+            'panda_working_group': pc.panda_working_group,
+            'panda_resource_type': pc.panda_resource_type,
+            'rucio_rse': pc.rucio_rse,
+            'data': pc.data or {},
+            'created_by': pc.created_by,
+            'updated_at': pc.updated_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    tasks_qs = ProdTask.objects.select_related('dataset', 'prod_config').order_by('-updated_at')
+    tasks_data = []
+    for t in tasks_qs:
+        tasks_data.append({
+            'id': t.id,
+            'name': t.name,
+            'status': t.status,
+            'dataset_id': t.dataset_id,
+            'dataset_name': t.dataset.dataset_name,
+            'prod_config_id': t.prod_config_id,
+            'prod_config_name': t.prod_config.name,
+            'csv_file': t.csv_file,
+            'overrides': t.overrides or {},
+            'description': t.description,
+            'condor_command': t.condor_command,
+            'panda_command': t.panda_command,
+            'created_by': t.created_by,
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    context = {
+        'datasets_json': json.dumps(datasets_data),
+        'configs_json': json.dumps(configs_data),
+        'tasks_json': json.dumps(tasks_data),
+        'selected_task': request.GET.get('selected'),
+        'username': request.user.username if request.user.is_authenticated else '',
+    }
+    return render(request, 'pcs/prod_task_compose.html', context)
+
+
+@login_required
+def prod_task_delete(request, pk):
+    if request.method != 'POST':
+        return redirect('pcs:prod_task_detail', pk=pk)
+    task = get_object_or_404(ProdTask, pk=pk)
+    if task.status != 'draft':
+        messages.error(request, "Only draft tasks can be deleted.")
+        return redirect('pcs:prod_task_detail', pk=pk)
+    task.delete()
+    messages.success(request, f"Task '{task.name}' deleted.")
+    return redirect('pcs:prod_tasks_list')
+
+
+def prod_task_generate_commands(request, pk):
+    """JSON endpoint: regenerate and return commands for a ProdTask."""
+    task = get_object_or_404(
+        ProdTask.objects.select_related(
+            'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+        ),
+        pk=pk,
+    )
+    task.generate_commands()
+    task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
+    return JsonResponse({
+        'condor_command': task.condor_command,
+        'panda_command': task.panda_command,
+    })

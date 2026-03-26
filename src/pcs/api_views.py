@@ -13,12 +13,13 @@ from rest_framework.permissions import AllowAny
 from django.db.models import Count
 
 from .models import (
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, Dataset, ProdConfig,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    Dataset, ProdConfig, ProdTask,
 )
 from .serializers import (
     PhysicsCategorySerializer, PhysicsTagSerializer,
     EvgenTagSerializer, SimuTagSerializer, RecoTagSerializer,
-    DatasetSerializer, ProdConfigSerializer,
+    DatasetSerializer, ProdConfigSerializer, ProdTaskSerializer,
 )
 from .schemas import validate_parameters, get_tag_model
 
@@ -178,3 +179,37 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
     queryset = ProdConfig.objects.all()
     serializer_class = ProdConfigSerializer
     permission_classes = [AllowAny]
+
+
+class ProdTaskViewSet(viewsets.ModelViewSet):
+    """Production tasks: Dataset + ProdConfig compositions with command generation."""
+    queryset = ProdTask.objects.select_related(
+        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+        'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+    )
+    serializer_class = ProdTaskSerializer
+    permission_classes = [AllowAny]
+
+    @action(detail=True, methods=['post'], url_path='generate-commands')
+    def generate_commands(self, request, pk=None):
+        task = self.get_object()
+        task.generate_commands()
+        task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
+        return Response({
+            'condor_command': task.condor_command,
+            'panda_command': task.panda_command,
+        })
+
+    @action(detail=True, methods=['post'], url_path='set-status')
+    def set_status(self, request, pk=None):
+        task = self.get_object()
+        new_status = request.data.get('status')
+        valid = [c[0] for c in task._meta.get_field('status').choices]
+        if new_status not in valid:
+            return Response(
+                {'detail': f'Invalid status. Choose from: {", ".join(valid)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task.status = new_status
+        task.save(update_fields=['status', 'updated_at'])
+        return Response(self.get_serializer(task).data)

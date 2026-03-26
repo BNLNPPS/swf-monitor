@@ -1,5 +1,6 @@
 from django.contrib import admin
-from .models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, Dataset, ProdConfig
+from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+                     Dataset, ProdConfig, ProdTask)
 
 
 @admin.register(PhysicsCategory)
@@ -54,3 +55,11 @@ class ProdConfigAdmin(admin.ModelAdmin):
                     'bg_mixing', 'use_rucio', 'created_by', 'updated_at')
     search_fields = ('name', 'description')
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(ProdTask)
+class ProdTaskAdmin(admin.ModelAdmin):
+    list_display = ('name', 'status', 'dataset', 'prod_config', 'created_by', 'updated_at')
+    list_filter = ('status',)
+    search_fields = ('name', 'description')
+    readonly_fields = ('condor_command', 'panda_command', 'created_at', 'updated_at')
