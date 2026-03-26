@@ -7,7 +7,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_task_compose' %}">Prod Tasks</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a></li>
             <li class="breadcrumb-item active">{{ task.name }}</li>
         </ol>
     </nav>
@@ -22,7 +22,7 @@
             </p>
         </div>
         <div>
-            <a href="{% url 'pcs:prod_task_compose' %}?selected={{ task.pk }}" class="btn btn-outline-primary btn-sm">Edit in Compose</a>
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.pk }}" class="btn btn-outline-primary btn-sm">Edit in Compose</a>
             <button class="btn btn-outline-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
         </div>
     </div>

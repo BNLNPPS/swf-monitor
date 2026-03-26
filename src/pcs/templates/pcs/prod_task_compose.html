@@ -167,13 +167,24 @@
     const csrfToken   = '{{ csrf_token }}';
     const initialSelected = {{ selected_task|default:"null" }};
 
+    // ── URL state ──
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialTab = urlParams.get('tab') || 'datasets';
+
     // ── State ──
-    let browseType = 'datasets';
+    let browseType = initialTab;
     let selectedDatasetId = null;
     let selectedConfigId = null;
     let editingTaskId = null;
     let selectedDataset = null;
     let selectedConfig = null;
+
+    function updateUrl() {
+        const params = new URLSearchParams();
+        params.set('tab', browseType);
+        if (editingTaskId) params.set('selected', editingTaskId);
+        history.replaceState(null, '', `${window.location.pathname}?${params}`);
+    }
 
     // ── DOM refs ──
     const itemList = document.getElementById('item-list');
@@ -186,14 +197,16 @@
     });
 
     // ── Tab switching ──
+    function switchTab(tabName) {
+        document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`[data-browse="${tabName}"]`).classList.add('active');
+        browseType = tabName;
+        searchBox.value = '';
+        renderList();
+        updateUrl();
+    }
     document.querySelectorAll('.browser-tab').forEach(tab => {
-        tab.addEventListener('click', function() {
-            document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
-            this.classList.add('active');
-            browseType = this.dataset.browse;
-            searchBox.value = '';
-            renderList();
-        });
+        tab.addEventListener('click', function() { switchTab(this.dataset.browse); });
     });
 
     // ── Search ──
@@ -260,6 +273,7 @@
         else if (type === 'config') selectConfig(id);
         else if (type === 'task') loadTask(id);
         renderList();
+        updateUrl();
     }
 
     // ── Dataset selection ──
@@ -497,6 +511,7 @@
         document.querySelector('[data-section="physics"]').classList.add('collapsed');
         updateSaveButton();
         renderList();
+        updateUrl();
     });
 
     // ── Keyboard nav ──
@@ -515,14 +530,11 @@
     });
 
     // ── Init ──
-    renderList();
+    // Activate the correct tab from URL
+    switchTab(browseType);
     if (initialSelected) {
-        // Switch to tasks tab and load
-        document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
-        document.querySelector('[data-browse="tasks"]').classList.add('active');
-        browseType = 'tasks';
-        renderList();
         loadTask(initialSelected);
+        updateUrl();
     }
 })();
 
