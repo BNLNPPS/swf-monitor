@@ -7,7 +7,7 @@ activity overview, and detail pages with rich cross-linking.
 
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
 
 from datetime import datetime
@@ -93,9 +93,16 @@ _EASTERN = ZoneInfo('America/New_York')
 
 
 def _linkify(text):
-    """Wrap text in an <a> tag if it looks like a URL."""
+    """Wrap text in an <a> tag if it looks like a URL.
+
+    TRF links (pandaserver-doma.cern.ch/trf/) are routed through our
+    view-text endpoint which extracts readable content from self-extracting zips.
+    """
     if text and text.startswith(('http://', 'https://')):
-        return f'<a href="{text}" target="_blank" rel="noopener">{text}</a>'
+        href = text
+        if 'pandaserver-doma.cern.ch/trf/' in text:
+            href = reverse('monitor_app:panda_view_text') + '?url=' + text
+        return f'<a href="{href}" target="_blank" rel="noopener">{text}</a>'
     return text
 
 
@@ -349,7 +356,63 @@ def panda_job_detail(request, pandaid):
     data['pandaid'] = pandaid
     job = data.get('job') or {}
     job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
+    trf = job.get('transformation') or ''
+    if 'pandaserver-doma.cern.ch/trf/' in trf:
+        job['transformation_view_url'] = reverse('monitor_app:panda_view_text') + '?url=' + trf
     return render(request, 'monitor_app/panda_job_detail.html', data)
+
+
+# ── View text (transformation script viewer) ────────────────────────────────
+
+def panda_view_text(request):
+    """Fetch a PanDA transformation URL — self-extracting zip with embedded scripts.
+
+    Extracts the bash header and all text files from the zip, presents them
+    as readable plain text.
+    """
+    import httpx
+    import io
+    import zipfile
+    url = request.GET.get('url', '')
+    if not url or not url.startswith('https://'):
+        return HttpResponse('Missing or invalid url parameter', status=400,
+                            content_type='text/plain')
+    try:
+        resp = httpx.get(url, timeout=15, follow_redirects=True)
+    except Exception as e:
+        return HttpResponse(f'Failed to fetch: {e}', status=502,
+                            content_type='text/plain')
+    data = resp.content
+    parts = []
+    # Extract the bash header (text before binary zip data)
+    try:
+        lines = []
+        for line in data.split(b'\n'):
+            try:
+                lines.append(line.decode('utf-8'))
+            except UnicodeDecodeError:
+                break
+        if lines:
+            parts.append(f'=== Shell header ({len(lines)} lines) ===\n')
+            parts.append('\n'.join(lines))
+    except Exception:
+        pass
+    # Extract text files from the zip
+    try:
+        buf = io.BytesIO(data)
+        with zipfile.ZipFile(buf) as zf:
+            for name in zf.namelist():
+                try:
+                    content = zf.read(name).decode('utf-8')
+                    parts.append(f'\n\n=== {name} ===\n')
+                    parts.append(content)
+                except (UnicodeDecodeError, KeyError):
+                    parts.append(f'\n\n=== {name} (binary, skipped) ===\n')
+    except zipfile.BadZipFile:
+        if not parts:
+            # Not a zip, just serve as text
+            parts.append(data.decode('utf-8', errors='replace'))
+    return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
 
 
 # ── Task detail ──────────────────────────────────────────────────────────────

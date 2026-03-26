@@ -81,6 +81,7 @@ from .viewdir.pandamon import (
     panda_errors_datatable_ajax,
     panda_diagnostics_list,
     panda_diagnostics_datatable_ajax,
+    panda_view_text,
 )
 
 # Import iDDS database views from new dedicated module
@@ -213,6 +214,7 @@ urlpatterns = [
     path('panda/jobs/datatable/', panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),
     path('panda/jobs/filter-counts/', panda_jobs_filter_counts, name='panda_jobs_filter_counts'),
     path('panda/jobs/<int:pandaid>/', panda_job_detail, name='panda_job_detail'),
+    path('panda/view-text/', panda_view_text, name='panda_view_text'),
     path('panda/tasks/', panda_tasks_list, name='panda_tasks_list'),
     path('panda/tasks/datatable/', panda_tasks_datatable_ajax, name='panda_tasks_datatable_ajax'),
     path('panda/tasks/filter-counts/', panda_tasks_filter_counts, name='panda_tasks_filter_counts'),
