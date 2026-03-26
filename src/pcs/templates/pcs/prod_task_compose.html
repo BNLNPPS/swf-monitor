@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}Compose Prod Task - PCS{% endblock %}
+{% block title %}Prod Tasks - PCS{% endblock %}
 
 {% block content %}
 <style>
@@ -11,22 +11,16 @@
 .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
 .panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; }
 
-/* Browser tabs */
 .browser-tabs { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: .75rem; }
 .browser-tab { padding: .4rem .75rem; cursor: pointer; border-bottom: 2px solid transparent;
                margin-bottom: -2px; font-size: .85rem; color: #6c757d; user-select: none; }
 .browser-tab.active { color: #0d6efd; border-bottom-color: #0d6efd; font-weight: 600; }
 .browser-tab:hover { color: #0d6efd; }
 
-/* Search and filters */
 .browser-search { width: 100%; padding: .35rem .6rem; border: 1px solid #dee2e6;
                    border-radius: .375rem; font-size: .85rem; margin-bottom: .5rem; }
 .filter-row { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
-.filter-pill { padding: .2rem .6rem; border: 1px solid #dee2e6; border-radius: 1rem;
-               background: #fff; font-size: .75rem; cursor: pointer; color: #495057; }
-.filter-pill.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
 
-/* Item list */
 .item-list { flex: 1; overflow-y: auto; border: 1px solid #dee2e6; border-radius: .375rem; }
 .item-entry { padding: .5rem .75rem; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: .82rem; }
 .item-entry:hover { background: #f8f9fa; }
@@ -34,7 +28,6 @@
 .item-label { font-weight: 600; }
 .item-meta { color: #6c757d; font-size: .75rem; }
 
-/* Spec sections */
 .spec-section { margin-bottom: .75rem; border: 1px solid #dee2e6; border-radius: .375rem; overflow: hidden; }
 .spec-section-header { padding: .5rem .75rem; background: #f8f9fa; font-weight: 600; font-size: .85rem;
                         cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
@@ -45,21 +38,18 @@
 .params-grid .pk { color: #6c757d; }
 .params-grid .pv { font-weight: 500; }
 
-/* Command blocks */
 .command-block { background: #1e1e1e; color: #d4d4d4; padding: .75rem; border-radius: .375rem;
-                 font-family: monospace; font-size: .78rem; position: relative;
-                 white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; margin-top: .5rem; }
-.btn-copy-cmd { position: absolute; top: .4rem; right: .4rem; font-size: .7rem; }
+                 font-family: monospace; font-size: .78rem; white-space: pre-wrap; word-break: break-all;
+                 max-height: 200px; overflow-y: auto; margin-top: .5rem; }
 
-/* Empty state */
 .empty-state { color: #6c757d; font-style: italic; padding: 1rem 0; }
 </style>
 
 <div class="compose-wrap">
-    <!-- LEFT PANE: Component Browser -->
+    <!-- LEFT PANE -->
     <div class="component-browser">
         <div class="browser-tabs" id="browser-tabs">
-            <span class="browser-tab active" data-browse="datasets">Datasets</span>
+            <span class="browser-tab" data-browse="datasets">Datasets</span>
             <span class="browser-tab" data-browse="configs">Configs</span>
             <span class="browser-tab" data-browse="tasks">Tasks</span>
         </div>
@@ -68,88 +58,71 @@
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
-    <!-- RIGHT PANE: Task Spec Builder -->
+    <!-- RIGHT PANE -->
     <div class="spec-panel">
         <div class="panel-header">
-            <h4 style="margin:0;">Compose Production Task</h4>
-            <div>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-reset">Reset</button>
-                <button class="btn btn-primary btn-sm" id="btn-save" disabled>Save Task</button>
+            <h4 id="panel-title" style="margin:0;">Select an item</h4>
+            <div id="panel-buttons">
+                {% if username %}
+                <button class="btn btn-outline-primary btn-sm" id="btn-new-task" style="display:none;">New Task</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
+                {% endif %}
+                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Save Task</button>
             </div>
         </div>
-        <div class="panel-body" id="spec-body">
-
-            <!-- Identity -->
-            <div class="spec-section" data-section="identity">
-                <div class="spec-section-header">Identity <span class="badge bg-secondary" id="identity-badge" style="display:none"></span></div>
-                <div class="spec-section-body">
-                    <div class="row mb-2">
-                        <div class="col-md-8">
-                            <label class="form-label" style="font-size:.82rem;"><strong>Task Name</strong></label>
-                            <input type="text" id="task-name" class="form-control form-control-sm" placeholder="Auto-generated from dataset">
+        <div class="panel-body">
+            <!-- BROWSE VIEW: shows detail for whatever item is selected -->
+            <div id="browse-panel">
+                <div class="empty-state" id="browse-empty">Click an item on the left to view details.</div>
+                <div id="browse-content" style="display:none;"></div>
+            </div>
+            <!-- COMPOSE VIEW: task editor, shown only when composing/editing -->
+            <div id="compose-panel" style="display:none;">
+                <div class="spec-section" data-section="identity">
+                    <div class="spec-section-header">Identity <span class="badge bg-secondary" id="identity-badge" style="display:none"></span></div>
+                    <div class="spec-section-body">
+                        <div class="row mb-2">
+                            <div class="col-md-8"><label class="form-label" style="font-size:.82rem;"><strong>Task Name</strong></label>
+                                <input type="text" id="task-name" class="form-control form-control-sm" placeholder="Auto-generated from dataset"></div>
+                            <div class="col-md-4"><label class="form-label" style="font-size:.82rem;"><strong>Created By</strong></label>
+                                <input type="text" id="task-created-by" class="form-control form-control-sm" value="{{ username }}" readonly></div>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label" style="font-size:.82rem;"><strong>Created By</strong></label>
-                            <input type="text" id="task-created-by" class="form-control form-control-sm" value="{{ username }}" readonly>
-                        </div>
+                        <div class="mb-2"><label class="form-label" style="font-size:.82rem;"><strong>Description</strong></label>
+                            <textarea id="task-description" class="form-control form-control-sm" rows="2"></textarea></div>
                     </div>
-                    <div class="mb-2">
-                        <label class="form-label" style="font-size:.82rem;"><strong>Description</strong></label>
-                        <textarea id="task-description" class="form-control form-control-sm" rows="2"></textarea>
-                    </div>
                 </div>
-            </div>
-
-            <!-- Dataset -->
-            <div class="spec-section" data-section="dataset">
-                <div class="spec-section-header">Dataset <span class="badge bg-secondary" id="dataset-badge">not selected</span></div>
-                <div class="spec-section-body">
-                    <div id="dataset-display" class="empty-state">Select a dataset from the left pane.</div>
+                <div class="spec-section" data-section="dataset">
+                    <div class="spec-section-header">Dataset <span class="badge bg-secondary" id="dataset-badge">not selected</span></div>
+                    <div class="spec-section-body"><div id="dataset-display" class="empty-state">Select a dataset from the left pane.</div></div>
                 </div>
-            </div>
-
-            <!-- Physics (auto-filled from dataset tags, collapsed) -->
-            <div class="spec-section collapsed" data-section="physics">
-                <div class="spec-section-header">Physics Configuration <span class="badge bg-secondary" id="physics-badge">from dataset</span></div>
-                <div class="spec-section-body">
-                    <div id="physics-display" class="params-grid"></div>
+                <div class="spec-section collapsed" data-section="physics">
+                    <div class="spec-section-header">Physics Configuration <span class="badge bg-secondary" id="physics-badge">from dataset</span></div>
+                    <div class="spec-section-body"><div id="physics-display" class="params-grid"></div></div>
                 </div>
-            </div>
-
-            <!-- Production Config -->
-            <div class="spec-section" data-section="config">
-                <div class="spec-section-header">Production Config <span class="badge bg-secondary" id="config-badge">not selected</span></div>
-                <div class="spec-section-body">
-                    <div id="config-display" class="empty-state">Select a config from the left pane.</div>
+                <div class="spec-section" data-section="config">
+                    <div class="spec-section-header">Production Config <span class="badge bg-secondary" id="config-badge">not selected</span></div>
+                    <div class="spec-section-body"><div id="config-display" class="empty-state">Select a config from the left pane.</div></div>
                 </div>
-            </div>
-
-            <!-- Submission -->
-            <div class="spec-section" data-section="submission">
-                <div class="spec-section-header">Submission</div>
-                <div class="spec-section-body">
-                    <div class="row mb-2">
-                        <div class="col-md-9">
-                            <label class="form-label" style="font-size:.82rem;"><strong>CSV File</strong></label>
-                            <input type="text" id="task-csv" class="form-control form-control-sm"
-                                   placeholder="e.g. DIS/NC/10x100/minQ2=1/DIS_NC_10x100_minQ2=1.csv">
+                <div class="spec-section" data-section="submission">
+                    <div class="spec-section-header">Submission</div>
+                    <div class="spec-section-body">
+                        <div class="row mb-2">
+                            <div class="col-md-9"><label class="form-label" style="font-size:.82rem;"><strong>CSV File</strong></label>
+                                <input type="text" id="task-csv" class="form-control form-control-sm" placeholder="e.g. DIS/NC/10x100/minQ2=1/DIS_NC_10x100_minQ2=1.csv"></div>
+                            <div class="col-md-3"><label class="form-label" style="font-size:.82rem;">&nbsp;</label>
+                                <button class="btn btn-outline-primary btn-sm d-block w-100" id="btn-generate">Generate Commands</button></div>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label" style="font-size:.82rem;">&nbsp;</label>
-                            <button class="btn btn-outline-primary btn-sm d-block w-100" id="btn-generate">Generate Commands</button>
+                        <div id="commands-area" style="display:none;">
+                            <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
+                                <strong style="font-size:.82rem;">Condor Command</strong>
+                                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('condor-preview')">Copy</button></div>
+                            <div class="command-block" id="condor-preview"></div>
+                            <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
+                                <strong style="font-size:.82rem;">PanDA Command</strong>
+                                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('panda-preview')">Copy</button></div>
+                            <div class="command-block" id="panda-preview"></div>
                         </div>
-                    </div>
-                    <div id="commands-area" style="display:none;">
-                        <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
-                            <strong style="font-size:.82rem;">Condor Command</strong>
-                            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('condor-preview')">Copy</button>
-                        </div>
-                        <div class="command-block" id="condor-preview"></div>
-                        <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
-                            <strong style="font-size:.82rem;">PanDA Command</strong>
-                            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('panda-preview')">Copy</button>
-                        </div>
-                        <div class="command-block" id="panda-preview"></div>
                     </div>
                 </div>
             </div>
@@ -159,341 +132,75 @@
 
 <script>
 (function() {
-    // ── Preloaded data ──
     const allDatasets = {{ datasets_json|safe }};
     const allConfigs  = {{ configs_json|safe }};
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
     const initialSelected = {{ selected_task|default:"null" }};
-
-    // ── URL state ──
     const urlParams = new URLSearchParams(window.location.search);
     const initialTab = urlParams.get('tab') || 'datasets';
 
     // ── State ──
     let browseType = initialTab;
-    let selectedDatasetId = null;
-    let selectedConfigId = null;
-    let editingTaskId = null;
-    let selectedDataset = null;
-    let selectedConfig = null;
+    let mode = 'browse';  // 'browse' or 'compose'
+    let selectedItemId = null;  // currently highlighted item in left list
+    // Compose state
+    let composeDatasetId = null, composeConfigId = null, composeTaskId = null;
+    let composeDataset = null, composeConfig = null;
+
+    const itemList = document.getElementById('item-list');
+    const searchBox = document.getElementById('browser-search');
+    const filterRow = document.getElementById('browser-filters');
+    const browsePanel = document.getElementById('browse-panel');
+    const browseEmpty = document.getElementById('browse-empty');
+    const browseContent = document.getElementById('browse-content');
+    const composePanel = document.getElementById('compose-panel');
+    const panelTitle = document.getElementById('panel-title');
+    const btnNewTask = document.getElementById('btn-new-task');
+    const btnEditTask = document.getElementById('btn-edit-task');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnSave = document.getElementById('btn-save');
 
     function updateUrl() {
         const params = new URLSearchParams();
         params.set('tab', browseType);
-        if (editingTaskId) params.set('selected', editingTaskId);
+        if (selectedItemId) params.set('selected', selectedItemId);
+        if (mode === 'compose') params.set('mode', 'compose');
         history.replaceState(null, '', `${window.location.pathname}?${params}`);
     }
 
-    // ── DOM refs ──
-    const itemList = document.getElementById('item-list');
-    const searchBox = document.getElementById('browser-search');
-    const filterRow = document.getElementById('browser-filters');
-
     // ── Section toggle ──
-    document.querySelectorAll('.spec-section-header').forEach(h => {
+    composePanel.querySelectorAll('.spec-section-header').forEach(h => {
         h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
     });
 
-    // ── Tab switching ──
-    function switchTab(tabName) {
-        document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
-        document.querySelector(`[data-browse="${tabName}"]`).classList.add('active');
-        browseType = tabName;
-        searchBox.value = '';
-        renderList();
-        updateUrl();
-    }
-    document.querySelectorAll('.browser-tab').forEach(tab => {
-        tab.addEventListener('click', function() { switchTab(this.dataset.browse); });
-    });
-
-    // ── Search ──
-    searchBox.addEventListener('input', renderList);
-
-    // ── Render item list ──
-    function renderList() {
-        const q = searchBox.value.toLowerCase();
-        let items = [];
-        if (browseType === 'datasets') {
-            items = allDatasets.filter(d => !q ||
-                d.dataset_name.toLowerCase().includes(q) ||
-                d.physics_tag.label.toLowerCase().includes(q) ||
-                d.physics_tag.description.toLowerCase().includes(q) ||
-                d.detector_config.toLowerCase().includes(q)
-            ).map(d => ({
-                id: d.id, type: 'dataset',
-                label: d.dataset_name,
-                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label} | ${d.created_by}`,
-                selected: d.id === selectedDatasetId,
-            }));
-            filterRow.innerHTML = '';
-        } else if (browseType === 'configs') {
-            items = allConfigs.filter(c => !q ||
-                c.name.toLowerCase().includes(q) ||
-                (c.jug_xl_tag || '').toLowerCase().includes(q) ||
-                c.description.toLowerCase().includes(q)
-            ).map(c => ({
-                id: c.id, type: 'config',
-                label: c.name,
-                meta: `JUG_XL: ${c.jug_xl_tag || '-'} | ${c.created_by}`,
-                selected: c.id === selectedConfigId,
-            }));
-            filterRow.innerHTML = '';
-        } else if (browseType === 'tasks') {
-            items = allTasks.filter(t => !q ||
-                t.name.toLowerCase().includes(q) ||
-                t.dataset_name.toLowerCase().includes(q) ||
-                t.prod_config_name.toLowerCase().includes(q)
-            ).map(t => ({
-                id: t.id, type: 'task',
-                label: t.name,
-                meta: `${t.status} | ${t.dataset_name} | ${t.prod_config_name}`,
-                selected: t.id === editingTaskId,
-            }));
-            filterRow.innerHTML = '';
-        }
-
-        itemList.innerHTML = items.map(it =>
-            `<div class="item-entry${it.selected ? ' selected' : ''}" data-type="${it.type}" data-id="${it.id}">
-                <div class="item-label">${it.label}</div>
-                <div class="item-meta">${it.meta}</div>
-            </div>`
-        ).join('') || '<div class="empty-state" style="padding:.75rem;">No items found.</div>';
-
-        itemList.querySelectorAll('.item-entry').forEach(el => {
-            el.addEventListener('click', () => onItemClick(el.dataset.type, parseInt(el.dataset.id)));
-        });
-    }
-
-    // ── Item click handler ──
-    function onItemClick(type, id) {
-        if (type === 'dataset') selectDataset(id);
-        else if (type === 'config') selectConfig(id);
-        else if (type === 'task') loadTask(id);
-        renderList();
+    // ── Mode switching ──
+    function enterBrowseMode() {
+        mode = 'browse';
+        composePanel.style.display = 'none';
+        browsePanel.style.display = 'block';
+        btnCancel.style.display = 'none';
+        btnSave.style.display = 'none';
+        if (btnNewTask) btnNewTask.style.display = browseType === 'tasks' ? 'inline-block' : 'none';
+        if (btnEditTask) btnEditTask.style.display = 'none';
+        composeTaskId = null; composeDatasetId = null; composeConfigId = null;
+        composeDataset = null; composeConfig = null;
         updateUrl();
     }
 
-    // ── Dataset selection ──
-    function selectDataset(id) {
-        const ds = allDatasets.find(d => d.id === id);
-        if (!ds) return;
-        selectedDatasetId = id;
-        selectedDataset = ds;
-
-        // Update dataset section
-        document.getElementById('dataset-badge').textContent = ds.dataset_name;
-        document.getElementById('dataset-badge').className = 'badge bg-success';
-        document.getElementById('dataset-display').innerHTML = `
-            <table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">
-                <tr><td style="width:35%"><strong>Name</strong></td><td>${ds.dataset_name}</td></tr>
-                <tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
-                <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
-                <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label}, ${ds.evgen_tag.label}, ${ds.simu_tag.label}, ${ds.reco_tag.label}</td></tr>
-            </table>`;
-
-        // Update physics section
-        const allParams = {};
-        [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
-            Object.entries(tag.parameters || {}).forEach(([k, v]) => {
-                if (v) allParams[`${label}: ${k}`] = v;
-            });
-        });
-        const physDiv = document.getElementById('physics-display');
-        physDiv.innerHTML = Object.entries(allParams).map(([k, v]) =>
-            `<span class="pk">${k}</span><span class="pv">${v}</span>`
-        ).join('');
-        document.getElementById('physics-badge').textContent = `${Object.keys(allParams).length} params`;
-        document.getElementById('physics-badge').className = 'badge bg-success';
-        document.querySelector('[data-section="physics"]').classList.remove('collapsed');
-
-        // Auto-fill name if empty
-        if (!document.getElementById('task-name').value) {
-            document.getElementById('task-name').value = ds.dataset_name;
-        }
-        updateSaveButton();
-    }
-
-    // ── Config selection ──
-    function selectConfig(id) {
-        const cfg = allConfigs.find(c => c.id === id);
-        if (!cfg) return;
-        selectedConfigId = id;
-        selectedConfig = cfg;
-
-        document.getElementById('config-badge').textContent = cfg.name;
-        document.getElementById('config-badge').className = 'badge bg-success';
-
-        let rows = '';
-        const fields = [
-            ['JUG_XL Tag', cfg.jug_xl_tag],
-            ['Container', cfg.container_image],
-            ['BG Mixing', cfg.bg_mixing ? 'Yes' : 'No'],
-            ['Copy Reco', cfg.copy_reco ? 'Yes' : 'No'],
-            ['Copy Full', cfg.copy_full ? 'Yes' : 'No'],
-            ['Copy Log', cfg.copy_log ? 'Yes' : 'No'],
-            ['Use Rucio', cfg.use_rucio ? 'Yes' : 'No'],
-            ['Target Hours/Job', cfg.target_hours_per_job || '-'],
-            ['Events/Task', cfg.events_per_task || '-'],
-            ['PanDA Site', cfg.panda_site || '-'],
-            ['PanDA Working Group', cfg.panda_working_group || '-'],
-            ['Rucio RSE', cfg.rucio_rse || '-'],
-        ];
-        fields.forEach(([k, v]) => { rows += `<tr><td style="width:40%"><strong>${k}</strong></td><td>${v || '-'}</td></tr>`; });
-
-        // Data (submission params)
-        if (cfg.data && Object.keys(cfg.data).length > 0) {
-            Object.entries(cfg.data).forEach(([k, v]) => {
-                rows += `<tr><td><strong>data.${k}</strong></td><td><code>${v}</code></td></tr>`;
-            });
-        }
-
-        document.getElementById('config-display').innerHTML =
-            `<table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">${rows}</table>`;
-        updateSaveButton();
-    }
-
-    // ── Load existing task ──
-    function loadTask(id) {
-        const t = allTasks.find(x => x.id === id);
-        if (!t) return;
-        editingTaskId = id;
-
-        // Fill identity
-        document.getElementById('task-name').value = t.name;
-        document.getElementById('task-description').value = t.description || '';
-
-        // Select its dataset and config
-        selectDataset(t.dataset_id);
-        selectConfig(t.prod_config_id);
-
-        // Fill csv and commands
-        document.getElementById('task-csv').value = t.csv_file || '';
-        if (t.condor_command || t.panda_command) {
-            document.getElementById('commands-area').style.display = 'block';
-            document.getElementById('condor-preview').textContent = t.condor_command || '';
-            document.getElementById('panda-preview').textContent = t.panda_command || '';
-        }
-
-        document.getElementById('identity-badge').textContent = `editing #${id}`;
-        document.getElementById('identity-badge').style.display = '';
-        document.getElementById('identity-badge').className = 'badge bg-warning';
-        updateSaveButton();
-    }
-
-    // ── Generate commands (client-side preview) ──
-    document.getElementById('btn-generate').addEventListener('click', function() {
-        if (!selectedDataset || !selectedConfig) {
-            alert('Select both a dataset and a config first.');
-            return;
-        }
-        const ds = selectedDataset;
-        const cfg = selectedConfig;
-        const csv = document.getElementById('task-csv').value || '<csv_file>';
-        const physics = ds.physics_tag.parameters || {};
-
-        // Condor command
-        const env = {};
-        env.EBEAM = physics.beam_energy_electron || '';
-        env.PBEAM = physics.beam_energy_hadron || '';
-        env.DETECTOR_VERSION = ds.detector_version;
-        env.DETECTOR_CONFIG = ds.detector_config;
-        env.JUG_XL_TAG = cfg.jug_xl_tag || '';
-        env.COPYRECO = cfg.copy_reco ? 'true' : 'false';
-        env.COPYFULL = cfg.copy_full ? 'true' : 'false';
-        env.COPYLOG = cfg.copy_log ? 'true' : 'false';
-        if (cfg.use_rucio) {
-            env.USERUCIO = 'true';
-            env.X509_USER_PROXY = 'secrets/x509_user_proxy';
-        }
-        if (cfg.rucio_rse) env.OUT_RSE = cfg.rucio_rse;
-        if (cfg.bg_mixing) {
-            const evgen = ds.evgen_tag.parameters || {};
-            env.SIGNAL_FREQ = evgen.signal_freq || '0';
-            env.SIGNAL_STATUS = evgen.signal_status || '0';
-            if (evgen.bg_tag_prefix) env.TAG_PREFIX = evgen.bg_tag_prefix;
-            env.CSV_FILE = csv;
-            if (evgen.bg_files) env.BG_FILES = evgen.bg_files;
-        }
-        const hours = cfg.target_hours_per_job || '2';
-        const envStr = Object.entries(env).filter(([,v]) => v).map(([k,v]) => `${k}=${v}`).join(' \\\n  ');
-        const condorCmd = `${envStr} \\\n  scripts/submit_csv.sh osg_csv hepmc3 ${csv} ${hours}`;
-
-        // PanDA command
-        const data = cfg.data || {};
-        const pParts = ['prun'];
-        if (data.exec_command) pParts.push(`--exec "${data.exec_command}"`);
-        pParts.push(`--outDS ${ds.did}`);
-        if (cfg.container_image) pParts.push(`--containerImage ${cfg.container_image}`);
-        if (cfg.panda_site) pParts.push(`--site ${cfg.panda_site}`);
-        if (cfg.panda_working_group) pParts.push(`--workingGroup ${cfg.panda_working_group}`);
-        pParts.push(`--prodSourceLabel ${data.prod_source_label || 'test'}`);
-        pParts.push(`--vo ${data.vo || 'wlcg'}`);
-        if (data.processing_type) pParts.push(`--processingType ${data.processing_type}`);
-        if (data.n_jobs) pParts.push(`--nJobs ${data.n_jobs}`);
-        if (data.events_per_job) pParts.push(`--nEventsPerJob ${data.events_per_job}`);
-        if (data.corecount) pParts.push(`--nCore ${data.corecount}`);
-        if (data.no_build) pParts.push('--noBuild');
-        if (data.skip_scout) pParts.push('--expertOnly_skipScout');
-        const pandaCmd = pParts.join(' \\\n  ');
-
-        document.getElementById('condor-preview').textContent = condorCmd;
-        document.getElementById('panda-preview').textContent = pandaCmd;
-        document.getElementById('commands-area').style.display = 'block';
-    });
-
-    // ── Save task ──
-    function updateSaveButton() {
-        const name = document.getElementById('task-name').value.trim();
-        document.getElementById('btn-save').disabled = !(name && selectedDatasetId && selectedConfigId);
-    }
-    document.getElementById('task-name').addEventListener('input', updateSaveButton);
-
-    document.getElementById('btn-save').addEventListener('click', async function() {
-        const name = document.getElementById('task-name').value.trim();
-        if (!name || !selectedDatasetId || !selectedConfigId) return;
-
-        const payload = {
-            name: name,
-            description: document.getElementById('task-description').value,
-            dataset: selectedDatasetId,
-            prod_config: selectedConfigId,
-            csv_file: document.getElementById('task-csv').value,
-            created_by: currentUser,
-        };
-
-        const url = editingTaskId
-            ? `/swf-monitor/pcs/api/prod-tasks/${editingTaskId}/`
-            : '/swf-monitor/pcs/api/prod-tasks/';
-        const method = editingTaskId ? 'PATCH' : 'POST';
-
-        const resp = await fetch(url, {
-            method: method,
-            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-            body: JSON.stringify(payload),
-        });
-
-        if (resp.ok) {
-            const data = await resp.json();
-            // Generate commands server-side
-            await fetch(`/swf-monitor/pcs/api/prod-tasks/${data.id}/generate-commands/`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
-            });
-            window.location.href = `/swf-monitor/pcs/tasks/${data.id}/`;
-        } else {
-            const err = await resp.json();
-            const msg = Object.values(err).flat().join(', ');
-            alert('Save failed: ' + msg);
-        }
-    });
-
-    // ── Reset ──
-    document.getElementById('btn-reset').addEventListener('click', function() {
-        selectedDatasetId = null; selectedConfigId = null; editingTaskId = null;
-        selectedDataset = null; selectedConfig = null;
+    function enterComposeMode(taskToEdit) {
+        mode = 'compose';
+        browsePanel.style.display = 'none';
+        composePanel.style.display = 'block';
+        if (btnNewTask) btnNewTask.style.display = 'none';
+        if (btnEditTask) btnEditTask.style.display = 'none';
+        btnCancel.style.display = 'inline-block';
+        btnSave.style.display = 'inline-block';
+        btnSave.disabled = true;
+        // Clear compose state
+        composeTaskId = null; composeDatasetId = null; composeConfigId = null;
+        composeDataset = null; composeConfig = null;
         document.getElementById('task-name').value = '';
         document.getElementById('task-description').value = '';
         document.getElementById('task-csv').value = '';
@@ -509,10 +216,334 @@
         document.getElementById('identity-badge').style.display = 'none';
         document.getElementById('commands-area').style.display = 'none';
         document.querySelector('[data-section="physics"]').classList.add('collapsed');
-        updateSaveButton();
+
+        if (taskToEdit) {
+            composeTaskId = taskToEdit.id;
+            document.getElementById('task-name').value = taskToEdit.name;
+            document.getElementById('task-description').value = taskToEdit.description || '';
+            document.getElementById('task-csv').value = taskToEdit.csv_file || '';
+            document.getElementById('identity-badge').textContent = `editing #${taskToEdit.id}`;
+            document.getElementById('identity-badge').style.display = '';
+            document.getElementById('identity-badge').className = 'badge bg-warning';
+            applyDatasetToCompose(taskToEdit.dataset_id);
+            applyConfigToCompose(taskToEdit.prod_config_id);
+            if (taskToEdit.condor_command || taskToEdit.panda_command) {
+                document.getElementById('commands-area').style.display = 'block';
+                document.getElementById('condor-preview').textContent = taskToEdit.condor_command || '';
+                document.getElementById('panda-preview').textContent = taskToEdit.panda_command || '';
+            }
+            panelTitle.textContent = `Edit: ${taskToEdit.name}`;
+            btnSave.disabled = true; // no changes yet
+        } else {
+            panelTitle.textContent = 'New Production Task';
+        }
+        updateUrl();
+    }
+
+    // ── Tab switching ──
+    function switchTab(tabName) {
+        document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`[data-browse="${tabName}"]`).classList.add('active');
+        browseType = tabName;
+        selectedItemId = null;
+        searchBox.value = '';
+        if (mode === 'browse') {
+            browseEmpty.style.display = 'block';
+            browseContent.style.display = 'none';
+            panelTitle.textContent = 'Select an item';
+            if (btnNewTask) btnNewTask.style.display = tabName === 'tasks' ? 'inline-block' : 'none';
+            if (btnEditTask) btnEditTask.style.display = 'none';
+        }
         renderList();
         updateUrl();
+    }
+    document.querySelectorAll('.browser-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            if (mode === 'compose') return; // don't switch tabs during compose
+            switchTab(this.dataset.browse);
+        });
     });
+
+    searchBox.addEventListener('input', renderList);
+
+    // ── Render list ──
+    function renderList() {
+        const q = searchBox.value.toLowerCase();
+        let items = [];
+        if (browseType === 'datasets') {
+            items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
+                d.physics_tag.label.toLowerCase().includes(q) || d.physics_tag.description.toLowerCase().includes(q)
+            ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
+                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label} | ${d.created_by}`,
+                selected: d.id === selectedItemId }));
+        } else if (browseType === 'configs') {
+            items = allConfigs.filter(c => !q || c.name.toLowerCase().includes(q) ||
+                (c.jug_xl_tag||'').toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
+            ).map(c => ({ id: c.id, type: 'config', label: c.name,
+                meta: `JUG_XL: ${c.jug_xl_tag || '-'} | ${c.created_by}`,
+                selected: c.id === selectedItemId }));
+        } else if (browseType === 'tasks') {
+            items = allTasks.filter(t => !q || t.name.toLowerCase().includes(q) ||
+                t.dataset_name.toLowerCase().includes(q) || t.prod_config_name.toLowerCase().includes(q)
+            ).map(t => ({ id: t.id, type: 'task', label: t.name,
+                meta: `${t.status} | ${t.dataset_name} | ${t.prod_config_name}`,
+                selected: t.id === selectedItemId }));
+        }
+        filterRow.innerHTML = '';
+        itemList.innerHTML = items.map(it =>
+            `<div class="item-entry${it.selected ? ' selected' : ''}" data-type="${it.type}" data-id="${it.id}">
+                <div class="item-label">${it.label}</div>
+                <div class="item-meta">${it.meta}</div>
+            </div>`
+        ).join('') || '<div class="empty-state" style="padding:.75rem;">No items found.</div>';
+        itemList.querySelectorAll('.item-entry').forEach(el => {
+            el.addEventListener('click', () => onItemClick(el.dataset.type, parseInt(el.dataset.id)));
+        });
+    }
+
+    // ── Item click ──
+    function onItemClick(type, id) {
+        selectedItemId = id;
+        if (mode === 'compose') {
+            // In compose mode, clicks apply to the task being built
+            if (type === 'dataset') applyDatasetToCompose(id);
+            else if (type === 'config') applyConfigToCompose(id);
+        } else {
+            // In browse mode, show detail on right
+            if (type === 'dataset') showDatasetDetail(id);
+            else if (type === 'config') showConfigDetail(id);
+            else if (type === 'task') showTaskDetail(id);
+        }
+        renderList();
+        updateUrl();
+    }
+
+    // ── BROWSE: Show details ──
+    function showDatasetDetail(id) {
+        const ds = allDatasets.find(d => d.id === id);
+        if (!ds) return;
+        browseEmpty.style.display = 'none';
+        browseContent.style.display = 'block';
+        panelTitle.textContent = ds.dataset_name;
+        if (btnEditTask) btnEditTask.style.display = 'none';
+        if (btnNewTask) btnNewTask.style.display = 'none';
+        let tagsHtml = '';
+        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
+            const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
+            tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+        });
+        browseContent.innerHTML = `
+            <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+                <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
+                <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
+                ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
+            </table>
+            <h6>Tags</h6>
+            <table class="table table-sm table-bordered" style="font-size:.82rem;">
+                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+                <tbody>${tagsHtml}</tbody>
+            </table>`;
+    }
+
+    function showConfigDetail(id) {
+        const c = allConfigs.find(x => x.id === id);
+        if (!c) return;
+        browseEmpty.style.display = 'none';
+        browseContent.style.display = 'block';
+        panelTitle.textContent = c.name;
+        if (btnEditTask) btnEditTask.style.display = 'none';
+        if (btnNewTask) btnNewTask.style.display = 'none';
+        function row(l,v) { return `<tr><td style="width:40%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
+        let dataRows = '';
+        if (c.data && Object.keys(c.data).length) {
+            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.'+k, `<code>${v}</code>`); });
+        }
+        browseContent.innerHTML = `
+            ${c.description ? `<p>${c.description}</p>` : ''}
+            <div class="row"><div class="col-md-6">
+                <h6>Background Mixing</h6>
+                <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                    ${row('Enabled', c.bg_mixing?'Yes':'No')}${row('Cross Section', c.bg_cross_section)}
+                </table></div><div class="col-md-6">
+                <h6>Output Control</h6>
+                <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                    ${row('Copy Reco', c.copy_reco?'Yes':'No')}${row('Copy Full', c.copy_full?'Yes':'No')}
+                    ${row('Copy Log', c.copy_log?'Yes':'No')}${row('Use Rucio', c.use_rucio?'Yes':'No')}
+                </table></div></div>
+            <div class="row"><div class="col-md-6">
+                <h6>Software Stack</h6>
+                <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                    ${row('JUG_XL', c.jug_xl_tag)}${row('Container', c.container_image?`<code>${c.container_image}</code>`:'-')}
+                </table></div><div class="col-md-6">
+                <h6>Resources</h6>
+                <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                    ${row('Hours/Job', c.target_hours_per_job)}${row('Events/Task', c.events_per_task)}
+                    ${row('PanDA Site', c.panda_site)}${row('Working Group', c.panda_working_group)}
+                    ${row('Rucio RSE', c.rucio_rse)}
+                </table></div></div>
+            ${dataRows ? `<h6>Submission Parameters</h6><table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">${dataRows}</table>` : ''}
+            <div class="item-meta">Created by ${c.created_by} | ${c.updated_at}</div>`;
+    }
+
+    function showTaskDetail(id) {
+        const t = allTasks.find(x => x.id === id);
+        if (!t) return;
+        browseEmpty.style.display = 'none';
+        browseContent.style.display = 'block';
+        panelTitle.textContent = t.name;
+        if (btnEditTask) btnEditTask.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnNewTask) btnNewTask.style.display = currentUser ? 'inline-block' : 'none';
+        const ds = allDatasets.find(d => d.id === t.dataset_id);
+        const cfg = allConfigs.find(c => c.id === t.prod_config_id);
+        const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
+
+        let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
+            <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
+        if (t.description) html += `<p>${t.description}</p>`;
+        html += `<div class="row"><div class="col-md-6">
+            <h6>Dataset</h6>
+            <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                <tr><td style="width:35%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
+                ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label} ${ds.evgen_tag.label} ${ds.simu_tag.label} ${ds.reco_tag.label}</td></tr>` : ''}
+            </table></div><div class="col-md-6">
+            <h6>Config</h6>
+            <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                <tr><td style="width:35%"><strong>Name</strong></td><td>${t.prod_config_name}</td></tr>
+                ${cfg ? `<tr><td><strong>JUG_XL</strong></td><td>${cfg.jug_xl_tag||'-'}</td></tr>
+                <tr><td><strong>BG Mixing</strong></td><td>${cfg.bg_mixing?'Yes':'No'}</td></tr>` : ''}
+            </table></div></div>`;
+        if (t.csv_file) html += `<p><strong>CSV:</strong> <code>${t.csv_file}</code></p>`;
+        if (t.condor_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">Condor</strong>
+            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
+            <div class="command-block" id="browse-condor">${t.condor_command}</div>`;
+        if (t.panda_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA</strong>
+            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
+            <div class="command-block" id="browse-panda">${t.panda_command}</div>`;
+        browseContent.innerHTML = html;
+    }
+
+    // ── COMPOSE: Apply dataset/config to task being built ──
+    function applyDatasetToCompose(id) {
+        const ds = allDatasets.find(d => d.id === id);
+        if (!ds) return;
+        composeDatasetId = id; composeDataset = ds;
+        document.getElementById('dataset-badge').textContent = ds.dataset_name;
+        document.getElementById('dataset-badge').className = 'badge bg-success';
+        document.getElementById('dataset-display').innerHTML = `
+            <table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">
+                <tr><td style="width:35%"><strong>Name</strong></td><td>${ds.dataset_name}</td></tr>
+                <tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label}, ${ds.evgen_tag.label}, ${ds.simu_tag.label}, ${ds.reco_tag.label}</td></tr>
+            </table>`;
+        const allParams = {};
+        [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
+            Object.entries(tag.parameters || {}).forEach(([k, v]) => { if (v) allParams[`${label}: ${k}`] = v; });
+        });
+        document.getElementById('physics-display').innerHTML = Object.entries(allParams).map(([k,v]) =>
+            `<span class="pk">${k}</span><span class="pv">${v}</span>`).join('');
+        document.getElementById('physics-badge').textContent = `${Object.keys(allParams).length} params`;
+        document.getElementById('physics-badge').className = 'badge bg-success';
+        document.querySelector('[data-section="physics"]').classList.remove('collapsed');
+        if (!document.getElementById('task-name').value) document.getElementById('task-name').value = ds.dataset_name;
+        updateSaveButton();
+    }
+
+    function applyConfigToCompose(id) {
+        const cfg = allConfigs.find(c => c.id === id);
+        if (!cfg) return;
+        composeConfigId = id; composeConfig = cfg;
+        document.getElementById('config-badge').textContent = cfg.name;
+        document.getElementById('config-badge').className = 'badge bg-success';
+        let rows = '';
+        [['JUG_XL Tag', cfg.jug_xl_tag], ['Container', cfg.container_image], ['BG Mixing', cfg.bg_mixing?'Yes':'No'],
+         ['Copy Reco', cfg.copy_reco?'Yes':'No'], ['Copy Full', cfg.copy_full?'Yes':'No'], ['Copy Log', cfg.copy_log?'Yes':'No'],
+         ['Use Rucio', cfg.use_rucio?'Yes':'No'], ['Hours/Job', cfg.target_hours_per_job||'-'], ['Events/Task', cfg.events_per_task||'-'],
+         ['PanDA Site', cfg.panda_site||'-'], ['Working Group', cfg.panda_working_group||'-'], ['Rucio RSE', cfg.rucio_rse||'-'],
+        ].forEach(([k,v]) => { rows += `<tr><td style="width:40%"><strong>${k}</strong></td><td>${v||'-'}</td></tr>`; });
+        if (cfg.data && Object.keys(cfg.data).length) {
+            Object.entries(cfg.data).forEach(([k,v]) => { rows += `<tr><td><strong>data.${k}</strong></td><td><code>${v}</code></td></tr>`; });
+        }
+        document.getElementById('config-display').innerHTML = `<table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">${rows}</table>`;
+        updateSaveButton();
+    }
+
+    // ── Generate commands ──
+    document.getElementById('btn-generate').addEventListener('click', function() {
+        if (!composeDataset || !composeConfig) { alert('Select both a dataset and a config first.'); return; }
+        const ds = composeDataset, cfg = composeConfig;
+        const csv = document.getElementById('task-csv').value || '<csv_file>';
+        const physics = ds.physics_tag.parameters || {};
+        const env = {};
+        env.EBEAM = physics.beam_energy_electron||''; env.PBEAM = physics.beam_energy_hadron||'';
+        env.DETECTOR_VERSION = ds.detector_version; env.DETECTOR_CONFIG = ds.detector_config;
+        env.JUG_XL_TAG = cfg.jug_xl_tag||'';
+        env.COPYRECO = cfg.copy_reco?'true':'false'; env.COPYFULL = cfg.copy_full?'true':'false'; env.COPYLOG = cfg.copy_log?'true':'false';
+        if (cfg.use_rucio) { env.USERUCIO = 'true'; env.X509_USER_PROXY = 'secrets/x509_user_proxy'; }
+        if (cfg.rucio_rse) env.OUT_RSE = cfg.rucio_rse;
+        if (cfg.bg_mixing) {
+            const evgen = ds.evgen_tag.parameters||{};
+            env.SIGNAL_FREQ = evgen.signal_freq||'0'; env.SIGNAL_STATUS = evgen.signal_status||'0';
+            if (evgen.bg_tag_prefix) env.TAG_PREFIX = evgen.bg_tag_prefix;
+            env.CSV_FILE = csv; if (evgen.bg_files) env.BG_FILES = evgen.bg_files;
+        }
+        const condorCmd = Object.entries(env).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(' \\\n  ')
+            + ` \\\n  scripts/submit_csv.sh osg_csv hepmc3 ${csv} ${cfg.target_hours_per_job||'2'}`;
+        const data = cfg.data||{}, pParts = ['prun'];
+        if (data.exec_command) pParts.push(`--exec "${data.exec_command}"`);
+        pParts.push(`--outDS ${ds.did}`);
+        if (cfg.container_image) pParts.push(`--containerImage ${cfg.container_image}`);
+        if (cfg.panda_site) pParts.push(`--site ${cfg.panda_site}`);
+        if (cfg.panda_working_group) pParts.push(`--workingGroup ${cfg.panda_working_group}`);
+        pParts.push(`--prodSourceLabel ${data.prod_source_label||'test'}`); pParts.push(`--vo ${data.vo||'wlcg'}`);
+        if (data.processing_type) pParts.push(`--processingType ${data.processing_type}`);
+        if (data.n_jobs) pParts.push(`--nJobs ${data.n_jobs}`);
+        if (data.events_per_job) pParts.push(`--nEventsPerJob ${data.events_per_job}`);
+        if (data.corecount) pParts.push(`--nCore ${data.corecount}`);
+        if (data.no_build) pParts.push('--noBuild'); if (data.skip_scout) pParts.push('--expertOnly_skipScout');
+        document.getElementById('condor-preview').textContent = condorCmd;
+        document.getElementById('panda-preview').textContent = pParts.join(' \\\n  ');
+        document.getElementById('commands-area').style.display = 'block';
+    });
+
+    // ── Save ──
+    function updateSaveButton() {
+        if (mode !== 'compose') return;
+        const name = document.getElementById('task-name').value.trim();
+        btnSave.disabled = !(name && composeDatasetId && composeConfigId);
+    }
+    document.getElementById('task-name').addEventListener('input', updateSaveButton);
+
+    btnSave.addEventListener('click', async function() {
+        const name = document.getElementById('task-name').value.trim();
+        if (!name || !composeDatasetId || !composeConfigId) return;
+        const payload = { name, description: document.getElementById('task-description').value,
+            dataset: composeDatasetId, prod_config: composeConfigId,
+            csv_file: document.getElementById('task-csv').value, created_by: currentUser };
+        const url = composeTaskId ? `/swf-monitor/pcs/api/prod-tasks/${composeTaskId}/` : '/swf-monitor/pcs/api/prod-tasks/';
+        const resp = await fetch(url, { method: composeTaskId ? 'PATCH' : 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}, body: JSON.stringify(payload) });
+        if (resp.ok) {
+            const data = await resp.json();
+            await fetch(`/swf-monitor/pcs/api/prod-tasks/${data.id}/generate-commands/`, {
+                method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken} });
+            window.location.href = `/swf-monitor/pcs/tasks/${data.id}/`;
+        } else {
+            const err = await resp.json();
+            alert('Save failed: ' + Object.values(err).flat().join(', '));
+        }
+    });
+
+    // ── Buttons ──
+    if (btnNewTask) btnNewTask.addEventListener('click', () => enterComposeMode(null));
+    if (btnEditTask) btnEditTask.addEventListener('click', () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (t) enterComposeMode(t);
+    });
+    btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 
     // ── Keyboard nav ──
     itemList.addEventListener('keydown', function(e) {
@@ -521,27 +552,28 @@
         const entries = Array.from(itemList.querySelectorAll('.item-entry'));
         if (!entries.length) return;
         const idx = entries.findIndex(el => el.classList.contains('selected'));
-        let next;
-        if (e.key === 'ArrowDown') next = idx < entries.length - 1 ? idx + 1 : 0;
-        else next = idx > 0 ? idx - 1 : entries.length - 1;
-        const entry = entries[next];
-        onItemClick(entry.dataset.type, parseInt(entry.dataset.id));
-        entry.scrollIntoView({block: 'nearest'});
+        let next = e.key === 'ArrowDown' ? (idx < entries.length-1 ? idx+1 : 0) : (idx > 0 ? idx-1 : entries.length-1);
+        onItemClick(entries[next].dataset.type, parseInt(entries[next].dataset.id));
+        entries[next].scrollIntoView({block: 'nearest'});
     });
 
     // ── Init ──
-    // Activate the correct tab from URL
     switchTab(browseType);
     if (initialSelected) {
-        loadTask(initialSelected);
-        updateUrl();
+        selectedItemId = initialSelected;
+        if (browseType === 'tasks') {
+            const t = allTasks.find(x => x.id === initialSelected);
+            if (t) showTaskDetail(initialSelected);
+        }
+        renderList();
     }
 })();
 
 function copyCmd(id) {
     const el = document.getElementById(id);
+    if (!el) return;
     navigator.clipboard.writeText(el.textContent).then(() => {
-        const btn = el.previousElementSibling.querySelector('button') || event.target;
+        const btn = event.target;
         btn.textContent = 'Copied!';
         setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
     });
