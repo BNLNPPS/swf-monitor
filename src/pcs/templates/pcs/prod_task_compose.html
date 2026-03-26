@@ -55,6 +55,11 @@
         </div>
         <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
         <div class="filter-row" id="browser-filters"></div>
+        {% if username %}
+        <div style="padding: .25rem 0;">
+            <button class="btn btn-primary btn-sm w-100" id="btn-new-task" style="display:none;">New Task</button>
+        </div>
+        {% endif %}
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
@@ -64,8 +69,8 @@
             <h4 id="panel-title" style="margin:0;">Select an item</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-outline-primary btn-sm" id="btn-new-task" style="display:none;">New Task</button>
                 <button class="btn btn-outline-secondary btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
                 {% endif %}
                 <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Save Task</button>
@@ -159,6 +164,7 @@
     const panelTitle = document.getElementById('panel-title');
     const btnNewTask = document.getElementById('btn-new-task');
     const btnEditTask = document.getElementById('btn-edit-task');
+    const btnCopyTask = document.getElementById('btn-copy-task');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
 
@@ -182,8 +188,9 @@
         browsePanel.style.display = 'block';
         btnCancel.style.display = 'none';
         btnSave.style.display = 'none';
-        if (btnNewTask) btnNewTask.style.display = browseType === 'tasks' ? 'inline-block' : 'none';
+        if (btnNewTask) btnNewTask.style.display = browseType === 'tasks' ? 'block' : 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
+        if (btnCopyTask) btnCopyTask.style.display = 'none';
         composeTaskId = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -195,6 +202,7 @@
         composePanel.style.display = 'block';
         if (btnNewTask) btnNewTask.style.display = 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
+        if (btnCopyTask) btnCopyTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -247,21 +255,20 @@
         browseType = tabName;
         selectedItemId = null;
         searchBox.value = '';
+        // Show "New Task" in left panel only on tasks tab in browse mode
+        if (btnNewTask) btnNewTask.style.display = (mode === 'browse' && tabName === 'tasks') ? 'block' : 'none';
         if (mode === 'browse') {
             browseEmpty.style.display = 'block';
             browseContent.style.display = 'none';
             panelTitle.textContent = 'Select an item';
-            if (btnNewTask) btnNewTask.style.display = tabName === 'tasks' ? 'inline-block' : 'none';
             if (btnEditTask) btnEditTask.style.display = 'none';
+            if (btnCopyTask) btnCopyTask.style.display = 'none';
         }
         renderList();
         updateUrl();
     }
     document.querySelectorAll('.browser-tab').forEach(tab => {
-        tab.addEventListener('click', function() {
-            if (mode === 'compose') return; // don't switch tabs during compose
-            switchTab(this.dataset.browse);
-        });
+        tab.addEventListener('click', function() { switchTab(this.dataset.browse); });
     });
 
     searchBox.addEventListener('input', renderList);
@@ -394,7 +401,7 @@
         browseContent.style.display = 'block';
         panelTitle.textContent = t.name;
         if (btnEditTask) btnEditTask.style.display = currentUser ? 'inline-block' : 'none';
-        if (btnNewTask) btnNewTask.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
         const ds = allDatasets.find(d => d.id === t.dataset_id);
         const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
@@ -542,6 +549,20 @@
     if (btnEditTask) btnEditTask.addEventListener('click', () => {
         const t = allTasks.find(x => x.id === selectedItemId);
         if (t) enterComposeMode(t);
+    });
+    if (btnCopyTask) btnCopyTask.addEventListener('click', () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (t) {
+            // Enter compose as new task, pre-filled from existing
+            enterComposeMode(null);
+            applyDatasetToCompose(t.dataset_id);
+            applyConfigToCompose(t.prod_config_id);
+            document.getElementById('task-name').value = t.name + ' (copy)';
+            document.getElementById('task-description').value = t.description || '';
+            document.getElementById('task-csv').value = t.csv_file || '';
+            panelTitle.textContent = 'New Task (copy)';
+            updateSaveButton();
+        }
     });
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 
