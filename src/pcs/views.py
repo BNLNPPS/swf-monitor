@@ -499,13 +499,21 @@ def datasets_compose(request):
                          'description': ds.reco_tag.description, 'parameters': ds.reco_tag.parameters},
         })
 
-    # Tag options for creation form
+    # Full tag data for browsing and diffs
     tags_data = {}
     for ttype, model in TAG_MODELS_MAP.items():
-        tags_data[ttype] = [
-            {'id': t.id, 'label': t.tag_label, 'description': t.description, 'status': t.status}
-            for t in model.objects.order_by('tag_number')
-        ]
+        tag_list = []
+        qs_tags = model.objects.order_by('tag_number')
+        if ttype == 'p':
+            qs_tags = qs_tags.select_related('category')
+        for t in qs_tags:
+            entry = {'id': t.id, 'tag_number': t.tag_number, 'label': t.tag_label,
+                     'description': t.description, 'status': t.status,
+                     'parameters': t.parameters, 'created_by': t.created_by}
+            if ttype == 'p':
+                entry['category_name'] = t.category.name
+            tag_list.append(entry)
+        tags_data[ttype] = tag_list
 
     context = {
         'datasets_json': json.dumps(datasets_data),
