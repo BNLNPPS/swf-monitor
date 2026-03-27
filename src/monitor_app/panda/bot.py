@@ -53,8 +53,10 @@ the answer is. The data changes constantly — you MUST query it live.
 
 You have access to swf_get_ai_memory which retrieves conversation history from \
 previous sessions. Use it when someone references something from a past conversation \
-or when deeper context would help answer a question. Call it with \
-username='pandabot-community' and a turns count.
+or when deeper context would help answer a question. For channel conversations use \
+username='pandabot-community'. For DMs or @mention conversations, use \
+username='pandabot-{mm_username}' where mm_username is the Mattermost username of \
+the person you are talking to.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
@@ -138,13 +140,6 @@ class UserSession:
         self.mm_username = mm_username
         self.messages = []
         self.lock = asyncio.Lock()
-
-    def trim_messages(self):
-        if len(self.messages) <= MAX_SESSION_MESSAGES:
-            return
-        self.messages = self.messages[-MAX_SESSION_MESSAGES:]
-        if self.messages and self.messages[0]['role'] != 'user':
-            self.messages = self.messages[1:]
 
 
 class PandaBot:
@@ -307,7 +302,7 @@ class PandaBot:
             logger.exception("Failed to fetch thread")
             return None
 
-def start(self):
+    def start(self):
         """Connect to Mattermost and start listening."""
         logger.info(f"Connecting to {self.mm_url}...")
         self.driver.login()
@@ -492,13 +487,13 @@ def start(self):
                     f"New reply: {message_text}"
                 )
 
-        msg_start = len(messages)
         messages.append({"role": "user", "content": user_content})
         # Trim if needed
         if len(messages) > MAX_SESSION_MESSAGES:
             del messages[:len(messages) - MAX_SESSION_MESSAGES]
             if messages and messages[0]['role'] != 'user':
                 del messages[0]
+        msg_start = len(messages) - 1  # index of the user message we just added
 
         reply = "Sorry, I encountered an error processing your question."
 
