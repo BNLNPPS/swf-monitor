@@ -436,12 +436,32 @@ class PandaBot:
             asyncio.create_task(self._respond_channel(mm_username, tagged_message, post_channel, post_id, root_id))
 
     async def _respond_channel(self, mm_username, tagged_message, reply_channel, post_id, root_id):
-        """Process a channel message using the shared conversation."""
+        """Process a channel message using the shared conversation.
+
+        Injects the user's per-user memory as context so the bot can
+        recall cross-context exchanges (e.g. DM content asked about in channel).
+        """
+        # Fetch user's recent history and inject as context
+        memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
+        user_history = []
+        await self._load_memory(memory_user, user_history)
+
+        user_context = ''
+        if user_history:
+            lines = []
+            for msg in user_history[-10:]:  # last 10 exchanges
+                lines.append(f"  {msg['role']}: {msg['content'][:200]}")
+            user_context = (
+                f"\n[Recent history for {mm_username} across all contexts:\n"
+                + "\n".join(lines) + "\n]"
+            )
+
+        augmented_message = tagged_message + user_context if user_context else tagged_message
+
         async with self._respond_lock:
-            reply = await self._process_message(self.messages, tagged_message, root_id)
+            reply = await self._process_message(self.messages, augmented_message, root_id)
 
         # Record to both community and per-user memory
-        memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
         asyncio.create_task(self._record_exchange(MEMORY_USERNAME, tagged_message, reply))
         asyncio.create_task(self._record_exchange(memory_user, tagged_message, reply))
         await self._post_reply(reply, reply_channel, post_id, root_id)
