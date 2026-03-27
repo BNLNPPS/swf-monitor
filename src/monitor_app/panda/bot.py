@@ -157,6 +157,7 @@ class PandaBot:
         self.system_prompt = SYSTEM_PREAMBLE
         self.anthropic_tools = []
         self._respond_lock = asyncio.Lock()
+        self._active_threads = set()  # thread root IDs the bot has replied to
 
     def _build_system_prompt(self):
         """System prompt with current datetime."""
@@ -344,12 +345,14 @@ class PandaBot:
             logger.debug(f"Skipping system message type={post_type}")
             return
 
-        # Accept: our channel, a DM, or an @mention in any channel
+        # Accept: our channel, a DM, an @mention, or a thread we're in
         is_our_channel = (post_channel == self.channel_id)
         is_dm = (channel_type == 'D')
         mentions_str = data.get('mentions', '')
         is_mention = self.bot_user_id and self.bot_user_id in mentions_str
-        if not is_our_channel and not is_dm and not is_mention:
+        root_id = post.get('root_id', '')
+        is_active_thread = root_id in self._active_threads
+        if not is_our_channel and not is_dm and not is_mention and not is_active_thread:
             return
 
         message_text = post.get('message', '').strip()
@@ -357,8 +360,7 @@ class PandaBot:
             return
 
         post_id = post.get('id')
-        root_id = post.get('root_id')
-        source = 'DM' if is_dm else ('mention' if is_mention and not is_our_channel else 'channel')
+        source = 'DM' if is_dm else ('thread' if is_active_thread and not is_our_channel else ('mention' if is_mention and not is_our_channel else 'channel'))
         logger.info(f"Message from {post_user} ({source}): {message_text[:100]}")
 
         asyncio.create_task(self._respond(message_text, post_channel, post_id, root_id))
@@ -377,6 +379,7 @@ class PandaBot:
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
+        thread_root = root_id or post_id
         try:
             logger.info("Posting reply to Mattermost...")
             await asyncio.to_thread(
@@ -384,9 +387,11 @@ class PandaBot:
                 options={
                     'channel_id': reply_channel,
                     'message': reply,
-                    'root_id': root_id or post_id,
+                    'root_id': thread_root,
                 },
             )
+            # Track this thread so we respond to follow-ups
+            self._active_threads.add(thread_root)
             logger.info("Reply posted successfully")
         except Exception:
             logger.exception("Failed to post reply")
