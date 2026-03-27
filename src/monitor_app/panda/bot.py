@@ -301,7 +301,30 @@ class PandaBot:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self._setup_mcp())
         loop.run_until_complete(self._load_memory())
+        self._load_active_threads()
         self.driver.init_websocket(self._handle_event)
+
+    THREADS_STATE_KEY = 'pandabot_active_threads'
+
+    def _load_active_threads(self):
+        """Load active thread IDs from PersistentState."""
+        from monitor_app.models import PersistentState
+        try:
+            obj = PersistentState.objects.get(id=1)
+            threads = obj.state_data.get(self.THREADS_STATE_KEY, [])
+            self._active_threads = set(threads)
+            logger.info(f"Loaded {len(self._active_threads)} active threads")
+        except PersistentState.DoesNotExist:
+            self._active_threads = set()
+
+    def _save_active_threads(self):
+        """Persist active thread IDs. Keep only the most recent 200."""
+        from monitor_app.models import PersistentState
+        threads = list(self._active_threads)[-200:]
+        self._active_threads = set(threads)
+        obj, _ = PersistentState.objects.get_or_create(id=1, defaults={'state_data': {}})
+        obj.state_data[self.THREADS_STATE_KEY] = threads
+        obj.save()
 
     async def _handle_event(self, raw):
         """WebSocket event handler."""
@@ -390,8 +413,10 @@ class PandaBot:
                     'root_id': thread_root,
                 },
             )
-            # Track this thread so we respond to follow-ups
-            self._active_threads.add(thread_root)
+            # Track this thread so we respond to follow-ups (persisted)
+            if thread_root not in self._active_threads:
+                self._active_threads.add(thread_root)
+                await asyncio.to_thread(self._save_active_threads)
             logger.info("Reply posted successfully")
         except Exception:
             logger.exception("Failed to post reply")
