@@ -334,18 +334,23 @@ class PandaBot:
             f"type={post_type} root_id={post.get('root_id', '')}"
         )
 
+        channel_type = data.get('channel_type', '')
+
         if post_user == self.bot_user_id:
             logger.debug("Skipping own message")
             return
 
-        if post_channel != self.channel_id:
-            logger.debug(
-                f"Skipping: channel {post_channel} != {self.channel_id}"
-            )
-            return
-
         if post_type:
             logger.debug(f"Skipping system message type={post_type}")
+            return
+
+        # Accept: our channel OR a direct message
+        is_our_channel = (post_channel == self.channel_id)
+        is_dm = (channel_type == 'D')
+        if not is_our_channel and not is_dm:
+            logger.debug(
+                f"Skipping: channel {post_channel} != {self.channel_id} and not DM"
+            )
             return
 
         message_text = post.get('message', '').strip()
@@ -354,11 +359,11 @@ class PandaBot:
 
         post_id = post.get('id')
         root_id = post.get('root_id')
-        logger.info(f"Message from {post_user}: {message_text[:100]}")
+        logger.info(f"Message from {post_user} ({'DM' if is_dm else 'channel'}): {message_text[:100]}")
 
-        asyncio.create_task(self._respond(message_text, post_id, root_id))
+        asyncio.create_task(self._respond(message_text, post_channel, post_id, root_id))
 
-    async def _respond(self, message_text, post_id, root_id):
+    async def _respond(self, message_text, reply_channel, post_id, root_id):
         """Process a message and post the reply.
 
         Serialized via _respond_lock so messages are processed in order
@@ -377,7 +382,7 @@ class PandaBot:
             await asyncio.to_thread(
                 self.driver.posts.create_post,
                 options={
-                    'channel_id': self.channel_id,
+                    'channel_id': reply_channel,
                     'message': reply,
                     'root_id': root_id or post_id,
                 },
