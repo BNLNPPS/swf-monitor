@@ -344,13 +344,12 @@ class PandaBot:
             logger.debug(f"Skipping system message type={post_type}")
             return
 
-        # Accept: our channel OR a direct message
+        # Accept: our channel, a DM, or an @mention in any channel
         is_our_channel = (post_channel == self.channel_id)
         is_dm = (channel_type == 'D')
-        if not is_our_channel and not is_dm:
-            logger.debug(
-                f"Skipping: channel {post_channel} != {self.channel_id} and not DM"
-            )
+        mentions_str = data.get('mentions', '')
+        is_mention = self.bot_user_id and self.bot_user_id in mentions_str
+        if not is_our_channel and not is_dm and not is_mention:
             return
 
         message_text = post.get('message', '').strip()
@@ -359,7 +358,8 @@ class PandaBot:
 
         post_id = post.get('id')
         root_id = post.get('root_id')
-        logger.info(f"Message from {post_user} ({'DM' if is_dm else 'channel'}): {message_text[:100]}")
+        source = 'DM' if is_dm else ('mention' if is_mention and not is_our_channel else 'channel')
+        logger.info(f"Message from {post_user} ({source}): {message_text[:100]}")
 
         asyncio.create_task(self._respond(message_text, post_channel, post_id, root_id))
 
