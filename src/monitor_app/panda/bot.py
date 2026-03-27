@@ -42,13 +42,11 @@ You use MCP tools to answer questions about PanDA production and the configurati
 tasks based on physics inputs using the Physics Configuration System (PCS).
 
 You communicate via Mattermost — in a shared channel, in direct messages (DMs), \
-and when @mentioned in any channel. You do not know which context you are in \
-unless told. Your channel conversation and each user's DM conversation are \
-SEPARATE — you cannot see a user's DM history from the channel, or channel \
-history from a DM. If someone references something from a different context, \
-tell them honestly that your conversations are separate. \
+and when @mentioned in any channel. Each message you receive is tagged with the \
+sender's username and context (e.g. [wenaus in #pandabot] or [wenaus in DM]). \
 You maintain full awareness of the ongoing conversation — refer back to earlier \
-questions and answers naturally.
+questions and answers naturally. One user's DM content is private to that user — \
+never reveal it to others in the channel.
 
 CRITICAL: ALWAYS call a tool to answer questions. NEVER answer from memory or from \
 examples in these instructions. The examples below show which tool to call, not what \
@@ -56,10 +54,10 @@ the answer is. The data changes constantly — you MUST query it live.
 
 You have access to swf_get_ai_memory which retrieves conversation history from \
 previous sessions. Use it when someone references something from a past conversation \
-or when deeper context would help answer a question. For channel conversations use \
-username='pandabot-community'. For DMs or @mention conversations, use \
-username='pandabot-{mm_username}' where mm_username is the Mattermost username of \
-the person you are talking to.
+or when deeper context would help answer a question. Call it with \
+username='pandabot-{mm_username}' to get a specific user's history across all \
+contexts (channel, DM, @mentions). This lets you recall what a user said in a DM \
+even when they ask about it in the channel.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
@@ -419,35 +417,42 @@ class PandaBot:
         post_id = post.get('id')
         is_personal = is_dm or (is_mention and not is_our_channel) or (is_active_thread and not is_our_channel)
         source = 'DM' if is_dm else ('thread' if is_active_thread and not is_our_channel else ('mention' if is_mention and not is_our_channel else 'channel'))
-        logger.info(f"Message from {post_user} ({source}): {message_text[:100]}")
+
+        # Resolve username for all messages (needed for context tagging and per-user memory)
+        mm_username = await self._resolve_mm_username(post_user)
+        context_tag = 'DM' if is_dm else f'#{self.mm_channel_name}' if is_our_channel else '@mention'
+        tagged_message = f"[{mm_username} in {context_tag}] {message_text}"
+        logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
         if is_personal:
             # Per-user session for DMs, @mentions, and their follow-up threads
-            mm_username = await self._resolve_mm_username(post_user)
             session = self._get_session(post_user, mm_username)
             if not session.messages:
                 memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
                 await self._load_memory(memory_user, session.messages)
-            asyncio.create_task(self._respond_personal(session, message_text, post_channel, post_id, root_id))
+            asyncio.create_task(self._respond_personal(session, mm_username, tagged_message, post_channel, post_id, root_id))
         else:
-            # Shared channel conversation
-            asyncio.create_task(self._respond_channel(message_text, post_channel, post_id, root_id))
+            # Shared channel conversation — but still record per-user for cross-context recall
+            asyncio.create_task(self._respond_channel(mm_username, tagged_message, post_channel, post_id, root_id))
 
-    async def _respond_channel(self, message_text, reply_channel, post_id, root_id):
+    async def _respond_channel(self, mm_username, tagged_message, reply_channel, post_id, root_id):
         """Process a channel message using the shared conversation."""
         async with self._respond_lock:
-            reply = await self._process_message(self.messages, message_text, root_id)
+            reply = await self._process_message(self.messages, tagged_message, root_id)
 
-        asyncio.create_task(self._record_exchange(MEMORY_USERNAME, message_text, reply))
+        # Record to both community and per-user memory
+        memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
+        asyncio.create_task(self._record_exchange(MEMORY_USERNAME, tagged_message, reply))
+        asyncio.create_task(self._record_exchange(memory_user, tagged_message, reply))
         await self._post_reply(reply, reply_channel, post_id, root_id)
 
-    async def _respond_personal(self, session, message_text, reply_channel, post_id, root_id):
+    async def _respond_personal(self, session, mm_username, tagged_message, reply_channel, post_id, root_id):
         """Process a DM/@mention using per-user conversation."""
         async with session.lock:
-            reply = await self._process_message(session.messages, message_text, root_id)
+            reply = await self._process_message(session.messages, tagged_message, root_id)
 
-        memory_user = f"{MEMORY_USERNAME_PREFIX}-{session.mm_username}"
-        asyncio.create_task(self._record_exchange(memory_user, message_text, reply))
+        memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
+        asyncio.create_task(self._record_exchange(memory_user, tagged_message, reply))
         await self._post_reply(reply, reply_channel, post_id, root_id)
 
     async def _post_reply(self, reply, reply_channel, post_id, root_id):
