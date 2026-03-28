@@ -259,7 +259,7 @@ class TestbedBot:
             await mcp.close()
         return messages
 
-    async def _record_exchange(self, question, answer):
+    async def _record_exchange(self, question, answer, post_id='', root_id=''):
         """Record a Q&A exchange to the unified memory."""
         mcp = MCPClient(self.mcp_url)
         try:
@@ -270,6 +270,8 @@ class TestbedBot:
                     'session_id': 'mattermost',
                     'role': role,
                     'content': content,
+                    'namespace': post_id,
+                    'project_path': root_id,
                 })
         except Exception:
             logger.exception("Failed to record exchange")
@@ -418,7 +420,7 @@ class TestbedBot:
                 messages, tagged_message, testbed_username, root_id
             )
             # Record inside lock so the next load sees this exchange
-            await self._record_exchange(tagged_message, reply)
+            await self._record_exchange(tagged_message, reply, post_id, root_id)
 
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'

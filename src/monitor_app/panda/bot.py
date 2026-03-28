@@ -224,7 +224,7 @@ class PandaBot:
             await mcp.close()
         return messages
 
-    async def _record_exchange(self, question, answer):
+    async def _record_exchange(self, question, answer, post_id='', root_id=''):
         """Record a Q&A exchange to the unified memory."""
         mcp = MCPClient(self.mcp_url)
         try:
@@ -235,6 +235,8 @@ class PandaBot:
                     'session_id': 'mattermost',
                     'role': role,
                     'content': content,
+                    'namespace': post_id,
+                    'project_path': root_id,
                 })
         except Exception:
             logger.exception("Failed to record exchange")
@@ -405,7 +407,7 @@ class PandaBot:
             messages = await self._load_recent_dialog()
             reply = await self._process_message(messages, tagged_message, root_id)
             # Record inside lock so the next load sees this exchange
-            await self._record_exchange(tagged_message, reply)
+            await self._record_exchange(tagged_message, reply, post_id, root_id)
 
         await self._post_reply(reply, reply_channel, post_id, root_id)
 
