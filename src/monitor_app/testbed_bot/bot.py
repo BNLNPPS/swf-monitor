@@ -6,7 +6,9 @@ Connects to Mattermost via WebSocket, listens for:
   - Messages in the testbed channel
 
 Access-controlled: only users in the TESTBED_USER_MAP can interact.
-Each user gets their own conversation history keyed by Mattermost user ID.
+On each message, loads recent dialog from the database — all users, all
+contexts — giving the bot full awareness. One soft privacy rule: don't
+reveal DM content to others in the channel.
 
 MCP transport: HTTP POST (JSON-RPC) — same as panda_bot. No SSE, no GET streams.
 """
@@ -26,14 +28,12 @@ logger = logging.getLogger('testbed_bot')
 MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
-MEMORY_TURNS = 20
-MAX_SESSION_MESSAGES = 200
+MEMORY_TURNS = 30
+MEMORY_USERNAME = 'testbedbot'
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('swf_', 'panda_', 'pcs_')
-BOT_EXTRA_TOOLS = ()
-MEMORY_USERNAME_PREFIX = 'testbedbot'
 
 # Mattermost username -> testbed username
 # Loaded from TESTBED_USER_MAP env var (JSON) or defaults below
@@ -48,16 +48,18 @@ You assist testbed developers with workflow operations, monitoring, and PanDA pr
 using MCP tools.
 
 You communicate via both direct messages and a shared Mattermost channel. \
-Each user has their own conversation context.
+Each message you receive is tagged with the sender's username and context \
+(e.g. [wenaus in #swf-testbed-bot] or [wenaus in DM]). Your conversation \
+history includes recent dialog across all users and contexts — refer back to \
+earlier questions and answers naturally.
 
 The current user's testbed username is: {testbed_username}
 
+Privacy: a user's DM exchanges are their own business. Don't volunteer DM content \
+to others in the channel.
+
 CRITICAL: ALWAYS call a tool to answer questions. NEVER answer from memory or from \
 examples in these instructions. Data changes constantly — query it live.
-
-You have access to swf_get_ai_memory which retrieves conversation history from \
-previous sessions. Use it when someone references something from a past conversation. \
-Call it with username='testbedbot-{testbed_username}' and a turns count.
 
 Active commands (start/stop testbed, start/stop workflow, kill agent, etc.) require the user \
 to have a pandaserver02 account. Only execute active commands for the current user using \
@@ -144,32 +146,12 @@ def mcp_tool_to_anthropic(tool):
     }
 
 
-class UserSession:
-    """Per-user conversation state."""
-
-    def __init__(self, mm_username, testbed_username):
-        self.mm_username = mm_username
-        self.testbed_username = testbed_username
-        self.messages = []
-        self.lock = asyncio.Lock()
-
-    def trim_messages(self):
-        if len(self.messages) <= MAX_SESSION_MESSAGES:
-            return
-        self.messages = self.messages[-MAX_SESSION_MESSAGES:]
-        if self.messages and self.messages[0]['role'] != 'user':
-            self.messages = self.messages[1:]
-        logger.info(
-            f"Trimmed {self.mm_username} conversation to "
-            f"{len(self.messages)} messages"
-        )
-
-
 class TestbedBot:
     """Mattermost bot for testbed developers.
 
-    Listens on both a channel and DMs. Only authorized users (those in the
-    user map) can interact. Each user gets per-user conversation history.
+    On each message, loads recent dialog from the database — all users,
+    all contexts — so the bot has full awareness. Access-controlled:
+    only users in the user map can interact.
     """
 
     def __init__(self):
@@ -195,36 +177,11 @@ class TestbedBot:
 
         self.bot_user_id = None
         self.channel_id = None
-        self.sessions: dict[str, UserSession] = {}
+        self.system_prompt_base = SYSTEM_PREAMBLE
         self.anthropic_tools = []
         self.server_instructions = ""
-        # Cache: mm_user_id -> mm_username
+        self._respond_lock = asyncio.Lock()
         self._mm_user_cache: dict[str, str] = {}
-
-    def _get_session(self, mm_user_id, mm_username):
-        """Get or create a per-user session."""
-        if mm_user_id not in self.sessions:
-            testbed_username = self.user_map.get(mm_username)
-            if not testbed_username:
-                return None
-            self.sessions[mm_user_id] = UserSession(
-                mm_username, testbed_username
-            )
-            logger.info(
-                f"New session for {mm_username} -> {testbed_username}"
-            )
-        return self.sessions[mm_user_id]
-
-    def _build_system_prompt(self, session: UserSession):
-        """System prompt personalized for this user."""
-        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-        preamble = SYSTEM_PREAMBLE.format(
-            testbed_username=session.testbed_username,
-        )
-        prompt = f"Current date and time: {now}\n\n{preamble}"
-        if self.server_instructions:
-            prompt += "\n" + self.server_instructions
-        return prompt
 
     async def _resolve_mm_username(self, mm_user_id):
         """Look up Mattermost username from user ID, with caching."""
@@ -241,6 +198,17 @@ class TestbedBot:
             logger.exception(f"Failed to resolve user {mm_user_id}")
             return ''
 
+    def _build_system_prompt(self, testbed_username):
+        """System prompt personalized for the current user."""
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        preamble = self.system_prompt_base.format(
+            testbed_username=testbed_username,
+        )
+        prompt = f"Current date and time: {now}\n\n{preamble}"
+        if self.server_instructions:
+            prompt += "\n" + self.server_instructions
+        return prompt
+
     async def _setup_mcp(self):
         """Discover tools and server instructions via MCP."""
         mcp = MCPClient(self.mcp_url)
@@ -250,23 +218,26 @@ class TestbedBot:
             self.anthropic_tools = [
                 mcp_tool_to_anthropic(t) for t in tools
                 if t["name"].startswith(BOT_TOOL_PREFIXES)
-                or t["name"] in BOT_EXTRA_TOOLS
             ]
             logger.info(f"Discovered {len(self.anthropic_tools)} tools via MCP")
             self.server_instructions = mcp.server_instructions or ""
+            if self.server_instructions:
+                self.system_prompt_base = (
+                    SYSTEM_PREAMBLE + "\n" + self.server_instructions
+                )
         except Exception:
             logger.exception("Failed MCP setup — will retry on first message")
         finally:
             await mcp.close()
 
-    async def _load_memory(self, session: UserSession):
-        """Load per-user memory as conversation history."""
-        memory_user = f"{MEMORY_USERNAME_PREFIX}-{session.testbed_username}"
+    async def _load_recent_dialog(self):
+        """Load recent dialog from the database — all users, all contexts."""
         mcp = MCPClient(self.mcp_url)
+        messages = []
         try:
             await mcp.initialize()
             result = await mcp.call_tool('swf_get_ai_memory', {
-                'username': memory_user,
+                'username': MEMORY_USERNAME,
                 'turns': MEMORY_TURNS,
             })
             content = result.get('content', [])
@@ -274,42 +245,34 @@ class TestbedBot:
             for item in content:
                 if isinstance(item, dict) and 'text' in item:
                     text += item['text']
-            if not text:
-                return
-            data = json.loads(text)
-            items = data.get('items', [])
-            if not items:
-                return
-            for item in items:
-                session.messages.append({
-                    "role": item['role'],
-                    "content": item['content'],
-                })
-            logger.info(
-                f"Loaded {len(items)} memory items for {session.mm_username}"
-            )
+            if text:
+                data = json.loads(text)
+                for item in data.get('items', []):
+                    messages.append({
+                        "role": item['role'],
+                        "content": item['content'],
+                    })
+                logger.info(f"Loaded {len(messages)} memory items")
         except Exception:
-            logger.exception(
-                f"Failed to load memory for {session.mm_username}"
-            )
+            logger.exception("Failed to load recent dialog")
         finally:
             await mcp.close()
+        return messages
 
-    async def _record_exchange(self, session: UserSession, question, answer):
-        """Record a Q&A exchange to per-user memory."""
-        memory_user = f"{MEMORY_USERNAME_PREFIX}-{session.testbed_username}"
+    async def _record_exchange(self, question, answer):
+        """Record a Q&A exchange to the unified memory."""
         mcp = MCPClient(self.mcp_url)
         try:
             await mcp.initialize()
             for role, content in [('user', question), ('assistant', answer)]:
                 await mcp.call_tool('swf_record_ai_memory', {
-                    'username': memory_user,
+                    'username': MEMORY_USERNAME,
                     'session_id': 'mattermost',
                     'role': role,
                     'content': content,
                 })
         except Exception:
-            logger.exception("Failed to record exchange to memory")
+            logger.exception("Failed to record exchange")
         finally:
             await mcp.close()
 
@@ -365,10 +328,6 @@ class TestbedBot:
         loop.run_until_complete(self._setup_mcp())
         self.driver.init_websocket(self._handle_event)
 
-    def _is_dm_channel(self, channel_type):
-        """Check if channel type is a direct message."""
-        return channel_type in ('D',)
-
     async def _handle_event(self, raw):
         """WebSocket event handler — accepts channel messages and DMs."""
         try:
@@ -406,7 +365,7 @@ class TestbedBot:
 
         # Accept: our channel OR a DM
         is_our_channel = (post_channel == self.channel_id)
-        is_dm = self._is_dm_channel(channel_type)
+        is_dm = (channel_type == 'D')
 
         if not is_our_channel and not is_dm:
             return
@@ -432,41 +391,44 @@ class TestbedBot:
                 )
             return
 
-        session = self._get_session(post_user, mm_username)
-
-        # Load memory on first interaction
-        if not session.messages:
-            await self._load_memory(session)
-
+        testbed_username = self.user_map[mm_username]
         post_id = post.get('id')
         root_id = post.get('root_id')
+
+        context_tag = 'DM' if is_dm else f'#{self.mm_channel_name}'
+        tagged_message = f"[{mm_username} in {context_tag}] {message_text}"
         logger.info(
             f"Message from {mm_username} "
             f"({'DM' if is_dm else 'channel'}): {message_text[:100]}"
         )
 
         asyncio.create_task(
-            self._respond(session, message_text, post_channel, post_id, root_id)
+            self._respond(tagged_message, testbed_username, post_channel, post_id, root_id)
         )
 
-    async def _respond(self, session, message_text, channel_id, post_id, root_id):
-        """Process a message and post the reply."""
-        async with session.lock:
-            reply = await self._process_message(session, message_text, root_id)
+    async def _respond(self, tagged_message, testbed_username, reply_channel, post_id, root_id):
+        """Process any message — channel or DM.
 
-        asyncio.create_task(
-            self._record_exchange(session, message_text, reply)
-        )
+        Loads recent dialog from DB, runs Claude, records the exchange.
+        Serialized via lock so recordings don't interleave.
+        """
+        async with self._respond_lock:
+            messages = await self._load_recent_dialog()
+            reply = await self._process_message(
+                messages, tagged_message, testbed_username, root_id
+            )
+            # Record inside lock so the next load sees this exchange
+            await self._record_exchange(tagged_message, reply)
 
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
         try:
-            logger.info(f"Posting reply to {session.mm_username}...")
+            logger.info("Posting reply to Mattermost...")
             await asyncio.to_thread(
                 self.driver.posts.create_post,
                 options={
-                    'channel_id': channel_id,
+                    'channel_id': reply_channel,
                     'message': reply,
                     'root_id': root_id or post_id,
                 },
@@ -475,8 +437,13 @@ class TestbedBot:
         except Exception:
             logger.exception("Failed to post reply")
 
-    async def _process_message(self, session, message_text, root_id):
-        """Run the Claude conversation loop for one user message."""
+    async def _process_message(self, messages, message_text, testbed_username, root_id):
+        """Run the Claude conversation loop for one user message.
+
+        Returns the final reply text. The messages list is ephemeral —
+        loaded from DB for this request and discarded after.
+        """
+        # Build user message with full thread context if it's a reply
         user_content = message_text
         if root_id:
             thread_context = await self._build_thread_context(root_id)
@@ -486,9 +453,7 @@ class TestbedBot:
                     f"New reply: {message_text}"
                 )
 
-        msg_start = len(session.messages)
-        session.messages.append({"role": "user", "content": user_content})
-        session.trim_messages()
+        messages.append({"role": "user", "content": user_content})
 
         reply = "Sorry, I encountered an error processing your question."
 
@@ -501,10 +466,9 @@ class TestbedBot:
                 self.anthropic_tools = [
                     mcp_tool_to_anthropic(t) for t in tools
                     if t["name"].startswith(BOT_TOOL_PREFIXES)
-                    or t["name"] in BOT_EXTRA_TOOLS
                 ]
 
-            system = self._build_system_prompt(session)
+            system = self._build_system_prompt(testbed_username)
 
             for _round in range(MAX_TOOL_ROUNDS):
                 response = await self.claude.beta.messages.create(
@@ -513,7 +477,7 @@ class TestbedBot:
                     cache_control={"type": "ephemeral"},
                     system=system,
                     tools=self.anthropic_tools,
-                    messages=session.messages,
+                    messages=messages,
                     betas=["context-management-2025-06-27"],
                     context_management={
                         "edits": [{
@@ -537,7 +501,7 @@ class TestbedBot:
                     reply = "\n".join(text_parts)
                     break
 
-                session.messages.append(
+                messages.append(
                     {"role": "assistant", "content": response.content}
                 )
                 tool_results = []
@@ -566,7 +530,7 @@ class TestbedBot:
                         "tool_use_id": block.id,
                         "content": result_text,
                     })
-                session.messages.append(
+                messages.append(
                     {"role": "user", "content": tool_results}
                 )
             else:
@@ -581,10 +545,5 @@ class TestbedBot:
             logger.exception("ask_claude failed")
         finally:
             await mcp.close()
-
-        # Consolidate: replace intermediate messages with clean Q&A pair
-        session.messages = session.messages[:msg_start]
-        session.messages.append({"role": "user", "content": user_content})
-        session.messages.append({"role": "assistant", "content": reply})
 
         return reply
