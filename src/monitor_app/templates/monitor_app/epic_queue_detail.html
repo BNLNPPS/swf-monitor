@@ -1,0 +1,97 @@
+{% extends 'base.html' %}
+
+{% block title %}ePIC Queue: {{ queue_name }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'monitor_app:home' %}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'monitor_app:epic_queues_list' %}">ePIC Queues</a></li>
+            <li class="breadcrumb-item active">{{ queue_name }}</li>
+        </ol>
+    </nav>
+
+    <h1>{{ queue_name }}</h1>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% else %}
+
+    <div class="row">
+    {% for section_name, fields in sections %}
+        {% if fields %}
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-header"><strong>{{ section_name }}</strong></div>
+                <div class="card-body p-0">
+                    <table class="table table-sm table-striped mb-0">
+                    {% for key, value in fields.items %}
+                        <tr>
+                            <td class="fw-bold" style="width:40%">{{ key }}</td>
+                            <td>
+                                {% if key == 'status' %}
+                                    {% if value == 'online' %}
+                                        <span class="badge bg-success">{{ value }}</span>
+                                    {% elif value == 'brokeroff' %}
+                                        <span class="badge bg-warning text-dark">{{ value }}</span>
+                                    {% elif value == 'offline' %}
+                                        <span class="badge bg-danger">{{ value }}</span>
+                                    {% else %}
+                                        {{ value }}
+                                    {% endif %}
+                                {% elif key == 'state' or key == 'rc_site_state' %}
+                                    {% if value == 'ACTIVE' %}
+                                        <span class="badge bg-success">{{ value }}</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ value }}</span>
+                                    {% endif %}
+                                {% else %}
+                                    {{ value }}
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    {% endfor %}
+    </div>
+
+    {% if other %}
+    <div class="card mb-3">
+        <div class="card-header">
+            <strong>All Other Parameters</strong>
+            <span class="text-muted ms-2">({{ other|length }} fields)</span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-striped mb-0" style="font-size: 0.85rem;">
+            {% for key, value in other.items %}
+                <tr>
+                    <td class="fw-bold" style="width:25%">{{ key }}</td>
+                    <td style="word-break: break-all;">{{ value }}</td>
+                </tr>
+            {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+        <div class="card-header">
+            <strong>Full JSON</strong>
+            <button class="btn btn-sm btn-outline-secondary float-end" onclick="
+                var el = document.getElementById('json-block');
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            ">Toggle</button>
+        </div>
+        <div class="card-body">
+            <pre id="json-block" style="display:none; max-height:600px; overflow:auto;">{{ config_json }}</pre>
+        </div>
+    </div>
+
+    {% endif %}
+</div>
+{% endblock %}

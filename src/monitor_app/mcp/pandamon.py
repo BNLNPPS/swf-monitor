@@ -211,6 +211,56 @@ async def panda_get_activity(
 
 
 @mcp.tool()
+async def panda_list_queues(
+    vo: str = None,
+    status: str = None,
+    state: str = None,
+    search: str = None,
+) -> dict:
+    """
+    List PanDA compute queues with configuration summary.
+
+    Shows available queues from the PanDA schedconfig registry. Each queue
+    represents a compute endpoint where jobs can be submitted.
+
+    Args:
+        vo: Filter by Virtual Organisation (e.g. 'eic', 'atlas', 'osg', 'lsst').
+            Use 'eic' for ePIC experiment queues.
+        status: Filter by queue status (e.g. 'online', 'brokeroff', 'offline').
+        state: Filter by queue state (e.g. 'ACTIVE').
+        search: Search queue name (case-insensitive, supports partial match).
+                Example: 'Perlmutter' to find all NERSC Perlmutter queues.
+
+    Returns:
+        queues: List of queue summaries with status, VO, resource type, region, etc.
+        count: Number of queues matching filters.
+    """
+    return await sync_to_async(queries.list_queues)(
+        vo=vo, status=status, state=state, search=search,
+    )
+
+
+@mcp.tool()
+async def panda_get_queue(
+    panda_queue: str,
+) -> dict:
+    """
+    Get full configuration for a single PanDA queue.
+
+    Returns the complete schedconfig for a queue including container options,
+    copy tools, storage endpoints, CE endpoints, resource limits, and all
+    operational parameters.
+
+    Args:
+        panda_queue: The queue name (e.g. 'NERSC_Perlmutter_epic').
+
+    Returns:
+        queue: Full configuration dict with all parameters.
+    """
+    return await sync_to_async(queries.get_queue)(panda_queue=panda_queue)
+
+
+@mcp.tool()
 async def panda_resource_usage(
     days: int = 30,
     site: str = None,

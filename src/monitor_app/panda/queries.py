@@ -610,6 +610,97 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
     }
 
 
+QUEUE_SUMMARY_FIELDS = [
+    'status', 'state', 'vo_name', 'resource_type', 'type', 'capability',
+    'corepower', 'atlas_site', 'region', 'country', 'tier', 'cloud',
+    'container_type', 'pilot_version', 'maxrss', 'maxtime', 'maxwdir',
+]
+
+
+def list_queues(vo=None, status=None, state=None, search=None):
+    """List PanDA queues from schedconfig_json with summary fields."""
+    conn = connections['panda']
+    where = []
+    params = []
+
+    if vo:
+        where.append(""""data"->>'vo_name' = %s""")
+        params.append(vo)
+    if status:
+        where.append(""""data"->>'status' = %s""")
+        params.append(status)
+    if state:
+        where.append(""""data"->>'state' = %s""")
+        params.append(state)
+    if search:
+        where.append(""""panda_queue" ILIKE %s""")
+        params.append(f'%{search}%')
+
+    where_sql = (' WHERE ' + ' AND '.join(where)) if where else ''
+
+    sql = f"""
+        SELECT "panda_queue", "data", "last_update"
+        FROM "{PANDA_SCHEMA}"."schedconfig_json"
+        {where_sql}
+        ORDER BY "panda_queue"
+    """
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"list_queues failed: {e}")
+        return {"error": str(e)}
+
+    queues = []
+    for row in rows:
+        data = row[1] or {}
+        summary = {'panda_queue': row[0]}
+        for f in QUEUE_SUMMARY_FIELDS:
+            val = data.get(f)
+            if val is not None:
+                summary[f] = val
+        summary['last_update'] = row[2].isoformat() if row[2] else None
+        queues.append(summary)
+
+    return {
+        "queues": queues,
+        "count": len(queues),
+        "filters": {"vo": vo, "status": status, "state": state, "search": search},
+    }
+
+
+def get_queue(panda_queue):
+    """Get full configuration for a single PanDA queue."""
+    conn = connections['panda']
+
+    sql = f"""
+        SELECT "panda_queue", "data", "last_update"
+        FROM "{PANDA_SCHEMA}"."schedconfig_json"
+        WHERE "panda_queue" = %s
+    """
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [panda_queue])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"get_queue failed: {e}")
+        return {"error": str(e)}
+
+    if not row:
+        return {"error": f"Queue '{panda_queue}' not found"}
+
+    data = row[1] or {}
+    # Strip None values for readability
+    config = {k: v for k, v in data.items() if v is not None}
+    config['panda_queue'] = row[0]
+    config['last_update'] = row[2].isoformat() if row[2] else None
+
+    return {"queue": config}
+
+
 def resource_usage(days=30, site=None, username=None, taskid=None):
     """Aggregate resource usage for finished jobs.
 

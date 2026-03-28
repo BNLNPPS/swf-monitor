@@ -261,6 +261,16 @@ def get_available_tools_list() -> list:
             "parameters": ["days", "username", "site", "workinggroup"],
         },
         {
+            "name": "panda_list_queues",
+            "description": "List PanDA compute queues with configuration summary. Filter by VO (e.g. 'eic'), status, state, or name search.",
+            "parameters": ["vo", "status", "state", "search"],
+        },
+        {
+            "name": "panda_get_queue",
+            "description": "Full configuration for a single PanDA queue — container options, storage, CE endpoints, resource limits.",
+            "parameters": ["panda_queue"],
+        },
+        {
             "name": "panda_resource_usage",
             "description": "Aggregate core-hours for finished jobs — allocated (facility charge) vs used (actual CPU). Breakdowns by site and user.",
             "parameters": ["days", "site", "username", "taskid"],

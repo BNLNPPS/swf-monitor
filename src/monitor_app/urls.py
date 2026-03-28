@@ -82,6 +82,8 @@ from .viewdir.pandamon import (
     panda_diagnostics_list,
     panda_diagnostics_datatable_ajax,
     panda_view_text,
+    epic_queues_list,
+    epic_queue_detail,
 )
 
 # Import iDDS database views from new dedicated module
@@ -223,6 +225,8 @@ urlpatterns = [
     path('panda/errors/datatable/', panda_errors_datatable_ajax, name='panda_errors_datatable_ajax'),
     path('panda/diagnostics/', panda_diagnostics_list, name='panda_diagnostics_list'),
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
+    path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
+    path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
 
     # PanDA Database
     path('panda-database/', panda_database_tables_list, name='panda_database_tables_list'),

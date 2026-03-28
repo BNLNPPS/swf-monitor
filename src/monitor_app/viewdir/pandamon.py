@@ -19,6 +19,7 @@ from ..panda import (
     list_jobs_dt, list_tasks_dt,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs,
+    list_queues, get_queue,
 )
 from ..panda.constants import LIST_FIELDS, TASK_LIST_FIELDS
 
@@ -559,3 +560,78 @@ def panda_diagnostics_datatable_ajax(request):
         ])
 
     return dt.create_response(data, total, total)
+
+
+# ── ePIC Queue views ────────────────────────────────────────────────────────
+
+@login_required
+def epic_queues_list(request):
+    """ePIC compute queues from live PanDA schedconfig."""
+    result = list_queues(vo='eic')
+    queues = result.get('queues', [])
+    return render(request, 'monitor_app/epic_queues_list.html', {
+        'queues': queues,
+    })
+
+
+@login_required
+def epic_queue_detail(request, queue_name):
+    """Full schedconfig for a single ePIC queue."""
+    import json as json_mod
+    result = get_queue(queue_name)
+    if 'error' in result:
+        return render(request, 'monitor_app/epic_queue_detail.html', {
+            'error': result['error'],
+            'queue_name': queue_name,
+        })
+    config = result['queue']
+
+    # Separate into sections for readability
+    identity_keys = [
+        'panda_queue', 'name', 'nickname', 'siteid', 'site', 'panda_site',
+        'atlas_site', 'gocname', 'id',
+    ]
+    status_keys = [
+        'status', 'state', 'rc_site_state', 'state_comment', 'state_update',
+        'last_modified', 'last_update',
+    ]
+    resource_keys = [
+        'resource_type', 'type', 'capability', 'corecount', 'corepower',
+        'maxrss', 'meanrss', 'minrss', 'maxtime', 'mintime', 'maxwdir',
+        'maxinputsize', 'timefloor', 'vo_name',
+    ]
+    location_keys = [
+        'region', 'country', 'cloud', 'tier', 'tier_level', 'rc', 'rc_site',
+        'rc_country',
+    ]
+    container_keys = [
+        'container_type', 'container_options', 'is_cvmfs',
+    ]
+    pilot_keys = [
+        'pilot_version', 'pilot_manager', 'python_version', 'jobseed',
+    ]
+
+    def _section(keys):
+        return {k: config[k] for k in keys if k in config}
+
+    sections = [
+        ('Identity', _section(identity_keys)),
+        ('Status', _section(status_keys)),
+        ('Resources', _section(resource_keys)),
+        ('Location', _section(location_keys)),
+        ('Container', _section(container_keys)),
+        ('Pilot', _section(pilot_keys)),
+    ]
+
+    # Everything else goes in "Other"
+    shown = set()
+    for _, s in sections:
+        shown.update(s.keys())
+    other = {k: v for k, v in config.items() if k not in shown}
+
+    return render(request, 'monitor_app/epic_queue_detail.html', {
+        'queue_name': queue_name,
+        'sections': sections,
+        'other': other,
+        'config_json': json_mod.dumps(config, indent=2, default=str),
+    })
