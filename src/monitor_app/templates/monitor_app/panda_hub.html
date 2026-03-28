@@ -57,9 +57,12 @@
             <div class="card h-100">
                 <div class="card-body">
                     <p class="mb-2">
-                        <strong><a href="{% url 'monitor_app:panda_queues_list' %}" class="text-decoration-none">PanDA Queues</a></strong>
+                        <strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">EIC PanDA Queues</a></strong>
                     </p>
-                    <p class="card-text">Manage computing queue configurations for the PanDA workload management system. View and update queue settings from GitHub.</p>
+                    <p class="card-text">ePIC compute queues from live PanDA schedconfig. Status, resource type, container config, and full queue parameters.</p>
+                    <p class="mb-0">
+                        <a href="{% url 'monitor_app:panda_queues_list' %}" class="text-muted small">JSON PanDA Queues</a>
+                    </p>
                 </div>
             </div>
         </div>
