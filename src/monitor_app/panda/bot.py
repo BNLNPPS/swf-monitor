@@ -54,6 +54,7 @@ if _xrootd_server:
             'XROOTD_SERVER': os.environ.get('XROOTD_SERVER', 'root://dtn-eic.jlab.org'),
             'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/volatile/eic/EPIC'),
         },
+        'repo_dir': '/data/wenauseic/github/xrootd-mcp-server',
         'update_commands': [
             'cd /data/wenauseic/github/xrootd-mcp-server && git pull && npm install && npm run build',
         ],
@@ -72,6 +73,7 @@ if _github_token:
         'env': {
             'GITHUB_PERSONAL_ACCESS_TOKEN': _github_token,
         },
+        'repo_dir': '/data/wenauseic/github/github-mcp-server',
         'update_commands': [
             'cd /data/wenauseic/github/github-mcp-server && git pull && PATH=$PATH:/usr/local/go/bin go build -o github-mcp-server ./cmd/github-mcp-server',
         ],
@@ -361,6 +363,33 @@ class PandaBot:
         now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         return f"Current date and time: {now}\n\n{self.system_prompt}"
 
+    @staticmethod
+    async def _git_version(repo_dir):
+        """Get short version string from a git repo: hash + date + tag if any."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                'git', 'log', '-1', '--format=%h %ci',
+                cwd=repo_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            parts = stdout.decode().strip().split(' ', 1)
+            commit_hash = parts[0] if parts else '?'
+            commit_date = parts[1][:10] if len(parts) > 1 else ''
+            # Try to get a tag
+            proc2 = await asyncio.create_subprocess_exec(
+                'git', 'describe', '--tags', '--always',
+                cwd=repo_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout2, _ = await proc2.communicate()
+            tag = stdout2.decode().strip()
+            return f"{tag} ({commit_date})" if tag != commit_hash else f"{commit_hash} ({commit_date})"
+        except Exception:
+            return 'unknown'
+
     async def _handle_manage_servers(self, arguments):
         """Handle the bot_manage_servers virtual tool."""
         action = arguments.get('action', 'list')
@@ -371,14 +400,18 @@ class PandaBot:
                 'type': 'HTTP',
                 'description': 'PanDA, PCS, memory, testbed tools',
                 'updatable': False,
+                'version': await self._git_version('/data/wenauseic/github/swf-monitor'),
             }]
             for cfg in STDIO_MCP_SERVERS:
-                servers.append({
+                entry = {
                     'name': cfg['name'],
                     'type': 'stdio',
                     'source': cfg.get('source', ''),
                     'updatable': bool(cfg.get('update_commands')),
-                })
+                }
+                if cfg.get('repo_dir'):
+                    entry['version'] = await self._git_version(cfg['repo_dir'])
+                servers.append(entry)
             return json.dumps({'servers': servers}, indent=2)
 
         if action == 'update':
