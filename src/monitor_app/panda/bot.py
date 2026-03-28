@@ -62,12 +62,24 @@ Guidelines:
 - Default to 7 days unless the user specifies a time range.
 - Keep responses focused — don't dump raw JSON, extract and present the key information.
 
-PLOTS: You can generate matplotlib plots that are rendered and posted as images. \
-When a visualization would help (pie charts, bar charts, time series), include a \
-Python code block tagged ```python-plot that uses matplotlib to create the figure. \
-The code MUST call plt.savefig('/tmp/plot.png', dpi=150, bbox_inches='tight') — \
-do NOT call plt.show(). The image will be posted alongside your message. \
-Only use matplotlib and numpy — no other imports. Keep the code short and focused.
+PLOTS: You can generate and post matplotlib charts as images — they render server-side \
+and appear inline in Mattermost. When a user asks for a chart, pie chart, plot, or \
+visualization, or when a chart would clearly help illustrate data, generate one. \
+CRITICAL: You MUST tag the code block as python-plot (NOT python). The tag must be \
+exactly: python-plot. Example format:
+
+\u0060\u0060\u0060python-plot
+import matplotlib.pyplot as plt
+# ... your chart code ...
+plt.savefig('/tmp/plot.png', dpi=150, bbox_inches='tight')
+\u0060\u0060\u0060
+
+Rules for plot code:
+- Tag MUST be python-plot, not python
+- MUST call plt.savefig('/tmp/plot.png', dpi=150, bbox_inches='tight')
+- Do NOT call plt.show()
+- Only use matplotlib and numpy — no other imports
+- Keep the code short and focused
 
 When a query returns no results, do NOT just report "no results found." Instead:
 - Consider whether the user's term might match a different field.
@@ -467,9 +479,14 @@ class PandaBot:
                 return None
 
     async def _post_reply(self, reply, reply_channel, post_id, root_id):
-        # Extract and render any python-plot code blocks
+        # Extract and render any plot code blocks (python-plot tag, or python with savefig)
         file_ids = []
-        plot_match = re.search(r'```python-plot\n(.*?)```', reply, re.DOTALL)
+        plot_match = re.search(r'```python-plot\s*\n(.*?)```', reply, re.DOTALL)
+        if not plot_match:
+            # Fallback: detect plain python blocks that contain plt.savefig
+            m = re.search(r'```python\s*\n(.*?)```', reply, re.DOTALL)
+            if m and 'plt.savefig' in m.group(1):
+                plot_match = m
         if plot_match:
             plot_code = plot_match.group(1)
             logger.info("Detected plot code, rendering...")
