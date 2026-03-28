@@ -610,6 +610,122 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
     }
 
 
+def resource_usage(days=30, site=None, username=None, taskid=None):
+    """Aggregate resource usage for finished jobs.
+
+    Reports two core-hour metrics:
+    - allocated: actualcorecount × wall time (cores reserved by the facility)
+    - used: cpuconsumptiontime (CPU time the job actually consumed)
+
+    Only counts jobs that actually ran: jobstatus='finished' with both
+    starttime and endtime set. Pre-running queue time is excluded.
+    """
+    cutoff = timezone.now() - timedelta(days=days)
+    conn = connections['panda']
+
+    filters = ''
+    extra_params = []
+
+    if site:
+        clause, val = like_or_eq('computingsite', site)
+        filters += f' AND {clause}'
+        extra_params.append(val)
+    if username:
+        clause, val = like_or_eq('produsername', username)
+        filters += f' AND {clause}'
+        extra_params.append(val)
+    if taskid:
+        filters += ' AND "jeditaskid" = %s'
+        extra_params.append(taskid)
+
+    base_where = (
+        '"modificationtime" >= %s'
+        ' AND "jobstatus" = \'finished\''
+        ' AND "starttime" IS NOT NULL'
+        ' AND "endtime" IS NOT NULL'
+        + filters
+    )
+    base_params = [cutoff] + extra_params
+
+    inner_fields = (
+        '"computingsite", "produsername", '
+        '"cpuconsumptiontime", "actualcorecount", "corecount", '
+        '"starttime", "endtime"'
+    )
+
+    agg_cols = """
+        COUNT(*) as job_count,
+        COALESCE(SUM(
+            EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+            * COALESCE("actualcorecount", "corecount", 1)
+        ), 0) / 3600.0 as allocated_core_hours,
+        COALESCE(SUM("cpuconsumptiontime"), 0) / 3600.0 as used_core_hours,
+        COALESCE(SUM(
+            EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+        ), 0) / 3600.0 as wall_hours
+    """
+
+    def _run(group_col=None):
+        select = f'"{group_col}", {agg_cols}' if group_col else agg_cols
+        group = f'GROUP BY "{group_col}" ORDER BY allocated_core_hours DESC' if group_col else ''
+        sql = f"""
+            SELECT {select} FROM (
+                SELECT {inner_fields}
+                FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {base_where}
+                UNION ALL
+                SELECT {inner_fields}
+                FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {base_where}
+            ) combined
+            {group}
+        """
+        with conn.cursor() as cursor:
+            cursor.execute(sql, base_params + base_params)
+            return cursor.fetchall()
+
+    def _parse(row, offset=0):
+        return {
+            'job_count': row[offset],
+            'allocated_core_hours': round(float(row[offset + 1]), 1),
+            'used_core_hours': round(float(row[offset + 2]), 1),
+            'wall_hours': round(float(row[offset + 3]), 1),
+        }
+
+    try:
+        rows = _run()
+        totals = _parse(rows[0]) if rows else {
+            'job_count': 0, 'allocated_core_hours': 0,
+            'used_core_hours': 0, 'wall_hours': 0,
+        }
+
+        by_site = []
+        for row in _run('computingsite'):
+            entry = _parse(row, offset=1)
+            entry['site'] = row[0]
+            by_site.append(entry)
+
+        by_user = []
+        for row in _run('produsername'):
+            entry = _parse(row, offset=1)
+            entry['user'] = row[0]
+            by_user.append(entry)
+
+    except Exception as e:
+        logger.error(f"resource_usage query failed: {e}")
+        return {"error": str(e)}
+
+    return {
+        "totals": totals,
+        "by_site": by_site,
+        "by_user": by_user,
+        "filters": {
+            "days": days,
+            "site": site,
+            "username": username,
+            "taskid": taskid,
+        },
+    }
+
+
 def study_job(pandaid):
     """Deep study of a single PanDA job — full record, files, harvester logs, errors."""
     conn = connections['panda']

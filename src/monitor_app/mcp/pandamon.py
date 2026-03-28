@@ -211,6 +211,43 @@ async def panda_get_activity(
 
 
 @mcp.tool()
+async def panda_resource_usage(
+    days: int = 30,
+    site: str = None,
+    username: str = None,
+    taskid: int = None,
+) -> dict:
+    """
+    Aggregate resource usage (core-hours) for finished PanDA jobs.
+
+    Reports two core-hour metrics:
+    - allocated_core_hours: cores reserved × wall time (what the facility charges)
+    - used_core_hours: CPU time actually consumed by the job
+
+    The gap between allocated and used reflects efficiency — e.g. a job that
+    requests 1 core but gets 2 allocated uses ~50% of its allocation.
+
+    Only counts finished jobs with actual runtime (starttime and endtime set).
+    Queue/waiting time is excluded.
+
+    Args:
+        days: Time window in days (default 30).
+        site: Filter by computing site (computingsite). Supports SQL LIKE with %.
+              Example: 'NERSC_Perlmutter%' for all Perlmutter queues.
+        username: Filter by job owner (produsername). Supports SQL LIKE with %.
+        taskid: Filter by JEDI task ID.
+
+    Returns:
+        totals: {job_count, allocated_core_hours, used_core_hours, wall_hours}
+        by_site: Breakdown by computing site, sorted by allocated_core_hours.
+        by_user: Breakdown by job owner, sorted by allocated_core_hours.
+    """
+    return await sync_to_async(queries.resource_usage)(
+        days=days, site=site, username=username, taskid=taskid,
+    )
+
+
+@mcp.tool()
 async def panda_study_job(
     pandaid: int,
 ) -> dict:

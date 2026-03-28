@@ -261,6 +261,11 @@ def get_available_tools_list() -> list:
             "parameters": ["days", "username", "site", "workinggroup"],
         },
         {
+            "name": "panda_resource_usage",
+            "description": "Aggregate core-hours for finished jobs — allocated (facility charge) vs used (actual CPU). Breakdowns by site and user.",
+            "parameters": ["days", "site", "username", "taskid"],
+        },
+        {
             "name": "panda_study_job",
             "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
             "parameters": ["pandaid"],

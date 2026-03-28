@@ -277,6 +277,8 @@ COMMON QUERIES:
 - Top errors? → panda_error_summary(days=7)
 - Errors for a user? → panda_error_summary(username='someone')
 - Deep dive on a failed job? → panda_study_job(pandaid=130497)
+- Core-hours this month? → panda_resource_usage(days=30)
+- Core-hours on Perlmutter? → panda_resource_usage(days=30, site='NERSC_Perlmutter%')
 - What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
