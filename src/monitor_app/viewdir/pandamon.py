@@ -177,9 +177,15 @@ def panda_activity(request):
 @login_required
 def panda_jobs_list(request):
     days = _get_days(request)
+    selected_site = request.GET.get('site', '')
+    description = f'Production jobs from the last {days} days.'
+    if selected_site:
+        site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
+        description += f' <a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
+
     context = {
         'table_title': 'PanDA Jobs',
-        'table_description': f'Production jobs from the last {days} days.',
+        'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_jobs_filter_counts'),
         'columns': JOB_COLUMNS,

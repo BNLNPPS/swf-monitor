@@ -13,6 +13,7 @@
     </nav>
 
     <h1>{{ queue_name }}</h1>
+    <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
 
     {% if error %}
     <div class="alert alert-danger">{{ error }}</div>

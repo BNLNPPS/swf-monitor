@@ -30,7 +30,7 @@ Filter field configuration format:
 {% block content %}
 <div class="container mt-4">
     <h2>{{ table_title }}</h2>
-    <p>{{ table_description }}</p>
+    <p>{{ table_description|safe }}</p>
 
     {% block extra_filters %}{% endblock %}
 

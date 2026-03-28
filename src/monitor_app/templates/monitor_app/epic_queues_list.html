@@ -28,6 +28,7 @@
                         <th>Tier</th>
                         <th>Core Power</th>
                         <th>Last Update</th>
+                        <th>Jobs</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -52,9 +53,10 @@
                         <td>{{ q.tier|default:"—" }}</td>
                         <td>{{ q.corepower|default:"—" }}</td>
                         <td>{{ q.last_update|truncatechars:19 }}</td>
+                        <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                     </tr>
                 {% empty %}
-                    <tr><td colspan="9" class="text-center text-muted">No ePIC queues found.</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted">No ePIC queues found.</td></tr>
                 {% endfor %}
                 </tbody>
             </table>
