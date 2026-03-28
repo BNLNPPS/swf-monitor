@@ -208,19 +208,27 @@ class StdioMCPClient:
         if not self._process or self._process.returncode is not None:
             raise RuntimeError(f"Stdio MCP '{self.name}' not running")
         self._request_id += 1
-        body = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
+        req_id = self._request_id
+        body = {"jsonrpc": "2.0", "id": req_id, "method": method}
         if params:
             body["params"] = params
         line = json.dumps(body) + "\n"
         self._process.stdin.write(line.encode())
         await self._process.stdin.drain()
 
-        resp_line = await asyncio.wait_for(
-            self._process.stdout.readline(), timeout=30
-        )
-        if not resp_line:
-            raise RuntimeError(f"Stdio MCP '{self.name}' closed stdout")
-        return json.loads(resp_line)
+        # Read lines until we get the response matching our request ID,
+        # skipping any server notifications (no "id" field)
+        while True:
+            resp_line = await asyncio.wait_for(
+                self._process.stdout.readline(), timeout=60
+            )
+            if not resp_line:
+                raise RuntimeError(f"Stdio MCP '{self.name}' closed stdout")
+            msg = json.loads(resp_line)
+            if "id" in msg and msg["id"] == req_id:
+                return msg
+            # Skip notifications and other non-response messages
+            logger.debug(f"Stdio MCP '{self.name}' skipped: {msg.get('method', '?')}")
 
     async def initialize(self):
         resp = await self._request("initialize", {
