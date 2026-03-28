@@ -395,24 +395,19 @@ class PandaBot:
         action = arguments.get('action', 'list')
 
         if action == 'list':
-            servers = [{
-                'name': 'swf-monitor',
-                'type': 'HTTP',
-                'description': 'PanDA, PCS, memory, testbed tools',
-                'updatable': False,
-                'version': await self._git_version('/data/wenauseic/github/swf-monitor'),
-            }]
+            lines = [
+                "POST THIS TABLE EXACTLY AS-IS — do not reformat or omit columns:",
+                "",
+                "| Server | Type | Version | Updatable |",
+                "| --- | --- | --- | --- |",
+            ]
+            swf_ver = await self._git_version('/data/wenauseic/github/swf-monitor')
+            lines.append(f"| swf-monitor | HTTP (PanDA, PCS, memory) | {swf_ver} | no |")
             for cfg in STDIO_MCP_SERVERS:
-                entry = {
-                    'name': cfg['name'],
-                    'type': 'stdio',
-                    'source': cfg.get('source', ''),
-                    'updatable': bool(cfg.get('update_commands')),
-                }
-                if cfg.get('repo_dir'):
-                    entry['version'] = await self._git_version(cfg['repo_dir'])
-                servers.append(entry)
-            return json.dumps({'servers': servers}, indent=2)
+                ver = await self._git_version(cfg['repo_dir']) if cfg.get('repo_dir') else '?'
+                upd = 'yes' if cfg.get('update_commands') else 'no'
+                lines.append(f"| {cfg['name']} | stdio ({cfg.get('source', '')}) | {ver} | {upd} |")
+            return '\n'.join(lines)
 
         if action == 'update':
             name = arguments.get('server_name', '')
