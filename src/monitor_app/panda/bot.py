@@ -37,13 +37,15 @@ MCP_URL = os.environ.get(
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_')
 
-# Stdio MCP servers — launched as subprocesses at startup
+# Stdio MCP servers — launched as subprocesses at startup.
+# update_commands: if present, the server can be updated via bot_manage_servers.
 STDIO_MCP_SERVERS = []
 
 _xrootd_server = os.environ.get('XROOTD_MCP_SERVER')
 if _xrootd_server:
     STDIO_MCP_SERVERS.append({
         'name': 'xrootd',
+        'source': 'github.com/eic/xrootd-mcp-server',
         'command': [
             os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin/node'),
             '/data/wenauseic/github/xrootd-mcp-server/build/src/index.js',
@@ -52,12 +54,16 @@ if _xrootd_server:
             'XROOTD_SERVER': os.environ.get('XROOTD_SERVER', 'root://dtn-eic.jlab.org'),
             'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/volatile/eic/EPIC'),
         },
+        'update_commands': [
+            'cd /data/wenauseic/github/xrootd-mcp-server && git pull && npm install && npm run build',
+        ],
     })
 
 _github_token = os.environ.get('GITHUB_PERSONAL_ACCESS_TOKEN')
 if _github_token:
     STDIO_MCP_SERVERS.append({
         'name': 'github',
+        'source': 'github.com/github/github-mcp-server',
         'command': [
             '/data/wenauseic/github/github-mcp-server/github-mcp-server', 'stdio',
             '--read-only',
@@ -66,7 +72,35 @@ if _github_token:
         'env': {
             'GITHUB_PERSONAL_ACCESS_TOKEN': _github_token,
         },
+        'update_commands': [
+            'cd /data/wenauseic/github/github-mcp-server && git pull && PATH=$PATH:/usr/local/go/bin go build -o github-mcp-server ./cmd/github-mcp-server',
+        ],
     })
+
+# Virtual tool definition for server management
+BOT_MANAGE_SERVERS_TOOL = {
+    "name": "bot_manage_servers",
+    "description": (
+        "List or update the bot's MCP servers. "
+        "action='list' shows all servers and which are updatable. "
+        "action='update', server_name='xrootd' pulls latest code, rebuilds, and restarts that server."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["list", "update"],
+                "description": "Action to perform.",
+            },
+            "server_name": {
+                "type": "string",
+                "description": "Server to update (required for action='update').",
+            },
+        },
+        "required": ["action"],
+    },
+}
 
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
@@ -327,6 +361,91 @@ class PandaBot:
         now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
         return f"Current date and time: {now}\n\n{self.system_prompt}"
 
+    async def _handle_manage_servers(self, arguments):
+        """Handle the bot_manage_servers virtual tool."""
+        action = arguments.get('action', 'list')
+
+        if action == 'list':
+            servers = [{
+                'name': 'swf-monitor',
+                'type': 'HTTP',
+                'description': 'PanDA, PCS, memory, testbed tools',
+                'updatable': False,
+            }]
+            for cfg in STDIO_MCP_SERVERS:
+                servers.append({
+                    'name': cfg['name'],
+                    'type': 'stdio',
+                    'source': cfg.get('source', ''),
+                    'updatable': bool(cfg.get('update_commands')),
+                })
+            return json.dumps({'servers': servers}, indent=2)
+
+        if action == 'update':
+            name = arguments.get('server_name', '')
+            cfg = next((s for s in STDIO_MCP_SERVERS if s['name'] == name), None)
+            if not cfg:
+                return json.dumps({'error': f"Unknown server '{name}'"})
+            if not cfg.get('update_commands'):
+                return json.dumps({'error': f"Server '{name}' is not updatable"})
+
+            # Run update commands
+            output_lines = []
+            for cmd in cfg['update_commands']:
+                logger.info(f"Updating '{name}': {cmd}")
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=120)
+                output_lines.append(stdout.decode().strip())
+                if proc.returncode != 0:
+                    return json.dumps({
+                        'error': f"Update command failed (exit {proc.returncode})",
+                        'output': '\n'.join(output_lines),
+                    })
+
+            # Restart the stdio server
+            old_client = next((c for c in self._stdio_clients if c.name == name), None)
+            if old_client:
+                # Remove old tool routes
+                for tool_name, client in list(self._tool_router.items()):
+                    if client is old_client:
+                        del self._tool_router[tool_name]
+                # Remove old tool definitions
+                self.anthropic_tools = [
+                    t for t in self.anthropic_tools
+                    if t['name'] not in [k for k, v in self._tool_router.items() if v is old_client]
+                ]
+                self._stdio_clients.remove(old_client)
+                await old_client.close()
+
+            # Start fresh
+            try:
+                client = StdioMCPClient(
+                    name=cfg['name'],
+                    command=cfg['command'],
+                    env=cfg.get('env'),
+                )
+                await client.start()
+                await client.initialize()
+                tools = await client.list_tools()
+                for t in tools:
+                    self.anthropic_tools.append(mcp_tool_to_anthropic(t))
+                    self._tool_router[t['name']] = client
+                self._stdio_clients.append(client)
+                return json.dumps({
+                    'success': True,
+                    'server': name,
+                    'tools_count': len(tools),
+                    'update_output': '\n'.join(output_lines),
+                })
+            except Exception as e:
+                return json.dumps({'error': f"Restart failed: {e}"})
+
+        return json.dumps({'error': f"Unknown action '{action}'"})
+
     async def _setup_mcp(self):
         """Discover tools from all MCP servers (HTTP + stdio)."""
         # 1. HTTP MCP server (Django — PanDA, PCS, memory tools)
@@ -371,6 +490,9 @@ class PandaBot:
                 logger.exception(
                     f"Failed to start stdio MCP '{server_cfg['name']}'"
                 )
+
+        # 3. Virtual tools (handled by the bot itself)
+        self.anthropic_tools.append(BOT_MANAGE_SERVERS_TOOL)
 
         logger.info(f"Total tools available: {len(self.anthropic_tools)}")
 
@@ -770,18 +892,22 @@ class PandaBot:
                         continue
                     logger.info(f"Tool call: {block.name}({block.input})")
                     try:
-                        # Route to the correct MCP server
-                        if block.name in self._tool_router:
-                            result = await self._tool_router[block.name].call_tool(
-                                block.name, block.input
-                            )
+                        # Virtual tools handled by the bot itself
+                        if block.name == 'bot_manage_servers':
+                            result_text = await self._handle_manage_servers(block.input)
                         else:
-                            result = await mcp.call_tool(block.name, block.input)
-                        content = result.get("content", [])
-                        result_text = ""
-                        for item in content:
-                            if isinstance(item, dict) and "text" in item:
-                                result_text += item["text"]
+                            # Route to the correct MCP server
+                            if block.name in self._tool_router:
+                                result = await self._tool_router[block.name].call_tool(
+                                    block.name, block.input
+                                )
+                            else:
+                                result = await mcp.call_tool(block.name, block.input)
+                            content = result.get("content", [])
+                            result_text = ""
+                            for item in content:
+                                if isinstance(item, dict) and "text" in item:
+                                    result_text += item["text"]
                         if len(result_text) > MAX_RESULT_LEN:
                             result_text = (
                                 result_text[:MAX_RESULT_LEN]
