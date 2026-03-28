@@ -56,7 +56,7 @@ if _xrootd_server:
         },
         'repo_dir': '/data/wenauseic/github/xrootd-mcp-server',
         'update_commands': [
-            'cd /data/wenauseic/github/xrootd-mcp-server && git pull && npm install && npm run build',
+            'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin:$PATH && cd /data/wenauseic/github/xrootd-mcp-server && git pull && npm install && npm run build',
         ],
     })
 
