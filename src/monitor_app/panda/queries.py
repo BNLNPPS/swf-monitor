@@ -41,6 +41,9 @@ def _stale_task_filter():
 def list_jobs(days=7, status=None, username=None, site=None,
               taskid=None, reqid=None, limit=200, before_id=None):
     """List PanDA jobs with summary statistics and cursor-based pagination."""
+    # When scoped to a specific task, return everything — don't truncate
+    if taskid:
+        limit = 100000
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
     params = [cutoff]
@@ -131,6 +134,9 @@ def list_jobs(days=7, status=None, username=None, site=None,
 def diagnose_jobs(days=7, username=None, site=None, taskid=None,
                   reqid=None, error_component=None, limit=500, before_id=None):
     """Diagnose failed PanDA jobs with full error details."""
+    # When scoped to a specific task, return everything — don't truncate
+    if taskid:
+        limit = 100000
     cutoff = timezone.now() - timedelta(days=days)
     where = [
         '"modificationtime" >= %s',
@@ -339,6 +345,9 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
 def error_summary(days=10, username=None, site=None, taskid=None,
                   error_source=None, limit=20):
     """Aggregate error summary across failed PanDA jobs, ranked by frequency."""
+    # When scoped to a specific task, return all error patterns
+    if taskid:
+        limit = 10000
     cutoff = timezone.now() - timedelta(days=days)
     conn = connections['panda']
 
