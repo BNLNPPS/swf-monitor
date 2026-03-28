@@ -437,14 +437,14 @@ class PandaBot:
             # Restart the stdio server
             old_client = next((c for c in self._stdio_clients if c.name == name), None)
             if old_client:
-                # Remove old tool routes
-                for tool_name, client in list(self._tool_router.items()):
-                    if client is old_client:
-                        del self._tool_router[tool_name]
-                # Remove old tool definitions
+                # Collect old tool names before removing routes
+                old_tool_names = {
+                    t for t, c in self._tool_router.items() if c is old_client
+                }
+                for t in old_tool_names:
+                    del self._tool_router[t]
                 self.anthropic_tools = [
-                    t for t in self.anthropic_tools
-                    if t['name'] not in [k for k, v in self._tool_router.items() if v is old_client]
+                    t for t in self.anthropic_tools if t['name'] not in old_tool_names
                 ]
                 self._stdio_clients.remove(old_client)
                 await old_client.close()
