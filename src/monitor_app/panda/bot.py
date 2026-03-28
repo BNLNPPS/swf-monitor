@@ -4,9 +4,9 @@ PanDA Mattermost bot — answers production monitoring questions using Claude wi
 Connects to Mattermost via WebSocket, listens for messages in a target channel,
 and responds using Claude with PanDA monitoring tools discovered via MCP.
 
-Maintains a persistent conversation session — Claude sees the full channel dialog
-history, just like any chatbot. Cross-session memory is loaded at startup from
-the swf_ai_memory system and new exchanges are recorded for future sessions.
+On each question, loads recent dialog from the database — all users, all
+contexts — giving the bot full awareness of recent conversations. One soft
+privacy rule: don't reveal DM content to others in the channel.
 
 MCP transport: HTTP POST (JSON-RPC) to the Django MCP endpoint — the same
 transport Claude Code uses. No SSE, no GET streams, no subprocesses.
@@ -27,14 +27,12 @@ logger = logging.getLogger('panda_bot')
 MAX_TOOL_ROUNDS = 10
 MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
-MEMORY_TURNS = 20
-MAX_SESSION_MESSAGES = 200
+MEMORY_TURNS = 30
+MEMORY_USERNAME = 'pandabot'
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_')
-BOT_EXTRA_TOOLS = ('swf_get_ai_memory',)
-MEMORY_USERNAME = 'pandabot-community'
 
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
@@ -44,20 +42,15 @@ tasks based on physics inputs using the Physics Configuration System (PCS).
 You communicate via Mattermost — in a shared channel, in direct messages (DMs), \
 and when @mentioned in any channel. Each message you receive is tagged with the \
 sender's username and context (e.g. [wenaus in #pandabot] or [wenaus in DM]). \
-You maintain full awareness of the ongoing conversation — refer back to earlier \
-questions and answers naturally. One user's DM content is private to that user — \
-never reveal it to others in the channel.
+Your conversation history includes recent dialog across all users and contexts — \
+refer back to earlier questions and answers naturally.
+
+Privacy: a user's DM exchanges are their own business. Don't volunteer DM content \
+to others in the channel.
 
 CRITICAL: ALWAYS call a tool to answer questions. NEVER answer from memory or from \
 examples in these instructions. The examples below show which tool to call, not what \
 the answer is. The data changes constantly — you MUST query it live.
-
-CRITICAL: When a user references something not visible in the current conversation \
-(e.g. "I mentioned X", "what did I say", "remember when"), you MUST call \
-swf_get_ai_memory(username='pandabot-{their_mm_username}', turns=20) BEFORE \
-responding. Their message tag tells you their username. This retrieves their full \
-history across channels and DMs. NEVER say "I don't have a record" without \
-calling this tool first.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
@@ -131,23 +124,11 @@ def mcp_tool_to_anthropic(tool):
     }
 
 
-MEMORY_USERNAME_PREFIX = 'pandabot'
-
-
-class UserSession:
-    """Per-user conversation state for DMs."""
-
-    def __init__(self, mm_username):
-        self.mm_username = mm_username
-        self.messages = []
-        self.lock = asyncio.Lock()
-
-
 class PandaBot:
     """Mattermost bot that answers PanDA production questions via Claude.
 
-    Channel messages use a shared conversation. DMs and @mentions use
-    per-user sessions with per-user persistent memory.
+    On each message, loads recent dialog from the database — all users,
+    all contexts — so the bot has full awareness of the community.
     """
 
     def __init__(self):
@@ -168,14 +149,10 @@ class PandaBot:
 
         self.bot_user_id = None
         self.channel_id = None
-        # Shared channel conversation
-        self.messages = []
         self.system_prompt = SYSTEM_PREAMBLE
         self.anthropic_tools = []
         self._respond_lock = asyncio.Lock()
         self._active_threads = set()
-        # Per-user DM sessions
-        self.sessions: dict[str, UserSession] = {}
         self._mm_user_cache: dict[str, str] = {}
 
     async def _resolve_mm_username(self, mm_user_id):
@@ -193,13 +170,6 @@ class PandaBot:
             logger.exception(f"Failed to resolve user {mm_user_id}")
             return ''
 
-    def _get_session(self, mm_user_id, mm_username):
-        """Get or create a per-user DM session."""
-        if mm_user_id not in self.sessions:
-            self.sessions[mm_user_id] = UserSession(mm_username)
-            logger.info(f"New DM session for {mm_username}")
-        return self.sessions[mm_user_id]
-
     def _build_system_prompt(self):
         """System prompt with current datetime."""
         now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
@@ -214,7 +184,6 @@ class PandaBot:
             self.anthropic_tools = [
                 mcp_tool_to_anthropic(t) for t in tools
                 if t["name"].startswith(BOT_TOOL_PREFIXES)
-                or t["name"] in BOT_EXTRA_TOOLS
             ]
             logger.info(f"Discovered {len(self.anthropic_tools)} tools via MCP")
             if mcp.server_instructions:
@@ -226,13 +195,14 @@ class PandaBot:
         finally:
             await mcp.close()
 
-    async def _load_memory(self, memory_user, messages_list):
-        """Load recent Q&A history into a messages list."""
+    async def _load_recent_dialog(self):
+        """Load recent dialog from the database — all users, all contexts."""
         mcp = MCPClient(self.mcp_url)
+        messages = []
         try:
             await mcp.initialize()
             result = await mcp.call_tool('swf_get_ai_memory', {
-                'username': memory_user,
+                'username': MEMORY_USERNAME,
                 'turns': MEMORY_TURNS,
             })
             content = result.get('content', [])
@@ -240,39 +210,34 @@ class PandaBot:
             for item in content:
                 if isinstance(item, dict) and 'text' in item:
                     text += item['text']
-            if not text:
-                return
-            data = json.loads(text)
-            items = data.get('items', [])
-            if not items:
-                return
-            for item in items:
-                messages_list.append({
-                    "role": item['role'],
-                    "content": item['content'],
-                })
-            logger.info(
-                f"Loaded {len(items)} memory items for {memory_user}"
-            )
+            if text:
+                data = json.loads(text)
+                for item in data.get('items', []):
+                    messages.append({
+                        "role": item['role'],
+                        "content": item['content'],
+                    })
+                logger.info(f"Loaded {len(messages)} memory items")
         except Exception:
-            logger.exception(f"Failed to load memory for {memory_user}")
+            logger.exception("Failed to load recent dialog")
         finally:
             await mcp.close()
+        return messages
 
-    async def _record_exchange(self, memory_user, question, answer):
-        """Record a Q&A exchange to memory."""
+    async def _record_exchange(self, question, answer):
+        """Record a Q&A exchange to the unified memory."""
         mcp = MCPClient(self.mcp_url)
         try:
             await mcp.initialize()
             for role, content in [('user', question), ('assistant', answer)]:
                 await mcp.call_tool('swf_record_ai_memory', {
-                    'username': memory_user,
+                    'username': MEMORY_USERNAME,
                     'session_id': 'mattermost',
                     'role': role,
                     'content': content,
                 })
         except Exception:
-            logger.exception(f"Failed to record exchange for {memory_user}")
+            logger.exception("Failed to record exchange")
         finally:
             await mcp.close()
 
@@ -332,7 +297,6 @@ class PandaBot:
 
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self._setup_mcp())
-        loop.run_until_complete(self._load_memory(MEMORY_USERNAME, self.messages))
         self._load_active_threads()
         self.driver.init_websocket(self._handle_event)
 
@@ -415,64 +379,34 @@ class PandaBot:
             return
 
         post_id = post.get('id')
-        is_personal = is_dm or (is_mention and not is_our_channel) or (is_active_thread and not is_our_channel)
-        source = 'DM' if is_dm else ('thread' if is_active_thread and not is_our_channel else ('mention' if is_mention and not is_our_channel else 'channel'))
-
-        # Resolve username for all messages (needed for context tagging and per-user memory)
         mm_username = await self._resolve_mm_username(post_user)
-        context_tag = 'DM' if is_dm else f'#{self.mm_channel_name}' if is_our_channel else '@mention'
+
+        if is_dm:
+            context_tag = 'DM'
+        elif is_our_channel:
+            context_tag = f'#{self.mm_channel_name}'
+        else:
+            channel_name = data.get('channel_name', 'unknown')
+            context_tag = f'#{channel_name}'
+
         tagged_message = f"[{mm_username} in {context_tag}] {message_text}"
+        source = 'DM' if is_dm else ('mention' if is_mention and not is_our_channel else 'channel')
         logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
-        if is_personal:
-            # Per-user session for DMs, @mentions, and their follow-up threads
-            session = self._get_session(post_user, mm_username)
-            if not session.messages:
-                memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
-                await self._load_memory(memory_user, session.messages)
-            asyncio.create_task(self._respond_personal(session, mm_username, tagged_message, post_channel, post_id, root_id))
-        else:
-            # Shared channel conversation — but still record per-user for cross-context recall
-            asyncio.create_task(self._respond_channel(mm_username, tagged_message, post_channel, post_id, root_id))
+        asyncio.create_task(self._respond(tagged_message, post_channel, post_id, root_id))
 
-    async def _respond_channel(self, mm_username, tagged_message, reply_channel, post_id, root_id):
-        """Process a channel message using the shared conversation.
+    async def _respond(self, tagged_message, reply_channel, post_id, root_id):
+        """Process any message — channel, DM, or mention.
 
-        Injects the user's per-user memory as context so the bot can
-        recall cross-context exchanges (e.g. DM content asked about in channel).
+        Loads recent dialog from DB, runs Claude, records the exchange.
+        Serialized via lock so recordings don't interleave.
         """
-        # Fetch user's recent history and inject as context
-        memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
-        user_history = []
-        await self._load_memory(memory_user, user_history)
-
-        user_context = ''
-        if user_history:
-            lines = []
-            for msg in user_history[-10:]:  # last 10 exchanges
-                lines.append(f"  {msg['role']}: {msg['content'][:200]}")
-            user_context = (
-                f"\n[Recent history for {mm_username} across all contexts:\n"
-                + "\n".join(lines) + "\n]"
-            )
-
-        augmented_message = tagged_message + user_context if user_context else tagged_message
-
         async with self._respond_lock:
-            reply = await self._process_message(self.messages, augmented_message, root_id)
+            messages = await self._load_recent_dialog()
+            reply = await self._process_message(messages, tagged_message, root_id)
+            # Record inside lock so the next load sees this exchange
+            await self._record_exchange(tagged_message, reply)
 
-        # Record to both community and per-user memory
-        asyncio.create_task(self._record_exchange(MEMORY_USERNAME, tagged_message, reply))
-        asyncio.create_task(self._record_exchange(memory_user, tagged_message, reply))
-        await self._post_reply(reply, reply_channel, post_id, root_id)
-
-    async def _respond_personal(self, session, mm_username, tagged_message, reply_channel, post_id, root_id):
-        """Process a DM/@mention using per-user conversation."""
-        async with session.lock:
-            reply = await self._process_message(session.messages, tagged_message, root_id)
-
-        memory_user = f"{MEMORY_USERNAME_PREFIX}-{mm_username}"
-        asyncio.create_task(self._record_exchange(memory_user, tagged_message, reply))
         await self._post_reply(reply, reply_channel, post_id, root_id)
 
     async def _post_reply(self, reply, reply_channel, post_id, root_id):
@@ -502,8 +436,8 @@ class PandaBot:
     async def _process_message(self, messages, message_text, root_id):
         """Run the Claude conversation loop for one user message.
 
-        Returns the final reply text. Consolidates tool-use messages
-        afterward so the conversation history stays clean.
+        Returns the final reply text. The messages list is ephemeral —
+        loaded from DB for this request and discarded after.
         """
         # Build user message with full thread context if it's a reply
         user_content = message_text
@@ -516,12 +450,6 @@ class PandaBot:
                 )
 
         messages.append({"role": "user", "content": user_content})
-        # Trim if needed
-        if len(messages) > MAX_SESSION_MESSAGES:
-            del messages[:len(messages) - MAX_SESSION_MESSAGES]
-            if messages and messages[0]['role'] != 'user':
-                del messages[0]
-        msg_start = len(messages) - 1  # index of the user message we just added
 
         reply = "Sorry, I encountered an error processing your question."
 
@@ -534,7 +462,6 @@ class PandaBot:
                 self.anthropic_tools = [
                     mcp_tool_to_anthropic(t) for t in tools
                     if t["name"].startswith(BOT_TOOL_PREFIXES)
-                    or t["name"] in BOT_EXTRA_TOOLS
                 ]
 
             system = self._build_system_prompt()
@@ -616,10 +543,5 @@ class PandaBot:
             logger.exception("ask_claude failed")
         finally:
             await mcp.close()
-
-        # Consolidate: replace all intermediate messages with clean Q&A pair
-        del messages[msg_start:]
-        messages.append({"role": "user", "content": user_content})
-        messages.append({"role": "assistant", "content": reply})
 
         return reply
