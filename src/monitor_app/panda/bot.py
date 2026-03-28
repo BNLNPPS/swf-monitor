@@ -16,6 +16,9 @@ import asyncio
 import json
 import logging
 import os
+import re
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 
 import anthropic
@@ -58,6 +61,13 @@ Guidelines:
 - For errors, show the top patterns with counts.
 - Default to 7 days unless the user specifies a time range.
 - Keep responses focused — don't dump raw JSON, extract and present the key information.
+
+PLOTS: You can generate matplotlib plots that are rendered and posted as images. \
+When a visualization would help (pie charts, bar charts, time series), include a \
+Python code block tagged ```python-plot that uses matplotlib to create the figure. \
+The code MUST call plt.savefig('/tmp/plot.png', dpi=150, bbox_inches='tight') — \
+do NOT call plt.show(). The image will be posted alongside your message. \
+Only use matplotlib and numpy — no other imports. Keep the code short and focused.
 
 When a query returns no results, do NOT just report "no results found." Instead:
 - Consider whether the user's term might match a different field.
@@ -411,7 +421,78 @@ class PandaBot:
 
         await self._post_reply(reply, reply_channel, post_id, root_id)
 
+    async def _render_plot(self, code):
+        """Execute matplotlib code and return the PNG path, or None on failure."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plot_path = os.path.join(tmpdir, 'plot.png')
+            # Rewrite savefig path to our temp location
+            code = re.sub(
+                r"plt\.savefig\([^)]+\)",
+                f"plt.savefig('{plot_path}', dpi=150, bbox_inches='tight')",
+                code,
+            )
+            # Ensure no plt.show()
+            code = code.replace('plt.show()', '')
+            # Prepend headless backend
+            code = "import matplotlib\nmatplotlib.use('Agg')\n" + code
+
+            script_path = os.path.join(tmpdir, 'plot.py')
+            with open(script_path, 'w') as f:
+                f.write(code)
+
+            try:
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    ['python3', script_path],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=tmpdir,
+                )
+                if result.returncode != 0:
+                    logger.warning(f"Plot script failed: {result.stderr[:500]}")
+                    return None
+                if not os.path.exists(plot_path):
+                    logger.warning("Plot script ran but produced no image")
+                    return None
+                # Copy out of tmpdir before it's cleaned up
+                import shutil
+                fd, final_path = tempfile.mkstemp(suffix='.png')
+                os.close(fd)
+                shutil.copy2(plot_path, final_path)
+                return final_path
+            except subprocess.TimeoutExpired:
+                logger.warning("Plot script timed out")
+                return None
+            except Exception:
+                logger.exception("Plot execution failed")
+                return None
+
     async def _post_reply(self, reply, reply_channel, post_id, root_id):
+        # Extract and render any python-plot code blocks
+        file_ids = []
+        plot_match = re.search(r'```python-plot\n(.*?)```', reply, re.DOTALL)
+        if plot_match:
+            plot_code = plot_match.group(1)
+            logger.info("Detected plot code, rendering...")
+            plot_path = await self._render_plot(plot_code)
+            if plot_path:
+                try:
+                    uploaded = await asyncio.to_thread(
+                        self.driver.files.upload_file,
+                        reply_channel,
+                        {'files': ('plot.png', open(plot_path, 'rb'))},
+                    )
+                    fid = uploaded['file_infos'][0]['id']
+                    file_ids.append(fid)
+                    logger.info(f"Plot uploaded: {fid}")
+                    # Remove the code block from the message since we have the image
+                    reply = reply.replace(plot_match.group(0), '*(plot attached)*')
+                except Exception:
+                    logger.exception("Failed to upload plot")
+                finally:
+                    try:
+                        os.unlink(plot_path)
+                    except OSError:
+                        pass
 
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
@@ -419,13 +500,16 @@ class PandaBot:
         thread_root = root_id or post_id
         try:
             logger.info("Posting reply to Mattermost...")
+            post_options = {
+                'channel_id': reply_channel,
+                'message': reply,
+                'root_id': thread_root,
+            }
+            if file_ids:
+                post_options['file_ids'] = file_ids
             await asyncio.to_thread(
                 self.driver.posts.create_post,
-                options={
-                    'channel_id': reply_channel,
-                    'message': reply,
-                    'root_id': thread_root,
-                },
+                options=post_options,
             )
             # Track this thread so we respond to follow-ups (persisted)
             if thread_root not in self._active_threads:
