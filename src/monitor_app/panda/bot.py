@@ -453,9 +453,11 @@ class PandaBot:
                 f.write(code)
 
             try:
+                # Use sys.executable so the subprocess has the same venv
+                import sys
                 result = await asyncio.to_thread(
                     subprocess.run,
-                    ['python3', script_path],
+                    [sys.executable, script_path],
                     capture_output=True, text=True, timeout=30,
                     cwd=tmpdir,
                 )
