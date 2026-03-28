@@ -37,6 +37,37 @@ MCP_URL = os.environ.get(
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_')
 
+# Stdio MCP servers — launched as subprocesses at startup
+STDIO_MCP_SERVERS = []
+
+_xrootd_server = os.environ.get('XROOTD_MCP_SERVER')
+if _xrootd_server:
+    STDIO_MCP_SERVERS.append({
+        'name': 'xrootd',
+        'command': [
+            os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin/node'),
+            '/data/wenauseic/github/xrootd-mcp-server/build/src/index.js',
+        ],
+        'env': {
+            'XROOTD_SERVER': os.environ.get('XROOTD_SERVER', 'root://dtn-eic.jlab.org'),
+            'XROOTD_BASE_DIR': os.environ.get('XROOTD_BASE_DIR', '/volatile/eic/EPIC'),
+        },
+    })
+
+_github_token = os.environ.get('GITHUB_PERSONAL_ACCESS_TOKEN')
+if _github_token:
+    STDIO_MCP_SERVERS.append({
+        'name': 'github',
+        'command': [
+            '/data/wenauseic/github/github-mcp-server/github-mcp-server', 'stdio',
+            '--read-only',
+            '--toolsets=repos,issues,pull_requests,actions,code_security',
+        ],
+        'env': {
+            'GITHUB_PERSONAL_ACCESS_TOKEN': _github_token,
+        },
+    })
+
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
 You use MCP tools to answer questions about PanDA production and the configuration of production \
@@ -137,6 +168,81 @@ class MCPClient:
         await self._http.aclose()
 
 
+class StdioMCPClient:
+    """MCP client for subprocess-based servers using stdio (stdin/stdout JSON-RPC)."""
+
+    def __init__(self, name: str, command: list, env: dict = None, args: list = None):
+        self.name = name
+        self.command = command + (args or [])
+        self.env = {**os.environ, **(env or {})}
+        self._request_id = 0
+        self._process = None
+        self.server_instructions = ""
+
+    async def start(self):
+        """Launch the subprocess."""
+        self._process = await asyncio.create_subprocess_exec(
+            *self.command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=self.env,
+        )
+        logger.info(f"Stdio MCP '{self.name}' started (pid {self._process.pid})")
+
+    async def _request(self, method: str, params: dict | None = None):
+        if not self._process or self._process.returncode is not None:
+            raise RuntimeError(f"Stdio MCP '{self.name}' not running")
+        self._request_id += 1
+        body = {"jsonrpc": "2.0", "id": self._request_id, "method": method}
+        if params:
+            body["params"] = params
+        line = json.dumps(body) + "\n"
+        self._process.stdin.write(line.encode())
+        await self._process.stdin.drain()
+
+        resp_line = await asyncio.wait_for(
+            self._process.stdout.readline(), timeout=30
+        )
+        if not resp_line:
+            raise RuntimeError(f"Stdio MCP '{self.name}' closed stdout")
+        return json.loads(resp_line)
+
+    async def initialize(self):
+        resp = await self._request("initialize", {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {"name": "panda-bot", "version": "1.0"},
+        })
+        self.server_instructions = (
+            resp.get("result", {}).get("instructions", "")
+        )
+        # Send initialized notification
+        notif = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        self._process.stdin.write((json.dumps(notif) + "\n").encode())
+        await self._process.stdin.drain()
+        return resp
+
+    async def list_tools(self):
+        result = await self._request("tools/list")
+        return result.get("result", {}).get("tools", [])
+
+    async def call_tool(self, name: str, arguments: dict):
+        result = await self._request("tools/call", {
+            "name": name, "arguments": arguments,
+        })
+        return result.get("result", {})
+
+    async def close(self):
+        if self._process and self._process.returncode is None:
+            self._process.stdin.close()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                self._process.kill()
+            logger.info(f"Stdio MCP '{self.name}' stopped")
+
+
 def mcp_tool_to_anthropic(tool):
     """Convert an MCP tool definition to Anthropic Messages API format."""
     return {
@@ -173,6 +279,8 @@ class PandaBot:
         self.channel_id = None
         self.system_prompt = SYSTEM_PREAMBLE
         self.anthropic_tools = []
+        self._tool_router: dict[str, object] = {}  # tool_name → MCP client
+        self._stdio_clients: list[StdioMCPClient] = []
         self._respond_lock = asyncio.Lock()
         self._active_threads = set()
         self._mm_user_cache: dict[str, str] = {}
@@ -198,24 +306,51 @@ class PandaBot:
         return f"Current date and time: {now}\n\n{self.system_prompt}"
 
     async def _setup_mcp(self):
-        """Discover tools and build system prompt via MCP."""
+        """Discover tools from all MCP servers (HTTP + stdio)."""
+        # 1. HTTP MCP server (Django — PanDA, PCS, memory tools)
         mcp = MCPClient(self.mcp_url)
         try:
             await mcp.initialize()
             tools = await mcp.list_tools()
-            self.anthropic_tools = [
-                mcp_tool_to_anthropic(t) for t in tools
-                if t["name"].startswith(BOT_TOOL_PREFIXES)
-            ]
-            logger.info(f"Discovered {len(self.anthropic_tools)} tools via MCP")
+            for t in tools:
+                if t["name"].startswith(BOT_TOOL_PREFIXES):
+                    self.anthropic_tools.append(mcp_tool_to_anthropic(t))
+                    # HTTP tools routed at call time (no persistent client)
+            logger.info(f"HTTP MCP: {len(self.anthropic_tools)} tools")
             if mcp.server_instructions:
                 self.system_prompt = (
                     SYSTEM_PREAMBLE + "\n" + mcp.server_instructions
                 )
         except Exception:
-            logger.exception("Failed MCP setup — will retry on first message")
+            logger.exception("Failed HTTP MCP setup — will retry on first message")
         finally:
             await mcp.close()
+
+        # 2. Stdio MCP servers (xrootd, github, etc.)
+        for server_cfg in STDIO_MCP_SERVERS:
+            try:
+                client = StdioMCPClient(
+                    name=server_cfg['name'],
+                    command=server_cfg['command'],
+                    env=server_cfg.get('env'),
+                    args=server_cfg.get('args'),
+                )
+                await client.start()
+                await client.initialize()
+                tools = await client.list_tools()
+                for t in tools:
+                    self.anthropic_tools.append(mcp_tool_to_anthropic(t))
+                    self._tool_router[t["name"]] = client
+                self._stdio_clients.append(client)
+                logger.info(
+                    f"Stdio MCP '{client.name}': {len(tools)} tools"
+                )
+            except Exception:
+                logger.exception(
+                    f"Failed to start stdio MCP '{server_cfg['name']}'"
+                )
+
+        logger.info(f"Total tools available: {len(self.anthropic_tools)}")
 
     async def _load_recent_dialog(self):
         """Load recent dialog from the database — all users, all contexts."""
@@ -613,7 +748,13 @@ class PandaBot:
                         continue
                     logger.info(f"Tool call: {block.name}({block.input})")
                     try:
-                        result = await mcp.call_tool(block.name, block.input)
+                        # Route to the correct MCP server
+                        if block.name in self._tool_router:
+                            result = await self._tool_router[block.name].call_tool(
+                                block.name, block.input
+                            )
+                        else:
+                            result = await mcp.call_tool(block.name, block.input)
                         content = result.get("content", [])
                         result_text = ""
                         for item in content:
