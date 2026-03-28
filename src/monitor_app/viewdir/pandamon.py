@@ -181,7 +181,7 @@ def panda_jobs_list(request):
     description = f'Production jobs from the last {days} days.'
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
-        description += f' <a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
+        description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
 
     context = {
         'table_title': 'PanDA Jobs',
