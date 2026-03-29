@@ -2,6 +2,7 @@
 {% block title %}{{ schema.label }} Tags - PCS{% endblock %}
 
 {% block content %}
+{% csrf_token %}
 <style>
     .compose-wrap {
         display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px);
@@ -161,12 +162,8 @@
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
                     <button type="button" class="btn btn-outline-primary btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
                     {% endif %}
-                    <form id="lock-form" method="post" style="display:none; margin:0;">{% csrf_token %}
-                        <button type="submit" class="btn btn-outline-success btn-sm" onclick="return confirm('Lock this tag? This cannot be undone.')">Lock</button>
-                    </form>
-                    <form id="delete-form" method="post" style="display:none; margin:0;">{% csrf_token %}
-                        <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('Delete this tag?')">Delete</button>
-                    </form>
+                    <button type="button" class="btn btn-outline-success btn-sm" id="btn-lock-tag" style="display:none" onclick="lockTag()">Lock</button>
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="btn-delete-tag" style="display:none" onclick="deleteTag()">Delete</button>
                 </div>
             </div>
             <div class="panel-body" id="view-body">
@@ -175,13 +172,12 @@
         </div>
 
         <!-- CREATE MODE (hidden by default) -->
-        <form method="post" id="create-panel" style="display:none; flex-direction:column; flex:1;">
-            {% csrf_token %}
+        <div id="create-panel" style="display:none; flex-direction:column; flex:1;">
             <div class="panel-header">
                 <h4 id="create-title">New {{ schema.label }} Tag</h4>
                 <div class="btn-group">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-cancel-create">Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm" id="btn-save">Save</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-save" onclick="saveTag()">Save</button>
                 </div>
             </div>
             <div class="panel-body">
@@ -204,7 +200,7 @@
                 </div>
                 <div class="field-group">
                     <label>Created By</label>
-                    <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ username }}" readonly>
+                    <input type="text" id="id_created_by" class="form-control" value="{{ username }}" readonly disabled>
                 </div>
                 <div class="params-header">Parameters
                     {% if user.is_authenticated %}
@@ -226,7 +222,7 @@
                     {% endif %}
                 {% endfor %}
             </div>
-        </form>
+        </div>
 
     </div>
 </div>
@@ -282,8 +278,8 @@
     const viewTitle = document.getElementById('view-title');
     const viewBody = document.getElementById('view-body');
     const viewStatusBadge = document.getElementById('view-status-badge');
-    const lockForm = document.getElementById('lock-form');
-    const deleteForm = document.getElementById('delete-form');
+    const btnLock = document.getElementById('btn-lock-tag');
+    const btnDelete = document.getElementById('btn-delete-tag');
     let statusFilter = 'all';
     let creatorFilter = null;
     const paramFilters = {};
@@ -391,7 +387,6 @@
     function enterCreateMode(categoryDigit) {
         mode = 'create';
         editingTagNumber = null;
-        createPanel.action = '';
         enableSave();
         viewPanel.style.display = 'none';
         createPanel.style.display = 'flex';
@@ -400,8 +395,7 @@
             : 'New Tag ' + predictNextLabel();
         // Clear form
         createPanel.querySelectorAll('input.form-control, textarea.form-control').forEach(el => {
-            if (el.name === 'created_by') el.value = currentUser;
-            else el.value = '';
+            el.value = '';
             el.classList.remove('suggested');
         });
         createPanel.querySelectorAll('select.form-select').forEach(sel => {
@@ -458,7 +452,6 @@
         if (!tag) return;
         enterCreateMode(tag.category_digit);
         editingTagNumber = tag.tag_number;
-        createPanel.action = `/swf-monitor/pcs/tags/${tagType}/${tag.tag_number}/edit/`;
         createTitle.textContent = 'Edit ' + tag.tag_label;
         fillFormFromTag(tag);
         snapshotOriginals();
@@ -471,7 +464,6 @@
         if (!tag) return;
         enterCreateMode(tag.category_digit);
         fillFormFromTag(tag);
-        setFieldValue('created_by', currentUser, false);
     });
     document.getElementById('btn-cancel-create').addEventListener('click', () => enterViewMode(selectedTagNumber));
 
@@ -483,8 +475,8 @@
             viewStatusBadge.innerHTML = '';
             if (btnEdit) btnEdit.style.display = 'none';
             if (btnCopy) btnCopy.style.display = 'none';
-            lockForm.style.display = 'none';
-            deleteForm.style.display = 'none';
+            btnLock.style.display = 'none';
+            btnDelete.style.display = 'none';
             return;
         }
         viewTitle.textContent = tag.tag_label + ' — ' + (tag.description || tag.category_name || '');
@@ -496,10 +488,8 @@
         if (btnEdit) btnEdit.style.display = ownerDraft ? 'inline-block' : 'none';
         // Copy: always visible when logged in
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
-        lockForm.action = `/swf-monitor/pcs/tags/${tagType}/${tag.tag_number}/lock/`;
-        lockForm.style.display = ownerDraft ? 'inline' : 'none';
-        deleteForm.action = `/swf-monitor/pcs/tags/${tagType}/${tag.tag_number}/delete/`;
-        deleteForm.style.display = ownerDraft ? 'inline' : 'none';
+        btnLock.style.display = ownerDraft ? 'inline-block' : 'none';
+        btnDelete.style.display = ownerDraft ? 'inline-block' : 'none';
 
         const params = tag.parameters || {};
         const paramHtml = Object.keys(params).length > 0
@@ -721,6 +711,77 @@
 
     // ── Filters ──
     searchInput.addEventListener('input', updateClearBtn);
+
+    // ── API helpers ──
+    const TAG_API_NAMES = {p: 'physics-tags', e: 'evgen-tags', s: 'simu-tags', r: 'reco-tags'};
+    const apiBase = '/swf-monitor/pcs/api/' + TAG_API_NAMES[tagType];
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+    const apiHeaders = {'Content-Type': 'application/json'};
+    if (csrfToken) apiHeaders['X-CSRFToken'] = csrfToken;
+
+    async function apiPost(url, body) {
+        const resp = await fetch(url, {method: 'POST', headers: apiHeaders, body: JSON.stringify(body)});
+        return resp;
+    }
+    async function apiPatch(url, body) {
+        const resp = await fetch(url, {method: 'PATCH', headers: apiHeaders, body: JSON.stringify(body)});
+        return resp;
+    }
+
+    window.lockTag = async function() {
+        if (!selectedTagNumber || !confirm('Lock this tag? This cannot be undone.')) return;
+        const resp = await apiPost(`${apiBase}/${selectedTagNumber}/lock/`, {});
+        if (resp.ok) {
+            window.location.href = `?selected=${selectedTagNumber}`;
+        } else {
+            const data = await resp.json();
+            alert(data.detail || 'Lock failed');
+        }
+    };
+
+    window.deleteTag = async function() {
+        if (!selectedTagNumber || !confirm('Delete this tag?')) return;
+        const resp = await apiPost(`${apiBase}/${selectedTagNumber}/delete/`, {});
+        if (resp.ok) {
+            window.location.href = window.location.pathname;
+        } else {
+            const data = await resp.json();
+            alert(data.detail || 'Delete failed');
+        }
+    };
+
+    window.saveTag = async function() {
+        // Collect form data
+        const payload = {};
+        if (tagType === 'p') payload.category = getFieldValue('category');
+        payload.description = getFieldValue('description');
+        const parameters = {};
+        createPanel.querySelectorAll('.choice-wrap').forEach(wrap => {
+            const fname = wrap.dataset.fieldName;
+            const paramKey = fname.replace('param_', '');
+            const val = getFieldValue(fname);
+            if (val) parameters[paramKey] = val;
+        });
+        payload.parameters = parameters;
+
+        let resp;
+        if (editingTagNumber) {
+            resp = await apiPatch(`${apiBase}/${editingTagNumber}/`, payload);
+        } else {
+            resp = await apiPost(`${apiBase}/`, payload);
+        }
+        if (resp.ok) {
+            const data = await resp.json();
+            window.location.href = `?selected=${data.tag_number}`;
+        } else {
+            const errors = await resp.json();
+            let msg = '';
+            for (const [field, msgs] of Object.entries(errors)) {
+                msg += `${field}: ${Array.isArray(msgs) ? msgs.join(', ') : msgs}\n`;
+            }
+            alert(msg || 'Save failed');
+        }
+    };
 
     // ── Init ──
     renderTagList();
