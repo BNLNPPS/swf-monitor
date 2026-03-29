@@ -73,11 +73,10 @@
     <nav>
         {% if is_tunnel %}
         {# Devcloud nav — only pages available through the proxy #}
-        <a href="{% url 'monitor_app:home' %}">Home</a>
+        <a href="{% url 'monitor_app:panda_hub' %}">Home</a>
         <div class="dropdown">
             <button class="dropbtn">PanDA</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:panda_hub' %}">PanDA Hub</a>
                 <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
                 <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
                 <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
