@@ -75,39 +75,6 @@
 </head>
 <body>
     <nav>
-        {% if is_tunnel %}
-        {# Devcloud nav — only pages available through the proxy #}
-        <a href="{% url 'monitor_app:prod_hub' %}">Home</a>
-        <div class="dropdown">
-            <button class="dropbtn">PanDA</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
-                <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
-                <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
-                <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
-                <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
-                <a href="{% url 'monitor_app:epic_queues_list' %}">EIC Queues</a>
-            </div>
-        </div>
-        <div class="dropdown">
-            <button class="dropbtn">PCS</button>
-            <div class="dropdown-content">
-                <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
-                <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
-                <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
-                <a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu Tags</a>
-                <a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco Tags</a>
-                <a href="{% url 'pcs:datasets_compose' %}">Datasets</a>
-                <a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a>
-                <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
-            </div>
-        </div>
-        <span class="nav-spacer"></span>
-        <div class="nav-auth">
-            <span style="color:#adb5bd;">{{ user.username }}</span>
-        </div>
-        {% else %}
-        {# BNL nav with mode flipper — visible to all #}
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
             <div class="dropdown-content">
@@ -193,7 +160,6 @@
                 <a href="{% url 'login' %}">Login</a>
             {% endif %}
         </div>
-        {% endif %}
     </nav>
     <main>
         {% if messages %}
