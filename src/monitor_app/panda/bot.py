@@ -774,10 +774,10 @@ class PandaBot:
         """
         async with self._respond_lock:
             messages = await self._load_recent_dialog()
-            reply, tool_was_called = await self._process_message(messages, tagged_message, root_id)
+            reply, dpid_verified = await self._process_message(messages, tagged_message, root_id)
             no_query_warn = ":warning: *This response was not based on a live data query.*"
             reply = reply.replace(no_query_warn, "").rstrip()
-            if not tool_was_called and not reply.startswith("Sorry,"):
+            if not dpid_verified and not reply.startswith("Sorry,"):
                 reply += "\n\n" + no_query_warn
             # Record inside lock so the next load sees this exchange
             await self._record_exchange(tagged_message, reply, post_id, root_id)
@@ -892,8 +892,8 @@ class PandaBot:
     async def _process_message(self, messages, message_text, root_id):
         """Run the Claude conversation loop for one user message.
 
-        Returns (reply_text, tool_was_called). The messages list is ephemeral —
-        loaded from DB for this request and discarded after.
+        Returns (reply_text, dpid_verified).  dpid_verified is True only when
+        a tool was called AND the LLM cited a matching DPID in its final reply.
         """
         # Build user message with full thread context if it's a reply
         user_content = message_text
@@ -908,7 +908,7 @@ class PandaBot:
         messages.append({"role": "user", "content": user_content})
 
         reply = "Sorry, I encountered an error processing your question."
-        tool_was_called = False
+        exchange_dpids = []  # DPIDs generated in this exchange
 
         mcp = MCPClient(self.mcp_url)
         try:
@@ -982,8 +982,8 @@ class PandaBot:
                                 if isinstance(item, dict) and "text" in item:
                                     result_text += item["text"]
                         # Assign DPID and stamp the result
-                        tool_was_called = True
                         dpid = self._generate_dpid()
+                        exchange_dpids.append(dpid)
                         await self._record_dpid(dpid, block.name, block.input)
                         result_text = f"[DPID:{dpid}]\n{result_text}"
                         if len(result_text) > MAX_RESULT_LEN:
@@ -1016,4 +1016,21 @@ class PandaBot:
         finally:
             await mcp.close()
 
-        return reply, tool_was_called
+        # Verify: did the LLM cite a DPID that was actually generated?
+        dpid_verified = False
+        if exchange_dpids:
+            cited = set(re.findall(r'DPID:([A-F0-9]{8})', reply))
+            matched = cited & set(exchange_dpids)
+            if matched:
+                dpid_verified = True
+                logger.info(f"DPID verified: {matched}")
+            else:
+                logger.warning(
+                    f"Tool called but no valid DPID cited. "
+                    f"Generated: {exchange_dpids}, cited: {cited}"
+                )
+
+        # Strip DPID citations from reply — user doesn't need to see them
+        reply = re.sub(r'\s*DPID:[A-F0-9]{8}\s*', '', reply).strip()
+
+        return reply, dpid_verified
