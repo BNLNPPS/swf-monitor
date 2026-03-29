@@ -62,9 +62,12 @@ def oauth_protected_resource(request):
 
 # Create your views here.
 def home(request):
-    if request.user.is_authenticated:
-        return redirect('monitor_app:authenticated_home')
-    return render(request, 'monitor_app/welcome.html')
+    from django.conf import settings
+    prefix = getattr(settings, 'FORCE_SCRIPT_NAME', '') or ''
+    return HttpResponse(f"""<!DOCTYPE html><html><head><script>
+var mode = localStorage.getItem('navMode') || 'production';
+window.location.replace(mode === 'testbed' ? '{prefix}/workflows/' : '{prefix}/prod/');
+</script></head><body></body></html>""", content_type='text/html')
 
 @login_required
 def authenticated_home(request):
