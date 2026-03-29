@@ -2494,11 +2494,20 @@ def panda_slash_command(request):
                 return JsonResponse({'text': f"Error: {data['error']}"})
             queue = data.get('queue', data)
             lines = [f"#### Site: {arg}"]
-            for key in ('status', 'state', 'resource_type', 'region', 'gocname',
-                        'maxrss', 'maxtime', 'corecount', 'container_options'):
+            for key in ('status', 'state', 'corecount', 'maxrss', 'maxtime',
+                        'container_options'):
                 val = queue.get(key)
                 if val is not None:
                     lines.append(f"**{key}:** {val}")
+            # Job breakdown
+            activity = queries.get_activity(days=1, site=arg)
+            jobs = activity.get('jobs', {})
+            by_status = jobs.get('by_status', {})
+            if by_status:
+                lines.append(f"**Jobs (24h):** {jobs.get('total', 0)}")
+                lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(by_status.items())))
+            else:
+                lines.append('**Jobs (24h):** 0')
             return JsonResponse({'text': '\n'.join(lines)})
 
         return JsonResponse({'text': f"Unknown subcommand `{subcmd}`. Try `/panda help`"})
