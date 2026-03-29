@@ -669,6 +669,25 @@ class AIMemory(models.Model):
         return f"{self.username}/{self.role}: {preview}"
 
 
+class DataProvenance(models.Model):
+    """
+    Data Provenance ID (DPID) — tracks every MCP tool call made by the bot.
+    Provides an independent verification that data in a bot response
+    came from a real tool call, not LLM fabrication.
+    """
+    dpid = models.CharField(max_length=12, unique=True, db_index=True)
+    tool_name = models.CharField(max_length=100)
+    tool_args = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'swf_data_provenance'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"DPID:{self.dpid} {self.tool_name}"
+
+
 # Import workflow models to register them with Django
 from .workflow_models import (
     STFWorkflow,

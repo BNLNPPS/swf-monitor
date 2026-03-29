@@ -13,12 +13,14 @@ transport Claude Code uses. No SSE, no GET streams, no subprocesses.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 
 import anthropic
@@ -134,7 +136,9 @@ Never fabricate, interpolate, or reconstruct data from memory. If you need data 
 plot, call the tool FIRST, then use the actual returned values. If values across plots \
 must be consistent (e.g. totals match sums of parts), verify the math before responding. \
 If you don't have the data, say so and offer to retrieve it — never fill gaps with \
-plausible-sounding numbers.
+plausible-sounding numbers. \
+Every tool result includes a Data Provenance ID (DPID:XXXXXXXX). You MUST cite the \
+DPID at the end of your response so users can verify the data source.
 
 Guidelines:
 - Be concise. Use markdown tables for structured data.
@@ -474,6 +478,23 @@ class PandaBot:
 
         return json.dumps({'error': f"Unknown action '{action}'"})
 
+    @staticmethod
+    def _generate_dpid():
+        """Generate a short unique Data Provenance ID."""
+        raw = f"{time.time():.6f}-{os.getpid()}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:8].upper()
+
+    async def _record_dpid(self, dpid, tool_name, tool_args):
+        """Record a DPID to the database."""
+        from monitor_app.models import DataProvenance
+        try:
+            await asyncio.to_thread(
+                DataProvenance.objects.create,
+                dpid=dpid, tool_name=tool_name, tool_args=tool_args,
+            )
+        except Exception:
+            logger.exception(f"Failed to record DPID:{dpid}")
+
     async def _setup_mcp(self):
         """Discover tools from all MCP servers (HTTP + stdio)."""
         # 1. HTTP MCP server (Django — PanDA, PCS, memory tools)
@@ -734,7 +755,9 @@ class PandaBot:
         """
         async with self._respond_lock:
             messages = await self._load_recent_dialog()
-            reply = await self._process_message(messages, tagged_message, root_id)
+            reply, tool_was_called = await self._process_message(messages, tagged_message, root_id)
+            if not tool_was_called and not reply.startswith("Sorry,"):
+                reply += "\n\n:warning: *This response was not based on a live data query.*"
             # Record inside lock so the next load sees this exchange
             await self._record_exchange(tagged_message, reply, post_id, root_id)
 
@@ -848,7 +871,7 @@ class PandaBot:
     async def _process_message(self, messages, message_text, root_id):
         """Run the Claude conversation loop for one user message.
 
-        Returns the final reply text. The messages list is ephemeral —
+        Returns (reply_text, tool_was_called). The messages list is ephemeral —
         loaded from DB for this request and discarded after.
         """
         # Build user message with full thread context if it's a reply
@@ -864,6 +887,7 @@ class PandaBot:
         messages.append({"role": "user", "content": user_content})
 
         reply = "Sorry, I encountered an error processing your question."
+        tool_was_called = False
 
         mcp = MCPClient(self.mcp_url)
         try:
@@ -936,6 +960,11 @@ class PandaBot:
                             for item in content:
                                 if isinstance(item, dict) and "text" in item:
                                     result_text += item["text"]
+                        # Assign DPID and stamp the result
+                        tool_was_called = True
+                        dpid = self._generate_dpid()
+                        await self._record_dpid(dpid, block.name, block.input)
+                        result_text = f"[DPID:{dpid}]\n{result_text}"
                         if len(result_text) > MAX_RESULT_LEN:
                             result_text = (
                                 result_text[:MAX_RESULT_LEN]
@@ -966,4 +995,4 @@ class PandaBot:
         finally:
             await mcp.close()
 
-        return reply
+        return reply, tool_was_called

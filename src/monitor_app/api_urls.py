@@ -8,7 +8,7 @@ from .views import (
     TFSliceViewSet, WorkerViewSet, RunStateViewSet, SystemStateEventViewSet,
     get_next_run_number, get_next_agent_id, get_next_workflow_execution_id,
     ensure_namespace,
-    ai_memory_record, ai_memory_load,
+    ai_memory_record, ai_memory_load, dpid_verify,
 )
 from .sse_views import sse_message_stream, sse_status
 
@@ -39,6 +39,7 @@ urlpatterns = [
     path('namespaces/ensure/', ensure_namespace, name='ensure-namespace'),
     path('ai-memory/record/', ai_memory_record, name='ai-memory-record'),
     path('ai-memory/', ai_memory_load, name='ai-memory-load'),
+    path('dpid/verify/', dpid_verify, name='dpid-verify'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),
     path('messages/stream/status/', sse_status, name='sse-stream-status'),
     path('', include(router.urls)),

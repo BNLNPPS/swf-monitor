@@ -2263,6 +2263,44 @@ def ai_memory_load(request):
     })
 
 
+# ==================== DATA PROVENANCE (DPID) ====================
+
+@api_view(['GET'])
+def dpid_verify(request):
+    """Verify a Data Provenance ID or list recent DPIDs.
+
+    GET /api/dpid/verify/?dpid=A7K2M9  — verify a specific DPID
+    GET /api/dpid/verify/              — list recent DPIDs
+    No auth required — read-only, no AI in the loop.
+    """
+    from .models import DataProvenance
+
+    dpid = request.query_params.get('dpid')
+    if dpid:
+        try:
+            record = DataProvenance.objects.get(dpid=dpid)
+            return Response({
+                'dpid': record.dpid,
+                'tool_name': record.tool_name,
+                'tool_args': record.tool_args,
+                'created_at': record.created_at.isoformat(),
+                'verified': True,
+            })
+        except DataProvenance.DoesNotExist:
+            return Response({'dpid': dpid, 'verified': False}, status=404)
+
+    # List recent
+    recent = DataProvenance.objects.order_by('-created_at')[:20]
+    return Response({
+        'items': [{
+            'dpid': r.dpid,
+            'tool_name': r.tool_name,
+            'created_at': r.created_at.isoformat(),
+        } for r in recent],
+        'count': len(recent),
+    })
+
+
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
 
 @login_required
