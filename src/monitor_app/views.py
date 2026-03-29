@@ -2326,11 +2326,11 @@ def panda_slash_command(request):
         site <name>         — Queue configuration
         help                — This help text
     """
-    import os
+    from decouple import config as decouple_config
     from .panda import queries
 
     # Validate Mattermost token
-    expected_token = os.environ.get('MATTERMOST_SLASH_TOKEN', '')
+    expected_token = decouple_config('MATTERMOST_SLASH_TOKEN', default='')
     received_token = request.data.get('token', '')
     if not expected_token or received_token != expected_token:
         return JsonResponse({'text': 'Unauthorized.'}, status=401)
