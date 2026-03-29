@@ -282,8 +282,13 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     conn = connections['panda']
 
     # Summary counts (without pagination cursor)
-    count_where = [w for w in where if '"jeditaskid" <' not in w]
-    count_params = [p for i, p in enumerate(params) if '"jeditaskid" <' not in where[i]]
+    # Remove the before_id clause and its param (always the last pair if present)
+    if before_id:
+        count_where = where[:-1]
+        count_params = params[:-1]
+    else:
+        count_where = where
+        count_params = params
     count_sql, count_full_params = build_task_count_query(count_where, count_params)
 
     summary = {}

@@ -2379,12 +2379,15 @@ def panda_slash_command(request):
             return JsonResponse({'text': '\n'.join(lines)})
 
         if subcmd == 'jobs':
+            status_filter = arg if arg and not arg.isdigit() else None
+            cursor_key = f'slash_cursor_{user}_jobs_{status_filter or "all"}'
             cursor = _get_cursor(cursor_key)
             limit = 20
-            data = queries.list_jobs(days=7, limit=limit, before_id=cursor)
+            data = queries.list_jobs(days=7, limit=limit, before_id=cursor, status=status_filter)
             pag = data.get('pagination', {})
             _set_cursor(cursor_key, pag.get('next_before_id'))
-            lines = [f"#### Recent Jobs (page {_cursor_page(cursor_key)})"]
+            label = f" ({status_filter})" if status_filter else ""
+            lines = [f"#### Recent Jobs{label} (page {_cursor_page(cursor_key)})"]
             summary = data.get('summary', {})
             if summary:
                 lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(summary.items())))
@@ -2422,12 +2425,15 @@ def panda_slash_command(request):
             return JsonResponse({'text': '\n'.join(lines)})
 
         if subcmd == 'tasks':
+            status_filter = arg if arg and not arg.isdigit() else None
+            cursor_key = f'slash_cursor_{user}_tasks_{status_filter or "all"}'
             cursor = _get_cursor(cursor_key)
             limit = 15
-            data = queries.list_tasks(days=7, limit=limit, before_id=cursor)
+            data = queries.list_tasks(days=7, limit=limit, before_id=cursor, status=status_filter)
             pag = data.get('pagination', {})
             _set_cursor(cursor_key, pag.get('next_before_id'))
-            lines = [f"#### Recent Tasks (page {_cursor_page(cursor_key)})"]
+            label = f" ({status_filter})" if status_filter else ""
+            lines = [f"#### Recent Tasks{label} (page {_cursor_page(cursor_key)})"]
             summary = data.get('summary', {})
             if summary:
                 lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(summary.items())))
@@ -2528,9 +2534,9 @@ def _slash_help():
 |---------|-------------|
 | `/panda status` | Activity overview (last 24h) |
 | `/panda errors [days]` | Top error patterns (default 7 days) |
-| `/panda jobs` | Recent jobs — repeat to page |
+| `/panda jobs [status]` | Recent jobs — repeat to page |
 | `/panda job <id>` | Deep study of a single job |
-| `/panda tasks` | Recent tasks — repeat to page |
+| `/panda tasks [status]` | Recent tasks — repeat to page |
 | `/panda task <id>` | Single task details |
 | `/panda sites` | EIC compute queues |
 | `/panda site <name>` | Queue configuration |
