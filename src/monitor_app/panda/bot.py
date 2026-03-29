@@ -81,6 +81,24 @@ if _github_token:
         ],
     })
 
+_zenodo_key = os.environ.get('ZENODO_API_KEY')
+if _zenodo_key:
+    STDIO_MCP_SERVERS.append({
+        'name': 'zenodo',
+        'source': 'github.com/eic/zenodo-mcp-server',
+        'command': [
+            os.environ.get('NODE_PATH', '/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin/node'),
+            '/data/wenauseic/github/zenodo-mcp-server/build/src/index.js',
+        ],
+        'env': {
+            'ZENODO_API_KEY': _zenodo_key,
+        },
+        'repo_dir': '/data/wenauseic/github/zenodo-mcp-server',
+        'update_commands': [
+            'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin:$PATH && cd /data/wenauseic/github/zenodo-mcp-server && git pull && npm install && npm run build',
+        ],
+    })
+
 # Virtual tool definition for server management
 BOT_MANAGE_SERVERS_TOOL = {
     "name": "bot_manage_servers",
@@ -109,7 +127,8 @@ BOT_MANAGE_SERVERS_TOOL = {
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
 You use MCP tools to answer questions about PanDA production, the Physics \
-Configuration System (PCS), ePIC GitHub repositories, and XRootD data files.
+Configuration System (PCS), ePIC GitHub repositories, XRootD data files, and \
+Zenodo records (search, inspect, download files from zenodo.org).
 
 You communicate via Mattermost — in a shared channel, in direct messages (DMs), \
 and when @mentioned in any channel. Each message you receive is tagged with the \
