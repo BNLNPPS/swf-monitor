@@ -1,11 +1,11 @@
 {% extends 'base.html' %}
 
-{% block title %}PanDA & Rucio Hub - SWF Monitor{% endblock %}
+{% block title %}ePIC Production - SWF Monitor{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
-    <h1 class="mb-4">PanDA & Rucio Hub</h1>
-    <p class="lead mb-5">Centralized access to PanDA workload management, Rucio data management, and database browsing</p>
+    <h1 class="mb-4">ePIC Production</h1>
+    <p class="lead mb-5">ePIC experiment production monitoring and configuration</p>
 
     <h3 class="mb-3">Production Monitor</h3>
     <div class="row mb-4">
@@ -49,42 +49,16 @@
                 </div>
             </div>
         </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">ePIC Production Queues</a></strong></p>
+                    <p class="card-text">ePIC compute queues from live PanDA schedconfig. Status, resource type, container config, and queue parameters.</p>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <h3 class="mb-3">Configuration & Databases</h3>
-    <div class="row">
-        <div class="col-md-4 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <p class="mb-2"><strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">EIC PanDA Queues</a></strong></p>
-                    <p class="card-text">ePIC compute queues from live PanDA schedconfig. Status, resource type, container config, and full queue parameters.</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_database_tables_list' %}" class="text-decoration-none">PanDA Database</a></strong></p>
-                    <p class="card-text">Browse tables and data in the external PanDA database system.</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <p class="mb-2"><strong><a href="{% url 'monitor_app:idds_database_tables_list' %}" class="text-decoration-none">iDDS Database</a></strong></p>
-                    <p class="card-text">Browse tables and data in the external iDDS database system.</p>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-4 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <p class="mb-2"><strong><a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="text-decoration-none">Rucio Endpoints</a></strong></p>
-                    <p class="card-text">Configure distributed data management endpoints for the Rucio system.</p>
-                </div>
-            </div>
-        </div>
-    </div>
+    {% include "pcs/_pcs_sections.html" %}
 </div>
 {% endblock %}

@@ -2973,13 +2973,11 @@ def update_rucio_endpoints_from_github(request):
 
 @login_required
 def panda_hub(request):
-    """
-    PanDA hub page. For tunnel (devcloud) requests, also serves as the
-    ePIC Production home with PCS sections included.
-    """
-    from monitor_app.middleware import _is_localhost
-    context = {}
-    if _is_localhost(request):
-        from pcs.views import pcs_hub_counts
-        context.update(pcs_hub_counts())
-    return render(request, 'monitor_app/panda_hub.html', context)
+    """PanDA & Rucio hub page — testbed-oriented, full BNL access."""
+    return render(request, 'monitor_app/panda_hub.html')
+
+
+def prod_hub(request):
+    """ePIC Production home — production monitor + PCS sections."""
+    from pcs.views import pcs_hub_counts
+    return render(request, 'monitor_app/prod_hub.html', pcs_hub_counts())

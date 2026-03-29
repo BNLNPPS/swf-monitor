@@ -54,7 +54,7 @@ from .views import (
     rucio_endpoints_all_json,
     update_panda_queues_from_github,
     update_rucio_endpoints_from_github,
-    panda_hub,
+    panda_hub, prod_hub,
 )
 
 # Import PanDA database views from new dedicated module
@@ -209,6 +209,7 @@ urlpatterns = [
     
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
+    path('prod/', prod_hub, name='prod_hub'),
 
     # PanDA Production Monitor
     path('panda/activity/', panda_activity, name='panda_activity'),
