@@ -1022,7 +1022,7 @@ class PandaBot:
         # Verify: did the LLM cite a DPID that was actually generated?
         dpid_verified = False
         if exchange_dpids:
-            cited = set(re.findall(r'DPID:([A-F0-9]{8})', reply))
+            cited = set(re.findall(r'DPID:\s*([A-F0-9]{8})', reply))
             matched = cited & set(exchange_dpids)
             if matched:
                 dpid_verified = True
@@ -1034,6 +1034,6 @@ class PandaBot:
                 )
 
         # Strip DPID citations from reply — user doesn't need to see them
-        reply = re.sub(r'\s*DPID:[A-F0-9]{8}\s*', '', reply).strip()
+        reply = re.sub(r'\s*\[?DPID:\s*[A-F0-9]{8}\]?\s*', '', reply).strip()
 
         return reply, dpid_verified
