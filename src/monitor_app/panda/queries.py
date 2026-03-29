@@ -30,6 +30,32 @@ TERMINAL_TASK_STATUSES = ('done', 'failed', 'aborted', 'broken', 'finished')
 STALE_TASK_DAYS = 60
 
 
+def _bulk_destinationse(pandaids):
+    """Look up destinationse (destination storage element) for a batch of jobs.
+
+    The destination SE — the Rucio storage element where output files are
+    written — is stored per-file in filestable4, not in the jobs table.
+    Returns {pandaid: destinationse} for jobs that have one.
+    """
+    if not pandaids:
+        return {}
+    conn = connections['panda']
+    placeholders = ','.join(['%s'] * len(pandaids))
+    sql = f"""
+        SELECT DISTINCT "pandaid", "destinationse"
+        FROM "{PANDA_SCHEMA}"."filestable4"
+        WHERE "pandaid" IN ({placeholders})
+          AND "destinationse" IS NOT NULL
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, list(pandaids))
+            return {row[0]: row[1] for row in cursor.fetchall()}
+    except Exception:
+        logger.exception("_bulk_destinationse failed")
+        return {}
+
+
 def _stale_task_filter():
     """Exclude non-terminal tasks created more than STALE_TASK_DAYS ago."""
     cutoff = timezone.now() - timedelta(days=STALE_TASK_DAYS)
@@ -108,6 +134,11 @@ def list_jobs(days=7, status=None, username=None, site=None,
 
     has_more = len(rows) > limit
     next_before_id = jobs[-1]['pandaid'] if jobs and has_more else None
+
+    # Annotate with destinationse from filestable4
+    dest_map = _bulk_destinationse([j['pandaid'] for j in jobs])
+    for j in jobs:
+        j['destinationse'] = dest_map.get(j['pandaid'])
 
     return {
         "summary": summary,
@@ -198,6 +229,11 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
 
     has_more = len(rows) > limit
     next_before_id = jobs[-1]['pandaid'] if jobs and has_more else None
+
+    # Annotate with destinationse from filestable4
+    dest_map = _bulk_destinationse([j['pandaid'] for j in jobs])
+    for j in jobs:
+        j['destinationse'] = dest_map.get(j['pandaid'])
 
     # Error summary: count by component and top codes
     component_counts = {}
@@ -347,8 +383,8 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     }
 
 
-def error_summary(days=10, username=None, site=None, taskid=None,
-                  error_source=None, limit=20):
+def error_summary(days=10, username=None, site=None, destinationse=None,
+                  taskid=None, error_source=None, limit=20):
     """Aggregate error summary across failed PanDA jobs, ranked by frequency."""
     # When scoped to a specific task, return all error patterns
     if taskid:
@@ -371,6 +407,14 @@ def error_summary(days=10, username=None, site=None, taskid=None,
         else:
             filters += ' AND "computingsite" = %s'
         extra_params.append(site)
+    destse_filter = ''
+    destse_params = []
+    if destinationse:
+        if '%' in destinationse:
+            destse_filter = ' AND f."destinationse" LIKE %s'
+        else:
+            destse_filter = ' AND f."destinationse" = %s'
+        destse_params.append(destinationse)
     if taskid:
         filters += ' AND "jeditaskid" = %s'
         extra_params.append(taskid)
@@ -383,23 +427,31 @@ def error_summary(days=10, username=None, site=None, taskid=None,
 
     parts = []
     all_params = []
+    join_type = 'JOIN' if destinationse else 'LEFT JOIN'
     for comp in components_to_query:
         for table in ['jobsactive4', 'jobsarchived4']:
             parts.append(f"""
                 SELECT '{comp['name']}' as error_source,
-                       "{comp['code']}" as error_code,
-                       "{comp['diag']}" as error_diag,
-                       "jeditaskid",
-                       "produsername",
-                       "computingsite"
-                FROM "{PANDA_SCHEMA}"."{table}"
-                WHERE "modificationtime" >= %s
-                  AND "jobstatus" IN ('failed','cancelled','closed')
-                  AND "{comp['code']}" IS NOT NULL
-                  AND "{comp['code']}" != 0
+                       j."{comp['code']}" as error_code,
+                       j."{comp['diag']}" as error_diag,
+                       j."jeditaskid",
+                       j."produsername",
+                       j."computingsite",
+                       f."destinationse"
+                FROM "{PANDA_SCHEMA}"."{table}" j
+                {join_type} (
+                    SELECT DISTINCT "pandaid", "destinationse"
+                    FROM "{PANDA_SCHEMA}"."filestable4"
+                    WHERE "destinationse" IS NOT NULL
+                ) f ON f."pandaid" = j."pandaid"
+                WHERE j."modificationtime" >= %s
+                  AND j."jobstatus" IN ('failed','cancelled','closed')
+                  AND j."{comp['code']}" IS NOT NULL
+                  AND j."{comp['code']}" != 0
                   {filters}
+                  {destse_filter}
             """)
-            all_params.extend([cutoff] + extra_params)
+            all_params.extend([cutoff] + extra_params + destse_params)
 
     union_sql = ' UNION ALL '.join(parts)
     sql = f"""
@@ -408,7 +460,8 @@ def error_summary(days=10, username=None, site=None, taskid=None,
                COUNT(*) as count,
                COUNT(DISTINCT jeditaskid) as task_count,
                array_agg(DISTINCT produsername) as users,
-               array_agg(DISTINCT computingsite) as sites
+               array_agg(DISTINCT computingsite) as sites,
+               array_agg(DISTINCT destinationse) as destination_sites
         FROM ({union_sql}) errs
         GROUP BY error_source, error_code, LEFT(error_diag, 256)
         ORDER BY count DESC
@@ -435,6 +488,7 @@ def error_summary(days=10, username=None, site=None, taskid=None,
             'task_count': row[4],
             'users': row[5],
             'sites': row[6],
+            'destination_sites': row[7],
         }
         total += row[3]
         errors.append(entry)

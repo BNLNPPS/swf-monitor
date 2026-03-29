@@ -43,7 +43,9 @@ async def panda_list_jobs(
 
     Returns:
         summary: Job counts by status for the full query (not just this page).
-        jobs: List of job records with key fields.
+        jobs: List of job records with key fields. Each job includes
+            destinationse — the destination storage element (Rucio SE) where
+            output files are written, looked up from the files table.
         pagination: {before_id, has_more, next_before_id} for incremental pulling.
         total_in_window: Total jobs matching filters in the time window.
     """
@@ -146,6 +148,7 @@ async def panda_error_summary(
     days: int = 10,
     username: str = None,
     site: str = None,
+    destinationse: str = None,
     taskid: int = None,
     error_source: str = None,
     limit: int = 20,
@@ -163,7 +166,9 @@ async def panda_error_summary(
     Args:
         days: Time window in days (default 10).
         username: Filter by job owner (produsername). Supports SQL LIKE with %.
-        site: Filter by computing site. Supports SQL LIKE with %.
+        site: Filter by computing site (computingsite). Supports SQL LIKE with %.
+        destinationse: Filter by destination storage element — the Rucio SE where
+            output files are written, located at a site. Supports SQL LIKE with %.
         taskid: Filter by JEDI task ID.
         error_source: Filter to errors from one component
                       (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).
@@ -173,10 +178,11 @@ async def panda_error_summary(
         total_errors: Total error occurrences across all components.
         errors: Ranked list of error patterns, each with:
             error_source, error_code, error_diag, count,
-            task_count, users, sites.
+            task_count, users, sites, destination_sites.
     """
     return await sync_to_async(queries.error_summary)(
         days=days, username=username, site=site,
+        destinationse=destinationse,
         taskid=taskid, error_source=error_source, limit=limit,
     )
 
