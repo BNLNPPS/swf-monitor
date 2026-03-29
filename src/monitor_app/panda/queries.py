@@ -959,7 +959,7 @@ def study_job(pandaid):
         result["task"] = task_info
 
     # Monitoring page URL
-    result["monitor_url"] = f"https://pandamon01.sdcc.bnl.gov/job?pandaid={pandaid}"
+    result["monitor_url"] = f"https://epic-devcloud.org/panda/jobs/{pandaid}/"
 
     return result
 
