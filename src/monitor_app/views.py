@@ -2361,8 +2361,8 @@ def panda_slash_command(request):
                 lines.append(f"  {s}: {c}")
             if jobs.get('by_site'):
                 lines.append('**By site:**')
-                for s, c in sorted(jobs['by_site'].items(), key=lambda x: -x[1]):
-                    lines.append(f"  {s}: {c}")
+                for entry in jobs['by_site']:
+                    lines.append(f"  {entry['site']}: {entry['total']}")
             return JsonResponse({'text': '\n'.join(lines)})
 
         if subcmd == 'errors':
@@ -2469,14 +2469,21 @@ def panda_slash_command(request):
             return JsonResponse({'text': '\n'.join(lines)})
 
         if subcmd == 'sites':
-            data = queries.list_queues(vo='eic')
+            activity = queries.get_activity(days=1)
+            by_site = {e['site']: e for e in activity.get('jobs', {}).get('by_site', [])}
+            queues = queries.list_queues(vo='eic')
             lines = ['#### EIC Compute Sites']
-            lines.append(f"{data.get('count', 0)} queues")
-            for q in data.get('queues', []):
-                lines.append(
-                    f"| {q.get('panda_queue', '')} | {q.get('status', '')} "
-                    f"| {q.get('resource_type', '')} | {q.get('region', '')} |"
-                )
+            lines.append('| Site | Status | Running | Finished | Failed | Total |')
+            lines.append('|------|--------|---------|----------|--------|-------|')
+            for q in queues.get('queues', []):
+                name = q.get('panda_queue', '')
+                st = q.get('status', '')
+                s = by_site.get(name, {})
+                running = s.get('running', 0)
+                finished = s.get('finished', 0)
+                failed = s.get('failed', 0)
+                total = s.get('total', 0)
+                lines.append(f"| {name} | {st} | {running} | {finished} | {failed} | {total} |")
             return JsonResponse({'text': '\n'.join(lines)})
 
         if subcmd == 'site':
