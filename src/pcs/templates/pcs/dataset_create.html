@@ -3,6 +3,7 @@
 {% block title %}Create Dataset - PCS{% endblock %}
 
 {% block content %}
+{% csrf_token %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
@@ -15,8 +16,7 @@
     <h2>Create Dataset</h2>
     <p>Compose a dataset from locked tags. Block 1 is created automatically. Only locked tags appear in the dropdowns.</p>
 
-    <form method="post" class="mt-3" style="max-width: 700px;" id="dataset-form">
-        {% csrf_token %}
+    <div class="mt-3" style="max-width: 700px;" id="dataset-form">
 
         <div class="row mb-3">
             <div class="col-md-4">
@@ -86,22 +86,11 @@
             <textarea name="description" id="id_description" class="form-control" rows="3">{{ form.description.value|default:"" }}</textarea>
         </div>
 
-        <div class="mb-3">
-            <label for="id_created_by" class="form-label"><strong>Created By</strong></label>
-            <input type="text" name="created_by" id="id_created_by" class="form-control" value="{{ form.created_by.value|default:"" }}">
-        </div>
+        <div class="alert alert-danger" id="form-errors" style="display:none;"></div>
 
-        {% if form.errors %}
-        <div class="alert alert-danger">
-            {% for field, errors in form.errors.items %}
-            <p><strong>{{ field }}:</strong> {{ errors|join:", " }}</p>
-            {% endfor %}
-        </div>
-        {% endif %}
-
-        <button type="submit" class="btn btn-primary">Create Dataset</button>
+        <button type="button" class="btn btn-primary" onclick="createDataset()">Create Dataset</button>
         <a href="{% url 'pcs:datasets_list' %}" class="btn btn-secondary">Cancel</a>
-    </form>
+    </div>
 </div>
 
 <script>
@@ -131,5 +120,38 @@ document.getElementById('id_scope').addEventListener('input', updatePreview);
 document.getElementById('id_detector_version').addEventListener('input', updatePreview);
 document.getElementById('id_detector_config').addEventListener('input', updatePreview);
 updatePreview();
+
+async function createDataset() {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+    const headers = {'Content-Type': 'application/json'};
+    if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+    const payload = {
+        scope: document.getElementById('id_scope').value,
+        detector_version: document.getElementById('id_detector_version').value,
+        detector_config: document.getElementById('id_detector_config').value,
+        physics_tag: document.getElementById('id_physics_tag').value,
+        evgen_tag: document.getElementById('id_evgen_tag').value,
+        simu_tag: document.getElementById('id_simu_tag').value,
+        reco_tag: document.getElementById('id_reco_tag').value,
+        description: document.getElementById('id_description').value,
+    };
+    const errDiv = document.getElementById('form-errors');
+    errDiv.style.display = 'none';
+    const resp = await fetch('/swf-monitor/pcs/api/datasets/', {
+        method: 'POST', headers, body: JSON.stringify(payload)
+    });
+    if (resp.ok) {
+        const data = await resp.json();
+        window.location.href = `{% url 'pcs:datasets_compose' %}?selected=${data.id}`;
+    } else {
+        const errors = await resp.json();
+        let html = '';
+        for (const [field, msgs] of Object.entries(errors)) {
+            html += `<p><strong>${field}:</strong> ${Array.isArray(msgs) ? msgs.join(', ') : msgs}</p>`;
+        }
+        errDiv.innerHTML = html;
+        errDiv.style.display = 'block';
+    }
+}
 </script>
 {% endblock %}

@@ -3,6 +3,7 @@
 {% block title %}{% if editing %}Edit {{ config.name }}{% else %}Create Prod Config{% endif %} - PCS{% endblock %}
 
 {% block content %}
+{% csrf_token %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
@@ -20,16 +21,8 @@
     <h2>{% if editing %}Edit {{ config.name }}{% else %}Create Production Config{% endif %}</h2>
     <p>{% if editing %}Modify this production configuration template.{% else %}Define a reusable production submission template.{% endif %}</p>
 
-    <form method="post" class="mt-3" style="max-width: 900px;">
-        {% csrf_token %}
-
-        {% if form.errors %}
-        <div class="alert alert-danger">
-            {% for field, errors in form.errors.items %}
-            <p><strong>{{ field }}:</strong> {{ errors|join:", " }}</p>
-            {% endfor %}
-        </div>
-        {% endif %}
+    <div id="config-form" class="mt-3" style="max-width: 900px;">
+        <div class="alert alert-danger" id="form-errors" style="display:none;"></div>
 
         <fieldset class="mb-4">
             <legend class="h5">General</legend>
@@ -39,8 +32,8 @@
                     {{ form.name }}
                 </div>
                 <div class="col-md-6">
-                    <label for="id_created_by" class="form-label"><strong>Created By</strong></label>
-                    {{ form.created_by }}
+                    <label class="form-label"><strong>Created By</strong></label>
+                    <input type="text" class="form-control" value="{{ username }}" readonly disabled>
                 </div>
             </div>
             <div class="mb-3">
@@ -174,12 +167,49 @@
             </div>
         </fieldset>
 
-        <button type="submit" class="btn btn-primary">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
+        <button type="button" class="btn btn-primary" onclick="saveConfig()">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
         {% if editing %}
         <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary">Cancel</a>
         {% else %}
         <a href="{% url 'pcs:prod_configs_list' %}" class="btn btn-secondary">Cancel</a>
         {% endif %}
-    </form>
+    </div>
 </div>
+<script>
+async function saveConfig() {
+    const editing = {{ editing|yesno:"true,false" }};
+    const pk = {{ config.pk|default:"null" }};
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+    const headers = {'Content-Type': 'application/json'};
+    if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+    const payload = {};
+    document.querySelectorAll('#config-form input[id^="id_"], #config-form textarea[id^="id_"], #config-form select[id^="id_"]').forEach(el => {
+        const name = el.id.replace('id_', '');
+        if (el.type === 'checkbox') payload[name] = el.checked;
+        else if (el.type === 'number') payload[name] = el.value ? Number(el.value) : null;
+        else if (name === 'data' || name === 'rucio_replication_rules') {
+            try { payload[name] = el.value ? JSON.parse(el.value) : null; }
+            catch(e) { payload[name] = el.value; }
+        }
+        else payload[name] = el.value;
+    });
+    const url = editing ? `/swf-monitor/pcs/api/prod-configs/${pk}/` : '/swf-monitor/pcs/api/prod-configs/';
+    const method = editing ? 'PATCH' : 'POST';
+    const errDiv = document.getElementById('form-errors');
+    errDiv.style.display = 'none';
+    const resp = await fetch(url, {method, headers, body: JSON.stringify(payload)});
+    if (resp.ok) {
+        const data = await resp.json();
+        window.location.href = `{% url 'pcs:prod_configs_compose' %}?selected=${data.id}`;
+    } else {
+        const errors = await resp.json();
+        let html = '';
+        for (const [field, msgs] of Object.entries(errors)) {
+            html += `<p><strong>${field}:</strong> ${Array.isArray(msgs) ? msgs.join(', ') : msgs}</p>`;
+        }
+        errDiv.innerHTML = html;
+        errDiv.style.display = 'block';
+    }
+}
+</script>
 {% endblock %}

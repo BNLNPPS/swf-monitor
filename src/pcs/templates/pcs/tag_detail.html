@@ -3,6 +3,7 @@
 {% block title %}{{ tag.tag_label }} - PCS{% endblock %}
 
 {% block content %}
+{% csrf_token %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
@@ -26,10 +27,21 @@
         <div>
             {% if tag.status == 'draft' %}
             <a href="{% url 'pcs:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-sm btn-outline-primary">Edit</a>
-            <form method="post" action="{% url 'pcs:tag_lock' tag_type=tag_type tag_number=tag.tag_number %}" class="d-inline" onsubmit="return confirm('Lock this tag? This is irreversible — the tag will become immutable.');">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-sm btn-warning">Lock</button>
-            </form>
+            <button type="button" class="btn btn-sm btn-warning" onclick="lockTag()">Lock</button>
+            <script>
+            async function lockTag() {
+                if (!confirm('Lock this tag? This is irreversible — the tag will become immutable.')) return;
+                const TAG_API = {p:'physics-tags',e:'evgen-tags',s:'simu-tags',r:'reco-tags'};
+                const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+                const headers = {'Content-Type': 'application/json'};
+                if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+                const resp = await fetch(`/swf-monitor/pcs/api/${TAG_API['{{ tag_type }}']}/{{ tag.tag_number }}/lock/`, {
+                    method: 'POST', headers, body: '{}'
+                });
+                if (resp.ok) location.reload();
+                else { const d = await resp.json(); alert(d.detail || 'Lock failed'); }
+            }
+            </script>
             {% endif %}
         </div>
     </div>

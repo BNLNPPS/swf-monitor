@@ -3,6 +3,7 @@
 {% block title %}{{ dataset.dataset_name }} - PCS{% endblock %}
 
 {% block content %}
+{% csrf_token %}
 <div class="container mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
@@ -69,10 +70,19 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">Blocks ({{ blocks|length }})</h5>
-                <form method="post" action="{% url 'pcs:dataset_add_block' pk=dataset.pk %}" class="d-inline">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn-sm btn-outline-primary">Add Block</button>
-                </form>
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="addBlock()">Add Block</button>
+                <script>
+                async function addBlock() {
+                    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
+                    const headers = {'Content-Type': 'application/json'};
+                    if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+                    const resp = await fetch('/swf-monitor/pcs/api/datasets/{{ dataset.pk }}/add-block/', {
+                        method: 'POST', headers, body: '{}'
+                    });
+                    if (resp.ok) location.reload();
+                    else { const d = await resp.json(); alert(d.detail || 'Add block failed'); }
+                }
+                </script>
             </div>
             <table class="table table-sm table-bordered">
                 <thead><tr><th>Block</th><th>DID</th><th>Files</th><th>Size</th></tr></thead>
