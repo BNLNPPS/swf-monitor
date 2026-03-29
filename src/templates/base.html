@@ -67,6 +67,10 @@
       .dropdown:hover .dropdown-content {
         display: block;
       }
+      /* Nav mode flipper */
+      .nav-mode { display: none; }
+      .nav-mode.active { display: contents; }
+      #mode-label { border-right: 1px solid rgba(255,255,255,.2); padding-right: 12px; margin-right: 4px; }
     </style>
 </head>
 <body>
@@ -103,9 +107,19 @@
             <span style="color:#adb5bd;">{{ user.username }}</span>
         </div>
         {% else %}
-        {# Full BNL nav #}
-        <a href="{% url 'monitor_app:home' %}">Home</a>
+        {# BNL nav with mode flipper #}
         {% if user.is_authenticated %}
+            <div class="dropdown" id="mode-flipper">
+                <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
+                <div class="dropdown-content">
+                    <a href="#" onclick="setNavMode('testbed');return false;">ePIC WFMS Testbed</a>
+                    <a href="#" onclick="setNavMode('production');return false;">ePIC Production</a>
+                </div>
+            </div>
+
+            {# ── Testbed mode ── #}
+            <span class="nav-mode nav-testbed">
+            <a href="{% url 'monitor_app:home' %}">Home</a>
             <div class="dropdown">
                 <button class="dropbtn">Workflows</button>
                 <div class="dropdown-content">
@@ -130,18 +144,6 @@
             <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
             <a href="{% url 'monitor_app:persistent_state' %}">State</a>
             <div class="dropdown">
-                <button class="dropbtn">PCS</button>
-                <div class="dropdown-content">
-                    <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu Tags</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco Tags</a>
-                    <a href="{% url 'pcs:datasets_list' %}">Datasets</a>
-                    <a href="{% url 'pcs:prod_configs_list' %}">Prod Configs</a>
-                </div>
-            </div>
-            <div class="dropdown">
                 <button class="dropbtn">PanDA/Rucio</button>
                 <div class="dropdown-content">
                     <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio Hub</a>
@@ -156,6 +158,31 @@
                     <a href="{% url 'monitor_app:rucio_endpoints_list' %}">Rucio Endpoints</a>
                 </div>
             </div>
+            </span>
+
+            {# ── Production mode ── #}
+            <span class="nav-mode nav-production">
+            <a href="{% url 'monitor_app:panda_hub' %}">Home</a>
+            <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
+            <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
+            <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
+            <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
+            <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
+            <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>
+            <div class="dropdown">
+                <button class="dropbtn">PCS</button>
+                <div class="dropdown-content">
+                    <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu Tags</a>
+                    <a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco Tags</a>
+                    <a href="{% url 'pcs:datasets_compose' %}">Datasets</a>
+                    <a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a>
+                    <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
+                </div>
+            </div>
+            </span>
         {% endif %}
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
@@ -188,5 +215,22 @@
         {% endif %}
         {% block content %}{% endblock %}
     </main>
+<script>
+function setNavMode(mode) {
+    localStorage.setItem('navMode', mode);
+    applyNavMode(mode);
+}
+function applyNavMode(mode) {
+    document.querySelectorAll('.nav-mode').forEach(el => el.classList.remove('active'));
+    const target = document.querySelector('.nav-' + mode);
+    if (target) target.classList.add('active');
+    const label = document.getElementById('mode-label');
+    if (label) label.textContent = mode === 'testbed' ? 'Testbed' : 'Production';
+}
+(function() {
+    const mode = localStorage.getItem('navMode') || 'production';
+    applyNavMode(mode);
+})();
+</script>
 </body>
 </html>
