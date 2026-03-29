@@ -68,6 +68,11 @@ class TunnelAuthMiddleware:
         return self.get_response(request)
 
 
+def tunnel_context(request):
+    """Template context processor: sets is_tunnel for localhost requests."""
+    return {'is_tunnel': _is_localhost(request)}
+
+
 class MCPAuthMiddleware:
     """
     Middleware for MCP endpoint authentication.
