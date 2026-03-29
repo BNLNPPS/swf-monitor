@@ -9,6 +9,7 @@ from .views import (
     get_next_run_number, get_next_agent_id, get_next_workflow_execution_id,
     ensure_namespace,
     ai_memory_record, ai_memory_load, dpid_verify, panda_slash_command,
+    users_list,
 )
 from .sse_views import sse_message_stream, sse_status
 
@@ -41,6 +42,7 @@ urlpatterns = [
     path('ai-memory/', ai_memory_load, name='ai-memory-load'),
     path('dpid/verify/', dpid_verify, name='dpid-verify'),
     path('slash/panda/', panda_slash_command, name='panda-slash-command'),
+    path('users/', users_list, name='users-list'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),
     path('messages/stream/status/', sse_status, name='sse-stream-status'),
     path('', include(router.urls)),

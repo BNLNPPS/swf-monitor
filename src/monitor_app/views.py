@@ -2304,6 +2304,23 @@ def dpid_verify(request):
     })
 
 
+# ==================== USERS ====================
+
+@api_view(['GET'])
+def users_list(request):
+    """List active users with username, status, and timestamps.
+
+    GET /api/users/ — requires authentication (session or token).
+    Used by swf-remote to sync user accounts from BNL.
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    users = User.objects.filter(is_active=True).order_by('username').values(
+        'username', 'is_active', 'date_joined', 'last_login'
+    )
+    return Response({'users': list(users)})
+
+
 # ==================== SLASH COMMANDS (Mattermost) ====================
 
 @api_view(['POST'])

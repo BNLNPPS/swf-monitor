@@ -1,15 +1,17 @@
 """
 PCS REST API ViewSets.
 
-Endpoints under /pcs/api/. No DELETE on any endpoint — tags and datasets are permanent.
+Endpoints under /pcs/api/. All endpoints require authentication.
 Tag immutability enforced: PATCH returns 400 on locked tags. Lock is one-way via POST /lock/.
+Tag delete via POST /delete/ — creator-only, draft-only (locked tags protected by PROTECT FK).
 Tag numbers auto-assigned on POST: physics from category range, e/s/r from PersistentState.
-Dataset creation requires all four tags to be locked.
+Dataset creation requires all four tags to be locked. created_by set from authenticated user.
 """
 from rest_framework import viewsets, status
+from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
 from django.db.models import Count
 
 from .models import (
@@ -28,13 +30,18 @@ class PhysicsCategoryViewSet(viewsets.ModelViewSet):
     """CRUD for physics categories. Categories are mutable (no lock lifecycle)."""
     queryset = PhysicsCategory.objects.annotate(tag_count=Count('tags'))
     serializer_class = PhysicsCategorySerializer
-    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user.username)
 
 
 class _TagViewSetMixin:
-    """Shared behavior for all tag ViewSets: draft/locked lifecycle, PATCH guard, lock action."""
-    permission_classes = [AllowAny]
+    """Shared behavior for all tag ViewSets: draft/locked lifecycle, PATCH guard, lock/delete actions."""
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     lookup_field = 'tag_number'
 
@@ -64,6 +71,23 @@ class _TagViewSetMixin:
         instance.save(update_fields=['status', 'updated_at'])
         return Response(self.get_serializer(instance).data)
 
+    @action(detail=True, methods=['post'], url_path='delete')
+    def soft_delete(self, request, **kwargs):
+        instance = self.get_object()
+        if instance.status == 'locked':
+            return Response(
+                {'detail': f'Tag {instance.tag_label} is locked and cannot be deleted.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if instance.created_by != request.user.username:
+            return Response(
+                {'detail': f'Only the creator ({instance.created_by}) can delete this tag.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        label = instance.tag_label
+        instance.delete()
+        return Response({'detail': f'Tag {label} deleted.'})
+
 
 class PhysicsTagViewSet(_TagViewSetMixin, viewsets.ModelViewSet):
     queryset = PhysicsTag.objects.select_related('category')
@@ -88,7 +112,8 @@ class PhysicsTagViewSet(_TagViewSetMixin, viewsets.ModelViewSet):
         data['tag_number'] = tag_number
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(tag_number=tag_number, tag_label=f"p{tag_number}")
+        serializer.save(tag_number=tag_number, tag_label=f"p{tag_number}",
+                        created_by=request.user.username)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -103,7 +128,8 @@ class _SimpleTagViewSet(_TagViewSetMixin, viewsets.ModelViewSet):
         data['tag_number'] = tag_number
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        serializer.save(tag_number=tag_number, tag_label=f"{prefix}{tag_number}")
+        serializer.save(tag_number=tag_number, tag_label=f"{prefix}{tag_number}",
+                        created_by=request.user.username)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
@@ -131,7 +157,8 @@ class DatasetViewSet(viewsets.ModelViewSet):
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
     )
     serializer_class = DatasetSerializer
-    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
     http_method_names = ['get', 'post', 'head', 'options']
 
     def create(self, request, *args, **kwargs):
@@ -145,7 +172,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
                     {field: [f'Tag {tag.tag_label} must be locked before use in a dataset.']},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        instance = serializer.save()
+        instance = serializer.save(created_by=request.user.username)
         return Response(self.get_serializer(instance).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='add-block')
@@ -169,7 +196,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
             did=f"{dataset.scope}:{dataset.dataset_name}.b{new_block_num}",
             description=dataset.description,
             metadata=dataset.metadata,
-            created_by=request.data.get('created_by', dataset.created_by),
+            created_by=request.user.username,
         )
         return Response(self.get_serializer(new_block).data, status=status.HTTP_201_CREATED)
 
@@ -178,7 +205,11 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
     """Production configuration templates. Always mutable — full CRUD."""
     queryset = ProdConfig.objects.all()
     serializer_class = ProdConfigSerializer
-    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user.username)
 
 
 class ProdTaskViewSet(viewsets.ModelViewSet):
@@ -188,7 +219,11 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
     )
     serializer_class = ProdTaskSerializer
-    permission_classes = [AllowAny]
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user.username)
 
     @action(detail=True, methods=['post'], url_path='generate-commands')
     def generate_commands(self, request, pk=None):

@@ -10,7 +10,7 @@ class PhysicsCategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = PhysicsCategory
         fields = ['digit', 'name', 'description', 'created_by', 'created_at', 'tag_count']
-        read_only_fields = ['created_at']
+        read_only_fields = ['created_by', 'created_at']
 
 
 class PhysicsTagSerializer(serializers.ModelSerializer):
@@ -23,7 +23,7 @@ class PhysicsTagSerializer(serializers.ModelSerializer):
             'status', 'description', 'parameters',
             'created_by', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'tag_number', 'tag_label', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'tag_number', 'tag_label', 'status', 'created_by', 'created_at', 'updated_at']
 
     def validate_parameters(self, value):
         ok, msg = validate_parameters('p', value)
@@ -38,7 +38,7 @@ class _SimpleTagSerializer(serializers.ModelSerializer):
             'id', 'tag_number', 'tag_label', 'status', 'description',
             'parameters', 'created_by', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'tag_number', 'tag_label', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'tag_number', 'tag_label', 'status', 'created_by', 'created_at', 'updated_at']
 
 
 class EvgenTagSerializer(_SimpleTagSerializer):
@@ -91,7 +91,7 @@ class DatasetSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'dataset_name', 'did', 'block_num', 'blocks',
-            'file_count', 'data_size', 'created_at',
+            'file_count', 'data_size', 'created_by', 'created_at',
         ]
 
 
@@ -99,7 +99,7 @@ class ProdConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProdConfig
         fields = '__all__'
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
 
 class ProdTaskSerializer(serializers.ModelSerializer):
@@ -120,5 +120,5 @@ class ProdTaskSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'condor_command', 'panda_command',
-            'created_at', 'updated_at',
+            'created_by', 'created_at', 'updated_at',
         ]

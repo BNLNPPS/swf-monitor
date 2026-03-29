@@ -25,10 +25,19 @@ class TunnelAuthMiddleware:
     def __call__(self, request):
         if not request.user.is_authenticated and self._is_localhost(request):
             User = get_user_model()
-            user, _ = User.objects.get_or_create(
-                username='swf-remote-proxy',
-                defaults={'is_active': True},
-            )
+            remote_user = request.META.get('HTTP_X_REMOTE_USER', '').strip()
+            if remote_user:
+                user, created = User.objects.get_or_create(
+                    username=remote_user,
+                    defaults={'is_active': True},
+                )
+                if created:
+                    logger.info(f"Auto-created user '{remote_user}' from tunnel proxy")
+            else:
+                user, _ = User.objects.get_or_create(
+                    username='swf-remote-proxy',
+                    defaults={'is_active': True},
+                )
             request.user = user
         return self.get_response(request)
 
