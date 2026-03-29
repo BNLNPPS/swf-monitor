@@ -75,20 +75,15 @@
 </head>
 <body>
     <nav>
-        {% if is_tunnel %}
-        <a href="{% url 'monitor_app:prod_hub' %}" style="font-weight:700; border-right:1px solid rgba(255,255,255,.2); padding-right:12px; margin-right:4px;">ePIC Production</a>
-        {% else %}
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:testbed_hub' %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
+                <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
                 <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">ePIC Production</a>
             </div>
         </div>
-        {% endif %}
 
-        {# ── Testbed mode (BNL only) ── #}
-        {% if not is_tunnel %}
+        {# ── Testbed mode ── #}
         <span class="nav-mode nav-testbed">
         <div class="dropdown">
             <button class="dropbtn">Workflows</button>
@@ -129,14 +124,9 @@
             </div>
         </div>
         </span>
-        {% endif %}
 
         {# ── Production mode ── #}
-        {% if is_tunnel %}
-        {# Tunnel: always show production nav, no toggle needed #}
-        {% else %}
         <span class="nav-mode nav-production">
-        {% endif %}
         <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
@@ -156,7 +146,7 @@
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
             </div>
         </div>
-        {% if not is_tunnel %}</span>{% endif %}
+        </span>
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
         <div class="nav-auth">
