@@ -775,8 +775,10 @@ class PandaBot:
         async with self._respond_lock:
             messages = await self._load_recent_dialog()
             reply, tool_was_called = await self._process_message(messages, tagged_message, root_id)
+            no_query_warn = ":warning: *This response was not based on a live data query.*"
+            reply = reply.replace(no_query_warn, "").rstrip()
             if not tool_was_called and not reply.startswith("Sorry,"):
-                reply += "\n\n:warning: *This response was not based on a live data query.*"
+                reply += "\n\n" + no_query_warn
             # Record inside lock so the next load sees this exchange
             await self._record_exchange(tagged_message, reply, post_id, root_id)
 
