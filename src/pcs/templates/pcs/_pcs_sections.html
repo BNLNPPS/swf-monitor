@@ -1,49 +1,49 @@
 {# Shared PCS sections — included by both PCS hub and Production hub #}
 
 <h3 class="mb-3">Tags</h3>
-<div class="row mb-4">
-    <div class="col-md-3 mb-3">
+<div class="row mb-4" style="display:flex; flex-wrap:wrap;">
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:physics_categories_list' %}" class="text-decoration-none">Physics Categories</a></strong>
+                <p class="mb-1"><strong><a href="{% url 'pcs:physics_categories_list' %}" class="text-decoration-none">Categories</a></strong>
                 <span class="badge bg-info">{{ categories_count }}</span></p>
-                <p class="card-text">Physics areas (DVCS, DIS, SIDIS...) that organize physics tag numbering.</p>
+                <p class="card-text small">Physics areas that organize tag numbering.</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics Tags</a></strong>
+                <p class="mb-1"><strong><a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics</a></strong>
                 <span class="badge bg-info">{{ physics_tags_count }}</span></p>
-                <p class="card-text">Physics process configurations (beam energies, process type, cross-sections).</p>
+                <p class="card-text small">Beam energies, process type, cross-sections.</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:tag_compose' tag_type='e' %}" class="text-decoration-none">EvGen Tags</a></strong>
+                <p class="mb-1"><strong><a href="{% url 'pcs:tag_compose' tag_type='e' %}" class="text-decoration-none">EvGen</a></strong>
                 <span class="badge bg-info">{{ evgen_tags_count }}</span></p>
-                <p class="card-text">Event generation configurations (signal frequency, generator settings).</p>
+                <p class="card-text small">Generator, signal frequency, settings.</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:tag_compose' tag_type='s' %}" class="text-decoration-none">Simu Tags</a></strong>
+                <p class="mb-1"><strong><a href="{% url 'pcs:tag_compose' tag_type='s' %}" class="text-decoration-none">Simu</a></strong>
                 <span class="badge bg-info">{{ simu_tags_count }}</span></p>
-                <p class="card-text">Simulation configurations (detector sim, digitization, backgrounds).</p>
+                <p class="card-text small">Detector sim, digitization, backgrounds.</p>
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:tag_compose' tag_type='r' %}" class="text-decoration-none">Reco Tags</a></strong>
+                <p class="mb-1"><strong><a href="{% url 'pcs:tag_compose' tag_type='r' %}" class="text-decoration-none">Reco</a></strong>
                 <span class="badge bg-info">{{ reco_tags_count }}</span></p>
-                <p class="card-text">Reconstruction configurations (version, calibration, alignment).</p>
+                <p class="card-text small">Reconstruction, calibration, alignment.</p>
             </div>
         </div>
     </div>
@@ -51,7 +51,7 @@
 
 <h3 class="mb-3">Production Tasks</h3>
 <div class="row mb-4">
-    <div class="col-md-3 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
                 <p class="mb-2"><strong><a href="{% url 'pcs:datasets_compose' %}" class="text-decoration-none">Datasets</a></strong>
@@ -60,7 +60,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
                 <p class="mb-2"><strong><a href="{% url 'pcs:prod_configs_compose' %}" class="text-decoration-none">Prod Configs</a></strong>
@@ -69,7 +69,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card h-100 border-primary">
             <div class="card-body d-flex flex-column">
                 <p class="mb-2"><strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Prod Tasks</a></strong>
