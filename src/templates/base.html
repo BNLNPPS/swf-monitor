@@ -78,8 +78,8 @@
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
             <div class="dropdown-content">
-                <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
                 <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">ePIC Production</a>
+                <a href="{% if is_tunnel %}https://pandaserver02.sdcc.bnl.gov/swf-monitor/testbed/{% else %}{% url 'monitor_app:testbed_hub' %}{% endif %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
             </div>
         </div>
 
