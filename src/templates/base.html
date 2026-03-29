@@ -112,14 +112,13 @@
             <div class="dropdown" id="mode-flipper">
                 <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
                 <div class="dropdown-content">
-                    <a href="#" onclick="setNavMode('testbed');return false;">ePIC WFMS Testbed</a>
-                    <a href="#" onclick="setNavMode('production');return false;">ePIC Production</a>
+                    <a href="{% url 'monitor_app:home' %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
+                    <a href="{% url 'monitor_app:panda_hub' %}" id="flip-production" onclick="setNavMode('production');">ePIC Production</a>
                 </div>
             </div>
 
             {# ── Testbed mode ── #}
             <span class="nav-mode nav-testbed">
-            <a href="{% url 'monitor_app:home' %}">Home</a>
             <div class="dropdown">
                 <button class="dropbtn">Workflows</button>
                 <div class="dropdown-content">
@@ -162,7 +161,6 @@
 
             {# ── Production mode ── #}
             <span class="nav-mode nav-production">
-            <a href="{% url 'monitor_app:panda_hub' %}">Home</a>
             <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
             <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
             <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
@@ -225,7 +223,11 @@ function applyNavMode(mode) {
     const target = document.querySelector('.nav-' + mode);
     if (target) target.classList.add('active');
     const label = document.getElementById('mode-label');
-    if (label) label.textContent = mode === 'testbed' ? 'Testbed' : 'Production';
+    if (label) label.textContent = mode === 'testbed' ? 'ePIC Testbed' : 'ePIC Production';
+    const ft = document.getElementById('flip-testbed');
+    const fp = document.getElementById('flip-production');
+    if (ft) ft.style.fontWeight = mode === 'testbed' ? '700' : 'normal';
+    if (fp) fp.style.fontWeight = mode === 'production' ? '700' : 'normal';
 }
 (function() {
     const mode = localStorage.getItem('navMode') || 'production';
