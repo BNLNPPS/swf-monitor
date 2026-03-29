@@ -107,81 +107,79 @@
             <span style="color:#adb5bd;">{{ user.username }}</span>
         </div>
         {% else %}
-        {# BNL nav with mode flipper #}
-        {% if user.is_authenticated %}
-            <div class="dropdown" id="mode-flipper">
-                <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
-                <div class="dropdown-content">
-                    <a href="{% url 'monitor_app:home' %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
-                    <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">ePIC Production</a>
-                </div>
+        {# BNL nav with mode flipper — visible to all #}
+        <div class="dropdown" id="mode-flipper">
+            <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:home' %}" id="flip-testbed" onclick="setNavMode('testbed');">ePIC Testbed</a>
+                <a href="{% url 'monitor_app:prod_hub' %}" id="flip-production" onclick="setNavMode('production');">ePIC Production</a>
             </div>
+        </div>
 
-            {# ── Testbed mode ── #}
-            <span class="nav-mode nav-testbed">
-            <div class="dropdown">
-                <button class="dropbtn">Workflows</button>
-                <div class="dropdown-content">
-                    <a href="{% url 'monitor_app:workflows_home' %}">Views</a>
-                    <a href="{% url 'monitor_app:workflow_definitions_list' %}">Workflow definitions</a>
-                    <a href="{% url 'monitor_app:workflow_executions_list' %}">Workflow executions</a>
-                    <a href="{% url 'monitor_app:namespaces_list' %}">Namespaces</a>
-                </div>
+        {# ── Testbed mode ── #}
+        <span class="nav-mode nav-testbed">
+        <div class="dropdown">
+            <button class="dropbtn">Workflows</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:workflows_home' %}">Views</a>
+                <a href="{% url 'monitor_app:workflow_definitions_list' %}">Workflow definitions</a>
+                <a href="{% url 'monitor_app:workflow_executions_list' %}">Workflow executions</a>
+                <a href="{% url 'monitor_app:namespaces_list' %}">Namespaces</a>
             </div>
-            <div class="dropdown">
-                <button class="dropbtn">Files</button>
-                <div class="dropdown-content">
-                    <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
-                    <a href="{% url 'monitor_app:fastmon_files_list' %}">STF Samples</a>
-                    <a href="{% url 'monitor_app:tf_slices_list' %}">TF Slices</a>
-                </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn">Files</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:stf_files_list' %}">STF Files</a>
+                <a href="{% url 'monitor_app:fastmon_files_list' %}">STF Samples</a>
+                <a href="{% url 'monitor_app:tf_slices_list' %}">TF Slices</a>
             </div>
-            <a href="{% url 'monitor_app:workflow_agents_list' %}">Agents</a>
-            <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>
-            <a href="{% url 'monitor_app:workflow_messages' %}">Messages</a>
-            <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
-            <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
-            <a href="{% url 'monitor_app:persistent_state' %}">State</a>
-            <div class="dropdown">
-                <button class="dropbtn">PanDA/Rucio</button>
-                <div class="dropdown-content">
-                    <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio Hub</a>
-                    <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
-                    <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
-                    <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
-                    <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
-                    <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
-                    <a href="{% url 'monitor_app:epic_queues_list' %}">EIC PanDA Queues</a>
-                    <a href="{% url 'monitor_app:panda_database_tables_list' %}">PanDA Database</a>
-                    <a href="{% url 'monitor_app:idds_database_tables_list' %}">iDDS Database</a>
-                    <a href="{% url 'monitor_app:rucio_endpoints_list' %}">Rucio Endpoints</a>
-                </div>
+        </div>
+        <a href="{% url 'monitor_app:workflow_agents_list' %}">Agents</a>
+        <a href="{% url 'monitor_app:subscribers_list' %}">Subscribers</a>
+        <a href="{% url 'monitor_app:workflow_messages' %}">Messages</a>
+        <a href="{% url 'monitor_app:log_summary' %}">Logs</a>
+        <a href="{% url 'monitor_app:database_tables_list' %}">Database</a>
+        <a href="{% url 'monitor_app:persistent_state' %}">State</a>
+        <div class="dropdown">
+            <button class="dropbtn">PanDA/Rucio</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_hub' %}">PanDA/Rucio Hub</a>
+                <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
+                <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
+                <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
+                <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
+                <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
+                <a href="{% url 'monitor_app:epic_queues_list' %}">EIC PanDA Queues</a>
+                <a href="{% url 'monitor_app:panda_database_tables_list' %}">PanDA Database</a>
+                <a href="{% url 'monitor_app:idds_database_tables_list' %}">iDDS Database</a>
+                <a href="{% url 'monitor_app:rucio_endpoints_list' %}">Rucio Endpoints</a>
             </div>
-            </span>
+        </div>
+        </span>
 
-            {# ── Production mode ── #}
-            <span class="nav-mode nav-production">
-            <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
-            <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
-            <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
-            <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
-            <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
-            <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>
-            <div class="dropdown">
-                <button class="dropbtn">PCS</button>
-                <div class="dropdown-content">
-                    <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu Tags</a>
-                    <a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco Tags</a>
-                    <a href="{% url 'pcs:datasets_compose' %}">Datasets</a>
-                    <a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a>
-                    <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
-                </div>
+        {# ── Production mode ── #}
+        <span class="nav-mode nav-production">
+        <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
+        <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
+        <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
+        <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
+        <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
+        <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>
+        <div class="dropdown">
+            <button class="dropbtn">PCS</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
+                <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
+                <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
+                <a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu Tags</a>
+                <a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco Tags</a>
+                <a href="{% url 'pcs:datasets_compose' %}">Datasets</a>
+                <a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a>
+                <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
             </div>
-            </span>
-        {% endif %}
+        </div>
+        </span>
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
         <div class="nav-auth">
@@ -230,7 +228,7 @@ function applyNavMode(mode) {
     if (fp) fp.style.fontWeight = mode === 'production' ? '700' : 'normal';
 }
 (function() {
-    const mode = localStorage.getItem('navMode') || 'production';
+    var mode = localStorage.getItem('navMode') || 'production';
     applyNavMode(mode);
 })();
 </script>

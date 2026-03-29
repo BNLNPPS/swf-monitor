@@ -186,12 +186,12 @@ if DEPLOYMENT_SUBPATH:
     FORCE_SCRIPT_NAME = DEPLOYMENT_SUBPATH
     STATIC_URL = config('SWF_STATIC_URL_BASE', default=f'{DEPLOYMENT_SUBPATH}/static/')
     LOGIN_REDIRECT_URL = config('SWF_LOGIN_REDIRECT', default=f'{DEPLOYMENT_SUBPATH}/home/')
-    LOGOUT_REDIRECT_URL = config('SWF_LOGOUT_REDIRECT', default=DEPLOYMENT_SUBPATH + '/')
+    LOGOUT_REDIRECT_URL = config('SWF_LOGOUT_REDIRECT', default=DEPLOYMENT_SUBPATH + '/prod/')
 else:
     # Development defaults (no subpath)
     STATIC_URL = "static/"
     LOGIN_REDIRECT_URL = '/home/'
-    LOGOUT_REDIRECT_URL = '/'
+    LOGOUT_REDIRECT_URL = '/prod/'
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
