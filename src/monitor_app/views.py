@@ -69,9 +69,8 @@ var mode = localStorage.getItem('navMode') || 'production';
 window.location.replace(mode === 'testbed' ? '{prefix}/testbed/' : '{prefix}/prod/');
 </script></head><body></body></html>""", content_type='text/html')
 
-@login_required
 def authenticated_home(request):
-    return render(request, 'monitor_app/authenticated_home.html')
+    return redirect('monitor_app:prod_hub')
 
 def about(request):
     return render(request, 'monitor_app/about.html')
