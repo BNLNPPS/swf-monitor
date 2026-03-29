@@ -2307,6 +2307,7 @@ def dpid_verify(request):
 # ==================== USERS ====================
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def users_list(request):
     """List active users with username, status, and timestamps.
 
