@@ -30,6 +30,9 @@ from django.apps import apps
 from django.db import connection
 from django.utils import timezone
 from django.conf import settings as django_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def oauth_protected_resource(request):
@@ -2299,6 +2302,239 @@ def dpid_verify(request):
         } for r in recent],
         'count': len(recent),
     })
+
+
+# ==================== SLASH COMMANDS (Mattermost) ====================
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def panda_slash_command(request):
+    """Handle /panda slash commands from Mattermost.
+
+    POST with token, command, text, user_name, channel_id.
+    Returns JSON with text (Markdown) for Mattermost to display.
+
+    Subcommands:
+        status              — PanDA activity overview (last 24h)
+        errors              — Top error patterns (last 7 days)
+        jobs                — Recent jobs (pages on repeat)
+        job <pandaid>       — Deep study of a single job
+        tasks               — Recent tasks (pages on repeat)
+        task <taskid>       — Single task details
+        sites               — List EIC compute queues
+        site <name>         — Queue configuration
+        help                — This help text
+    """
+    import os
+    from .panda import queries
+
+    # Validate Mattermost token
+    expected_token = os.environ.get('MATTERMOST_SLASH_TOKEN', '')
+    received_token = request.data.get('token', '')
+    if not expected_token or received_token != expected_token:
+        return JsonResponse({'text': 'Unauthorized.'}, status=401)
+
+    text = (request.data.get('text') or '').strip()
+    user = request.data.get('user_name', 'unknown')
+    parts = text.split(None, 1)
+    subcmd = parts[0].lower() if parts else 'help'
+    arg = parts[1].strip() if len(parts) > 1 else ''
+
+    # Cursor state for pagination (per user per command)
+    cursor_key = f'slash_cursor_{user}_{subcmd}'
+
+    try:
+        if subcmd == 'help' or not text:
+            return JsonResponse({'text': _slash_help()})
+
+        if subcmd == 'status':
+            data = queries.get_activity(days=1)
+            jobs = data.get('jobs', {})
+            tasks = data.get('tasks', {})
+            lines = ['#### PanDA Activity (last 24h)']
+            lines.append(f"**Jobs:** {jobs.get('total', 0)}")
+            for s, c in sorted(jobs.get('by_status', {}).items()):
+                lines.append(f"  {s}: {c}")
+            lines.append(f"**Tasks:** {tasks.get('total', 0)}")
+            for s, c in sorted(tasks.get('by_status', {}).items()):
+                lines.append(f"  {s}: {c}")
+            if jobs.get('by_site'):
+                lines.append('**By site:**')
+                for s, c in sorted(jobs['by_site'].items(), key=lambda x: -x[1]):
+                    lines.append(f"  {s}: {c}")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'errors':
+            days = int(arg) if arg.isdigit() else 7
+            data = queries.error_summary(days=days, limit=10)
+            lines = [f"#### Top Errors (last {days} days)"]
+            lines.append(f"Total error occurrences: {data.get('total_errors', 0)}")
+            for e in data.get('errors', []):
+                diag = (e.get('error_diag') or '')[:80]
+                lines.append(
+                    f"- **{e['error_source']}:{e['error_code']}** × {e['count']} "
+                    f"({e.get('task_count', '?')} tasks) — {diag}"
+                )
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'jobs':
+            cursor = _get_cursor(cursor_key)
+            limit = 20
+            data = queries.list_jobs(days=7, limit=limit, before_id=cursor)
+            pag = data.get('pagination', {})
+            _set_cursor(cursor_key, pag.get('next_before_id'))
+            lines = [f"#### Recent Jobs (page {_cursor_page(cursor_key)})"]
+            summary = data.get('summary', {})
+            if summary:
+                lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(summary.items())))
+            for j in data.get('jobs', []):
+                ts = str(j.get('modificationtime', ''))[:16]
+                lines.append(
+                    f"| {j.get('pandaid')} | {j.get('jobstatus', '')} "
+                    f"| {j.get('computingsite', '')[:30]} | {ts} |"
+                )
+            if pag.get('has_more'):
+                lines.append('_Type `/panda jobs` again for next page_')
+            else:
+                lines.append('_End of results_')
+                _clear_cursor(cursor_key)
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'job':
+            if not arg or not arg.isdigit():
+                return JsonResponse({'text': 'Usage: `/panda job <pandaid>`'})
+            data = queries.study_job(pandaid=int(arg))
+            if 'error' in data:
+                return JsonResponse({'text': f"Error: {data['error']}"})
+            job = data.get('job', {})
+            task = data.get('task', {})
+            lines = [f"#### Job {arg}"]
+            lines.append(f"**Status:** {job.get('jobstatus', '?')}")
+            lines.append(f"**Site:** {job.get('computingsite', '?')}")
+            lines.append(f"**Task:** {job.get('jeditaskid', '?')} — {task.get('taskname', '')}")
+            if job.get('errors'):
+                lines.append('**Errors:**')
+                for e in job['errors']:
+                    lines.append(f"  - {e['source']}:{e['code']} — {e.get('diag', '')[:100]}")
+            if data.get('monitor_url'):
+                lines.append(f"[PanDA Monitor]({data['monitor_url']})")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'tasks':
+            cursor = _get_cursor(cursor_key)
+            limit = 15
+            data = queries.list_tasks(days=7, limit=limit, before_id=cursor)
+            pag = data.get('pagination', {})
+            _set_cursor(cursor_key, pag.get('next_before_id'))
+            lines = [f"#### Recent Tasks (page {_cursor_page(cursor_key)})"]
+            summary = data.get('summary', {})
+            if summary:
+                lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(summary.items())))
+            for t in data.get('tasks', []):
+                ts = str(t.get('modificationtime', ''))[:16]
+                name = (t.get('taskname') or '')[:40]
+                lines.append(
+                    f"| {t.get('jeditaskid')} | {t.get('status', '')} "
+                    f"| {name} | {ts} |"
+                )
+            if pag.get('has_more'):
+                lines.append('_Type `/panda tasks` again for next page_')
+            else:
+                lines.append('_End of results_')
+                _clear_cursor(cursor_key)
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'task':
+            if not arg or not arg.isdigit():
+                return JsonResponse({'text': 'Usage: `/panda task <taskid>`'})
+            data = queries.get_task(jeditaskid=int(arg))
+            if 'error' in data:
+                return JsonResponse({'text': f"Error: {data['error']}"})
+            lines = [f"#### Task {arg}"]
+            lines.append(f"**Name:** {data.get('taskname', '?')}")
+            lines.append(f"**Status:** {data.get('status', '?')}")
+            lines.append(f"**Owner:** {data.get('username', '?')}")
+            lines.append(f"**Working group:** {data.get('workinggroup', '?')}")
+            lines.append(f"**Created:** {str(data.get('creationdate', ''))[:16]}")
+            lines.append(f"**Modified:** {str(data.get('modificationtime', ''))[:16]}")
+            if data.get('errordialog'):
+                lines.append(f"**Error:** {data['errordialog'][:200]}")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'sites':
+            data = queries.list_queues(vo='eic')
+            lines = ['#### EIC Compute Sites']
+            lines.append(f"{data.get('count', 0)} queues")
+            for q in data.get('queues', []):
+                lines.append(
+                    f"| {q.get('panda_queue', '')} | {q.get('status', '')} "
+                    f"| {q.get('resource_type', '')} | {q.get('region', '')} |"
+                )
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'site':
+            if not arg:
+                return JsonResponse({'text': 'Usage: `/panda site <queue_name>`'})
+            data = queries.get_queue(panda_queue=arg)
+            if 'error' in data:
+                return JsonResponse({'text': f"Error: {data['error']}"})
+            queue = data.get('queue', data)
+            lines = [f"#### Site: {arg}"]
+            for key in ('status', 'state', 'resource_type', 'region', 'gocname',
+                        'maxrss', 'maxtime', 'corecount', 'container_options'):
+                val = queue.get(key)
+                if val is not None:
+                    lines.append(f"**{key}:** {val}")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        return JsonResponse({'text': f"Unknown subcommand `{subcmd}`. Try `/panda help`"})
+
+    except Exception as e:
+        import traceback
+        logger.exception(f"Slash command error: {subcmd} {arg}")
+        return JsonResponse({'text': f"Error: {e}"})
+
+
+# Slash command cursor state (in-memory, per-process — fine for single bot)
+_slash_cursors = {}
+_slash_pages = {}
+
+
+def _get_cursor(key):
+    return _slash_cursors.get(key)
+
+
+def _set_cursor(key, value):
+    if value:
+        _slash_cursors[key] = value
+        _slash_pages[key] = _slash_pages.get(key, 0) + 1
+    else:
+        _slash_cursors.pop(key, None)
+
+
+def _clear_cursor(key):
+    _slash_cursors.pop(key, None)
+    _slash_pages.pop(key, None)
+
+
+def _cursor_page(key):
+    return _slash_pages.get(key, 1)
+
+
+def _slash_help():
+    return """#### /panda — PanDA Slash Commands
+| Command | Description |
+|---------|-------------|
+| `/panda status` | Activity overview (last 24h) |
+| `/panda errors [days]` | Top error patterns (default 7 days) |
+| `/panda jobs` | Recent jobs — repeat to page |
+| `/panda job <id>` | Deep study of a single job |
+| `/panda tasks` | Recent tasks — repeat to page |
+| `/panda task <id>` | Single task details |
+| `/panda sites` | EIC compute queues |
+| `/panda site <name>` | Queue configuration |
+| `/panda help` | This help |"""
 
 
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
