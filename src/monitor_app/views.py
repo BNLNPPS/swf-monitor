@@ -2415,11 +2415,26 @@ def panda_slash_command(request):
             lines = [f"#### Job {arg}"]
             lines.append(f"**Status:** {job.get('jobstatus', '?')}")
             lines.append(f"**Site:** {job.get('computingsite', '?')}")
+            lines.append(f"**Owner:** {job.get('produsername', '?')}")
             lines.append(f"**Task:** {job.get('jeditaskid', '?')} — {task.get('taskname', '')}")
+            lines.append(f"**Container:** {job.get('container_name', '?')}")
+            lines.append(f"**Transformation:** {job.get('transformation', '?')}")
+            lines.append(f"**Cores:** {job.get('actualcorecount') or job.get('corecount', '?')}")
+            cpu = job.get('cpuconsumptiontime')
+            if cpu:
+                lines.append(f"**CPU time:** {cpu}s")
+            lines.append(f"**Created:** {str(job.get('creationtime', ''))[:16]}")
+            lines.append(f"**Started:** {str(job.get('starttime', ''))[:16]}")
+            lines.append(f"**Modified:** {str(job.get('modificationtime', ''))[:16]}")
             if job.get('errors'):
                 lines.append('**Errors:**')
                 for e in job['errors']:
-                    lines.append(f"  - {e['source']}:{e['code']} — {e.get('diag', '')[:100]}")
+                    lines.append(f"  - {e['source']}:{e['code']} — {e.get('diag', '')[:120]}")
+            files = data.get('files', [])
+            if files:
+                out = [f for f in files if f.get('type') == 'output']
+                log = [f for f in files if f.get('type') == 'log']
+                lines.append(f"**Files:** {len(files)} total ({len(out)} output, {len(log)} log)")
             if data.get('monitor_url'):
                 lines.append(f"[PanDA Monitor]({data['monitor_url']})")
             return JsonResponse({'text': '\n'.join(lines)})
