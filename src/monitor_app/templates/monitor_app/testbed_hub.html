@@ -1,0 +1,138 @@
+{% extends 'base.html' %}
+
+{% block title %}ePIC WFMS Testbed - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">ePIC Streaming WFMS Testbed</h1>
+    <p class="lead mb-5">Streaming workflow management system testbed for the ePIC experiment at the Electron Ion Collider</p>
+
+    <h3 class="mb-3">Workflows</h3>
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:workflows_home' %}" class="text-decoration-none">Workflow Views</a></strong></p>
+                    <p class="card-text">Dashboard views of workflow activity, runs, and processing status.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:workflow_definitions_list' %}" class="text-decoration-none">Workflow Definitions</a></strong></p>
+                    <p class="card-text">Registered workflow types and their processing stage configurations.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:workflow_executions_list' %}" class="text-decoration-none">Workflow Executions</a></strong></p>
+                    <p class="card-text">Running and completed workflow instances with status tracking.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:namespaces_list' %}" class="text-decoration-none">Namespaces</a></strong></p>
+                    <p class="card-text">Isolation boundaries for different users' workflow runs and data.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="mb-3">Data & Files</h3>
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:stf_files_list' %}" class="text-decoration-none">STF Files</a></strong></p>
+                    <p class="card-text">Super Time Frame files — primary data units from the detector DAQ system.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:fastmon_files_list' %}" class="text-decoration-none">STF Samples</a></strong></p>
+                    <p class="card-text">Fast monitoring file samples for quick processing validation.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:tf_slices_list' %}" class="text-decoration-none">TF Slices</a></strong></p>
+                    <p class="card-text">Time Frame slices — small processing units for fast monitoring workflows.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="mb-3">System</h3>
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:workflow_agents_list' %}" class="text-decoration-none">Agents</a></strong></p>
+                    <p class="card-text">DAQ simulator, data agent, processing agent, and other workflow executors.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:subscribers_list' %}" class="text-decoration-none">Subscribers</a></strong></p>
+                    <p class="card-text">ActiveMQ message subscribers and their connection status.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:workflow_messages' %}" class="text-decoration-none">Messages</a></strong></p>
+                    <p class="card-text">Workflow event messages and inter-agent communication log.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:log_summary' %}" class="text-decoration-none">Logs</a></strong></p>
+                    <p class="card-text">Aggregated application logs with level filtering and source tracking.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:database_tables_list' %}" class="text-decoration-none">Database</a></strong></p>
+                    <p class="card-text">Browse the SWF monitor database tables and records.</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:persistent_state' %}" class="text-decoration-none">State</a></strong></p>
+                    <p class="card-text">Persistent state counters: run numbers, agent IDs, sequence generators.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="mb-3">PanDA / Rucio</h3>
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_hub' %}" class="text-decoration-none">PanDA / Rucio Hub</a></strong></p>
+                    <p class="card-text">Production monitoring, queue configuration, and database browsing for PanDA and Rucio.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

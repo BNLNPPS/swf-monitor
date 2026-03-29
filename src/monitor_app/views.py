@@ -66,7 +66,7 @@ def home(request):
     prefix = getattr(settings, 'FORCE_SCRIPT_NAME', '') or ''
     return HttpResponse(f"""<!DOCTYPE html><html><head><script>
 var mode = localStorage.getItem('navMode') || 'production';
-window.location.replace(mode === 'testbed' ? '{prefix}/workflows/' : '{prefix}/prod/');
+window.location.replace(mode === 'testbed' ? '{prefix}/testbed/' : '{prefix}/prod/');
 </script></head><body></body></html>""", content_type='text/html')
 
 @login_required
@@ -2984,3 +2984,8 @@ def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
     return render(request, 'monitor_app/prod_hub.html', pcs_hub_counts())
+
+
+def testbed_hub(request):
+    """ePIC Testbed home — workflow system overview."""
+    return render(request, 'monitor_app/testbed_hub.html')
