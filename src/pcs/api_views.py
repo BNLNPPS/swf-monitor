@@ -9,6 +9,7 @@ Dataset creation requires all four tags to be locked. created_by set from authen
 """
 from rest_framework import viewsets, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from monitor_app.middleware import TunnelAuthentication
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
@@ -30,7 +31,7 @@ class PhysicsCategoryViewSet(viewsets.ModelViewSet):
     """CRUD for physics categories. Categories are mutable (no lock lifecycle)."""
     queryset = PhysicsCategory.objects.annotate(tag_count=Count('tags'))
     serializer_class = PhysicsCategorySerializer
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
@@ -40,7 +41,7 @@ class PhysicsCategoryViewSet(viewsets.ModelViewSet):
 
 class _TagViewSetMixin:
     """Shared behavior for all tag ViewSets: draft/locked lifecycle, PATCH guard, lock/delete actions."""
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     lookup_field = 'tag_number'
@@ -157,7 +158,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
     )
     serializer_class = DatasetSerializer
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'head', 'options']
 
@@ -205,7 +206,7 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
     """Production configuration templates. Always mutable — full CRUD."""
     queryset = ProdConfig.objects.all()
     serializer_class = ProdConfigSerializer
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def perform_create(self, serializer):
@@ -219,7 +220,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
     )
     serializer_class = ProdTaskSerializer
-    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
 
     def perform_create(self, serializer):

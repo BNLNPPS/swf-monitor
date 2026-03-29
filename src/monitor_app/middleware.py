@@ -1,16 +1,52 @@
-"""Authentication middleware for MCP OAuth 2.1 and tunnel proxy."""
+"""Authentication middleware and DRF backends for MCP OAuth 2.1 and tunnel proxy."""
 
 import logging
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import JsonResponse
+from rest_framework.authentication import BaseAuthentication
 
 from .auth0 import get_bearer_token, validate_token
 
 logger = logging.getLogger(__name__)
 
 LOCALHOST_IPS = {'127.0.0.1', '::1'}
+
+
+def _is_localhost(request):
+    return request.META.get('REMOTE_ADDR', '') in LOCALHOST_IPS
+
+
+class TunnelAuthentication(BaseAuthentication):
+    """DRF authentication backend for SSH tunnel (localhost) requests.
+
+    Authenticates via X-Remote-User header on localhost requests, bypassing
+    CSRF. Must be listed BEFORE SessionAuthentication in authentication_classes
+    so DRF uses it first for tunnel requests and never reaches CSRF checks.
+
+    Falls back to a generic 'swf-remote-proxy' user if no header is present.
+    Returns None (skip) for non-localhost requests, letting the next backend try.
+    """
+
+    def authenticate(self, request):
+        if not _is_localhost(request):
+            return None
+        User = get_user_model()
+        remote_user = request.META.get('HTTP_X_REMOTE_USER', '').strip()
+        if remote_user:
+            user, created = User.objects.get_or_create(
+                username=remote_user,
+                defaults={'is_active': True},
+            )
+            if created:
+                logger.info(f"Auto-created user '{remote_user}' from tunnel proxy")
+        else:
+            user, _ = User.objects.get_or_create(
+                username='swf-remote-proxy',
+                defaults={'is_active': True},
+            )
+        return (user, None)
 
 
 class TunnelAuthMiddleware:
@@ -23,27 +59,13 @@ class TunnelAuthMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        if not request.user.is_authenticated and self._is_localhost(request):
-            User = get_user_model()
-            remote_user = request.META.get('HTTP_X_REMOTE_USER', '').strip()
-            if remote_user:
-                user, created = User.objects.get_or_create(
-                    username=remote_user,
-                    defaults={'is_active': True},
-                )
-                if created:
-                    logger.info(f"Auto-created user '{remote_user}' from tunnel proxy")
-            else:
-                user, _ = User.objects.get_or_create(
-                    username='swf-remote-proxy',
-                    defaults={'is_active': True},
-                )
-            request.user = user
+        if not request.user.is_authenticated and _is_localhost(request):
+            # Reuse same logic as TunnelAuthentication DRF backend
+            auth = TunnelAuthentication()
+            result = auth.authenticate(request)
+            if result:
+                request.user = result[0]
         return self.get_response(request)
-
-    def _is_localhost(self, request):
-        ip = request.META.get('REMOTE_ADDR', '')
-        return ip in LOCALHOST_IPS
 
 
 class MCPAuthMiddleware:
