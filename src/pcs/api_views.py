@@ -10,7 +10,7 @@ Dataset creation requires all four tags to be locked. created_by set from authen
 from rest_framework import viewsets, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from django.db.models import Count
 
@@ -31,7 +31,7 @@ class PhysicsCategoryViewSet(viewsets.ModelViewSet):
     queryset = PhysicsCategory.objects.annotate(tag_count=Count('tags'))
     serializer_class = PhysicsCategorySerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
     def perform_create(self, serializer):
@@ -41,7 +41,7 @@ class PhysicsCategoryViewSet(viewsets.ModelViewSet):
 class _TagViewSetMixin:
     """Shared behavior for all tag ViewSets: draft/locked lifecycle, PATCH guard, lock/delete actions."""
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'patch', 'head', 'options']
     lookup_field = 'tag_number'
 
@@ -158,7 +158,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
     )
     serializer_class = DatasetSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     http_method_names = ['get', 'post', 'head', 'options']
 
     def create(self, request, *args, **kwargs):
@@ -206,7 +206,7 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
     queryset = ProdConfig.objects.all()
     serializer_class = ProdConfigSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
@@ -220,7 +220,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     )
     serializer_class = ProdTaskSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
