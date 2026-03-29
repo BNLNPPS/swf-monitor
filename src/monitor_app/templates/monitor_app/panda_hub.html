@@ -1,11 +1,16 @@
 {% extends 'base.html' %}
 
-{% block title %}PanDA & Rucio Hub - SWF Monitor{% endblock %}
+{% block title %}{% if is_tunnel %}ePIC Production{% else %}PanDA & Rucio Hub{% endif %} - SWF Monitor{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
+    {% if is_tunnel %}
+    <h1 class="mb-4">ePIC Production</h1>
+    <p class="lead mb-5">ePIC experiment production monitoring and configuration</p>
+    {% else %}
     <h1 class="mb-4">PanDA & Rucio Hub</h1>
     <p class="lead mb-5">Centralized access to PanDA workload management, Rucio data management, and database browsing</p>
+    {% endif %}
 
     <h3 class="mb-3">Production Monitor</h3>
     <div class="row mb-4">
@@ -49,56 +54,47 @@
                 </div>
             </div>
         </div>
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">ePIC Production Queues</a></strong></p>
+                    <p class="card-text">ePIC compute queues from live PanDA schedconfig. Status, resource type, container config, and queue parameters.</p>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <h3 class="mb-3">Configuration & Databases</h3>
+    {% if is_tunnel %}
+    {# Production home includes PCS sections #}
+    {% include "pcs/_pcs_sections.html" %}
+    {% else %}
+    <h3 class="mb-3">Databases</h3>
     <div class="row">
-        <div class="col-md-6 mb-4">
+        <div class="col-md-4 mb-4">
             <div class="card h-100">
                 <div class="card-body">
-                    <p class="mb-2">
-                        <strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">EIC PanDA Queues</a></strong>
-                    </p>
-                    <p class="card-text">ePIC compute queues from live PanDA schedconfig. Status, resource type, container config, and full queue parameters.</p>
-                    <p class="mb-0">
-                        <a href="{% url 'monitor_app:panda_queues_list' %}" class="text-muted small">JSON PanDA Queues</a>
-                    </p>
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:panda_database_tables_list' %}" class="text-decoration-none">PanDA Database</a></strong></p>
+                    <p class="card-text">Browse tables and data in the external PanDA database system.</p>
                 </div>
             </div>
         </div>
-
-        <div class="col-md-6 mb-4">
+        <div class="col-md-4 mb-4">
             <div class="card h-100">
                 <div class="card-body">
-                    <p class="mb-2">
-                        <strong><a href="{% url 'monitor_app:panda_database_tables_list' %}" class="text-decoration-none">PanDA Database</a></strong>
-                    </p>
-                    <p class="card-text">Browse tables and data in the external PanDA database system. Inspect production workload management data.</p>
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:idds_database_tables_list' %}" class="text-decoration-none">iDDS Database</a></strong></p>
+                    <p class="card-text">Browse tables and data in the external iDDS database system.</p>
                 </div>
             </div>
         </div>
-
-        <div class="col-md-6 mb-4">
+        <div class="col-md-4 mb-4">
             <div class="card h-100">
                 <div class="card-body">
-                    <p class="mb-2">
-                        <strong><a href="{% url 'monitor_app:idds_database_tables_list' %}" class="text-decoration-none">iDDS Database</a></strong>
-                    </p>
-                    <p class="card-text">Browse tables and data in the external iDDS (intelligent Data Delivery Service) database system. Monitor distributed data management operations.</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-md-6 mb-4">
-            <div class="card h-100">
-                <div class="card-body">
-                    <p class="mb-2">
-                        <strong><a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="text-decoration-none">Rucio Endpoints</a></strong>
-                    </p>
-                    <p class="card-text">Configure distributed data management endpoints for the Rucio system. Monitor storage sites and update configurations.</p>
+                    <p class="mb-2"><strong><a href="{% url 'monitor_app:rucio_endpoints_list' %}" class="text-decoration-none">Rucio Endpoints</a></strong></p>
+                    <p class="card-text">Configure distributed data management endpoints for the Rucio system.</p>
                 </div>
             </div>
         </div>
     </div>
+    {% endif %}
 </div>
 {% endblock %}

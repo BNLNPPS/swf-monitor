@@ -2974,7 +2974,12 @@ def update_rucio_endpoints_from_github(request):
 @login_required
 def panda_hub(request):
     """
-    PanDA hub page that consolidates all PanDA-related functionality.
-    Includes sections for PanDA Queues, Rucio Endpoints, PanDA Database, and iDDS Database.
+    PanDA hub page. For tunnel (devcloud) requests, also serves as the
+    ePIC Production home with PCS sections included.
     """
-    return render(request, 'monitor_app/panda_hub.html')
+    from monitor_app.middleware import _is_localhost
+    context = {}
+    if _is_localhost(request):
+        from pcs.views import pcs_hub_counts
+        context.update(pcs_hub_counts())
+    return render(request, 'monitor_app/panda_hub.html', context)

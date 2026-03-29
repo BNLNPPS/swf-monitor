@@ -23,8 +23,9 @@ from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
 
-def pcs_hub(request):
-    context = {
+def pcs_hub_counts():
+    """PCS entity counts — shared by PCS hub and production hub."""
+    return {
         'categories_count': PhysicsCategory.objects.count(),
         'physics_tags_count': PhysicsTag.objects.count(),
         'evgen_tags_count': EvgenTag.objects.count(),
@@ -34,7 +35,10 @@ def pcs_hub(request):
         'prod_configs_count': ProdConfig.objects.count(),
         'prod_tasks_count': ProdTask.objects.count(),
     }
-    return render(request, 'pcs/pcs_hub.html', context)
+
+
+def pcs_hub(request):
+    return render(request, 'pcs/pcs_hub.html', pcs_hub_counts())
 
 
 # ── Physics Categories ────────────────────────────────────────────
