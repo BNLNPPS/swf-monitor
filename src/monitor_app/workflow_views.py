@@ -341,11 +341,11 @@ def namespaces_datatable_ajax(request):
     )
     execution_counts = dict(
         WorkflowExecution.objects.exclude(namespace__isnull=True).exclude(namespace='')
-        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+        .values('namespace').annotate(c=Count('execution_id')).values_list('namespace', 'c')
     )
     message_counts = dict(
         WorkflowMessage.objects.exclude(namespace__isnull=True).exclude(namespace='')
-        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+        .values('namespace').annotate(c=Count('pk')).values_list('namespace', 'c')
     )
 
     # Build data
