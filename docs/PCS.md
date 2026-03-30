@@ -1,6 +1,6 @@
 # PCS — Physics Configuration System
 
-PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production.
+PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production and subsequent reconstruction.
 
 **URL:** `/swf-monitor/pcs/`
 
@@ -163,9 +163,16 @@ A production config is a reusable template capturing everything needed to build 
 
 Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
 
-## MCP Tools (TBD)
+## JEDI Integration
 
-Designed for addition of MCP tools for AI-assisted tag and dataset management:
+PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution and Definition Interface) via the PanDA Python API, replacing the current approach of generating `prun` CLI commands as text. See:
+
+- [JEDI Integration Design](JEDI_INTEGRATION.md) — architecture, field mapping, implementation plan
+- [JEDI ePIC Proposal](JEDI_EPIC_PROPOSAL.md) — technical proposal for PanDA team review
+
+## MCP Tools
+
+MCP tools for AI-assisted tag and dataset management:
 
 | Tool | Description |
 |------|-------------|
