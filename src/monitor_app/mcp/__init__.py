@@ -1,20 +1,24 @@
 """
-MCP Tools for ePIC Streaming Workflow Testbed Monitor.
+MCP Tools for ePIC Streaming Workflow Testbed Monitor and PanDA Monitor.
 
-This package provides LLM-based natural language interaction with the testbed,
-allowing users to query system state, agents, workflows, runs, STF files,
-TF slices, messages, and manage AI dialogue memory.
+This package provides LLM-based natural language interaction with the testbed
+and the PanDA production system, allowing users to query system state, agents,
+workflows, runs, STF files, TF slices, messages, PanDA jobs, error diagnostics,
+and manage AI dialogue memory.
 
 ARCHITECTURE PRINCIPLE:
 - Monitor consumes ALL workflow messages from ActiveMQ
 - MCP provides access to everything monitor captures
 - Use MCP tools for diagnostics, NOT log files
+- PanDA MCP tools query the doma_panda schema directly for ePIC production monitoring
 
 Module structure:
 - common.py: Shared utilities and tool discovery list
 - system.py: System state, agents, namespaces, logs, testbed management
 - workflows.py: Workflow definitions, executions, messages, runs, files, slices
 - ai_memory.py: AI dialogue recording and retrieval for session context
+- pandamon.py: PanDA job monitoring and error diagnostics for ePIC production
+- pcs.py: PCS (Physics Configuration System) tag browsing and lookup
 """
 
 from mcp_server import mcp_server as mcp
@@ -71,6 +75,23 @@ from .ai_memory import (
     swf_get_ai_memory,
 )
 
+# PanDA Monitor tools
+from .pandamon import (
+    panda_list_jobs,
+    panda_diagnose_jobs,
+    panda_list_tasks,
+    panda_error_summary,
+    panda_get_activity,
+    panda_study_job,
+)
+
+# PCS tools
+from .pcs import (
+    pcs_list_tags,
+    pcs_get_tag,
+    pcs_search_tags,
+)
+
 
 # Tool discovery - registered as MCP tool
 @mcp.tool()
@@ -123,4 +144,15 @@ __all__ = [
     # AI Memory
     'swf_record_ai_memory',
     'swf_get_ai_memory',
+    # PanDA Monitor
+    'panda_list_jobs',
+    'panda_diagnose_jobs',
+    'panda_list_tasks',
+    'panda_error_summary',
+    'panda_get_activity',
+    'panda_study_job',
+    # PCS
+    'pcs_list_tags',
+    'pcs_get_tag',
+    'pcs_search_tags',
 ]

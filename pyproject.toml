@@ -51,6 +51,8 @@ dependencies = [
     "supervisor",
     # Auth0 OAuth 2.1 for MCP
     "python-jose[cryptography]",
+    "anthropic>=0.40",
+    "mattermostdriver>=7.3",
 ]
 
 [project.optional-dependencies]

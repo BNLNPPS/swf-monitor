@@ -65,7 +65,7 @@ The MCP endpoint supports two authentication modes:
 
 ### Claude Code (Local)
 
-POST requests (used by Claude Code) pass through without authentication. This enables local development and CLI-based MCP access without OAuth setup.
+POST requests pass through without authentication. This enables local clients (Claude Code, the PanDA Mattermost bot, scripts) to access MCP without OAuth setup.
 
 ### Claude.ai (Remote)
 
@@ -540,6 +540,127 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 ---
 
+### PanDA Production Monitoring
+
+Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `panda_get_activity` | `days`, `username`, `site`, `workinggroup` | Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first for "What is PanDA doing?" |
+| `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
+| `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
+| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 25 tasks). Cursor-based pagination via before_id. |
+| `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
+| `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
+
+**`panda_get_activity`** — Pre-digested overview, no individual records:
+- `days`: Time window in days (default 1)
+- `username`: Filter by job owner / task owner (supports SQL LIKE with %)
+- `site`: Filter by computing site (supports SQL LIKE with %)
+- `workinggroup`: Filter tasks by working group (e.g. 'EIC')
+
+Returns:
+- `jobs`: `{total, by_status, by_user, by_site}` — each with status breakdown
+- `tasks`: `{total, by_status, by_user}` — each with status breakdown
+
+Use cases:
+- What's PanDA doing right now? `panda_get_activity()`
+- EIC activity this week? `panda_get_activity(days=7, workinggroup='EIC')`
+- Activity for a user? `panda_get_activity(username='Dmitrii Kalinkin')`
+
+**`panda_list_tasks` filters:**
+- `days`: Time window in days (default 7)
+- `status`: Task status (done, failed, running, ready, broken, aborted, pending, finished)
+- `username`: Task owner (supports SQL LIKE with %)
+- `taskname`: Task name (supports SQL LIKE with %)
+- `reqid`: Request ID
+- `workinggroup`: Experiment affiliation (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
+- `processingtype`: Processing type (e.g. 'epicproduction'). Supports SQL LIKE with %.
+- `taskid`: Specific JEDI task ID
+- `limit`: Max tasks to return (default 25)
+- `before_id`: Pagination cursor
+
+**Returns per task:**
+- `jeditaskid`, `taskname`, `status`, `username`
+- `creationdate`, `starttime`, `endtime`, `modificationtime`
+- `reqid`, `processingtype`, `transpath`
+- `progress`, `failurerate`, `errordialog`
+- `site`, `corecount`, `taskpriority`, `currentpriority`
+- `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
+
+**Diagnostic use cases:**
+- Task overview: `panda_list_tasks(days=7)`
+- Failed tasks: `panda_list_tasks(status='failed')`
+- Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
+- EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
+- Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
+
+**`panda_error_summary` filters:**
+- `days`: Time window in days (default 10)
+- `username`: Filter by job owner (supports SQL LIKE with %)
+- `site`: Filter by computing site (supports SQL LIKE with %)
+- `taskid`: Filter by JEDI task ID
+- `error_source`: Filter to one component (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer)
+- `limit`: Max error patterns to return (default 20)
+
+**Returns per error pattern:**
+- `error_source`: Component name (pilot, executor, ddm, etc.)
+- `error_code`: Numeric error code
+- `error_diag`: Diagnostic message (truncated to 256 chars)
+- `count`: Number of affected jobs
+- `task_count`: Number of affected tasks
+- `users`: List of affected users
+- `sites`: List of affected sites
+
+**Diagnostic use cases:**
+- Top errors this week: `panda_error_summary(days=7)`
+- Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
+- Pilot errors only: `panda_error_summary(error_source='pilot')`
+- Errors for a specific task: `panda_error_summary(taskid=33824)`
+
+**`panda_study_job`** — Deep study of a single job:
+- `pandaid`: PanDA job ID (required)
+
+Returns:
+- `job`: Full record (~40 fields, nulls stripped) with structured `errors` list
+- `files`: All associated files from `filestable4` (log, output, input) with lfn, guid, scope, status
+- `log_urls`: Harvester log URLs — `pilot_stdout`, `pilot_stderr`, `batch_log` (require CILogon auth)
+- `log_file`: Log tarball metadata if registered (lfn, guid, scope for future rucio retrieval)
+- `harvester`: Condor worker details (workerid, status, error info)
+- `task`: Parent JEDI task context (name, status, error dialog)
+- `monitor_url`: Link to PanDA monitoring page
+
+Use cases:
+- Study a failed job: `panda_study_job(pandaid=130497)`
+- After `panda_diagnose_jobs` identifies failures, drill into specific jobs
+
+---
+
+### PanDA Mattermost Bot
+
+The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client** — it connects to the MCP endpoint via HTTP POST and uses the `panda_*` tools to answer production monitoring questions in Mattermost.
+
+**Architecture:**
+- Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
+- Sends user questions to Claude Haiku with discovered PanDA tools
+- Executes tool calls via HTTP POST JSON-RPC to the MCP endpoint
+- Posts Claude's response back to the Mattermost thread
+- Remembers recent Q&A exchanges (via `swf_ai_memory`) to improve responses over time. Memory is collective — the bot does not track or remember who asked what
+
+**Running:** `manage.py panda_bot`
+
+**Environment variables:**
+- `MATTERMOST_URL` (default: `chat.epic-eic.org`)
+- `MATTERMOST_TOKEN` (required)
+- `MATTERMOST_TEAM` (default: `main`)
+- `MATTERMOST_CHANNEL` (default: `pandabot`)
+- `MCP_URL` (default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/`)
+- `ANTHROPIC_API_KEY` (required, used by the Anthropic SDK)
+
+**MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the MCP endpoint — the same transport Claude Code uses. Each user question gets a fresh MCP session (initialize, discover tools, tool-use loop, close).
+
+---
+
 ## Tool Summary
 
 | Category | Tools | Count |
@@ -559,7 +680,8 @@ This tool aggregates information from workflow messages and logs, providing a si
 | Agent Management | `swf_kill_agent` | 1 |
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| **Total** | | **29** |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job` | 6 |
+| **Total** | | **35** |
 
 ---
 
@@ -722,6 +844,10 @@ swf-monitor/
 │   │   │   ├── workflows.py               # Workflow, message, run, STF tools
 │   │   │   ├── ai_memory.py               # AI memory tools
 │   │   │   └── common.py                  # Shared utilities
+│   │   ├── panda/                          # PanDA Mattermost bot (MCP client)
+│   │   │   └── bot.py                      # Bot logic, MCPClient, Claude integration
+│   │   ├── management/commands/
+│   │   │   └── panda_bot.py                # `manage.py panda_bot` management command
 │   │   ├── auth0.py                        # JWT validation with Auth0 JWKS
 │   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
 │   │   └── views.py                        # OAuth protected resource metadata
@@ -733,6 +859,7 @@ swf-monitor/
 | File | Purpose |
 |------|---------|
 | `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, common.py) |
+| `src/monitor_app/panda/bot.py` | **PanDA Mattermost bot** - MCP client using HTTP POST, Claude Haiku for responses |
 | `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
 | `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |
 | `src/swf_monitor_project/settings.py` | **Server config** - MCP config, Auth0 settings |
@@ -757,7 +884,7 @@ The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init_
 
 ### Transport
 
-HTTP/REST transport (Streamable HTTP). The MCP spec also supports stdio and SSE transports, but HTTP aligns with the existing REST architecture.
+HTTP POST transport (JSON-RPC over Streamable HTTP with `json_response=True`). All requests and responses are plain JSON — no SSE streaming, no GET listeners. The MCP spec also supports stdio and SSE transports, but HTTP POST aligns with the existing REST architecture and Django WSGI deployment.
 
 ### Settings
 
@@ -779,7 +906,7 @@ AUTH0_ALGORITHMS = ["RS256"]
 ### Adding New Tools
 
 ```python
-# In monitor_app/mcp.py
+# In monitor_app/mcp/system.py, workflows.py, or new file in the mcp/ package
 
 from mcp_server import mcp_server as mcp
 

@@ -1,22 +1,57 @@
 {% extends 'base.html' %}
 
-{% block title %}About SWF Monitor{% endblock %}
+{% block title %}About - ePIC SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="about-container">
-    <h1>About SWF Monitor</h1>
-    <p>
-        This application is a monitoring and information service for the ePIC streaming workflow testbed.
+<div class="container mt-4" style="max-width: 800px;">
+    <h1 class="mb-4">About ePIC SWF Monitor</h1>
+
+    <p class="lead">
+        The ePIC streaming workflow (SWF) monitor provides monitoring and configuration services
+        for the ePIC experiment at the Electron Ion Collider, serving both production operations
+        and the streaming workflow testbed.
     </p>
+
+    <h3 class="mt-4 mb-3">Two Modes</h3>
     <p>
-        It provides a browser-based dashboard, a REST API, and a WebSocket service for monitoring the state of the testbed components (agents).
+        The monitor operates in two modes, selectable via the nav bar toggle:
     </p>
-    <h2>Features</h2>
     <ul>
-        <li>Real-time status updates of monitored agents.</li>
-        <li>A REST API for programmatic access and control.</li>
-        <li>A WebSocket interface for receiving live updates.</li>
-        <li>User authentication and an admin interface for management.</li>
+        <li><strong>ePIC Production</strong> — PanDA job and task monitoring, error diagnostics,
+            compute queue status, and the Physics Configuration System (PCS) for managing
+            production tags, datasets, and submission configurations.</li>
+        <li><strong>ePIC Testbed</strong> — Streaming workflow management system testbed:
+            workflow definitions and executions, time frame data, agents, messaging,
+            and system state monitoring.</li>
     </ul>
+
+    <h3 class="mt-4 mb-3">Access</h3>
+    <ul>
+        <li><strong>BNL</strong> — Direct access at pandaserver02, both modes, full functionality.</li>
+        <li><strong>Open web</strong> — <a href="https://epic-devcloud.org">epic-devcloud.org</a>,
+            production mode, proxied through SSH tunnel. PCS write operations require login.</li>
+        <li><strong>Mattermost</strong> — PanDA bot in the #pandabot channel and DMs.
+            Natural language queries via AI (Claude Haiku) with MCP tool access to PanDA, PCS,
+            GitHub, XRootD, and Zenodo. Slash commands via <code>/panda</code>.</li>
+        <li><strong>REST API</strong> — Programmatic access under <code>/api/</code> and <code>/pcs/api/</code>.
+            Read access open, writes require authentication.</li>
+        <li><strong>MCP</strong> — Model Context Protocol server for AI assistant integration
+            (Claude Code, Claude Desktop).</li>
+    </ul>
+
+    <h3 class="mt-4 mb-3">Technology</h3>
+    <p>
+        Django, Django REST Framework, PostgreSQL, ActiveMQ, Server-Sent Events.
+        PanDA and iDDS database access for production monitoring.
+        MCP server for AI tool integration. Deployed on SDCC infrastructure at BNL.
+    </p>
+
+    <h3 class="mt-4 mb-3">Source</h3>
+    <p>
+        <a href="https://github.com/BNLNPPS/swf-monitor">BNLNPPS/swf-monitor</a> — this application (Django, REST API, MCP server)<br>
+        <a href="https://github.com/BNLNPPS/swf-remote">BNLNPPS/swf-remote</a> — open-web frontend at <a href="https://epic-devcloud.org">epic-devcloud.org</a><br>
+        <a href="https://github.com/BNLNPPS/swf-testbed">BNLNPPS/swf-testbed</a> — testbed CLI and orchestration<br>
+        <a href="https://github.com/BNLNPPS/swf-common-lib">BNLNPPS/swf-common-lib</a> — shared libraries
+    </p>
 </div>
 {% endblock %}

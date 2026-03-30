@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ task.name }} - Prod Task - PCS{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a></li>
+            <li class="breadcrumb-item active">{{ task.name }}</li>
+        </ol>
+    </nav>
+
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <h2>{{ task.name }}</h2>
+            <p class="text-muted">
+                <span class="badge bg-{% if task.status == 'draft' %}secondary{% elif task.status == 'ready' %}primary{% elif task.status == 'submitted' %}info{% elif task.status == 'completed' %}success{% else %}danger{% endif %}">{{ task.status }}</span>
+                Created by {{ task.created_by }} on {{ task.created_at|date:"Y-m-d H:i" }}
+                {% if task.updated_at != task.created_at %} | Updated {{ task.updated_at|date:"Y-m-d H:i" }}{% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.pk }}" class="btn btn-outline-primary btn-sm">Edit in Compose</a>
+            <button class="btn btn-outline-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
+        </div>
+    </div>
+
+    {% if task.description %}
+    <p>{{ task.description }}</p>
+    {% endif %}
+
+    <div class="row">
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Dataset</h5>
+                    <table class="table table-sm table-bordered mb-0">
+                        <tr><td style="width:40%"><strong>Name</strong></td><td><a href="{% url 'pcs:dataset_detail' pk=task.dataset.pk %}">{{ task.dataset.dataset_name }}</a></td></tr>
+                        <tr><td><strong>DID</strong></td><td><code>{{ task.dataset.did }}</code></td></tr>
+                        <tr><td><strong>Detector Version</strong></td><td>{{ task.dataset.detector_version }}</td></tr>
+                        <tr><td><strong>Detector Config</strong></td><td>{{ task.dataset.detector_config }}</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-3">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Production Config</h5>
+                    <table class="table table-sm table-bordered mb-0">
+                        <tr><td style="width:40%"><strong>Name</strong></td><td><a href="{% url 'pcs:prod_config_detail' pk=task.prod_config.pk %}">{{ task.prod_config.name }}</a></td></tr>
+                        <tr><td><strong>JUG_XL Tag</strong></td><td>{{ task.prod_config.jug_xl_tag|default:"-" }}</td></tr>
+                        <tr><td><strong>Container</strong></td><td><code>{{ task.prod_config.container_image|default:"-" }}</code></td></tr>
+                        <tr><td><strong>BG Mixing</strong></td><td>{% if task.prod_config.bg_mixing %}Yes{% else %}No{% endif %}</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Tags</h5>
+            <table class="table table-sm table-bordered" style="max-width: 800px;">
+                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Key Parameters</th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td>Physics</td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?selected={{ task.dataset.physics_tag.tag_number }}">{{ task.dataset.physics_tag.tag_label }}</a></td>
+                        <td>{{ task.dataset.physics_tag.description|truncatewords:10 }}</td>
+                        <td>{% for k, v in task.dataset.physics_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+                    </tr>
+                    <tr>
+                        <td>EvGen</td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='e' %}?selected={{ task.dataset.evgen_tag.tag_number }}">{{ task.dataset.evgen_tag.tag_label }}</a></td>
+                        <td>{{ task.dataset.evgen_tag.description|truncatewords:10 }}</td>
+                        <td>{% for k, v in task.dataset.evgen_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+                    </tr>
+                    <tr>
+                        <td>Simulation</td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='s' %}?selected={{ task.dataset.simu_tag.tag_number }}">{{ task.dataset.simu_tag.tag_label }}</a></td>
+                        <td>{{ task.dataset.simu_tag.description|truncatewords:10 }}</td>
+                        <td>{% for k, v in task.dataset.simu_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+                    </tr>
+                    <tr>
+                        <td>Reconstruction</td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='r' %}?selected={{ task.dataset.reco_tag.tag_number }}">{{ task.dataset.reco_tag.tag_label }}</a></td>
+                        <td>{{ task.dataset.reco_tag.description|truncatewords:10 }}</td>
+                        <td>{% for k, v in task.dataset.reco_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if task.csv_file %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Submission</h5>
+            <table class="table table-sm table-bordered" style="max-width: 600px;">
+                <tr><td style="width:30%"><strong>CSV File</strong></td><td><code>{{ task.csv_file }}</code></td></tr>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if task.overrides %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Overrides</h5>
+            <table class="table table-sm table-bordered mb-0">
+                {% for key, value in task.overrides.items %}
+                <tr><td style="width:40%"><strong>{{ key }}</strong></td><td><code>{{ value }}</code></td></tr>
+                {% endfor %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if task.condor_command %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0">Condor Command</h5>
+                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="condor-cmd">Copy</button>
+            </div>
+            <pre id="condor-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;">{{ task.condor_command }}</pre>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if task.panda_command %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0">PanDA Command</h5>
+                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="panda-cmd">Copy</button>
+            </div>
+            <pre id="panda-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;">{{ task.panda_command }}</pre>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if task.panda_task_id or task.condor_cluster_id %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Tracking</h5>
+            <table class="table table-sm table-bordered" style="max-width: 600px;">
+                {% if task.panda_task_id %}<tr><td><strong>PanDA Task ID</strong></td><td>{{ task.panda_task_id }}</td></tr>{% endif %}
+                {% if task.condor_cluster_id %}<tr><td><strong>Condor Cluster ID</strong></td><td>{{ task.condor_cluster_id }}</td></tr>{% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.querySelectorAll('.btn-copy').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const pre = document.getElementById(this.dataset.target);
+        navigator.clipboard.writeText(pre.textContent).then(() => {
+            this.textContent = 'Copied!';
+            setTimeout(() => { this.textContent = 'Copy'; }, 1500);
+        });
+    });
+});
+document.getElementById('btn-regen').addEventListener('click', function() {
+    fetch('{% url "pcs:prod_task_generate_commands" pk=task.pk %}')
+        .then(r => r.json())
+        .then(data => { location.reload(); });
+});
+</script>
+{% endblock %}

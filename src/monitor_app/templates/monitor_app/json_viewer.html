@@ -51,7 +51,7 @@
         <div class="col-12">
             <nav aria-label="breadcrumb">
                 <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:home' %}">Home</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_hub' %}">Home</a></li>
                     {% if queue %}
                     <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_queues_list' %}">PanDA Queues</a></li>
                     <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_queue_detail' queue.queue_name %}">{{ queue.queue_name }}</a></li>

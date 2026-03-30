@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "pcs",  # Physics Configuration System
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "django_dbml",  # For schema diagram generation
     # Third-party apps
@@ -83,6 +84,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "monitor_app.middleware.MCPAuthMiddleware",  # Auth0 OAuth for MCP
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "monitor_app.middleware.TunnelAuthMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -100,6 +102,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "monitor_app.middleware.tunnel_context",
             ],
         },
     },
@@ -182,13 +185,13 @@ if DEPLOYMENT_SUBPATH:
     # Production subpath deployment
     FORCE_SCRIPT_NAME = DEPLOYMENT_SUBPATH
     STATIC_URL = config('SWF_STATIC_URL_BASE', default=f'{DEPLOYMENT_SUBPATH}/static/')
-    LOGIN_REDIRECT_URL = config('SWF_LOGIN_REDIRECT', default=f'{DEPLOYMENT_SUBPATH}/home/')
-    LOGOUT_REDIRECT_URL = config('SWF_LOGOUT_REDIRECT', default=DEPLOYMENT_SUBPATH + '/')
+    LOGIN_REDIRECT_URL = config('SWF_LOGIN_REDIRECT', default=f'{DEPLOYMENT_SUBPATH}/prod/')
+    LOGOUT_REDIRECT_URL = config('SWF_LOGOUT_REDIRECT', default=DEPLOYMENT_SUBPATH + '/prod/')
 else:
     # Development defaults (no subpath)
     STATIC_URL = "static/"
-    LOGIN_REDIRECT_URL = '/home/'
-    LOGOUT_REDIRECT_URL = '/'
+    LOGIN_REDIRECT_URL = '/prod/'
+    LOGOUT_REDIRECT_URL = '/prod/'
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
@@ -267,6 +270,35 @@ COMMON QUERIES:
 - Activity in a namespace? → swf_get_namespace(namespace='name')
 - Failed workflows? → swf_list_workflow_executions(status='failed')
 - Send announcement/test message? → swf_send_message(message='...', message_type='announcement')
+- What's PanDA doing? → panda_get_activity() — compact overview, no individual records
+- PanDA task overview? → panda_list_tasks(days=7)
+- Failed PanDA tasks? → panda_list_tasks(status='failed')
+- EIC experiment tasks? → panda_list_tasks(workinggroup='EIC')
+- Production tasks? → panda_list_tasks(processingtype='epicproduction')
+- Top errors? → panda_error_summary(days=7)
+- Errors for a user? → panda_error_summary(username='someone')
+- Deep dive on a failed job? → panda_study_job(pandaid=130497)
+- EIC queues? → panda_list_queues(vo='eic')
+- Queue config? → panda_get_queue(panda_queue='NERSC_Perlmutter_epic')
+- Core-hours this month? → panda_resource_usage(days=30)
+- Core-hours on Perlmutter? → panda_resource_usage(days=30, site='NERSC_Perlmutter%')
+- What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
+- List physics tags? → pcs_list_tags(tag_type='p')
+- What is tag p1001? → pcs_get_tag(tag_label='p1001')
+- Reco tags? → pcs_list_tags(tag_type='r')
+- Photoproduction tags? → pcs_search_tags(query='photoproduction')
+- DIS tags? → pcs_list_tags(tag_type='p', category='DIS')
+- Tags using pythia8? → pcs_search_tags(query='pythia8')
+
+PCS (Physics Configuration System):
+PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are
+organized as tags — named parameter sets for each pipeline stage:
+- Physics tags (p): process, beam energies, species, Q2 range (e.g. p1001 = DIS NC 10x100 ep)
+- EvGen tags (e): event generator and version (e.g. e1 = pythia8 8.310)
+- Simu tags (s): detector simulation config (e.g. s1 = npsim 26.02.0)
+- Reco tags (r): reconstruction config (e.g. r1 = eicrecon 26.02.0)
+Physics tags are grouped by category: DIS (p1xxx), DVCS (p2xxx), SIDIS (p3xxx), EXCLUSIVE (p4xxx).
+Tags are draft (editable) or locked (immutable, for production use).
 
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.

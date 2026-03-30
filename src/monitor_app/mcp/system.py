@@ -57,6 +57,8 @@ async def swf_get_system_state(username: str = None) -> dict:
 
     @sync_to_async
     def fetch():
+        SystemAgent.mark_stale_agents()
+
         now = timezone.now()
         recent_threshold = now - timedelta(minutes=5)
 
@@ -265,6 +267,8 @@ async def swf_list_agents(
     """
     @sync_to_async
     def fetch():
+        SystemAgent.mark_stale_agents()
+
         qs = SystemAgent.objects.all().order_by('-last_heartbeat')
 
         if namespace:
@@ -943,6 +947,8 @@ async def swf_get_testbed_status(username: str = None) -> dict:
 
     @sync_to_async
     def fetch_agents():
+        SystemAgent.mark_stale_agents()
+
         now = timezone.now()
         healthy_threshold = now - timedelta(minutes=2)
 

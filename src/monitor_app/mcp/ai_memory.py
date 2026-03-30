@@ -121,6 +121,8 @@ async def swf_get_ai_memory(
                 "content": m.content,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
                 "session_id": m.session_id,
+                "post_id": m.namespace or '',
+                "root_id": m.project_path or '',
             }
             for m in recent
         ]))

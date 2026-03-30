@@ -974,9 +974,9 @@ async def swf_get_workflow_monitor(execution_id: str) -> dict:
         ).order_by('sent_at')
 
         events = []
-        stf_count = 0
         current_phase = "unknown"
         run_id = None
+        run_ids = set()
         errors = []
 
         for msg in messages:
@@ -987,20 +987,30 @@ async def swf_get_workflow_monitor(execution_id: str) -> dict:
             if msg_type == 'run_imminent':
                 current_phase = "imminent"
                 run_id = content.get('run_id') or msg.run_id
+                if run_id:
+                    run_ids.add(run_id)
                 events.append({"type": "run_imminent", "time": timestamp, "run_id": run_id})
             elif msg_type == 'start_run':
                 current_phase = "running"
                 events.append({"type": "start_run", "time": timestamp})
             elif msg_type == 'stf_gen':
-                stf_count += 1
+                pass  # counted from StfFile table below
             elif msg_type == 'end_run':
                 current_phase = "ended"
-                events.append({"type": "end_run", "time": timestamp, "stf_count": stf_count})
+                events.append({"type": "end_run", "time": timestamp})
             elif msg_type in ('run_workflow_failed', 'error'):
                 errors.append({
                     "time": timestamp,
                     "error": content.get('error', str(content)),
                 })
+
+        # Count actual STF files from the StfFile table
+        if not run_ids:
+            run_ids = set(WorkflowMessage.objects.filter(
+                execution_id=execution_id, run_id__isnull=False,
+            ).values_list('run_id', flat=True).distinct())
+        run_numbers = [int(r) for r in run_ids if r]
+        stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
 
         error_logs = AppLog.objects.filter(
             level__gte=py_logging.ERROR,
@@ -1054,10 +1064,12 @@ async def swf_list_workflow_monitors() -> list:
         total_count = qs.count()
         items = []
         for e in qs[:MAX_ITEMS]:
-            stf_count = WorkflowMessage.objects.filter(
+            run_ids = WorkflowMessage.objects.filter(
                 execution_id=e.execution_id,
-                message_type='stf_gen',
-            ).count()
+                run_id__isnull=False,
+            ).values_list('run_id', flat=True).distinct()
+            run_numbers = [int(r) for r in run_ids if r]
+            stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
 
             items.append({
                 "execution_id": e.execution_id,

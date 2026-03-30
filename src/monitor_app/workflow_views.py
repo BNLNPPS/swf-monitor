@@ -9,6 +9,7 @@ from django.urls import reverse
 from django.db.models import Count
 from django.utils import timezone
 
+from .models import StfFile
 from .workflow_models import WorkflowDefinition, WorkflowExecution
 
 
@@ -234,11 +235,13 @@ def workflow_executions_datatable_ajax(request):
         else:
             duration_str = '-'
 
-        # Count STF messages for this execution
-        stf_count = WorkflowMessage.objects.filter(
+        # Count actual STF files via run_ids associated with this execution
+        run_ids = WorkflowMessage.objects.filter(
             execution_id=execution.execution_id,
-            message_type='stf_gen'
-        ).count()
+            run_id__isnull=False,
+        ).values_list('run_id', flat=True).distinct()
+        run_numbers = [int(r) for r in run_ids if r]
+        stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
 
         # Format namespace as link
         if execution.namespace:
@@ -338,11 +341,11 @@ def namespaces_datatable_ajax(request):
     )
     execution_counts = dict(
         WorkflowExecution.objects.exclude(namespace__isnull=True).exclude(namespace='')
-        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+        .values('namespace').annotate(c=Count('execution_id')).values_list('namespace', 'c')
     )
     message_counts = dict(
         WorkflowMessage.objects.exclude(namespace__isnull=True).exclude(namespace='')
-        .values('namespace').annotate(c=Count('id')).values_list('namespace', 'c')
+        .values('namespace').annotate(c=Count('pk')).values_list('namespace', 'c')
     )
 
     # Build data

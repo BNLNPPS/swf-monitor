@@ -1,0 +1,552 @@
+{% extends 'base.html' %}
+
+{% block title %}Datasets - PCS{% endblock %}
+
+{% block content %}
+<style>
+.compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); }
+.browse-panel { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; }
+.right-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
+.panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; }
+
+.browser-tabs { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: .75rem; }
+.browser-tab { padding: .4rem .75rem; cursor: pointer; border-bottom: 2px solid transparent;
+               margin-bottom: -2px; font-size: .85rem; color: #6c757d; user-select: none; }
+.browser-tab.active { color: #0d6efd; border-bottom-color: #0d6efd; font-weight: 600; }
+.browser-tab:hover { color: #0d6efd; }
+
+.browser-search { width: 100%; padding: .35rem .6rem; border: 1px solid #dee2e6;
+                   border-radius: .375rem; font-size: .85rem; margin-bottom: .5rem; }
+.item-list { flex: 1; overflow-y: auto; border: 1px solid #dee2e6; border-radius: .375rem; }
+.item-entry { padding: .5rem .75rem; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: .82rem; }
+.item-entry:hover { background: #f8f9fa; }
+.item-entry.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
+.item-label { font-weight: 600; }
+.item-meta { color: #6c757d; font-size: .75rem; }
+.item-tags { font-size: .75rem; color: #0d6efd; }
+
+.spec-section { margin-bottom: .75rem; border: 1px solid #dee2e6; border-radius: .375rem; overflow: hidden; }
+.spec-section-header { padding: .5rem .75rem; background: #f8f9fa; font-weight: 600; font-size: .85rem;
+                        cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.spec-section-header:hover { background: #e9ecef; }
+.spec-section-body { padding: .75rem; }
+.spec-section.collapsed .spec-section-body { display: none; }
+.params-grid { display: grid; grid-template-columns: auto 1fr; gap: .2rem .75rem; font-size: .82rem; }
+.params-grid .pk { color: #6c757d; }
+.params-grid .pv { font-weight: 500; }
+
+.empty-state { color: #6c757d; font-style: italic; padding: 1rem 0; }
+
+.suggestion-bar { display: none; background: #fff3cd; border: 1px solid #ffc107; border-radius: .3rem;
+    padding: .3rem .6rem; margin-bottom: .5rem; font-size: .8rem; align-items: center; gap: .5rem; }
+.suggestion-bar.visible { display: inline-flex; }
+.suggestion-bar .sg-source { font-weight: 600; color: #664d03; }
+.suggestion-bar .sg-value { color: #664d03; }
+.suggestion-bar .btn-apply { font-size: .72rem; padding: .1rem .5rem; }
+
+.field-diff-container { margin-top: .25rem; }
+.field-diff { display: flex; align-items: center; gap: .4rem; padding: .2rem .5rem; margin-bottom: .2rem;
+    background: #fff3cd; border: 1px solid #ffeeba; border-radius: .25rem; font-size: .78rem; flex-wrap: wrap; }
+.fd-label { font-weight: 600; color: #664d03; min-width: 80px; }
+.fd-current { color: #6c757d; text-decoration: line-through; }
+.fd-arrow { color: #664d03; }
+.fd-new { font-weight: 600; color: #664d03; }
+.fd-apply { font-size: .68rem; padding: .05rem .4rem; margin-left: auto; }
+</style>
+
+<div class="compose-wrap">
+    <!-- LEFT PANE -->
+    <div class="browse-panel">
+        <div class="browser-tabs">
+            <span class="browser-tab" data-browse="datasets">Datasets</span>
+            <span class="browser-tab" data-browse="p">Physics</span>
+            <span class="browser-tab" data-browse="e">EvGen</span>
+            <span class="browser-tab" data-browse="s">Simu</span>
+            <span class="browser-tab" data-browse="r">Reco</span>
+        </div>
+        <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
+        {% if username %}
+        <div style="padding: .25rem 0;">
+            <button class="btn btn-primary btn-sm w-100" id="btn-new-dataset" style="display:none;">New Dataset</button>
+        </div>
+        {% endif %}
+        <div class="item-list" id="item-list" tabindex="0"></div>
+    </div>
+
+    <!-- RIGHT PANE -->
+    <div class="right-panel">
+        <div class="panel-header">
+            <h4 id="panel-title" style="margin:0;">Select an item</h4>
+            <div id="panel-buttons">
+                {% if username %}
+                <button class="btn btn-outline-secondary btn-sm" id="btn-copy" style="display:none;">Copy</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-edit" style="display:none;">Edit</button>
+                {% endif %}
+                <button class="btn btn-outline-warning btn-sm" id="btn-clear" style="display:none;">Clear</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Create Dataset</button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <!-- BROWSE -->
+            <div id="browse-panel">
+                <div class="empty-state" id="browse-empty">Click an item on the left to view details.</div>
+                <div id="browse-content" style="display:none;"></div>
+            </div>
+            <!-- COMPOSE -->
+            <div id="compose-panel" style="display:none;">
+                <div class="spec-section" data-section="general">
+                    <div class="spec-section-header">General</div>
+                    <div class="spec-section-body">
+                        <div class="row mb-2">
+                            <div class="col-md-3"><label class="form-label" style="font-size:.82rem;"><strong>Scope</strong></label>
+                                <input type="text" id="ds-scope" class="form-control form-control-sm" value="group.EIC"></div>
+                            <div class="col-md-3"><label class="form-label" style="font-size:.82rem;"><strong>Detector Version</strong></label>
+                                <input type="text" id="ds-version" class="form-control form-control-sm" placeholder="26.02.0"></div>
+                            <div class="col-md-3"><label class="form-label" style="font-size:.82rem;"><strong>Detector Config</strong></label>
+                                <input type="text" id="ds-config" class="form-control form-control-sm" placeholder="epic_craterlake"></div>
+                            <div class="col-md-3"><label class="form-label" style="font-size:.82rem;"><strong>Created By</strong></label>
+                                <input type="text" id="ds-created-by" class="form-control form-control-sm" value="{{ username }}" readonly></div>
+                        </div>
+                        <div class="mb-2"><label class="form-label" style="font-size:.82rem;"><strong>Description</strong></label>
+                            <textarea id="ds-description" class="form-control form-control-sm" rows="2"></textarea></div>
+                        <div class="mb-2"><label class="form-label" style="font-size:.82rem;"><strong>Name Preview</strong></label>
+                            <div id="name-preview" class="form-control form-control-sm bg-light" style="font-family:monospace;min-height:32px;"></div></div>
+                    </div>
+                </div>
+                <div class="spec-section" data-section="physics_tag">
+                    <div class="spec-section-header">Physics Tag <span class="badge bg-secondary" id="p-badge">not selected</span></div>
+                    <div class="spec-section-body"><div class="suggestion-bar" id="p-suggestion"></div><div id="p-display" class="empty-state">Select a physics tag from the left pane.</div></div>
+                </div>
+                <div class="spec-section" data-section="evgen_tag">
+                    <div class="spec-section-header">EvGen Tag <span class="badge bg-secondary" id="e-badge">not selected</span></div>
+                    <div class="spec-section-body"><div class="suggestion-bar" id="e-suggestion"></div><div id="e-display" class="empty-state">Select an evgen tag from the left pane.</div></div>
+                </div>
+                <div class="spec-section" data-section="simu_tag">
+                    <div class="spec-section-header">Simu Tag <span class="badge bg-secondary" id="s-badge">not selected</span></div>
+                    <div class="spec-section-body"><div class="suggestion-bar" id="s-suggestion"></div><div id="s-display" class="empty-state">Select a simu tag from the left pane.</div></div>
+                </div>
+                <div class="spec-section" data-section="reco_tag">
+                    <div class="spec-section-header">Reco Tag <span class="badge bg-secondary" id="r-badge">not selected</span></div>
+                    <div class="spec-section-body"><div class="suggestion-bar" id="r-suggestion"></div><div id="r-display" class="empty-state">Select a reco tag from the left pane.</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const allDatasets = {{ datasets_json|safe }};
+    const allTags = {{ tags_json|safe }};
+    const currentUser = '{{ username }}';
+    const csrfToken = '{{ csrf_token }}';
+    const initialSelected = {{ selected|default:"null" }};
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialTab = urlParams.get('tab') || 'datasets';
+
+    let browseType = initialTab;
+    let mode = 'browse';
+    let selectedItemId = null;
+    // Compose state: selected tag per type
+    const compose = { p: null, e: null, s: null, r: null };
+    let editingDatasetId = null;
+
+    const itemList = document.getElementById('item-list');
+    const searchBox = document.getElementById('browser-search');
+    const browsePanel = document.getElementById('browse-panel');
+    const browseEmpty = document.getElementById('browse-empty');
+    const browseContent = document.getElementById('browse-content');
+    const composePanel = document.getElementById('compose-panel');
+    const panelTitle = document.getElementById('panel-title');
+    const btnNew = document.getElementById('btn-new-dataset');
+    const btnCopy = document.getElementById('btn-copy');
+    const btnEdit = document.getElementById('btn-edit');
+    const btnClear = document.getElementById('btn-clear');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnSave = document.getElementById('btn-save');
+
+    const TAG_LABELS = {p:'Physics', e:'EvGen', s:'Simu', r:'Reco'};
+    const TAG_FK = {p:'physics_tag', e:'evgen_tag', s:'simu_tag', r:'reco_tag'};
+
+    function updateUrl() {
+        const params = new URLSearchParams();
+        params.set('tab', browseType);
+        if (selectedItemId) params.set('selected', selectedItemId);
+        if (mode === 'compose') params.set('mode', 'compose');
+        history.replaceState(null, '', `${window.location.pathname}?${params}`);
+    }
+
+    composePanel.querySelectorAll('.spec-section-header').forEach(h => {
+        h.addEventListener('click', () => h.parentElement.classList.toggle('collapsed'));
+    });
+
+    // ── Tag display helper ──
+    function renderTagDetail(tag, tagType) {
+        let paramsHtml = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v]) =>
+            `<span class="pk">${k}</span><span class="pv">${v}</span>`).join('');
+        let cat = tagType === 'p' && tag.category_name ? `<span class="item-meta">${tag.category_name}</span> | ` : '';
+        return `<div style="font-size:.82rem;">
+            <strong>${tag.label}</strong> <span class="badge bg-${tag.status==='locked'?'success':'secondary'}" style="font-size:.7rem;">${tag.status}</span>
+            <span class="item-meta ms-2">${cat}${tag.created_by}</span>
+            ${tag.description ? `<p class="mb-1 mt-1">${tag.description}</p>` : ''}
+            ${paramsHtml ? `<div class="params-grid mt-1">${paramsHtml}</div>` : ''}
+        </div>`;
+    }
+
+    // ── Suggestion system ──
+    function clearAllSuggestions() {
+        ['p','e','s','r'].forEach(tt => {
+            const bar = document.getElementById(tt+'-suggestion');
+            bar.classList.remove('visible'); bar.innerHTML = '';
+        });
+        document.querySelectorAll('.field-diff-container').forEach(el => el.remove());
+        btnClear.style.display = 'none';
+    }
+
+    function showTagDiffs(tagType, browsedTag) {
+        const currentTag = compose[tagType];
+        if (!currentTag || !browsedTag || browsedTag.id === currentTag.id) return;
+        const bar = document.getElementById(tagType+'-suggestion');
+
+        // Top-level apply
+        bar.innerHTML = `<span class="sg-source">Replace ${TAG_LABELS[tagType]} with ${browsedTag.label}:</span>
+            <button type="button" class="btn btn-warning btn-sm btn-apply" data-tt="${tagType}" data-id="${browsedTag.id}">Apply</button>`;
+        bar.classList.add('visible');
+        bar.querySelector('.btn-apply').addEventListener('click', () => { applyTag(tagType, browsedTag); clearAllSuggestions(); });
+
+        // Per-param diffs
+        const curP = currentTag.parameters || {}, newP = browsedTag.parameters || {};
+        const allKeys = new Set([...Object.keys(curP), ...Object.keys(newP)]);
+        let diffHtml = '';
+        allKeys.forEach(k => {
+            const cv = String(curP[k]||'-'), nv = String(newP[k]||'-');
+            if (cv !== nv) {
+                diffHtml += `<div class="field-diff">
+                    <span class="fd-label">${k}:</span>
+                    <span class="fd-current">${cv}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${nv}</span></div>`;
+            }
+        });
+        if (browsedTag.description !== currentTag.description) {
+            diffHtml += `<div class="field-diff"><span class="fd-label">description:</span>
+                <span class="fd-current">${(currentTag.description||'').substring(0,40)}</span> <span class="fd-arrow">&rarr;</span>
+                <span class="fd-new">${(browsedTag.description||'').substring(0,40)}</span></div>`;
+        }
+        if (diffHtml) {
+            const container = document.createElement('div');
+            container.className = 'field-diff-container';
+            container.innerHTML = diffHtml;
+            bar.after(container);
+        }
+        btnClear.style.display = 'inline-block';
+    }
+
+    // ── Apply tag to compose ──
+    function applyTag(tagType, tag) {
+        compose[tagType] = tag;
+        const badge = document.getElementById(tagType+'-badge');
+        badge.textContent = tag.label;
+        badge.className = 'badge bg-success';
+        document.getElementById(tagType+'-display').innerHTML = renderTagDetail(tag, tagType);
+        clearAllSuggestions();
+        updatePreview();
+        updateSaveButton();
+    }
+
+    function updatePreview() {
+        const scope = document.getElementById('ds-scope').value || '?';
+        const ver = document.getElementById('ds-version').value || '?';
+        const cfg = document.getElementById('ds-config').value || '?';
+        const p = compose.p ? compose.p.label : '?';
+        const e = compose.e ? compose.e.label : '?';
+        const s = compose.s ? compose.s.label : '?';
+        const r = compose.r ? compose.r.label : '?';
+        document.getElementById('name-preview').textContent = `${scope}.${ver}.${cfg}.${p}.${e}.${s}.${r}`;
+    }
+
+    function updateSaveButton() {
+        if (mode !== 'compose') return;
+        const ver = document.getElementById('ds-version').value.trim();
+        const cfg = document.getElementById('ds-config').value.trim();
+        btnSave.disabled = !(ver && cfg && compose.p && compose.e && compose.s && compose.r);
+    }
+
+    // ── Mode switching ──
+    function enterBrowseMode() {
+        mode = 'browse';
+        composePanel.style.display = 'none';
+        browsePanel.style.display = 'block';
+        btnCancel.style.display = 'none';
+        btnSave.style.display = 'none';
+        btnClear.style.display = 'none';
+        if (btnNew) btnNew.style.display = browseType === 'datasets' ? 'block' : 'none';
+        if (btnEdit) btnEdit.style.display = 'none';
+        if (btnCopy) btnCopy.style.display = 'none';
+        editingDatasetId = null;
+        compose.p = null; compose.e = null; compose.s = null; compose.r = null;
+        clearAllSuggestions();
+        updateUrl();
+    }
+
+    function enterComposeMode(datasetToEdit) {
+        mode = 'compose';
+        browsePanel.style.display = 'none';
+        composePanel.style.display = 'block';
+        if (btnNew) btnNew.style.display = 'none';
+        if (btnEdit) btnEdit.style.display = 'none';
+        if (btnCopy) btnCopy.style.display = 'none';
+        btnCancel.style.display = 'inline-block';
+        btnSave.style.display = 'inline-block';
+        btnSave.disabled = true;
+        editingDatasetId = null;
+        compose.p = null; compose.e = null; compose.s = null; compose.r = null;
+        clearAllSuggestions();
+
+        // Reset form
+        document.getElementById('ds-scope').value = 'group.EIC';
+        document.getElementById('ds-version').value = '';
+        document.getElementById('ds-config').value = '';
+        document.getElementById('ds-description').value = '';
+        ['p','e','s','r'].forEach(tt => {
+            document.getElementById(tt+'-badge').textContent = 'not selected';
+            document.getElementById(tt+'-badge').className = 'badge bg-secondary';
+            document.getElementById(tt+'-display').innerHTML = `<div class="empty-state">Select ${TAG_LABELS[tt]==='Physics'?'a':'an'} ${TAG_LABELS[tt].toLowerCase()} tag from the left pane.</div>`;
+        });
+
+        if (datasetToEdit) {
+            editingDatasetId = datasetToEdit.id;
+            document.getElementById('ds-scope').value = datasetToEdit.scope;
+            document.getElementById('ds-version').value = datasetToEdit.detector_version;
+            document.getElementById('ds-config').value = datasetToEdit.detector_config;
+            document.getElementById('ds-description').value = datasetToEdit.description || '';
+            ['p','e','s','r'].forEach(tt => {
+                const tagData = datasetToEdit[TAG_FK[tt]];
+                // Find full tag from allTags
+                const fullTag = (allTags[tt]||[]).find(t => t.id === tagData.id) || tagData;
+                applyTag(tt, fullTag);
+            });
+            panelTitle.textContent = 'Edit Dataset';
+            btnSave.textContent = 'Save Dataset';
+        } else {
+            panelTitle.textContent = 'New Dataset';
+            btnSave.textContent = 'Create Dataset';
+        }
+        updatePreview();
+        updateUrl();
+    }
+
+    // ── Tab switching ──
+    function switchTab(tabName) {
+        document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`[data-browse="${tabName}"]`).classList.add('active');
+        browseType = tabName;
+        selectedItemId = null;
+        searchBox.value = '';
+        if (btnNew) btnNew.style.display = (mode === 'browse' && tabName === 'datasets') ? 'block' : 'none';
+        if (mode === 'browse') {
+            browseEmpty.style.display = 'block';
+            browseContent.style.display = 'none';
+            panelTitle.textContent = 'Select an item';
+            if (btnEdit) btnEdit.style.display = 'none';
+            if (btnCopy) btnCopy.style.display = 'none';
+        }
+        renderList();
+        updateUrl();
+    }
+    document.querySelectorAll('.browser-tab').forEach(tab => {
+        tab.addEventListener('click', function() { switchTab(this.dataset.browse); });
+    });
+
+    searchBox.addEventListener('input', renderList);
+
+    // ── Render list ──
+    function renderList() {
+        const q = searchBox.value.toLowerCase();
+        let items = [];
+        if (browseType === 'datasets') {
+            items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
+                d.physics_tag.label.toLowerCase().includes(q) || d.description.toLowerCase().includes(q)
+            ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
+                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label} | ${d.created_by}`,
+                selected: d.id === selectedItemId }));
+        } else {
+            // Tag type
+            const tt = browseType;
+            items = (allTags[tt]||[]).filter(t => !q || t.label.toLowerCase().includes(q) ||
+                t.description.toLowerCase().includes(q) ||
+                (t.category_name||'').toLowerCase().includes(q) ||
+                Object.values(t.parameters||{}).some(v => String(v).toLowerCase().includes(q))
+            ).map(t => ({
+                id: t.id, type: tt, label: t.label,
+                meta: `${t.status}${t.category_name ? ' | '+t.category_name : ''} | ${t.description.substring(0,50)}`,
+                selected: t.id === selectedItemId,
+            }));
+        }
+        itemList.innerHTML = items.map(it =>
+            `<div class="item-entry${it.selected ? ' selected' : ''}" data-type="${it.type}" data-id="${it.id}">
+                <div class="item-label">${it.label}</div>
+                <div class="item-meta">${it.meta}</div>
+            </div>`
+        ).join('') || '<div class="empty-state" style="padding:.75rem;">No items found.</div>';
+        itemList.querySelectorAll('.item-entry').forEach(el => {
+            el.addEventListener('click', () => onItemClick(el.dataset.type, parseInt(el.dataset.id)));
+        });
+    }
+
+    // ── Item click ──
+    function onItemClick(type, id) {
+        selectedItemId = id;
+        if (mode === 'compose') {
+            // Clear previous diffs
+            document.querySelectorAll('.field-diff-container').forEach(el => el.remove());
+            ['p','e','s','r'].forEach(tt => { const b = document.getElementById(tt+'-suggestion'); b.classList.remove('visible'); b.innerHTML = ''; });
+            btnClear.style.display = 'none';
+
+            if (['p','e','s','r'].includes(type)) {
+                const tag = (allTags[type]||[]).find(t => t.id === id);
+                if (!tag) return;
+                if (!compose[type]) {
+                    applyTag(type, tag);
+                } else if (id !== compose[type].id) {
+                    showTagDiffs(type, tag);
+                }
+            }
+            // dataset clicks in compose mode are ignored
+        } else {
+            if (type === 'dataset') showDatasetDetail(id);
+            else showTagBrowseDetail(type, id);
+        }
+        renderList();
+        updateUrl();
+    }
+
+    // ── Browse: dataset detail ──
+    function showDatasetDetail(id) {
+        const ds = allDatasets.find(d => d.id === id);
+        if (!ds) return;
+        browseEmpty.style.display = 'none';
+        browseContent.style.display = 'block';
+        panelTitle.textContent = ds.dataset_name;
+        if (btnEdit) btnEdit.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
+        let tagsHtml = '';
+        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
+            const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
+            tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+        });
+        browseContent.innerHTML = `
+            <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+                <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
+                <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
+                ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
+            </table>
+            <h6>Tags</h6>
+            <table class="table table-sm table-bordered" style="font-size:.82rem;">
+                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+                <tbody>${tagsHtml}</tbody>
+            </table>`;
+    }
+
+    // ── Browse: tag detail ──
+    function showTagBrowseDetail(tagType, id) {
+        const tag = (allTags[tagType]||[]).find(t => t.id === id);
+        if (!tag) return;
+        browseEmpty.style.display = 'none';
+        browseContent.style.display = 'block';
+        panelTitle.textContent = `${TAG_LABELS[tagType]} Tag: ${tag.label}`;
+        if (btnEdit) btnEdit.style.display = 'none';
+        if (btnCopy) btnCopy.style.display = 'none';
+        browseContent.innerHTML = renderTagDetail(tag, tagType);
+    }
+
+    // ── Buttons ──
+    if (btnNew) btnNew.addEventListener('click', () => enterComposeMode(null));
+    if (btnEdit) btnEdit.addEventListener('click', () => {
+        const ds = allDatasets.find(d => d.id === selectedItemId);
+        if (ds) enterComposeMode(ds);
+    });
+    if (btnCopy) btnCopy.addEventListener('click', () => {
+        const ds = allDatasets.find(d => d.id === selectedItemId);
+        if (ds) {
+            enterComposeMode(null);
+            // Pre-fill from copied dataset but no editingDatasetId (creates new)
+            document.getElementById('ds-scope').value = ds.scope;
+            document.getElementById('ds-version').value = ds.detector_version;
+            document.getElementById('ds-config').value = ds.detector_config;
+            document.getElementById('ds-description').value = ds.description || '';
+            ['p','e','s','r'].forEach(tt => {
+                const tagData = ds[TAG_FK[tt]];
+                const fullTag = (allTags[tt]||[]).find(t => t.id === tagData.id) || tagData;
+                applyTag(tt, fullTag);
+            });
+            panelTitle.textContent = 'New Dataset (copy)';
+            updatePreview();
+        }
+    });
+    btnClear.addEventListener('click', clearAllSuggestions);
+    btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
+
+    // Save
+    btnSave.addEventListener('click', async function() {
+        const scope = document.getElementById('ds-scope').value.trim();
+        const ver = document.getElementById('ds-version').value.trim();
+        const cfg = document.getElementById('ds-config').value.trim();
+        const desc = document.getElementById('ds-description').value;
+        if (!ver || !cfg || !compose.p || !compose.e || !compose.s || !compose.r) return;
+
+        // Duplicate check: same name means same tag+detector combo already exists
+        const previewName = `${scope}.${ver}.${cfg}.${compose.p.label}.${compose.e.label}.${compose.s.label}.${compose.r.label}`;
+        const existing = allDatasets.find(d => d.dataset_name === previewName && d.id !== editingDatasetId);
+        if (existing) {
+            alert(`Dataset already exists: ${previewName}`);
+            return;
+        }
+
+        const payload = { scope, detector_version: ver, detector_config: cfg, description: desc,
+            physics_tag: compose.p.id, evgen_tag: compose.e.id, simu_tag: compose.s.id, reco_tag: compose.r.id,
+            created_by: currentUser };
+
+        const url = editingDatasetId ? `/swf-monitor/pcs/api/datasets/${editingDatasetId}/` : '/swf-monitor/pcs/api/datasets/';
+        const method = editingDatasetId ? 'PATCH' : 'POST';
+        const resp = await fetch(url, { method, headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify(payload) });
+        if (resp.ok) {
+            const data = await resp.json();
+            window.location.href = `/swf-monitor/pcs/datasets/compose/?tab=datasets&selected=${data.id}`;
+        } else {
+            const err = await resp.json();
+            alert('Save failed: ' + Object.values(err).flat().join(', '));
+        }
+    });
+
+    // Input listeners for preview
+    ['ds-scope','ds-version','ds-config'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => { updatePreview(); updateSaveButton(); });
+    });
+
+    // ── Keyboard nav ──
+    itemList.addEventListener('keydown', function(e) {
+        if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        e.preventDefault();
+        const entries = Array.from(itemList.querySelectorAll('.item-entry'));
+        if (!entries.length) return;
+        const idx = entries.findIndex(el => el.classList.contains('selected'));
+        let next = e.key === 'ArrowDown' ? (idx < entries.length-1 ? idx+1 : 0) : (idx > 0 ? idx-1 : entries.length-1);
+        onItemClick(entries[next].dataset.type, parseInt(entries[next].dataset.id));
+        entries[next].scrollIntoView({block: 'nearest'});
+    });
+
+    // ── Init ──
+    switchTab(browseType);
+    if (initialSelected && browseType === 'datasets') {
+        selectedItemId = initialSelected;
+        showDatasetDetail(initialSelected);
+        renderList();
+    }
+})();
+</script>
+{% endblock %}

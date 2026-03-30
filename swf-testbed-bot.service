@@ -1,0 +1,17 @@
+[Unit]
+Description=SWF Testbed Mattermost Bot
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=wenauseic
+Group=eic
+WorkingDirectory=/opt/swf-monitor/current/src
+EnvironmentFile=/opt/swf-monitor/config/env/production.env
+Environment=DJANGO_SETTINGS_MODULE=swf_monitor_project.settings
+ExecStart=/opt/swf-monitor/current/.venv/bin/python manage.py testbed_bot
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

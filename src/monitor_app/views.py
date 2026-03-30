@@ -30,6 +30,9 @@ from django.apps import apps
 from django.db import connection
 from django.utils import timezone
 from django.conf import settings as django_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def oauth_protected_resource(request):
@@ -59,13 +62,15 @@ def oauth_protected_resource(request):
 
 # Create your views here.
 def home(request):
-    if request.user.is_authenticated:
-        return redirect('monitor_app:authenticated_home')
-    return render(request, 'monitor_app/welcome.html')
+    from django.conf import settings
+    prefix = getattr(settings, 'FORCE_SCRIPT_NAME', '') or ''
+    return HttpResponse(f"""<!DOCTYPE html><html><head><script>
+var mode = localStorage.getItem('navMode') || 'production';
+window.location.replace(mode === 'testbed' ? '{prefix}/testbed/' : '{prefix}/prod/');
+</script></head><body></body></html>""", content_type='text/html')
 
-@login_required
 def authenticated_home(request):
-    return render(request, 'monitor_app/authenticated_home.html')
+    return redirect('monitor_app:prod_hub')
 
 def about(request):
     return render(request, 'monitor_app/about.html')
@@ -183,8 +188,10 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
             instance_name=instance_name,
             defaults=defaults
         )
-        
-        # Return the full agent data
+
+        # Piggyback: mark any stale agents as EXITED
+        SystemAgent.mark_stale_agents()
+
         return Response(self.get_serializer(agent).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
 
@@ -258,6 +265,16 @@ class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
     serializer_class = WorkflowDefinitionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        workflow_name = self.request.query_params.get('workflow_name')
+        version = self.request.query_params.get('version')
+        if workflow_name:
+            qs = qs.filter(workflow_name=workflow_name)
+        if version:
+            qs = qs.filter(version=version)
+        return qs
 
 
 class WorkflowExecutionViewSet(viewsets.ModelViewSet):
@@ -2239,6 +2256,8 @@ def ai_memory_load(request):
             'content': m.content,
             'created_at': m.created_at.isoformat() if m.created_at else None,
             'session_id': m.session_id,
+            'post_id': m.namespace or '',
+            'root_id': m.project_path or '',
         }
         for m in recent
     ]))
@@ -2247,6 +2266,332 @@ def ai_memory_load(request):
         'items': messages,
         'count': len(messages),
     })
+
+
+# ==================== DATA PROVENANCE (DPID) ====================
+
+@api_view(['GET'])
+def dpid_verify(request):
+    """Verify a Data Provenance ID or list recent DPIDs.
+
+    GET /api/dpid/verify/?dpid=A7K2M9  — verify a specific DPID
+    GET /api/dpid/verify/              — list recent DPIDs
+    No auth required — read-only, no AI in the loop.
+    """
+    from .models import DataProvenance
+
+    dpid = request.query_params.get('dpid')
+    if dpid:
+        try:
+            record = DataProvenance.objects.get(dpid=dpid)
+            return Response({
+                'dpid': record.dpid,
+                'tool_name': record.tool_name,
+                'tool_args': record.tool_args,
+                'created_at': record.created_at.isoformat(),
+                'verified': True,
+            })
+        except DataProvenance.DoesNotExist:
+            return Response({'dpid': dpid, 'verified': False}, status=404)
+
+    # List recent
+    recent = DataProvenance.objects.order_by('-created_at')[:20]
+    return Response({
+        'items': [{
+            'dpid': r.dpid,
+            'tool_name': r.tool_name,
+            'created_at': r.created_at.isoformat(),
+        } for r in recent],
+        'count': len(recent),
+    })
+
+
+# ==================== USERS ====================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def users_list(request):
+    """List active users with username, password hash, status, and timestamps.
+
+    GET /api/users/ — requires authentication (session or token).
+    Tunnel-only; password hash included for account sync to swf-remote.
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    users = User.objects.filter(is_active=True).order_by('username').values(
+        'username', 'password', 'is_active', 'date_joined', 'last_login'
+    )
+    return Response({'users': list(users)})
+
+
+# ==================== SLASH COMMANDS (Mattermost) ====================
+
+@api_view(['POST'])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def panda_slash_command(request):
+    """Handle /panda slash commands from Mattermost.
+
+    POST with token, command, text, user_name, channel_id.
+    Returns JSON with text (Markdown) for Mattermost to display.
+
+    Subcommands:
+        status              — PanDA activity overview (last 24h)
+        errors              — Top error patterns (last 7 days)
+        jobs                — Recent jobs (pages on repeat)
+        job <pandaid>       — Deep study of a single job
+        tasks               — Recent tasks (pages on repeat)
+        task <taskid>       — Single task details
+        sites               — List EIC compute queues
+        site <name>         — Queue configuration
+        help                — This help text
+    """
+    from decouple import config as decouple_config
+    from .panda import queries
+
+    # Validate Mattermost token
+    expected_token = decouple_config('MATTERMOST_SLASH_TOKEN', default='')
+    received_token = request.data.get('token', '')
+    if not expected_token or received_token != expected_token:
+        return JsonResponse({'text': 'Unauthorized.'}, status=401)
+
+    text = (request.data.get('text') or '').strip()
+    user = request.data.get('user_name', 'unknown')
+    parts = text.split(None, 1)
+    subcmd = parts[0].lower() if parts else 'help'
+    arg = parts[1].strip() if len(parts) > 1 else ''
+
+    # Cursor state for pagination (per user per command)
+    cursor_key = f'slash_cursor_{user}_{subcmd}'
+
+    try:
+        if subcmd == 'help' or not text:
+            return JsonResponse({'text': _slash_help()})
+
+        if subcmd == 'status':
+            data = queries.get_activity(days=1)
+            jobs = data.get('jobs', {})
+            tasks = data.get('tasks', {})
+            lines = ['#### PanDA Activity (last 24h)']
+            lines.append(f"**Jobs:** {jobs.get('total', 0)}")
+            for s, c in sorted(jobs.get('by_status', {}).items()):
+                lines.append(f"  {s}: {c}")
+            lines.append(f"**Tasks:** {tasks.get('total', 0)}")
+            for s, c in sorted(tasks.get('by_status', {}).items()):
+                lines.append(f"  {s}: {c}")
+            if jobs.get('by_site'):
+                lines.append('**By site:**')
+                for entry in jobs['by_site']:
+                    lines.append(f"  {entry['site']}: {entry['total']}")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'errors':
+            days = int(arg) if arg.isdigit() else 7
+            data = queries.error_summary(days=days, limit=10)
+            lines = [f"#### Top Errors (last {days} days)"]
+            lines.append(f"Total error occurrences: {data.get('total_errors', 0)}")
+            for e in data.get('errors', []):
+                diag = (e.get('error_diag') or '')[:80]
+                lines.append(
+                    f"- **{e['error_source']}:{e['error_code']}** × {e['count']} "
+                    f"({e.get('task_count', '?')} tasks) — {diag}"
+                )
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'jobs':
+            status_filter = arg if arg and not arg.isdigit() else None
+            cursor_key = f'slash_cursor_{user}_jobs_{status_filter or "all"}'
+            cursor = _get_cursor(cursor_key)
+            limit = 20
+            data = queries.list_jobs(days=7, limit=limit, before_id=cursor, status=status_filter)
+            pag = data.get('pagination', {})
+            _set_cursor(cursor_key, pag.get('next_before_id'))
+            label = f" ({status_filter})" if status_filter else ""
+            lines = [f"#### Recent Jobs{label} (page {_cursor_page(cursor_key)})"]
+            summary = data.get('summary', {})
+            if summary:
+                lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(summary.items())))
+            for j in data.get('jobs', []):
+                ts = str(j.get('modificationtime', ''))[:16]
+                lines.append(
+                    f"| {j.get('pandaid')} | {j.get('jobstatus', '')} "
+                    f"| {j.get('computingsite', '')[:30]} | {ts} |"
+                )
+            if pag.get('has_more'):
+                lines.append('_Type `/panda jobs` again for next page_')
+            else:
+                lines.append('_End of results_')
+                _clear_cursor(cursor_key)
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'job':
+            if not arg or not arg.isdigit():
+                return JsonResponse({'text': 'Usage: `/panda job <pandaid>`'})
+            data = queries.study_job(pandaid=int(arg))
+            if 'error' in data:
+                return JsonResponse({'text': f"Error: {data['error']}"})
+            job = data.get('job', {})
+            task = data.get('task', {})
+            lines = [f"#### Job {arg}"]
+            lines.append(f"**Status:** {job.get('jobstatus', '?')}")
+            lines.append(f"**Site:** {job.get('computingsite', '?')}")
+            lines.append(f"**Owner:** {job.get('produsername', '?')}")
+            lines.append(f"**Task:** {job.get('jeditaskid', '?')} — {task.get('taskname', '')}")
+            lines.append(f"**Container:** {job.get('container_name', '?')}")
+            lines.append(f"**Transformation:** {job.get('transformation', '?')}")
+            lines.append(f"**Cores:** {job.get('actualcorecount') or job.get('corecount', '?')}")
+            cpu = job.get('cpuconsumptiontime')
+            if cpu:
+                lines.append(f"**CPU time:** {cpu}s")
+            lines.append(f"**Created:** {str(job.get('creationtime', ''))[:16]}")
+            lines.append(f"**Started:** {str(job.get('starttime', ''))[:16]}")
+            lines.append(f"**Modified:** {str(job.get('modificationtime', ''))[:16]}")
+            if job.get('errors'):
+                lines.append('**Errors:**')
+                for e in job['errors']:
+                    lines.append(f"  - {e['source']}:{e['code']} — {e.get('diag', '')[:120]}")
+            files = data.get('files', [])
+            if files:
+                out = [f for f in files if f.get('type') == 'output']
+                log = [f for f in files if f.get('type') == 'log']
+                lines.append(f"**Files:** {len(files)} total ({len(out)} output, {len(log)} log)")
+            if data.get('monitor_url'):
+                lines.append(f"[PanDA Monitor]({data['monitor_url']})")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'tasks':
+            status_filter = arg if arg and not arg.isdigit() else None
+            cursor_key = f'slash_cursor_{user}_tasks_{status_filter or "all"}'
+            cursor = _get_cursor(cursor_key)
+            limit = 15
+            data = queries.list_tasks(days=7, limit=limit, before_id=cursor, status=status_filter)
+            pag = data.get('pagination', {})
+            _set_cursor(cursor_key, pag.get('next_before_id'))
+            label = f" ({status_filter})" if status_filter else ""
+            lines = [f"#### Recent Tasks{label} (page {_cursor_page(cursor_key)})"]
+            summary = data.get('summary', {})
+            if summary:
+                lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(summary.items())))
+            for t in data.get('tasks', []):
+                ts = str(t.get('modificationtime', ''))[:16]
+                name = (t.get('taskname') or '')[:40]
+                lines.append(
+                    f"| {t.get('jeditaskid')} | {t.get('status', '')} "
+                    f"| {name} | {ts} |"
+                )
+            if pag.get('has_more'):
+                lines.append('_Type `/panda tasks` again for next page_')
+            else:
+                lines.append('_End of results_')
+                _clear_cursor(cursor_key)
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'task':
+            if not arg or not arg.isdigit():
+                return JsonResponse({'text': 'Usage: `/panda task <taskid>`'})
+            data = queries.get_task(jeditaskid=int(arg))
+            if 'error' in data:
+                return JsonResponse({'text': f"Error: {data['error']}"})
+            lines = [f"#### Task {arg}"]
+            lines.append(f"**Name:** {data.get('taskname', '?')}")
+            lines.append(f"**Status:** {data.get('status', '?')}")
+            lines.append(f"**Owner:** {data.get('username', '?')}")
+            lines.append(f"**Working group:** {data.get('workinggroup', '?')}")
+            lines.append(f"**Created:** {str(data.get('creationdate', ''))[:16]}")
+            lines.append(f"**Modified:** {str(data.get('modificationtime', ''))[:16]}")
+            if data.get('errordialog'):
+                lines.append(f"**Error:** {data['errordialog'][:200]}")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'sites':
+            activity = queries.get_activity(days=1)
+            by_site = {e['site']: e for e in activity.get('jobs', {}).get('by_site', [])}
+            queues = queries.list_queues(vo='eic')
+            lines = ['#### EIC Compute Sites']
+            lines.append('| Site | Status | Running | Finished | Failed | Total |')
+            lines.append('|------|--------|---------|----------|--------|-------|')
+            for q in queues.get('queues', []):
+                name = q.get('panda_queue', '')
+                st = q.get('status', '')
+                s = by_site.get(name, {})
+                running = s.get('running', 0)
+                finished = s.get('finished', 0)
+                failed = s.get('failed', 0)
+                total = s.get('total', 0)
+                lines.append(f"| {name} | {st} | {running} | {finished} | {failed} | {total} |")
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        if subcmd == 'site':
+            if not arg:
+                return JsonResponse({'text': 'Usage: `/panda site <queue_name>`'})
+            data = queries.get_queue(panda_queue=arg)
+            if 'error' in data:
+                return JsonResponse({'text': f"Error: {data['error']}"})
+            queue = data.get('queue', data)
+            lines = [f"#### Site: {arg}"]
+            for key in ('status', 'state', 'corecount', 'maxrss', 'maxtime',
+                        'container_options'):
+                val = queue.get(key)
+                if val is not None:
+                    lines.append(f"**{key}:** {val}")
+            # Job breakdown
+            activity = queries.get_activity(days=1, site=arg)
+            jobs = activity.get('jobs', {})
+            by_status = jobs.get('by_status', {})
+            if by_status:
+                lines.append(f"**Jobs (24h):** {jobs.get('total', 0)}")
+                lines.append(' | '.join(f"{s}: {c}" for s, c in sorted(by_status.items())))
+            else:
+                lines.append('**Jobs (24h):** 0')
+            return JsonResponse({'text': '\n'.join(lines)})
+
+        return JsonResponse({'text': f"Unknown subcommand `{subcmd}`. Try `/panda help`"})
+
+    except Exception as e:
+        import traceback
+        logger.exception(f"Slash command error: {subcmd} {arg}")
+        return JsonResponse({'text': f"Error: {e}"})
+
+
+# Slash command cursor state (in-memory, per-process — fine for single bot)
+_slash_cursors = {}
+_slash_pages = {}
+
+
+def _get_cursor(key):
+    return _slash_cursors.get(key)
+
+
+def _set_cursor(key, value):
+    if value:
+        _slash_cursors[key] = value
+        _slash_pages[key] = _slash_pages.get(key, 0) + 1
+    else:
+        _slash_cursors.pop(key, None)
+
+
+def _clear_cursor(key):
+    _slash_cursors.pop(key, None)
+    _slash_pages.pop(key, None)
+
+
+def _cursor_page(key):
+    return _slash_pages.get(key, 1)
+
+
+def _slash_help():
+    return """#### /panda — PanDA Slash Commands
+| Command | Description |
+|---------|-------------|
+| `/panda status` | Activity overview (last 24h) |
+| `/panda errors [days]` | Top error patterns (default 7 days) |
+| `/panda jobs [status]` | Recent jobs — repeat to page |
+| `/panda job <id>` | Deep study of a single job |
+| `/panda tasks [status]` | Recent tasks — repeat to page |
+| `/panda task <id>` | Single task details |
+| `/panda sites` | EIC compute queues |
+| `/panda site <name>` | Queue configuration |
+| `/panda help` | This help |"""
 
 
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
@@ -2630,8 +2975,16 @@ def update_rucio_endpoints_from_github(request):
 
 @login_required
 def panda_hub(request):
-    """
-    PanDA hub page that consolidates all PanDA-related functionality.
-    Includes sections for PanDA Queues, Rucio Endpoints, PanDA Database, and iDDS Database.
-    """
+    """PanDA & Rucio hub page — testbed-oriented, full BNL access."""
     return render(request, 'monitor_app/panda_hub.html')
+
+
+def prod_hub(request):
+    """ePIC Production home — production monitor + PCS sections."""
+    from pcs.views import pcs_hub_counts
+    return render(request, 'monitor_app/prod_hub.html', pcs_hub_counts())
+
+
+def testbed_hub(request):
+    """ePIC Testbed home — workflow system overview."""
+    return render(request, 'monitor_app/testbed_hub.html')

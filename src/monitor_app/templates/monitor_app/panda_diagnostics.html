@@ -1,0 +1,18 @@
+{% extends "monitor_app/_datatable_base.html" %}
+
+{% block extra_filters %}
+<!-- Days selector -->
+<div style="margin-bottom:1em;">
+    <strong>Time window:</strong>
+    {% for opt in days_options %}
+    {% if opt.active %}
+    <a href="?days={{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
+    {% else %}
+    <a href="?days={{ opt.value }}" style="margin-right:0.8em;">{{ opt.value }}d</a>
+    {% endif %}
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block initial_filters %}{ days: '{{ days }}' }{% endblock %}
+{% block default_order %}[[0, 'desc']]{% endblock %}

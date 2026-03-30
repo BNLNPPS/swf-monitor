@@ -1,0 +1,52 @@
+from django.urls import path, include
+from . import views
+
+app_name = 'pcs'
+
+urlpatterns = [
+    # Hub
+    path('', views.pcs_hub, name='pcs_hub'),
+
+    # Physics Categories
+    path('categories/', views.physics_categories_list, name='physics_categories_list'),
+    path('categories/create/', views.physics_category_create, name='physics_category_create'),
+
+    # Tag compose — 2-panel browse + create (before generic list routes)
+    path('tags/<str:tag_type>/compose/', views.tag_compose, name='tag_compose'),
+    path('tags/<str:tag_type>/param-defs/', views.param_defs_api, name='param_defs_api'),
+    path('tags/<str:tag_type>/<int:tag_number>/delete/', views.tag_delete, name='tag_delete'),
+
+    # Tags (parameterized by type)
+    path('tags/<str:tag_type>/', views.tags_list, name='tags_list'),
+    path('tags/<str:tag_type>/datatable/', views.tags_datatable_ajax, name='tags_datatable_ajax'),
+    path('tags/<str:tag_type>/<int:tag_number>/', views.tag_detail, name='tag_detail'),
+    path('tags/<str:tag_type>/<int:tag_number>/edit/', views.tag_edit, name='tag_edit'),
+    path('tags/<str:tag_type>/<int:tag_number>/lock/', views.tag_lock, name='tag_lock'),
+
+    # Datasets
+    path('datasets/compose/', views.datasets_compose, name='datasets_compose'),
+    path('datasets/', views.datasets_list, name='datasets_list'),
+    path('datasets/datatable/', views.datasets_datatable_ajax, name='datasets_datatable_ajax'),
+    path('datasets/create/', views.dataset_create, name='dataset_create'),
+    path('datasets/<int:pk>/', views.dataset_detail, name='dataset_detail'),
+    path('datasets/<int:pk>/add-block/', views.dataset_add_block, name='dataset_add_block'),
+
+    # Production Configs
+    path('configs/compose/', views.prod_configs_compose, name='prod_configs_compose'),
+    path('configs/', views.prod_configs_list, name='prod_configs_list'),
+    path('configs/datatable/', views.prod_configs_datatable_ajax, name='prod_configs_datatable_ajax'),
+    path('configs/create/', views.prod_config_create, name='prod_config_create'),
+    path('configs/<int:pk>/', views.prod_config_detail, name='prod_config_detail'),
+    path('configs/<int:pk>/edit/', views.prod_config_edit, name='prod_config_edit'),
+
+    # Production Tasks
+    path('tasks/', views.prod_tasks_list, name='prod_tasks_list'),
+    path('tasks/datatable/', views.prod_tasks_datatable_ajax, name='prod_tasks_datatable_ajax'),
+    path('tasks/compose/', views.prod_task_compose, name='prod_task_compose'),
+    path('tasks/<int:pk>/', views.prod_task_detail, name='prod_task_detail'),
+    path('tasks/<int:pk>/delete/', views.prod_task_delete, name='prod_task_delete'),
+    path('tasks/<int:pk>/commands/', views.prod_task_generate_commands, name='prod_task_generate_commands'),
+
+    # REST API
+    path('api/', include('pcs.api_urls')),
+]

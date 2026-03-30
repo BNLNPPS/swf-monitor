@@ -151,6 +151,20 @@ python manage.py collectstatic --noinput --clear --settings=swf_monitor_project.
 log "Copying static files to shared location..."
 rsync -a --delete "$RELEASE_DIR/src/staticfiles/" "$DEPLOY_ROOT/shared/static/"
 
+# Pre-migration: rename 'emi' app to 'pcs' in migration history and content types
+# This is idempotent — safe to run even after the rename is complete.
+log "Pre-migration: updating app label emi → pcs in migration history..."
+python -c "
+import django, os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
+django.setup()
+from django.db import connection
+with connection.cursor() as c:
+    c.execute(\"UPDATE django_migrations SET app = 'pcs' WHERE app = 'emi'\")
+    c.execute(\"UPDATE django_content_type SET app_label = 'pcs' WHERE app_label = 'emi'\")
+print('  Done (emi → pcs in django_migrations and django_content_type)')
+" 2>/dev/null || log "  (no emi records to update — already migrated)"
+
 # Run database migrations
 log "Running database migrations..."
 python manage.py migrate --settings=swf_monitor_project.settings
@@ -159,17 +173,56 @@ python manage.py migrate --settings=swf_monitor_project.settings
 log "Setting ownership..."
 chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 
-# Stop Apache
-log "Stopping Apache..."
-systemctl stop httpd
-
 # Update current symlink
 log "Updating current symlink..."
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 
-# Start Apache
-log "Starting Apache..."
-systemctl start httpd
+# Graceful Apache reload — finishes in-flight requests, picks up new code
+log "Reloading Apache (graceful)..."
+systemctl reload httpd
+
+# Restart bots only if their code changed
+PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
+
+# PanDA bot
+if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
+    BOT_CHANGED=false
+    if [ -z "$PREV_RELEASE" ]; then
+        BOT_CHANGED=true
+    elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/panda" \
+                     "$RELEASE_DIR/src/monitor_app/panda" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/panda_bot.py" \
+                    "$RELEASE_DIR/src/monitor_app/management/commands/panda_bot.py" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    fi
+    if [ "$BOT_CHANGED" = true ]; then
+        log "Bot code changed — restarting PanDA Mattermost bot..."
+        systemctl restart swf-panda-bot.service
+    else
+        log "Bot code unchanged — skipping PanDA bot restart"
+    fi
+fi
+
+# Testbed bot
+if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
+    BOT_CHANGED=false
+    if [ -z "$PREV_RELEASE" ]; then
+        BOT_CHANGED=true
+    elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/testbed_bot" \
+                     "$RELEASE_DIR/src/monitor_app/testbed_bot" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/testbed_bot.py" \
+                    "$RELEASE_DIR/src/monitor_app/management/commands/testbed_bot.py" >/dev/null 2>&1; then
+        BOT_CHANGED=true
+    fi
+    if [ "$BOT_CHANGED" = true ]; then
+        log "Bot code changed — restarting Testbed Mattermost bot..."
+        systemctl restart swf-testbed-bot.service
+    else
+        log "Bot code unchanged — skipping Testbed bot restart"
+    fi
+fi
 
 # Health check
 log "Performing health check..."
@@ -199,3 +252,12 @@ log "Current deployment status:"
 echo "  Release: $DEPLOY_NAME"
 echo "  Path: $RELEASE_DIR"
 echo "  Current: $(readlink $DEPLOY_ROOT/current)"
+
+# Check if deploy script in repo has diverged from production copy
+if [ -f "$RELEASE_DIR/deploy-swf-monitor.sh" ]; then
+    if ! diff -q "$DEPLOY_ROOT/bin/deploy-swf-monitor.sh" "$RELEASE_DIR/deploy-swf-monitor.sh" >/dev/null 2>&1; then
+        echo ""
+        echo "NOTE: deploy-swf-monitor.sh in repo differs from $DEPLOY_ROOT/bin/deploy-swf-monitor.sh"
+        echo "Review and update the production copy manually."
+    fi
+fi

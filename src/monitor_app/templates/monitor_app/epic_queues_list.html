@@ -1,0 +1,66 @@
+{% extends 'base.html' %}
+
+{% block title %}ePIC Compute Queues{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_hub' %}">Home</a></li>
+            <li class="breadcrumb-item active">ePIC Queues</li>
+        </ol>
+    </nav>
+
+    <h1>ePIC Compute Queues</h1>
+    <p class="text-muted">Live from PanDA schedconfig &mdash; {{ queues|length }} queues registered for VO <strong>eic</strong>.</p>
+
+    <div class="card">
+        <div class="card-body p-0">
+            <table class="table table-striped table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Queue</th>
+                        <th>Status</th>
+                        <th>State</th>
+                        <th>Resource Type</th>
+                        <th>Type</th>
+                        <th>Region</th>
+                        <th>Tier</th>
+                        <th>Core Power</th>
+                        <th>Last Update</th>
+                        <th>Jobs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for q in queues %}
+                    <tr>
+                        <td><a href="{% url 'monitor_app:epic_queue_detail' q.panda_queue %}">{{ q.panda_queue }}</a></td>
+                        <td>
+                            {% if q.status == 'online' %}
+                                <span class="badge bg-success">{{ q.status }}</span>
+                            {% elif q.status == 'brokeroff' %}
+                                <span class="badge bg-warning text-dark">{{ q.status }}</span>
+                            {% elif q.status == 'offline' %}
+                                <span class="badge bg-danger">{{ q.status }}</span>
+                            {% else %}
+                                <span class="badge bg-secondary">{{ q.status|default:"—" }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ q.state|default:"—" }}</td>
+                        <td>{{ q.resource_type|default:"—" }}</td>
+                        <td>{{ q.type|default:"—" }}</td>
+                        <td>{{ q.country|default:"—" }}</td>
+                        <td>{{ q.tier|default:"—" }}</td>
+                        <td>{{ q.corepower|default:"—" }}</td>
+                        <td>{{ q.last_update|truncatechars:19 }}</td>
+                        <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="10" class="text-center text-muted">No ePIC queues found.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
