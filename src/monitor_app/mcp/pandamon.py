@@ -365,9 +365,19 @@ async def panda_harvester_workers(
     now = datetime.now(timezone.utc)
     from_dt = (now - timedelta(hours=hours)).isoformat()
     to_dt = now.isoformat()
-    result = await sync_to_async(fetch_worker_stats)(
+    raw = await sync_to_async(fetch_worker_stats)(
         base_url, from_dt, to_dt, site=site,
     )
-    # Strip raw_payload to keep MCP response compact
-    result.pop('raw_payload', None)
-    return result
+    if raw.get('error'):
+        return {"error": raw['error']}
+    return {
+        "summary": (
+            f"{raw.get('nworkers_total', 0)} pilots total"
+            + (f" at {site}" if site else " across all EIC sites")
+            + f" (last {hours}h)"
+        ),
+        "by_status": raw.get('nworkers_by_status', {}),
+        "by_site": raw.get('nworkers_by_site', {}),
+        "by_resourcetype": raw.get('nworkers_by_resourcetype', {}),
+        "time_window": {"from": from_dt, "to": to_dt},
+    }
