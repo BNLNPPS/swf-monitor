@@ -285,16 +285,6 @@ def get_available_tools_list() -> list:
             "description": "Live Harvester pilot/worker counts across EIC queues — running, submitted, finished by site.",
             "parameters": ["site", "hours"],
         },
-        {
-            "name": "epic_doc_search",
-            "description": "Search ePIC documentation (epicdoc) — SWF, PanDA, EICrecon, containers, afterburner and more. Semantic search.",
-            "parameters": ["query", "top_k"],
-        },
-        {
-            "name": "epic_doc_contents",
-            "description": "Table of contents of epicdoc — what documentation is indexed and searchable.",
-            "parameters": [],
-        },
         # PCS (Physics Configuration System) tools
         {
             "name": "pcs_list_tags",
