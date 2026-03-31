@@ -1,4 +1,4 @@
-# Documentation sources for ChromaDB ingestion.
+# Documentation sources for ChromaDB ingestion (epicdoc).
 # Add new doc directories here — run `python scripts/ingest_docs.py` to ingest.
 
 chroma_path: /data/wenauseic/github/swf-monitor/chroma_db
@@ -8,7 +8,7 @@ chunk_size: 3000
 chunk_overlap: 300
 
 sources:
-  # SWF Testbed — architecture, workflows, operations
+  # ── SWF / Testbed ──────────────────────────────────────────────────────
   - path: /data/wenauseic/github/swf-testbed/docs
     glob: "**/*.md"
     label: swf-testbed
@@ -16,7 +16,6 @@ sources:
     glob: "README.md"
     label: swf-testbed
 
-  # SWF Monitor — MCP tools, API, PCS, deployment
   - path: /data/wenauseic/github/swf-monitor/docs
     glob: "**/*.md"
     label: swf-monitor
@@ -24,7 +23,11 @@ sources:
     glob: "README.md"
     label: swf-monitor
 
-  # Bamboo MCP — PanDA tools, RAG, tracing, plugins
+  - path: /data/wenauseic/github/swf-common-lib
+    glob: "README.md"
+    label: swf-common-lib
+
+  # ── Bamboo / PanDA ─────────────────────────────────────────────────────
   - path: /data/wenauseic/github/bamboo-mcp/docs
     glob: "**/*.md"
     label: bamboo
@@ -32,12 +35,67 @@ sources:
     glob: "README.md"
     label: bamboo
 
-  # PanDA BigMon — monitoring API docs
   - path: /data/wenauseic/github/panda-bigmon-core
     glob: "README*.md"
     label: panda-bigmon
 
-  # SWF Common Lib
-  - path: /data/wenauseic/github/swf-common-lib
+  # ── EIC master doc hub ─────────────────────────────────────────────────
+  - path: /data/wenauseic/github/eic.github.io/_documentation
+    glob: "**/*.md"
+    label: eic-docs
+  - path: /data/wenauseic/github/eic.github.io/_resources
+    glob: "**/*.md"
+    label: eic-docs
+  - path: /data/wenauseic/github/eic.github.io/_software
+    glob: "**/*.md"
+    label: eic-docs
+
+  # ── ePIC production campaigns ──────────────────────────────────────────
+  - path: /data/wenauseic/github/epic-prod/docs/_documentation
+    glob: "**/*.md"
+    label: epic-prod
+  - path: /data/wenauseic/github/epic-prod/docs/_campaigns
+    glob: "**/*.md"
+    label: epic-prod
+
+  # ── Rucio / file access tutorial ───────────────────────────────────────
+  - path: /data/wenauseic/github/tutorial-file-access/_episodes
+    glob: "**/*.md"
+    label: eic-file-access
+
+  # ── EICrecon ───────────────────────────────────────────────────────────
+  - path: /data/wenauseic/github/EICrecon/docs
+    glob: "**/*.md"
+    label: eicrecon
+  - path: /data/wenauseic/github/EICrecon
+    glob: "AGENTS.md"
+    label: eicrecon
+  - path: /data/wenauseic/github/EICrecon
     glob: "README.md"
-    label: swf-common-lib
+    label: eicrecon
+
+  # ── Containers (eic_xl, eic_ci) ────────────────────────────────────────
+  - path: /data/wenauseic/github/containers/docs
+    glob: "**/*.md"
+    label: eic-containers
+  - path: /data/wenauseic/github/containers
+    glob: "AGENTS.md"
+    label: eic-containers
+  - path: /data/wenauseic/github/containers
+    glob: "README.md"
+    label: eic-containers
+
+  # ── epic detector geometry ─────────────────────────────────────────────
+  - path: /data/wenauseic/github/epic
+    glob: "README.md"
+    label: epic-detector
+
+  # ── Afterburner (beam effects) ─────────────────────────────────────────
+  - path: /data/wenauseic/github/afterburner
+    glob: "README.md"
+    label: afterburner
+
+  # ── eic-shell (environment) ────────────────────────────────────────────
+  - path: /data/wenauseic/github/eic-shell
+    glob: "README.md"
+    label: eic-shell
