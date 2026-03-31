@@ -1028,6 +1028,25 @@ def study_job(pandaid):
             base_url = get_base_url()
             log_filename = _select_log_filename(job)
             log_text = _fetch_log_text(pandaid, log_filename, base_url, timeout=30)
+            log_source = 'filebrowser'
+
+            # Fallback: fetch pilot log directly from Harvester URL
+            if not log_text:
+                harvester_url = (
+                    log_urls.get('pilot_stdout')
+                    or (harvester or {}).get('stdout')
+                )
+                if harvester_url:
+                    import requests as _requests
+                    try:
+                        resp = _requests.get(
+                            harvester_url, timeout=30, verify=False,
+                        )
+                        if resp.status_code == 200 and resp.text:
+                            log_text = resp.text
+                            log_source = 'harvester'
+                    except Exception as exc:
+                        logger.warning("Harvester log fetch failed: %s", exc)
 
             if log_text:
                 piloterrorcode = int(job.get('piloterrorcode') or 0)
@@ -1039,6 +1058,7 @@ def study_job(pandaid):
                 result['log_analysis'] = {
                     'failure_type': failure_type,
                     'log_filename': log_filename,
+                    'log_source': log_source,
                     'log_excerpt': excerpt,
                     'log_available': True,
                 }
