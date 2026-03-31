@@ -684,15 +684,17 @@ class PandaBot:
             if any(kw in msg_lower for kw in keywords):
                 allowed_servers.add(server)
 
-        scored = self._tool_selector.select(clean_message, top_k=TOP_K_TOOLS)
+        all_scored = self._tool_selector.select(clean_message, top_k=TOP_K_TOOLS)
         tools = []
+        scored = []
         seen = set()
-        for name, _score in scored:
+        for name, score in all_scored:
             server = self._tool_server_map.get(name, 'unknown')
             if server not in allowed_servers:
                 continue
             if name in self._tool_registry and name not in seen:
                 tools.append(self._tool_registry[name])
+                scored.append((name, score))
                 seen.add(name)
         # Always include virtual tools
         for name in ('bot_manage_servers',):
