@@ -1,0 +1,43 @@
+# Documentation sources for ChromaDB ingestion.
+# Add new doc directories here — run `python scripts/ingest_docs.py` to ingest.
+
+chroma_path: /data/wenauseic/github/swf-monitor/chroma_db
+collection: bamboo_docs
+embedding_model: all-MiniLM-L6-v2
+chunk_size: 3000
+chunk_overlap: 300
+
+sources:
+  # SWF Testbed — architecture, workflows, operations
+  - path: /data/wenauseic/github/swf-testbed/docs
+    glob: "**/*.md"
+    label: swf-testbed
+  - path: /data/wenauseic/github/swf-testbed
+    glob: "README.md"
+    label: swf-testbed
+
+  # SWF Monitor — MCP tools, API, PCS, deployment
+  - path: /data/wenauseic/github/swf-monitor/docs
+    glob: "**/*.md"
+    label: swf-monitor
+  - path: /data/wenauseic/github/swf-monitor
+    glob: "README.md"
+    label: swf-monitor
+
+  # Bamboo MCP — PanDA tools, RAG, tracing, plugins
+  - path: /data/wenauseic/github/bamboo-mcp/docs
+    glob: "**/*.md"
+    label: bamboo
+  - path: /data/wenauseic/github/bamboo-mcp
+    glob: "README.md"
+    label: bamboo
+
+  # PanDA BigMon — monitoring API docs
+  - path: /data/wenauseic/github/panda-bigmon-core
+    glob: "README*.md"
+    label: panda-bigmon
+
+  # SWF Common Lib
+  - path: /data/wenauseic/github/swf-common-lib
+    glob: "README.md"
+    label: swf-common-lib

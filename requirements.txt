@@ -45,3 +45,7 @@ django-dbml
 django-extensions
 python-json-logger
 whitenoise
+# RAG / doc search
+chromadb
+pysqlite3-binary
+rank_bm25

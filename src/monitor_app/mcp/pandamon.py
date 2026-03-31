@@ -381,3 +381,100 @@ async def panda_harvester_workers(
         "by_resourcetype": raw.get('nworkers_by_resourcetype', {}),
         "time_window": {"from": from_dt, "to": to_dt},
     }
+
+
+# ── ePIC Doc Search ────────────────────────────────────────────────────────
+
+import sys
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
+
+CHROMA_PATH = "/data/wenauseic/github/swf-monitor/chroma_db"
+CHROMA_COLLECTION = "bamboo_docs"
+CHROMA_MODEL = "all-MiniLM-L6-v2"
+
+
+def _get_chroma_collection():
+    """Lazy-load ChromaDB collection (cached after first call)."""
+    import chromadb
+    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+    ef = SentenceTransformerEmbeddingFunction(CHROMA_MODEL)
+    client = chromadb.PersistentClient(path=CHROMA_PATH)
+    return client.get_collection(CHROMA_COLLECTION, embedding_function=ef)
+
+
+@mcp.tool()
+async def panda_doc_search(
+    query: str,
+    top_k: int = 5,
+) -> dict:
+    """
+    Search ePIC documentation by natural language query (semantic search).
+
+    Searches across SWF testbed, SWF monitor, Bamboo/PanDA, and BigMon docs.
+    Use "what's in epicdoc?" to see the full table of contents.
+
+    Args:
+        query: Natural language question (e.g. "how does fast processing work?").
+        top_k: Number of results to return (default 5, max 20).
+
+    Returns:
+        results: Ranked list of doc excerpts with source, file, and relevance score.
+    """
+    top_k = min(top_k, 20)
+    col = await sync_to_async(_get_chroma_collection)()
+    raw = await sync_to_async(col.query)(query_texts=[query], n_results=top_k)
+
+    results = []
+    for doc, meta, dist in zip(
+        raw["documents"][0], raw["metadatas"][0], raw["distances"][0],
+    ):
+        score = max(0, (1 - dist) * 100)
+        results.append({
+            "score": round(score),
+            "source": meta.get("source", "?"),
+            "file": meta.get("rel_path", "?"),
+            "excerpt": doc[:1500],
+        })
+    return {"query": query, "results": results}
+
+
+@mcp.tool()
+async def panda_doc_contents() -> dict:
+    """
+    Show what's in epicdoc — table of contents of all indexed documentation.
+
+    Lists every source and document with chunk counts. Use this to discover
+    what documentation is searchable via panda_doc_search.
+    """
+    col = await sync_to_async(_get_chroma_collection)()
+    all_meta = await sync_to_async(col.get)(include=["metadatas"])
+
+    # Build TOC grouped by source
+    sources = {}
+    for meta in all_meta["metadatas"]:
+        src = meta.get("source", "unknown")
+        rel = meta.get("rel_path", "?")
+        total = meta.get("total_chunks", 1)
+        if src not in sources:
+            sources[src] = {}
+        sources[src][rel] = total
+
+    toc = {}
+    total_chunks = 0
+    total_files = 0
+    for src, files in sorted(sources.items()):
+        file_list = []
+        for rel, chunks in sorted(files.items()):
+            file_list.append({"file": rel, "chunks": chunks})
+            total_chunks += chunks
+            total_files += 1
+        toc[src] = file_list
+
+    return {
+        "summary": f"{total_files} documents, {total_chunks} chunks across {len(toc)} sources",
+        "sources": toc,
+    }
