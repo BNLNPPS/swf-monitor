@@ -181,50 +181,36 @@ ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 log "Reloading Apache (graceful)..."
 systemctl reload httpd
 
-# Restart bots only if their code changed
+# Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
+PANDA_BOT_CHANGED=false
+TESTBED_BOT_CHANGED=false
 
-# PanDA bot
 if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
-    BOT_CHANGED=false
     if [ -z "$PREV_RELEASE" ]; then
-        BOT_CHANGED=true
+        PANDA_BOT_CHANGED=true
     elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/panda" \
                      "$RELEASE_DIR/src/monitor_app/panda" >/dev/null 2>&1; then
-        BOT_CHANGED=true
+        PANDA_BOT_CHANGED=true
     elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/panda_bot.py" \
                     "$RELEASE_DIR/src/monitor_app/management/commands/panda_bot.py" >/dev/null 2>&1; then
-        BOT_CHANGED=true
-    fi
-    if [ "$BOT_CHANGED" = true ]; then
-        log "Bot code changed — restarting PanDA Mattermost bot..."
-        systemctl restart swf-panda-bot.service
-    else
-        log "Bot code unchanged — skipping PanDA bot restart"
+        PANDA_BOT_CHANGED=true
     fi
 fi
 
-# Testbed bot
 if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
-    BOT_CHANGED=false
     if [ -z "$PREV_RELEASE" ]; then
-        BOT_CHANGED=true
+        TESTBED_BOT_CHANGED=true
     elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/testbed_bot" \
                      "$RELEASE_DIR/src/monitor_app/testbed_bot" >/dev/null 2>&1; then
-        BOT_CHANGED=true
+        TESTBED_BOT_CHANGED=true
     elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/testbed_bot.py" \
                     "$RELEASE_DIR/src/monitor_app/management/commands/testbed_bot.py" >/dev/null 2>&1; then
-        BOT_CHANGED=true
-    fi
-    if [ "$BOT_CHANGED" = true ]; then
-        log "Bot code changed — restarting Testbed Mattermost bot..."
-        systemctl restart swf-testbed-bot.service
-    else
-        log "Bot code unchanged — skipping Testbed bot restart"
+        TESTBED_BOT_CHANGED=true
     fi
 fi
 
-# Health check
+# Health check — confirm Apache is serving before restarting bots
 log "Performing health check..."
 HEALTH_URL="https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/"
 HTTP_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
@@ -235,7 +221,21 @@ else
     log "❌ Health check FAILED - Application not responding (HTTP $HTTP_STATUS)"
     echo "WARNING: Deployment completed but application may not be working correctly"
     echo "Check Apache error logs: sudo tail -f /var/log/httpd/error_log"
-    # Don't exit - deployment artifacts are in place, just alerting
+fi
+
+# Restart bots AFTER health check confirms Apache is up
+if [ "$PANDA_BOT_CHANGED" = true ]; then
+    log "Bot code changed — restarting PanDA Mattermost bot..."
+    systemctl restart swf-panda-bot.service
+else
+    log "Bot code unchanged — skipping PanDA bot restart"
+fi
+
+if [ "$TESTBED_BOT_CHANGED" = true ]; then
+    log "Bot code changed — restarting Testbed Mattermost bot..."
+    systemctl restart swf-testbed-bot.service
+else
+    log "Bot code unchanged — skipping Testbed bot restart"
 fi
 
 # Cleanup old releases (keep last 5)
