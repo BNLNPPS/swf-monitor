@@ -359,9 +359,9 @@ async def panda_harvester_workers(
     """
     from datetime import datetime, timedelta, timezone
     from askpanda_atlas.harvester_worker_impl import fetch_worker_stats
-    from askpanda_atlas._fallback_http import get_base_url
+    from decouple import config
 
-    base_url = get_base_url()
+    base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
     now = datetime.now(timezone.utc)
     from_dt = (now - timedelta(hours=hours)).isoformat()
     to_dt = now.isoformat()

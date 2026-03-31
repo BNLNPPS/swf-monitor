@@ -1023,9 +1023,8 @@ def study_job(pandaid):
                 _select_log_filename, _fetch_log_text,
                 extract_log_excerpt, classify_failure,
             )
-            from askpanda_atlas._fallback_http import get_base_url
-
-            base_url = get_base_url()
+            from decouple import config
+            base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
             log_filename = _select_log_filename(job)
             log_text = _fetch_log_text(pandaid, log_filename, base_url, timeout=30)
             log_source = 'filebrowser'
