@@ -280,6 +280,11 @@ def get_available_tools_list() -> list:
             "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
             "parameters": ["pandaid"],
         },
+        {
+            "name": "panda_harvester_workers",
+            "description": "Live Harvester pilot/worker counts across EIC queues — running, submitted, finished by site.",
+            "parameters": ["site", "hours"],
+        },
         # PCS (Physics Configuration System) tools
         {
             "name": "pcs_list_tags",

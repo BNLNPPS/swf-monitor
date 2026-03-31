@@ -334,3 +334,40 @@ async def panda_study_job(
         monitor_url: Link to PanDA monitoring page.
     """
     return await sync_to_async(queries.study_job)(pandaid=pandaid)
+
+
+@mcp.tool()
+async def panda_harvester_workers(
+    site: str | None = None,
+    hours: int = 1,
+) -> dict:
+    """
+    Live Harvester pilot/worker counts across EIC compute queues.
+
+    Shows how many pilots are running, submitted, finished, etc. at each site.
+    Useful for checking if Perlmutter or other sites are actively processing.
+
+    Args:
+        site: Filter to a specific queue (e.g. 'NERSC_Perlmutter_epic'). Default: all sites.
+        hours: Time window in hours to look back (default 1).
+
+    Returns:
+        nworkers_total: Grand total across all statuses.
+        nworkers_by_status: Counts by worker status (running, submitted, finished, etc.).
+        nworkers_by_site: Counts by computing site.
+        pivot: Breakdown by status × jobtype × resourcetype.
+    """
+    from datetime import datetime, timedelta, timezone
+    from askpanda_atlas.harvester_worker_impl import fetch_worker_stats
+    from askpanda_atlas._fallback_http import get_base_url
+
+    base_url = get_base_url()
+    now = datetime.now(timezone.utc)
+    from_dt = (now - timedelta(hours=hours)).isoformat()
+    to_dt = now.isoformat()
+    result = await sync_to_async(fetch_worker_stats)(
+        base_url, from_dt, to_dt, site=site,
+    )
+    # Strip raw_payload to keep MCP response compact
+    result.pop('raw_payload', None)
+    return result
