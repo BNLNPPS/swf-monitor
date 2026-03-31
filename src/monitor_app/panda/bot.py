@@ -153,7 +153,9 @@ examples in these instructions. The examples below show which tool to call, not 
 the answer is. The data changes constantly — you MUST query it live. \
 NEVER ask the user to look something up if you can query it yourself. Chain multiple \
 tool calls if needed — e.g. list jobs to find an ID, then study that job. Do the \
-legwork yourself.
+legwork yourself. \
+If you need a tool that isn't pre-loaded, call select_tools with the tool names from \
+the catalog below. NEVER say you don't have access to a tool — check the catalog first.
 
 DATA INTEGRITY: Every number you present must come from a tool call in this conversation. \
 Never fabricate, interpolate, or reconstruct data from memory. If you need data for a \
@@ -665,11 +667,53 @@ class PandaBot:
         'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
     }
 
-    def _select_tools_for_message(self, message: str) -> tuple[list[dict], list[tuple[str, float]]]:
-        """Pick tools for this message: semantic top-K + always-on tools.
+    def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:
+        """Extract tool history from prior bot replies in a thread.
+
+        Parses (tools suggested: ...) and (tools used: ...) metadata lines
+        from bot messages in the thread.
+
+        Returns (prior_servers, prior_tools) where:
+        - prior_servers: servers of tools actually used in prior turns
+        - prior_tools: top 3 suggested tool names from each prior turn
+        """
+        prior_servers = set()
+        prior_tools = set()
+        if not thread_context:
+            return prior_servers, prior_tools
+
+        for line in thread_context.split('\n'):
+            if not line.startswith('Bot:'):
+                continue
+            # Extract used tools → their servers
+            used_match = re.search(r'\(tools used:\s*([^)]+)\)', line)
+            if used_match and used_match.group(1).strip() != 'none':
+                for tool_name in used_match.group(1).split(','):
+                    tool_name = tool_name.strip()
+                    server = self._tool_server_map.get(tool_name)
+                    if server:
+                        prior_servers.add(server)
+            # Extract top 3 suggested tools (name:score format)
+            sugg_match = re.search(r'\(tools suggested:\s*([^)]+)\)', line)
+            if sugg_match:
+                entries = sugg_match.group(1).split(',')
+                for entry in entries[:3]:
+                    name = entry.strip().split(':')[0]
+                    if name and name != 'none':
+                        prior_tools.add(name)
+
+        return prior_servers, prior_tools
+
+    def _select_tools_for_message(self, message: str, thread_context: str | None = None) -> tuple[list[dict], list[tuple[str, float]]]:
+        """Pick tools for this message: semantic top-K + thread history + always-on tools.
+
+        Tool set is built from three sources:
+        1. All tools from servers used in prior thread turns
+        2. Top 3 suggested tools from each prior thread turn
+        3. Top-K from vector search on the current message
 
         Strips the [username in #channel] tag before embedding. Excludes
-        stdio server tools unless the message mentions that domain.
+        stdio server tools unless activated by keyword or thread history.
 
         Returns (active_tools, scored_names) where scored_names is
         [(name, score), ...] in ranked order.
@@ -678,16 +722,28 @@ class PandaBot:
         clean_message = re.sub(r'^\[.*?\]\s*', '', message)
         msg_lower = clean_message.lower()
 
+        # Thread history: servers used + top suggestions from prior turns
+        prior_servers, prior_tools = self._extract_thread_tool_history(thread_context)
+
         # Determine which servers are relevant
-        allowed_servers = {'swf-monitor'}  # always included
+        allowed_servers = {'swf-monitor'} | prior_servers
         for server, keywords in self._SERVER_KEYWORDS.items():
             if any(kw in msg_lower for kw in keywords):
                 allowed_servers.add(server)
 
-        all_scored = self._tool_selector.select(clean_message, top_k=TOP_K_TOOLS)
+        # Start with prior suggested tools (carry forward from thread)
         tools = []
         scored = []
         seen = set()
+        for name in prior_tools:
+            if name in self._tool_registry and name not in seen:
+                server = self._tool_server_map.get(name, 'unknown')
+                if server in allowed_servers:
+                    tools.append(self._tool_registry[name])
+                    seen.add(name)
+
+        # Add vector search results for current message
+        all_scored = self._tool_selector.select(clean_message, top_k=TOP_K_TOOLS)
         for name, score in all_scored:
             server = self._tool_server_map.get(name, 'unknown')
             if server not in allowed_servers:
@@ -1042,6 +1098,7 @@ class PandaBot:
         """
         # Build user message with full thread context if it's a reply
         user_content = message_text
+        thread_context = None
         if root_id:
             thread_context = await self._build_thread_context(root_id)
             if thread_context:
@@ -1067,8 +1124,8 @@ class PandaBot:
                         at = mcp_tool_to_anthropic(t)
                         self._tool_registry[at["name"]] = at
 
-            # Select tools relevant to this message
-            active_tools, scored = self._select_tools_for_message(message_text)
+            # Select tools relevant to this message + thread history
+            active_tools, scored = self._select_tools_for_message(message_text, thread_context)
             active_tool_names = {t['name'] for t in active_tools}
             suggested_names = [
                 f"{name}:{score:.2f}" for name, score in scored
