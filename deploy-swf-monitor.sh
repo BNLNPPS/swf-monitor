@@ -130,6 +130,12 @@ ln -sf "$DEPLOY_ROOT/shared/logs" "$RELEASE_DIR/logs"
 ln -sf "$DEPLOY_ROOT/config/env/production.env" "$RELEASE_DIR/.env"
 log "  .env source: $DEPLOY_ROOT/config/env/production.env (edit this file for config changes)"
 
+# Shared caches — writable by both httpd (WSGI) and service users
+mkdir -p "$DEPLOY_ROOT/shared/hf_cache"
+chmod 777 "$DEPLOY_ROOT/shared/hf_cache"
+grep -q '^HF_HOME=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
+    echo "HF_HOME=$DEPLOY_ROOT/shared/hf_cache" >> "$DEPLOY_ROOT/config/env/production.env"
+
 # Install WSGI module configuration if it exists in repository
 if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then
     log "Installing WSGI module configuration..."
