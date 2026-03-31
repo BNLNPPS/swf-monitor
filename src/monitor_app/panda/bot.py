@@ -659,7 +659,7 @@ class PandaBot:
         """One-liner catalog of all tools for the system prompt."""
         lines = [
             "TOOL AWARENESS — three tiers:",
-            "1. CATALOG: All tools listed below as one-liners — full awareness at minimal token cost.",
+            "1. CATALOG: All tools are in your system prompt as one-liners — full awareness at minimal token cost.",
             "2. PRE-LOADED: Tools you can call directly — pre-loaded based on relevance to this query.",
             "3. select_tools: Call this to load any catalog tool that isn't pre-loaded. You are never limited to pre-loaded tools.",
             "",
