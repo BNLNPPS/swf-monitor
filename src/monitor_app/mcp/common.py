@@ -286,12 +286,12 @@ def get_available_tools_list() -> list:
             "parameters": ["site", "hours"],
         },
         {
-            "name": "panda_doc_search",
-            "description": "Search ePIC documentation (epicdoc) — SWF testbed, monitor, PanDA, Bamboo docs. Semantic search.",
+            "name": "epic_doc_search",
+            "description": "Search ePIC documentation (epicdoc) — SWF, PanDA, EICrecon, containers, afterburner and more. Semantic search.",
             "parameters": ["query", "top_k"],
         },
         {
-            "name": "panda_doc_contents",
+            "name": "epic_doc_contents",
             "description": "Table of contents of epicdoc — what documentation is indexed and searchable.",
             "parameters": [],
         },

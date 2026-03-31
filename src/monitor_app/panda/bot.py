@@ -39,7 +39,7 @@ MEMORY_USERNAME = 'pandabot'
 MCP_URL = os.environ.get(
     'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
 )
-BOT_TOOL_PREFIXES = ('panda_', 'pcs_')
+BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
 
 # Stdio MCP servers — launched as subprocesses at startup.
 # update_commands: if present, the server can be updated via bot_manage_servers.

@@ -416,15 +416,16 @@ def _get_chroma_collection():
 
 
 @mcp.tool()
-async def panda_doc_search(
+async def epic_doc_search(
     query: str,
     top_k: int = 5,
 ) -> dict:
     """
     Search ePIC documentation by natural language query (semantic search).
 
-    Searches across SWF testbed, SWF monitor, Bamboo/PanDA, and BigMon docs.
-    Use "what's in epicdoc?" to see the full table of contents.
+    Searches across SWF testbed, SWF monitor, Bamboo/PanDA, EICrecon,
+    containers, afterburner, and more. Use "what's in epicdoc?" to see
+    the full table of contents.
 
     Args:
         query: Natural language question (e.g. "how does fast processing work?").
@@ -452,12 +453,12 @@ async def panda_doc_search(
 
 
 @mcp.tool()
-async def panda_doc_contents() -> dict:
+async def epic_doc_contents() -> dict:
     """
     Show what's in epicdoc — table of contents of all indexed documentation.
 
     Lists every source and document with chunk counts. Use this to discover
-    what documentation is searchable via panda_doc_search.
+    what documentation is searchable via epic_doc_search.
     """
     col = await sync_to_async(_get_chroma_collection)()
     all_meta = await sync_to_async(col.get)(include=["metadatas"])
