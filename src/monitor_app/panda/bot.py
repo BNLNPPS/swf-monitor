@@ -25,7 +25,9 @@ from datetime import datetime, timezone
 
 import anthropic
 import httpx
+import numpy as np
 from mattermostdriver import Driver
+from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger('panda_bot')
 
@@ -336,6 +338,63 @@ def mcp_tool_to_anthropic(tool):
     }
 
 
+SELECT_TOOLS_TOOL = {
+    "name": "select_tools",
+    "description": (
+        "Load additional tools by name from the tool catalog. "
+        "Call this when the pre-loaded tools don't cover what you need. "
+        "The tool catalog is listed in your system prompt."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Tool names to load from the catalog.",
+            },
+        },
+        "required": ["names"],
+    },
+}
+
+# Number of tools to pre-load via semantic matching
+TOP_K_TOOLS = 8
+
+
+class ToolSelector:
+    """Selects relevant tools for a user message via semantic similarity.
+
+    At startup, embeds all tool descriptions into vectors. Per message,
+    embeds the user text and returns the top-K most relevant tools.
+    """
+
+    def __init__(self):
+        self._model = SentenceTransformer('all-MiniLM-L6-v2')
+        self._tool_names: list[str] = []
+        self._tool_embeddings: np.ndarray | None = None
+
+    def build_index(self, tools: list[dict]):
+        """Embed all tool descriptions. Call once at startup.
+
+        Args:
+            tools: list of Anthropic-format tool dicts with 'name' and 'description'.
+        """
+        self._tool_names = [t['name'] for t in tools]
+        texts = [f"{t['name']}: {t['description']}" for t in tools]
+        self._tool_embeddings = self._model.encode(texts, normalize_embeddings=True)
+        logger.info(f"ToolSelector: indexed {len(tools)} tools")
+
+    def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[str]:
+        """Return the top-K tool names most relevant to the message."""
+        if self._tool_embeddings is None or len(self._tool_names) == 0:
+            return []
+        msg_embedding = self._model.encode(message, normalize_embeddings=True)
+        scores = self._tool_embeddings @ msg_embedding
+        top_indices = np.argsort(scores)[-top_k:][::-1]
+        return [self._tool_names[i] for i in top_indices]
+
+
 class PandaBot:
     """Mattermost bot that answers PanDA production questions via Claude.
 
@@ -363,8 +422,10 @@ class PandaBot:
         self.channel_id = None
         self.system_prompt = SYSTEM_PREAMBLE
         self.anthropic_tools = []
+        self._tool_registry: dict[str, dict] = {}  # tool_name → Anthropic tool dict
         self._tool_router: dict[str, object] = {}  # tool_name → MCP client
         self._stdio_clients: list[StdioMCPClient] = []
+        self._tool_selector = ToolSelector()
         self._respond_lock = asyncio.Lock()
         self._active_threads = set()
         self._mm_user_cache: dict[str, str] = {}
@@ -518,7 +579,12 @@ class PandaBot:
             logger.exception(f"Failed to record DPID:{dpid}")
 
     async def _setup_mcp(self):
-        """Discover tools from all MCP servers (HTTP + stdio)."""
+        """Discover tools from all MCP servers (HTTP + stdio).
+
+        Builds a tool registry (full schemas) and a semantic index for
+        progressive tool loading. Tools are selected per-message based
+        on relevance rather than loaded all at once.
+        """
         # 1. HTTP MCP server (Django — PanDA, PCS, memory tools)
         mcp = MCPClient(self.mcp_url)
         try:
@@ -526,9 +592,10 @@ class PandaBot:
             tools = await mcp.list_tools()
             for t in tools:
                 if t["name"].startswith(BOT_TOOL_PREFIXES):
-                    self.anthropic_tools.append(mcp_tool_to_anthropic(t))
+                    at = mcp_tool_to_anthropic(t)
+                    self._tool_registry[at["name"]] = at
                     # HTTP tools routed at call time (no persistent client)
-            logger.info(f"HTTP MCP: {len(self.anthropic_tools)} tools")
+            logger.info(f"HTTP MCP: {len(self._tool_registry)} tools")
             if mcp.server_instructions:
                 self.system_prompt = (
                     SYSTEM_PREAMBLE + "\n" + mcp.server_instructions
@@ -551,7 +618,8 @@ class PandaBot:
                 await client.initialize()
                 tools = await client.list_tools()
                 for t in tools:
-                    self.anthropic_tools.append(mcp_tool_to_anthropic(t))
+                    at = mcp_tool_to_anthropic(t)
+                    self._tool_registry[at["name"]] = at
                     self._tool_router[t["name"]] = client
                 self._stdio_clients.append(client)
                 logger.info(
@@ -563,9 +631,39 @@ class PandaBot:
                 )
 
         # 3. Virtual tools (handled by the bot itself)
-        self.anthropic_tools.append(BOT_MANAGE_SERVERS_TOOL)
+        self._tool_registry['bot_manage_servers'] = BOT_MANAGE_SERVERS_TOOL
 
-        logger.info(f"Total tools available: {len(self.anthropic_tools)}")
+        # 4. Build semantic index for tool selection
+        all_tools = list(self._tool_registry.values())
+        self._tool_selector.build_index(all_tools)
+
+        logger.info(f"Total tools in registry: {len(self._tool_registry)}")
+
+    def _build_tool_catalog(self):
+        """One-liner catalog of all tools for the system prompt."""
+        lines = ["Available tool catalog (use select_tools to load any not pre-loaded):"]
+        for name, tool in sorted(self._tool_registry.items()):
+            desc = tool["description"].split('\n')[0][:120]
+            lines.append(f"- {name}: {desc}")
+        return "\n".join(lines)
+
+    def _select_tools_for_message(self, message: str) -> list[dict]:
+        """Pick tools for this message: semantic top-K + always-on tools."""
+        selected_names = self._tool_selector.select(message, top_k=TOP_K_TOOLS)
+        tools = []
+        seen = set()
+        for name in selected_names:
+            if name in self._tool_registry and name not in seen:
+                tools.append(self._tool_registry[name])
+                seen.add(name)
+        # Always include virtual tools
+        for name in ('bot_manage_servers',):
+            if name in self._tool_registry and name not in seen:
+                tools.append(self._tool_registry[name])
+                seen.add(name)
+        # Always include select_tools for fallback
+        tools.append(SELECT_TOOLS_TOOL)
+        return tools
 
     async def _load_recent_dialog(self):
         """Load recent dialog from the database — all users, all contexts."""
@@ -777,11 +875,15 @@ class PandaBot:
         """
         async with self._respond_lock:
             messages = await self._load_recent_dialog()
-            reply, dpid_verified = await self._process_message(messages, tagged_message, root_id)
+            reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
             no_query_warn = ":warning: *This response was not based on a live data query.*"
             reply = reply.replace(no_query_warn, "").rstrip()
             if not dpid_verified and not reply.startswith("Sorry,"):
                 reply += "\n\n" + no_query_warn
+            # Append tool selection metadata
+            suggested = ', '.join(tool_meta['suggested']) or 'none'
+            used = ', '.join(tool_meta['used']) or 'none'
+            reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
             # Record inside lock so the next load sees this exchange
             await self._record_exchange(tagged_message, reply, post_id, root_id)
 
@@ -917,14 +1019,24 @@ class PandaBot:
         try:
             await mcp.initialize()
 
-            if not self.anthropic_tools:
+            # Fallback: if registry is empty (setup failed), load eagerly
+            if not self._tool_registry:
                 tools = await mcp.list_tools()
-                self.anthropic_tools = [
-                    mcp_tool_to_anthropic(t) for t in tools
-                    if t["name"].startswith(BOT_TOOL_PREFIXES)
-                ]
+                for t in tools:
+                    if t["name"].startswith(BOT_TOOL_PREFIXES):
+                        at = mcp_tool_to_anthropic(t)
+                        self._tool_registry[at["name"]] = at
+
+            # Select tools relevant to this message
+            active_tools = self._select_tools_for_message(message_text)
+            active_tool_names = {t['name'] for t in active_tools}
+            suggested_names = sorted(active_tool_names - {'select_tools', 'bot_manage_servers'})
+            tools_used = []
+            logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
             system = self._build_system_prompt()
+            tool_catalog = self._build_tool_catalog()
+            system_with_catalog = f"{system}\n\n{tool_catalog}"
 
             for _round in range(MAX_TOOL_ROUNDS):
                 response = await self.claude.beta.messages.create(
@@ -932,8 +1044,8 @@ class PandaBot:
                     model="claude-haiku-4-5-20251001",
                     max_tokens=4096,
                     cache_control={"type": "ephemeral"},
-                    system=system,
-                    tools=self.anthropic_tools,
+                    system=system_with_catalog,
+                    tools=active_tools,
                     messages=messages,
                     betas=["context-management-2025-06-27"],
                     context_management={
@@ -967,9 +1079,23 @@ class PandaBot:
                     if block.type != "tool_use":
                         continue
                     logger.info(f"Tool call: {block.name}({block.input})")
+                    if block.name not in ('select_tools', 'bot_manage_servers'):
+                        tools_used.append(block.name)
                     try:
                         # Virtual tools handled by the bot itself
-                        if block.name == 'bot_manage_servers':
+                        if block.name == 'select_tools':
+                            loaded = []
+                            for tname in block.input.get('names', []):
+                                if tname in self._tool_registry and tname not in active_tool_names:
+                                    active_tools.append(self._tool_registry[tname])
+                                    active_tool_names.add(tname)
+                                    loaded.append(tname)
+                            result_text = json.dumps({
+                                'loaded': loaded,
+                                'message': f"Loaded {len(loaded)} tools. They are now available for use.",
+                            })
+                            logger.info(f"select_tools loaded: {loaded}")
+                        elif block.name == 'bot_manage_servers':
                             result_text = await self._handle_manage_servers(block.input)
                         else:
                             # Route to the correct MCP server
@@ -1036,4 +1162,12 @@ class PandaBot:
         # Strip DPID citations from reply — user doesn't need to see them
         reply = re.sub(r'\s*\[?DPID:\s*[A-F0-9]{8}\]?\s*', '', reply).strip()
 
-        return reply, dpid_verified
+        # Deduplicate tools_used preserving order
+        seen = set()
+        tools_used = [t for t in tools_used if not (t in seen or seen.add(t))]
+
+        tool_meta = {
+            'suggested': suggested_names,
+            'used': tools_used,
+        }
+        return reply, dpid_verified, tool_meta
