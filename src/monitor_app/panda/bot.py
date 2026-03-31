@@ -392,32 +392,14 @@ class ToolSelector:
         self._tool_embeddings = self._model.encode(texts, normalize_embeddings=True)
         logger.info(f"ToolSelector: indexed {len(self._tool_names)} tools")
 
-    def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[str]:
-        """Return the most relevant tool names, truncated at score drop-off.
-
-        Takes top-K by score, then drops trailing tools where the score
-        gap to the previous tool exceeds the median gap — i.e. cuts at
-        the cliff.
-        """
+    def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[tuple[str, float]]:
+        """Return top-K tool names with scores, ranked by relevance."""
         if self._tool_embeddings is None or len(self._tool_names) == 0:
             return []
         msg_embedding = self._model.encode(message, normalize_embeddings=True)
         scores = self._tool_embeddings @ msg_embedding
         top_indices = np.argsort(scores)[-top_k:][::-1]
-        top_scores = scores[top_indices]
-        # Find the cliff: where gap between consecutive scores exceeds median gap
-        if len(top_scores) > 2:
-            gaps = top_scores[:-1] - top_scores[1:]
-            median_gap = np.median(gaps)
-            cutoff = len(top_scores)
-            for i, gap in enumerate(gaps):
-                if gap > median_gap * 2:
-                    cutoff = i + 1
-                    break
-            # Always keep at least 3
-            cutoff = max(cutoff, 3)
-            top_indices = top_indices[:cutoff]
-        return [self._tool_names[i] for i in top_indices]
+        return [(self._tool_names[i], float(scores[i])) for i in top_indices]
 
 
 class PandaBot:
@@ -675,12 +657,16 @@ class PandaBot:
             lines.append(f"- {name}: {desc}")
         return "\n".join(lines)
 
-    def _select_tools_for_message(self, message: str) -> list[dict]:
-        """Pick tools for this message: semantic top-K + always-on tools."""
-        selected_names = self._tool_selector.select(message, top_k=TOP_K_TOOLS)
+    def _select_tools_for_message(self, message: str) -> tuple[list[dict], list[tuple[str, float]]]:
+        """Pick tools for this message: semantic top-K + always-on tools.
+
+        Returns (active_tools, scored_names) where scored_names is
+        [(name, score), ...] in ranked order.
+        """
+        scored = self._tool_selector.select(message, top_k=TOP_K_TOOLS)
         tools = []
         seen = set()
-        for name in selected_names:
+        for name, _score in scored:
             if name in self._tool_registry and name not in seen:
                 tools.append(self._tool_registry[name])
                 seen.add(name)
@@ -691,7 +677,7 @@ class PandaBot:
                 seen.add(name)
         # Always include select_tools for fallback
         tools.append(SELECT_TOOLS_TOOL)
-        return tools
+        return tools, scored
 
     async def _load_recent_dialog(self):
         """Load recent dialog from the database — all users, all contexts."""
@@ -1056,11 +1042,10 @@ class PandaBot:
                         self._tool_registry[at["name"]] = at
 
             # Select tools relevant to this message
-            active_tools = self._select_tools_for_message(message_text)
+            active_tools, scored = self._select_tools_for_message(message_text)
             active_tool_names = {t['name'] for t in active_tools}
             suggested_names = [
-                t['name'] for t in active_tools
-                if t['name'] not in ('select_tools', 'bot_manage_servers')
+                f"{name}:{score:.2f}" for name, score in scored
             ]
             tools_used = []
             logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
