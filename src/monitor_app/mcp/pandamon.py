@@ -384,11 +384,15 @@ async def panda_harvester_workers(
 
 
 # ── ePIC Doc Search ────────────────────────────────────────────────────────
-# NOTE: pysqlite3 swap must happen before chromadb import (RHEL8 sqlite 3.26)
-# Deferred to first tool call to avoid slowing down MCP tools/list.
-
+# pysqlite3 swap MUST happen before any chromadb import (RHEL8 sqlite 3.26)
 import os
+import sys as _sys
 os.environ.setdefault("HF_HOME", "/opt/swf-monitor/shared/hf_cache")
+try:
+    __import__("pysqlite3")
+    _sys.modules["sqlite3"] = _sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
 
 CHROMA_PATH = "/data/wenauseic/github/swf-monitor/chroma_db"
 CHROMA_COLLECTION = "bamboo_docs"
@@ -403,12 +407,6 @@ def _get_chroma_collection():
     global _chroma_col
     if _chroma_col is not None:
         return _chroma_col
-    import sys as _sys
-    try:
-        __import__("pysqlite3")
-        _sys.modules["sqlite3"] = _sys.modules.pop("pysqlite3")
-    except ImportError:
-        pass
     import chromadb
     from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
     ef = SentenceTransformerEmbeddingFunction(CHROMA_MODEL)
