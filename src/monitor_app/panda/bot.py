@@ -365,8 +365,10 @@ TOP_K_TOOLS = 8
 class ToolSelector:
     """Selects relevant tools for a user message via semantic similarity.
 
-    At startup, embeds all tool descriptions into vectors. Per message,
-    embeds the user text and returns the top-K most relevant tools.
+    At startup, embeds all tool descriptions into vectors. Tool names are
+    prefixed with their MCP server name for embedding (e.g. "github:get_job_logs")
+    so the model can distinguish tools from different domains. Returned names
+    are unprefixed (the actual tool name for dispatch).
     """
 
     def __init__(self):
@@ -374,16 +376,21 @@ class ToolSelector:
         self._tool_names: list[str] = []
         self._tool_embeddings: np.ndarray | None = None
 
-    def build_index(self, tools: list[dict]):
-        """Embed all tool descriptions. Call once at startup.
+    def build_index(self, tool_registry: dict[str, dict], server_map: dict[str, str]):
+        """Embed all tool descriptions with server-prefixed names.
 
         Args:
-            tools: list of Anthropic-format tool dicts with 'name' and 'description'.
+            tool_registry: tool_name → Anthropic tool dict
+            server_map: tool_name → server name (e.g. 'github', 'xrootd', 'swf-monitor')
         """
-        self._tool_names = [t['name'] for t in tools]
-        texts = [f"{t['name']}: {t['description']}" for t in tools]
+        self._tool_names = []
+        texts = []
+        for name, tool in tool_registry.items():
+            self._tool_names.append(name)
+            server = server_map.get(name, 'unknown')
+            texts.append(f"{server}:{name}: {tool['description']}")
         self._tool_embeddings = self._model.encode(texts, normalize_embeddings=True)
-        logger.info(f"ToolSelector: indexed {len(tools)} tools")
+        logger.info(f"ToolSelector: indexed {len(self._tool_names)} tools")
 
     def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[str]:
         """Return the top-K tool names most relevant to the message."""
@@ -423,6 +430,7 @@ class PandaBot:
         self.system_prompt = SYSTEM_PREAMBLE
         self.anthropic_tools = []
         self._tool_registry: dict[str, dict] = {}  # tool_name → Anthropic tool dict
+        self._tool_server_map: dict[str, str] = {}  # tool_name → server name
         self._tool_router: dict[str, object] = {}  # tool_name → MCP client
         self._stdio_clients: list[StdioMCPClient] = []
         self._tool_selector = ToolSelector()
@@ -594,7 +602,7 @@ class PandaBot:
                 if t["name"].startswith(BOT_TOOL_PREFIXES):
                     at = mcp_tool_to_anthropic(t)
                     self._tool_registry[at["name"]] = at
-                    # HTTP tools routed at call time (no persistent client)
+                    self._tool_server_map[at["name"]] = "swf-monitor"
             logger.info(f"HTTP MCP: {len(self._tool_registry)} tools")
             if mcp.server_instructions:
                 self.system_prompt = (
@@ -620,6 +628,7 @@ class PandaBot:
                 for t in tools:
                     at = mcp_tool_to_anthropic(t)
                     self._tool_registry[at["name"]] = at
+                    self._tool_server_map[at["name"]] = server_cfg['name']
                     self._tool_router[t["name"]] = client
                 self._stdio_clients.append(client)
                 logger.info(
@@ -633,9 +642,10 @@ class PandaBot:
         # 3. Virtual tools (handled by the bot itself)
         self._tool_registry['bot_manage_servers'] = BOT_MANAGE_SERVERS_TOOL
 
-        # 4. Build semantic index for tool selection
-        all_tools = list(self._tool_registry.values())
-        self._tool_selector.build_index(all_tools)
+        # 4. Build semantic index with server-prefixed names for domain separation.
+        # "github:get_job_logs" vs "panda:panda_list_jobs" gives the embedding
+        # model semantic context to distinguish CI jobs from PanDA jobs.
+        self._tool_selector.build_index(self._tool_registry, self._tool_server_map)
 
         logger.info(f"Total tools in registry: {len(self._tool_registry)}")
 
