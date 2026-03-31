@@ -1015,6 +1015,42 @@ def study_job(pandaid):
     # Monitoring page URL
     result["monitor_url"] = f"https://epic-devcloud.org/panda/jobs/{pandaid}/"
 
+    # 5. Log analysis for failed jobs (via Bamboo askpanda_atlas)
+    jobstatus = job.get('jobstatus', '')
+    if jobstatus in ('failed', 'holding', 'cancelled'):
+        try:
+            from askpanda_atlas.log_analysis_impl import (
+                _select_log_filename, _fetch_log_text,
+                extract_log_excerpt, classify_failure,
+            )
+            from askpanda_atlas._fallback_http import get_base_url
+
+            base_url = get_base_url()
+            log_filename = _select_log_filename(job)
+            log_text = _fetch_log_text(pandaid, log_filename, base_url, timeout=30)
+
+            if log_text:
+                piloterrorcode = int(job.get('piloterrorcode') or 0)
+                piloterrordiag = str(job.get('piloterrordiag') or '')
+                excerpt = extract_log_excerpt(
+                    log_text, log_filename, piloterrorcode, piloterrordiag
+                )
+                failure_type = classify_failure(job, excerpt)
+                result['log_analysis'] = {
+                    'failure_type': failure_type,
+                    'log_filename': log_filename,
+                    'log_excerpt': excerpt,
+                    'log_available': True,
+                }
+            else:
+                result['log_analysis'] = {
+                    'log_available': False,
+                    'log_filename': log_filename,
+                }
+        except Exception as e:
+            logger.error(f"study_job log analysis failed: {e}")
+            result['log_analysis'] = {'error': str(e)}
+
     return result
 
 
