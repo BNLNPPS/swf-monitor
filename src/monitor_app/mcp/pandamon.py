@@ -387,6 +387,9 @@ async def panda_harvester_workers(
 # NOTE: pysqlite3 swap must happen before chromadb import (RHEL8 sqlite 3.26)
 # Deferred to first tool call to avoid slowing down MCP tools/list.
 
+import os
+os.environ.setdefault("HF_HOME", "/opt/swf-monitor/shared/hf_cache")
+
 CHROMA_PATH = "/data/wenauseic/github/swf-monitor/chroma_db"
 CHROMA_COLLECTION = "bamboo_docs"
 CHROMA_MODEL = "all-MiniLM-L6-v2"
