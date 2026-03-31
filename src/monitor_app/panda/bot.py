@@ -989,10 +989,11 @@ class PandaBot:
             reply = reply.replace(no_query_warn, "").rstrip()
             if not dpid_verified and not reply.startswith("Sorry,"):
                 reply += "\n\n" + no_query_warn
-            # Append tool selection metadata
-            suggested = ', '.join(tool_meta['suggested']) or 'none'
-            used = ', '.join(tool_meta['used']) or 'none'
-            reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
+            # Append tool selection metadata only when tools were used
+            if tool_meta['used']:
+                suggested = ', '.join(tool_meta['suggested']) or 'none'
+                used = ', '.join(tool_meta['used'])
+                reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
             # Record inside lock so the next load sees this exchange
             await self._record_exchange(tagged_message, reply, post_id, root_id)
 
