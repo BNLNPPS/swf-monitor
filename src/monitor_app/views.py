@@ -2449,7 +2449,7 @@ def panda_slash_command(request):
             if job.get('errors'):
                 lines.append('**Errors:**')
                 for e in job['errors']:
-                    lines.append(f"  - {e['source']}:{e['code']} — {e.get('diag', '')[:120]}")
+                    lines.append(f"  - {e.get('component', '?')}:{e.get('code', '?')} — {e.get('diag', '')[:120]}")
             files = data.get('files', [])
             if files:
                 out = [f for f in files if f.get('type') == 'output']
