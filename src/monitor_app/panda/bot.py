@@ -393,12 +393,30 @@ class ToolSelector:
         logger.info(f"ToolSelector: indexed {len(self._tool_names)} tools")
 
     def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[str]:
-        """Return the top-K tool names most relevant to the message."""
+        """Return the most relevant tool names, truncated at score drop-off.
+
+        Takes top-K by score, then drops trailing tools where the score
+        gap to the previous tool exceeds the median gap — i.e. cuts at
+        the cliff.
+        """
         if self._tool_embeddings is None or len(self._tool_names) == 0:
             return []
         msg_embedding = self._model.encode(message, normalize_embeddings=True)
         scores = self._tool_embeddings @ msg_embedding
         top_indices = np.argsort(scores)[-top_k:][::-1]
+        top_scores = scores[top_indices]
+        # Find the cliff: where gap between consecutive scores exceeds median gap
+        if len(top_scores) > 2:
+            gaps = top_scores[:-1] - top_scores[1:]
+            median_gap = np.median(gaps)
+            cutoff = len(top_scores)
+            for i, gap in enumerate(gaps):
+                if gap > median_gap * 2:
+                    cutoff = i + 1
+                    break
+            # Always keep at least 3
+            cutoff = max(cutoff, 3)
+            top_indices = top_indices[:cutoff]
         return [self._tool_names[i] for i in top_indices]
 
 
