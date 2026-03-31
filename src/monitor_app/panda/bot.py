@@ -657,7 +657,14 @@ class PandaBot:
 
     def _build_tool_catalog(self):
         """One-liner catalog of all tools for the system prompt."""
-        lines = ["Available tool catalog (use select_tools to load any not pre-loaded):"]
+        lines = [
+            "TOOL AWARENESS — three tiers:",
+            "1. CATALOG: All tools listed below as one-liners. You can see what exists.",
+            "2. PRE-LOADED: Tools you can call directly — pre-loaded based on relevance to this query.",
+            "3. select_tools: Call this to load any catalog tool that isn't pre-loaded. You are never limited to pre-loaded tools.",
+            "",
+            "Full tool catalog:",
+        ]
         for name, tool in sorted(self._tool_registry.items()):
             desc = tool["description"].split('\n')[0][:120]
             lines.append(f"- {name}: {desc}")
@@ -976,6 +983,8 @@ class PandaBot:
         async with self._respond_lock:
             messages = await self._load_recent_dialog()
             reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
+            # Strip any tool metadata Haiku echoed from conversation history
+            reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
             no_query_warn = ":warning: *This response was not based on a live data query.*"
             reply = reply.replace(no_query_warn, "").rstrip()
             if not dpid_verified and not reply.startswith("Sorry,"):
