@@ -657,16 +657,40 @@ class PandaBot:
             lines.append(f"- {name}: {desc}")
         return "\n".join(lines)
 
+    # Stdio servers only included when the user's message mentions the domain.
+    # Maps server name → keywords that trigger inclusion.
+    _SERVER_KEYWORDS = {
+        'github': ('github', 'repo', 'pr ', 'pull request', 'issue', 'commit', 'branch'),
+        'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile'),
+        'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
+    }
+
     def _select_tools_for_message(self, message: str) -> tuple[list[dict], list[tuple[str, float]]]:
         """Pick tools for this message: semantic top-K + always-on tools.
+
+        Strips the [username in #channel] tag before embedding. Excludes
+        stdio server tools unless the message mentions that domain.
 
         Returns (active_tools, scored_names) where scored_names is
         [(name, score), ...] in ranked order.
         """
-        scored = self._tool_selector.select(message, top_k=TOP_K_TOOLS)
+        # Strip context tag before embedding
+        clean_message = re.sub(r'^\[.*?\]\s*', '', message)
+        msg_lower = clean_message.lower()
+
+        # Determine which servers are relevant
+        allowed_servers = {'swf-monitor'}  # always included
+        for server, keywords in self._SERVER_KEYWORDS.items():
+            if any(kw in msg_lower for kw in keywords):
+                allowed_servers.add(server)
+
+        scored = self._tool_selector.select(clean_message, top_k=TOP_K_TOOLS)
         tools = []
         seen = set()
         for name, _score in scored:
+            server = self._tool_server_map.get(name, 'unknown')
+            if server not in allowed_servers:
+                continue
             if name in self._tool_registry and name not in seen:
                 tools.append(self._tool_registry[name])
                 seen.add(name)
