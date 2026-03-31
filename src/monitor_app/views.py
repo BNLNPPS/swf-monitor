@@ -2455,6 +2455,20 @@ def panda_slash_command(request):
                 out = [f for f in files if f.get('type') == 'output']
                 log = [f for f in files if f.get('type') == 'log']
                 lines.append(f"**Files:** {len(files)} total ({len(out)} output, {len(log)} log)")
+            la = data.get('log_analysis', {})
+            if la.get('log_available'):
+                src = la.get('log_source', 'filebrowser')
+                lines.append(f"**Log analysis** (via {src}):")
+                lines.append(f"  - Failure type: **{la.get('failure_type', '?')}**")
+                excerpt = la.get('log_excerpt', '')
+                if excerpt:
+                    # Show last few meaningful lines, truncated for Mattermost
+                    excerpt_lines = [
+                        l for l in excerpt.strip().splitlines() if l.strip()
+                    ][-8:]
+                    lines.append('```')
+                    lines.extend(excerpt_lines)
+                    lines.append('```')
             if data.get('monitor_url'):
                 lines.append(f"[PanDA Monitor]({data['monitor_url']})")
             return JsonResponse({'text': '\n'.join(lines)})
