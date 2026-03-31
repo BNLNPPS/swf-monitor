@@ -384,26 +384,34 @@ async def panda_harvester_workers(
 
 
 # ── ePIC Doc Search ────────────────────────────────────────────────────────
-
-import sys
-try:
-    __import__("pysqlite3")
-    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-except ImportError:
-    pass
+# NOTE: pysqlite3 swap must happen before chromadb import (RHEL8 sqlite 3.26)
+# Deferred to first tool call to avoid slowing down MCP tools/list.
 
 CHROMA_PATH = "/data/wenauseic/github/swf-monitor/chroma_db"
 CHROMA_COLLECTION = "bamboo_docs"
 CHROMA_MODEL = "all-MiniLM-L6-v2"
 
 
+_chroma_col = None
+
+
 def _get_chroma_collection():
     """Lazy-load ChromaDB collection (cached after first call)."""
+    global _chroma_col
+    if _chroma_col is not None:
+        return _chroma_col
+    import sys as _sys
+    try:
+        __import__("pysqlite3")
+        _sys.modules["sqlite3"] = _sys.modules.pop("pysqlite3")
+    except ImportError:
+        pass
     import chromadb
     from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
     ef = SentenceTransformerEmbeddingFunction(CHROMA_MODEL)
     client = chromadb.PersistentClient(path=CHROMA_PATH)
-    return client.get_collection(CHROMA_COLLECTION, embedding_function=ef)
+    _chroma_col = client.get_collection(CHROMA_COLLECTION, embedding_function=ef)
+    return _chroma_col
 
 
 @mcp.tool()

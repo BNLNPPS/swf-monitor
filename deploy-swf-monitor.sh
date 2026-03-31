@@ -183,9 +183,14 @@ chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 log "Updating current symlink..."
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 
-# Graceful Apache reload — finishes in-flight requests, picks up new code
-log "Reloading Apache (graceful)..."
-systemctl reload httpd
+# Apache: reload if running, start if not
+if systemctl is-active httpd >/dev/null 2>&1; then
+    log "Reloading Apache (graceful)..."
+    systemctl reload httpd
+else
+    log "Apache was not running — starting..."
+    systemctl start httpd
+fi
 
 # Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
