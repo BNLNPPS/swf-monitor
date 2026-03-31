@@ -176,6 +176,10 @@ Guidelines:
 - For errors, show the top patterns with counts.
 - Default to 7 days unless the user specifies a time range.
 - Keep responses focused — don't dump raw JSON, extract and present the key information.
+- When panda_study_job returns a log_analysis block with log_available=true, ALWAYS \
+present the failure_type and relevant lines from the log_excerpt prominently in your \
+analysis. This is real log evidence — it takes precedence over guessing from error fields. \
+Cite the log_source (filebrowser or harvester) so the user knows where the log came from.
 
 PLOTS: You can generate and post matplotlib charts as images — they render server-side \
 and appear inline in Mattermost. When a user asks for a chart, pie chart, plot, or \
