@@ -1040,7 +1040,10 @@ class PandaBot:
             # Select tools relevant to this message
             active_tools = self._select_tools_for_message(message_text)
             active_tool_names = {t['name'] for t in active_tools}
-            suggested_names = sorted(active_tool_names - {'select_tools', 'bot_manage_servers'})
+            suggested_names = [
+                t['name'] for t in active_tools
+                if t['name'] not in ('select_tools', 'bot_manage_servers')
+            ]
             tools_used = []
             logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
