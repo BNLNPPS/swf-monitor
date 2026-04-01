@@ -294,7 +294,7 @@ class TFSliceViewSet(viewsets.ModelViewSet):
     serializer_class = TFSliceSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticated]
-    filterset_fields = ['run_number', 'status', 'stf_filename', 'assigned_worker']
+    filterset_fields = ['run_number', 'status', 'stf_filename', 'assigned_worker', 'tf_filename', 'slice_id']
 
 
 class WorkerViewSet(viewsets.ModelViewSet):
