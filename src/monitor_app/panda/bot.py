@@ -406,6 +406,7 @@ class StdioMCPClient:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self.env,
+            limit=1024 * 1024,  # 1 MB readline buffer (default 64 KB too small for large tool lists)
         )
         logger.info(f"Stdio MCP '{self.name}' started (pid {self._process.pid})")
 
