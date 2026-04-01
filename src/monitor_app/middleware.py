@@ -60,11 +60,17 @@ class TunnelAuthMiddleware:
 
     def __call__(self, request):
         if not request.user.is_authenticated and _is_localhost(request):
-            # Reuse same logic as TunnelAuthentication DRF backend
-            auth = TunnelAuthentication()
-            result = auth.authenticate(request)
-            if result:
-                request.user = result[0]
+            remote_user = request.META.get('HTTP_X_REMOTE_USER', '').strip()
+            if remote_user:
+                User = get_user_model()
+                user, created = User.objects.get_or_create(
+                    username=remote_user,
+                    defaults={'is_active': True},
+                )
+                if created:
+                    logger.info(f"Auto-created user '{remote_user}' from tunnel proxy")
+                request.user = user
+            # No X-Remote-User → leave request anonymous (proxy user not logged in)
         return self.get_response(request)
 
 
