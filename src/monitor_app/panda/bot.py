@@ -361,6 +361,9 @@ Guidelines:
 - For errors, show the top patterns with counts.
 - Default to 7 days unless the user specifies a time range.
 - Keep responses focused — don't dump raw JSON, extract and present the key information.
+- LXR CODE BROWSER: When lxr_ident or lxr_search results include URLs, you MUST include \
+those URLs in your response as clickable links. Every file reference from LXR must have \
+its link. Do NOT strip or omit LXR URLs — they are the primary value of the tool.
 - When panda_study_job returns a log_analysis block with log_available=true, ALWAYS \
 present the failure_type and relevant lines from the log_excerpt prominently in your \
 analysis. This is real log evidence — it takes precedence over guessing from error fields. \
