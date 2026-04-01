@@ -19,9 +19,18 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
+
+# ChromaDB requires sqlite3 >= 3.35; RHEL8 ships 3.26.
+# pysqlite3-binary bundles a modern sqlite3 — swap BEFORE any chromadb import.
+try:
+    __import__("pysqlite3")
+    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+except ImportError:
+    pass
 
 import anthropic
 import httpx
@@ -125,6 +134,167 @@ BOT_MANAGE_SERVERS_TOOL = {
         "required": ["action"],
     },
 }
+
+# ── ePIC Doc Search (virtual tools — handled in-process) ───────────────────
+
+CHROMA_PATH = "/data/wenauseic/github/swf-monitor/chroma_db"
+CHROMA_COLLECTION = "bamboo_docs"
+
+EPIC_DOC_SEARCH_TOOL = {
+    "name": "epic_doc_search",
+    "description": (
+        "Search ePIC documentation by natural-language query (semantic vector search). "
+        "Covers SWF testbed, SWF monitor, Bamboo/PanDA, EICrecon, containers, ePIC production, "
+        "EIC master docs, afterburner, eic-shell, and more. "
+        "Use for conceptual 'how does X work?' questions about the software and experiment."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Natural-language question (e.g. 'how does fast processing work?').",
+            },
+            "top_k": {
+                "type": "integer",
+                "description": "Number of results (default 5, max 20).",
+                "default": 5,
+            },
+        },
+        "required": ["query"],
+    },
+}
+
+EPIC_DOC_CONTENTS_TOOL = {
+    "name": "epic_doc_contents",
+    "description": (
+        "Show what's in epicdoc — table of contents of all indexed ePIC documentation. "
+        "Lists every source and document with chunk counts. Use to discover what documentation "
+        "is searchable via epic_doc_search."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+
+class DocSearchHandler:
+    """Handles epic_doc_search and epic_doc_contents using a ChromaDB vector store.
+
+    Lazy-loads ChromaDB on first call, caches the collection handle.
+    Runs in the long-lived bot process so the embedding model loads once.
+    """
+
+    def __init__(self):
+        self._collection = None
+        self._init_error = None
+
+    def _ensure_collection(self):
+        """Lazy-load ChromaDB collection. Returns error string or None."""
+        if self._collection is not None:
+            return None
+        if self._init_error is not None:
+            return self._init_error
+
+        try:
+            import chromadb
+            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        except ImportError:
+            self._init_error = "chromadb not installed"
+            return self._init_error
+
+        if not os.path.exists(CHROMA_PATH):
+            self._init_error = f"ChromaDB path not found: {CHROMA_PATH}"
+            return self._init_error
+
+        try:
+            os.environ.setdefault("HF_HOME", "/opt/swf-monitor/shared/hf_cache")
+            ef = SentenceTransformerEmbeddingFunction("all-MiniLM-L6-v2")
+            client = chromadb.PersistentClient(path=CHROMA_PATH)
+            self._collection = client.get_collection(CHROMA_COLLECTION, embedding_function=ef)
+            logger.info(
+                f"DocSearch: loaded collection '{CHROMA_COLLECTION}' "
+                f"({self._collection.count()} chunks)"
+            )
+        except Exception as e:
+            self._init_error = f"ChromaDB init failed: {e}"
+            return self._init_error
+        return None
+
+    async def search(self, arguments: dict) -> str:
+        """Handle epic_doc_search."""
+        query = str(arguments.get("query", "")).strip()
+        if not query:
+            return json.dumps({"error": "query is required"})
+
+        top_k = max(1, min(int(arguments.get("top_k", 5)), 20))
+
+        err = await asyncio.to_thread(self._ensure_collection)
+        if err:
+            return json.dumps({"error": err})
+
+        try:
+            raw = await asyncio.to_thread(
+                self._collection.query,
+                query_texts=[query], n_results=top_k,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as e:
+            return json.dumps({"error": f"ChromaDB query failed: {e}"})
+
+        results = []
+        docs = (raw.get("documents") or [[]])[0]
+        metas = (raw.get("metadatas") or [[]])[0]
+        dists = (raw.get("distances") or [[]])[0]
+        for doc, meta, dist in zip(docs, metas, dists):
+            score = max(0, (1 - dist) * 100)
+            results.append({
+                "score": round(score),
+                "source": meta.get("source", "?"),
+                "file": meta.get("rel_path", "?"),
+                "excerpt": doc[:1500],
+            })
+        return json.dumps({"query": query, "results": results})
+
+    async def contents(self, arguments: dict) -> str:
+        """Handle epic_doc_contents."""
+        err = await asyncio.to_thread(self._ensure_collection)
+        if err:
+            return json.dumps({"error": err})
+
+        try:
+            all_meta = await asyncio.to_thread(
+                self._collection.get, include=["metadatas"],
+            )
+        except Exception as e:
+            return json.dumps({"error": f"ChromaDB get failed: {e}"})
+
+        sources = {}
+        for meta in all_meta.get("metadatas", []):
+            src = meta.get("source", "unknown")
+            rel = meta.get("rel_path", "?")
+            total = meta.get("total_chunks", 1)
+            if src not in sources:
+                sources[src] = {}
+            sources[src][rel] = total
+
+        toc = {}
+        total_chunks = 0
+        total_files = 0
+        for src, files in sorted(sources.items()):
+            file_list = []
+            for rel, chunks in sorted(files.items()):
+                file_list.append({"file": rel, "chunks": chunks})
+                total_chunks += chunks
+                total_files += 1
+            toc[src] = file_list
+
+        return json.dumps({
+            "summary": f"{total_files} documents, {total_chunks} chunks across {len(toc)} sources",
+            "sources": toc,
+        })
+
 
 SYSTEM_PREAMBLE = """\
 You are the PanDA bot for the ePIC experiment at the Electron Ion Collider. \
@@ -444,6 +614,7 @@ class PandaBot:
         self._tool_router: dict[str, object] = {}  # tool_name → MCP client
         self._stdio_clients: list[StdioMCPClient] = []
         self._tool_selector = ToolSelector()
+        self._doc_handler = DocSearchHandler()
         self._respond_lock = asyncio.Lock()
         self._active_threads = set()
         self._mm_user_cache: dict[str, str] = {}
@@ -651,6 +822,15 @@ class PandaBot:
 
         # 3. Virtual tools (handled by the bot itself)
         self._tool_registry['bot_manage_servers'] = BOT_MANAGE_SERVERS_TOOL
+        self._tool_registry['epic_doc_search'] = EPIC_DOC_SEARCH_TOOL
+        self._tool_registry['epic_doc_contents'] = EPIC_DOC_CONTENTS_TOOL
+        self._tool_server_map['epic_doc_search'] = 'epicdoc'
+        self._tool_server_map['epic_doc_contents'] = 'epicdoc'
+
+        # 3b. Pre-load ChromaDB so first doc query is instant
+        err = self._doc_handler._ensure_collection()
+        if err:
+            logger.warning(f"DocSearch init deferred: {err}")
 
         # 4. Build semantic index with server-prefixed names for domain separation.
         # "github:get_job_logs" vs "panda:panda_list_jobs" gives the embedding
@@ -741,7 +921,7 @@ class PandaBot:
         prior_servers, prior_tools = self._extract_thread_tool_history(thread_context)
 
         # Determine which servers are relevant
-        allowed_servers = {'swf-monitor'} | prior_servers
+        allowed_servers = {'swf-monitor', 'epicdoc'} | prior_servers
         for server, keywords in self._SERVER_KEYWORDS.items():
             if any(kw in msg_lower for kw in keywords):
                 allowed_servers.add(server)
@@ -1214,6 +1394,10 @@ class PandaBot:
                             logger.info(f"select_tools loaded: {loaded}")
                         elif block.name == 'bot_manage_servers':
                             result_text = await self._handle_manage_servers(block.input)
+                        elif block.name == 'epic_doc_search':
+                            result_text = await self._doc_handler.search(block.input)
+                        elif block.name == 'epic_doc_contents':
+                            result_text = await self._doc_handler.contents(block.input)
                         else:
                             # Route to the correct MCP server
                             if block.name in self._tool_router:
