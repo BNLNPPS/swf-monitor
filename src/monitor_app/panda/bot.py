@@ -125,6 +125,23 @@ STDIO_MCP_SERVERS.append({
     ],
 })
 
+STDIO_MCP_SERVERS.append({
+    'name': 'uproot',
+    'source': 'github.com/eic/uproot-mcp-server',
+    'command': [
+        os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                     'swf-testbed/.venv/bin/uproot-mcp-server'),
+    ],
+    'env': {},
+    'repo_dir': '/data/wenauseic/github/uproot-mcp-server',
+    'update_commands': [
+        'cd /data/wenauseic/github/uproot-mcp-server && git pull && '
+        + os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                       'swf-testbed/.venv/bin/pip')
+        + ' install -e ".[xrootd]"',
+    ],
+})
+
 # Virtual tool definition for server management
 BOT_MANAGE_SERVERS_TOOL = {
     "name": "bot_manage_servers",
@@ -810,6 +827,8 @@ class PandaBot:
         'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
         'lxr': ('lxr', 'code browser', 'cross-reference', 'source code', 'identifier',
                 'class definition', 'where is', 'defined', 'header file', 'algorithm'),
+        'uproot': ('uproot', 'root file', '.root', 'ttree', 'branch', 'histogram',
+                   'root data', 'hepdata', 'ntuple'),
     }
 
     def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:
