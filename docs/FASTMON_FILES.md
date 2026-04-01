@@ -27,6 +27,9 @@ The FastMon system provides:
 - `stf_file`: Reference to parent STF file
 - `tf_filename`: Unique filename following pattern: `{stf_base}_tf_{sequence}.tf`
 - `file_size_bytes`: Size of the TF file (typically ~15% of STF size)
+- `tf_first`: Index of the first Time Frame in the sample
+- `tf_last`: Index of the last Time Frame in the sample
+- `tf_count`: Number of Time Frames in the sample (typically ~15% of `StfFile.tf_count`)
 - `status`: Processing status (registered, processing, processed, failed, done)
 - `metadata`: JSON field containing:
   - Simulation parameters
