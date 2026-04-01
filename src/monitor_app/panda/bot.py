@@ -80,8 +80,7 @@ if _github_token:
         'source': 'github.com/github/github-mcp-server',
         'command': [
             '/data/wenauseic/github/github-mcp-server/github-mcp-server', 'stdio',
-            '--read-only',
-            '--toolsets=repos,issues,pull_requests,actions,code_security',
+            '--toolsets=issues,pull_requests,actions,code_security,discussions',
         ],
         'env': {
             'GITHUB_PERSONAL_ACCESS_TOKEN': _github_token,
@@ -822,7 +821,7 @@ class PandaBot:
     # Stdio servers only included when the user's message mentions the domain.
     # Maps server name → keywords that trigger inclusion.
     _SERVER_KEYWORDS = {
-        'github': ('github', 'repo', 'pr ', 'pull request', 'issue', 'commit', 'branch'),
+        'github': ('github', 'repo', 'pr ', 'pull request', 'issue', 'commit', 'branch', 'discussion'),
         'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile'),
         'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
         'lxr': ('lxr', 'code browser', 'cross-reference', 'source code', 'identifier',
