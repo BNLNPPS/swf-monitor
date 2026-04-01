@@ -110,6 +110,21 @@ if _zenodo_key:
         ],
     })
 
+STDIO_MCP_SERVERS.append({
+    'name': 'lxr',
+    'source': 'github.com/BNLNPPS/lxr-mcp-server',
+    'command': [
+        os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                     'swf-testbed/.venv/bin/python'),
+        '/data/wenauseic/github/lxr-mcp-server/lxr_mcp_server.py',
+    ],
+    'env': {},
+    'repo_dir': '/data/wenauseic/github/lxr-mcp-server',
+    'update_commands': [
+        'cd /data/wenauseic/github/lxr-mcp-server && git pull',
+    ],
+})
+
 # Virtual tool definition for server management
 BOT_MANAGE_SERVERS_TOOL = {
     "name": "bot_manage_servers",
@@ -860,6 +875,8 @@ class PandaBot:
         'github': ('github', 'repo', 'pr ', 'pull request', 'issue', 'commit', 'branch'),
         'xrootd': ('xrootd', 'file', 'storage', 'directory', 'volatile'),
         'zenodo': ('zenodo', 'record', 'doi', 'deposit'),
+        'lxr': ('lxr', 'code browser', 'cross-reference', 'source code', 'identifier',
+                'class definition', 'where is', 'defined', 'header file', 'algorithm'),
     }
 
     def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:
