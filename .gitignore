@@ -211,3 +211,6 @@ ssl_cert.pem
 ssl_key.pem
 # NFS temporary files
 .nfs*
+
+# ChromaDB vector store (rebuilt by scripts/ingest_docs.py)
+chroma_db/
