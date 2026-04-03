@@ -1460,11 +1460,15 @@ class PandaBot:
         # Verify: did the LLM cite a DPID that was actually generated?
         dpid_verified = False
         if exchange_dpids:
-            # Find DPIDs: any line mentioning "dpid" or "provenance", extract 8-char hex
+            # Find cited DPIDs: line must mention trigger word AND contain a known DPID
+            generated = set(exchange_dpids)
+            generated_lower = {d.lower() for d in generated}
             cited = set()
             for line in reply.split('\n'):
                 if re.search(r'(?i)dpid|provenance', line):
-                    cited.update(re.findall(r'\b([A-Fa-f0-9]{8})\b', line))
+                    for h in re.findall(r'\b([A-Fa-f0-9]{8})\b', line):
+                        if h.upper() in generated or h.lower() in generated_lower:
+                            cited.add(h.upper())
             matched = cited & set(exchange_dpids)
             if matched:
                 dpid_verified = True
@@ -1476,10 +1480,18 @@ class PandaBot:
                 )
 
         # Strip DPID citations from reply — user doesn't need to see them
-        # Remove any line mentioning dpid/provenance (the LLM's citation)
+        # Remove lines that are DPID citations (trigger word + known DPID on same line)
+        generated_upper = {d.upper() for d in exchange_dpids} if exchange_dpids else set()
+        def _is_dpid_citation(line):
+            if not re.search(r'(?i)dpid|provenance', line):
+                return False
+            for h in re.findall(r'\b([A-Fa-f0-9]{8})\b', line):
+                if h.upper() in generated_upper:
+                    return True
+            return False
         reply = '\n'.join(
             line for line in reply.split('\n')
-            if not re.search(r'(?i)dpid|provenance', line)
+            if not _is_dpid_citation(line)
         ).strip()
 
         # Deduplicate tools_used preserving order
