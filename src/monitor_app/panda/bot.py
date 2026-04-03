@@ -1460,8 +1460,11 @@ class PandaBot:
         # Verify: did the LLM cite a DPID that was actually generated?
         dpid_verified = False
         if exchange_dpids:
-            logger.info(f"DPID check — reply text: {reply!r}")
-            cited = set(re.findall(r'(?:DPID|Data Provenance ID)[:\s]*\(?([A-Fa-f0-9]{8})\)?', reply))
+            # Find DPIDs: any line mentioning "dpid" or "provenance", extract 8-char hex
+            cited = set()
+            for line in reply.split('\n'):
+                if re.search(r'(?i)dpid|provenance', line):
+                    cited.update(re.findall(r'\b([A-Fa-f0-9]{8})\b', line))
             matched = cited & set(exchange_dpids)
             if matched:
                 dpid_verified = True
@@ -1473,7 +1476,11 @@ class PandaBot:
                 )
 
         # Strip DPID citations from reply — user doesn't need to see them
-        reply = re.sub(r'\s*\[?(?:DPID:|Data Provenance ID:)\s*\(?[A-F0-9]{8}\)?\]?\s*', '', reply).strip()
+        # Remove any line mentioning dpid/provenance (the LLM's citation)
+        reply = '\n'.join(
+            line for line in reply.split('\n')
+            if not re.search(r'(?i)dpid|provenance', line)
+        ).strip()
 
         # Deduplicate tools_used preserving order
         seen = set()
