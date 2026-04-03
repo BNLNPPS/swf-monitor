@@ -1460,7 +1460,8 @@ class PandaBot:
         # Verify: did the LLM cite a DPID that was actually generated?
         dpid_verified = False
         if exchange_dpids:
-            cited = set(re.findall(r'(?:DPID:|Data Provenance ID:)\s*\(?([A-F0-9]{8})\)?', reply))
+            logger.info(f"DPID check — reply text: {reply!r}")
+            cited = set(re.findall(r'(?:DPID|Data Provenance ID)[:\s]*\(?([A-Fa-f0-9]{8})\)?', reply))
             matched = cited & set(exchange_dpids)
             if matched:
                 dpid_verified = True
