@@ -143,6 +143,7 @@ STDIO_MCP_SERVERS.append({
 
 STDIO_MCP_SERVERS.append({
     'name': 'jlab-rucio',
+    'prefix': 'jlab_rucio_',
     'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
     'command': [
         os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
@@ -602,6 +603,7 @@ class PandaBot:
         self._tool_registry: dict[str, dict] = {}  # tool_name → Anthropic tool dict
         self._tool_server_map: dict[str, str] = {}  # tool_name → server name
         self._tool_router: dict[str, object] = {}  # tool_name → MCP client
+        self._tool_original_name: dict[str, str] = {}  # prefixed_name → original MCP tool name
         self._stdio_clients: list[StdioMCPClient] = []
         self._tool_selector = ToolSelector()
         self._doc_handler = DocSearchHandler()
@@ -730,9 +732,15 @@ class PandaBot:
                 await client.start()
                 await client.initialize()
                 tools = await client.list_tools()
+                prefix = cfg.get('prefix', '')
                 for t in tools:
-                    self.anthropic_tools.append(mcp_tool_to_anthropic(t))
-                    self._tool_router[t['name']] = client
+                    at = mcp_tool_to_anthropic(t)
+                    original_name = at["name"]
+                    if prefix:
+                        at["name"] = f"{prefix}{original_name}"
+                    self.anthropic_tools.append(at)
+                    self._tool_router[at["name"]] = client
+                    self._tool_original_name[at["name"]] = original_name
                 self._stdio_clients.append(client)
                 return json.dumps({
                     'success': True,
@@ -799,11 +807,16 @@ class PandaBot:
                 await client.start()
                 await client.initialize()
                 tools = await client.list_tools()
+                prefix = server_cfg.get('prefix', '')
                 for t in tools:
                     at = mcp_tool_to_anthropic(t)
+                    original_name = at["name"]
+                    if prefix:
+                        at["name"] = f"{prefix}{original_name}"
                     self._tool_registry[at["name"]] = at
                     self._tool_server_map[at["name"]] = server_cfg['name']
-                    self._tool_router[t["name"]] = client
+                    self._tool_router[at["name"]] = client
+                    self._tool_original_name[at["name"]] = original_name
                 self._stdio_clients.append(client)
                 logger.info(
                     f"Stdio MCP '{client.name}': {len(tools)} tools"
@@ -1398,8 +1411,9 @@ class PandaBot:
                         else:
                             # Route to the correct MCP server
                             if block.name in self._tool_router:
+                                mcp_name = self._tool_original_name.get(block.name, block.name)
                                 result = await self._tool_router[block.name].call_tool(
-                                    block.name, block.input
+                                    mcp_name, block.input
                                 )
                             else:
                                 result = await mcp.call_tool(block.name, block.input)
@@ -1446,7 +1460,7 @@ class PandaBot:
         # Verify: did the LLM cite a DPID that was actually generated?
         dpid_verified = False
         if exchange_dpids:
-            cited = set(re.findall(r'DPID:\s*([A-F0-9]{8})', reply))
+            cited = set(re.findall(r'(?:DPID:|Data Provenance ID:)\s*\(?([A-F0-9]{8})\)?', reply))
             matched = cited & set(exchange_dpids)
             if matched:
                 dpid_verified = True
@@ -1458,7 +1472,7 @@ class PandaBot:
                 )
 
         # Strip DPID citations from reply — user doesn't need to see them
-        reply = re.sub(r'\s*\[?DPID:\s*[A-F0-9]{8}\]?\s*', '', reply).strip()
+        reply = re.sub(r'\s*\[?(?:DPID:|Data Provenance ID:)\s*\(?[A-F0-9]{8}\)?\]?\s*', '', reply).strip()
 
         # Deduplicate tools_used preserving order
         seen = set()
