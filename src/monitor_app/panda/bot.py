@@ -141,6 +141,31 @@ STDIO_MCP_SERVERS.append({
     ],
 })
 
+STDIO_MCP_SERVERS.append({
+    'name': 'jlab-rucio',
+    'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
+    'command': [
+        os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                     'swf-testbed/.venv/bin/python'),
+        '/data/wenauseic/github/rucio-eic-mcp-server/rucio_eic_mcp_server.py',
+    ],
+    'env': {
+        'RUCIO_URL': 'https://rucio-server.jlab.org:443',
+        'RUCIO_AUTH_TYPE': 'userpass',
+        'RUCIO_ACCOUNT': 'eicread',
+        'RUCIO_USERNAME': 'eicread',
+        'RUCIO_PASSWORD': 'eicread',
+        'RUCIO_CA_BUNDLE': 'false',
+    },
+    'repo_dir': '/data/wenauseic/github/rucio-eic-mcp-server',
+    'update_commands': [
+        'cd /data/wenauseic/github/rucio-eic-mcp-server && git pull && '
+        + os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                       'swf-testbed/.venv/bin/pip')
+        + ' install -e .',
+    ],
+})
+
 # Virtual tool definition for server management
 BOT_MANAGE_SERVERS_TOOL = {
     "name": "bot_manage_servers",
