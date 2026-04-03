@@ -327,7 +327,10 @@ class DocSearchHandler:
         })
 
 
-SYSTEM_PROMPT_FILE = os.path.join(os.path.dirname(__file__), 'system_prompt.txt')
+SYSTEM_PROMPT_FILE = os.getenv(
+    'PANDABOT_SYSTEM_PROMPT',
+    os.path.join(os.path.dirname(__file__), 'system_prompt.txt'),
+)
 
 
 def _load_system_preamble():
