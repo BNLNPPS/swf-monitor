@@ -214,3 +214,4 @@ ssl_key.pem
 
 # ChromaDB vector store (rebuilt by scripts/ingest_docs.py)
 chroma_db/
+.mcp.json
