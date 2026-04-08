@@ -226,6 +226,8 @@ class StfFile(models.Model):
     daq_state = models.CharField(max_length=20, null=True, blank=True)
     daq_substate = models.CharField(max_length=20, null=True, blank=True)
     workflow_status = models.CharField(max_length=30, null=True, blank=True)
+    # Number of TF (time frames) contained within this STF file
+    tf_count = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = 'swf_stf_files'
@@ -334,6 +336,10 @@ class FastMonFile(models.Model):
     metadata = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # TF-level summary fields (filled when TFs are generated from the STF)
+    tf_count = models.IntegerField(null=True, blank=True)
+    tf_first = models.IntegerField(null=True, blank=True)
+    tf_last = models.IntegerField(null=True, blank=True)
 
     class Meta:
         db_table = 'swf_fastmon_files'
