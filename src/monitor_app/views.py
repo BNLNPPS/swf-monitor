@@ -2311,7 +2311,7 @@ def dpid_verify(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def users_list(request):
-    """List active users with username, password hash, status, and timestamps.
+    """List active users with identity fields, password hash, and timestamps.
 
     GET /api/users/ — requires authentication (session or token).
     Tunnel-only; password hash included for account sync to swf-remote.
@@ -2319,7 +2319,8 @@ def users_list(request):
     from django.contrib.auth import get_user_model
     User = get_user_model()
     users = User.objects.filter(is_active=True).order_by('username').values(
-        'username', 'password', 'is_active', 'date_joined', 'last_login'
+        'username', 'email', 'first_name', 'last_name',
+        'password', 'is_active', 'date_joined', 'last_login',
     )
     return Response({'users': list(users)})
 
