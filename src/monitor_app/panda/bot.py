@@ -870,6 +870,9 @@ class PandaBot:
                 'class definition', 'where is', 'defined', 'header file', 'algorithm'),
         'uproot': ('uproot', 'root file', '.root', 'ttree', 'branch', 'histogram',
                    'root data', 'hepdata', 'ntuple'),
+        'jlab-rucio': ('rucio', 'did', 'dids', 'dataset', 'datasets', 'container',
+                       'replica', 'replicas', 'rse', 'rses', 'scope', 'replication',
+                       'pwg'),
     }
 
     def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:
