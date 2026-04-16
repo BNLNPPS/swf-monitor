@@ -1183,9 +1183,10 @@ class PandaBot:
             # Strip any tool metadata Haiku echoed from conversation history
             reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
             no_query_warn = ":warning: *This response was not based on a live data query.*"
-            reply = reply.replace(no_query_warn, "").rstrip()
+            no_cite_warn = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
+            reply = reply.replace(no_query_warn, "").replace(no_cite_warn, "").rstrip()
             if not dpid_verified and not reply.startswith("Sorry,"):
-                reply += "\n\n" + no_query_warn
+                reply += "\n\n" + (no_cite_warn if tool_meta['used'] else no_query_warn)
             # Append tool selection metadata only when tools were used
             if tool_meta['used']:
                 suggested = ', '.join(tool_meta['suggested']) or 'none'
