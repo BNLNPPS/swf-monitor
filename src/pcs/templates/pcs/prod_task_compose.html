@@ -40,7 +40,7 @@
 
 .command-block { background: #1e1e1e; color: #d4d4d4; padding: .75rem; border-radius: .375rem;
                  font-family: monospace; font-size: .78rem; white-space: pre-wrap; word-break: break-all;
-                 max-height: 200px; overflow-y: auto; margin-top: .5rem; }
+                 margin-top: .5rem; }
 
 .empty-state { color: #6c757d; font-style: italic; padding: 1rem 0; }
 
@@ -641,7 +641,7 @@
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">JEDI taskParamMap</strong>
                 <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
-                <pre class="command-block" id="browse-task-params" style="white-space: pre; max-height: 400px; overflow: auto;">${escaped}</pre>`;
+                <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
         }
         browseContent.innerHTML = html;
     }

@@ -126,7 +126,7 @@
                 <h5 class="card-title mb-0">Condor Command</h5>
                 <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="condor-cmd">Copy</button>
             </div>
-            <pre id="condor-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;">{{ task.condor_command }}</pre>
+            <pre id="condor-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all;">{{ task.condor_command }}</pre>
         </div>
     </div>
     {% endif %}
@@ -138,7 +138,7 @@
                 <h5 class="card-title mb-0">PanDA Command</h5>
                 <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="panda-cmd">Copy</button>
             </div>
-            <pre id="panda-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;">{{ task.panda_command }}</pre>
+            <pre id="panda-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all;">{{ task.panda_command }}</pre>
         </div>
     </div>
     {% endif %}
@@ -153,7 +153,7 @@
             <div class="text-muted mb-2" style="font-size: 0.85em;">
                 Computed from current PCS state. Passed to <code>Client.insertTaskParams()</code> for JEDI submission.
             </div>
-            <pre id="task-params" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; max-height: 400px; overflow-y: auto;">{{ task_params_json }}</pre>
+            <pre id="task-params" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap;">{{ task_params_json }}</pre>
         </div>
     </div>
     {% elif task_params_error %}
