@@ -87,9 +87,10 @@
                 {% if username %}
                 <button class="btn btn-dark-green btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
                 <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
+                <button class="btn btn-outline-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
                 {% endif %}
                 <button class="btn btn-outline-warning btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
-                <button class="btn btn-dark-green btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Save Task</button>
             </div>
         </div>
@@ -203,6 +204,7 @@
     const btnNewTask = document.getElementById('btn-new-task');
     const btnEditTask = document.getElementById('btn-edit-task');
     const btnCopyTask = document.getElementById('btn-copy-task');
+    const btnDeleteTask = document.getElementById('btn-delete-task');
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -233,6 +235,7 @@
         if (btnNewTask) btnNewTask.style.display = browseType === 'tasks' ? 'block' : 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         composeTaskId = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -245,6 +248,7 @@
         if (btnNewTask) btnNewTask.style.display = 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -304,6 +308,7 @@
             browseEmpty.style.display = 'block';
             browseContent.style.display = 'none';
             panelTitle.textContent = 'Select an item';
+            if (btnDeleteTask) btnDeleteTask.style.display = 'none';
             if (btnEditTask) btnEditTask.style.display = 'none';
             if (btnCopyTask) btnCopyTask.style.display = 'none';
         }
@@ -584,8 +589,10 @@
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
         panelTitle.textContent = t.name;
-        if (btnEditTask) btnEditTask.style.display = currentUser ? 'inline-block' : 'none';
+        const isOwner = currentUser && t.created_by === currentUser;
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnEditTask) btnEditTask.style.display = isOwner ? 'inline-block' : 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = isOwner ? 'inline-block' : 'none';
         const ds = allDatasets.find(d => d.id === t.dataset_id);
         const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
@@ -778,6 +785,20 @@
             document.getElementById('task-csv').value = t.csv_file || '';
             panelTitle.textContent = 'New Task (copy)';
             updateSaveButton();
+        }
+    });
+    if (btnDeleteTask) btnDeleteTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Delete prod task "${t.name}"? This cannot be undone.`)) return;
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/`,
+            {method: 'DELETE', headers: {'X-CSRFToken': csrfToken}});
+        if (resp.ok || resp.status === 204) {
+            window.location.href = window.location.pathname;
+        } else {
+            let msg = `Delete failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
         }
     });
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);

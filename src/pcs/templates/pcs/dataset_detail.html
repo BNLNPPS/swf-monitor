@@ -70,7 +70,7 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">Blocks ({{ blocks|length }})</h5>
-                <button type="button" class="btn btn-sm btn-outline-primary" onclick="addBlock()">Add Block</button>
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="addBlock()">Add Block</button>
                 <script>
                 async function addBlock() {
                     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';

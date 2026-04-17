@@ -26,8 +26,8 @@
         </div>
         <div>
             {% if tag.status == 'draft' %}
-            <a href="{% url 'pcs:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-sm btn-outline-primary">Edit</a>
-            <button type="button" class="btn btn-sm btn-warning" onclick="lockTag()">Lock</button>
+            <a href="{% url 'pcs:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-dark-green btn-sm">Edit</a>
+            <button type="button" class="btn btn-warning btn-sm" onclick="lockTag()">Lock</button>
             <script>
             async function lockTag() {
                 if (!confirm('Lock this tag? This is irreversible — the tag will become immutable.')) return;

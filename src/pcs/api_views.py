@@ -234,7 +234,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     )
     serializer_class = ProdTaskSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)

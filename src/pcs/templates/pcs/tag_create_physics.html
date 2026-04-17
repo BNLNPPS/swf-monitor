@@ -48,8 +48,8 @@
             {% endif %}
         {% endfor %}
 
-        <button type="button" class="btn btn-primary" onclick="saveTag()">{% if editing %}Save Changes{% else %}Create Tag{% endif %}</button>
-        <a href="{% url 'pcs:tags_list' tag_type='p' %}" class="btn btn-secondary">Cancel</a>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveTag()">{% if editing %}Save Changes{% else %}Create Tag{% endif %}</button>
+        <a href="{% url 'pcs:tags_list' tag_type='p' %}" class="btn btn-outline-secondary btn-sm">Cancel</a>
     </div>
 </div>
 <script>

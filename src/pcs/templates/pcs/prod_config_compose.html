@@ -50,8 +50,9 @@
                 {% if username %}
                 <button class="btn btn-dark-green btn-sm" id="btn-copy" style="display:none;">Copy</button>
                 <button class="btn btn-dark-green btn-sm" id="btn-edit" style="display:none;">Edit</button>
+                <button class="btn btn-outline-danger btn-sm" id="btn-delete" style="display:none;">Delete</button>
                 {% endif %}
-                <button class="btn btn-dark-green btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;">Save</button>
             </div>
         </div>
@@ -276,11 +277,14 @@
             </div>
             <div class="item-meta">Created by ${c.created_by} on ${c.created_at} | Updated ${c.updated_at}</div>`;
 
-        // Copy: any authenticated user. Edit: only the owner.
+        // Copy: any authenticated user. Edit/Delete: only the owner.
         const btnEdit = document.getElementById('btn-edit');
         const btnCopy = document.getElementById('btn-copy');
+        const btnDelete = document.getElementById('btn-delete');
+        const isOwner = currentUser && c.created_by === currentUser;
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
-        if (btnEdit) btnEdit.style.display = (currentUser && c.created_by === currentUser) ? 'inline-block' : 'none';
+        if (btnEdit) btnEdit.style.display = isOwner ? 'inline-block' : 'none';
+        if (btnDelete) btnDelete.style.display = isOwner ? 'inline-block' : 'none';
     }
 
     // Fill form from config object
@@ -316,6 +320,7 @@
     const btnNew = document.getElementById('btn-new');
     const btnEdit = document.getElementById('btn-edit');
     const btnCopy = document.getElementById('btn-copy');
+    const btnDelete = document.getElementById('btn-delete');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
     const viewPanel = document.getElementById('view-panel');
@@ -329,6 +334,7 @@
         if (btnNew) btnNew.style.display = 'none';
         if (btnEdit) btnEdit.style.display = 'none';
         if (btnCopy) btnCopy.style.display = 'none';
+        if (btnDelete) btnDelete.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         document.getElementById('panel-title').textContent = isCopy ? 'Copy Config' : (config ? `Edit: ${config.name}` : 'New Config');
@@ -346,6 +352,7 @@
             document.getElementById('panel-title').textContent = 'Select a config';
             if (btnEdit) btnEdit.style.display = 'none';
             if (btnCopy) btnCopy.style.display = 'none';
+            if (btnDelete) btnDelete.style.display = 'none';
         }
     }
 
@@ -357,6 +364,20 @@
     if (btnCopy) btnCopy.addEventListener('click', () => {
         const c = allConfigs.find(x => x.id === selectedId);
         if (c) enterEditMode(c, true);
+    });
+    if (btnDelete) btnDelete.addEventListener('click', async () => {
+        const c = allConfigs.find(x => x.id === selectedId);
+        if (!c) return;
+        if (!confirm(`Delete prod config "${c.name}"? This cannot be undone.`)) return;
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-configs/${c.id}/`,
+            {method: 'DELETE', headers: apiHeaders});
+        if (resp.ok || resp.status === 204) {
+            window.location.href = window.location.pathname;
+        } else {
+            let msg = `Delete failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
     });
     btnCancel.addEventListener('click', enterViewMode);
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';

@@ -160,7 +160,7 @@
                     <span id="view-status-badge"></span>
                     {% if user.is_authenticated %}
                     <button type="button" class="btn btn-dark-green btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
-                    <button type="button" class="btn btn-outline-primary btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
                     {% endif %}
                     <button type="button" class="btn btn-outline-success btn-sm" id="btn-lock-tag" style="display:none" onclick="lockTag()">Lock</button>
                     <button type="button" class="btn btn-outline-danger btn-sm" id="btn-delete-tag" style="display:none" onclick="deleteTag()">Delete</button>
@@ -176,7 +176,7 @@
             <div class="panel-header">
                 <h4 id="create-title">New {{ schema.label }} Tag</h4>
                 <div class="btn-group">
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-cancel-create">Cancel</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-cancel-create">Cancel</button>
                     <button type="button" class="btn btn-primary btn-sm" id="btn-save" onclick="saveTag()">Save</button>
                 </div>
             </div>
@@ -674,7 +674,7 @@
         if (!bar) return;
         bar.innerHTML = `<span class="suggestion-source">${sourceLabel}:</span>
             <span class="suggestion-value">${value}</span>
-            <button type="button" class="btn btn-warning btn-apply">Apply</button>`;
+            <button type="button" class="btn btn-warning btn-sm btn-apply">Apply</button>`;
         bar.classList.add('visible');
         bar.querySelector('.btn-apply').addEventListener('click', () => {
             setFieldValue(fieldName, value, false);
