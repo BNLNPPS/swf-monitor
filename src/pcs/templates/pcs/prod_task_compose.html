@@ -85,11 +85,11 @@
             <h4 id="panel-title" style="margin:0;">Select an item</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-outline-secondary btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 {% endif %}
                 <button class="btn btn-outline-warning btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Save Task</button>
             </div>
         </div>
@@ -144,11 +144,11 @@
                         <div id="commands-area" style="display:none;">
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
                                 <strong style="font-size:.82rem;">Condor Command</strong>
-                                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('condor-preview')">Copy</button></div>
+                                <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('condor-preview')">Copy</button></div>
                             <div class="command-block" id="condor-preview"></div>
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
                                 <strong style="font-size:.82rem;">PanDA Command</strong>
-                                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('panda-preview')">Copy</button></div>
+                                <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('panda-preview')">Copy</button></div>
                             <div class="command-block" id="panda-preview"></div>
                         </div>
                     </div>
@@ -631,16 +631,16 @@
 
         if (t.csv_file) html += `<p><strong>CSV:</strong> <code>${t.csv_file}</code></p>`;
         if (t.condor_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">Condor</strong>
-            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
+            <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
             <div class="command-block" id="browse-condor">${t.condor_command}</div>`;
         if (t.panda_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA</strong>
-            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
+            <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
             <div class="command-block" id="browse-panda">${t.panda_command}</div>`;
         if (t.task_params_json) {
             const escaped = t.task_params_json
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">JEDI taskParamMap</strong>
-                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
+                <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
                 <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
         }
         browseContent.innerHTML = html;

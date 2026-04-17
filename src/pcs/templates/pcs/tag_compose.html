@@ -159,7 +159,7 @@
                 <div class="btn-group">
                     <span id="view-status-badge"></span>
                     {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
                     <button type="button" class="btn btn-outline-primary btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
                     {% endif %}
                     <button type="button" class="btn btn-outline-success btn-sm" id="btn-lock-tag" style="display:none" onclick="lockTag()">Lock</button>
@@ -176,7 +176,7 @@
             <div class="panel-header">
                 <h4 id="create-title">New {{ schema.label }} Tag</h4>
                 <div class="btn-group">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-cancel-create">Cancel</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-cancel-create">Cancel</button>
                     <button type="button" class="btn btn-primary btn-sm" id="btn-save" onclick="saveTag()">Save</button>
                 </div>
             </div>
@@ -204,7 +204,7 @@
                 </div>
                 <div class="params-header">Parameters
                     {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btn-manage-params">Edit parameter fields</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-manage-params">Edit parameter fields</button>
                     {% endif %}
                 </div>
                 {% for field in form %}
