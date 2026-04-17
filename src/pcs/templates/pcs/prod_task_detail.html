@@ -23,7 +23,7 @@
         </div>
         <div>
             <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}" class="btn btn-dark-green btn-sm">Edit in Compose</a>
-            <button class="btn btn-outline-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
+            <button class="btn btn-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
         </div>
     </div>
 
@@ -124,7 +124,7 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">Condor Command</h5>
-                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="condor-cmd">Copy</button>
+                <button class="btn btn-secondary btn-sm btn-copy" data-target="condor-cmd">Copy</button>
             </div>
             <pre id="condor-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all;">{{ task.condor_command }}</pre>
         </div>
@@ -136,7 +136,7 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">PanDA Command</h5>
-                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="panda-cmd">Copy</button>
+                <button class="btn btn-secondary btn-sm btn-copy" data-target="panda-cmd">Copy</button>
             </div>
             <pre id="panda-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all;">{{ task.panda_command }}</pre>
         </div>
@@ -148,7 +148,7 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">JEDI taskParamMap</h5>
-                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="task-params">Copy</button>
+                <button class="btn btn-secondary btn-sm btn-copy" data-target="task-params">Copy</button>
             </div>
             <div class="text-muted mb-2" style="font-size: 0.85em;">
                 Computed from current PCS state. Passed to <code>Client.insertTaskParams()</code> for JEDI submission.

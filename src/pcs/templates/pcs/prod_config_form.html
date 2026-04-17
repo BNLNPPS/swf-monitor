@@ -169,9 +169,9 @@
 
         <button type="button" class="btn btn-primary btn-sm" onclick="saveConfig()">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
         {% if editing %}
-        <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-outline-secondary btn-sm">Cancel</a>
+        <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary btn-sm">Cancel</a>
         {% else %}
-        <a href="{% url 'pcs:prod_configs_list' %}" class="btn btn-outline-secondary btn-sm">Cancel</a>
+        <a href="{% url 'pcs:prod_configs_list' %}" class="btn btn-secondary btn-sm">Cancel</a>
         {% endif %}
     </div>
 </div>
