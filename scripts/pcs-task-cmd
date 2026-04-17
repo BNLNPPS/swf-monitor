@@ -37,7 +37,7 @@ def main() -> int:
                     help=f'swf-monitor base URL (default: {DEFAULT_URL})')
     args = ap.parse_args()
 
-    qs = urllib.parse.urlencode({'name': args.name, 'format': args.format})
+    qs = urllib.parse.urlencode({'name': args.name, 'fmt': args.format})
     url = f'{args.url.rstrip("/")}/pcs/api/prod-tasks/command/?{qs}'
 
     req = urllib.request.Request(url)

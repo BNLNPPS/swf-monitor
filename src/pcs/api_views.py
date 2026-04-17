@@ -243,23 +243,23 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         formats. Lookup by task name. No DB writes.
 
         Query params:
-            name   — ProdTask.name (required)
-            format — condor | panda | jedi (required)
+            name — ProdTask.name (required)
+            fmt  — condor | panda | jedi (required). Named 'fmt' (not 'format')
+                   because DRF reserves 'format' for content negotiation.
 
         Returns:
             text/plain for condor/panda, application/json for jedi.
         """
         from django.http import HttpResponse, JsonResponse
-        import json as _json
         from .commands import build_condor_command, build_panda_command, build_task_params
 
         name = request.query_params.get('name')
-        fmt = request.query_params.get('format', '').lower()
+        fmt = request.query_params.get('fmt', '').lower()
         if not name:
             return Response({'detail': 'Missing ?name='}, status=status.HTTP_400_BAD_REQUEST)
         if fmt not in ('condor', 'panda', 'jedi'):
             return Response(
-                {'detail': "format must be one of: condor, panda, jedi"},
+                {'detail': "fmt must be one of: condor, panda, jedi"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
