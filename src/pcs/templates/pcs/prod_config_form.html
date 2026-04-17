@@ -8,7 +8,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_list' %}">Prod Configs</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a></li>
             {% if editing %}
             <li class="breadcrumb-item"><a href="{% url 'pcs:prod_config_detail' pk=config.pk %}">{{ config.name }}</a></li>
             <li class="breadcrumb-item active">Edit</li>
@@ -171,7 +171,7 @@
         {% if editing %}
         <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary btn-sm">Cancel</a>
         {% else %}
-        <a href="{% url 'pcs:prod_configs_list' %}" class="btn btn-secondary btn-sm">Cancel</a>
+        <a href="{% url 'pcs:prod_configs_compose' %}" class="btn btn-secondary btn-sm">Cancel</a>
         {% endif %}
     </div>
 </div>

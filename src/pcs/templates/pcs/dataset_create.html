@@ -8,7 +8,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:datasets_list' %}">Datasets</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:datasets_compose' %}">Datasets</a></li>
             <li class="breadcrumb-item active">Create</li>
         </ol>
     </nav>
@@ -89,7 +89,7 @@
         <div class="alert alert-danger" id="form-errors" style="display:none;"></div>
 
         <button type="button" class="btn btn-primary btn-sm" onclick="createDataset()">Create Dataset</button>
-        <a href="{% url 'pcs:datasets_list' %}" class="btn btn-secondary btn-sm">Cancel</a>
+        <a href="{% url 'pcs:datasets_compose' %}" class="btn btn-secondary btn-sm">Cancel</a>
     </div>
 </div>
 

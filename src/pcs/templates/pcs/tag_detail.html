@@ -8,7 +8,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:tags_list' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:tag_compose' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
             <li class="breadcrumb-item active">{{ tag.tag_label }}</li>
         </ol>
     </nav>
