@@ -182,7 +182,7 @@ STDIO_MCP_SERVERS.append({
         'RUCIO_AUTH_TYPE': 'x509',
         'RUCIO_ACCOUNT': 'panda',
         'RUCIO_VO': 'eic',
-        'X509_USER_PROXY': '/etc/swf-monitor/longproxy-for-rucio',
+        'X509_USER_PROXY': '/data/wenauseic/longproxy-for-rucio',
         'TOKEN_FILE_PATH': '/tmp/rucio_eic_bnl_token.txt',
     },
     'repo_dir': '/data/wenauseic/github/rucio-eic-mcp-server',
