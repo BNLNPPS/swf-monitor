@@ -170,17 +170,17 @@
     const initialTab = urlParams.get('tab') || 'datasets';
 
     // Selection-key helpers: the URL carries the stable name, but internal
-    // lookups use integer ids.
+    // lookups use integer ids. Accept singular or plural type.
     function itemKeyOf(type, id) {
-        if (type === 'task')    return (allTasks.find(x => x.id === id)    || {}).name;
-        if (type === 'dataset') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
-        if (type === 'config')  return (allConfigs.find(x => x.id === id)  || {}).name;
+        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.id === id)    || {}).name;
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.id === id)  || {}).name;
         return null;
     }
     function itemIdOf(type, key) {
-        if (type === 'task')    return (allTasks.find(x => x.name === key)         || {}).id;
-        if (type === 'dataset') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
-        if (type === 'config')  return (allConfigs.find(x => x.name === key)       || {}).id;
+        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.name === key)            || {}).id;
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.name === key)          || {}).id;
         return null;
     }
 

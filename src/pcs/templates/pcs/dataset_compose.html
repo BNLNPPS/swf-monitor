@@ -152,12 +152,12 @@
 
     // URL carries the stable name/label; internal lookups use integer id.
     function itemKeyOf(type, id) {
-        if (type === 'dataset') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
         if (['p','e','s','r'].includes(type)) return ((allTags[type]||[]).find(x => x.id === id) || {}).label;
         return null;
     }
     function itemIdOf(type, key) {
-        if (type === 'dataset') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
         if (['p','e','s','r'].includes(type)) return ((allTags[type]||[]).find(x => x.label === key) || {}).id;
         return null;
     }
