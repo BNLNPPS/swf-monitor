@@ -11,7 +11,20 @@ from rest_framework import viewsets, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from monitor_app.middleware import TunnelAuthentication
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS, BasePermission
+
+
+class IsOwnerOrReadOnly(BasePermission):
+    """Read open to anyone; write requires authenticated owner (by created_by username)."""
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        return getattr(obj, 'created_by', None) == request.user.username
 from rest_framework.response import Response
 from django.db.models import Count
 
@@ -203,11 +216,11 @@ class DatasetViewSet(viewsets.ModelViewSet):
 
 
 class ProdConfigViewSet(viewsets.ModelViewSet):
-    """Production configuration templates. Always mutable — full CRUD."""
+    """Production configuration templates. Owner-only edit; anyone can create."""
     queryset = ProdConfig.objects.all()
     serializer_class = ProdConfigSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)

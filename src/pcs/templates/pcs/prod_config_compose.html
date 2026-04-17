@@ -31,7 +31,12 @@
     <div class="browse-panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
             <strong style="font-size:.9rem;">Prod Configs</strong>
-            <span class="badge bg-secondary" id="count-badge">0</span>
+            <div>
+                <span class="badge bg-secondary me-2" id="count-badge">0</span>
+                {% if username %}
+                <button class="btn btn-primary btn-sm" id="btn-new">New Config</button>
+                {% endif %}
+            </div>
         </div>
         <input type="text" class="browser-search" id="search" placeholder="Search configs...">
         <div class="item-list" id="item-list" tabindex="0"></div>
@@ -43,9 +48,8 @@
             <h4 id="panel-title" style="margin:0;">Select a config</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-dark-green btn-sm" id="btn-edit" style="display:none;">Edit</button>
                 <button class="btn btn-dark-green btn-sm" id="btn-copy" style="display:none;">Copy</button>
-                <button class="btn btn-primary btn-sm" id="btn-new">New Config</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-edit" style="display:none;">Edit</button>
                 {% endif %}
                 <button class="btn btn-dark-green btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;">Save</button>
@@ -272,11 +276,11 @@
             </div>
             <div class="item-meta">Created by ${c.created_by} on ${c.created_at} | Updated ${c.updated_at}</div>`;
 
-        // Show edit/copy buttons if authenticated
+        // Copy: any authenticated user. Edit: only the owner.
         const btnEdit = document.getElementById('btn-edit');
         const btnCopy = document.getElementById('btn-copy');
-        if (btnEdit) btnEdit.style.display = currentUser ? 'inline-block' : 'none';
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnEdit) btnEdit.style.display = (currentUser && c.created_by === currentUser) ? 'inline-block' : 'none';
     }
 
     // Fill form from config object
