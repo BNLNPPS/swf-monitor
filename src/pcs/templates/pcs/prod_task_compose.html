@@ -165,9 +165,24 @@
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
-    const initialSelected = {{ selected_task|default:"null" }};
+    const initialSelected = {{ selected_item_json|safe }};  // string key (name) or null
     const urlParams = new URLSearchParams(window.location.search);
     const initialTab = urlParams.get('tab') || 'datasets';
+
+    // Selection-key helpers: the URL carries the stable name, but internal
+    // lookups use integer ids.
+    function itemKeyOf(type, id) {
+        if (type === 'task')    return (allTasks.find(x => x.id === id)    || {}).name;
+        if (type === 'dataset') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (type === 'config')  return (allConfigs.find(x => x.id === id)  || {}).name;
+        return null;
+    }
+    function itemIdOf(type, key) {
+        if (type === 'task')    return (allTasks.find(x => x.name === key)         || {}).id;
+        if (type === 'dataset') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (type === 'config')  return (allConfigs.find(x => x.name === key)       || {}).id;
+        return null;
+    }
 
     // ── State ──
     let browseType = initialTab;
@@ -195,7 +210,10 @@
     function updateUrl() {
         const params = new URLSearchParams();
         params.set('tab', browseType);
-        if (selectedItemId) params.set('selected', selectedItemId);
+        if (selectedItemId) {
+            const key = itemKeyOf(browseType, selectedItemId);
+            if (key) params.set('selected', key);
+        }
         if (mode === 'compose') params.set('mode', 'compose');
         history.replaceState(null, '', `${window.location.pathname}?${params}`);
     }
@@ -618,6 +636,13 @@
         if (t.panda_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA</strong>
             <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
             <div class="command-block" id="browse-panda">${t.panda_command}</div>`;
+        if (t.task_params_json) {
+            const escaped = t.task_params_json
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">JEDI taskParamMap</strong>
+                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
+                <pre class="command-block" id="browse-task-params" style="white-space: pre; max-height: 400px; overflow: auto;">${escaped}</pre>`;
+        }
         browseContent.innerHTML = html;
     }
 
@@ -773,12 +798,14 @@
     // ── Init ──
     switchTab(browseType);
     if (initialSelected) {
-        selectedItemId = initialSelected;
-        if (browseType === 'tasks') {
-            const t = allTasks.find(x => x.id === initialSelected);
-            if (t) showTaskDetail(initialSelected);
+        const id = itemIdOf(browseType, initialSelected);
+        if (id) {
+            selectedItemId = id;
+            if (browseType === 'tasks')    showTaskDetail(id);
+            else if (browseType === 'datasets') showDatasetDetail(id);
+            else if (browseType === 'configs')  showConfigDetail(id);
+            renderList();
         }
-        renderList();
     }
 })();
 

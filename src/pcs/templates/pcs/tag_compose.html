@@ -266,7 +266,7 @@
     const filterFields = {{ filter_fields_json|safe }};
     let paramDefs = {{ param_defs_json|safe }};
     const nextSuffix = {{ next_suffix }};
-    const initialSelected = {{ selected_tag|default:"null" }};
+    const initialSelectedLabel = {{ selected_tag_json|safe }};
     const currentUser = '{{ username }}';
     const tagType = '{{ tag_type }}';
     const tagPrefix = '{{ schema.prefix }}';
@@ -606,6 +606,21 @@
         } else {
             fillCreateForm(tagNumber);
         }
+        updateUrl();
+    }
+
+    function updateUrl() {
+        const params = new URLSearchParams(window.location.search);
+        if (selectedTagNumber) {
+            const tag = allTags.find(t => t.tag_number === selectedTagNumber);
+            if (tag) params.set('selected', tag.tag_label);
+            else params.delete('selected');
+        } else {
+            params.delete('selected');
+        }
+        const qs = params.toString();
+        const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        history.replaceState(null, '', newUrl);
     }
 
     // ── Fill create form from clicked tag (compose behavior) ──
@@ -732,7 +747,9 @@
         if (!selectedTagNumber || !confirm('Lock this tag? This cannot be undone.')) return;
         const resp = await apiPost(`${apiBase}/${selectedTagNumber}/lock/`, {});
         if (resp.ok) {
-            window.location.href = `?selected=${selectedTagNumber}`;
+            const tag = allTags.find(t => t.tag_number === selectedTagNumber);
+            const label = tag ? tag.tag_label : selectedTagNumber;
+            window.location.href = `?selected=${encodeURIComponent(label)}`;
         } else {
             const data = await resp.json();
             alert(data.detail || 'Lock failed');
@@ -772,7 +789,8 @@
         }
         if (resp.ok) {
             const data = await resp.json();
-            window.location.href = `?selected=${data.tag_number}`;
+            const label = data.tag_label || data.tag_number;
+            window.location.href = `?selected=${encodeURIComponent(label)}`;
         } else {
             const errors = await resp.json();
             let msg = '';
@@ -793,7 +811,12 @@
         const cleanUrl = urlParams.toString() ? `${window.location.pathname}?${urlParams}` : window.location.pathname;
         history.replaceState(null, '', cleanUrl);
     } else {
-        const autoSelect = initialSelected || (allTags.length > 0 ? allTags[0].tag_number : null);
+        let autoSelect = null;
+        if (initialSelectedLabel) {
+            const match = allTags.find(t => t.tag_label === initialSelectedLabel);
+            if (match) autoSelect = match.tag_number;
+        }
+        if (!autoSelect && allTags.length > 0) autoSelect = allTags[0].tag_number;
         if (autoSelect) {
             onTagClick(autoSelect);
             const el = tagList.querySelector(`[data-tag="${autoSelect}"]`);

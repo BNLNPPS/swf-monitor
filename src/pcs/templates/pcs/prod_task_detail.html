@@ -22,7 +22,7 @@
             </p>
         </div>
         <div>
-            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.pk }}" class="btn btn-outline-primary btn-sm">Edit in Compose</a>
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}" class="btn btn-outline-primary btn-sm">Edit in Compose</a>
             <button class="btn btn-outline-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
         </div>
     </div>
@@ -68,25 +68,25 @@
                 <tbody>
                     <tr>
                         <td>Physics</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?selected={{ task.dataset.physics_tag.tag_number }}">{{ task.dataset.physics_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?selected={{ task.dataset.physics_tag.tag_label|urlencode }}">{{ task.dataset.physics_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.physics_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.physics_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>EvGen</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='e' %}?selected={{ task.dataset.evgen_tag.tag_number }}">{{ task.dataset.evgen_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='e' %}?selected={{ task.dataset.evgen_tag.tag_label|urlencode }}">{{ task.dataset.evgen_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.evgen_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.evgen_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Simulation</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='s' %}?selected={{ task.dataset.simu_tag.tag_number }}">{{ task.dataset.simu_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='s' %}?selected={{ task.dataset.simu_tag.tag_label|urlencode }}">{{ task.dataset.simu_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.simu_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.simu_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Reconstruction</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='r' %}?selected={{ task.dataset.reco_tag.tag_number }}">{{ task.dataset.reco_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='r' %}?selected={{ task.dataset.reco_tag.tag_label|urlencode }}">{{ task.dataset.reco_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.reco_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.reco_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>

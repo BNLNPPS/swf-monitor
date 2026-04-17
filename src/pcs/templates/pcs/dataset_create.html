@@ -142,7 +142,7 @@ async function createDataset() {
     });
     if (resp.ok) {
         const data = await resp.json();
-        window.location.href = `{% url 'pcs:datasets_compose' %}?selected=${data.id}`;
+        window.location.href = `{% url 'pcs:datasets_compose' %}?selected=${encodeURIComponent(data.dataset_name || data.name || data.id)}`;
     } else {
         const errors = await resp.json();
         let html = '';

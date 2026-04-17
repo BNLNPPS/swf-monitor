@@ -142,13 +142,25 @@
     const allTags = {{ tags_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken = '{{ csrf_token }}';
-    const initialSelected = {{ selected|default:"null" }};
+    const initialSelected = {{ selected_item_json|safe }};  // string key (name/label) or null
     const urlParams = new URLSearchParams(window.location.search);
     const initialTab = urlParams.get('tab') || 'datasets';
 
     let browseType = initialTab;
     let mode = 'browse';
     let selectedItemId = null;
+
+    // URL carries the stable name/label; internal lookups use integer id.
+    function itemKeyOf(type, id) {
+        if (type === 'dataset') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (['p','e','s','r'].includes(type)) return ((allTags[type]||[]).find(x => x.id === id) || {}).label;
+        return null;
+    }
+    function itemIdOf(type, key) {
+        if (type === 'dataset') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (['p','e','s','r'].includes(type)) return ((allTags[type]||[]).find(x => x.label === key) || {}).id;
+        return null;
+    }
     // Compose state: selected tag per type
     const compose = { p: null, e: null, s: null, r: null };
     let editingDatasetId = null;
@@ -173,7 +185,10 @@
     function updateUrl() {
         const params = new URLSearchParams();
         params.set('tab', browseType);
-        if (selectedItemId) params.set('selected', selectedItemId);
+        if (selectedItemId) {
+            const key = itemKeyOf(browseType, selectedItemId);
+            if (key) params.set('selected', key);
+        }
         if (mode === 'compose') params.set('mode', 'compose');
         history.replaceState(null, '', `${window.location.pathname}?${params}`);
     }
@@ -516,7 +531,7 @@
             body: JSON.stringify(payload) });
         if (resp.ok) {
             const data = await resp.json();
-            window.location.href = `/swf-monitor/pcs/datasets/compose/?tab=datasets&selected=${data.id}`;
+            window.location.href = `/swf-monitor/pcs/datasets/compose/?tab=datasets&selected=${encodeURIComponent(data.dataset_name || data.name || data.id)}`;
         } else {
             const err = await resp.json();
             alert('Save failed: ' + Object.values(err).flat().join(', '));
@@ -542,10 +557,14 @@
 
     // ── Init ──
     switchTab(browseType);
-    if (initialSelected && browseType === 'datasets') {
-        selectedItemId = initialSelected;
-        showDatasetDetail(initialSelected);
-        renderList();
+    if (initialSelected) {
+        const id = itemIdOf(browseType, initialSelected);
+        if (id) {
+            selectedItemId = id;
+            if (browseType === 'datasets') showDatasetDetail(id);
+            else if (['p','e','s','r'].includes(browseType)) showTagBrowseDetail(browseType, id);
+            renderList();
+        }
     }
 })();
 </script>

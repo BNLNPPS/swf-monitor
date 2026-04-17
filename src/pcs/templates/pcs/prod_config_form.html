@@ -200,7 +200,7 @@ async function saveConfig() {
     const resp = await fetch(url, {method, headers, body: JSON.stringify(payload)});
     if (resp.ok) {
         const data = await resp.json();
-        window.location.href = `{% url 'pcs:prod_configs_compose' %}?selected=${data.id}`;
+        window.location.href = `{% url 'pcs:prod_configs_compose' %}?selected=${encodeURIComponent(data.name || data.id)}`;
     } else {
         const errors = await resp.json();
         let html = '';
