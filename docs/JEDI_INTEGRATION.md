@@ -250,6 +250,20 @@ This calls `Client.insertTaskParams(task_params)` and handles the response. Auth
 - ePIC prod monitoring views for task and job info, and info via MCP tools
 - Surface errors via the existing PanDA MCP tools
 
+## Submitting from the CLI
+
+Today, `pcs-task-cmd` (documented in [PCS.md](PCS.md)) can emit the `taskParamMap` JSON for any task. Operators with a valid PanDA auth context (x509 proxy or OIDC token) can pipe it straight into `Client.insertTaskParams()`:
+
+```bash
+pcs-task-cmd <task_name> --format jedi | python -c '
+import json, sys
+from pandaclient import Client
+print(Client.insertTaskParams(json.load(sys.stdin)))
+'
+```
+
+This is the intended test-phase submission path. Server-side submission from swf-monitor is blocked on the OIDC service account listed below.
+
 ## Infrastructure: What We Know
 
 - **VO**: `eic`

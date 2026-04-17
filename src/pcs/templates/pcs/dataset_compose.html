@@ -557,14 +557,18 @@
 
     // ── Init ──
     switchTab(browseType);
-    if (initialSelected) {
-        const id = itemIdOf(browseType, initialSelected);
-        if (id) {
-            selectedItemId = id;
-            if (browseType === 'datasets') showDatasetDetail(id);
-            else if (['p','e','s','r'].includes(browseType)) showTagBrowseDetail(browseType, id);
-            renderList();
-        }
+    let autoId = null;
+    if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
+    if (!autoId) {
+        const firstList = browseType === 'datasets' ? allDatasets : (allTags[browseType] || []);
+        if (firstList.length > 0) autoId = firstList[0].id;
+    }
+    if (autoId) {
+        selectedItemId = autoId;
+        if (browseType === 'datasets') showDatasetDetail(autoId);
+        else if (['p','e','s','r'].includes(browseType)) showTagBrowseDetail(browseType, autoId);
+        renderList();
+        updateUrl();
     }
 })();
 </script>

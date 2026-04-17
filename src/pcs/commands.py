@@ -171,6 +171,85 @@ def _build_env_string(task):
     return ' '.join(f'{k}={v}' for k, v in env.items() if v)
 
 
+def build_task_dump(task):
+    """
+    Build a fully-resolved dict describing a ProdTask and everything it
+    references: dataset, all four tags with parameters, the ProdConfig
+    as stored, and the effective config (after task-level overrides).
+
+    Suitable for human inspection or downstream tooling. Pure read.
+    """
+    ds = task.dataset
+    cfg = task.prod_config
+
+    def _tag(t):
+        if t is None:
+            return None
+        return {
+            'tag_label': t.tag_label,
+            'tag_number': t.tag_number,
+            'status': t.status,
+            'description': t.description,
+            'parameters': dict(t.parameters or {}),
+            'created_by': t.created_by,
+            'created_at': t.created_at.isoformat() if t.created_at else None,
+        }
+
+    def _cfg(c):
+        if c is None:
+            return None
+        out = {}
+        for f in c._meta.get_fields():
+            if not hasattr(f, 'attname'):
+                continue
+            if f.name in ('id',):
+                continue
+            val = getattr(c, f.name, None)
+            if hasattr(val, 'isoformat'):
+                val = val.isoformat()
+            out[f.name] = val
+        return out
+
+    effective = task.get_effective_config()
+    for k, v in list(effective.items()):
+        if hasattr(v, 'isoformat'):
+            effective[k] = v.isoformat()
+
+    return {
+        'task': {
+            'id': task.id,
+            'name': task.name,
+            'description': task.description,
+            'status': task.status,
+            'csv_file': task.csv_file,
+            'overrides': task.overrides or {},
+            'created_by': task.created_by,
+            'created_at': task.created_at.isoformat() if task.created_at else None,
+            'updated_at': task.updated_at.isoformat() if task.updated_at else None,
+        },
+        'dataset': {
+            'id': ds.id,
+            'dataset_name': ds.dataset_name,
+            'did': ds.did,
+            'scope': ds.scope,
+            'detector_version': ds.detector_version,
+            'detector_config': ds.detector_config,
+            'blocks': ds.blocks,
+            'description': ds.description,
+            'created_by': ds.created_by,
+            'created_at': ds.created_at.isoformat() if ds.created_at else None,
+        },
+        'tags': {
+            'physics': _tag(ds.physics_tag),
+            'evgen':   _tag(ds.evgen_tag),
+            'simu':    _tag(ds.simu_tag),
+            'reco':    _tag(ds.reco_tag),
+        },
+        'prod_config': _cfg(cfg),
+        'effective_config': effective,
+    }
+
+
 def build_task_params(task):
     """
     Build a JEDI ``taskParamMap`` dict from a ProdTask.

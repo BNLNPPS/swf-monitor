@@ -114,6 +114,58 @@ Tags support list, create, get, update (draft only), and lock. Replace `{type}` 
 
 Physics tag creation requires a `category` field (digit). Tag numbers are always auto-assigned.
 
+### Production Tasks — submission artifacts
+
+A single read-only endpoint regenerates a task's submission artifact from current PCS state on every call (no DB writes):
+
+```
+GET /swf-monitor/pcs/api/prod-tasks/command/?name=<task_name>&fmt=<format>
+```
+
+| `fmt` | Content-Type | Contents |
+|-------|--------------|----------|
+| `condor` | `text/plain` | env-prefixed `submit_csv.sh` command |
+| `panda` | `text/plain` | `prun` command |
+| `jedi` | `application/json` | `taskParamMap` for `Client.insertTaskParams()` |
+| `dump` | `application/json` | Full view: task + dataset + all four tags + prod config + effective config |
+
+The parameter is named `fmt` because DRF reserves `format` for its own content-negotiation.
+
+### `pcs-task-cmd` — the CLI wrapper
+
+`scripts/pcs-task-cmd` is a stdlib-only Python client over the endpoint above. It is the recommended way for production operators and automation scripts to fetch submission artifacts — no Django import, no DB credentials.
+
+```bash
+pcs-task-cmd <task_name> --format {condor|panda|jedi|dump}
+```
+
+Environment:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SWFMON_URL` | `https://epic-devcloud.org/prod` | swf-monitor base URL |
+| `SWFMON_TOKEN` | *(unset)* | Optional DRF token for non-public deployments |
+
+Examples:
+
+```bash
+# Inspect everything about a task
+pcs-task-cmd group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1 --format dump
+
+# Submit to JEDI (requires a valid PanDA auth context: proxy or OIDC token)
+pcs-task-cmd <name> --format jedi | python -c '
+import json, sys
+from pandaclient import Client
+print(Client.insertTaskParams(json.load(sys.stdin)))
+'
+
+# Inspect what would go to PanDA prun
+pcs-task-cmd <name> --format panda
+
+# Get the env-prefixed Condor command (pipe into bash)
+eval "$(pcs-task-cmd <name> --format condor)"
+```
+
 ## Datasets
 
 A dataset composes four locked tags with detector version information into a standardized name:

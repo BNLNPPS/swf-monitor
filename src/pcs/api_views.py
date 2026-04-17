@@ -244,22 +244,26 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
 
         Query params:
             name — ProdTask.name (required)
-            fmt  — condor | panda | jedi (required). Named 'fmt' (not 'format')
-                   because DRF reserves 'format' for content negotiation.
+            fmt  — condor | panda | jedi | dump (required). Named 'fmt'
+                   (not 'format') because DRF reserves 'format' for
+                   content negotiation.
 
         Returns:
-            text/plain for condor/panda, application/json for jedi.
+            text/plain for condor/panda, application/json for jedi/dump.
         """
         from django.http import HttpResponse, JsonResponse
-        from .commands import build_condor_command, build_panda_command, build_task_params
+        from .commands import (
+            build_condor_command, build_panda_command,
+            build_task_params, build_task_dump,
+        )
 
         name = request.query_params.get('name')
         fmt = request.query_params.get('fmt', '').lower()
         if not name:
             return Response({'detail': 'Missing ?name='}, status=status.HTTP_400_BAD_REQUEST)
-        if fmt not in ('condor', 'panda', 'jedi'):
+        if fmt not in ('condor', 'panda', 'jedi', 'dump'):
             return Response(
-                {'detail': "fmt must be one of: condor, panda, jedi"},
+                {'detail': "fmt must be one of: condor, panda, jedi, dump"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
@@ -271,7 +275,9 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return HttpResponse(build_condor_command(task), content_type='text/plain')
         if fmt == 'panda':
             return HttpResponse(build_panda_command(task), content_type='text/plain')
-        return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
+        if fmt == 'jedi':
+            return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
+        return JsonResponse(build_task_dump(task), json_dumps_params={'indent': 2})
 
     @action(detail=True, methods=['post'], url_path='set-status')
     def set_status(self, request, pk=None):

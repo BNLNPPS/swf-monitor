@@ -797,15 +797,21 @@
 
     // ── Init ──
     switchTab(browseType);
-    if (initialSelected) {
-        const id = itemIdOf(browseType, initialSelected);
-        if (id) {
-            selectedItemId = id;
-            if (browseType === 'tasks')    showTaskDetail(id);
-            else if (browseType === 'datasets') showDatasetDetail(id);
-            else if (browseType === 'configs')  showConfigDetail(id);
-            renderList();
-        }
+    let autoId = null;
+    if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
+    if (!autoId) {
+        const firstList = browseType === 'tasks' ? allTasks
+                        : browseType === 'datasets' ? allDatasets
+                        : allConfigs;
+        if (firstList.length > 0) autoId = firstList[0].id;
+    }
+    if (autoId) {
+        selectedItemId = autoId;
+        if (browseType === 'tasks')    showTaskDetail(autoId);
+        else if (browseType === 'datasets') showDatasetDetail(autoId);
+        else if (browseType === 'configs')  showConfigDetail(autoId);
+        renderList();
+        updateUrl();
     }
 })();
 
