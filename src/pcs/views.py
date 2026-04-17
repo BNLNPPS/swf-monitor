@@ -842,6 +842,7 @@ def prod_tasks_datatable_ajax(request):
 
 
 def prod_task_detail(request, pk):
+    from .commands import build_task_params
     task = get_object_or_404(
         ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
@@ -849,7 +850,18 @@ def prod_task_detail(request, pk):
         ),
         pk=pk,
     )
-    return render(request, 'pcs/prod_task_detail.html', {'task': task})
+    try:
+        task_params = build_task_params(task)
+        task_params_json = json.dumps(task_params, indent=2, sort_keys=False, default=str)
+        task_params_error = None
+    except Exception as e:
+        task_params_json = None
+        task_params_error = str(e)
+    return render(request, 'pcs/prod_task_detail.html', {
+        'task': task,
+        'task_params_json': task_params_json,
+        'task_params_error': task_params_error,
+    })
 
 
 def prod_task_compose(request):

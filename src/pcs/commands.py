@@ -140,3 +140,143 @@ def build_panda_command(task):
         parts.append('--expertOnly_skipScout')
 
     return ' \\\n  '.join(parts)
+
+
+def _build_env_string(task):
+    """Shared env-var string for Condor command and JEDI jobParameters."""
+    ds = task.dataset
+    cfg = task.get_effective_config()
+    physics = ds.physics_tag.parameters
+    evgen = ds.evgen_tag.parameters
+
+    env = {
+        'EBEAM': str(physics.get('beam_energy_electron', '')),
+        'PBEAM': str(physics.get('beam_energy_hadron', '')),
+        'DETECTOR_VERSION': ds.detector_version,
+        'DETECTOR_CONFIG': ds.detector_config,
+        'JUG_XL_TAG': cfg.get('jug_xl_tag') or '',
+        'COPYRECO': 'true' if cfg.get('copy_reco') else 'false',
+        'COPYFULL': 'true' if cfg.get('copy_full') else 'false',
+        'COPYLOG': 'true' if cfg.get('copy_log') else 'false',
+    }
+    if cfg.get('bg_mixing'):
+        if evgen.get('signal_freq') is not None:
+            env['SIGNAL_FREQ'] = str(evgen['signal_freq'])
+        if evgen.get('signal_status') is not None:
+            env['SIGNAL_STATUS'] = str(evgen['signal_status'])
+        if evgen.get('bg_tag_prefix'):
+            env['TAG_PREFIX'] = evgen['bg_tag_prefix']
+        if evgen.get('bg_files'):
+            env['BG_FILES'] = evgen['bg_files']
+    return ' '.join(f'{k}={v}' for k, v in env.items() if v)
+
+
+def build_task_params(task):
+    """
+    Build a JEDI ``taskParamMap`` dict from a ProdTask.
+
+    The returned dict can be passed directly to
+    ``pandaclient.Client.insertTaskParams()`` for JEDI submission.
+    Pure mapping — no database writes, no network.
+
+    Field mapping follows ``docs/JEDI_INTEGRATION.md``.
+    """
+    ds = task.dataset
+    cfg = task.get_effective_config()
+    data = cfg.get('data') or {}
+
+    task_name = ds.task_name
+    working_group = cfg.get('panda_working_group') or 'EIC'
+
+    params = {
+        # Identity
+        'taskName': task_name,
+        'userName': task.created_by,
+        'vo': data.get('vo', 'eic'),
+        'workingGroup': working_group,
+        'campaign': ds.detector_version,
+
+        # Processing
+        'prodSourceLabel': data.get('prod_source_label', 'test'),
+        'taskType': data.get('task_type', 'production'),
+        'processingType': data.get('processing_type', 'epicproduction'),
+        'taskPriority': data.get('task_priority', 900),
+
+        # Executable (containerized)
+        'transPath': data.get(
+            'transformation',
+            'https://pandaserver-doma.cern.ch/trf/user/runGen-00-00-02',
+        ),
+        'transUses': '',
+        'transHome': '',
+        'architecture': '',
+        'container_name': cfg.get('container_image') or '',
+
+        # Splitting (MC generation: noInput=True)
+        'noInput': True,
+        'nFilesPerJob': data.get('files_per_job', 1),
+        'coreCount': data.get('corecount', 1),
+        'ramCount': data.get('ram_count', 2000),
+        'ramUnit': 'MBPerCore',
+
+        # Site selection
+        'site': cfg.get('panda_site') or '',
+        'cloud': data.get('cloud', working_group),
+    }
+
+    # Job count — for noInput tasks this drives the number of jobs
+    if data.get('n_jobs'):
+        params['nFiles'] = data['n_jobs']
+    if data.get('events_per_job'):
+        params['nEventsPerJob'] = data['events_per_job']
+    if cfg.get('events_per_task'):
+        params['nEvents'] = cfg['events_per_task']
+
+    # Walltime in seconds (JEDI expects seconds)
+    hours = cfg.get('target_hours_per_job')
+    if hours is not None:
+        params['walltime'] = int(float(hours) * 3600)
+
+    # Flags
+    if data.get('skip_scout'):
+        params['skipScout'] = True
+    if data.get('disable_auto_retry'):
+        params['disableAutoRetry'] = True
+    if cfg.get('use_rucio'):
+        params['useRucio'] = True
+
+    # Log/output dataset templates — use task_name (no .bN suffix)
+    log_dataset = f'{ds.scope}:{task_name}.log'
+    out_dataset = f'{ds.scope}:{task_name}'
+    log_filename = f'{task_name}.log.${{SN}}.log.tgz'
+    params['log'] = {
+        'dataset': log_dataset,
+        'type': 'template',
+        'param_type': 'log',
+        'token': 'local',
+        'destination': 'local',
+        'value': log_filename,
+    }
+
+    # jobParameters: env + exec command, then output template
+    env_str = _build_env_string(task)
+    exec_cmd = data.get('exec_command') or './run.sh'
+    constant_value = f'{env_str} {exec_cmd}' if env_str else exec_cmd
+    output_filename = f'{task_name}.${{SN}}.root'
+    params['jobParameters'] = [
+        {
+            'type': 'constant',
+            'value': constant_value,
+        },
+        {
+            'type': 'template',
+            'param_type': 'output',
+            'token': 'local',
+            'destination': 'local',
+            'dataset': out_dataset,
+            'value': output_filename,
+            'offset': data.get('output_offset', 1000),
+        },
+    ]
+
+    return params
