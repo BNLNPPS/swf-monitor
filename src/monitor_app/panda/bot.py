@@ -157,6 +157,33 @@ STDIO_MCP_SERVERS.append({
         'RUCIO_USERNAME': 'eicread',
         'RUCIO_PASSWORD': 'eicread',
         'RUCIO_CA_BUNDLE': 'false',
+        'TOKEN_FILE_PATH': '/tmp/rucio_eic_jlab_token.txt',
+    },
+    'repo_dir': '/data/wenauseic/github/rucio-eic-mcp-server',
+    'update_commands': [
+        'cd /data/wenauseic/github/rucio-eic-mcp-server && git pull && '
+        + os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                       'swf-testbed/.venv/bin/pip')
+        + ' install -e .',
+    ],
+})
+
+STDIO_MCP_SERVERS.append({
+    'name': 'bnl-rucio',
+    'prefix': 'bnl_rucio_',
+    'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
+    'command': [
+        os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                     'swf-testbed/.venv/bin/python'),
+        '/data/wenauseic/github/rucio-eic-mcp-server/rucio_eic_mcp_server.py',
+    ],
+    'env': {
+        'RUCIO_URL': 'https://nprucio01.sdcc.bnl.gov:443',
+        'RUCIO_AUTH_TYPE': 'x509',
+        'RUCIO_ACCOUNT': 'panda',
+        'RUCIO_VO': 'eic',
+        'X509_USER_PROXY': '/etc/swf-monitor/longproxy-for-rucio',
+        'TOKEN_FILE_PATH': '/tmp/rucio_eic_bnl_token.txt',
     },
     'repo_dir': '/data/wenauseic/github/rucio-eic-mcp-server',
     'update_commands': [
@@ -872,7 +899,9 @@ class PandaBot:
                    'root data', 'hepdata', 'ntuple'),
         'jlab-rucio': ('rucio', 'did', 'dids', 'dataset', 'datasets', 'container',
                        'replica', 'replicas', 'rse', 'rses', 'scope', 'replication',
-                       'pwg'),
+                       'pwg', 'jlab', 'jefferson'),
+        'bnl-rucio': ('bnl rucio', 'brookhaven rucio', 'nprucio', 'panda rucio',
+                      'bnl did', 'bnl dataset', 'bnl replica'),
     }
 
     def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:
