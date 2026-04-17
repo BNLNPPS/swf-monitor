@@ -58,19 +58,19 @@
 <div class="compose-wrap">
     <!-- LEFT PANE -->
     <div class="browse-panel">
-        <div class="browser-tabs">
-            <span class="browser-tab" data-browse="datasets">Datasets</span>
-            <span class="browser-tab" data-browse="p">Physics</span>
-            <span class="browser-tab" data-browse="e">EvGen</span>
-            <span class="browser-tab" data-browse="s">Simu</span>
-            <span class="browser-tab" data-browse="r">Reco</span>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 2px solid #dee2e6; margin-bottom:.75rem;">
+            <div class="browser-tabs" style="border-bottom: none; margin-bottom: 0;">
+                <span class="browser-tab" data-browse="datasets">Datasets</span>
+                <span class="browser-tab" data-browse="p">Physics</span>
+                <span class="browser-tab" data-browse="e">EvGen</span>
+                <span class="browser-tab" data-browse="s">Simu</span>
+                <span class="browser-tab" data-browse="r">Reco</span>
+            </div>
+            {% if username %}
+            <button class="btn btn-primary btn-sm" id="btn-new-dataset" style="display:none; margin-bottom:.35rem;">New Dataset</button>
+            {% endif %}
         </div>
         <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
-        {% if username %}
-        <div style="padding: .25rem 0;">
-            <button class="btn btn-primary btn-sm w-100" id="btn-new-dataset" style="display:none;">New Dataset</button>
-        </div>
-        {% endif %}
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
