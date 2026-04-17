@@ -236,6 +236,43 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             'panda_command': task.panda_command,
         })
 
+    @action(detail=False, methods=['get'], url_path='command')
+    def command(self, request):
+        """
+        Regenerate and return a task's submission artifact in one of three
+        formats. Lookup by task name. No DB writes.
+
+        Query params:
+            name   — ProdTask.name (required)
+            format — condor | panda | jedi (required)
+
+        Returns:
+            text/plain for condor/panda, application/json for jedi.
+        """
+        from django.http import HttpResponse, JsonResponse
+        import json as _json
+        from .commands import build_condor_command, build_panda_command, build_task_params
+
+        name = request.query_params.get('name')
+        fmt = request.query_params.get('format', '').lower()
+        if not name:
+            return Response({'detail': 'Missing ?name='}, status=status.HTTP_400_BAD_REQUEST)
+        if fmt not in ('condor', 'panda', 'jedi'):
+            return Response(
+                {'detail': "format must be one of: condor, panda, jedi"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            task = self.get_queryset().get(name=name)
+        except ProdTask.DoesNotExist:
+            return Response({'detail': f"No task named '{name}'"}, status=status.HTTP_404_NOT_FOUND)
+
+        if fmt == 'condor':
+            return HttpResponse(build_condor_command(task), content_type='text/plain')
+        if fmt == 'panda':
+            return HttpResponse(build_panda_command(task), content_type='text/plain')
+        return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
+
     @action(detail=True, methods=['post'], url_path='set-status')
     def set_status(self, request, pk=None):
         task = self.get_object()

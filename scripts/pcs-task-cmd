@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""
+pcs-task-cmd — fetch a PCS ProdTask's submission artifact.
+
+Thin HTTP client over swf-monitor's REST API. No Django, no DB access.
+The server regenerates from current PCS state on every call, so what
+you print here reflects the task + dataset + config as they exist now.
+
+Usage:
+    pcs-task-cmd <name> --format {condor|panda|jedi}
+
+    # condor: bash one-liner (env-prefixed submit_csv.sh)
+    # panda:  prun command
+    # jedi:   JSON taskParamMap for Client.insertTaskParams()
+
+Env:
+    SWFMON_URL    base URL, default https://epic-devcloud.org/prod
+    SWFMON_TOKEN  optional DRF token (only needed for non-public endpoints)
+"""
+import argparse
+import os
+import sys
+import urllib.parse
+import urllib.request
+
+
+DEFAULT_URL = os.environ.get('SWFMON_URL', 'https://epic-devcloud.org/prod')
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    ap.add_argument('name', help='ProdTask name')
+    ap.add_argument('--format', required=True,
+                    choices=['condor', 'panda', 'jedi'],
+                    help='output format')
+    ap.add_argument('--url', default=DEFAULT_URL,
+                    help=f'swf-monitor base URL (default: {DEFAULT_URL})')
+    args = ap.parse_args()
+
+    qs = urllib.parse.urlencode({'name': args.name, 'format': args.format})
+    url = f'{args.url.rstrip("/")}/pcs/api/prod-tasks/command/?{qs}'
+
+    req = urllib.request.Request(url)
+    token = os.environ.get('SWFMON_TOKEN')
+    if token:
+        req.add_header('Authorization', f'Token {token}')
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            sys.stdout.write(resp.read().decode())
+            if not sys.stdout.isatty():
+                pass
+            else:
+                sys.stdout.write('\n')
+        return 0
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors='replace')
+        sys.stderr.write(f'HTTP {e.code}: {body}\n')
+        return 1
+    except urllib.error.URLError as e:
+        sys.stderr.write(f'Request failed: {e.reason}\n')
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
