@@ -49,3 +49,5 @@ whitenoise
 chromadb
 pysqlite3-binary
 rank_bm25
+# Rucio client (BNL)
+rucio-clients
