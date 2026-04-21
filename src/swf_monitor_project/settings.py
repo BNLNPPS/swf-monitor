@@ -417,6 +417,20 @@ else:
                 'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
                 'propagate': False,
             },
+            # Django's default django.request logger sends uncaught view
+            # exceptions to mail_admins — silently dropped when ADMINS is
+            # empty. Force them onto console+db so 5xx leaves a trail.
+            'django.request': {
+                'handlers': ['console', 'db'],
+                'level': 'ERROR',
+                'propagate': False,
+            },
+            # Same for django.security — Django default also mail_admins only.
+            'django.security': {
+                'handlers': ['console', 'db'],
+                'level': 'ERROR',
+                'propagate': False,
+            },
             'monitor_app': {
                 'handlers': ['db', 'console'],
                 'level': 'INFO',
