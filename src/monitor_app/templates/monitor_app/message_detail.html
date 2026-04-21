@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Message Detail - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container-fluid">
     <div class="row">
         <div class="col-md-12">
             <h2>Message Detail</h2>
@@ -110,15 +111,15 @@
                     <table class="table table-sm">
                         <tr>
                             <th>Sent:</th>
-                            <td>{{ message.sent_at|date:"Y-m-d H:i:s.u" }}</td>
+                            <td>{{ message.sent_at|fmt_dt }}</td>
                         </tr>
                         <tr>
                             <th>Delivered:</th>
-                            <td>{{ message.delivered_at|date:"Y-m-d H:i:s.u"|default:"—" }}</td>
+                            <td>{{ message.delivered_at|fmt_dt|default:"—" }}</td>
                         </tr>
                         <tr>
                             <th>Acknowledged:</th>
-                            <td>{{ message.acknowledged_at|date:"Y-m-d H:i:s.u"|default:"—" }}</td>
+                            <td>{{ message.acknowledged_at|fmt_dt|default:"—" }}</td>
                         </tr>
                     </table>
                 </div>

@@ -4,7 +4,7 @@
 
 {% block content %}
 {% csrf_token %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
@@ -23,7 +23,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Configuration</h5>
-            <table class="table table-sm table-bordered" style="max-width: 600px;">
+            <table class="table table-sm table-bordered">
                 <tr><td><strong>Scope</strong></td><td>{{ dataset.scope }}</td></tr>
                 <tr><td><strong>Detector Version</strong></td><td>{{ dataset.detector_version }}</td></tr>
                 <tr><td><strong>Detector Config</strong></td><td>{{ dataset.detector_config }}</td></tr>
@@ -34,7 +34,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Tags</h5>
-            <table class="table table-sm table-bordered" style="max-width: 800px;">
+            <table class="table table-sm table-bordered">
                 <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Key Parameters</th></tr></thead>
                 <tbody>
                     <tr>

@@ -320,6 +320,20 @@ def _compute_failurerate(nfailed, nfinished):
     return round((nfailed or 0) / denom, 4)
 
 
+def _compute_progress(nactive, nfinished, nfailed):
+    """Integer-percent progress derived from job-level counts.
+
+    Substitute for the native JEDI `progress` column, which is NULL here for
+    the same reason as `failurerate`. Semantics: fraction of known jobs that
+    have reached a terminal state (finished or failed), as an integer %.
+    Returns None when there are no known jobs yet.
+    """
+    total = (nactive or 0) + (nfinished or 0) + (nfailed or 0)
+    if total == 0:
+        return None
+    return round(100 * ((nfinished or 0) + (nfailed or 0)) / total)
+
+
 def _get_task_job_counts(jeditaskids):
     """Return per-task job counts: {jeditaskid: {nactive, nfinished, nfailed}}.
 
@@ -454,14 +468,15 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         return {"error": str(e)}
 
     # Per-task job counts (nactive, nfinished, nfailed) — one extra query.
-    # computed_failurerate = nfailed / (nfailed+nfinished); serves as the usable
-    # failure signal because the native JEDI failurerate column is usually NULL
-    # in this deployment.
+    # computed_failurerate and computed_progress serve as usable substitutes
+    # for the native JEDI failurerate/progress columns, which are NULL in
+    # this deployment.
     job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
     for t in tasks:
         c = job_counts.get(t['jeditaskid'], {'nactive': 0, 'nfinished': 0, 'nfailed': 0})
         t.update(c)
         t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
+        t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
 
     has_more = len(rows) > limit
     next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
@@ -1356,11 +1371,22 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
     )
 
     rows = []
+    n_base = len(TASK_LIST_FIELDS)
     try:
         with conn.cursor() as cursor:
             cursor.execute(sql, full_params)
             for row in cursor.fetchall():
-                rows.append(row_to_dict(row, TASK_LIST_FIELDS))
+                # build_task_query_dt returns TASK_LIST_FIELDS + 5 aggregate
+                # columns: nactive, nfinished, nfailed, computed_failurerate,
+                # computed_progress.
+                task = row_to_dict(row[:n_base], TASK_LIST_FIELDS)
+                task['nactive'] = row[n_base]
+                task['nfinished'] = row[n_base + 1]
+                task['nfailed'] = row[n_base + 2]
+                fr = row[n_base + 3]
+                task['computed_failurerate'] = float(fr) if fr is not None else None
+                task['computed_progress'] = row[n_base + 4]  # already integer or None
+                rows.append(task)
     except Exception as e:
         logger.error(f"list_tasks_dt query failed: {e}")
         return [], total, filtered
@@ -1477,4 +1503,5 @@ def get_task(jeditaskid):
         jeditaskid, {'nactive': 0, 'nfinished': 0, 'nfailed': 0})
     task.update(c)
     task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
+    task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     return task

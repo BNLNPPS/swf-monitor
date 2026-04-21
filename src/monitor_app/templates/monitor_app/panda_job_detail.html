@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Job {{ pandaid }} - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Job {{ pandaid }}</h2>
         <a href="{% url 'monitor_app:panda_jobs_list' %}" class="btn btn-outline-secondary btn-sm">Back to Jobs</a>
@@ -25,7 +26,7 @@
                         <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' job.jeditaskid %}">{{ job.jeditaskid }}</a></td></tr>
                         {% endif %}
                         {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td><code>{{ job.jobname }}</code></td></tr>{% endif %}
-                        <tr><td><strong>Status</strong></td><td>{{ job.jobstatus }}</td></tr>
+                        <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}">{{ job.jobstatus }}</td></tr>
                         {% if job.produsername %}
                         <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?username={{ job.produsername }}">{{ job.produsername }}</a></td></tr>
                         {% endif %}
@@ -47,10 +48,10 @@
                 <div class="card-header"><strong>Timing</strong></div>
                 <div class="card-body">
                     <table class="table table-sm mb-0">
-                        {% if job.creationtime %}<tr><td><strong>Created</strong></td><td>{{ job.creationtime }}</td></tr>{% endif %}
-                        {% if job.starttime %}<tr><td><strong>Started</strong></td><td>{{ job.starttime }}</td></tr>{% endif %}
-                        {% if job.endtime %}<tr><td><strong>Ended</strong></td><td>{{ job.endtime }}</td></tr>{% endif %}
-                        {% if job.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ job.modificationtime }}</td></tr>{% endif %}
+                        {% if job.creationtime %}<tr><td><strong>Created</strong></td><td>{{ job.creationtime|fmt_dt }}</td></tr>{% endif %}
+                        {% if job.starttime %}<tr><td><strong>Started</strong></td><td>{{ job.starttime|fmt_dt }}</td></tr>{% endif %}
+                        {% if job.endtime %}<tr><td><strong>Ended</strong></td><td>{{ job.endtime|fmt_dt }}</td></tr>{% endif %}
+                        {% if job.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ job.modificationtime|fmt_dt }}</td></tr>{% endif %}
                     </table>
                 </div>
             </div>

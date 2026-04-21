@@ -5,7 +5,12 @@ Pure functions that construct SQL strings and transform database rows.
 No database I/O — callers execute the returned (sql, params) tuples.
 """
 
-from .constants import PANDA_SCHEMA, ERROR_COMPONENTS
+from .constants import PANDA_SCHEMA, ERROR_COMPONENTS, JOB_STATUS_CATEGORIES
+
+
+def _job_status_in_list(category):
+    """Return a comma-quoted list of job statuses for use in a SQL IN clause."""
+    return ', '.join(f"'{s}'" for s in JOB_STATUS_CATEGORIES[category])
 
 
 # ── SQL builders ─────────────────────────────────────────────────────────────
@@ -179,14 +184,61 @@ def build_union_count_by_field(field, where_clauses, params):
 
 
 def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
-    """Build a task query with OFFSET for DataTables pagination."""
-    field_list = ', '.join(f'"{f}"' for f in fields)
+    """Build a task query with OFFSET for DataTables pagination.
+
+    Includes per-task job-count aggregates (nactive / nfinished / nfailed) and
+    a derived computed_failurerate as SELECT aliases so callers can ORDER BY
+    any of them. Aggregates come from a LATERAL subquery against
+    jobsactive4 + jobsarchived4 filtered by jeditaskid — one indexed lookup
+    per returned task.
+
+    order_by must use `"column"` for jedi_tasks columns (e.g. `"jeditaskid" DESC`)
+    or a bare alias for the aggregates (e.g. `nfailed DESC`, `computed_failurerate DESC NULLS LAST`).
+    """
+    field_list = ', '.join(f't."{f}"' for f in fields)
     where_sql = ''
     if where_clauses:
+        # Prefix unqualified column refs — callers pass `"status"` etc.
         where_sql = ' WHERE ' + ' AND '.join(where_clauses)
+
+    active_list = _job_status_in_list('active')
+    finished_list = _job_status_in_list('finished')
+    failed_list = _job_status_in_list('failed')
+
     sql = f"""
-        SELECT {field_list}
-        FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+        SELECT {field_list},
+               COALESCE(c.nactive, 0) AS nactive,
+               COALESCE(c.nfinished, 0) AS nfinished,
+               COALESCE(c.nfailed, 0) AS nfailed,
+               CASE WHEN COALESCE(c.nfailed, 0) + COALESCE(c.nfinished, 0) = 0
+                    THEN NULL
+                    ELSE ROUND(
+                        COALESCE(c.nfailed, 0)::numeric
+                        / NULLIF(COALESCE(c.nfailed, 0) + COALESCE(c.nfinished, 0), 0),
+                        4)
+               END AS computed_failurerate,
+               CASE WHEN COALESCE(c.nactive, 0) + COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0) = 0
+                    THEN NULL
+                    ELSE ROUND(
+                        100.0 * (COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0))::numeric
+                        / NULLIF(COALESCE(c.nactive, 0) + COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0), 0)
+                    )::integer
+               END AS computed_progress
+        FROM "{PANDA_SCHEMA}"."jedi_tasks" t
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(CASE WHEN jobstatus IN ({active_list})   THEN 1 ELSE 0 END) AS nactive,
+                SUM(CASE WHEN jobstatus IN ({finished_list}) THEN 1 ELSE 0 END) AS nfinished,
+                SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed
+            FROM (
+                SELECT jobstatus FROM "{PANDA_SCHEMA}"."jobsactive4"
+                    WHERE jeditaskid = t.jeditaskid
+                UNION ALL
+                SELECT jobstatus FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                    WHERE jeditaskid = t.jeditaskid
+            ) j
+        ) c ON TRUE
+        {where_sql}
         ORDER BY {order_by}
         LIMIT {limit} OFFSET {offset}
     """

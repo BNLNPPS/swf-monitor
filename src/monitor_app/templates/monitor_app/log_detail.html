@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Log Entry #{{ log.id }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <h2>Log Entry #{{ log.id }}</h2>
 
     <div class="card mb-4">
@@ -15,7 +16,7 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Timestamp</th>
-                        <td>{{ log.timestamp|date:"Y-m-d H:i:s.u" }} UTC</td>
+                        <td>{{ log.timestamp|fmt_dt }}</td>
                     </tr>
                     <tr>
                         <th>Level</th>

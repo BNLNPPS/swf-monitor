@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Subscriber Detail - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container-fluid">
     <div class="row">
         <div class="col-md-8">
             <h2>Subscriber Details</h2>
@@ -22,8 +23,8 @@
                             <p><strong>Fraction:</strong> {{ subscriber.fraction|default:"Not set" }}</p>
                         </div>
                         <div class="col-md-6">
-                            <p><strong>Created:</strong> {{ subscriber.created_at|date:"Y-m-d H:i:s" }}</p>
-                            <p><strong>Updated:</strong> {{ subscriber.updated_at|date:"Y-m-d H:i:s" }}</p>
+                            <p><strong>Created:</strong> {{ subscriber.created_at|fmt_dt }}</p>
+                            <p><strong>Updated:</strong> {{ subscriber.updated_at|fmt_dt }}</p>
                         </div>
                     </div>
                     

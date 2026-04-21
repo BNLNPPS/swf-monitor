@@ -3,7 +3,7 @@
 {% block title %}{{ task.name }} - Prod Task - PCS{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
@@ -63,7 +63,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Tags</h5>
-            <table class="table table-sm table-bordered" style="max-width: 800px;">
+            <table class="table table-sm table-bordered">
                 <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Key Parameters</th></tr></thead>
                 <tbody>
                     <tr>
@@ -99,7 +99,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Submission</h5>
-            <table class="table table-sm table-bordered" style="max-width: 600px;">
+            <table class="table table-sm table-bordered">
                 <tr><td style="width:30%"><strong>CSV File</strong></td><td><code>{{ task.csv_file }}</code></td></tr>
             </table>
         </div>
@@ -166,7 +166,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Tracking</h5>
-            <table class="table table-sm table-bordered" style="max-width: 600px;">
+            <table class="table table-sm table-bordered">
                 {% if task.panda_task_id %}<tr><td><strong>PanDA Task ID</strong></td><td>{{ task.panda_task_id }}</td></tr>{% endif %}
                 {% if task.condor_cluster_id %}<tr><td><strong>Condor Cluster ID</strong></td><td>{{ task.condor_cluster_id }}</td></tr>{% endif %}
             </table>

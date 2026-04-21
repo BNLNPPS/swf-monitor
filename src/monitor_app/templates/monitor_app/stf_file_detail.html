@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}STF File {{ stf_file.stf_filename }} - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container-fluid">
     <div class="row">
         <div class="col-md-12">
             <h2>STF File {{ stf_file.stf_filename }}</h2>
@@ -47,11 +48,11 @@
                                 </tr>
                                 <tr>
                                     <th>Created:</th>
-                                    <td>{{ stf_file.created_at|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ stf_file.created_at|fmt_dt }}</td>
                                 </tr>
                                 <tr>
                                     <th>Last Updated:</th>
-                                    <td>{{ stf_file.updated_at|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ stf_file.updated_at|fmt_dt }}</td>
                                 </tr>
                             </table>
                         </div>
@@ -75,11 +76,11 @@
                                 </tr>
                                 <tr>
                                     <th>Run Start:</th>
-                                    <td>{{ stf_file.run.start_time|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ stf_file.run.start_time|fmt_dt }}</td>
                                 </tr>
                                 <tr>
                                     <th>Run End:</th>
-                                    <td>{{ stf_file.run.end_time|date:"Y-m-d H:i:s"|default:"—" }}</td>
+                                    <td>{{ stf_file.run.end_time|fmt_dt|default:"—" }}</td>
                                 </tr>
                             </table>
                         </div>

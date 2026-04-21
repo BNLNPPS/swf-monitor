@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Task {{ jeditaskid }} - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Task {{ jeditaskid }}</h2>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
@@ -22,7 +23,7 @@
                     <table class="table table-sm mb-0">
                         <tr><td><strong>Task ID</strong></td><td>{{ task.jeditaskid }}</td></tr>
                         {% if task.taskname %}<tr><td><strong>Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>{% endif %}
-                        <tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>
+                        <tr><td><strong>Status</strong></td><td class="{{ task.status|state_class }}">{{ task.status }}</td></tr>
                         {% if task.username %}
                         <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_tasks_list' %}?username={{ task.username }}">{{ task.username }}</a></td></tr>
                         {% endif %}
@@ -42,16 +43,15 @@
                 <div class="card-header"><strong>Timing & Progress</strong></div>
                 <div class="card-body">
                     <table class="table table-sm mb-0">
-                        {% if task.creationdate %}<tr><td><strong>Created</strong></td><td>{{ task.creationdate }}</td></tr>{% endif %}
-                        {% if task.starttime %}<tr><td><strong>Started</strong></td><td>{{ task.starttime }}</td></tr>{% endif %}
-                        {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime }}</td></tr>{% endif %}
-                        {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime }}</td></tr>{% endif %}
-                        {% if task.progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.progress }}%</td></tr>{% endif %}
-                        <tr><td><strong>Active Jobs</strong></td><td>{{ task.nactive|default:0 }}</td></tr>
-                        <tr><td><strong>Finished Jobs</strong></td><td>{{ task.nfinished|default:0 }}</td></tr>
-                        <tr><td><strong>Failed Jobs</strong></td><td>{{ task.nfailed|default:0 }}</td></tr>
+                        {% if task.creationdate %}<tr><td><strong>Created</strong></td><td>{{ task.creationdate|fmt_dt }}</td></tr>{% endif %}
+                        {% if task.starttime %}<tr><td><strong>Started</strong></td><td>{{ task.starttime|fmt_dt }}</td></tr>{% endif %}
+                        {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime|fmt_dt }}</td></tr>{% endif %}
+                        {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime|fmt_dt }}</td></tr>{% endif %}
+                        {% if task.computed_progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.computed_progress }}% <span class="text-muted">(from job counts)</span></td></tr>{% endif %}
+                        <tr><td><strong>Active Jobs</strong></td><td class="running_fill">{{ task.nactive|default:0 }}</td></tr>
+                        <tr><td><strong>Finished Jobs</strong></td><td class="finished_fill">{{ task.nfinished|default:0 }}</td></tr>
+                        <tr><td><strong>Failed Jobs</strong></td><td class="failed_fill">{{ task.nfailed|default:0 }}</td></tr>
                         {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts; cancelled excluded)</span></td></tr>{% endif %}
-                        {% if task.failurerate is not None %}<tr><td><strong>JEDI Failure Rate</strong></td><td>{{ task.failurerate }}%</td></tr>{% endif %}
                         {% if task.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ task.attemptnr }}</td></tr>{% endif %}
                         {% if task.corecount %}<tr><td><strong>Cores</strong></td><td>{{ task.corecount }}</td></tr>{% endif %}
                         {% if task.taskpriority %}<tr><td><strong>Priority</strong></td><td>{{ task.taskpriority }}{% if task.currentpriority %} (current: {{ task.currentpriority }}){% endif %}</td></tr>{% endif %}
@@ -103,10 +103,10 @@
                     {% for job in jobs %}
                     <tr>
                         <td><a href="{% url 'monitor_app:panda_job_detail' job.pandaid %}">{{ job.pandaid }}</a></td>
-                        <td>{{ job.jobstatus }}</td>
+                        <td class="{{ job.jobstatus|state_class }}">{{ job.jobstatus }}</td>
                         <td>{{ job.computingsite|default:"" }}</td>
-                        <td>{{ job.creationtime|default:"" }}</td>
-                        <td>{{ job.endtime|default:"" }}</td>
+                        <td>{{ job.creationtime|fmt_dt }}</td>
+                        <td>{{ job.endtime|fmt_dt }}</td>
                         <td>{{ job.corecount|default:"" }}</td>
                     </tr>
                     {% endfor %}

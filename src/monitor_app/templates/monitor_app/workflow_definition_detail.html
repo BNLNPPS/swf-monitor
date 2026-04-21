@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% load swf_fmt %}
 
 {% block title %}{{ definition.workflow_name }} v{{ definition.version }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>{{ definition.workflow_name }} v{{ definition.version }}</h2>
         <a href="{% url 'monitor_app:workflow_definitions_list' %}" class="btn btn-secondary">Back to List</a>
@@ -36,11 +37,11 @@
                         </tr>
                         <tr>
                             <th>Created:</th>
-                            <td>{{ definition.created_at }}</td>
+                            <td>{{ definition.created_at|fmt_dt }}</td>
                         </tr>
                         <tr>
                             <th>Updated:</th>
-                            <td>{{ definition.updated_at }}</td>
+                            <td>{{ definition.updated_at|fmt_dt }}</td>
                         </tr>
                         {% if definition.parameter_values.source %}
                         <tr>

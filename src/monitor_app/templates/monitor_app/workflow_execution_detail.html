@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% load swf_fmt %}
 
 {% block title %}Execution {{ execution.execution_id }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Execution {{ execution.execution_id }}</h2>
         <a href="{% url 'monitor_app:workflow_executions_list' %}" class="btn btn-secondary">Back to List</a>
@@ -66,12 +67,12 @@
                         </tr>
                         <tr>
                             <th>Started:</th>
-                            <td>{{ execution.start_time }}</td>
+                            <td>{{ execution.start_time|fmt_dt }}</td>
                         </tr>
                         {% if execution.end_time %}
                         <tr>
                             <th>Ended:</th>
-                            <td>{{ execution.end_time }}</td>
+                            <td>{{ execution.end_time|fmt_dt }}</td>
                         </tr>
                         <tr>
                             <th>Duration:</th>

@@ -21,8 +21,10 @@ from ..panda import (
     get_task, error_summary, diagnose_jobs,
     list_queues, get_queue,
 )
-from ..panda.queries import _get_task_job_counts, _compute_failurerate
-from ..panda.constants import LIST_FIELDS, TASK_LIST_FIELDS
+from ..panda.constants import (
+    LIST_FIELDS, TASK_LIST_FIELDS,
+    TASK_STATE_COLORS, JOB_STATE_COLORS,
+)
 
 
 # ── Column definitions ───────────────────────────────────────────────────────
@@ -53,31 +55,38 @@ TASK_COLUMNS = [
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
     {'name': 'username', 'title': 'User', 'orderable': True},
-    {'name': 'workinggroup', 'title': 'Working Group', 'orderable': True},
     {'name': 'creationdate', 'title': 'Created', 'orderable': True},
     {'name': 'modificationtime', 'title': 'Modified', 'orderable': True},
-    {'name': 'progress', 'title': 'Progress', 'orderable': True},
-    # Per-task job counts — computed from a separate aggregation of
-    # jobsactive4 + jobsarchived4. Not orderable via SQL since they aren't
-    # columns on jedi_tasks. See monitor_app.panda.queries._get_task_job_counts.
-    {'name': 'nactive', 'title': 'Active', 'orderable': False},
-    {'name': 'nfinished', 'title': 'Finished', 'orderable': False},
-    {'name': 'nfailed', 'title': 'Failed', 'orderable': False},
+    # Progress column shows the computed (job-based) progress since native JEDI
+    # progress is always NULL in this deployment. Same rationale as Fail Rate.
+    {'name': 'computed_progress', 'title': 'Progress', 'orderable': True},
+    # Per-task job-count aggregates + derived failure rate are SELECT aliases
+    # on build_task_query_dt's enriched query, so they're SQL-sortable.
+    {'name': 'nactive', 'title': 'Active', 'orderable': True},
+    {'name': 'nfinished', 'title': 'Finished', 'orderable': True},
+    {'name': 'nfailed', 'title': 'Failed', 'orderable': True},
     # Derived from nfailed / (nfailed+nfinished). The native JEDI failurerate
-    # column is usually NULL in this deployment, so this is the usable signal.
-    {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': False},
-    {'name': 'failurerate', 'title': 'JEDI Fail Rate', 'orderable': True},
+    # column is always NULL in this deployment (post-processing that populates
+    # it isn't running for ePIC task types), so this is the only signal shown.
+    {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': True},
 ]
 
 TASK_FIELD_NAMES = [c['name'] for c in TASK_COLUMNS]
 
 TASK_ORDER_MAP = {
     0: '"jeditaskid"', 1: '"taskname"', 2: '"status"',
-    3: '"username"', 4: '"workinggroup"', 5: '"creationdate"',
-    6: '"modificationtime"', 7: '"progress"',
-    # indexes 8..11 are not-orderable (aggregated counts + computed rate).
-    # indexes reserved but no SQL ORDER BY — fall back to default on click.
-    12: '"failurerate"',
+    3: '"username"', 4: '"creationdate"', 5: '"modificationtime"',
+    # Aggregates surface as SELECT aliases from build_task_query_dt.
+    # Wrapped expressions in ORDER BY can't reference SELECT aliases in PG,
+    # so these stay as bare alias names; the view's order_by construction
+    # appends 'NULLS LAST' for computed_failurerate and computed_progress so
+    # tasks with no terminal jobs (rate/progress=NULL) don't surface at the
+    # top of a DESC ranking.
+    6: 'computed_progress',
+    7: 'nactive',
+    8: 'nfinished',
+    9: 'nfailed',
+    10: 'computed_failurerate',
 }
 
 ERROR_COLUMNS = [
@@ -132,24 +141,28 @@ def _fmt_dt(val):
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
-STATUS_COLORS = {
-    'finished': '#28a745', 'done': '#28a745',
-    'failed': '#dc3545', 'broken': '#dc3545',
-    'running': '#007bff',
-    'activated': '#17a2b8', 'ready': '#17a2b8',
-    'cancelled': '#6c757d', 'aborted': '#6c757d', 'closed': '#6c757d',
-    'exhausted': '#fd7e14',
-}
+def _fill_cell(content, state, url=None):
+    """Emit a DataTables cell that fills the enclosing <td> with a state color.
 
+    The content is wrapped in ``<span data-fill="<state>_fill">…</span>`` so
+    the DT base template's ``createdCell`` hook can promote the fill class
+    to the enclosing ``<td>``. BigMon's state-colors.css provides the
+    per-state background colors (see src/monitor_app/static/css/state-colors.css).
 
-def _status_badge(status, url=None):
-    """Render a status as a colored badge, optionally linked."""
-    color = STATUS_COLORS.get(status, '#6c757d')
-    badge = (f'<span style="background:{color};color:#fff;padding:2px 8px;'
-             f'border-radius:3px;font-size:0.85em;">{status}</span>')
+    state can be a PanDA task or job status string, or any fixed label that
+    resolves to a ``<label>_fill`` CSS class (e.g. 'running' for the Active
+    count column, 'finished' for Finished, 'failed' for Failed).
+    Empty/falsy state returns the content unwrapped (no fill).
+    """
+    if content is None:
+        content = ''
+    if not state:
+        return str(content)
+    fill = f'{str(state).lower()}_fill'
+    wrapper = f'<span data-fill="{fill}">{content}</span>'
     if url:
-        return f'<a href="{url}" style="text-decoration:none;">{badge}</a>'
-    return badge
+        return f'<a href="{url}" style="text-decoration:none;color:inherit;">{wrapper}</a>'
+    return wrapper
 
 
 DAYS_OPTIONS = [1, 3, 7, 14, 30]
@@ -250,7 +263,7 @@ def panda_jobs_datatable_ajax(request):
             f'<a href="{job_url}">{job["pandaid"]}</a>',
             f'<a href="{task_url}">{job["jeditaskid"]}</a>' if task_url else str(job.get('jeditaskid', '')),
             f'<a href="{jobs_by_user_url}">{job["produsername"]}</a>' if jobs_by_user_url else '',
-            _status_badge(job['jobstatus'], jobs_by_status_url) if job.get('jobstatus') else '',
+            _fill_cell(job['jobstatus'], job['jobstatus'], jobs_by_status_url) if job.get('jobstatus') else '',
             f'<a href="{jobs_by_site_url}">{job["computingsite"]}</a>' if jobs_by_site_url else '',
             _linkify(job.get('transformation', '') or ''),
             _fmt_dt(job.get('creationtime')),
@@ -289,11 +302,9 @@ def panda_tasks_list(request):
         'filter_fields': [
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
-            {'name': 'workinggroup', 'label': 'Working Group', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
-        'selected_workinggroup': request.GET.get('workinggroup', ''),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_tasks_list.html', context)
@@ -307,58 +318,52 @@ def panda_tasks_datatable_ajax(request):
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
     taskname = request.GET.get('taskname', '') or None
-    workinggroup = request.GET.get('workinggroup', '') or None
 
     order_col = TASK_ORDER_MAP.get(dt.order_column_idx, '"jeditaskid"')
     order_dir = 'ASC' if dt.order_direction == 'asc' else 'DESC'
-    order_by = f'{order_col} {order_dir}'
+    # NULL failurerate/progress = no jobs reported yet; push those to the
+    # bottom of any ranking so they don't surface as the extremes view.
+    null_suffix = ' NULLS LAST' if order_col in ('computed_failurerate', 'computed_progress') else ''
+    order_by = f'{order_col} {order_dir}{null_suffix}'
 
+    # workinggroup no longer exposed in the table view (dropped as low-signal in
+    # this deployment — always EIC or NULL). Still on the task detail page and
+    # in list_tasks_dt's filter contract for backward compat with direct callers.
     rows, total, filtered = list_tasks_dt(
         days=days, status=status, username=username, taskname=taskname,
-        workinggroup=workinggroup,
         order_by=order_by, limit=dt.length, offset=dt.start,
         search=dt.search_value or None,
     )
-
-    # Per-task job counts for this page only — one extra aggregation query.
-    job_counts = _get_task_job_counts([r['jeditaskid'] for r in rows])
 
     data = []
     for task in rows:
         task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
         tasks_by_user_url = reverse('monitor_app:panda_tasks_list') + f'?days={days}&username={task["username"]}' if task.get('username') else None
         tasks_by_status_url = reverse('monitor_app:panda_tasks_list') + f'?days={days}&status={task["status"]}' if task.get('status') else None
-        tasks_by_wg_url = reverse('monitor_app:panda_tasks_list') + f'?days={days}&workinggroup={task["workinggroup"]}' if task.get('workinggroup') else None
 
         # Truncate taskname for display
         taskname_display = task.get('taskname', '') or ''
         if len(taskname_display) > 80:
             taskname_display = taskname_display[:77] + '...'
 
-        progress = task.get('progress')
-        progress_str = f'{progress}%' if progress is not None else ''
+        comp_pr = task.get('computed_progress')
+        comp_pr_str = f'{comp_pr}%' if comp_pr is not None else ''
 
-        native_fr = task.get('failurerate')
-        native_fr_str = f'{native_fr}%' if native_fr is not None else ''
-
-        counts = job_counts.get(task['jeditaskid'], {'nactive': 0, 'nfinished': 0, 'nfailed': 0})
-        comp_fr = _compute_failurerate(counts['nfailed'], counts['nfinished'])
+        comp_fr = task.get('computed_failurerate')
         comp_fr_str = f'{comp_fr * 100:.1f}%' if comp_fr is not None else ''
 
         data.append([
             f'<a href="{task_url}">{task["jeditaskid"]}</a>',
             f'<a href="{task_url}" title="{task.get("taskname", "")}">{taskname_display}</a>',
-            _status_badge(task['status'], tasks_by_status_url) if task.get('status') else '',
+            _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
             f'<a href="{tasks_by_user_url}">{task["username"]}</a>' if tasks_by_user_url else '',
-            f'<a href="{tasks_by_wg_url}">{task["workinggroup"]}</a>' if tasks_by_wg_url else str(task.get('workinggroup', '') or ''),
             _fmt_dt(task.get('creationdate')),
             _fmt_dt(task.get('modificationtime')),
-            progress_str,
-            counts['nactive'],
-            counts['nfinished'],
-            counts['nfailed'],
+            comp_pr_str,
+            _fill_cell(task.get('nactive', 0), 'running'),
+            _fill_cell(task.get('nfinished', 0), 'finished'),
+            _fill_cell(task.get('nfailed', 0), 'failed'),
             comp_fr_str,
-            native_fr_str,
         ])
 
     return dt.create_response(data, total, filtered)
@@ -583,7 +588,7 @@ def panda_diagnostics_datatable_ajax(request):
             f'<a href="{job_url}">{job["pandaid"]}</a>',
             f'<a href="{task_url}">{job["jeditaskid"]}</a>' if task_url else str(job.get('jeditaskid', '')),
             job.get('produsername', ''),
-            _status_badge(job['jobstatus']) if job.get('jobstatus') else '',
+            _fill_cell(job['jobstatus'], job['jobstatus']) if job.get('jobstatus') else '',
             job.get('computingsite', ''),
             '<br>'.join(errors_html) if errors_html else '',
             _fmt_dt(job.get('endtime')),

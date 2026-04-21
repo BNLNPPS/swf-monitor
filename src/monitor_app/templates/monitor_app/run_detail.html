@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Run {{ run.run_number }} Details - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container-fluid">
     <div class="row">
         <div class="col-md-12">
             <h2>Run {{ run.run_number }} Details</h2>
@@ -32,11 +33,11 @@
                                 </tr>
                                 <tr>
                                     <th>Start Time:</th>
-                                    <td>{{ run.start_time|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ run.start_time|fmt_dt }}</td>
                                 </tr>
                                 <tr>
                                     <th>End Time:</th>
-                                    <td>{{ run.end_time|date:"Y-m-d H:i:s"|default:"—" }}</td>
+                                    <td>{{ run.end_time|fmt_dt|default:"—" }}</td>
                                 </tr>
                             </table>
                         </div>

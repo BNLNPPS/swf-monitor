@@ -28,7 +28,7 @@ Filter field configuration format:
 {% block title %}{{ table_title }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <h2>{{ table_title }}</h2>
     <p>{{ table_description|safe }}</p>
 
@@ -203,11 +203,21 @@ $(document).ready(function() {
         },
         columns: [
             {% for column in columns %}
-            { 
+            {
                 data: null,
                 orderable: {{ column.orderable|yesno:"true,false" }},
                 render: function(data, type, row) {
                     return row[{{ forloop.counter0 }}];
+                },
+                // If the cell HTML carries a data-fill="<class>" attribute,
+                // promote that class to the enclosing <td> so the whole cell
+                // fills with the BigMon state color. Pattern matches
+                // monitor_app.viewdir.pandamon._fill_cell.
+                createdCell: function(td, cellData) {
+                    if (typeof cellData === 'string') {
+                        var m = cellData.match(/data-fill="([^"]+)"/);
+                        if (m) $(td).addClass(m[1]);
+                    }
                 }
             }{% if not forloop.last %},{% endif %}
             {% endfor %}

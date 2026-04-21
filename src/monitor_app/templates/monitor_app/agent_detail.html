@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Agent Detail: {{ agent.instance_name }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <h2>Agent Detail: {{ agent.instance_name }}</h2>
 
     <div class="card mb-4">
@@ -63,19 +64,19 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Last Heartbeat</th>
-                        <td>{% if agent.last_heartbeat %}{{ agent.last_heartbeat|date:"Y-m-d H:i:s" }} UTC{% else %}<em class="text-muted">never</em>{% endif %}</td>
+                        <td>{% if agent.last_heartbeat %}{{ agent.last_heartbeat|fmt_dt }}{% else %}<em class="text-muted">never</em>{% endif %}</td>
                     </tr>
                     <tr>
                         <th>Last STF Processed</th>
-                        <td>{% if agent.last_stf_processed %}{{ agent.last_stf_processed|date:"Y-m-d H:i:s" }} UTC{% else %}<em class="text-muted">never</em>{% endif %}</td>
+                        <td>{% if agent.last_stf_processed %}{{ agent.last_stf_processed|fmt_dt }}{% else %}<em class="text-muted">never</em>{% endif %}</td>
                     </tr>
                     <tr>
                         <th>Created At</th>
-                        <td>{{ agent.created_at|date:"Y-m-d H:i:s" }} UTC</td>
+                        <td>{{ agent.created_at|fmt_dt }}</td>
                     </tr>
                     <tr>
                         <th>Updated At</th>
-                        <td>{{ agent.updated_at|date:"Y-m-d H:i:s" }} UTC</td>
+                        <td>{{ agent.updated_at|fmt_dt }}</td>
                     </tr>
                 </tbody>
             </table>

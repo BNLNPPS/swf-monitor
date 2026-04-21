@@ -93,6 +93,57 @@ TASK_LIST_FIELDS = [
     'gshare', 'attemptnr', 'parent_tid', 'workinggroup',
 ]
 
+# State-color maps — imported verbatim from PanDA BigMon
+# (panda-bigmon-core/core/static/js/draw-plots-c3.js: task_state_colors /
+# job_state_colors). BigMon tuned these over years; staying consistent so
+# operators reading both monitors see the same palette for the same states.
+# Keys are lowercase; callers should lowercase before lookup.
+TASK_STATE_COLORS = {
+    'done':        '#165616',  # dark green (terminal success)
+    'finished':    '#207f20',  # green
+    'running':     '#47D147',  # bright green (in-flight)
+    'waiting':     '#c7c7c7',  # light gray
+    'assigning':   '#099999',  # teal
+    'exhausted':   '#e67300',  # orange
+    'paused':      '#808080',  # gray
+    'throttled':   '#FF9933',  # orange
+    'pending':     '#deb900',  # amber
+    'ready':       '#099999',  # teal
+    'registered':  '#4a4a4a',  # dark gray
+    'scouting':    '#addf80',  # light green
+    'scouted':     '#addf80',
+    'toabort':     '#ff9896',  # salmon
+    'aborting':    '#FF8174',
+    'aborted':     '#FF8174',
+    'failed':      '#ff0000',  # red
+    'broken':      '#b22222',  # firebrick
+    'passed':      '#1a1a1a',  # near-black
+    'defined':     '#2174bb',  # blue
+    'remaining':   '#2174bb',
+    'rerefine':    '#4a4a4a',
+    'prepared':    '#4a4a4a',
+}
+
+JOB_STATE_COLORS = {
+    'finished':     '#165616',  # dark green (terminal success, matches task 'done')
+    'merging':      '#207f20',
+    'running':      '#47D147',
+    'starting':     '#addf80',
+    'transferring': '#DBF1C6',
+    'pending':      '#c7c7c7',
+    'defined':      '#2174bb',
+    'assigning':    '#099999',
+    'activated':    '#3b8e67',
+    'cancelled':    '#e67300',
+    'throttled':    '#FF9933',
+    'holding':      '#deb900',
+    'sent':         '#FFD65D',
+    'waiting':      '#808080',
+    'closed':       '#4a4a4a',
+    'failed':       '#ff0000',
+    'broken':       '#b22222',
+}
+
 # Per-task job-count categorization.
 # Bucketing of jobstatus values aggregated from jobsactive4 + jobsarchived4.
 # The three returned counts (nactive, nfinished, nfailed) are what an alarm
