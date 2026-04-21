@@ -211,13 +211,13 @@ $(document).ready(function() {
                 },
                 // If the cell HTML carries a data-fill="<class>" attribute,
                 // promote that class to the enclosing <td> so the whole cell
-                // fills with the BigMon state color. Pattern matches
-                // monitor_app.viewdir.pandamon._fill_cell.
-                createdCell: function(td, cellData) {
-                    if (typeof cellData === 'string') {
-                        var m = cellData.match(/data-fill="([^"]+)"/);
-                        if (m) $(td).addClass(m[1]);
-                    }
+                // fills with the BigMon state color. Reads td.innerHTML
+                // because with `data: null` + `render`, DT passes null as
+                // cellData to createdCell — the rendered HTML is only on the
+                // td at that point. Pattern matches pandamon._fill_cell.
+                createdCell: function(td) {
+                    var m = td.innerHTML.match(/data-fill="([^"]+)"/);
+                    if (m) td.classList.add(m[1]);
                 }
             }{% if not forloop.last %},{% endif %}
             {% endfor %}
