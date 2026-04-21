@@ -306,6 +306,20 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
     }
 
 
+def _compute_failurerate(nfailed, nfinished):
+    """Compute file-like failure rate from job-level counts.
+
+    Useful because the native JEDI `failurerate` column is commonly NULL in
+    this PanDA instance — the upstream post-processing that populates it
+    isn't running for ePIC task types. Returns None when no jobs have
+    reached a terminal success/fail state (avoids 0/0 noise).
+    """
+    denom = (nfailed or 0) + (nfinished or 0)
+    if denom == 0:
+        return None
+    return round((nfailed or 0) / denom, 4)
+
+
 def _get_task_job_counts(jeditaskids):
     """Return per-task job counts: {jeditaskid: {nactive, nfinished, nfailed}}.
 
@@ -440,9 +454,14 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         return {"error": str(e)}
 
     # Per-task job counts (nactive, nfinished, nfailed) — one extra query.
+    # computed_failurerate = nfailed / (nfailed+nfinished); serves as the usable
+    # failure signal because the native JEDI failurerate column is usually NULL
+    # in this deployment.
     job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
     for t in tasks:
-        t.update(job_counts.get(t['jeditaskid'], {'nactive': 0, 'nfinished': 0, 'nfailed': 0}))
+        c = job_counts.get(t['jeditaskid'], {'nactive': 0, 'nfinished': 0, 'nfailed': 0})
+        t.update(c)
+        t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
 
     has_more = len(rows) > limit
     next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
@@ -1454,6 +1473,8 @@ def get_task(jeditaskid):
         return {"error": f"Task {jeditaskid} not found"}
 
     task = row_to_dict(row, TASK_LIST_FIELDS)
-    task.update(_get_task_job_counts([jeditaskid]).get(
-        jeditaskid, {'nactive': 0, 'nfinished': 0, 'nfailed': 0}))
+    c = _get_task_job_counts([jeditaskid]).get(
+        jeditaskid, {'nactive': 0, 'nfinished': 0, 'nfailed': 0})
+    task.update(c)
+    task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
     return task

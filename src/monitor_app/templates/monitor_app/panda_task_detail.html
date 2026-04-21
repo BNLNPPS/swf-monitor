@@ -47,7 +47,11 @@
                         {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime }}</td></tr>{% endif %}
                         {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime }}</td></tr>{% endif %}
                         {% if task.progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.progress }}%</td></tr>{% endif %}
-                        {% if task.failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.failurerate }}%</td></tr>{% endif %}
+                        <tr><td><strong>Active Jobs</strong></td><td>{{ task.nactive|default:0 }}</td></tr>
+                        <tr><td><strong>Finished Jobs</strong></td><td>{{ task.nfinished|default:0 }}</td></tr>
+                        <tr><td><strong>Failed Jobs</strong></td><td>{{ task.nfailed|default:0 }}</td></tr>
+                        {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts; cancelled excluded)</span></td></tr>{% endif %}
+                        {% if task.failurerate is not None %}<tr><td><strong>JEDI Failure Rate</strong></td><td>{{ task.failurerate }}%</td></tr>{% endif %}
                         {% if task.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ task.attemptnr }}</td></tr>{% endif %}
                         {% if task.corecount %}<tr><td><strong>Cores</strong></td><td>{{ task.corecount }}</td></tr>{% endif %}
                         {% if task.taskpriority %}<tr><td><strong>Priority</strong></td><td>{{ task.taskpriority }}{% if task.currentpriority %} (current: {{ task.currentpriority }}){% endif %}</td></tr>{% endif %}

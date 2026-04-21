@@ -21,6 +21,7 @@ from ..panda import (
     get_task, error_summary, diagnose_jobs,
     list_queues, get_queue,
 )
+from ..panda.queries import _get_task_job_counts, _compute_failurerate
 from ..panda.constants import LIST_FIELDS, TASK_LIST_FIELDS
 
 
@@ -56,7 +57,16 @@ TASK_COLUMNS = [
     {'name': 'creationdate', 'title': 'Created', 'orderable': True},
     {'name': 'modificationtime', 'title': 'Modified', 'orderable': True},
     {'name': 'progress', 'title': 'Progress', 'orderable': True},
-    {'name': 'failurerate', 'title': 'Failure Rate', 'orderable': True},
+    # Per-task job counts — computed from a separate aggregation of
+    # jobsactive4 + jobsarchived4. Not orderable via SQL since they aren't
+    # columns on jedi_tasks. See monitor_app.panda.queries._get_task_job_counts.
+    {'name': 'nactive', 'title': 'Active', 'orderable': False},
+    {'name': 'nfinished', 'title': 'Finished', 'orderable': False},
+    {'name': 'nfailed', 'title': 'Failed', 'orderable': False},
+    # Derived from nfailed / (nfailed+nfinished). The native JEDI failurerate
+    # column is usually NULL in this deployment, so this is the usable signal.
+    {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': False},
+    {'name': 'failurerate', 'title': 'JEDI Fail Rate', 'orderable': True},
 ]
 
 TASK_FIELD_NAMES = [c['name'] for c in TASK_COLUMNS]
@@ -64,7 +74,10 @@ TASK_FIELD_NAMES = [c['name'] for c in TASK_COLUMNS]
 TASK_ORDER_MAP = {
     0: '"jeditaskid"', 1: '"taskname"', 2: '"status"',
     3: '"username"', 4: '"workinggroup"', 5: '"creationdate"',
-    6: '"modificationtime"', 7: '"progress"', 8: '"failurerate"',
+    6: '"modificationtime"', 7: '"progress"',
+    # indexes 8..11 are not-orderable (aggregated counts + computed rate).
+    # indexes reserved but no SQL ORDER BY — fall back to default on click.
+    12: '"failurerate"',
 }
 
 ERROR_COLUMNS = [
@@ -307,6 +320,9 @@ def panda_tasks_datatable_ajax(request):
         search=dt.search_value or None,
     )
 
+    # Per-task job counts for this page only — one extra aggregation query.
+    job_counts = _get_task_job_counts([r['jeditaskid'] for r in rows])
+
     data = []
     for task in rows:
         task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
@@ -322,8 +338,12 @@ def panda_tasks_datatable_ajax(request):
         progress = task.get('progress')
         progress_str = f'{progress}%' if progress is not None else ''
 
-        failurerate = task.get('failurerate')
-        failurerate_str = f'{failurerate}%' if failurerate is not None else ''
+        native_fr = task.get('failurerate')
+        native_fr_str = f'{native_fr}%' if native_fr is not None else ''
+
+        counts = job_counts.get(task['jeditaskid'], {'nactive': 0, 'nfinished': 0, 'nfailed': 0})
+        comp_fr = _compute_failurerate(counts['nfailed'], counts['nfinished'])
+        comp_fr_str = f'{comp_fr * 100:.1f}%' if comp_fr is not None else ''
 
         data.append([
             f'<a href="{task_url}">{task["jeditaskid"]}</a>',
@@ -334,7 +354,11 @@ def panda_tasks_datatable_ajax(request):
             _fmt_dt(task.get('creationdate')),
             _fmt_dt(task.get('modificationtime')),
             progress_str,
-            failurerate_str,
+            counts['nactive'],
+            counts['nfinished'],
+            counts['nfailed'],
+            comp_fr_str,
+            native_fr_str,
         ])
 
     return dt.create_response(data, total, filtered)

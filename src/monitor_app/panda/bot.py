@@ -1224,7 +1224,7 @@ class PandaBot:
             # Record inside lock so the next load sees this exchange
             await self._record_exchange(tagged_message, reply, post_id, root_id)
 
-        await self._post_reply(reply, reply_channel, post_id, root_id)
+        await self._post_reply(reply, reply_channel, root_id)
 
     async def _render_plot(self, code):
         """Execute matplotlib code and return the PNG path, or None on failure."""
@@ -1273,7 +1273,7 @@ class PandaBot:
                 logger.exception("Plot execution failed")
                 return None
 
-    async def _post_reply(self, reply, reply_channel, post_id, root_id):
+    async def _post_reply(self, reply, reply_channel, root_id):
         # Extract and render any plot code blocks (python-plot tag, or python with savefig)
         file_ids = []
         plot_match = re.search(r'```python-plot\s*\n(.*?)```', reply, re.DOTALL)
@@ -1309,23 +1309,28 @@ class PandaBot:
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
-        thread_root = root_id or post_id
+        # Reply where you were spoken to:
+        #   - Original post in a thread (root_id set) → reply in that thread.
+        #   - Original post in main channel (root_id empty) → reply in main channel,
+        #     not a new thread off the user's message.
         try:
             logger.info("Posting reply to Mattermost...")
             post_options = {
                 'channel_id': reply_channel,
                 'message': reply,
-                'root_id': thread_root,
             }
+            if root_id:
+                post_options['root_id'] = root_id
             if file_ids:
                 post_options['file_ids'] = file_ids
             await asyncio.to_thread(
                 self.driver.posts.create_post,
                 options=post_options,
             )
-            # Track this thread so we respond to follow-ups (persisted)
-            if thread_root not in self._active_threads:
-                self._active_threads.add(thread_root)
+            # Track the thread (if any) so follow-ups engage without re-@mention.
+            # Main-channel replies aren't tracked — users re-engage by @mentioning.
+            if root_id and root_id not in self._active_threads:
+                self._active_threads.add(root_id)
                 await asyncio.to_thread(self._save_active_threads)
             logger.info("Reply posted successfully")
         except Exception:
