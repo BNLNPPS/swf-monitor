@@ -8,7 +8,7 @@ SWF Monitor forwards workflow messages it consumes from ActiveMQ to remote HTTP 
 
 For user documentation on SSE streaming including client setup and usage examples, see [SSE Real-Time Streaming](../../swf-testbed/docs/sse-streaming.md) in the testbed repository.
 
-Production runs multiple WSGI processes; the ActiveMQ listener runs in a separate process. To reliably fan out events to all SSE clients across processes, we use Django Channels with a Redis channel layer as an inter-process relay. WebSockets are not required or enabled for this feature.
+Production runs Django under mod_wsgi (one or more daemon processes) with the ActiveMQ listener in a separate process, and `/swf-monitor/mcp/` on a separate uvicorn ASGI worker. To reliably fan out events to all SSE clients across processes, we use Django Channels with a Redis channel layer as an inter-process relay. WebSockets are not required or enabled for this feature.
 
 Important: Redis/Channels is REQUIRED in any environment that must support remote ActiveMQ client recipients via SSE. The in-memory fallback is for single-process development only and is not suitable for production.
 

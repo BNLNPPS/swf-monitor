@@ -224,12 +224,12 @@ PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution an
 
 ## MCP Tools
 
-MCP tools for AI-assisted tag and dataset management:
+MCP tools for AI-assisted tag browsing and lookup:
 
 | Tool | Description |
 |------|-------------|
 | `pcs_list_tags(tag_type)` | List tags with label, description, status, key params |
 | `pcs_get_tag(tag_label)` | Full tag detail with all parameters |
-| `pcs_create_tag(tag_type, ...)` | Create tag with auto-assigned number |
-| `pcs_list_datasets(...)` | Dataset list with tag filters |
-| `pcs_create_dataset(...)` | Create dataset from tag labels |
+| `pcs_search_tags(query, tag_type)` | Full-text search across tag labels, descriptions, and parameter values |
+
+Tag creation, lock/delete, and dataset/prod-config management go through the REST API and the web UI — see the sections above. The submission-artifact endpoint (`/prod-tasks/command/`) plus the `pcs-task-cmd` CLI are the programmatic path for production operators.

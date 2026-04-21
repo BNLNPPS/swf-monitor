@@ -552,6 +552,10 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 25 tasks). Cursor-based pagination via before_id. |
 | `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
+| `panda_list_queues` | `cloud`, `site`, `resource_type`, `status`, `limit` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
+| `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
+| `panda_resource_usage` | `days`, `username`, `site`, `workinggroup` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
+| `panda_harvester_workers` | `status`, `site`, `resourcetype`, `days` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -638,14 +642,20 @@ Use cases:
 
 ### PanDA Mattermost Bot
 
-The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client** — it connects to the MCP endpoint via HTTP POST and uses the `panda_*` tools to answer production monitoring questions in Mattermost.
+The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers production-monitoring questions in Mattermost by selecting and calling tools across multiple MCP servers.
 
 **Architecture:**
 - Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
-- Sends user questions to Claude Haiku with discovered PanDA tools
-- Executes tool calls via HTTP POST JSON-RPC to the MCP endpoint
-- Posts Claude's response back to the Mattermost thread
-- Remembers recent Q&A exchanges (via `swf_ai_memory`) to improve responses over time. Memory is collective — the bot does not track or remember who asked what
+- Holds connections to the local swf-monitor MCP (HTTP — the `swf_*`, `pcs_*`, `panda_*` tools) plus seven stdio-launched external servers: **LXR** (EIC code browser cross-reference), **uproot** (ROOT file analysis), **GitHub**, **Zenodo**, **XRootD**, **JLab-Rucio**, **BNL-Rucio**
+- Registers in-process **epicdoc** tools (`epic_doc_search`, `epic_doc_contents`) backed by a ChromaDB vector store of ePIC docs — runs inside the bot process, not as a separate MCP server
+- **Bamboo** log analysis is used via the `panda_study_job` and `panda_harvester_workers` swf-monitor MCP tools, not as a separate MCP server
+- System prompt is externalized to a file and re-read per message, so prompt iteration doesn't require a bot restart
+- **3-tier tool awareness**: every tool is visible by name+one-liner in the system prompt so the LLM knows the full catalog; detailed schemas are fetched only for tools the LLM explicitly selects via `select_tools`; the bot preserves server and suggestion context across thread turns so follow-ups don't re-select from scratch
+- **Progressive tool loading via semantic similarity**: for each user question the bot embeds the question and ranks tools by server-prefixed cosine similarity, auto-truncating at a score cliff — the LLM sees a small, relevant set rather than all hundreds of tools
+- **DPID (Data Provenance ID) anti-fabrication**: for questions about specific jobs/tasks, the bot verifies the LLM cited a real DPID from tool output, strips the DPID from the user-facing reply, and warns if verification fails
+- Remembers recent Q&A exchanges (via `swf_record_ai_memory`) to improve responses over time. Memory is collective — the bot does not track or remember who asked what
+- `/panda` slash commands for direct queries without LLM involvement (status, errors, jobs/tasks by filter, site detail)
+- Server-side matplotlib plots rendered in Mattermost
 
 **Running:** `manage.py panda_bot`
 
@@ -680,8 +690,10 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client** — it connects 
 | Agent Management | `swf_kill_agent` | 1 |
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
-| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job` | 6 |
-| **Total** | | **35** |
+| AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
+| PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
+| **Total** | | **44** |
 
 ---
 
@@ -868,9 +880,10 @@ swf-monitor/
 
 ### Architecture
 
-MCP is integrated directly into Django rather than as a separate service:
+MCP is integrated directly into Django rather than as a separate service, but the `/mcp/` endpoint is served by a **separate ASGI worker** (uvicorn) fronted by Apache `ProxyPass`. The rest of swf-monitor stays on mod_wsgi. Rationale: `django-mcp-server` uses Starlette's `StreamableHTTPSessionManager`, which holds one thread per streaming session; under WSGI that saturates the thread pool when a handful of clients hit MCP. Isolating MCP on an ASGI worker keeps the failure mode out of the main app. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
 
-- **Django** serves the MCP endpoint alongside REST API
+- **Django** exposes the MCP endpoint alongside the REST API (same codebase, same URL tree)
+- **ASGI (uvicorn)** serves `/mcp/` on `127.0.0.1:8001`; Apache ProxyPasses to it with streaming-safe settings (`timeout=3600`, `disablereuse=On`, `no-gzip`, `CacheDisable`)
 - **django-mcp-server** provides MCP spec compliance and tool registration
 - **Auth0 OAuth 2.1** authentication for Claude.ai remote connections (optional, disabled if AUTH0_DOMAIN not set)
 
@@ -884,7 +897,9 @@ The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init_
 
 ### Transport
 
-HTTP POST transport (JSON-RPC over Streamable HTTP with `json_response=True`). All requests and responses are plain JSON — no SSE streaming, no GET listeners. The MCP spec also supports stdio and SSE transports, but HTTP POST aligns with the existing REST architecture and Django WSGI deployment.
+Streamable HTTP (the MCP spec's HTTP transport) — `django-mcp-server` uses Starlette's `StreamableHTTPSessionManager`, so the server can stream responses and long-lived SSE-style session events when a client asks for them. The Django view (`MCPServerStreamableHttpView`) dispatches GET/POST/DELETE to the session manager; sessions are keyed via the `mcp-session-id` header and persisted in the Django session store.
+
+Because streaming sessions tie up a thread for the session's lifetime, the endpoint runs under an ASGI worker (uvicorn) rather than mod_wsgi — see the Architecture section above.
 
 ### Settings
 
