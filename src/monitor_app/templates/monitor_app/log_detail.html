@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load swf_fmt %}
+{% load swf_fmt humanize %}
 
 {% block title %}Log Entry #{{ log.id }}{% endblock %}
 
@@ -16,11 +16,11 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Timestamp</th>
-                        <td>{{ log.timestamp|fmt_dt }}</td>
+                        <td>{{ log.timestamp|fmt_dt }} <span class="text-muted">({{ log.timestamp|naturaltime }})</span></td>
                     </tr>
                     <tr>
                         <th>Level</th>
-                        <td class="{{ log.levelname|state_class }}">{{ log.levelname }}</td>
+                        <td class="{{ log.levelname|state_class }}" title="{{ log.levelname|state_title }}">{{ log.levelname }}</td>
                     </tr>
                     <tr>
                         <th>Application</th>
