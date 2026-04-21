@@ -591,6 +591,7 @@ Use cases:
 - `progress`, `failurerate`, `errordialog`
 - `site`, `corecount`, `taskpriority`, `currentpriority`
 - `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
+- **`nactive`, `nfinished`, `nfailed`** — per-task job counts aggregated from `jobsactive4` + `jobsarchived4`, bucketed per `JOB_STATUS_CATEGORIES` in `panda/constants.py`. Cancelled and closed are deliberately excluded so alarm consumers see only what operators don't know.
 
 **Diagnostic use cases:**
 - Task overview: `panda_list_tasks(days=7)`

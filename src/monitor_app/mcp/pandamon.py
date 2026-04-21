@@ -132,7 +132,22 @@ async def panda_list_tasks(
 
     Returns:
         summary: Task counts by status for the full query (not just this page).
-        tasks: List of task records with key fields.
+        tasks: List of task records. Each task includes native JEDI fields
+            (status, failurerate, progress, taskname, username, workinggroup,
+            processingtype, errordialog, creationdate, modificationtime, ...)
+            PLUS aggregated per-task job counts:
+              - nactive: jobs in non-terminal states (running, activated,
+                starting, holding, transferring, merging, ...)
+              - nfinished: jobs with jobstatus='finished'
+              - nfailed: jobs with jobstatus='failed'
+            Cancelled and closed jobs are deliberately NOT counted —
+            operator-facing summaries should surface what operators don't
+            already know (operators know when they cancel).
+            failurerate is pre-computed at the file level; the
+            nfailed/nfinished/nactive triple is job-level. Prefer
+            failurerate when present; the job counts are useful for naming
+            specific failing tasks (failures tend to correlate to a task
+            by software or by running site).
         pagination: {before_id, has_more, next_before_id} for incremental pulling.
         total_in_window: Total tasks matching filters in the time window.
     """

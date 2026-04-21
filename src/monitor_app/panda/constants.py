@@ -92,3 +92,18 @@ TASK_LIST_FIELDS = [
     'site', 'corecount', 'taskpriority', 'currentpriority',
     'gshare', 'attemptnr', 'parent_tid', 'workinggroup',
 ]
+
+# Per-task job-count categorization.
+# Bucketing of jobstatus values aggregated from jobsactive4 + jobsarchived4.
+# The three returned counts (nactive, nfinished, nfailed) are what an alarm
+# engine or dashboard needs to reason about task health. Cancelled and closed
+# are deliberately excluded — operators know when they cancel; alarms surface
+# what they don't know.
+JOB_STATUS_CATEGORIES = {
+    'active': (
+        'defined', 'waiting', 'assigned', 'activated', 'sent',
+        'starting', 'running', 'holding', 'transferring', 'merging',
+    ),
+    'finished': ('finished',),
+    'failed': ('failed',),
+}

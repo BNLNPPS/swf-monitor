@@ -14,7 +14,7 @@ from django.db import connections
 from .constants import (
     PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
-    STUDY_FIELDS, FILE_FIELDS,
+    STUDY_FIELDS, FILE_FIELDS, JOB_STATUS_CATEGORIES,
 )
 from .sql import (
     build_union_query, build_count_query,
@@ -306,10 +306,60 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
     }
 
 
+def _get_task_job_counts(jeditaskids):
+    """Return per-task job counts: {jeditaskid: {nactive, nfinished, nfailed}}.
+
+    Aggregates over jobsactive4 + jobsarchived4 bucketed by JOB_STATUS_CATEGORIES.
+    Cancelled and closed are deliberately not reported — alarms surface what
+    operators don't know. Missing tasks get zero counts across the three keys.
+    """
+    zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0}
+    if not jeditaskids:
+        return {}
+
+    # Build flat {status: category} lookup once
+    status_to_cat = {}
+    for cat, statuses in JOB_STATUS_CATEGORIES.items():
+        for s in statuses:
+            status_to_cat[s] = cat
+
+    placeholders = ','.join(['%s'] * len(jeditaskids))
+    sql = f"""
+        SELECT "jeditaskid", "jobstatus", COUNT(*) FROM (
+            SELECT "jeditaskid", "jobstatus" FROM "{PANDA_SCHEMA}"."jobsactive4"
+                WHERE "jeditaskid" IN ({placeholders})
+            UNION ALL
+            SELECT "jeditaskid", "jobstatus" FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                WHERE "jeditaskid" IN ({placeholders})
+        ) combined
+        GROUP BY "jeditaskid", "jobstatus"
+    """
+    params = list(jeditaskids) + list(jeditaskids)
+
+    counts = {tid: dict(zero_counts) for tid in jeditaskids}
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, params)
+            for tid, jobstatus, n in cursor.fetchall():
+                cat = status_to_cat.get(jobstatus)
+                if cat is None:
+                    continue  # cancelled, closed, unknown — skipped by design
+                counts[tid][f'n{cat}'] += n
+    except Exception as e:
+        logger.error(f"_get_task_job_counts failed: {e}")
+        # On failure, return zeros so caller still gets a consistent shape.
+    return counts
+
+
 def list_tasks(days=7, status=None, username=None, taskname=None,
                reqid=None, workinggroup=None, taskid=None,
                processingtype=None, limit=25, before_id=None):
-    """List JEDI tasks with summary statistics and cursor-based pagination."""
+    """List JEDI tasks with summary statistics and cursor-based pagination.
+
+    Each task dict is augmented with per-task job counts (nactive, nfinished,
+    nfailed) via _get_task_job_counts. See JOB_STATUS_CATEGORIES in
+    constants.py for the bucketing; cancelled and closed are excluded.
+    """
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
     params = [cutoff]
@@ -388,6 +438,11 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     except Exception as e:
         logger.error(f"list_tasks query failed: {e}")
         return {"error": str(e)}
+
+    # Per-task job counts (nactive, nfinished, nfailed) — one extra query.
+    job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
+    for t in tasks:
+        t.update(job_counts.get(t['jeditaskid'], {'nactive': 0, 'nfinished': 0, 'nfailed': 0}))
 
     has_more = len(rows) > limit
     next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
@@ -1399,4 +1454,6 @@ def get_task(jeditaskid):
         return {"error": f"Task {jeditaskid} not found"}
 
     task = row_to_dict(row, TASK_LIST_FIELDS)
+    task.update(_get_task_job_counts([jeditaskid]).get(
+        jeditaskid, {'nactive': 0, 'nfinished': 0, 'nfailed': 0}))
     return task
