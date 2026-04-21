@@ -13,6 +13,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <style>
       .btn.btn-dark-green {
         background-color: #166534; border-color: #166534; color: #fff;
@@ -162,6 +163,28 @@
                 btn.classList.remove('copied');
             }, 1000);
         });
+    });
+    // Near-zero-latency tooltips via Bootstrap 5 for elements with title=.
+    // Scoped to state-filled cells and the copy button so we don't spin up
+    // a tooltip for every cell on every page. show delay 50ms, hide 0ms.
+    document.addEventListener('DOMContentLoaded', function() {
+        if (!window.bootstrap || !bootstrap.Tooltip) return;
+        function init(root) {
+            root.querySelectorAll(
+                'td[title]:not([data-bs-tooltip-init]), .copy-btn[title]:not([data-bs-tooltip-init])'
+            ).forEach(function(el) {
+                if (!el.getAttribute('title')) return;
+                el.setAttribute('data-bs-tooltip-init', '1');
+                new bootstrap.Tooltip(el, {delay: {show: 50, hide: 0}});
+            });
+        }
+        init(document);
+        // DataTables redraws replace rows; re-init after each draw.
+        if (window.jQuery) {
+            jQuery(document).on('draw.dt', function(_, settings) {
+                init(settings.nTable || document);
+            });
+        }
     });
     </script>
     <nav>
