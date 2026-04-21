@@ -143,8 +143,8 @@
         });
     })();
     // One-click copy-to-clipboard handler for .copy-btn buttons rendered by
-    // the {% copy_btn %} template tag. Swaps the icon to a checkmark for 1s
-    // on success so the user sees the click landed.
+    // the copy_btn template tag (swf_fmt). Swaps the icon to a checkmark for
+    // 1s on success so the user sees the click landed.
     document.addEventListener('click', function(ev) {
         var btn = ev.target.closest('.copy-btn');
         if (!btn) return;
