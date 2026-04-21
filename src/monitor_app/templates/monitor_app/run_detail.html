@@ -87,34 +87,4 @@
     </div>
 </div>
 
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-<script>
-  $(document).ready(function() {
-    $('#stf-files-table').DataTable({
-      paging: true,
-      pageLength: 25,
-      lengthMenu: [[10, 25, 50, -1], [10, 25, 50, 'All']],
-      ordering: true,
-      order: [[3, 'desc']],
-      info: true,
-      searching: true,
-      responsive: true,
-      language: {
-        search: "Filter files:",
-        lengthMenu: "Show _MENU_ files",
-        info: "Showing _START_ to _END_ of _TOTAL_ files",
-        emptyTable: "No STF files found for this run.",
-        paginate: {
-          first: "First",
-          last: "Last",
-          next: "Next",
-          previous: "Previous"
-        }
-      }
-    });
-    $(table.table().container()).find('input[type="search"]').css({'width':'24em','display':'inline-block'});
-  });
-</script>
 {% endblock %}
