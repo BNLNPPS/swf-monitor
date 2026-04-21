@@ -233,3 +233,19 @@
 .err_cat_4 {background-color:#deb900 !important}
 .err_cat_5 {background-color:#2174bb !important}
 .err_cat_6 {background-color:#e67300 !important}
+
+/* SWF additions — state names the monitor uses that aren't in the
+   BigMon base palette (log levels, agent statuses, STF lifecycle). */
+
+/* Log levels: error/warning/debug already above; add info + critical. */
+.info_fill { color:black; background-color:#d9efef !important; }
+.critical_fill { color:white; background-color:firebrick !important; }
+
+/* Agent statuses: OK/WARNING/ERROR/UNKNOWN/EXITED. */
+.ok_fill { color:black; background-color:#96ca69 !important; }
+.unknown_fill { color:black; background-color:#bdbdbd !important; }
+.exited_fill { color:black; background-color:#bdbdbd !important; }
+
+/* STF file lifecycle: registered/processing/processed/done/failed —
+   the first two need fills (others already covered). */
+.processing_fill { color:black; background-color:#C7E9A9 !important; }

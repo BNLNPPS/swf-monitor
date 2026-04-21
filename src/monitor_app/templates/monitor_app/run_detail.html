@@ -23,13 +23,7 @@
                                 </tr>
                                 <tr>
                                     <th>Status:</th>
-                                    <td>
-                                        {% if run.end_time %}
-                                            <span class="badge badge-secondary">Completed</span>
-                                        {% else %}
-                                            <span class="badge badge-success">Active</span>
-                                        {% endif %}
-                                    </td>
+                                    <td class="{% if run.end_time %}finished_fill{% else %}running_fill{% endif %}">{% if run.end_time %}Completed{% else %}Active{% endif %}</td>
                                 </tr>
                                 <tr>
                                     <th>Start Time:</th>

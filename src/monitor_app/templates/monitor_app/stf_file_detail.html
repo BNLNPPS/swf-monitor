@@ -24,11 +24,7 @@
                                 </tr>
                                 <tr>
                                     <th>Status:</th>
-                                    <td>
-                                        <span class="badge badge-{% if stf_file.status == 'REGISTERED' %}primary{% elif stf_file.status == 'PROCESSING' %}warning{% elif stf_file.status == 'PROCESSED' %}success{% elif stf_file.status == 'FAILED' %}danger{% else %}secondary{% endif %}">
-                                            {{ stf_file.get_status_display }}
-                                        </span>
-                                    </td>
+                                    <td class="{{ stf_file.status|state_class }}">{{ stf_file.get_status_display }}</td>
                                 </tr>
                                 <tr>
                                     <th>File Size:</th>
@@ -40,11 +36,11 @@
                                 </tr>
                                 <tr>
                                     <th>State:</th>
-                                    <td>{{ stf_file.machine_state }}</td>
+                                    <td class="{{ stf_file.machine_state|state_class }}">{{ stf_file.machine_state }}</td>
                                 </tr>
                                 <tr>
                                     <th>Substate:</th>
-                                    <td>{{ stf_file.daq_substate|default:"N/A" }}</td>
+                                    <td class="{{ stf_file.daq_substate|state_class }}">{{ stf_file.daq_substate|default:"N/A" }}</td>
                                 </tr>
                                 <tr>
                                     <th>Created:</th>

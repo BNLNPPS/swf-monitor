@@ -25,6 +25,7 @@ from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
     TASK_STATE_COLORS, JOB_STATE_COLORS,
 )
+from ..cell_fmt import fill_cell
 
 
 # ── Column definitions ───────────────────────────────────────────────────────
@@ -141,28 +142,7 @@ def _fmt_dt(val):
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
-def _fill_cell(content, state, url=None):
-    """Emit a DataTables cell that fills the enclosing <td> with a state color.
-
-    The content is wrapped in ``<span data-fill="<state>_fill">…</span>`` so
-    the DT base template's ``createdCell`` hook can promote the fill class
-    to the enclosing ``<td>``. BigMon's state-colors.css provides the
-    per-state background colors (see src/monitor_app/static/css/state-colors.css).
-
-    state can be a PanDA task or job status string, or any fixed label that
-    resolves to a ``<label>_fill`` CSS class (e.g. 'running' for the Active
-    count column, 'finished' for Finished, 'failed' for Failed).
-    Empty/falsy state returns the content unwrapped (no fill).
-    """
-    if content is None:
-        content = ''
-    if not state:
-        return str(content)
-    fill = f'{str(state).lower()}_fill'
-    wrapper = f'<span data-fill="{fill}">{content}</span>'
-    if url:
-        return f'<a href="{url}" style="text-decoration:none;color:inherit;">{wrapper}</a>'
-    return wrapper
+_fill_cell = fill_cell  # backwards-compat alias within this module
 
 
 DAYS_OPTIONS = [1, 3, 7, 14, 30]

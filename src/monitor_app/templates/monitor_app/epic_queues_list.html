@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}ePIC Compute Queues{% endblock %}
 
@@ -35,17 +36,7 @@
                 {% for q in queues %}
                     <tr>
                         <td><a href="{% url 'monitor_app:epic_queue_detail' q.panda_queue %}">{{ q.panda_queue }}</a></td>
-                        <td>
-                            {% if q.status == 'online' %}
-                                <span class="badge bg-success">{{ q.status }}</span>
-                            {% elif q.status == 'brokeroff' %}
-                                <span class="badge bg-warning text-dark">{{ q.status }}</span>
-                            {% elif q.status == 'offline' %}
-                                <span class="badge bg-danger">{{ q.status }}</span>
-                            {% else %}
-                                <span class="badge bg-secondary">{{ q.status|default:"—" }}</span>
-                            {% endif %}
-                        </td>
+                        <td class="{{ q.status|state_class }}">{{ q.status|default:"—" }}</td>
                         <td>{{ q.state|default:"—" }}</td>
                         <td>{{ q.resource_type|default:"—" }}</td>
                         <td>{{ q.type|default:"—" }}</td>

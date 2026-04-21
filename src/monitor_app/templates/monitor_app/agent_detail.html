@@ -24,11 +24,7 @@
                     </tr>
                     <tr>
                         <th>Status</th>
-                        <td>
-                            <span class="badge bg-{% if agent.status == 'OK' %}success{% elif agent.status == 'WARNING' %}warning{% elif agent.status == 'ERROR' %}danger{% else %}secondary{% endif %}">
-                                {{ agent.status }}
-                            </span>
-                        </td>
+                        <td class="{{ agent.status|state_class }}">{{ agent.status }}</td>
                     </tr>
                     <tr>
                         <th>Description</th>

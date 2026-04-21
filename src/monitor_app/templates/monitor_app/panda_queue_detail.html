@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% load swf_fmt %}
 
+
 {% block title %}PanDA Queue: {{ queue.queue_name }}{% endblock %}
 
 {% block content %}
@@ -35,13 +36,7 @@
                                 </tr>
                                 <tr>
                                     <th>Status:</th>
-                                    <td>
-                                        {% if queue.status == 'active' %}
-                                            <span class="badge bg-success">{{ queue.status }}</span>
-                                        {% else %}
-                                            <span class="badge bg-secondary">{{ queue.status }}</span>
-                                        {% endif %}
-                                    </td>
+                                    <td class="{{ queue.status|state_class }}">{{ queue.status }}</td>
                                 </tr>
                                 <tr>
                                     <th>Type:</th>

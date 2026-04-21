@@ -157,7 +157,18 @@ $(document).ready(function() {
         },
         columns: [
             {% for column in columns %}
-                { data: {{ forloop.counter0 }}, name: '{{ column.name }}', orderable: {{ column.orderable|yesno:"true,false" }} }{% if not forloop.last %},{% endif %}
+                {
+                    data: {{ forloop.counter0 }},
+                    name: '{{ column.name }}',
+                    orderable: {{ column.orderable|yesno:"true,false" }},
+                    // Promote data-fill="<class>" from the cell HTML to the
+                    // enclosing <td> so BigMon state colors fill the whole
+                    // cell. Pattern matches monitor_app.cell_fmt.fill_cell.
+                    createdCell: function(td) {
+                        var m = td.innerHTML.match(/data-fill="([^"]+)"/);
+                        if (m) td.classList.add(m[1]);
+                    }
+                }{% if not forloop.last %},{% endif %}
             {% endfor %}
         ],
         order: {% block default_order %}[[0, 'desc']]{% endblock %},

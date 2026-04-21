@@ -111,6 +111,7 @@ def tf_slices_datatable_ajax(request):
         # Worker display
         worker_display = slice_obj.assigned_worker if slice_obj.assigned_worker else "-"
 
+        from .cell_fmt import fill_cell
         data.append([
             slice_obj.slice_id,
             slice_obj.tf_filename,
@@ -118,7 +119,7 @@ def tf_slices_datatable_ajax(request):
             slice_obj.run_number,
             tf_range,
             slice_obj.tf_count,
-            slice_obj.status,
+            fill_cell(slice_obj.status, slice_obj.status),
             worker_display,
             format_datetime(slice_obj.created_at)
         ])

@@ -20,11 +20,7 @@
                     </tr>
                     <tr>
                         <th>Level</th>
-                        <td>
-                            <span class="badge bg-{% if log.levelname == 'ERROR' or log.levelname == 'CRITICAL' %}danger{% elif log.levelname == 'WARNING' %}warning{% elif log.levelname == 'DEBUG' %}secondary{% else %}info{% endif %}">
-                                {{ log.levelname }}
-                            </span>
-                        </td>
+                        <td class="{{ log.levelname|state_class }}">{{ log.levelname }}</td>
                     </tr>
                     <tr>
                         <th>Application</th>

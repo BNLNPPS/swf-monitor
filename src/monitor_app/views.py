@@ -464,13 +464,16 @@ def log_summary_datatable_ajax(request):
         view_logs_url = f'{logs_url}?app_name={item["app_name"]}&instance_name={item["instance_name"]}'
         view_logs_link = f'<a href="{view_logs_url}">View Logs</a>'
         
+        from .cell_fmt import fill_cell
+        # Color each per-level count cell by its level so operators can scan
+        # for ERROR/CRITICAL columns at a glance.
         data.append([
             app_name_link, instance_name_link, timestamp_str,
-            create_level_link(item['info_count'], 'INFO', item['app_name'], item['instance_name']),
-            create_level_link(item['warning_count'], 'WARNING', item['app_name'], item['instance_name']),
-            create_level_link(item['error_count'], 'ERROR', item['app_name'], item['instance_name']),
-            create_level_link(item['critical_count'], 'CRITICAL', item['app_name'], item['instance_name']),
-            create_level_link(item['debug_count'], 'DEBUG', item['app_name'], item['instance_name']),
+            fill_cell(create_level_link(item['info_count'], 'INFO', item['app_name'], item['instance_name']), 'info' if item['info_count'] else ''),
+            fill_cell(create_level_link(item['warning_count'], 'WARNING', item['app_name'], item['instance_name']), 'warning' if item['warning_count'] else ''),
+            fill_cell(create_level_link(item['error_count'], 'ERROR', item['app_name'], item['instance_name']), 'error' if item['error_count'] else ''),
+            fill_cell(create_level_link(item['critical_count'], 'CRITICAL', item['app_name'], item['instance_name']), 'critical' if item['critical_count'] else ''),
+            fill_cell(create_level_link(item['debug_count'], 'DEBUG', item['app_name'], item['instance_name']), 'debug' if item['debug_count'] else ''),
             item['total_count'], view_logs_link
         ])
     
@@ -596,9 +599,10 @@ def logs_datatable_ajax(request):
         message = log.message[:200] + '...' if len(log.message) > 200 else log.message
         func_display = f"{log.funcname}:{log.lineno}"
 
+        from .cell_fmt import fill_cell
         data.append([
             timestamp_link, app_name_link, instance_name_display,
-            level_text, message, log.module, func_display
+            fill_cell(level_text, log.levelname), message, log.module, func_display
         ])
 
     return dt.create_response(data, records_total, records_filtered)
@@ -1124,9 +1128,11 @@ def stf_files_datatable_ajax(request):
         stf_file_detail_url = reverse('monitor_app:stf_file_detail', args=[file.file_id])
         view_link = f'<a href="{stf_file_detail_url}">View</a>'
 
+        from .cell_fmt import fill_cell
         data.append([
-            file.stf_filename, run_link, tf_files_link, file.machine_state or '',
-            status_text, timestamp_str, view_link
+            file.stf_filename, run_link, tf_files_link,
+            fill_cell(file.machine_state or '', file.machine_state),
+            fill_cell(status_text, file.status), timestamp_str, view_link
         ])
     
     return dt.create_response(data, records_total, records_filtered)
@@ -1544,14 +1550,8 @@ def workflow_agents_datatable_ajax(request):
             completed_at__gte=timezone.now() - timedelta(hours=1)
         ).count()
         
-        # Format status badge
-        status_class = {
-            'OK': 'success',
-            'WARNING': 'warning', 
-            'ERROR': 'danger'
-        }.get(agent.status, 'secondary')
-        
-        status_badge = f'<span class="badge bg-{status_class}">{agent.status}</span>'
+        from .cell_fmt import fill_cell
+        status_badge = fill_cell(agent.status, agent.status)
         
         # Create agent name link
         agent_detail_url = reverse('monitor_app:agent_detail', args=[agent.instance_name])
