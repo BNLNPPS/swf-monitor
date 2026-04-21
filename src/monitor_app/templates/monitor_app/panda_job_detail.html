@@ -21,12 +21,12 @@
                 <div class="card-header"><strong>Job Information</strong></div>
                 <div class="card-body">
                     <table class="table table-sm mb-0">
-                        <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }}</td></tr>
+                        <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }} {% copy_btn job.pandaid %}</td></tr>
                         {% if job.jeditaskid %}
                         <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' job.jeditaskid %}">{{ job.jeditaskid }}</a></td></tr>
                         {% endif %}
                         {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td><code>{{ job.jobname }}</code></td></tr>{% endif %}
-                        <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}">{{ job.jobstatus }}</td></tr>
+                        <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td></tr>
                         {% if job.produsername %}
                         <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?username={{ job.produsername }}">{{ job.produsername }}</a></td></tr>
                         {% endif %}

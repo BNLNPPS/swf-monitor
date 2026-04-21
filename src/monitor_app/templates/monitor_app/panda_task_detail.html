@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load swf_fmt %}
+{% load swf_fmt humanize %}
 
 {% block title %}Task {{ jeditaskid }} - SWF Monitor{% endblock %}
 
@@ -21,9 +21,9 @@
                 <div class="card-header"><strong>Task Information</strong></div>
                 <div class="card-body">
                     <table class="table table-sm mb-0">
-                        <tr><td><strong>Task ID</strong></td><td>{{ task.jeditaskid }}</td></tr>
+                        <tr><td><strong>Task ID</strong></td><td>{{ task.jeditaskid }} {% copy_btn task.jeditaskid %}</td></tr>
                         {% if task.taskname %}<tr><td><strong>Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>{% endif %}
-                        <tr><td><strong>Status</strong></td><td class="{{ task.status|state_class }}">{{ task.status }}</td></tr>
+                        <tr><td><strong>Status</strong></td><td class="{{ task.status|state_class }}" title="{{ task.status|state_title }}">{{ task.status }}</td></tr>
                         {% if task.username %}
                         <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_tasks_list' %}?username={{ task.username }}">{{ task.username }}</a></td></tr>
                         {% endif %}
@@ -48,9 +48,9 @@
                         {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime|fmt_dt }}</td></tr>{% endif %}
                         {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime|fmt_dt }}</td></tr>{% endif %}
                         {% if task.computed_progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.computed_progress }}% <span class="text-muted">(from job counts)</span></td></tr>{% endif %}
-                        <tr><td><strong>Active Jobs</strong></td><td class="running_fill">{{ task.nactive|default:0 }}</td></tr>
-                        <tr><td><strong>Finished Jobs</strong></td><td class="finished_fill">{{ task.nfinished|default:0 }}</td></tr>
-                        <tr><td><strong>Failed Jobs</strong></td><td class="failed_fill">{{ task.nfailed|default:0 }}</td></tr>
+                        <tr><td><strong>Active Jobs</strong></td><td class="running_fill">{{ task.nactive|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Finished Jobs</strong></td><td class="finished_fill">{{ task.nfinished|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Failed Jobs</strong></td><td class="failed_fill">{{ task.nfailed|default:0|intcomma }}</td></tr>
                         {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts; cancelled excluded)</span></td></tr>{% endif %}
                         {% if task.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ task.attemptnr }}</td></tr>{% endif %}
                         {% if task.corecount %}<tr><td><strong>Cores</strong></td><td>{{ task.corecount }}</td></tr>{% endif %}
@@ -103,7 +103,7 @@
                     {% for job in jobs %}
                     <tr>
                         <td><a href="{% url 'monitor_app:panda_job_detail' job.pandaid %}">{{ job.pandaid }}</a></td>
-                        <td class="{{ job.jobstatus|state_class }}">{{ job.jobstatus }}</td>
+                        <td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td>
                         <td>{{ job.computingsite|default:"" }}</td>
                         <td>{{ job.creationtime|fmt_dt }}</td>
                         <td>{{ job.endtime|fmt_dt }}</td>
