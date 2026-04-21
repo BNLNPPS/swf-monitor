@@ -28,6 +28,12 @@ class ActiveMQConnectionManager:
             return
         self.conn = None
         self.listener = None
+        # Only processes that own the database-saving listener should subscribe
+        # to the topic. Everyone else (MCP tools, bots) connects send-only via
+        # send_message() and must NOT subscribe — that was the source of the
+        # duplicate-message bug when MCP moved to the ASGI worker. apps.py
+        # flips this True before calling connect() in the listener process.
+        self._should_subscribe = False
         self.initialized = True
         self.logger = logging.getLogger(__name__)
     
@@ -81,10 +87,12 @@ class ActiveMQConnectionManager:
                 }
             )
 
-            # Subscribe to workflow topic (broadcast messages from agents)
-            self.conn.subscribe(destination=topic, id=1, ack='auto')
-
-            self.logger.info(f"Successfully connected to ActiveMQ and subscribed to {topic}")
+            if self._should_subscribe:
+                # Subscribe to workflow topic (broadcast messages from agents)
+                self.conn.subscribe(destination=topic, id=1, ack='auto')
+                self.logger.info(f"Successfully connected to ActiveMQ and subscribed to {topic}")
+            else:
+                self.logger.info(f"Successfully connected to ActiveMQ (send-only, no subscribe)")
             return True
             
         except Exception as e:
