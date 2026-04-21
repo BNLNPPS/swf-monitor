@@ -72,7 +72,6 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django.contrib.humanize",  # intcomma / filesizeformat / naturaltime for swf_fmt
     "pcs",  # Physics Configuration System
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "django_dbml",  # For schema diagram generation

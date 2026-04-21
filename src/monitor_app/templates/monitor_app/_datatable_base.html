@@ -97,17 +97,7 @@ Example usage in child template:
         margin-top: 0 !important;
         margin-bottom: 0 !important;
     }
-
-    /* Truncate long cell text with ellipsis; drawCallback sets title= so
-       hovering reveals the full value. 400px is generous — short cells
-       (IDs, statuses, numbers) stay below it and don't truncate. */
-    #main-table td {
-        max-width: 400px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
+    
     {% block extra_styles %}{% endblock %}
     </style>
 
@@ -206,13 +196,6 @@ $(document).ready(function() {
             updatePaginationLabels(this);
             // Update length menu with total count
             updateLengthMenuText(this);
-            // Native tooltip for any cell whose content is truncated by the
-            // ellipsis CSS above — no-op on cells that fit.
-            $('#main-table tbody td').each(function() {
-                if (!this.hasAttribute('title') && this.scrollWidth > this.clientWidth) {
-                    this.setAttribute('title', this.textContent.trim());
-                }
-            });
         }
     });
 

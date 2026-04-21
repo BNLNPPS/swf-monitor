@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% load swf_fmt humanize %}
+{% load swf_fmt %}
 
 {% block title %}Agent Detail: {{ agent.instance_name }}{% endblock %}
 
@@ -16,7 +16,7 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Instance Name</th>
-                        <td>{{ agent.instance_name }} {% copy_btn agent.instance_name %}</td>
+                        <td>{{ agent.instance_name }}</td>
                     </tr>
                     <tr>
                         <th>Type</th>
@@ -24,7 +24,7 @@
                     </tr>
                     <tr>
                         <th>Status</th>
-                        <td class="{{ agent.status|state_class }}" title="{{ agent.status|state_title }}">{{ agent.status }}</td>
+                        <td class="{{ agent.status|state_class }}">{{ agent.status }}</td>
                     </tr>
                     <tr>
                         <th>Description</th>
@@ -60,11 +60,11 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Last Heartbeat</th>
-                        <td>{% if agent.last_heartbeat %}{{ agent.last_heartbeat|fmt_dt }} <span class="text-muted">({{ agent.last_heartbeat|naturaltime }})</span>{% else %}<em class="text-muted">never</em>{% endif %}</td>
+                        <td>{% if agent.last_heartbeat %}{{ agent.last_heartbeat|fmt_dt }}{% else %}<em class="text-muted">never</em>{% endif %}</td>
                     </tr>
                     <tr>
                         <th>Last STF Processed</th>
-                        <td>{% if agent.last_stf_processed %}{{ agent.last_stf_processed|fmt_dt }} <span class="text-muted">({{ agent.last_stf_processed|naturaltime }})</span>{% else %}<em class="text-muted">never</em>{% endif %}</td>
+                        <td>{% if agent.last_stf_processed %}{{ agent.last_stf_processed|fmt_dt }}{% else %}<em class="text-muted">never</em>{% endif %}</td>
                     </tr>
                     <tr>
                         <th>Created At</th>
@@ -88,11 +88,11 @@
                 <tbody>
                     <tr>
                         <th style="width: 200px;">Current STF Count</th>
-                        <td>{{ agent.current_stf_count|intcomma }}</td>
+                        <td>{{ agent.current_stf_count }}</td>
                     </tr>
                     <tr>
                         <th>Total STF Processed</th>
-                        <td>{{ agent.total_stf_processed|intcomma }}</td>
+                        <td>{{ agent.total_stf_processed }}</td>
                     </tr>
                 </tbody>
             </table>

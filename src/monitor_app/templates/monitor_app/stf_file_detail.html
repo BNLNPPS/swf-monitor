@@ -16,15 +16,15 @@
                             <table class="table table-sm">
                                 <tr>
                                     <th>Filename:</th>
-                                    <td>{{ stf_file.stf_filename }} {% copy_btn stf_file.stf_filename %}</td>
+                                    <td>{{ stf_file.stf_filename }}</td>
                                 </tr>
                                 <tr>
                                     <th>File ID:</th>
-                                    <td><code>{{ stf_file.file_id }}</code> {% copy_btn stf_file.file_id %}</td>
+                                    <td><code>{{ stf_file.file_id }}</code></td>
                                 </tr>
                                 <tr>
                                     <th>Status:</th>
-                                    <td class="{{ stf_file.status|state_class }}" title="{{ stf_file.status|state_title }}">{{ stf_file.get_status_display }}</td>
+                                    <td class="{{ stf_file.status|state_class }}">{{ stf_file.get_status_display }}</td>
                                 </tr>
                                 <tr>
                                     <th>File Size:</th>
@@ -36,11 +36,11 @@
                                 </tr>
                                 <tr>
                                     <th>State:</th>
-                                    <td class="{{ stf_file.machine_state|state_class }}" title="{{ stf_file.machine_state|state_title }}">{{ stf_file.machine_state }}</td>
+                                    <td class="{{ stf_file.machine_state|state_class }}">{{ stf_file.machine_state }}</td>
                                 </tr>
                                 <tr>
                                     <th>Substate:</th>
-                                    <td class="{{ stf_file.daq_substate|state_class }}" title="{{ stf_file.daq_substate|state_title }}">{{ stf_file.daq_substate|default:"N/A" }}</td>
+                                    <td class="{{ stf_file.daq_substate|state_class }}">{{ stf_file.daq_substate|default:"N/A" }}</td>
                                 </tr>
                                 <tr>
                                     <th>Created:</th>
