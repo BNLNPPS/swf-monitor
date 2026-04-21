@@ -6,6 +6,7 @@ directly. Callers in async contexts should wrap with sync_to_async.
 """
 
 import logging
+import re
 from datetime import timedelta
 from django.utils import timezone
 from django.db import connections
@@ -28,6 +29,37 @@ logger = logging.getLogger(__name__)
 
 TERMINAL_TASK_STATUSES = ('done', 'failed', 'aborted', 'broken', 'finished')
 STALE_TASK_DAYS = 60
+
+# NERSC Perlmutter jobs publish their per-job pilot & slurm logs here.
+# Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
+_NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
+_NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
+
+
+def _nersc_portal_log_urls(computingsite, pandaid):
+    """Build Perlmutter log URLs by scraping the NERSC portal dir listing.
+
+    The slurm task filename contains a per-allocation task index not stored in
+    our DB, so we have to scrape the Apache autoindex to find it. Returns
+    ``None`` if the dir is unreachable or empty.
+    """
+    import requests
+    log_dir = f"{_NERSC_PORTAL_BASE}/{computingsite}/{pandaid}/"
+    try:
+        resp = requests.get(log_dir, timeout=5)
+        if resp.status_code != 200:
+            return None
+    except Exception as e:
+        logger.warning("NERSC portal dir fetch failed for %s: %s", pandaid, e)
+        return None
+    result = {
+        'nersc_log_dir': log_dir,
+        'pilot_stdout': log_dir + 'pilotlog.txt',
+    }
+    m = _NERSC_SLURM_RE.search(resp.text)
+    if m:
+        result['slurm_task_stdout'] = log_dir + m.group(1)
+    return result
 
 
 def _bulk_destinationse(pandaids):
@@ -918,6 +950,18 @@ def study_job(pandaid):
             job['pilot_type'] = parts[1]
             job['pilot_version'] = parts[3]
 
+    # NERSC Perlmutter pilotid ends in literal 'None' so the synthesized URLs
+    # 404. The NERSC portal exposes per-job log dirs instead.
+    site = job.get('computingsite') or ''
+    if site.startswith('NERSC_Perlmutter'):
+        portal_urls = _nersc_portal_log_urls(site, pandaid)
+        if portal_urls:
+            # Drop the broken stderr/batch entries; Perlmutter has a single
+            # combined pilot log.
+            log_urls.pop('pilot_stderr', None)
+            log_urls.pop('batch_log', None)
+            log_urls.update(portal_urls)
+
     # 2. Files from filestable4
     file_field_list = ', '.join(f'"{f}"' for f in FILE_FIELDS)
     files_sql = f"""
@@ -1014,6 +1058,68 @@ def study_job(pandaid):
 
     # Monitoring page URL
     result["monitor_url"] = f"https://epic-devcloud.org/panda/jobs/{pandaid}/"
+
+    # 5. Log analysis for failure-adjacent statuses. 'closed' covers
+    # lost-heartbeat (pilot killed at slot boundary before reporting back);
+    # its pilot log on NERSC CFS is the only window into what happened.
+    jobstatus = job.get('jobstatus', '')
+    if jobstatus in ('failed', 'holding', 'cancelled', 'closed'):
+        try:
+            from askpanda_atlas.log_analysis_impl import (
+                _select_log_filename, _fetch_log_text,
+                extract_log_excerpt, classify_failure,
+            )
+            from decouple import config
+            base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
+            log_filename = _select_log_filename(job)
+            log_text = _fetch_log_text(pandaid, log_filename, base_url, timeout=30)
+            log_source = 'filebrowser'
+
+            # Fallback: fetch pilot log directly from its URL (NERSC portal for
+            # Perlmutter, Harvester-published URL elsewhere).
+            if not log_text:
+                direct_url = (
+                    log_urls.get('pilot_stdout')
+                    or (harvester or {}).get('stdout')
+                )
+                if direct_url:
+                    import requests as _requests
+                    try:
+                        resp = _requests.get(
+                            direct_url, timeout=30, verify=False,
+                        )
+                        if resp.status_code == 200 and resp.text:
+                            log_text = resp.text
+                            log_source = (
+                                'nersc_portal'
+                                if 'portal.nersc.gov' in direct_url
+                                else 'harvester'
+                            )
+                    except Exception as exc:
+                        logger.warning("Direct log fetch failed: %s", exc)
+
+            if log_text:
+                piloterrorcode = int(job.get('piloterrorcode') or 0)
+                piloterrordiag = str(job.get('piloterrordiag') or '')
+                excerpt = extract_log_excerpt(
+                    log_text, log_filename, piloterrorcode, piloterrordiag
+                )
+                failure_type = classify_failure(job, excerpt)
+                result['log_analysis'] = {
+                    'failure_type': failure_type,
+                    'log_filename': log_filename,
+                    'log_source': log_source,
+                    'log_excerpt': excerpt,
+                    'log_available': True,
+                }
+            else:
+                result['log_analysis'] = {
+                    'log_available': False,
+                    'log_filename': log_filename,
+                }
+        except Exception as e:
+            logger.error(f"study_job log analysis failed: {e}")
+            result['log_analysis'] = {'error': str(e)}
 
     return result
 

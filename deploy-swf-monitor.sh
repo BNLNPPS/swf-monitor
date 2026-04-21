@@ -130,6 +130,12 @@ ln -sf "$DEPLOY_ROOT/shared/logs" "$RELEASE_DIR/logs"
 ln -sf "$DEPLOY_ROOT/config/env/production.env" "$RELEASE_DIR/.env"
 log "  .env source: $DEPLOY_ROOT/config/env/production.env (edit this file for config changes)"
 
+# Shared caches — writable by both httpd (WSGI) and service users
+mkdir -p "$DEPLOY_ROOT/shared/hf_cache"
+chmod 777 "$DEPLOY_ROOT/shared/hf_cache"
+grep -q '^HF_HOME=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
+    echo "HF_HOME=$DEPLOY_ROOT/shared/hf_cache" >> "$DEPLOY_ROOT/config/env/production.env"
+
 # Install WSGI module configuration if it exists in repository
 if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then
     log "Installing WSGI module configuration..."
@@ -177,54 +183,79 @@ chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 log "Updating current symlink..."
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 
-# Graceful Apache reload — finishes in-flight requests, picks up new code
-log "Reloading Apache (graceful)..."
-systemctl reload httpd
+# Apache virtual-host conf sync from repo canonical.
+# Repo apache-swf-monitor.conf is the source of truth; live is whatever was
+# last installed. This catches conf changes in the same deploy that brings
+# the code change they go with — no more 6-week drift like dce7abf.
+APACHE_CONF_SRC="$RELEASE_DIR/apache-swf-monitor.conf"
+APACHE_CONF_DST="/etc/httpd/conf.d/swf-monitor.conf"
+if [ -f "$APACHE_CONF_SRC" ]; then
+    if ! cmp -s "$APACHE_CONF_SRC" "$APACHE_CONF_DST"; then
+        TS=$(date +%s)
+        log "Apache conf differs from repo — syncing (backup: ${APACHE_CONF_DST}.bak.$TS)"
+        cp "$APACHE_CONF_DST" "${APACHE_CONF_DST}.bak.$TS"
+        install -o root -g root -m 644 "$APACHE_CONF_SRC" "$APACHE_CONF_DST"
+        if ! httpd -t >/dev/null 2>&1; then
+            log "ERROR: httpd -t failed after conf sync — rolling back"
+            cp "${APACHE_CONF_DST}.bak.$TS" "$APACHE_CONF_DST"
+            httpd -t
+            exit 1
+        fi
+    else
+        log "Apache conf matches repo canonical — no sync needed"
+    fi
+fi
 
-# Restart bots only if their code changed
+# Apache: reload if running, start if not. Reload is required on every deploy
+# to recycle mod_wsgi daemon processes so they pick up new Python code; any
+# conf sync just performed rides along on the same reload.
+if systemctl is-active httpd >/dev/null 2>&1; then
+    log "Reloading Apache (graceful) to pick up new code..."
+    systemctl reload httpd
+else
+    log "Apache was not running — starting..."
+    systemctl start httpd
+fi
+
+# ASGI worker (MCP endpoint) — uvicorn loads code once at startup and does
+# not re-read on file change, so new Python code requires a restart. Bot
+# code restarts below follow the same logic with more selective detection;
+# here we always restart since the ASGI worker imports the full Django app.
+if systemctl is-enabled swf-monitor-mcp-asgi.service >/dev/null 2>&1; then
+    log "Restarting ASGI worker (swf-monitor-mcp-asgi) to pick up new code..."
+    systemctl restart swf-monitor-mcp-asgi.service
+fi
+
+# Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
+PANDA_BOT_CHANGED=false
+TESTBED_BOT_CHANGED=false
 
-# PanDA bot
 if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
-    BOT_CHANGED=false
     if [ -z "$PREV_RELEASE" ]; then
-        BOT_CHANGED=true
+        PANDA_BOT_CHANGED=true
     elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/panda" \
                      "$RELEASE_DIR/src/monitor_app/panda" >/dev/null 2>&1; then
-        BOT_CHANGED=true
+        PANDA_BOT_CHANGED=true
     elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/panda_bot.py" \
                     "$RELEASE_DIR/src/monitor_app/management/commands/panda_bot.py" >/dev/null 2>&1; then
-        BOT_CHANGED=true
-    fi
-    if [ "$BOT_CHANGED" = true ]; then
-        log "Bot code changed — restarting PanDA Mattermost bot..."
-        systemctl restart swf-panda-bot.service
-    else
-        log "Bot code unchanged — skipping PanDA bot restart"
+        PANDA_BOT_CHANGED=true
     fi
 fi
 
-# Testbed bot
 if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
-    BOT_CHANGED=false
     if [ -z "$PREV_RELEASE" ]; then
-        BOT_CHANGED=true
+        TESTBED_BOT_CHANGED=true
     elif ! diff -rq "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/testbed_bot" \
                      "$RELEASE_DIR/src/monitor_app/testbed_bot" >/dev/null 2>&1; then
-        BOT_CHANGED=true
+        TESTBED_BOT_CHANGED=true
     elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/testbed_bot.py" \
                     "$RELEASE_DIR/src/monitor_app/management/commands/testbed_bot.py" >/dev/null 2>&1; then
-        BOT_CHANGED=true
-    fi
-    if [ "$BOT_CHANGED" = true ]; then
-        log "Bot code changed — restarting Testbed Mattermost bot..."
-        systemctl restart swf-testbed-bot.service
-    else
-        log "Bot code unchanged — skipping Testbed bot restart"
+        TESTBED_BOT_CHANGED=true
     fi
 fi
 
-# Health check
+# Health check — confirm Apache is serving before restarting bots
 log "Performing health check..."
 HEALTH_URL="https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/"
 HTTP_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
@@ -235,7 +266,21 @@ else
     log "❌ Health check FAILED - Application not responding (HTTP $HTTP_STATUS)"
     echo "WARNING: Deployment completed but application may not be working correctly"
     echo "Check Apache error logs: sudo tail -f /var/log/httpd/error_log"
-    # Don't exit - deployment artifacts are in place, just alerting
+fi
+
+# Restart bots AFTER health check confirms Apache is up
+if [ "$PANDA_BOT_CHANGED" = true ]; then
+    log "Bot code changed — restarting PanDA Mattermost bot..."
+    systemctl restart swf-panda-bot.service
+else
+    log "Bot code unchanged — skipping PanDA bot restart"
+fi
+
+if [ "$TESTBED_BOT_CHANGED" = true ]; then
+    log "Bot code changed — restarting Testbed Mattermost bot..."
+    systemctl restart swf-testbed-bot.service
+else
+    log "Bot code unchanged — skipping Testbed bot restart"
 fi
 
 # Cleanup old releases (keep last 5)

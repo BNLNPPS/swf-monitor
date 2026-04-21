@@ -8,7 +8,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:tags_list' tag_type='p' %}">Physics Tags</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a></li>
             <li class="breadcrumb-item active">{% if editing %}Edit {{ tag.tag_label }}{% else %}Create{% endif %}</li>
         </ol>
     </nav>
@@ -48,8 +48,8 @@
             {% endif %}
         {% endfor %}
 
-        <button type="button" class="btn btn-primary" onclick="saveTag()">{% if editing %}Save Changes{% else %}Create Tag{% endif %}</button>
-        <a href="{% url 'pcs:tags_list' tag_type='p' %}" class="btn btn-secondary">Cancel</a>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveTag()">{% if editing %}Save Changes{% else %}Create Tag{% endif %}</button>
+        <a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="btn btn-secondary btn-sm">Cancel</a>
     </div>
 </div>
 <script>
@@ -77,7 +77,7 @@ async function saveTag() {
     const resp = await fetch(url, {method, headers, body: JSON.stringify(payload)});
     if (resp.ok) {
         const data = await resp.json();
-        window.location.href = `{% url 'pcs:tag_compose' tag_type='p' %}?selected=${data.tag_number}`;
+        window.location.href = `{% url 'pcs:tag_compose' tag_type='p' %}?selected=${encodeURIComponent(data.tag_label || data.tag_number)}`;
     } else {
         const errors = await resp.json();
         document.querySelectorAll('.field-error').forEach(el => el.textContent = '');

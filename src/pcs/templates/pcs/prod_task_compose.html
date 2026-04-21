@@ -40,7 +40,7 @@
 
 .command-block { background: #1e1e1e; color: #d4d4d4; padding: .75rem; border-radius: .375rem;
                  font-family: monospace; font-size: .78rem; white-space: pre-wrap; word-break: break-all;
-                 max-height: 200px; overflow-y: auto; margin-top: .5rem; }
+                 margin-top: .5rem; }
 
 .empty-state { color: #6c757d; font-style: italic; padding: 1rem 0; }
 
@@ -64,18 +64,18 @@
 <div class="compose-wrap">
     <!-- LEFT PANE -->
     <div class="component-browser">
-        <div class="browser-tabs" id="browser-tabs">
-            <span class="browser-tab" data-browse="datasets">Datasets</span>
-            <span class="browser-tab" data-browse="configs">Configs</span>
-            <span class="browser-tab" data-browse="tasks">Tasks</span>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 2px solid #dee2e6; margin-bottom:.75rem;">
+            <div class="browser-tabs" id="browser-tabs" style="border-bottom: none; margin-bottom: 0;">
+                <span class="browser-tab" data-browse="datasets">Datasets</span>
+                <span class="browser-tab" data-browse="configs">Configs</span>
+                <span class="browser-tab" data-browse="tasks">Tasks</span>
+            </div>
+            {% if username %}
+            <button class="btn btn-primary btn-sm" id="btn-new-task" style="display:none; margin-bottom:.35rem;">New Task</button>
+            {% endif %}
         </div>
         <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
         <div class="filter-row" id="browser-filters"></div>
-        {% if username %}
-        <div style="padding: .25rem 0;">
-            <button class="btn btn-primary btn-sm w-100" id="btn-new-task" style="display:none;">New Task</button>
-        </div>
-        {% endif %}
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
@@ -85,11 +85,12 @@
             <h4 id="panel-title" style="margin:0;">Select an item</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-outline-secondary btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
+                <button class="btn btn-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
                 {% endif %}
-                <button class="btn btn-outline-warning btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
+                <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Save Task</button>
             </div>
         </div>
@@ -139,16 +140,16 @@
                             <div class="col-md-9"><label class="form-label" style="font-size:.82rem;"><strong>CSV File</strong></label>
                                 <input type="text" id="task-csv" class="form-control form-control-sm" placeholder="e.g. DIS/NC/10x100/minQ2=1/DIS_NC_10x100_minQ2=1.csv"></div>
                             <div class="col-md-3"><label class="form-label" style="font-size:.82rem;">&nbsp;</label>
-                                <button class="btn btn-outline-primary btn-sm d-block w-100" id="btn-generate">Generate Commands</button></div>
+                                <button class="btn btn-primary btn-sm d-block w-100" id="btn-generate">Generate Commands</button></div>
                         </div>
                         <div id="commands-area" style="display:none;">
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
                                 <strong style="font-size:.82rem;">Condor Command</strong>
-                                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('condor-preview')">Copy</button></div>
+                                <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('condor-preview')">Copy</button></div>
                             <div class="command-block" id="condor-preview"></div>
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
                                 <strong style="font-size:.82rem;">PanDA Command</strong>
-                                <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('panda-preview')">Copy</button></div>
+                                <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('panda-preview')">Copy</button></div>
                             <div class="command-block" id="panda-preview"></div>
                         </div>
                     </div>
@@ -165,9 +166,24 @@
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
-    const initialSelected = {{ selected_task|default:"null" }};
+    const initialSelected = {{ selected_item_json|safe }};  // string key (name) or null
     const urlParams = new URLSearchParams(window.location.search);
     const initialTab = urlParams.get('tab') || 'datasets';
+
+    // Selection-key helpers: the URL carries the stable name, but internal
+    // lookups use integer ids. Accept singular or plural type.
+    function itemKeyOf(type, id) {
+        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.id === id)    || {}).name;
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.id === id)  || {}).name;
+        return null;
+    }
+    function itemIdOf(type, key) {
+        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.name === key)            || {}).id;
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.name === key)          || {}).id;
+        return null;
+    }
 
     // ── State ──
     let browseType = initialTab;
@@ -188,6 +204,7 @@
     const btnNewTask = document.getElementById('btn-new-task');
     const btnEditTask = document.getElementById('btn-edit-task');
     const btnCopyTask = document.getElementById('btn-copy-task');
+    const btnDeleteTask = document.getElementById('btn-delete-task');
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -195,7 +212,10 @@
     function updateUrl() {
         const params = new URLSearchParams();
         params.set('tab', browseType);
-        if (selectedItemId) params.set('selected', selectedItemId);
+        if (selectedItemId) {
+            const key = itemKeyOf(browseType, selectedItemId);
+            if (key) params.set('selected', key);
+        }
         if (mode === 'compose') params.set('mode', 'compose');
         history.replaceState(null, '', `${window.location.pathname}?${params}`);
     }
@@ -215,6 +235,7 @@
         if (btnNewTask) btnNewTask.style.display = browseType === 'tasks' ? 'block' : 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         composeTaskId = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -227,6 +248,7 @@
         if (btnNewTask) btnNewTask.style.display = 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -286,6 +308,7 @@
             browseEmpty.style.display = 'block';
             browseContent.style.display = 'none';
             panelTitle.textContent = 'Select an item';
+            if (btnDeleteTask) btnDeleteTask.style.display = 'none';
             if (btnEditTask) btnEditTask.style.display = 'none';
             if (btnCopyTask) btnCopyTask.style.display = 'none';
         }
@@ -566,8 +589,10 @@
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
         panelTitle.textContent = t.name;
-        if (btnEditTask) btnEditTask.style.display = currentUser ? 'inline-block' : 'none';
+        const isOwner = currentUser && t.created_by === currentUser;
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnEditTask) btnEditTask.style.display = isOwner ? 'inline-block' : 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = isOwner ? 'inline-block' : 'none';
         const ds = allDatasets.find(d => d.id === t.dataset_id);
         const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
@@ -613,11 +638,18 @@
 
         if (t.csv_file) html += `<p><strong>CSV:</strong> <code>${t.csv_file}</code></p>`;
         if (t.condor_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">Condor</strong>
-            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
+            <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
             <div class="command-block" id="browse-condor">${t.condor_command}</div>`;
         if (t.panda_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA</strong>
-            <button class="btn btn-outline-secondary btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
+            <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
             <div class="command-block" id="browse-panda">${t.panda_command}</div>`;
+        if (t.task_params_json) {
+            const escaped = t.task_params_json
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">JEDI taskParamMap</strong>
+                <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
+                <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
+        }
         browseContent.innerHTML = html;
     }
 
@@ -755,6 +787,20 @@
             updateSaveButton();
         }
     });
+    if (btnDeleteTask) btnDeleteTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Delete prod task "${t.name}"? This cannot be undone.`)) return;
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/`,
+            {method: 'DELETE', headers: {'X-CSRFToken': csrfToken}});
+        if (resp.ok || resp.status === 204) {
+            window.location.href = window.location.pathname;
+        } else {
+            let msg = `Delete failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
+    });
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 
@@ -772,13 +818,21 @@
 
     // ── Init ──
     switchTab(browseType);
-    if (initialSelected) {
-        selectedItemId = initialSelected;
-        if (browseType === 'tasks') {
-            const t = allTasks.find(x => x.id === initialSelected);
-            if (t) showTaskDetail(initialSelected);
-        }
+    let autoId = null;
+    if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
+    if (!autoId) {
+        const firstList = browseType === 'tasks' ? allTasks
+                        : browseType === 'datasets' ? allDatasets
+                        : allConfigs;
+        if (firstList.length > 0) autoId = firstList[0].id;
+    }
+    if (autoId) {
+        selectedItemId = autoId;
+        if (browseType === 'tasks')    showTaskDetail(autoId);
+        else if (browseType === 'datasets') showDatasetDetail(autoId);
+        else if (browseType === 'configs')  showConfigDetail(autoId);
         renderList();
+        updateUrl();
     }
 })();
 

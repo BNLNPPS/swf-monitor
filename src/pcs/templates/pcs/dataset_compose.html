@@ -58,19 +58,19 @@
 <div class="compose-wrap">
     <!-- LEFT PANE -->
     <div class="browse-panel">
-        <div class="browser-tabs">
-            <span class="browser-tab" data-browse="datasets">Datasets</span>
-            <span class="browser-tab" data-browse="p">Physics</span>
-            <span class="browser-tab" data-browse="e">EvGen</span>
-            <span class="browser-tab" data-browse="s">Simu</span>
-            <span class="browser-tab" data-browse="r">Reco</span>
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; border-bottom: 2px solid #dee2e6; margin-bottom:.75rem;">
+            <div class="browser-tabs" style="border-bottom: none; margin-bottom: 0;">
+                <span class="browser-tab" data-browse="datasets">Datasets</span>
+                <span class="browser-tab" data-browse="p">Physics</span>
+                <span class="browser-tab" data-browse="e">EvGen</span>
+                <span class="browser-tab" data-browse="s">Simu</span>
+                <span class="browser-tab" data-browse="r">Reco</span>
+            </div>
+            {% if username %}
+            <button class="btn btn-primary btn-sm" id="btn-new-dataset" style="display:none; margin-bottom:.35rem;">New Dataset</button>
+            {% endif %}
         </div>
         <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
-        {% if username %}
-        <div style="padding: .25rem 0;">
-            <button class="btn btn-primary btn-sm w-100" id="btn-new-dataset" style="display:none;">New Dataset</button>
-        </div>
-        {% endif %}
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
@@ -80,11 +80,11 @@
             <h4 id="panel-title" style="margin:0;">Select an item</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-outline-secondary btn-sm" id="btn-copy" style="display:none;">Copy</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-edit" style="display:none;">Edit</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-copy" style="display:none;">Copy</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-edit" style="display:none;">Edit</button>
                 {% endif %}
-                <button class="btn btn-outline-warning btn-sm" id="btn-clear" style="display:none;">Clear</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-secondary btn-sm" id="btn-clear" style="display:none;">Clear</button>
+                <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;" disabled>Create Dataset</button>
             </div>
         </div>
@@ -142,13 +142,25 @@
     const allTags = {{ tags_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken = '{{ csrf_token }}';
-    const initialSelected = {{ selected|default:"null" }};
+    const initialSelected = {{ selected_item_json|safe }};  // string key (name/label) or null
     const urlParams = new URLSearchParams(window.location.search);
     const initialTab = urlParams.get('tab') || 'datasets';
 
     let browseType = initialTab;
     let mode = 'browse';
     let selectedItemId = null;
+
+    // URL carries the stable name/label; internal lookups use integer id.
+    function itemKeyOf(type, id) {
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (['p','e','s','r'].includes(type)) return ((allTags[type]||[]).find(x => x.id === id) || {}).label;
+        return null;
+    }
+    function itemIdOf(type, key) {
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (['p','e','s','r'].includes(type)) return ((allTags[type]||[]).find(x => x.label === key) || {}).id;
+        return null;
+    }
     // Compose state: selected tag per type
     const compose = { p: null, e: null, s: null, r: null };
     let editingDatasetId = null;
@@ -173,7 +185,10 @@
     function updateUrl() {
         const params = new URLSearchParams();
         params.set('tab', browseType);
-        if (selectedItemId) params.set('selected', selectedItemId);
+        if (selectedItemId) {
+            const key = itemKeyOf(browseType, selectedItemId);
+            if (key) params.set('selected', key);
+        }
         if (mode === 'compose') params.set('mode', 'compose');
         history.replaceState(null, '', `${window.location.pathname}?${params}`);
     }
@@ -516,7 +531,7 @@
             body: JSON.stringify(payload) });
         if (resp.ok) {
             const data = await resp.json();
-            window.location.href = `/swf-monitor/pcs/datasets/compose/?tab=datasets&selected=${data.id}`;
+            window.location.href = `/swf-monitor/pcs/datasets/compose/?tab=datasets&selected=${encodeURIComponent(data.dataset_name || data.name || data.id)}`;
         } else {
             const err = await resp.json();
             alert('Save failed: ' + Object.values(err).flat().join(', '));
@@ -542,10 +557,18 @@
 
     // ── Init ──
     switchTab(browseType);
-    if (initialSelected && browseType === 'datasets') {
-        selectedItemId = initialSelected;
-        showDatasetDetail(initialSelected);
+    let autoId = null;
+    if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
+    if (!autoId) {
+        const firstList = browseType === 'datasets' ? allDatasets : (allTags[browseType] || []);
+        if (firstList.length > 0) autoId = firstList[0].id;
+    }
+    if (autoId) {
+        selectedItemId = autoId;
+        if (browseType === 'datasets') showDatasetDetail(autoId);
+        else if (['p','e','s','r'].includes(browseType)) showTagBrowseDetail(browseType, autoId);
         renderList();
+        updateUrl();
     }
 })();
 </script>

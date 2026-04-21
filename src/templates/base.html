@@ -12,6 +12,35 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
     <style>
+      .btn.btn-dark-green {
+        background-color: #166534; border-color: #166534; color: #fff;
+      }
+      .btn.btn-dark-green:hover, .btn.btn-dark-green:focus {
+        background-color: #14532d; border-color: #14532d; color: #fff;
+      }
+      .btn.btn-dark-green:disabled, .btn.btn-dark-green.disabled {
+        background-color: #6c757d; border-color: #6c757d; color: #e9ecef;
+      }
+      #js-error-overlay {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        z-index: 100000; max-width: 720px; width: calc(100vw - 2rem);
+        background: #c9302c; color: #fff; padding: 1.25rem 1.5rem;
+        border: 3px solid #7a1a18; border-radius: .5rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,.4);
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        display: none;
+      }
+      #js-error-overlay h3 { margin: 0 0 .5rem; font-size: 1.1rem; }
+      #js-error-overlay pre {
+        background: rgba(0,0,0,.25); color: #fff; padding: .5rem .75rem;
+        border-radius: .25rem; margin: .5rem 0 0; font-size: .8rem;
+        white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto;
+      }
+      #js-error-overlay .close-btn {
+        position: absolute; top: .5rem; right: .75rem;
+        background: transparent; border: none; color: #fff; font-size: 1.5rem;
+        cursor: pointer; line-height: 1;
+      }
       nav {
         display: flex;
         align-items: center;
@@ -74,6 +103,37 @@
     </style>
 </head>
 <body>
+    <div id="js-error-overlay" role="alert">
+        <button class="close-btn" onclick="document.getElementById('js-error-overlay').style.display='none';">&times;</button>
+        <h3>JavaScript error</h3>
+        <div id="js-error-msg"></div>
+        <pre id="js-error-detail"></pre>
+    </div>
+    <script>
+    (function() {
+        function show(title, detail) {
+            var box = document.getElementById('js-error-overlay');
+            var msg = document.getElementById('js-error-msg');
+            var det = document.getElementById('js-error-detail');
+            if (!box || !msg || !det) return;
+            msg.textContent = title || 'Error';
+            det.textContent = detail || '';
+            box.style.display = 'block';
+        }
+        window.addEventListener('error', function(ev) {
+            var err = ev.error;
+            var loc = (ev.filename || '') + (ev.lineno ? ':' + ev.lineno + ':' + (ev.colno || 0) : '');
+            var stack = err && err.stack ? err.stack : '';
+            show(ev.message || 'Script error', (loc ? loc + '\n\n' : '') + stack);
+        });
+        window.addEventListener('unhandledrejection', function(ev) {
+            var r = ev.reason;
+            var msg = (r && r.message) ? r.message : String(r);
+            var stack = (r && r.stack) ? r.stack : '';
+            show('Unhandled promise rejection: ' + msg, stack);
+        });
+    })();
+    </script>
     <nav>
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>

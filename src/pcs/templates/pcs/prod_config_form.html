@@ -8,7 +8,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_list' %}">Prod Configs</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a></li>
             {% if editing %}
             <li class="breadcrumb-item"><a href="{% url 'pcs:prod_config_detail' pk=config.pk %}">{{ config.name }}</a></li>
             <li class="breadcrumb-item active">Edit</li>
@@ -167,11 +167,11 @@
             </div>
         </fieldset>
 
-        <button type="button" class="btn btn-primary" onclick="saveConfig()">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveConfig()">{% if editing %}Save Changes{% else %}Create Config{% endif %}</button>
         {% if editing %}
-        <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'pcs:prod_config_detail' pk=config.pk %}" class="btn btn-secondary btn-sm">Cancel</a>
         {% else %}
-        <a href="{% url 'pcs:prod_configs_list' %}" class="btn btn-secondary">Cancel</a>
+        <a href="{% url 'pcs:prod_configs_compose' %}" class="btn btn-secondary btn-sm">Cancel</a>
         {% endif %}
     </div>
 </div>
@@ -200,7 +200,7 @@ async function saveConfig() {
     const resp = await fetch(url, {method, headers, body: JSON.stringify(payload)});
     if (resp.ok) {
         const data = await resp.json();
-        window.location.href = `{% url 'pcs:prod_configs_compose' %}?selected=${data.id}`;
+        window.location.href = `{% url 'pcs:prod_configs_compose' %}?selected=${encodeURIComponent(data.name || data.id)}`;
     } else {
         const errors = await resp.json();
         let html = '';

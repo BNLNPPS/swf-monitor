@@ -22,8 +22,8 @@
             </p>
         </div>
         <div>
-            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.pk }}" class="btn btn-outline-primary btn-sm">Edit in Compose</a>
-            <button class="btn btn-outline-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}" class="btn btn-dark-green btn-sm">Edit in Compose</a>
+            <button class="btn btn-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
         </div>
     </div>
 
@@ -68,25 +68,25 @@
                 <tbody>
                     <tr>
                         <td>Physics</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?selected={{ task.dataset.physics_tag.tag_number }}">{{ task.dataset.physics_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?selected={{ task.dataset.physics_tag.tag_label|urlencode }}">{{ task.dataset.physics_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.physics_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.physics_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>EvGen</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='e' %}?selected={{ task.dataset.evgen_tag.tag_number }}">{{ task.dataset.evgen_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='e' %}?selected={{ task.dataset.evgen_tag.tag_label|urlencode }}">{{ task.dataset.evgen_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.evgen_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.evgen_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Simulation</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='s' %}?selected={{ task.dataset.simu_tag.tag_number }}">{{ task.dataset.simu_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='s' %}?selected={{ task.dataset.simu_tag.tag_label|urlencode }}">{{ task.dataset.simu_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.simu_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.simu_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
                     <tr>
                         <td>Reconstruction</td>
-                        <td><a href="{% url 'pcs:tag_compose' tag_type='r' %}?selected={{ task.dataset.reco_tag.tag_number }}">{{ task.dataset.reco_tag.tag_label }}</a></td>
+                        <td><a href="{% url 'pcs:tag_compose' tag_type='r' %}?selected={{ task.dataset.reco_tag.tag_label|urlencode }}">{{ task.dataset.reco_tag.tag_label }}</a></td>
                         <td>{{ task.dataset.reco_tag.description|truncatewords:10 }}</td>
                         <td>{% for k, v in task.dataset.reco_tag.parameters.items %}<code>{{ k }}</code>={{ v }}{% if not forloop.last %}, {% endif %}{% endfor %}</td>
                     </tr>
@@ -124,9 +124,9 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">Condor Command</h5>
-                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="condor-cmd">Copy</button>
+                <button class="btn btn-secondary btn-sm btn-copy" data-target="condor-cmd">Copy</button>
             </div>
-            <pre id="condor-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;">{{ task.condor_command }}</pre>
+            <pre id="condor-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all;">{{ task.condor_command }}</pre>
         </div>
     </div>
     {% endif %}
@@ -136,10 +136,29 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
                 <h5 class="card-title mb-0">PanDA Command</h5>
-                <button class="btn btn-outline-secondary btn-sm btn-copy" data-target="panda-cmd">Copy</button>
+                <button class="btn btn-secondary btn-sm btn-copy" data-target="panda-cmd">Copy</button>
             </div>
-            <pre id="panda-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;">{{ task.panda_command }}</pre>
+            <pre id="panda-cmd" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap; word-break: break-all;">{{ task.panda_command }}</pre>
         </div>
+    </div>
+    {% endif %}
+
+    {% if task_params_json %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h5 class="card-title mb-0">JEDI taskParamMap</h5>
+                <button class="btn btn-secondary btn-sm btn-copy" data-target="task-params">Copy</button>
+            </div>
+            <div class="text-muted mb-2" style="font-size: 0.85em;">
+                Computed from current PCS state. Passed to <code>Client.insertTaskParams()</code> for JEDI submission.
+            </div>
+            <pre id="task-params" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap;">{{ task_params_json }}</pre>
+        </div>
+    </div>
+    {% elif task_params_error %}
+    <div class="alert alert-warning mb-3">
+        <strong>JEDI taskParamMap unavailable:</strong> {{ task_params_error }}
     </div>
     {% endif %}
 

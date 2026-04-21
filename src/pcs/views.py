@@ -6,6 +6,7 @@ Tag list views use server-side DataTables via monitor_app._datatable_base.html.
 Read operations are public; create/edit/lock require login.
 """
 import json
+from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
@@ -140,7 +141,7 @@ def tags_datatable_ajax(request, tag_type):
     data = []
     for tag in page:
         compose_url = reverse('pcs:tag_compose', args=[tag_type])
-        tag_url = f'{compose_url}?selected={tag.tag_number}'
+        tag_url = f'{compose_url}?selected={urlquote(tag.tag_label)}'
         tag_link = f'<a href="{tag_url}">{tag.tag_label}</a>'
         status_badge = (
             f'<span class="badge bg-secondary">{tag.status}</span>'
@@ -224,7 +225,7 @@ def tag_create(request, tag_type):
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
             compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
-            return redirect(f'{compose_url}?selected={tag.tag_number}')
+            return redirect(f'{compose_url}?selected={urlquote(tag.tag_label)}')
     else:
         form = FormClass(**form_kwargs)
 
@@ -278,7 +279,7 @@ def tag_compose(request, tag_type):
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
             compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
-            return redirect(f'{compose_url}?selected={tag.tag_number}')
+            return redirect(f'{compose_url}?selected={urlquote(tag.tag_label)}')
     else:
         form = FormClass(**form_kwargs)
         selected_tag = request.GET.get('selected')
@@ -327,7 +328,7 @@ def tag_compose(request, tag_type):
         'param_defs_json': json.dumps(param_defs),
         'next_suffix': next_suffix,
         'username': request.user.username if request.user.is_authenticated else '',
-        'selected_tag': selected_tag,
+        'selected_tag_json': json.dumps(selected_tag),
     }
     return render(request, 'pcs/tag_compose.html', context)
 
@@ -475,7 +476,7 @@ def datasets_compose(request):
             )
             ds.save()
             messages.success(request, f"Dataset created: {ds.did}")
-            return redirect(f"{reverse('pcs:datasets_compose')}?selected={ds.pk}")
+            return redirect(f"{reverse('pcs:datasets_compose')}?selected={urlquote(ds.dataset_name)}")
 
     qs = Dataset.objects.filter(block_num=1).select_related(
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
@@ -522,7 +523,7 @@ def datasets_compose(request):
     context = {
         'datasets_json': json.dumps(datasets_data),
         'tags_json': json.dumps(tags_data),
-        'selected': request.GET.get('selected'),
+        'selected_item_json': json.dumps(request.GET.get('selected') or None),
         'username': request.user.username if request.user.is_authenticated else '',
     }
     return render(request, 'pcs/dataset_compose.html', context)
@@ -666,7 +667,7 @@ def prod_configs_compose(request):
         if form.is_valid():
             pc = form.save()
             messages.success(request, f"Config '{pc.name}' {'updated' if editing_pk else 'created'}.")
-            return redirect(f"{reverse('pcs:prod_configs_compose')}?selected={pc.pk}")
+            return redirect(f"{reverse('pcs:prod_configs_compose')}?selected={urlquote(pc.name)}")
 
     qs = ProdConfig.objects.order_by('-updated_at')
     configs_data = []
@@ -701,7 +702,7 @@ def prod_configs_compose(request):
 
     context = {
         'configs_json': json.dumps(configs_data),
-        'selected': request.GET.get('selected'),
+        'selected_item_json': json.dumps(request.GET.get('selected') or None),
         'username': request.user.username if request.user.is_authenticated else '',
     }
     return render(request, 'pcs/prod_config_compose.html', context)
@@ -842,6 +843,7 @@ def prod_tasks_datatable_ajax(request):
 
 
 def prod_task_detail(request, pk):
+    from .commands import build_task_params
     task = get_object_or_404(
         ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
@@ -849,11 +851,23 @@ def prod_task_detail(request, pk):
         ),
         pk=pk,
     )
-    return render(request, 'pcs/prod_task_detail.html', {'task': task})
+    try:
+        task_params = build_task_params(task)
+        task_params_json = json.dumps(task_params, indent=2, sort_keys=False, default=str)
+        task_params_error = None
+    except Exception as e:
+        task_params_json = None
+        task_params_error = str(e)
+    return render(request, 'pcs/prod_task_detail.html', {
+        'task': task,
+        'task_params_json': task_params_json,
+        'task_params_error': task_params_error,
+    })
 
 
 def prod_task_compose(request):
     """Two-pane compose UI for building production tasks."""
+    from .commands import build_task_params
     # Preload all component data as JSON for client-side browsing
     datasets_qs = Dataset.objects.filter(block_num=1).select_related(
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
@@ -907,9 +921,17 @@ def prod_task_compose(request):
             'updated_at': pc.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
 
-    tasks_qs = ProdTask.objects.select_related('dataset', 'prod_config').order_by('-updated_at')
+    tasks_qs = ProdTask.objects.select_related(
+        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+        'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+    ).order_by('-updated_at')
     tasks_data = []
     for t in tasks_qs:
+        try:
+            task_params = build_task_params(t)
+            task_params_json = json.dumps(task_params, indent=2, default=str)
+        except Exception as e:
+            task_params_json = f'// Error building taskParamMap: {e}'
         tasks_data.append({
             'id': t.id,
             'name': t.name,
@@ -923,6 +945,7 @@ def prod_task_compose(request):
             'description': t.description,
             'condor_command': t.condor_command,
             'panda_command': t.panda_command,
+            'task_params_json': task_params_json,
             'created_by': t.created_by,
             'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
@@ -931,7 +954,7 @@ def prod_task_compose(request):
         'datasets_json': json.dumps(datasets_data),
         'configs_json': json.dumps(configs_data),
         'tasks_json': json.dumps(tasks_data),
-        'selected_task': request.GET.get('selected'),
+        'selected_item_json': json.dumps(request.GET.get('selected') or None),
         'username': request.user.username if request.user.is_authenticated else '',
     }
     return render(request, 'pcs/prod_task_compose.html', context)

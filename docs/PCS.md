@@ -1,6 +1,6 @@
 # PCS — Physics Configuration System
 
-PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production.
+PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production and subsequent reconstruction.
 
 **URL:** `/swf-monitor/pcs/`
 
@@ -114,6 +114,58 @@ Tags support list, create, get, update (draft only), and lock. Replace `{type}` 
 
 Physics tag creation requires a `category` field (digit). Tag numbers are always auto-assigned.
 
+### Production Tasks — submission artifacts
+
+A single read-only endpoint regenerates a task's submission artifact from current PCS state on every call (no DB writes):
+
+```
+GET /swf-monitor/pcs/api/prod-tasks/command/?name=<task_name>&fmt=<format>
+```
+
+| `fmt` | Content-Type | Contents |
+|-------|--------------|----------|
+| `condor` | `text/plain` | env-prefixed `submit_csv.sh` command |
+| `panda` | `text/plain` | `prun` command |
+| `jedi` | `application/json` | `taskParamMap` for `Client.insertTaskParams()` |
+| `dump` | `application/json` | Full view: task + dataset + all four tags + prod config + effective config |
+
+The parameter is named `fmt` because DRF reserves `format` for its own content-negotiation.
+
+### `pcs-task-cmd` — the CLI wrapper
+
+`scripts/pcs-task-cmd` is a stdlib-only Python client over the endpoint above. It is the recommended way for production operators and automation scripts to fetch submission artifacts — no Django import, no DB credentials.
+
+```bash
+pcs-task-cmd <task_name> --format {condor|panda|jedi|dump}
+```
+
+Environment:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SWFMON_URL` | `https://epic-devcloud.org/prod` | swf-monitor base URL |
+| `SWFMON_TOKEN` | *(unset)* | Optional DRF token for non-public deployments |
+
+Examples:
+
+```bash
+# Inspect everything about a task
+pcs-task-cmd group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1 --format dump
+
+# Submit to JEDI (requires a valid PanDA auth context: proxy or OIDC token)
+pcs-task-cmd <name> --format jedi | python -c '
+import json, sys
+from pandaclient import Client
+print(Client.insertTaskParams(json.load(sys.stdin)))
+'
+
+# Inspect what would go to PanDA prun
+pcs-task-cmd <name> --format panda
+
+# Get the env-prefixed Condor command (pipe into bash)
+eval "$(pcs-task-cmd <name> --format condor)"
+```
+
 ## Datasets
 
 A dataset composes four locked tags with detector version information into a standardized name:
@@ -163,14 +215,21 @@ A production config is a reusable template capturing everything needed to build 
 
 Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
 
-## MCP Tools (TBD)
+## JEDI Integration
 
-Designed for addition of MCP tools for AI-assisted tag and dataset management:
+PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution and Definition Interface) via the PanDA Python API, replacing the current approach of generating `prun` CLI commands as text. See:
+
+- [JEDI Integration Design](JEDI_INTEGRATION.md) — architecture, field mapping, implementation plan
+- [JEDI ePIC Proposal](JEDI_EPIC_PROPOSAL.md) — technical proposal for PanDA team review
+
+## MCP Tools
+
+MCP tools for AI-assisted tag browsing and lookup:
 
 | Tool | Description |
 |------|-------------|
 | `pcs_list_tags(tag_type)` | List tags with label, description, status, key params |
 | `pcs_get_tag(tag_label)` | Full tag detail with all parameters |
-| `pcs_create_tag(tag_type, ...)` | Create tag with auto-assigned number |
-| `pcs_list_datasets(...)` | Dataset list with tag filters |
-| `pcs_create_dataset(...)` | Create dataset from tag labels |
+| `pcs_search_tags(query, tag_type)` | Full-text search across tag labels, descriptions, and parameter values |
+
+Tag creation, lock/delete, and dataset/prod-config management go through the REST API and the web UI — see the sections above. The submission-artifact endpoint (`/prod-tasks/command/`) plus the `pcs-task-cmd` CLI are the programmatic path for production operators.

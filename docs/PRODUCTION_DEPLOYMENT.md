@@ -37,12 +37,14 @@ python /eic/u/wenauseic/github/swf-testbed/report_system_status.py
 ```
 
 **Key Components:**
-- **Apache HTTP Server**: Serves static files and proxies Django via mod_wsgi
-- **Python 3.11 mod_wsgi**: WSGI interface for Django application
+- **Apache HTTP Server**: Serves static files, proxies Django via mod_wsgi for most paths, and ProxyPasses `/swf-monitor/mcp/` to the ASGI worker
+- **Python 3.11 mod_wsgi**: WSGI interface for Django application (all paths except `/mcp/`)
+- **ASGI worker (uvicorn)**: `swf-monitor-mcp-asgi.service` on `127.0.0.1:8001` serves `/swf-monitor/mcp/`. Streaming MCP (StreamableHTTPSessionManager) holds a thread per session; under WSGI that saturates the pool. The ASGI worker isolates that failure mode from the rest of the app.
 - **PostgreSQL**: Production database (system-managed)
 - **ActiveMQ**: Message broker (system-managed via artemis.service)
- - **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
-- **Release Management**: Automated deployment
+- **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
+- **Mattermost bots**: `swf-panda-bot.service` and `swf-testbed-bot.service` — Claude-backed chatbots for `#pandabot` and `#testbed-bot` channels
+- **Release Management**: Automated deployment with Apache-conf sync and ASGI-worker recycle
 
 ## Prerequisites
 
@@ -115,12 +117,20 @@ This automated setup script:
 1. **Creates deployment structure** at `/opt/swf-monitor/`
 2. **Installs Apache development headers** (httpd-devel)
 3. **Compiles Python 3.11 mod_wsgi** in the project virtual environment
-4. **Generates Apache configuration** with Python 3.11 mod_wsgi paths
-5. **Disables system mod_wsgi** to avoid Python version conflicts
-6. **Installs Apache virtual host** configuration at `/etc/httpd/conf.d/swf-monitor.conf`
+4. **Disables system mod_wsgi** to avoid Python version conflicts
+5. **Generates LoadModule config** into `/etc/httpd/conf.modules.d/20-swf-monitor-wsgi.conf` (LoadModule + WSGIPythonHome only — loads before `conf.d/` so the module is available when WSGIDaemonProcess is parsed)
+6. **Installs the Apache vhost config** by copying the repo canonical `apache-swf-monitor.conf` to `/etc/httpd/conf.d/swf-monitor.conf`. The repo file is the source of truth; `deploy-swf-monitor.sh` keeps live in sync with it on every deploy.
 7. **Copies deployment automation** script to `/opt/swf-monitor/bin/`
 8. **Creates production environment** template
-9. **Tests Apache configuration** and restarts Apache
+9. **Tests Apache configuration** (`httpd -t`) and restarts Apache
+
+Note: you must also install the `swf-monitor-mcp-asgi.service` systemd unit from the repo (not automated by this script; one-time bootstrap per host):
+
+```bash
+sudo install -o root -g root -m 644 swf-monitor-mcp-asgi.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now swf-monitor-mcp-asgi.service
+```
 
 ### Step 2: Configure Production Environment
 
@@ -204,14 +214,18 @@ The deployment script automatically:
 2. **Creates** new release directory: `/opt/swf-monitor/releases/branch-main/`
 3. **Clones** the specified Git reference to the release directory
 4. **Copies** development virtual environment from the configured development path
-5. **Links** shared resources (logs, production.env, SSL certificates)
-6. **Collects** Django static files with `python manage.py collectstatic`
-7. **Syncs** static files to shared Apache location
-8. **Runs** database migrations with `python manage.py migrate`
-9. **Updates** current symlink to point to new release
-10. **Sets** proper file ownership and permissions
-11. **Reloads** Apache configuration (`systemctl reload httpd`)
-12. **Cleans up** old releases (keeps last 5)
+5. **Links** shared resources (logs, production.env, SSL certificates) and ensures the shared HuggingFace cache exists with open perms
+6. **Installs** WSGI LoadModule config from release's `config/apache/20-swf-monitor-wsgi.conf` into `/etc/httpd/conf.modules.d/`
+7. **Collects** Django static files with `python manage.py collectstatic`
+8. **Syncs** static files to shared Apache location
+9. **Runs** database migrations with `python manage.py migrate`
+10. **Updates** current symlink to point to new release, sets proper ownership
+11. **Syncs Apache vhost conf** — compares release's `apache-swf-monitor.conf` with live `/etc/httpd/conf.d/swf-monitor.conf`; if different, timestamped backup + install + `httpd -t` validates, rollback on failure
+12. **Reloads** Apache (`systemctl reload httpd`) — required every deploy to recycle mod_wsgi daemon processes so they pick up new Python code; any conf change from step 11 rides along on the same reload
+13. **Restarts** the ASGI worker (`systemctl restart swf-monitor-mcp-asgi.service`) so uvicorn picks up new code (uvicorn loads code once at startup and does not re-read on file change)
+14. **Conditionally restarts bots** (`swf-panda-bot`, `swf-testbed-bot`) — only if bot-specific code changed relative to the previous release
+15. **Health-checks** the deployment by hitting `/swf-monitor/api/`
+16. **Cleans up** old releases (keeps last 5)
 
 
 ### Deployment Output
@@ -231,38 +245,52 @@ Current deployment status:
 
 ## Apache Configuration
 
-**Location:** `/etc/httpd/conf.d/swf-monitor.conf`
+**Source of truth:** `apache-swf-monitor.conf` in the repo root. The deploy script copies it to `/etc/httpd/conf.d/swf-monitor.conf` on every release whenever it differs from live (with `httpd -t` validation + rollback on failure). Editing the live file directly is safe for emergency triage, but any deploy will re-install the repo canonical — so durable changes belong in the repo file.
 
-The production Apache configuration:
+**Two-backend layout:**
+- mod_wsgi (`WSGIDaemonProcess swf-monitor`) serves `/swf-monitor/*` **except** `/mcp/`
+- mod_proxy → ASGI (uvicorn on `127.0.0.1:8001`) serves `/swf-monitor/mcp/` only
+
+Key directives (abridged — see `apache-swf-monitor.conf` for the full file):
 
 ```apache
-# Load Python 3.11 mod_wsgi module (auto-generated paths)
-LoadModule wsgi_module "/path/to/venv/lib/python3.11/site-packages/mod_wsgi/server/mod_wsgi-py311.cpython-311-x86_64-linux-gnu.so"
-WSGIPythonHome "/path/to/development/.venv"
-
-# WSGI Daemon Process
+# WSGI tuning — threads absorb bursty concurrency; listen-backlog absorbs retry
+# bursts; queue/inactivity/graceful timeouts bound failure modes. No
+# request-timeout because it would truncate /api/messages/stream/ SSE long-poll.
 WSGIDaemonProcess swf-monitor \
     python-path=/opt/swf-monitor/current/src:/opt/swf-monitor/current/.venv/lib/python3.11/site-packages \
     python-home=/opt/swf-monitor/current/.venv \
-    processes=2 \
-    threads=15 \
-    display-name=%{GROUP} \
-    lang='en_US.UTF-8' \
-    locale='en_US.UTF-8'
+    processes=1 threads=30 \
+    listen-backlog=500 queue-timeout=30 \
+    inactivity-timeout=300 graceful-timeout=15 \
+    display-name=%{GROUP} lang='en_US.UTF-8' locale='en_US.UTF-8'
 
-# URL Mapping
+SetEnv SWF_HOME /opt/swf-monitor
+
+# MCP on ASGI worker — streaming-safe proxy settings.
+# Must appear BEFORE WSGIScriptAlias so the proxy takes precedence for /mcp/.
+<Location /swf-monitor/mcp/>
+    ProxyPass         http://127.0.0.1:8001/swf-monitor/mcp/ timeout=3600 keepalive=On disablereuse=On
+    ProxyPassReverse  http://127.0.0.1:8001/swf-monitor/mcp/
+    SetEnv proxy-sendchunked 1
+    SetEnv no-gzip 1
+    RequestHeader set X-Forwarded-Proto "https"
+    CacheDisable on
+</Location>
+
 WSGIScriptAlias /swf-monitor /opt/swf-monitor/current/src/swf_monitor_project/wsgi.py process-group=swf-monitor
+WSGIPassAuthorization On
 
-# Static Files (served directly by Apache)
 Alias /swf-monitor/static /opt/swf-monitor/shared/static
 
-# Security Headers
 <Location /swf-monitor>
     Header always set X-Content-Type-Options nosniff
-    Header always set X-Frame-Options DENY  
+    Header always set X-Frame-Options DENY
     Header always set X-XSS-Protection "1; mode=block"
 </Location>
 ```
+
+**LoadModule** is in a separate file (`/etc/httpd/conf.modules.d/20-swf-monitor-wsgi.conf`) generated by `setup-apache-deployment.sh` at bootstrap and re-installed from the repo's `config/apache/` on every deploy. The prefix `conf.modules.d/` (vs `conf.d/`) matters — Apache loads that directory first, so the module is available when `WSGIDaemonProcess` is parsed.
 
 ## Service Management
 
@@ -281,6 +309,31 @@ sudo systemctl status httpd
 # View Apache logs
 sudo tail -f /var/log/httpd/error_log
 sudo tail -f /var/log/httpd/access_log
+```
+
+### ASGI Worker (MCP endpoint)
+
+`/swf-monitor/mcp/` is served by `swf-monitor-mcp-asgi.service`, a uvicorn ASGI worker bound to `127.0.0.1:8001`. Apache ProxyPasses to it.
+
+```bash
+# Restart (picks up new Python code — uvicorn does not re-read files)
+sudo systemctl restart swf-monitor-mcp-asgi.service
+
+# Status
+sudo systemctl status swf-monitor-mcp-asgi.service
+
+# Logs
+sudo journalctl -u swf-monitor-mcp-asgi.service -f
+```
+
+The deploy script restarts this unit on every deploy; manual restart is only needed for targeted code changes or recovery from a crash-loop.
+
+### Mattermost Bots
+
+```bash
+sudo systemctl restart swf-panda-bot.service
+sudo systemctl restart swf-testbed-bot.service
+sudo journalctl -u swf-panda-bot.service -f
 ```
 
 ### Application Logs
@@ -358,7 +411,7 @@ source /opt/swf-monitor/current/.venv/bin/activate
 python manage.py check --deploy
 
 # Check all services
-sudo systemctl status httpd postgresql-16 artemis redis
+sudo systemctl status httpd swf-monitor-mcp-asgi swf-panda-bot swf-testbed-bot postgresql-16 artemis redis
 ```
 
 ## Security Considerations

@@ -7,7 +7,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_list' %}">Prod Configs</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:prod_configs_compose' %}">Prod Configs</a></li>
             <li class="breadcrumb-item active">{{ config.name }}</li>
         </ol>
     </nav>
@@ -18,7 +18,7 @@
             <p class="text-muted">Created by {{ config.created_by }} on {{ config.created_at|date:"Y-m-d H:i" }}
             {% if config.updated_at != config.created_at %} | Updated {{ config.updated_at|date:"Y-m-d H:i" }}{% endif %}</p>
         </div>
-        <a href="{% url 'pcs:prod_config_edit' pk=config.pk %}" class="btn btn-outline-primary btn-sm">Edit</a>
+        <a href="{% url 'pcs:prod_config_edit' pk=config.pk %}" class="btn btn-dark-green btn-sm">Edit</a>
     </div>
 
     {% if config.description %}

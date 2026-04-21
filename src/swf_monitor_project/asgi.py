@@ -1,30 +1,21 @@
 """
 ASGI config for swf_monitor_project project.
 
-It exposes the ASGI callable as a module-level variable named ``application``.
+Exposes the ASGI callable as a module-level variable named ``application``.
 
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/howto/deployment/asgi/
+Used by the uvicorn worker (see swf-monitor-mcp-asgi.service) that serves
+/swf-monitor/mcp/ behind Apache ProxyPass. Pure HTTP — no WebSocket consumers
+exist in this codebase; the Channels layer is used only for inter-process SSE
+fan-out inside the WSGI app (see docs/SSE_RELAY.md).
 """
 
 import os
 
-# Ensure DJANGO_SETTINGS_MODULE is set before any Django imports
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'swf_monitor_project.settings')
 
 import django
 from django.core.asgi import get_asgi_application
 
-# Initialize Django settings
 django.setup()
 
-from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
-import mcp_app.routing # This import might trigger settings access if consumers.py imports models
-
-application = ProtocolTypeRouter({
-    "http": get_asgi_application(),
-    "websocket": URLRouter(
-        mcp_app.routing.websocket_urlpatterns
-    ),
-})
+application = get_asgi_application()

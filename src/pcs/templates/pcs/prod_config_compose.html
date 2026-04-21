@@ -31,7 +31,12 @@
     <div class="browse-panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
             <strong style="font-size:.9rem;">Prod Configs</strong>
-            <span class="badge bg-secondary" id="count-badge">0</span>
+            <div>
+                <span class="badge bg-secondary me-2" id="count-badge">0</span>
+                {% if username %}
+                <button class="btn btn-primary btn-sm" id="btn-new">New Config</button>
+                {% endif %}
+            </div>
         </div>
         <input type="text" class="browser-search" id="search" placeholder="Search configs...">
         <div class="item-list" id="item-list" tabindex="0"></div>
@@ -43,11 +48,11 @@
             <h4 id="panel-title" style="margin:0;">Select a config</h4>
             <div id="panel-buttons">
                 {% if username %}
-                <button class="btn btn-outline-secondary btn-sm" id="btn-edit" style="display:none;">Edit</button>
-                <button class="btn btn-outline-secondary btn-sm" id="btn-copy" style="display:none;">Copy</button>
-                <button class="btn btn-primary btn-sm" id="btn-new">New Config</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-copy" style="display:none;">Copy</button>
+                <button class="btn btn-dark-green btn-sm" id="btn-edit" style="display:none;">Edit</button>
+                <button class="btn btn-danger btn-sm" id="btn-delete" style="display:none;">Delete</button>
                 {% endif %}
-                <button class="btn btn-outline-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
+                <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
                 <button class="btn btn-primary btn-sm" id="btn-save" style="display:none;">Save</button>
             </div>
         </div>
@@ -67,7 +72,7 @@
                             <div class="col-md-6"><label class="form-label"><strong>Name</strong></label>
                                 <input type="text" name="name" class="form-control form-control-sm" required></div>
                             <div class="col-md-6"><label class="form-label"><strong>Created By</strong></label>
-                                <input type="text" class="form-control form-control-sm" value="{{ username }}" readonly disabled></div>
+                                <input type="text" name="created_by" class="form-control form-control-sm" value="{{ username }}" readonly disabled></div>
                         </div>
                         <div class="mb-2"><label class="form-label"><strong>Description</strong></label>
                             <textarea name="description" class="form-control form-control-sm" rows="2"></textarea></div>
@@ -153,10 +158,23 @@
 <script>
 (function() {
     const allConfigs = {{ configs_json|safe }};
-    const initialSelected = {{ selected|default:"null" }};
+    const initialSelected = {{ selected_item_json|safe }};  // config name or null
     const currentUser = '{{ username }}';
     let selectedId = null;
     let mode = 'view';
+
+    function configKeyOf(id) { return (allConfigs.find(x => x.id === id) || {}).name; }
+    function configIdOf(key) { return (allConfigs.find(x => x.name === key) || {}).id; }
+
+    function updateUrl() {
+        const params = new URLSearchParams();
+        if (selectedId) {
+            const key = configKeyOf(selectedId);
+            if (key) params.set('selected', key);
+        }
+        const qs = params.toString();
+        history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    }
 
     const itemList = document.getElementById('item-list');
     const searchBox = document.getElementById('search');
@@ -189,6 +207,7 @@
         selectedId = id;
         const c = allConfigs.find(x => x.id === id);
         if (!c) return;
+        updateUrl();
         renderList();
         document.getElementById('panel-title').textContent = c.name;
         document.getElementById('view-empty').style.display = 'none';
@@ -258,11 +277,14 @@
             </div>
             <div class="item-meta">Created by ${c.created_by} on ${c.created_at} | Updated ${c.updated_at}</div>`;
 
-        // Show edit/copy buttons if authenticated
+        // Copy: any authenticated user. Edit/Delete: only the owner.
         const btnEdit = document.getElementById('btn-edit');
         const btnCopy = document.getElementById('btn-copy');
-        if (btnEdit) btnEdit.style.display = currentUser ? 'inline-block' : 'none';
+        const btnDelete = document.getElementById('btn-delete');
+        const isOwner = currentUser && c.created_by === currentUser;
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
+        if (btnEdit) btnEdit.style.display = isOwner ? 'inline-block' : 'none';
+        if (btnDelete) btnDelete.style.display = isOwner ? 'inline-block' : 'none';
     }
 
     // Fill form from config object
@@ -298,6 +320,7 @@
     const btnNew = document.getElementById('btn-new');
     const btnEdit = document.getElementById('btn-edit');
     const btnCopy = document.getElementById('btn-copy');
+    const btnDelete = document.getElementById('btn-delete');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
     const viewPanel = document.getElementById('view-panel');
@@ -311,6 +334,7 @@
         if (btnNew) btnNew.style.display = 'none';
         if (btnEdit) btnEdit.style.display = 'none';
         if (btnCopy) btnCopy.style.display = 'none';
+        if (btnDelete) btnDelete.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         document.getElementById('panel-title').textContent = isCopy ? 'Copy Config' : (config ? `Edit: ${config.name}` : 'New Config');
@@ -328,6 +352,7 @@
             document.getElementById('panel-title').textContent = 'Select a config';
             if (btnEdit) btnEdit.style.display = 'none';
             if (btnCopy) btnCopy.style.display = 'none';
+            if (btnDelete) btnDelete.style.display = 'none';
         }
     }
 
@@ -339,6 +364,20 @@
     if (btnCopy) btnCopy.addEventListener('click', () => {
         const c = allConfigs.find(x => x.id === selectedId);
         if (c) enterEditMode(c, true);
+    });
+    if (btnDelete) btnDelete.addEventListener('click', async () => {
+        const c = allConfigs.find(x => x.id === selectedId);
+        if (!c) return;
+        if (!confirm(`Delete prod config "${c.name}"? This cannot be undone.`)) return;
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-configs/${c.id}/`,
+            {method: 'DELETE', headers: apiHeaders});
+        if (resp.ok || resp.status === 204) {
+            window.location.href = window.location.pathname;
+        } else {
+            let msg = `Delete failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
     });
     btnCancel.addEventListener('click', enterViewMode);
     const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value || '';
@@ -364,7 +403,7 @@
         const resp = await fetch(url, {method, headers: apiHeaders, body: JSON.stringify(payload)});
         if (resp.ok) {
             const data = await resp.json();
-            window.location.href = `?selected=${data.id}`;
+            window.location.href = `?selected=${encodeURIComponent(data.name || data.id)}`;
         } else {
             const errors = await resp.json();
             let msg = '';
@@ -389,8 +428,11 @@
 
     // Init
     renderList();
-    if (initialSelected) selectConfig(initialSelected);
-    else if (allConfigs.length) selectConfig(allConfigs[0].id);
+    if (initialSelected) {
+        const id = configIdOf(initialSelected);
+        if (id) selectConfig(id);
+        else if (allConfigs.length) selectConfig(allConfigs[0].id);
+    } else if (allConfigs.length) selectConfig(allConfigs[0].id);
 })();
 </script>
 {% endblock %}

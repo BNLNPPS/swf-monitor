@@ -26,7 +26,7 @@
                 <td>{{ cat.digit }}</td>
                 <td>{{ cat.name }}</td>
                 <td>{{ cat.description }}</td>
-                <td><a href="{% url 'pcs:tags_list' tag_type='p' %}?category={{ cat.name }}">{{ cat.tag_count }}</a></td>
+                <td><a href="{% url 'pcs:tag_compose' tag_type='p' %}?category={{ cat.name }}">{{ cat.tag_count }}</a></td>
                 <td>{{ cat.created_by }}</td>
                 <td>{{ cat.created_at|date:"Y-m-d H:i" }}</td>
             </tr>

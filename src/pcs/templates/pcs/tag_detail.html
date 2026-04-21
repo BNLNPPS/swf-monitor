@@ -8,7 +8,7 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'pcs:tags_list' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'pcs:tag_compose' tag_type=tag_type %}">{{ schema.label }} Tags</a></li>
             <li class="breadcrumb-item active">{{ tag.tag_label }}</li>
         </ol>
     </nav>
@@ -26,8 +26,8 @@
         </div>
         <div>
             {% if tag.status == 'draft' %}
-            <a href="{% url 'pcs:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-sm btn-outline-primary">Edit</a>
-            <button type="button" class="btn btn-sm btn-warning" onclick="lockTag()">Lock</button>
+            <a href="{% url 'pcs:tag_edit' tag_type=tag_type tag_number=tag.tag_number %}" class="btn btn-dark-green btn-sm">Edit</a>
+            <button type="button" class="btn btn-warning btn-sm" onclick="lockTag()">Lock</button>
             <script>
             async function lockTag() {
                 if (!confirm('Lock this tag? This is irreversible — the tag will become immutable.')) return;

@@ -334,3 +334,50 @@ async def panda_study_job(
         monitor_url: Link to PanDA monitoring page.
     """
     return await sync_to_async(queries.study_job)(pandaid=pandaid)
+
+
+@mcp.tool()
+async def panda_harvester_workers(
+    site: str | None = None,
+    hours: int = 1,
+) -> dict:
+    """
+    Live Harvester pilot/worker counts across EIC compute queues.
+
+    Shows how many pilots are running, submitted, finished, etc. at each site.
+    Useful for checking if Perlmutter or other sites are actively processing.
+
+    Args:
+        site: Filter to a specific queue (e.g. 'NERSC_Perlmutter_epic'). Default: all sites.
+        hours: Time window in hours to look back (default 1).
+
+    Returns:
+        nworkers_total: Grand total across all statuses.
+        nworkers_by_status: Counts by worker status (running, submitted, finished, etc.).
+        nworkers_by_site: Counts by computing site.
+        pivot: Breakdown by status × jobtype × resourcetype.
+    """
+    from datetime import datetime, timedelta, timezone
+    from askpanda_atlas.harvester_worker_impl import fetch_worker_stats
+    from decouple import config
+
+    base_url = config('PANDA_BASE_URL', default='https://pandamon01.sdcc.bnl.gov')
+    now = datetime.now(timezone.utc)
+    from_dt = (now - timedelta(hours=hours)).isoformat()
+    to_dt = now.isoformat()
+    raw = await sync_to_async(fetch_worker_stats)(
+        base_url, from_dt, to_dt, site=site,
+    )
+    if raw.get('error'):
+        return {"error": raw['error']}
+    return {
+        "summary": (
+            f"{raw.get('nworkers_total', 0)} pilots total"
+            + (f" at {site}" if site else " across all EIC sites")
+            + f" (last {hours}h)"
+        ),
+        "by_status": raw.get('nworkers_by_status', {}),
+        "by_site": raw.get('nworkers_by_site', {}),
+        "by_resourcetype": raw.get('nworkers_by_resourcetype', {}),
+        "time_window": {"from": from_dt, "to": to_dt},
+    }

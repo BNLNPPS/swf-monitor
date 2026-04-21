@@ -53,6 +53,7 @@ dependencies = [
     "python-jose[cryptography]",
     "anthropic>=0.40",
     "mattermostdriver>=7.3",
+    "rucio-clients",
 ]
 
 [project.optional-dependencies]

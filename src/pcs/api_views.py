@@ -11,7 +11,20 @@ from rest_framework import viewsets, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from monitor_app.middleware import TunnelAuthentication
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS, BasePermission
+
+
+class IsOwnerOrReadOnly(BasePermission):
+    """Read open to anyone; write requires authenticated owner (by created_by username)."""
+    def has_permission(self, request, view):
+        if request.method in SAFE_METHODS:
+            return True
+        return bool(request.user and request.user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        return getattr(obj, 'created_by', None) == request.user.username
 from rest_framework.response import Response
 from django.db.models import Count
 
@@ -203,11 +216,11 @@ class DatasetViewSet(viewsets.ModelViewSet):
 
 
 class ProdConfigViewSet(viewsets.ModelViewSet):
-    """Production configuration templates. Always mutable — full CRUD."""
+    """Production configuration templates. Owner-only edit; anyone can create."""
     queryset = ProdConfig.objects.all()
     serializer_class = ProdConfigSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
@@ -221,7 +234,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     )
     serializer_class = ProdTaskSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
@@ -235,6 +248,49 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             'condor_command': task.condor_command,
             'panda_command': task.panda_command,
         })
+
+    @action(detail=False, methods=['get'], url_path='command')
+    def command(self, request):
+        """
+        Regenerate and return a task's submission artifact in one of three
+        formats. Lookup by task name. No DB writes.
+
+        Query params:
+            name — ProdTask.name (required)
+            fmt  — condor | panda | jedi | dump (required). Named 'fmt'
+                   (not 'format') because DRF reserves 'format' for
+                   content negotiation.
+
+        Returns:
+            text/plain for condor/panda, application/json for jedi/dump.
+        """
+        from django.http import HttpResponse, JsonResponse
+        from .commands import (
+            build_condor_command, build_panda_command,
+            build_task_params, build_task_dump,
+        )
+
+        name = request.query_params.get('name')
+        fmt = request.query_params.get('fmt', '').lower()
+        if not name:
+            return Response({'detail': 'Missing ?name='}, status=status.HTTP_400_BAD_REQUEST)
+        if fmt not in ('condor', 'panda', 'jedi', 'dump'):
+            return Response(
+                {'detail': "fmt must be one of: condor, panda, jedi, dump"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            task = self.get_queryset().get(name=name)
+        except ProdTask.DoesNotExist:
+            return Response({'detail': f"No task named '{name}'"}, status=status.HTTP_404_NOT_FOUND)
+
+        if fmt == 'condor':
+            return HttpResponse(build_condor_command(task), content_type='text/plain')
+        if fmt == 'panda':
+            return HttpResponse(build_panda_command(task), content_type='text/plain')
+        if fmt == 'jedi':
+            return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
+        return JsonResponse(build_task_dump(task), json_dumps_params={'indent': 2})
 
     @action(detail=True, methods=['post'], url_path='set-status')
     def set_status(self, request, pk=None):

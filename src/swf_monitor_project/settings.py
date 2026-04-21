@@ -17,6 +17,13 @@ from decouple import config
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Rucio client reads these from os.environ directly, so bridge them from the
+# .env-loaded config. No-op if unset (e.g. in dev).
+for _k in ("X509_USER_PROXY", "RUCIO_ACCOUNT", "RUCIO_HOST", "RUCIO_AUTH_HOST"):
+    _v = config(_k, default=None)
+    if _v:
+        os.environ[_k] = _v
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
