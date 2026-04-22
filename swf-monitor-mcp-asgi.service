@@ -9,13 +9,18 @@ Group=eic
 WorkingDirectory=/opt/swf-monitor/current/src
 EnvironmentFile=/opt/swf-monitor/config/env/production.env
 Environment=DJANGO_SETTINGS_MODULE=swf_monitor_project.settings
-# uvicorn with 2 workers — one event loop per worker, each multiplexing many
-# streaming MCP sessions. Bound to loopback only; Apache ProxyPass fronts it.
+# uvicorn with 20 workers — one event loop per worker, each multiplexing many
+# streaming MCP sessions. The ASGI-only path still wedged under a couple of
+# users' worth of concurrent MCP activity at --workers 2 because Django ORM
+# calls from MCP tool handlers run synchronously and pin a thread per request
+# until the DB round-trip returns. 20 workers gives real headroom (~4.7 GB
+# RAM, ~60 DB conns across all three DBs — well under Postgres limits).
+# Bound to loopback only; Apache ProxyPass fronts it.
 ExecStart=/opt/swf-monitor/current/.venv/bin/uvicorn \
     swf_monitor_project.asgi:application \
     --host 127.0.0.1 \
     --port 8001 \
-    --workers 2 \
+    --workers 20 \
     --log-level info \
     --proxy-headers \
     --forwarded-allow-ips 127.0.0.1
