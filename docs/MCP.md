@@ -592,6 +592,8 @@ Use cases:
 - `site`, `corecount`, `taskpriority`, `currentpriority`
 - `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
 - **`nactive`, `nfinished`, `nfailed`** — per-task job counts aggregated from `jobsactive4` + `jobsarchived4`, bucketed per `JOB_STATUS_CATEGORIES` in `panda/constants.py`. Cancelled and closed are deliberately excluded so alarm consumers see only what operators don't know.
+- **`nrunning`** — count of job records with `jobstatus='running'` (subset of `nactive`).
+- **`nretries`** — count of job records with `attemptnr > 1`. Every retry creates a new job record in the ePIC PanDA schema, so this is the total retry count for the task. Retry limit is 3.
 
 **Diagnostic use cases:**
 - Task overview: `panda_list_tasks(days=7)`

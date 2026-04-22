@@ -186,11 +186,11 @@ def build_union_count_by_field(field, where_clauses, params):
 def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
     """Build a task query with OFFSET for DataTables pagination.
 
-    Includes per-task job-count aggregates (nactive / nfinished / nfailed) and
-    a derived computed_failurerate as SELECT aliases so callers can ORDER BY
-    any of them. Aggregates come from a LATERAL subquery against
-    jobsactive4 + jobsarchived4 filtered by jeditaskid — one indexed lookup
-    per returned task.
+    Includes per-task job-count aggregates (nactive / nfinished / nfailed /
+    nrunning / nretries) and a derived computed_failurerate as SELECT
+    aliases so callers can ORDER BY any of them. Aggregates come from a
+    LATERAL subquery against jobsactive4 + jobsarchived4 filtered by
+    jeditaskid — one indexed lookup per returned task.
 
     order_by must use `"column"` for jedi_tasks columns (e.g. `"jeditaskid" DESC`)
     or a bare alias for the aggregates (e.g. `nfailed DESC`, `computed_failurerate DESC NULLS LAST`).
@@ -210,6 +210,8 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
                COALESCE(c.nactive, 0) AS nactive,
                COALESCE(c.nfinished, 0) AS nfinished,
                COALESCE(c.nfailed, 0) AS nfailed,
+               COALESCE(c.nrunning, 0) AS nrunning,
+               COALESCE(c.nretries, 0) AS nretries,
                CASE WHEN COALESCE(c.nfailed, 0) + COALESCE(c.nfinished, 0) = 0
                     THEN NULL
                     ELSE ROUND(
@@ -229,12 +231,14 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
             SELECT
                 SUM(CASE WHEN jobstatus IN ({active_list})   THEN 1 ELSE 0 END) AS nactive,
                 SUM(CASE WHEN jobstatus IN ({finished_list}) THEN 1 ELSE 0 END) AS nfinished,
-                SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed
+                SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed,
+                SUM(CASE WHEN jobstatus = 'running'          THEN 1 ELSE 0 END) AS nrunning,
+                SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries
             FROM (
-                SELECT jobstatus FROM "{PANDA_SCHEMA}"."jobsactive4"
+                SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsactive4"
                     WHERE jeditaskid = t.jeditaskid
                 UNION ALL
-                SELECT jobstatus FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsarchived4"
                     WHERE jeditaskid = t.jeditaskid
             ) j
         ) c ON TRUE
