@@ -109,7 +109,7 @@ async def panda_list_tasks(
     workinggroup: str = None,
     taskid: int = None,
     processingtype: str = None,
-    limit: int = 25,
+    limit: int = 500,
     before_id: int = None,
 ) -> dict:
     """
@@ -127,7 +127,7 @@ async def panda_list_tasks(
         workinggroup: Filter by working group (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
         taskid: Filter by specific JEDI task ID (jeditaskid).
         processingtype: Filter by processing type (e.g. 'epicproduction'). Supports SQL LIKE with %.
-        limit: Maximum tasks to return (default 25).
+        limit: Maximum tasks to return (default 500).
         before_id: Pagination cursor — return tasks with jeditaskid < this value.
 
     Returns:
