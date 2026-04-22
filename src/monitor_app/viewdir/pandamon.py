@@ -75,6 +75,12 @@ TASK_COLUMNS = [
     # column is always NULL in this deployment (post-processing that populates
     # it isn't running for ePIC task types), so this is the only signal shown.
     {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': True},
+    # Final-failed: jobs that failed AND exhausted the retry budget
+    # (attemptnr >= 3). Subset of Failed. The rate derived from these is
+    # what alarms trigger on — distinguishes true failures from
+    # transient-fail-then-retry-succeeds.
+    {'name': 'nfinalfailed', 'title': 'Final Failed', 'orderable': True},
+    {'name': 'computed_finalfailurerate', 'title': 'Final Fail Rate', 'orderable': True},
 ]
 
 TASK_FIELD_NAMES = [c['name'] for c in TASK_COLUMNS]
@@ -95,6 +101,8 @@ TASK_ORDER_MAP = {
     10: 'nrunning',
     11: 'nretries',
     12: 'computed_failurerate',
+    13: 'nfinalfailed',
+    14: 'computed_finalfailurerate',
 }
 
 ERROR_COLUMNS = [
@@ -339,6 +347,9 @@ def panda_tasks_datatable_ajax(request):
         comp_fr = task.get('computed_failurerate')
         comp_fr_str = f'{comp_fr * 100:.1f}%' if comp_fr is not None else ''
 
+        comp_ffr = task.get('computed_finalfailurerate')
+        comp_ffr_str = f'{comp_ffr * 100:.1f}%' if comp_ffr is not None else ''
+
         data.append([
             f'<a href="{task_url}">{task["jeditaskid"]}</a>',
             f'<a href="{task_url}" title="{task.get("taskname", "")}">{taskname_display}</a>',
@@ -353,6 +364,8 @@ def panda_tasks_datatable_ajax(request):
             _fill_cell(task.get('nrunning', 0), 'running'),
             task.get('nretries', 0),
             comp_fr_str,
+            _fill_cell(task.get('nfinalfailed', 0), 'failed'),
+            comp_ffr_str,
         ])
 
     return dt.create_response(data, total, filtered)

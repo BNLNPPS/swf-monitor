@@ -1402,9 +1402,10 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
         with conn.cursor() as cursor:
             cursor.execute(sql, full_params)
             for row in cursor.fetchall():
-                # build_task_query_dt returns TASK_LIST_FIELDS + 7 aggregate
+                # build_task_query_dt returns TASK_LIST_FIELDS + 9 aggregate
                 # columns (in order): nactive, nfinished, nfailed, nrunning,
-                # nretries, computed_failurerate, computed_progress.
+                # nretries, computed_failurerate, computed_progress,
+                # nfinalfailed, computed_finalfailurerate.
                 task = row_to_dict(row[:n_base], TASK_LIST_FIELDS)
                 task['nactive'] = row[n_base]
                 task['nfinished'] = row[n_base + 1]
@@ -1414,6 +1415,9 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
                 fr = row[n_base + 5]
                 task['computed_failurerate'] = float(fr) if fr is not None else None
                 task['computed_progress'] = row[n_base + 6]  # already integer or None
+                task['nfinalfailed'] = row[n_base + 7]
+                ffr = row[n_base + 8]
+                task['computed_finalfailurerate'] = float(ffr) if ffr is not None else None
                 rows.append(task)
     except Exception as e:
         logger.error(f"list_tasks_dt query failed: {e}")

@@ -53,7 +53,9 @@
                         <tr><td><strong>Failed Jobs</strong></td><td class="failed_fill">{{ task.nfailed|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Running Jobs</strong></td><td class="running_fill">{{ task.nrunning|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Retries</strong></td><td>{{ task.nretries|default:0|intcomma }} <span class="text-muted">(jobs with attemptnr&nbsp;&gt;&nbsp;1)</span></td></tr>
+                        <tr><td><strong>Final Failed Jobs</strong></td><td class="failed_fill">{{ task.nfinalfailed|default:0|intcomma }} <span class="text-muted">(retry-exhausted; attemptnr&nbsp;&ge;&nbsp;3)</span></td></tr>
                         {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts; cancelled excluded)</span></td></tr>{% endif %}
+                        {% if task.computed_finalfailurerate is not None %}<tr><td><strong>Final Fail Rate</strong></td><td>{{ task.computed_finalfailurerate|floatformat:3 }} <span class="text-muted">(retry-exhausted; what alarms use)</span></td></tr>{% endif %}
                         {% if task.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ task.attemptnr }}</td></tr>{% endif %}
                         {% if task.corecount %}<tr><td><strong>Cores</strong></td><td>{{ task.corecount }}</td></tr>{% endif %}
                         {% if task.taskpriority %}<tr><td><strong>Priority</strong></td><td>{{ task.taskpriority }}{% if task.currentpriority %} (current: {{ task.currentpriority }}){% endif %}</td></tr>{% endif %}
