@@ -68,7 +68,10 @@ def tasks_list(request):
     Returns:
         { items, total_count, has_more, next_before_id, summary, filters }
         Each task includes native JEDI fields (failurerate, progress, ...)
-        plus nactive / nfinished / nfailed aggregated from job tables.
+        plus nactive / nfinished / nfailed / nrunning / nretries /
+        nfinalfailed aggregated from job tables, and computed helpers
+        computed_failurerate (all failures) / computed_finalfailurerate
+        (retry-exhausted failures only, used by alarms).
     """
     limit, err = _int_param(request, 'limit', default=50, min_value=1, max_value=200)
     if err:
