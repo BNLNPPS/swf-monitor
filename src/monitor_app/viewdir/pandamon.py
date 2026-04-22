@@ -66,6 +66,11 @@ TASK_COLUMNS = [
     {'name': 'nactive', 'title': 'Active', 'orderable': True},
     {'name': 'nfinished', 'title': 'Finished', 'orderable': True},
     {'name': 'nfailed', 'title': 'Failed', 'orderable': True},
+    # Running is a subset of Active (jobstatus='running').
+    {'name': 'nrunning', 'title': 'Running', 'orderable': True},
+    # Retries: count of job records with attemptnr > 1. Every retry creates a
+    # new job record in the ePIC PanDA schema. Retry limit is 3.
+    {'name': 'nretries', 'title': 'Retries', 'orderable': True},
     # Derived from nfailed / (nfailed+nfinished). The native JEDI failurerate
     # column is always NULL in this deployment (post-processing that populates
     # it isn't running for ePIC task types), so this is the only signal shown.
@@ -87,7 +92,9 @@ TASK_ORDER_MAP = {
     7: 'nactive',
     8: 'nfinished',
     9: 'nfailed',
-    10: 'computed_failurerate',
+    10: 'nrunning',
+    11: 'nretries',
+    12: 'computed_failurerate',
 }
 
 ERROR_COLUMNS = [
@@ -343,6 +350,8 @@ def panda_tasks_datatable_ajax(request):
             _fill_cell(task.get('nactive', 0), 'running'),
             _fill_cell(task.get('nfinished', 0), 'finished'),
             _fill_cell(task.get('nfailed', 0), 'failed'),
+            _fill_cell(task.get('nrunning', 0), 'running'),
+            task.get('nretries', 0),
             comp_fr_str,
         ])
 

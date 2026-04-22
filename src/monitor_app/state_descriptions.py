@@ -1,5 +1,6 @@
 """Short human descriptions for state values shown in the monitor.
 
+
 Used by ``cell_fmt.fill_cell`` and the ``state_class`` filter variants to
 attach a ``title=`` attribute to state-colored cells, so hovering a
 "finished" or "failed" cell reveals what the state actually means.
