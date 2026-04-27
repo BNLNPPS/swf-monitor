@@ -31,6 +31,7 @@ from django.db import connection
 from django.utils import timezone
 from django.conf import settings as django_settings
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,38 @@ def oauth_protected_resource(request):
         "bearer_methods_supported": ["header"],
     }
     return JsonResponse(metadata)
+
+
+def mcp_health(request):
+    """
+    Cheap health check for the MCP ASGI worker.
+
+    This deliberately avoids the MCP transport/session code. It verifies that
+    Django can serve a request and reach the default database.
+    """
+    try:
+        connection.ensure_connection()
+        db_ok = True
+        status_code = 200
+        error = None
+    except Exception as e:
+        db_ok = False
+        status_code = 503
+        error = str(e)
+
+    payload = {
+        "ok": db_ok,
+        "service": "swf-monitor-mcp-asgi",
+        "pid": os.getpid(),
+        "database": "ok" if db_ok else "error",
+        "mcp_stateless": bool(
+            django_settings.DJANGO_MCP_GLOBAL_SERVER_CONFIG.get("stateless")
+        ),
+        "timestamp": timezone.now().isoformat(),
+    }
+    if error:
+        payload["error"] = error
+    return JsonResponse(payload, status=status_code)
 
 
 # Create your views here.

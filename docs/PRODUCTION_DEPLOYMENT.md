@@ -39,7 +39,7 @@ python /eic/u/wenauseic/github/swf-testbed/report_system_status.py
 **Key Components:**
 - **Apache HTTP Server**: Serves static files, proxies Django via mod_wsgi for most paths, and ProxyPasses `/swf-monitor/mcp/` to the ASGI worker
 - **Python 3.11 mod_wsgi**: WSGI interface for Django application (all paths except `/mcp/`)
-- **ASGI worker (uvicorn)**: `swf-monitor-mcp-asgi.service` on `127.0.0.1:8001` serves `/swf-monitor/mcp/`. Streaming MCP (StreamableHTTPSessionManager) holds a thread per session; under WSGI that saturates the pool. The ASGI worker isolates that failure mode from the rest of the app.
+- **ASGI worker (uvicorn)**: `swf-monitor-mcp-asgi.service` on `127.0.0.1:8001` serves `/swf-monitor/mcp/` as stateless POST request/response MCP. The ASGI worker isolates MCP failures from the rest of the app.
 - **PostgreSQL**: Production database (system-managed)
 - **ActiveMQ**: Message broker (system-managed via artemis.service)
 - **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
@@ -130,6 +130,17 @@ Note: you must also install the `swf-monitor-mcp-asgi.service` systemd unit from
 sudo install -o root -g root -m 644 swf-monitor-mcp-asgi.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now swf-monitor-mcp-asgi.service
+```
+
+Optional but recommended: install the MCP watchdog timer, which probes the
+non-MCP health endpoint plus MCP `initialize` and `tools/list`, and restarts
+the ASGI worker if the probe fails:
+
+```bash
+sudo install -o root -g root -m 644 swf-monitor-mcp-watchdog.service /etc/systemd/system/
+sudo install -o root -g root -m 644 swf-monitor-mcp-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now swf-monitor-mcp-watchdog.timer
 ```
 
 ### Step 2: Configure Production Environment
@@ -267,13 +278,11 @@ WSGIDaemonProcess swf-monitor \
 
 SetEnv SWF_HOME /opt/swf-monitor
 
-# MCP on ASGI worker — streaming-safe proxy settings.
+# MCP on ASGI worker — stateless POST request/response MCP.
 # Must appear BEFORE WSGIScriptAlias so the proxy takes precedence for /mcp/.
 <Location /swf-monitor/mcp/>
-    ProxyPass         http://127.0.0.1:8001/swf-monitor/mcp/ timeout=3600 keepalive=On disablereuse=On
+    ProxyPass         http://127.0.0.1:8001/swf-monitor/mcp/ timeout=60 keepalive=On disablereuse=On
     ProxyPassReverse  http://127.0.0.1:8001/swf-monitor/mcp/
-    SetEnv proxy-sendchunked 1
-    SetEnv no-gzip 1
     RequestHeader set X-Forwarded-Proto "https"
     CacheDisable on
 </Location>
@@ -326,7 +335,29 @@ sudo systemctl status swf-monitor-mcp-asgi.service
 sudo journalctl -u swf-monitor-mcp-asgi.service -f
 ```
 
-The deploy script restarts this unit on every deploy; manual restart is only needed for targeted code changes or recovery from a crash-loop.
+The deploy script restarts this unit on every deploy; manual restart is only needed for targeted code changes or recovery from a crash-loop. The MCP endpoint is operated as stateless POST request/response MCP on this host; long-lived GET/SSE streaming is not an operational dependency.
+
+Health checks:
+
+```bash
+# Non-MCP health endpoint: verifies Django and default DB connectivity
+curl http://127.0.0.1:8001/swf-monitor/api/mcp-health/
+
+# Full local watchdog probe without restart
+/opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/mcp_watchdog.py
+```
+
+### MCP Watchdog
+
+If installed, `swf-monitor-mcp-watchdog.timer` runs once per minute and invokes
+`scripts/mcp_watchdog.py --restart`. The probe checks:
+
+1. `/swf-monitor/api/mcp-health/`
+2. MCP `initialize`
+3. MCP `tools/list`
+
+Failures are visible in the timer/service journal. The watchdog is deliberately
+an external HTTP probe rather than an in-process Django management command.
 
 ### Mattermost Bots
 

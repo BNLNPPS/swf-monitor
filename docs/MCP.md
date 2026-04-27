@@ -31,13 +31,13 @@ This helps LLMs understand when query results are truncated and whether to refin
 
 ### Claude Desktop
 
-Add to `claude_desktop_config.json`:
+For clients running on swf-testbed, add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "swf-monitor": {
-      "url": "https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/",
+      "url": "http://127.0.0.1:8001/swf-monitor/mcp/",
       "transport": "http"
     }
   }
@@ -53,7 +53,7 @@ Add via `/mcp add` or create `.mcp.json` in project:
   "mcpServers": {
     "swf-monitor": {
       "type": "http",
-      "url": "https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/"
+      "url": "http://127.0.0.1:8001/swf-monitor/mcp/"
     }
   }
 }
@@ -61,21 +61,14 @@ Add via `/mcp add` or create `.mcp.json` in project:
 
 ## Authentication
 
-The MCP endpoint supports two authentication modes:
+The operational MCP clients on swf-testbed are local clients: Claude Code,
+the PanDA Mattermost bot, the testbed bot, scripts, and the watchdog. They use
+the loopback ASGI endpoint and do not require OAuth.
 
-### Claude Code (Local)
-
-POST requests pass through without authentication. This enables local clients (Claude Code, the PanDA Mattermost bot, scripts) to access MCP without OAuth setup.
-
-### Claude.ai (Remote)
-
-GET requests require OAuth 2.1 Bearer token authentication via Auth0. This enables Claude.ai remote MCP connections with proper authorization.
-
-**OAuth Flow:**
-1. Claude.ai discovers OAuth metadata via `/.well-known/oauth-protected-resource`
-2. User authenticates with Auth0
-3. Claude.ai includes Bearer token in requests
-4. MCP middleware validates JWT against Auth0 JWKS
+The public Apache path still exists, but remote Claude.ai GET/SSE streaming is
+not an operational dependency and should not be treated as supported by the
+current deployment. If remote MCP access is reintroduced, require OAuth 2.1
+and revalidate the transport lifecycle under load before enabling it.
 
 **Configuration (production):**
 ```bash
@@ -86,10 +79,8 @@ AUTH0_CLIENT_SECRET=your-client-secret
 AUTH0_API_IDENTIFIER=https://your-server/swf-monitor/mcp
 ```
 
-Leave `AUTH0_DOMAIN` empty to disable OAuth (allows all requests through).
-
-**Network Requirements:**
-Claude.ai connects from Anthropic's servers, so the MCP endpoint must be accessible from the public internet. Internal networks (e.g., behind lab firewalls) may require network configuration to allow external access.
+Leave `AUTH0_DOMAIN` empty to disable OAuth. Do not expose unauthenticated
+remote MCP access.
 
 ---
 
@@ -102,7 +93,7 @@ Full `~/.claude/settings.json` with swf-monitor MCP server, permissions, and sta
   "mcpServers": {
     "swf-monitor": {
       "type": "http",
-      "url": "https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/"
+      "url": "http://127.0.0.1:8001/swf-monitor/mcp/"
     }
   },
   "statusLine": {
@@ -667,10 +658,10 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 - `MATTERMOST_TOKEN` (required)
 - `MATTERMOST_TEAM` (default: `main`)
 - `MATTERMOST_CHANNEL` (default: `pandabot`)
-- `MCP_URL` (default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/`)
+- `MCP_URL` (default: `http://127.0.0.1:8001/swf-monitor/mcp/`)
 - `ANTHROPIC_API_KEY` (required, used by the Anthropic SDK)
 
-**MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the MCP endpoint — the same transport Claude Code uses. Each user question gets a fresh MCP session (initialize, discover tools, tool-use loop, close).
+**MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the local MCP endpoint. Each user question gets a fresh stateless request/response exchange.
 
 ---
 
@@ -883,10 +874,10 @@ swf-monitor/
 
 ### Architecture
 
-MCP is integrated directly into Django rather than as a separate service, but the `/mcp/` endpoint is served by a **separate ASGI worker** (uvicorn) fronted by Apache `ProxyPass`. The rest of swf-monitor stays on mod_wsgi. Rationale: `django-mcp-server` uses Starlette's `StreamableHTTPSessionManager`, which holds one thread per streaming session; under WSGI that saturates the thread pool when a handful of clients hit MCP. Isolating MCP on an ASGI worker keeps the failure mode out of the main app. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
+MCP is integrated directly into Django rather than as a separate service, but the `/mcp/` endpoint is served by a **separate ASGI worker** (uvicorn) fronted by Apache `ProxyPass`. The rest of swf-monitor stays on mod_wsgi. MCP is operated here as stateless POST request/response traffic; isolating it on the ASGI worker keeps MCP failures out of the main app. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
 
 - **Django** exposes the MCP endpoint alongside the REST API (same codebase, same URL tree)
-- **ASGI (uvicorn)** serves `/mcp/` on `127.0.0.1:8001`; Apache ProxyPasses to it with streaming-safe settings (`timeout=3600`, `disablereuse=On`, `no-gzip`, `CacheDisable`)
+- **ASGI (uvicorn)** serves `/mcp/` on `127.0.0.1:8001`; Apache ProxyPasses to it for external callers, while local bots use the loopback URL directly
 - **django-mcp-server** provides MCP spec compliance and tool registration
 - **Auth0 OAuth 2.1** authentication for Claude.ai remote connections (optional, disabled if AUTH0_DOMAIN not set)
 
@@ -900,9 +891,19 @@ The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init_
 
 ### Transport
 
-Streamable HTTP (the MCP spec's HTTP transport) — `django-mcp-server` uses Starlette's `StreamableHTTPSessionManager`, so the server can stream responses and long-lived SSE-style session events when a client asks for them. The Django view (`MCPServerStreamableHttpView`) dispatches GET/POST/DELETE to the session manager; sessions are keyed via the `mcp-session-id` header and persisted in the Django session store.
+MCP is operated on swf-testbed as stateless POST request/response MCP over
+HTTP. The useful tool surface is `initialize`, `tools/list`, and `tools/call`
+returning JSON responses. Local swf-monitor clients use this POST-only path.
 
-Because streaming sessions tie up a thread for the session's lifetime, the endpoint runs under an ASGI worker (uvicorn) rather than mod_wsgi — see the Architecture section above.
+Long-lived GET/SSE streaming is not an operational dependency on this host.
+The previous stateful streaming setup was unreliable: GET/SSE requests returned
+400 or 406 depending on headers, and the lifecycle used by the Django adapter
+created too much risk for uvicorn worker lockups. If streaming becomes useful
+later, it should be reimplemented as a deliberate ASGI app with a
+lifespan-managed `StreamableHTTPSessionManager`.
+
+The endpoint still runs under an ASGI worker (uvicorn) rather than mod_wsgi so
+MCP failures remain isolated from the main Django site.
 
 ### Settings
 
@@ -911,6 +912,7 @@ Because streaming sessions tie up a thread for the session's lifetime, the endpo
 DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
     "name": "swf-monitor",
     "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
+    "stateless": True,
 }
 
 # Auth0 OAuth 2.1 configuration (optional - leave AUTH0_DOMAIN empty to disable)

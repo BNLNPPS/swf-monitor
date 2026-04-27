@@ -46,7 +46,7 @@ MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
 MCP_URL = os.environ.get(
-    'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
+    'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
 
@@ -1207,22 +1207,29 @@ class PandaBot:
         Serialized via lock so recordings don't interleave.
         """
         async with self._respond_lock:
-            messages = await self._load_recent_dialog()
-            reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
-            # Strip any tool metadata Haiku echoed from conversation history
-            reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
-            no_query_warn = ":warning: *This response was not based on a live data query.*"
-            no_cite_warn = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
-            reply = reply.replace(no_query_warn, "").replace(no_cite_warn, "").rstrip()
-            if not dpid_verified and not reply.startswith("Sorry,"):
-                reply += "\n\n" + (no_cite_warn if tool_meta['used'] else no_query_warn)
-            # Append tool selection metadata only when tools were used
-            if tool_meta['used']:
-                suggested = ', '.join(tool_meta['suggested']) or 'none'
-                used = ', '.join(tool_meta['used'])
-                reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
-            # Record inside lock so the next load sees this exchange
-            await self._record_exchange(tagged_message, reply, post_id, root_id)
+            try:
+                messages = await self._load_recent_dialog()
+                reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
+                # Strip any tool metadata Haiku echoed from conversation history
+                reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
+                no_query_warn = ":warning: *This response was not based on a live data query.*"
+                no_cite_warn = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
+                reply = reply.replace(no_query_warn, "").replace(no_cite_warn, "").rstrip()
+                if not dpid_verified and not reply.startswith("Sorry,"):
+                    reply += "\n\n" + (no_cite_warn if tool_meta['used'] else no_query_warn)
+                # Append tool selection metadata only when tools were used
+                if tool_meta['used']:
+                    suggested = ', '.join(tool_meta['suggested']) or 'none'
+                    used = ', '.join(tool_meta['used'])
+                    reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
+                # Record inside lock so the next load sees this exchange
+                await self._record_exchange(tagged_message, reply, post_id, root_id)
+            except Exception:
+                logger.exception("PanDA bot response task failed")
+                reply = (
+                    "Sorry, I hit an internal error while processing this "
+                    "message. The exception was logged."
+                )
 
         await self._post_reply(reply, reply_channel, root_id)
 
@@ -1357,6 +1364,8 @@ class PandaBot:
 
         reply = "Sorry, I encountered an error processing your question."
         exchange_dpids = []  # DPIDs generated in this exchange
+        suggested_names = []
+        tools_used = []
 
         mcp = MCPClient(self.mcp_url)
         try:
@@ -1376,7 +1385,6 @@ class PandaBot:
             suggested_names = [
                 f"{name}:{score:.2f}" for name, score in scored
             ]
-            tools_used = []
             logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
             system = self._build_system_prompt()

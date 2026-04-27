@@ -1,0 +1,7 @@
+[Unit]
+Description=Probe SWF Monitor MCP endpoint and restart on failure
+After=network.target swf-monitor-mcp-asgi.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/mcp_watchdog.py --restart

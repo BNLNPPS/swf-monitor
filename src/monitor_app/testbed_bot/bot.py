@@ -31,7 +31,7 @@ MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'testbedbot'
 MCP_URL = os.environ.get(
-    'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
+    'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('swf_', 'panda_', 'pcs_')
 
@@ -415,12 +415,19 @@ class TestbedBot:
         Serialized via lock so recordings don't interleave.
         """
         async with self._respond_lock:
-            messages = await self._load_recent_dialog()
-            reply = await self._process_message(
-                messages, tagged_message, testbed_username, root_id
-            )
-            # Record inside lock so the next load sees this exchange
-            await self._record_exchange(tagged_message, reply, post_id, root_id)
+            try:
+                messages = await self._load_recent_dialog()
+                reply = await self._process_message(
+                    messages, tagged_message, testbed_username, root_id
+                )
+                # Record inside lock so the next load sees this exchange
+                await self._record_exchange(tagged_message, reply, post_id, root_id)
+            except Exception:
+                logger.exception("Testbed bot response task failed")
+                reply = (
+                    "Sorry, I hit an internal error while processing this "
+                    "message. The exception was logged."
+                )
 
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'

@@ -261,6 +261,7 @@ AUTH0_ALGORITHMS = ["RS256"]
 # Django MCP Server configuration
 DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
     "name": "swf-testbed",
+    "stateless": True,
     "instructions": """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
 
 KEY CONCEPTS:
