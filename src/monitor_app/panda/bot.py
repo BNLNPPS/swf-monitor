@@ -49,6 +49,11 @@ MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
+SILENT_REPLY_SENTINELS = {
+    '__PANDABOT_SILENT__',
+    '[NO RESPONSE]',
+    'NO RESPONSE',
+}
 
 # Stdio MCP servers — launched as subprocesses at startup.
 # update_commands: if present, the server can be updated via bot_manage_servers.
@@ -1212,6 +1217,9 @@ class PandaBot:
                 reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
                 # Strip any tool metadata Haiku echoed from conversation history
                 reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
+                if self._is_silent_reply(reply):
+                    logger.info("PanDA bot chose silence; not posting a reply")
+                    return
                 no_query_warn = ":warning: *This response was not based on a live data query.*"
                 no_cite_warn = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
                 reply = reply.replace(no_query_warn, "").replace(no_cite_warn, "").rstrip()
@@ -1232,6 +1240,12 @@ class PandaBot:
                 )
 
         await self._post_reply(reply, reply_channel, root_id)
+
+    @staticmethod
+    def _is_silent_reply(reply: str) -> bool:
+        """True when the LLM intentionally chose not to post in Mattermost."""
+        normalized = reply.strip().strip('`*_').upper()
+        return normalized in SILENT_REPLY_SENTINELS
 
     async def _render_plot(self, code):
         """Execute matplotlib code and return the PNG path, or None on failure."""
