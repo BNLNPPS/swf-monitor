@@ -148,7 +148,7 @@ STDIO_MCP_SERVERS.append({
 STDIO_MCP_SERVERS.append({
     'name': 'jlab-rucio',
     'prefix': 'jlab_rucio_',
-    'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
+    'source': 'github.com/eic/rucio-eic-mcp-server',
     'command': [
         os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
                      'swf-testbed/.venv/bin/python'),
@@ -175,7 +175,7 @@ STDIO_MCP_SERVERS.append({
 STDIO_MCP_SERVERS.append({
     'name': 'bnl-rucio',
     'prefix': 'bnl_rucio_',
-    'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
+    'source': 'github.com/eic/rucio-eic-mcp-server',
     'command': [
         os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
                      'swf-testbed/.venv/bin/python'),
