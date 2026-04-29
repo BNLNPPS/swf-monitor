@@ -50,9 +50,8 @@ MCP_URL = os.environ.get(
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
 SILENT_REPLY_SENTINELS = {
-    '__PANDABOT_SILENT__',
-    '[NO RESPONSE]',
     'NO RESPONSE',
+    'PANDABOT SILENT',
 }
 
 # Stdio MCP servers — launched as subprocesses at startup.
@@ -1244,7 +1243,8 @@ class PandaBot:
     @staticmethod
     def _is_silent_reply(reply: str) -> bool:
         """True when the LLM intentionally chose not to post in Mattermost."""
-        normalized = reply.strip().strip('`*_').upper()
+        normalized = reply.strip().strip('`*_[]').upper()
+        normalized = re.sub(r'[_\s-]+', ' ', normalized)
         return normalized in SILENT_REPLY_SENTINELS
 
     async def _render_plot(self, code):
