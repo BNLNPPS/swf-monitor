@@ -105,6 +105,40 @@ tags, but their file/path/CSV source is dataset metadata, not tag metadata.
 Future PCS/PanDA-produced EVGEN outputs are also ordinary datasets, with
 `stage=evgen` and `external=false`.
 
+Interim implementation: externally supplied EVGEN inputs are represented in the
+existing `Dataset.metadata` JSON rather than by new database columns. The
+metadata convention is:
+
+```json
+{
+  "stage": "evgen",
+  "external": true,
+  "source": {
+    "kind": "csv_manifest",
+    "location": "path/to/input.csv",
+    "hash": null
+  },
+  "provider": {
+    "group": "PWG or DSC name",
+    "contact": null
+  },
+  "provenance": {
+    "status": "declared",
+    "notes": "Supplied by PWG; PCS has not independently verified physics content."
+  },
+  "validation": {
+    "status": "not_checked",
+    "checked_at": null,
+    "messages": []
+  },
+  "public_catalog": {}
+}
+```
+
+This keeps the external-input capability lightweight and transitional while
+preserving the path to a later first-class workflow/stage model for EVGEN run
+inside PCS/PanDA.
+
 Production tasks should compose lists of datasets rather than a single dataset:
 
 ```text

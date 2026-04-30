@@ -184,6 +184,67 @@ class Dataset(models.Model):
     def __str__(self):
         return self.did
 
+    def get_metadata(self):
+        """Return metadata as a mutable dict, normalizing empty/null values."""
+        return self.metadata if isinstance(self.metadata, dict) else {}
+
+    def get_metadata_value(self, *path, default=None):
+        data = self.get_metadata()
+        for key in path:
+            if not isinstance(data, dict) or key not in data:
+                return default
+            data = data[key]
+        return data
+
+    @property
+    def stage(self):
+        return self.get_metadata_value('stage', default='')
+
+    @property
+    def is_external(self):
+        return bool(self.get_metadata_value('external', default=False))
+
+    @property
+    def source_kind(self):
+        return self.get_metadata_value('source', 'kind', default='')
+
+    @property
+    def source_location(self):
+        return self.get_metadata_value('source', 'location', default='')
+
+    @property
+    def validation_status(self):
+        return self.get_metadata_value('validation', 'status', default='')
+
+    @classmethod
+    def external_evgen_metadata(
+        cls, source_location, source_kind='csv_manifest', provider_group='',
+        provider_contact='', provenance_notes='', source_hash=None
+    ):
+        return {
+            'stage': 'evgen',
+            'external': True,
+            'source': {
+                'kind': source_kind,
+                'location': source_location,
+                'hash': source_hash,
+            },
+            'provider': {
+                'group': provider_group,
+                'contact': provider_contact,
+            },
+            'provenance': {
+                'status': 'declared',
+                'notes': provenance_notes,
+            },
+            'validation': {
+                'status': 'not_checked',
+                'checked_at': None,
+                'messages': [],
+            },
+            'public_catalog': {},
+        }
+
     def clean(self):
         for tag_field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']:
             tag = getattr(self, tag_field, None)

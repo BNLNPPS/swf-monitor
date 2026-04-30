@@ -472,6 +472,7 @@ def datasets_compose(request):
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
                 description=cd.get('description', ''),
+                metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
             )
             ds.save()
@@ -616,6 +617,7 @@ def dataset_create(request):
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
                 description=cd.get('description', ''),
+                metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
             )
             ds.save()
@@ -881,6 +883,12 @@ def prod_task_compose(request):
             'scope': ds.scope,
             'detector_version': ds.detector_version,
             'detector_config': ds.detector_config,
+            'stage': ds.stage,
+            'external': ds.is_external,
+            'source_kind': ds.source_kind,
+            'source_location': ds.source_location,
+            'validation_status': ds.validation_status,
+            'metadata': ds.metadata or {},
             'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description,
                             'parameters': ds.physics_tag.parameters},
             'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description,

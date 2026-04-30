@@ -329,7 +329,8 @@
             items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
                 d.physics_tag.label.toLowerCase().includes(q) || d.physics_tag.description.toLowerCase().includes(q)
             ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
-                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label} | ${d.created_by}`,
+                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}`
+                    + `${d.external ? ' | external ' + (d.stage || 'dataset') : ''} | ${d.created_by}`,
                 selected: d.id === selectedItemId }));
         } else if (browseType === 'configs') {
             items = allConfigs.filter(c => !q || c.name.toLowerCase().includes(q) ||
@@ -532,6 +533,11 @@
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
                 <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                <tr><td><strong>Stage</strong></td><td>${ds.stage || '-'}</td></tr>
+                <tr><td><strong>External</strong></td><td>${ds.external ? 'yes' : 'no'}</td></tr>
+                ${ds.source_kind ? `<tr><td><strong>Source Kind</strong></td><td>${ds.source_kind}</td></tr>` : ''}
+                ${ds.source_location ? `<tr><td><strong>Source Location</strong></td><td><code>${ds.source_location}</code></td></tr>` : ''}
+                ${ds.validation_status ? `<tr><td><strong>Validation</strong></td><td>${ds.validation_status}</td></tr>` : ''}
                 <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
                 ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
@@ -666,6 +672,7 @@
                 <tr><td style="width:35%"><strong>Name</strong></td><td>${ds.dataset_name}</td></tr>
                 <tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                ${ds.external ? `<tr><td><strong>Input Source</strong></td><td>${ds.source_kind || '-'}: <code>${ds.source_location || '-'}</code></td></tr>` : ''}
                 <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label}, ${ds.evgen_tag.label}, ${ds.simu_tag.label}, ${ds.reco_tag.label}</td></tr>
             </table>`;
         const allParams = {};

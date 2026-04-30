@@ -27,6 +27,11 @@
                 <tr><td><strong>Scope</strong></td><td>{{ dataset.scope }}</td></tr>
                 <tr><td><strong>Detector Version</strong></td><td>{{ dataset.detector_version }}</td></tr>
                 <tr><td><strong>Detector Config</strong></td><td>{{ dataset.detector_config }}</td></tr>
+                <tr><td><strong>Stage</strong></td><td>{{ dataset.stage|default:"-" }}</td></tr>
+                <tr><td><strong>External</strong></td><td>{{ dataset.is_external|yesno:"yes,no" }}</td></tr>
+                <tr><td><strong>Source Kind</strong></td><td>{{ dataset.source_kind|default:"-" }}</td></tr>
+                <tr><td><strong>Source Location</strong></td><td>{% if dataset.source_location %}<code>{{ dataset.source_location }}</code>{% else %}-{% endif %}</td></tr>
+                <tr><td><strong>Validation</strong></td><td>{{ dataset.validation_status|default:"-" }}</td></tr>
             </table>
         </div>
     </div>

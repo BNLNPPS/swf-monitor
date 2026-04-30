@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 
 from pcs.commands import build_task_params
+from pcs.models import Dataset
 
 
 def _make_task():
@@ -158,3 +159,27 @@ class BuildTaskParamsTest(TestCase):
         self.assertNotIn('nFiles', params)
         self.assertNotIn('skipScout', params)
         self.assertNotIn('useRucio', params)
+
+
+class DatasetMetadataTest(TestCase):
+    def test_external_evgen_metadata_helpers(self):
+        metadata = Dataset.external_evgen_metadata(
+            source_location='campaign/input.csv',
+            provider_group='DIS PWG',
+            provenance_notes='Supplied by PWG',
+        )
+        dataset = Dataset(metadata=metadata)
+
+        self.assertEqual(dataset.stage, 'evgen')
+        self.assertTrue(dataset.is_external)
+        self.assertEqual(dataset.source_kind, 'csv_manifest')
+        self.assertEqual(dataset.source_location, 'campaign/input.csv')
+        self.assertEqual(dataset.validation_status, 'not_checked')
+
+    def test_metadata_helpers_tolerate_null_metadata(self):
+        dataset = Dataset(metadata=None)
+
+        self.assertEqual(dataset.stage, '')
+        self.assertFalse(dataset.is_external)
+        self.assertEqual(dataset.source_kind, '')
+        self.assertEqual(dataset.source_location, '')

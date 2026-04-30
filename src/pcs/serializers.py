@@ -79,6 +79,11 @@ class DatasetSerializer(serializers.ModelSerializer):
     evgen_tag_label = serializers.CharField(source='evgen_tag.tag_label', read_only=True)
     simu_tag_label = serializers.CharField(source='simu_tag.tag_label', read_only=True)
     reco_tag_label = serializers.CharField(source='reco_tag.tag_label', read_only=True)
+    stage = serializers.CharField(read_only=True)
+    external = serializers.BooleanField(source='is_external', read_only=True)
+    source_kind = serializers.CharField(read_only=True)
+    source_location = serializers.CharField(read_only=True)
+    validation_status = serializers.CharField(read_only=True)
 
     class Meta:
         model = Dataset
@@ -87,12 +92,28 @@ class DatasetSerializer(serializers.ModelSerializer):
             'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
             'physics_tag_label', 'evgen_tag_label', 'simu_tag_label', 'reco_tag_label',
             'block_num', 'blocks', 'did', 'file_count', 'data_size',
+            'stage', 'external', 'source_kind', 'source_location', 'validation_status',
             'description', 'metadata', 'created_by', 'created_at',
         ]
         read_only_fields = [
             'id', 'dataset_name', 'did', 'block_num', 'blocks',
             'file_count', 'data_size', 'created_by', 'created_at',
         ]
+
+    def validate_metadata(self, value):
+        if value in (None, ''):
+            return None
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('metadata must be a JSON object.')
+        if value.get('external'):
+            source = value.get('source')
+            if not isinstance(source, dict):
+                raise serializers.ValidationError('external datasets require metadata.source.')
+            if not source.get('kind'):
+                raise serializers.ValidationError('external datasets require metadata.source.kind.')
+            if not source.get('location'):
+                raise serializers.ValidationError('external datasets require metadata.source.location.')
+        return value
 
 
 class ProdConfigSerializer(serializers.ModelSerializer):

@@ -182,6 +182,46 @@ Block `.b1` is always present. Rucio limits datasets to 100k files; PCS manages 
 
 The **task name** is the dataset name (without the `.bN` block suffix). This is what appears in PanDA as the task identifier.
 
+### External EVGEN Inputs
+
+As an interim production-planning capability, PCS can represent externally
+supplied generator-level inputs using `Dataset.metadata` rather than new schema
+fields. This is intended for the current mode where PWGs or DSCs provide EVGEN
+files or CSV manifests that PCS records but does not independently produce.
+
+Example metadata:
+
+```json
+{
+  "stage": "evgen",
+  "external": true,
+  "source": {
+    "kind": "csv_manifest",
+    "location": "path/to/input.csv",
+    "hash": null
+  },
+  "provider": {
+    "group": "PWG or DSC name",
+    "contact": null
+  },
+  "provenance": {
+    "status": "declared",
+    "notes": "Supplied by PWG; PCS has not independently verified physics content."
+  },
+  "validation": {
+    "status": "not_checked",
+    "checked_at": null,
+    "messages": []
+  },
+  "public_catalog": {}
+}
+```
+
+The dataset API exposes convenience fields derived from this metadata:
+`stage`, `external`, `source_kind`, `source_location`, and
+`validation_status`. The full `metadata` object remains the writable transport
+for this interim model.
+
 ## Production Configs
 
 A production config is a reusable template capturing everything needed to build a submit command beyond what tags and datasets define.

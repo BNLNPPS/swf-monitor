@@ -43,7 +43,10 @@ class RecoTagAdmin(admin.ModelAdmin):
 
 @admin.register(Dataset)
 class DatasetAdmin(admin.ModelAdmin):
-    list_display = ('did', 'dataset_name', 'block_num', 'blocks', 'file_count', 'created_by', 'created_at')
+    list_display = (
+        'did', 'dataset_name', 'stage', 'is_external', 'source_kind',
+        'block_num', 'blocks', 'file_count', 'created_by', 'created_at',
+    )
     list_filter = ('detector_version', 'detector_config')
     search_fields = ('dataset_name', 'did')
     readonly_fields = ('created_at',)
