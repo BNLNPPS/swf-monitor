@@ -46,6 +46,7 @@ The application is built on Django infrastructure and comprises three main compo
 | **[API Reference](docs/API_REFERENCE.md)** | REST API, WebSocket, database schema, authentication | Integration |
 | **[MCP Integration](docs/MCP.md)** | Model Context Protocol for LLM interaction | Natural language queries |
 | **[PCS](docs/PCS.md)** | Physics Configuration System — tags, datasets, production configuration | Production task configuration |
+| **[PCS Dataset Request Workflow](docs/PCS_DATASET_REQUEST_WORKFLOW.md)** | PCS-centered dataset request intake, external datasets, and public catalogue projection | Production planning workflow |
 | **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 
 ### Quick Links
