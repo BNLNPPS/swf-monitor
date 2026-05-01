@@ -131,26 +131,31 @@ DATABASES = {
         "HOST": config("DB_HOST", default="localhost"),
         "PORT": config("DB_PORT", default="5432"),
     },
-    "panda": {
+}
+
+# Optional external databases — only registered when credentials are provided.
+if config("PANDA_DB_PASSWORD", default=""):
+    DATABASES["panda"] = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": config("PANDA_DB_NAME", default="panda_db"),
         "USER": config("PANDA_DB_USER", default="panda"),
-        "PASSWORD": config("PANDA_DB_PASSWORD", default="dummy"),
+        "PASSWORD": config("PANDA_DB_PASSWORD"),
         "HOST": config("PANDA_DB_HOST", default="pandadb01.sdcc.bnl.gov"),
         "PORT": config("PANDA_DB_PORT", default="5432"),
-    },
-    "idds": {
+    }
+
+if config("IDDS_DB_PASSWORD", default=""):
+    DATABASES["idds"] = {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": config("IDDS_DB_NAME", default="idds_db"),
         "USER": config("IDDS_DB_USER", default="idds"),
-        "PASSWORD": config("IDDS_DB_PASSWORD", default="dummy"),
+        "PASSWORD": config("IDDS_DB_PASSWORD"),
         "HOST": config("IDDS_DB_HOST", default="pandadb01.sdcc.bnl.gov"),
         "PORT": config("IDDS_DB_PORT", default="5432"),
         "OPTIONS": {
             "options": f"-c search_path={config('IDDS_DB_SCHEMA', default='doma_idds')}"
         },
     }
-}
 
 
 # Password validation
