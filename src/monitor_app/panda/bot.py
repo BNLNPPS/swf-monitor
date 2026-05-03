@@ -1171,13 +1171,18 @@ class PandaBot:
             logger.debug(f"Skipping system message type={post_type}")
             return
 
-        # Accept: our channel, a DM, an @mention, or a thread we're in
+        # Accept: DMs, @mentions, or a thread we're in. Plain channel chatter
+        # is recorded nowhere and never sent to the LLM; silence must be a
+        # harness decision, not model output.
         is_our_channel = (post_channel == self.channel_id)
         is_dm = (channel_type == 'D')
         mentions_str = data.get('mentions', '')
         is_mention = self.bot_user_id and self.bot_user_id in mentions_str
         root_id = post.get('root_id', '')
         is_active_thread = root_id in self._active_threads
+        if is_our_channel and not is_dm and not is_mention and not is_active_thread:
+            logger.debug("Skipping plain channel message")
+            return
         if not is_our_channel and not is_dm and not is_mention and not is_active_thread:
             return
 
@@ -1245,12 +1250,17 @@ class PandaBot:
     @staticmethod
     def _is_silent_reply(reply: str) -> bool:
         """True when the LLM intentionally chose not to post in Mattermost."""
-        text = re.sub(r'[^a-z0-9]+', ' ', reply.lower())
+        raw = reply.strip()
+        if re.fullmatch(r'[\(\[\{<][^)\]\}>]{1,200}[\)\]\}>]', raw):
+            return True
+        text = re.sub(r'[^a-z0-9]+', ' ', raw.lower())
         words = set(text.split())
         return (
             not words
             or 'silence' in text
             or 'silent' in words
+            or 'listen' in text
+            or ('not' in words and 'speaking' in words)
             or ('no' in words and 'response' in words)
         )
 
