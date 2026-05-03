@@ -1200,9 +1200,18 @@ class PandaBot:
         source = 'DM' if is_dm else ('mention' if is_mention and not is_our_channel else 'channel')
         logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
-        asyncio.create_task(self._respond(tagged_message, post_channel, post_id, root_id))
+        direct_addressed = is_dm or is_mention
+        asyncio.create_task(
+            self._respond(
+                tagged_message, post_channel, post_id, root_id,
+                direct_addressed=direct_addressed,
+            )
+        )
 
-    async def _respond(self, tagged_message, reply_channel, post_id, root_id):
+    async def _respond(
+        self, tagged_message, reply_channel, post_id, root_id,
+        direct_addressed=False,
+    ):
         """Process any message — channel, DM, or mention.
 
         Loads recent dialog from DB, runs Claude, records the exchange.
@@ -1213,7 +1222,10 @@ class PandaBot:
                 messages = await self._load_recent_dialog()
                 reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
                 reply = self._clean_reply_boilerplate(reply)
-                if self._is_silent_reply(reply):
+                if (
+                    not (direct_addressed and len(reply.strip()) > 20)
+                    and self._is_silent_reply(reply)
+                ):
                     logger.info(
                         "PanDA bot chose silence; not posting reply marker: %r",
                         reply,
