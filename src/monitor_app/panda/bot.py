@@ -1250,13 +1250,15 @@ class PandaBot:
             return True
         text = re.sub(r'[^a-z0-9]+', ' ', raw.lower())
         words = set(text.split())
+        if len(raw) > 200:
+            return False
         return (
             not words
             or 'silence' in text
             or 'silent' in words
             or 'listen' in text
             or ('not' in words and 'speaking' in words)
-            or ('no' in words and 'response' in words)
+            or 'no response' in text
         )
 
     async def _render_plot(self, code):
