@@ -1247,7 +1247,12 @@ class PandaBot:
         """True when the LLM intentionally chose not to post in Mattermost."""
         text = re.sub(r'[^a-z0-9]+', ' ', reply.lower())
         words = set(text.split())
-        return not words or 'silence' in text or ('no' in words and 'response' in words)
+        return (
+            not words
+            or 'silence' in text
+            or 'silent' in words
+            or ('no' in words and 'response' in words)
+        )
 
     async def _render_plot(self, code):
         """Execute matplotlib code and return the PNG path, or None on failure."""
