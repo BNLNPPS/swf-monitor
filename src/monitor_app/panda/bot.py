@@ -1214,7 +1214,10 @@ class PandaBot:
                 reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
                 reply = self._clean_reply_boilerplate(reply)
                 if self._is_silent_reply(reply):
-                    logger.info("PanDA bot chose silence; not posting a reply")
+                    logger.info(
+                        "PanDA bot chose silence; not posting reply marker: %r",
+                        reply,
+                    )
                     return
                 if not dpid_verified and not reply.startswith("Sorry,"):
                     reply += "\n\n" + (NO_CITE_WARN if tool_meta['used'] else NO_QUERY_WARN)
