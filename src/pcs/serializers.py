@@ -105,10 +105,14 @@ class DatasetSerializer(serializers.ModelSerializer):
             return None
         if not isinstance(value, dict):
             raise serializers.ValidationError('metadata must be a JSON object.')
-        if value.get('external'):
-            source = value.get('source')
+        if 'external' in value:
+            raise serializers.ValidationError(
+                'metadata.external is obsolete; external status is derived from metadata.source.kind.'
+            )
+        source = value.get('source')
+        if source is not None:
             if not isinstance(source, dict):
-                raise serializers.ValidationError('external datasets require metadata.source.')
+                raise serializers.ValidationError('metadata.source must be a JSON object.')
             if not source.get('kind'):
                 raise serializers.ValidationError('external datasets require metadata.source.kind.')
             if not source.get('location'):

@@ -49,10 +49,8 @@ MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
-SILENT_REPLY_SENTINELS = {
-    'NO RESPONSE',
-    'PANDABOT SILENT',
-}
+NO_QUERY_WARN = ":warning: *This response was not based on a live data query.*"
+NO_CITE_WARN = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
 
 # Stdio MCP servers — launched as subprocesses at startup.
 # update_commands: if present, the server can be updated via bot_manage_servers.
@@ -1214,16 +1212,12 @@ class PandaBot:
             try:
                 messages = await self._load_recent_dialog()
                 reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
-                # Strip any tool metadata Haiku echoed from conversation history
-                reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
+                reply = self._clean_reply_boilerplate(reply)
                 if self._is_silent_reply(reply):
                     logger.info("PanDA bot chose silence; not posting a reply")
                     return
-                no_query_warn = ":warning: *This response was not based on a live data query.*"
-                no_cite_warn = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
-                reply = reply.replace(no_query_warn, "").replace(no_cite_warn, "").rstrip()
                 if not dpid_verified and not reply.startswith("Sorry,"):
-                    reply += "\n\n" + (no_cite_warn if tool_meta['used'] else no_query_warn)
+                    reply += "\n\n" + (NO_CITE_WARN if tool_meta['used'] else NO_QUERY_WARN)
                 # Append tool selection metadata only when tools were used
                 if tool_meta['used']:
                     suggested = ', '.join(tool_meta['suggested']) or 'none'
@@ -1241,11 +1235,19 @@ class PandaBot:
         await self._post_reply(reply, reply_channel, root_id)
 
     @staticmethod
+    def _clean_reply_boilerplate(reply: str) -> str:
+        """Remove bot-managed footers Haiku may echo from recent dialog."""
+        reply = reply or ''
+        reply = reply.replace(NO_QUERY_WARN, "").replace(NO_CITE_WARN, "")
+        reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
+        return reply.rstrip()
+
+    @staticmethod
     def _is_silent_reply(reply: str) -> bool:
         """True when the LLM intentionally chose not to post in Mattermost."""
-        normalized = reply.strip().strip('`*_[]').upper()
-        normalized = re.sub(r'[_\s-]+', ' ', normalized)
-        return normalized in SILENT_REPLY_SENTINELS
+        text = re.sub(r'[^a-z0-9]+', ' ', reply.lower())
+        words = set(text.split())
+        return not words or 'silence' in text or ('no' in words and 'response' in words)
 
     async def _render_plot(self, code):
         """Execute matplotlib code and return the PNG path, or None on failure."""

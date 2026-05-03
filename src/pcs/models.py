@@ -176,6 +176,8 @@ class Dataset(models.Model):
     created_by = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    EXTERNAL_SOURCE_KINDS = {'csv_manifest', 'path', 'url', 'rucio_did', 'file_list'}
+
     class Meta:
         db_table = 'pcs_dataset'
         ordering = ['-created_at']
@@ -202,6 +204,9 @@ class Dataset(models.Model):
 
     @property
     def is_external(self):
+        source_kind = self.source_kind
+        if source_kind:
+            return source_kind in self.EXTERNAL_SOURCE_KINDS
         return bool(self.get_metadata_value('external', default=False))
 
     @property
@@ -218,31 +223,14 @@ class Dataset(models.Model):
 
     @classmethod
     def external_evgen_metadata(
-        cls, source_location, source_kind='csv_manifest', provider_group='',
-        provider_contact='', provenance_notes='', source_hash=None
+        cls, source_location, source_kind='csv_manifest', **_ignored
     ):
         return {
             'stage': 'evgen',
-            'external': True,
             'source': {
                 'kind': source_kind,
                 'location': source_location,
-                'hash': source_hash,
             },
-            'provider': {
-                'group': provider_group,
-                'contact': provider_contact,
-            },
-            'provenance': {
-                'status': 'declared',
-                'notes': provenance_notes,
-            },
-            'validation': {
-                'status': 'not_checked',
-                'checked_at': None,
-                'messages': [],
-            },
-            'public_catalog': {},
         }
 
     def clean(self):

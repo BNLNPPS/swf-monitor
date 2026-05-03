@@ -194,33 +194,16 @@ Example metadata:
 ```json
 {
   "stage": "evgen",
-  "external": true,
   "source": {
     "kind": "csv_manifest",
-    "location": "path/to/input.csv",
-    "hash": null
-  },
-  "provider": {
-    "group": "PWG or DSC name",
-    "contact": null
-  },
-  "provenance": {
-    "status": "declared",
-    "notes": "Supplied by PWG; PCS has not independently verified physics content."
-  },
-  "validation": {
-    "status": "not_checked",
-    "checked_at": null,
-    "messages": []
-  },
-  "public_catalog": {}
+    "location": "path/to/input.csv"
+  }
 }
 ```
 
 The dataset API exposes convenience fields derived from this metadata:
-`stage`, `external`, `source_kind`, `source_location`, and
-`validation_status`. The full `metadata` object remains the writable transport
-for this interim model.
+`stage`, `external`, `source_kind`, and `source_location`. The full `metadata`
+object remains the writable transport for this interim model.
 
 ## Production Configs
 

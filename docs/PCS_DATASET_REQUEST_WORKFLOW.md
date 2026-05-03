@@ -92,18 +92,14 @@ PCS should keep one generalized dataset model and extend it to cover externally
 supplied data as well as internally produced data. The key additions are:
 
 - stage or role, e.g. `evgen`, `simu`, `reco`, `full`, `log`
-- external flag
-- source kind and source location, e.g. path, CSV manifest, URL, Rucio DID, file list
-- manifest reference or content hash where useful
-- provider or requesting PWG/DSC
-- provenance and validation status
-- public catalogue references where applicable
+- source kind and source location, e.g. CSV manifest, path, URL, Rucio DID, file list
 
 The present externally supplied EVGEN files are then ordinary PCS datasets with
-`stage=evgen` and `external=true`. They are described by PCS physics and EvGen
-tags, but their file/path/CSV source is dataset metadata, not tag metadata.
+`stage=evgen` and `source.kind=csv_manifest` or another external source kind.
+They are described by PCS physics and EvGen tags, but their file/path/CSV
+source is dataset metadata, not tag metadata.
 Future PCS/PanDA-produced EVGEN outputs are also ordinary datasets, with
-`stage=evgen` and `external=false`.
+`stage=evgen` and an internal production source when that exists.
 
 Interim implementation: externally supplied EVGEN inputs are represented in the
 existing `Dataset.metadata` JSON rather than by new database columns. The
@@ -112,26 +108,10 @@ metadata convention is:
 ```json
 {
   "stage": "evgen",
-  "external": true,
   "source": {
     "kind": "csv_manifest",
-    "location": "path/to/input.csv",
-    "hash": null
-  },
-  "provider": {
-    "group": "PWG or DSC name",
-    "contact": null
-  },
-  "provenance": {
-    "status": "declared",
-    "notes": "Supplied by PWG; PCS has not independently verified physics content."
-  },
-  "validation": {
-    "status": "not_checked",
-    "checked_at": null,
-    "messages": []
-  },
-  "public_catalog": {}
+    "location": "path/to/input.csv"
+  }
 }
 ```
 
@@ -228,8 +208,7 @@ PCS already has dynamic listings and edit/copy/delete/update extensible function
 
 ## Implementation Plan
 
-1. Extend `Dataset` with stage, external/source, provenance, validation, and
-   public-catalogue reference metadata.
+1. Extend `Dataset` with stage and source metadata.
 2. Add task-dataset relations for input, output, and intermediate dataset lists.
 3. Migrate current `ProdTask.dataset` semantics to an output dataset relation.
 4. Move current `ProdTask.csv_file` semantics to external input dataset source
