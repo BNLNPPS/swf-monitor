@@ -131,6 +131,9 @@ class ProdTaskSerializer(serializers.ModelSerializer):
     dataset_name = serializers.CharField(source='dataset.dataset_name', read_only=True)
     dataset_did = serializers.CharField(source='dataset.did', read_only=True)
     prod_config_name = serializers.CharField(source='prod_config.name', read_only=True)
+    input_dataset_dids = serializers.SerializerMethodField(read_only=True)
+    output_dataset_dids = serializers.SerializerMethodField(read_only=True)
+    intermediate_dataset_dids = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = ProdTask
@@ -139,11 +142,22 @@ class ProdTaskSerializer(serializers.ModelSerializer):
             'dataset', 'dataset_name', 'dataset_did',
             'prod_config', 'prod_config_name',
             'csv_file', 'overrides',
+            'input_dataset_dids', 'output_dataset_dids', 'intermediate_dataset_dids',
             'condor_command', 'panda_command',
             'panda_task_id', 'condor_cluster_id',
             'created_by', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'condor_command', 'panda_command',
+            'input_dataset_dids', 'output_dataset_dids', 'intermediate_dataset_dids',
             'created_by', 'created_at', 'updated_at',
         ]
+
+    def get_input_dataset_dids(self, obj):
+        return [d.did for d in obj.input_datasets]
+
+    def get_output_dataset_dids(self, obj):
+        return [d.did for d in obj.output_datasets]
+
+    def get_intermediate_dataset_dids(self, obj):
+        return [d.did for d in obj.intermediate_datasets]

@@ -389,18 +389,71 @@ class ProdTask(models.Model):
     def __str__(self):
         return self.name
 
-    @property
-    def input_dataset(self):
-        """
-        External input Dataset linked via overrides['input_dataset_did'].
-        Returns None if the link is unset or the DID is unknown.
-        Linkage is JSON-only — no schema column — per
+    def _dids_from_overrides(self, list_key, single_key=None):
+        """Resolve a list of DIDs from overrides JSON.
+
+        Reads ``overrides[list_key]`` if it is a non-empty list; else, if
+        ``single_key`` is provided and present, wraps that single DID; else
+        returns an empty list. JSON-only, no schema column — per
         PCS_DATASET_REQUEST_WORKFLOW.md interim model.
         """
-        did = (self.overrides or {}).get('input_dataset_did')
-        if not did:
-            return None
-        return Dataset.objects.filter(did=did).first()
+        ov = self.overrides or {}
+        dids = ov.get(list_key)
+        if isinstance(dids, list) and dids:
+            return [d for d in dids if d]
+        if single_key:
+            single = ov.get(single_key)
+            if single:
+                return [single]
+        return []
+
+    def _resolve_datasets(self, dids):
+        """Resolve a list of DIDs to Dataset objects, preserving order.
+        DIDs not found are silently dropped.
+        """
+        if not dids:
+            return []
+        by_did = {d.did: d for d in Dataset.objects.filter(did__in=dids)}
+        return [by_did[d] for d in dids if d in by_did]
+
+    @property
+    def input_datasets(self):
+        """List of input Datasets from overrides['input_dataset_dids'] or
+        the singular 'input_dataset_did' (back-compat shortcut for the
+        single-input EVGEN case)."""
+        return self._resolve_datasets(
+            self._dids_from_overrides('input_dataset_dids', 'input_dataset_did')
+        )
+
+    @property
+    def output_datasets(self):
+        """List of output Datasets from overrides['output_dataset_dids'].
+        Falls back to ``[self.dataset]`` — the legacy single-output FK —
+        when the override is unset."""
+        dids = self._dids_from_overrides('output_dataset_dids')
+        if dids:
+            return self._resolve_datasets(dids)
+        return [self.dataset] if self.dataset_id else []
+
+    @property
+    def intermediate_datasets(self):
+        """List of intermediate Datasets from overrides['intermediate_dataset_dids']."""
+        return self._resolve_datasets(
+            self._dids_from_overrides('intermediate_dataset_dids')
+        )
+
+    @property
+    def input_dataset(self):
+        """Single helper: first of ``input_datasets`` (or None)."""
+        inputs = self.input_datasets
+        return inputs[0] if inputs else None
+
+    @property
+    def output_dataset(self):
+        """Single helper: first of ``output_datasets`` — equivalent to the
+        legacy ``self.dataset`` FK when no list override is set."""
+        outputs = self.output_datasets
+        return outputs[0] if outputs else None
 
     @property
     def input_source_kind(self):

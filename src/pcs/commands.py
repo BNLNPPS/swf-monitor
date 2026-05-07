@@ -18,7 +18,7 @@ def build_condor_command(task):
     Produces the env-var-prefixed command used in the Colab notebook:
         EBEAM=... PBEAM=... scripts/submit_csv.sh osg_csv hepmc3 {csv} {hours}
     """
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.get_effective_config()
     physics = ds.physics_tag.parameters
     data = cfg.get('data') or {}
@@ -83,7 +83,7 @@ def build_panda_command(task):
     uses PrunScript.main() from pandaclient, but this generates the
     equivalent CLI command for reference/execution.
     """
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.get_effective_config()
     data = cfg.get('data') or {}
 
@@ -147,7 +147,7 @@ def build_panda_command(task):
 
 def _build_env_string(task):
     """Shared env-var string for Condor command and JEDI jobParameters."""
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.get_effective_config()
     physics = ds.physics_tag.parameters
     evgen = ds.evgen_tag.parameters
@@ -187,7 +187,7 @@ def build_task_dump(task):
 
     Suitable for human inspection or downstream tooling. Pure read.
     """
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.prod_config
 
     def _tag(t):
@@ -231,6 +231,9 @@ def build_task_dump(task):
             'status': task.status,
             'csv_file': task.csv_file,
             'overrides': task.overrides or {},
+            'input_dataset_dids': [d.did for d in task.input_datasets],
+            'output_dataset_dids': [d.did for d in task.output_datasets],
+            'intermediate_dataset_dids': [d.did for d in task.intermediate_datasets],
             'created_by': task.created_by,
             'created_at': task.created_at.isoformat() if task.created_at else None,
             'updated_at': task.updated_at.isoformat() if task.updated_at else None,

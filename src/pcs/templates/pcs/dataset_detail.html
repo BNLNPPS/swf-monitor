@@ -71,6 +71,46 @@
         </div>
     </div>
 
+    {% if output_tasks or input_tasks or intermediate_tasks %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Used by Production Tasks</h5>
+            <p class="text-muted mb-2" style="font-size: 0.9em;">
+                Roles derived from
+                <code>ProdTask.overrides.{input,output,intermediate}_dataset_dids</code>
+                plus the legacy <code>ProdTask.dataset</code> FK (output).
+            </p>
+            {% if output_tasks %}
+            <h6 class="mt-2">As output ({{ output_tasks|length }})</h6>
+            <ul class="mb-3">
+                {% for t in output_tasks %}
+                <li><a href="{% url 'pcs:prod_task_detail' pk=t.pk %}">{{ t.name }}</a>
+                    <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if input_tasks %}
+            <h6 class="mt-2">As input ({{ input_tasks|length }})</h6>
+            <ul class="mb-3">
+                {% for t in input_tasks %}
+                <li><a href="{% url 'pcs:prod_task_detail' pk=t.pk %}">{{ t.name }}</a>
+                    <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if intermediate_tasks %}
+            <h6 class="mt-2">As intermediate ({{ intermediate_tasks|length }})</h6>
+            <ul class="mb-0">
+                {% for t in intermediate_tasks %}
+                <li><a href="{% url 'pcs:prod_task_detail' pk=t.pk %}">{{ t.name }}</a>
+                    <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card mb-3">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">

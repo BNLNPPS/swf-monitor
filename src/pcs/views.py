@@ -12,7 +12,7 @@ from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.http import JsonResponse
 from django.contrib import messages
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from monitor_app.utils import DataTablesProcessor, get_filter_params, format_datetime
 
@@ -595,9 +595,29 @@ def dataset_detail(request, pk):
         pk=pk,
     )
     blocks = Dataset.objects.filter(dataset_name=dataset.dataset_name).order_by('block_num')
+
+    # Reverse references — tasks that use this dataset and in what role.
+    # Output: legacy FK or override list contains DID. Input: legacy single
+    # override or list contains DID. Intermediate: list only.
+    did = dataset.did
+    output_tasks = (ProdTask.objects
+                    .filter(Q(dataset=dataset)
+                            | Q(overrides__output_dataset_dids__contains=[did]))
+                    .distinct().order_by('name'))
+    input_tasks = (ProdTask.objects
+                   .filter(Q(overrides__input_dataset_did=did)
+                           | Q(overrides__input_dataset_dids__contains=[did]))
+                   .distinct().order_by('name'))
+    intermediate_tasks = (ProdTask.objects
+                          .filter(overrides__intermediate_dataset_dids__contains=[did])
+                          .order_by('name'))
+
     context = {
         'dataset': dataset,
         'blocks': blocks,
+        'output_tasks': output_tasks,
+        'input_tasks': input_tasks,
+        'intermediate_tasks': intermediate_tasks,
     }
     return render(request, 'pcs/dataset_detail.html', context)
 
