@@ -178,24 +178,30 @@ The public catalogue publication state is not production readiness. Sakib's
 current issue fields are sufficient to create a public planning row and a
 partial PCS request, but not a fully specified PCS production task.
 
-The PCS lifecycle should therefore be explicit:
+The PCS lifecycle is the simple five-state set already on `ProdTask`:
 
 ```text
-requested
-needs_metadata
-needs_tag_mapping
-needs_input_validation
-planned
-ready_for_operator_review
-ready_to_submit
-submitted
+draft  →  ready  →  submitted  →  completed | failed
 ```
 
-PCS should infer likely values where possible, present short option lists via
-the bot, record user comments, and support operator completion through
-templates, defaults, and direct metadata entry. Readiness checks should validate
-paths, CSV manifests, file readability where possible, event counts, tag
-mapping, production config, and public catalogue projection.
+`draft` covers every incomplete state — missing metadata, missing tag
+mapping, unvalidated inputs, partial public-catalogue projection. When
+everything required is in place and the operator has confirmed, the task
+transitions to `ready`. From `ready` the operator submits, which
+transitions to `submitted`; PanDA then drives the terminal transitions
+to `completed` or `failed`.
+
+PCS infers likely values where possible, surfaces missing fields and
+validation errors via the same surface (web / REST / MCP), and supports
+operator completion through templates and defaults. The visible state
+stays `draft` until readiness checks pass and the operator confirms;
+there is no separate `needs_metadata`, `planned`, or
+`ready_for_operator_review` state — those are sub-states *inside*
+`draft` driven by validation, not enumerated transitions.
+
+Readiness checks include path / CSV manifest validity, file readability
+where possible, event counts, tag mapping, production config, and
+public catalogue projection.
 
 PCS should store the public catalogue mapping internally:
 
