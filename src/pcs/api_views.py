@@ -305,3 +305,47 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         task.status = new_status
         task.save(update_fields=['status', 'updated_at'])
         return Response(self.get_serializer(task).data)
+
+    @action(detail=False, methods=['post'], url_path='record-submission')
+    def record_submission(self, request):
+        """
+        Record outcome of a JEDI submission. Sets panda_task_id and status.
+        Called by `pcs-task-cmd --submit` after Client.insertTaskParams()
+        returns the JEDI task ID.
+
+        Query params:
+            name — ProdTask.name (required)
+
+        Body (JSON):
+            jedi_task_id — int, required
+            status       — str, optional (default 'submitted'); must be a
+                           valid PRODTASK_STATUS_CHOICES value
+        """
+        name = request.query_params.get('name') or request.data.get('name')
+        if not name:
+            return Response({'detail': 'Missing ?name='},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            task = self.get_queryset().get(name=name)
+        except ProdTask.DoesNotExist:
+            return Response({'detail': f"No task named '{name}'"},
+                            status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, task)
+
+        jedi_task_id = request.data.get('jedi_task_id')
+        try:
+            task.panda_task_id = int(jedi_task_id)
+        except (TypeError, ValueError):
+            return Response({'detail': 'jedi_task_id must be an integer'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        new_status = request.data.get('status', 'submitted')
+        valid = [c[0] for c in task._meta.get_field('status').choices]
+        if new_status not in valid:
+            return Response(
+                {'detail': f'Invalid status. Choose from: {", ".join(valid)}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        task.status = new_status
+        task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+        return Response(self.get_serializer(task).data)

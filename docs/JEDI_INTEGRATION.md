@@ -191,6 +191,78 @@ taskParamMap = {
 }
 ```
 
+## External EVGEN Inputs
+
+The example above is the pure MC-generation case (`noInput=True`). PCS also
+needs to submit production tasks that consume **externally supplied EVGEN
+files** — generator-level samples produced by PWGs/DSCs and described to PCS
+as a CSV manifest (or other external source). See
+[PCS_DATASET_REQUEST_WORKFLOW.md](PCS_DATASET_REQUEST_WORKFLOW.md) for the
+PCS-side dataset model.
+
+### Mode summary
+
+| Mode | When | `noInput` | How payload sees the input |
+|------|------|-----------|----------------------------|
+| Generation-only | No external EVGEN; payload generates events | `True` | n/a |
+| External EVGEN — payload-staged | External CSV manifest names the input files | `True` | `CSV_FILE=<location>` env var; payload script downloads and stages the listed files at runtime |
+| External EVGEN — Rucio input | (Future) input is a registered Rucio dataset | `False` | JEDI drives input via standard `pfnList`/dataset reference |
+
+Only the first two modes are in scope for the current PCS implementation.
+Rucio-managed input is the natural follow-on once externally supplied EVGEN
+files are registered as Rucio datasets, but it is deferred — moving from
+payload-staged to Rucio-driven input is a localized later change.
+
+### Payload-staged external EVGEN
+
+This matches the existing condor-side wrapper convention: PCS already passes
+`CSV_FILE=<csv_path>` as an environment variable to the condor job, and the
+payload's `run.sh` reads it. We carry the same convention into JEDI.
+
+The PCS source for the value is the linked `Dataset.metadata.source.location`
+on the input dataset (kind `csv_manifest`), exposed via
+`ProdTask.input_source_location`.
+
+`build_task_params(task)` injects the value into the **payload command
+string** in `jobParameters[0]['value']` when the task has an external input
+source. The job dictionary keeps `noInput=True` and the rest of the
+generation-mode shape — the only change is one extra `CSV_FILE=...` env in the
+constant string. Example:
+
+```python
+'jobParameters': [
+    {
+        'type': 'constant',
+        'value': (
+            'EBEAM=10 PBEAM=100 '
+            'DETECTOR_VERSION=26.02.0 DETECTOR_CONFIG=epic_craterlake '
+            'JUG_XL_TAG=26.02.0-stable '
+            'CSV_FILE=campaigns/26.02.0/dis_nc_10x100.csv '   # ← only this line is added
+            'COPYRECO=true COPYFULL=false COPYLOG=true '
+            './run.sh'
+        ),
+    },
+    # output template unchanged
+]
+```
+
+This is **not** a JEDI parameter. It is an env var the payload reads. JEDI
+sees an opaque constant string and stages it into each job's command line as
+written.
+
+### What this does *not* require
+
+- No new JEDI fields. `pfnList`, input-dataset references, and `nFilesPerJob`
+  semantics for inputs all stay untouched.
+- No GenTaskRefiner behavior change.
+- No PanDA-team confirmation beyond what the all-`noInput` plan already
+  needed.
+
+The PCS-side mechanism is the only change: `ProdTask.input_dataset` (FK to a
+`Dataset(stage=evgen, source.kind=csv_manifest)`) replaces the legacy
+`ProdTask.csv_file` string as the source of truth, and `build_task_params`
+reads from it.
+
 ## GenTaskRefiner Behavior
 
 When JEDI processes this task, `GenTaskRefiner` (61 lines, `panda-server/pandajedi/jedirefine/GenTaskRefiner.py`) applies these defaults:

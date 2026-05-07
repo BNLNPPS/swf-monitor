@@ -389,6 +389,43 @@ class ProdTask(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def input_dataset(self):
+        """
+        External input Dataset linked via overrides['input_dataset_did'].
+        Returns None if the link is unset or the DID is unknown.
+        Linkage is JSON-only — no schema column — per
+        PCS_DATASET_REQUEST_WORKFLOW.md interim model.
+        """
+        did = (self.overrides or {}).get('input_dataset_did')
+        if not did:
+            return None
+        return Dataset.objects.filter(did=did).first()
+
+    @property
+    def input_source_kind(self):
+        """Source kind of the external input. Linked Dataset wins; csv_file fallback."""
+        ds = self.input_dataset
+        if ds:
+            return ds.source_kind
+        return 'csv_manifest' if self.csv_file else ''
+
+    @property
+    def input_source_location(self):
+        """Source location of the external input. Linked Dataset wins; csv_file fallback."""
+        ds = self.input_dataset
+        if ds:
+            return ds.source_location
+        return self.csv_file or ''
+
+    @property
+    def input_source_stage(self):
+        """Stage of the external input. Linked Dataset wins; csv_file → 'evgen'."""
+        ds = self.input_dataset
+        if ds:
+            return ds.stage
+        return 'evgen' if self.csv_file else ''
+
     def get_effective_config(self):
         """Return ProdConfig field values with per-task overrides applied."""
         config = self.prod_config
