@@ -72,16 +72,29 @@ PCS is designed to be the authoritative source and record for task configuration
 - downstream production status and task IDs
 
 PCS definition and composition into tasks is currently based in a web interface.
-The plan to support bot submission is as follows.
+Intake is via PCS REST. Bots, scripts, and the web UI all converge on the
+same REST surface; there is one contract, with multiple front-ends.
 
-- the PCS MCP service is extended to support injection of PCS data, task composition and task submission requests.
-- the PCS MCP service supports the bot acting as mediator and Q&A driver to gather from the user the information needed to constitute a sufficiently complete request to create a draft PCS task and project it to the public catalogue. PanDAbot should submit user-provided request data to PCS, then relay PCS questions, inferred values, short option lists, validation errors, and comments
-back to the user. Comments supplied through the bot should be saved in PCS as
-part of the request history.
-- PCS informs the user via the bot that the point of readiness has been reached, and the user then instructs the bot to proceed with issue creation.
-- the issue creation should be programmatically precise, and so is performed not by the bot but by PCS, once the bot passes the user's 'go' on issue creation to PCS via MCP.
-- the GitHub path via the existing
-GitHub issue/PR path then proceeds as now, so traceability and review are preserved.
+- **Bots trigger; they do not mediate.** PanDAbot receives a Mattermost
+  event, then calls a PCS MCP tool. Bots do not construct REST queries
+  themselves and do not embed PCS logic. Intake decisions, validation,
+  and persistence live behind REST.
+- **MCP wraps REST.** Each MCP tool is a one-line adapter over a REST
+  endpoint, so adding a new intake operation is "add the REST endpoint,
+  expose an MCP tool" — never the reverse.
+- **Scripts and other automation** call REST directly, with the same
+  contract.
+- **GitHub issue creation, when needed,** is performed by PCS server-side
+  on receipt of a 'go' from the bot/user via REST — programmatically
+  precise, so traceability and review are preserved.
+
+User-supplied comments arrive through whichever front-end the user chose
+(bot, web, script). PCS records them as part of the request history via
+the same REST endpoint. The bot's job is to relay PCS responses
+(questions, inferred values, short option lists, validation errors)
+back to the user; PCS's job is to compute them.
+
+The REST surface itself is listed under "REST Intake Surface" below.
 
 ## Model Direction
 
@@ -200,6 +213,66 @@ public_catalog_commit_sha
 The GitHub issue number is the durable update key. The visible row index is a
 useful human locator, but advisory.
 
+## REST Intake Surface
+
+All intake — from bots (via MCP), scripts, and the web UI — goes through
+the same REST endpoints. Most are already in place; the gaps are the
+high-level idempotent intake calls that take a request payload (CSV
+manifest, GitHub issue, etc.) and return a Dataset DID or ProdTask name.
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST   | `/pcs/api/datasets/`                          | Generic create. Body carries `metadata` (validated for external source.kind/location). |
+| POST   | `/pcs/api/datasets/intake/`                   | Idempotent: given a CSV-manifest location (+ optional tag handles), find-or-create the external EVGEN Dataset, return its DID. |
+| POST   | `/pcs/api/prod-tasks/`                        | Generic create. |
+| POST   | `/pcs/api/prod-tasks/intake/`                 | Idempotent on a request key (e.g. `epic-prod#<issue>` or `csv_path+row_key`): create a draft ProdTask, ensure linked input Dataset(s), persist `public_catalog_*` mapping fields in `overrides`, return the task. |
+| POST   | `/pcs/api/prod-tasks/<pk>/link-input/`        | Link an existing Dataset as input by DID (writes `overrides.input_dataset_did(s)`). Sugar over PATCH. |
+| POST   | `/pcs/api/prod-tasks/<pk>/set-status/`        | Lifecycle transition with rule enforcement (e.g. only `ready → submitted`). |
+| POST   | `/pcs/api/prod-tasks/record-submission/?name=`| Record JEDI submission outcome (`panda_task_id`, `status='submitted'`). Rejects if `panda_task_id` already set, or `status != 'ready'`. |
+| GET    | `/pcs/api/prod-tasks/command/?name=&fmt=`     | Submission artifact — `condor`/`panda`/`jedi`/`dump`. |
+| GET    | `/pcs/api/{datasets,prod-tasks}/`             | List with filters (`stage`, `source_kind`, `status`, `public_catalog_issue`, …). |
+
+### Idempotency keys
+
+The two `intake/` endpoints are idempotent and require a stable key in
+the request body:
+
+- `datasets/intake/` keys on `source.location` (+ `source.kind`, default
+  `csv_manifest`). Repeated calls with the same location return the same
+  Dataset row.
+- `prod-tasks/intake/` keys on either:
+  - `public_catalog_issue` when the request originated from a GitHub
+    issue, or
+  - `(public_catalog_csv_path, public_catalog_row_key)` when the request
+    is identified by a row in `datasets.csv`.
+
+Repeated calls with the same key return the same ProdTask row, never
+duplicate. New input fields are merged into the existing draft (until
+the task is locked or submitted).
+
+### MCP wrappers
+
+Each MCP tool is a one-line adapter over the corresponding REST call.
+This way, adding a new intake operation is "add the REST endpoint,
+expose an MCP tool" — never the reverse.
+
+- `pcs_dataset_intake(source_location, source_kind='csv_manifest', tags=...)` → DID
+- `pcs_prodtask_intake(request_payload)` → task name
+- `pcs_prodtask_link_input(task_name, did)`
+- `pcs_prodtask_set_status(task_name, status)`
+- `pcs_prodtask_submit(task_name)` → jediTaskID
+- `pcs_prodtask_get(task_name)` / `pcs_prodtask_list(filters)`
+
+### Public catalogue mapping fields
+
+Stored in `ProdTask.overrides` under reserved keys (no schema columns
+needed for the interim model):
+
+`public_catalog_repo`, `public_catalog_issue`, `public_catalog_pr`,
+`public_catalog_row_index`, `public_catalog_csv_path`,
+`public_catalog_row_key`, `public_catalog_page_url`,
+`public_catalog_commit_sha`.
+
 ## Dynamic Public Catalog
 
 The present GitHub/Jekyll public catalog webpage provides a static snapshot of production requests, but does not offer dynamic modification: cloning of established requests into new campaigns, modification of requests and injection into campaigns, adjustment of priorities, withdrawal of requests, and other changes, all of them based on authenticated users with particular production system rights.
@@ -214,9 +287,13 @@ PCS already has dynamic listings and edit/copy/delete/update extensible function
 4. Move current `ProdTask.csv_file` semantics to external input dataset source
    metadata, with backward compatibility during transition.
 5. Add workflow-mode/template fields to `ProdConfig`.
-6. Extend PCS MCP tools so PanDAbot can create draft requests, add comments,
-   answer missing-field prompts, preview catalogue rows, and pass the user's
-   approval for PCS-driven GitHub issue creation.
+6. Add the REST intake endpoints listed under "REST Intake Surface"
+   (`datasets/intake/`, `prod-tasks/intake/`, `link-input/`, the
+   lifecycle gates on `set-status/` and `record-submission/`).
+   Expose each as a one-line MCP wrapper so PanDAbot can trigger
+   intake, status transitions, comment append, catalogue-row preview,
+   and PCS-driven GitHub issue creation by calling MCP only — never
+   composing REST queries itself.
 7. Continue to develop the integrated automated production workflow from user input to
    running task, including a dynamic web interface providing documentation and
    flexible interaction with and control of the automated production system,
