@@ -121,6 +121,8 @@ class DatasetSerializer(serializers.ModelSerializer):
 
 
 class ProdConfigSerializer(serializers.ModelSerializer):
+    workflow_mode = serializers.CharField(read_only=True)
+
     class Meta:
         model = ProdConfig
         fields = '__all__'

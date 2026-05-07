@@ -318,9 +318,9 @@ class ProdConfig(models.Model):
                                                help_text="Rucio replication rule definitions")
 
     # Extensible submission parameters (no migration needed for new keys).
-    # Keys: transformation, processing_type, prod_source_label, vo,
-    # n_jobs, events_per_job, events_per_file, files_per_job,
-    # corecount, no_build, skip_scout, exec_command, scope
+    # Keys: workflow_mode, transformation, processing_type,
+    # prod_source_label, vo, n_jobs, events_per_job, events_per_file,
+    # files_per_job, corecount, no_build, skip_scout, exec_command, scope
     data = models.JSONField(null=True, blank=True,
                             help_text="Additional submission parameters (JSON)")
 
@@ -334,6 +334,13 @@ class ProdConfig(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def workflow_mode(self):
+        """Production workflow mode: 'external_evgen' (default) or
+        'internal_evgen'. Stored in ``data['workflow_mode']``; defaults
+        to 'external_evgen' (current production reality)."""
+        return (self.data or {}).get('workflow_mode', 'external_evgen')
 
 
 PRODTASK_STATUS_CHOICES = [

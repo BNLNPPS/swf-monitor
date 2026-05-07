@@ -222,6 +222,7 @@ A production config is a reusable template capturing everything needed to build 
 
 | Key | Example | Purpose |
 |-----|---------|---------|
+| `workflow_mode` | `external_evgen` | Production workflow mode: `external_evgen` (default; payload consumes a CSV-manifest input) or `internal_evgen` (payload runs evgen + sim + reco internally). Surfaced as `ProdConfig.workflow_mode`. |
 | `transformation` | `runGen-00-00-02` | PanDA TRF script name/version |
 | `processing_type` | `epicproduction` | PanDA classification |
 | `prod_source_label` | `managed` | PanDA authorization (managed/test) |
