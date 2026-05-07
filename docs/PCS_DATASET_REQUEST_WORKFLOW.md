@@ -72,29 +72,35 @@ PCS is designed to be the authoritative source and record for task configuration
 - downstream production status and task IDs
 
 PCS definition and composition into tasks is currently based in a web interface.
-Intake is via PCS REST. Bots, scripts, and the web UI all converge on the
-same REST surface; there is one contract, with multiple front-ends.
+Intake goes through a single service layer (`pcs.services`) that is the source
+of truth for validation, idempotency, and lifecycle. REST and MCP are peer
+surfaces over that layer: each is a thin adapter that turns wire-format input
+(HTTP body or MCP args) into a service call and the service result back into
+wire-format output.
 
 - **Bots trigger; they do not mediate.** PanDAbot receives a Mattermost
-  event, then calls a PCS MCP tool. Bots do not construct REST queries
-  themselves and do not embed PCS logic. Intake decisions, validation,
-  and persistence live behind REST.
-- **MCP wraps REST.** Each MCP tool is a one-line adapter over a REST
-  endpoint, so adding a new intake operation is "add the REST endpoint,
-  expose an MCP tool" — never the reverse.
-- **Scripts and other automation** call REST directly, with the same
-  contract.
+  event, then calls a PCS MCP tool. Bots do not embed PCS logic. Intake
+  decisions, validation, and persistence live in the service layer.
+- **Web UI uses REST.** PCS web pages call PCS REST for reads and writes;
+  nothing in the UI bypasses the service layer.
+- **MCP and REST are peers over the same services.** Adding a new
+  operation is "add the service function, expose it via REST and MCP" —
+  the two surfaces stay aligned because they share business logic.
+- **Scripts and other automation** typically call REST (e.g. `pcs-task-cmd`
+  is a stdlib HTTP client over REST). They could equally well use MCP;
+  the contract is the same.
 - **GitHub issue creation, when needed,** is performed by PCS server-side
-  on receipt of a 'go' from the bot/user via REST — programmatically
+  on receipt of a 'go' from the bot/user via REST or MCP — programmatically
   precise, so traceability and review are preserved.
 
 User-supplied comments arrive through whichever front-end the user chose
-(bot, web, script). PCS records them as part of the request history via
-the same REST endpoint. The bot's job is to relay PCS responses
-(questions, inferred values, short option lists, validation errors)
-back to the user; PCS's job is to compute them.
+(bot, web, script). PCS records them as part of the request history through
+the same service layer. The bot's job is to relay PCS responses (questions,
+inferred values, short option lists, validation errors) back to the user;
+PCS's job is to compute them.
 
-The REST surface itself is listed under "REST Intake Surface" below.
+The intake surface — REST endpoints and the corresponding MCP tools — is
+listed under "Intake Surface" below.
 
 ## Model Direction
 
@@ -219,12 +225,12 @@ public_catalog_commit_sha
 The GitHub issue number is the durable update key. The visible row index is a
 useful human locator, but advisory.
 
-## REST Intake Surface
+## Intake Surface
 
 All intake — from bots (via MCP), scripts, and the web UI — goes through
-the same REST endpoints. Most are already in place; the gaps are the
-high-level idempotent intake calls that take a request payload (CSV
-manifest, GitHub issue, etc.) and return a Dataset DID or ProdTask name.
+the same service layer (`pcs.services`). REST endpoints and MCP tools are
+peer adapters over the same service functions; the contract (validation,
+idempotency, lifecycle rules) is identical on both surfaces.
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -256,18 +262,31 @@ Repeated calls with the same key return the same ProdTask row, never
 duplicate. New input fields are merged into the existing draft (until
 the task is locked or submitted).
 
-### MCP wrappers
+### MCP tools
 
-Each MCP tool is a one-line adapter over the corresponding REST call.
-This way, adding a new intake operation is "add the REST endpoint,
-expose an MCP tool" — never the reverse.
+Each MCP tool is a peer to the corresponding REST endpoint, calling the
+same service function. The two surfaces stay aligned because they share
+business logic.
 
-- `pcs_dataset_intake(source_location, source_kind='csv_manifest', tags=...)` → DID
-- `pcs_prodtask_intake(request_payload)` → task name
-- `pcs_prodtask_link_input(task_name, did)`
+Read:
+- `pcs_dataset_list(stage=None, source_kind=None, source_location=None, scope=None, name_contains=None, limit=20, offset=0)`
+- `pcs_dataset_get(did=None, dataset_name=None)`
+- `pcs_prodtask_list(status=None, public_catalog_issue=None, name_contains=None, limit=20, offset=0)`
+- `pcs_prodtask_get(name)`
+- `pcs_prodtask_artifact(name, fmt='dump')` — `condor` / `panda` / `jedi` / `dump`
+
+Write (intake / lifecycle):
+- `pcs_dataset_intake(source_location, source_kind='csv_manifest', physics_tag=…, evgen_tag=…, simu_tag=…, reco_tag=…, detector_version=…, detector_config=…, scope='group.EIC.evgen', stage='evgen', description='', created_by=…)` — idempotent on `(source_kind, source_location)`.
+- `pcs_prodtask_intake(public_catalog_issue=…, public_catalog_csv_path=…, public_catalog_row_key=…, name=…, dataset=…, prod_config=…, description=…, input_dataset_did=…, public_catalog_*=…)` — idempotent on the catalogue key.
+- `pcs_prodtask_link_input(task_name, did=None, dids=None)`
 - `pcs_prodtask_set_status(task_name, status)`
-- `pcs_prodtask_submit(task_name)` → jediTaskID
-- `pcs_prodtask_get(task_name)` / `pcs_prodtask_list(filters)`
+
+Submission itself (`pcs-task-cmd <name> --submit`, which calls
+`pandaclient.Client.insertTaskParams()`) is **not** exposed via MCP.
+The MCP server runs on swf-monitor and has no operator PanDA auth
+context; the operator runs the CLI on a host where their proxy or
+OIDC token is live. A future `pcs_prodtask_submit` MCP tool needs an
+OIDC service account on swf-monitor first.
 
 ### Public catalogue mapping fields
 
@@ -293,13 +312,14 @@ PCS already has dynamic listings and edit/copy/delete/update extensible function
 4. Move current `ProdTask.csv_file` semantics to external input dataset source
    metadata, with backward compatibility during transition.
 5. Add workflow-mode/template fields to `ProdConfig`.
-6. Add the REST intake endpoints listed under "REST Intake Surface"
+6. Add the intake endpoints listed under "Intake Surface"
    (`datasets/intake/`, `prod-tasks/intake/`, `link-input/`, the
    lifecycle gates on `set-status/` and `record-submission/`).
-   Expose each as a one-line MCP wrapper so PanDAbot can trigger
-   intake, status transitions, comment append, catalogue-row preview,
-   and PCS-driven GitHub issue creation by calling MCP only — never
-   composing REST queries itself.
+   Expose each as a peer MCP tool calling the same service function,
+   so PanDAbot and other MCP clients drive intake, status transitions,
+   comment append, catalogue-row preview, and PCS-driven GitHub issue
+   creation through the shared service layer rather than constructing
+   REST queries.
 7. Continue to develop the integrated automated production workflow from user input to
    running task, including a dynamic web interface providing documentation and
    flexible interaction with and control of the automated production system,

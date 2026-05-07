@@ -298,6 +298,20 @@ COMMON QUERIES:
 - Photoproduction tags? → pcs_search_tags(query='photoproduction')
 - DIS tags? → pcs_list_tags(tag_type='p', category='DIS')
 - Tags using pythia8? → pcs_search_tags(query='pythia8')
+- List PCS Datasets? → pcs_dataset_list()
+- External EVGEN datasets? → pcs_dataset_list(stage='evgen', source_kind='csv_manifest')
+- One Dataset by DID? → pcs_dataset_get(did='group.EIC:...b1')
+- Register an external EVGEN CSV manifest? → pcs_dataset_intake(source_location='path/to/input.csv', physics_tag='p1001', evgen_tag='e1', simu_tag='s1', reco_tag='r1', detector_version='26.02.0', detector_config='epic_craterlake')
+- List ProdTasks? → pcs_prodtask_list()
+- Tasks awaiting submission? → pcs_prodtask_list(status='ready')
+- Submitted tasks? → pcs_prodtask_list(status='submitted')
+- One task in detail? → pcs_prodtask_get(name='group.EIC.26.02.0...')
+- Get the JEDI taskParamMap? → pcs_prodtask_artifact(name='...', fmt='jedi')
+- Intake a draft task from a GitHub issue? → pcs_prodtask_intake(public_catalog_issue=42, name='...', dataset='...', prod_config='...')
+- Update a task on re-intake? → pcs_prodtask_intake(public_catalog_issue=42, public_catalog_pr=99) (idempotent on issue)
+- Link an input Dataset? → pcs_prodtask_link_input(task_name='...', did='group.EIC.evgen:...b1')
+- Mark a task ready for submission? → pcs_prodtask_set_status(task_name='...', status='ready')
+- Submission itself is not on MCP: operator runs `pcs-task-cmd <name> --submit` locally with their PanDA auth context.
 
 PCS (Physics Configuration System):
 PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are

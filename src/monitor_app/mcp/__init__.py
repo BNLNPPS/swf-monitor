@@ -90,6 +90,15 @@ from .pcs import (
     pcs_list_tags,
     pcs_get_tag,
     pcs_search_tags,
+    pcs_dataset_list,
+    pcs_dataset_get,
+    pcs_dataset_intake,
+    pcs_prodtask_list,
+    pcs_prodtask_get,
+    pcs_prodtask_artifact,
+    pcs_prodtask_intake,
+    pcs_prodtask_link_input,
+    pcs_prodtask_set_status,
 )
 
 
@@ -151,8 +160,18 @@ __all__ = [
     'panda_error_summary',
     'panda_get_activity',
     'panda_study_job',
-    # PCS
+    # PCS — tag browsing
     'pcs_list_tags',
     'pcs_get_tag',
     'pcs_search_tags',
+    # PCS — datasets and tasks
+    'pcs_dataset_list',
+    'pcs_dataset_get',
+    'pcs_dataset_intake',
+    'pcs_prodtask_list',
+    'pcs_prodtask_get',
+    'pcs_prodtask_artifact',
+    'pcs_prodtask_intake',
+    'pcs_prodtask_link_input',
+    'pcs_prodtask_set_status',
 ]

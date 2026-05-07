@@ -38,6 +38,8 @@ from .serializers import (
     DatasetSerializer, ProdConfigSerializer, ProdTaskSerializer,
 )
 from .schemas import validate_parameters, get_tag_model
+from . import services
+from .services import ServiceError
 
 
 class PhysicsCategoryViewSet(viewsets.ModelViewSet):
@@ -194,89 +196,28 @@ class DatasetViewSet(viewsets.ModelViewSet):
         """
         Idempotent intake of an external (e.g. EVGEN CSV manifest) Dataset.
 
-        Idempotency key: (source.kind, source.location). Repeated calls
-        with the same key return the same Dataset row.
-
-        Body:
-            source_location  (required) — e.g. CSV manifest path
-            source_kind      (default 'csv_manifest')
-            stage            (default 'evgen')
-            scope            (default 'group.EIC.evgen' when creating)
-            detector_version (required when creating)
-            detector_config  (required when creating)
-            physics_tag      (label, required when creating)
-            evgen_tag        (label, required when creating)
-            simu_tag         (label, required when creating)
-            reco_tag         (label, required when creating)
-            description      (optional)
+        Thin wrapper over ``services.dataset_intake``; see that for the
+        full contract.
         """
-        location = request.data.get('source_location')
-        kind = request.data.get('source_kind', 'csv_manifest')
-        if not location:
-            return Response(
-                {'detail': 'source_location is required'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        existing = self.get_queryset().filter(
-            metadata__source__location=location,
-            metadata__source__kind=kind,
-        ).first()
-        if existing:
-            return Response(self.get_serializer(existing).data,
-                            status=status.HTTP_200_OK)
-
-        # Need to create — collect required fields
-        required = ['detector_version', 'detector_config',
-                    'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']
-        missing = [k for k in required if not request.data.get(k)]
-        if missing:
-            return Response(
-                {'detail': f'No existing Dataset for {kind}:{location}; '
-                          f'creation requires: {", ".join(missing)}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Resolve tag labels
-        tag_models = {
-            'physics_tag': PhysicsTag, 'evgen_tag': EvgenTag,
-            'simu_tag': SimuTag,       'reco_tag': RecoTag,
-        }
-        tags = {}
-        for field, model in tag_models.items():
-            label = request.data[field]
-            tag = model.objects.filter(tag_label=label).first()
-            if not tag:
-                return Response(
-                    {'detail': f'{field} not found: {label}'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            if tag.status != 'locked':
-                return Response(
-                    {'detail': f'{field} {label} must be locked before use'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            tags[field] = tag
-
-        ds = Dataset(
-            scope=request.data.get('scope', 'group.EIC.evgen'),
-            detector_version=request.data['detector_version'],
-            detector_config=request.data['detector_config'],
-            description=request.data.get('description', ''),
-            metadata={
-                'stage': request.data.get('stage', 'evgen'),
-                'source': {'kind': kind, 'location': location},
-            },
-            created_by=request.user.username,
-            **tags,
-        )
         try:
-            ds.save()
-        except Exception as e:
-            return Response({'detail': str(e)},
-                            status=status.HTTP_400_BAD_REQUEST)
-        return Response(self.get_serializer(ds).data,
-                        status=status.HTTP_201_CREATED)
+            ds, created = services.dataset_intake(
+                source_location=request.data.get('source_location'),
+                source_kind=request.data.get('source_kind', 'csv_manifest'),
+                scope=request.data.get('scope', 'group.EIC.evgen'),
+                stage=request.data.get('stage', 'evgen'),
+                detector_version=request.data.get('detector_version'),
+                detector_config=request.data.get('detector_config'),
+                physics_tag_label=request.data.get('physics_tag'),
+                evgen_tag_label=request.data.get('evgen_tag'),
+                simu_tag_label=request.data.get('simu_tag'),
+                reco_tag_label=request.data.get('reco_tag'),
+                description=request.data.get('description', ''),
+                created_by=request.user.username,
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(self.get_serializer(ds).data, status=http_status)
 
     @action(detail=True, methods=['post'], url_path='add-block')
     def add_block(self, request, pk=None):
@@ -381,185 +322,48 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
         return JsonResponse(build_task_dump(task), json_dumps_params={'indent': 2})
 
-    # Allowed lifecycle transitions for set-status. Submission and
-    # post-submission state changes are recorded via record-submission and
-    # automation, not direct human transitions.
-    PRODTASK_TRANSITIONS = {
-        'draft':     {'ready'},
-        'ready':     {'draft', 'submitted'},
-        'submitted': {'completed', 'failed'},
-        'completed': set(),
-        'failed':    set(),
-    }
-
     @action(detail=True, methods=['post'], url_path='set-status')
     def set_status(self, request, pk=None):
         task = self.get_object()
-        new_status = request.data.get('status')
-        valid = [c[0] for c in task._meta.get_field('status').choices]
-        if new_status not in valid:
-            return Response(
-                {'detail': f'Invalid status. Choose from: {", ".join(valid)}'},
-                status=status.HTTP_400_BAD_REQUEST,
+        try:
+            services.prodtask_set_status(
+                task=task, new_status=request.data.get('status'),
             )
-        allowed = self.PRODTASK_TRANSITIONS.get(task.status, set())
-        if new_status != task.status and new_status not in allowed:
-            return Response(
-                {'detail': f'Cannot transition from {task.status!r} to '
-                          f'{new_status!r}. Allowed from {task.status!r}: '
-                          f'{sorted(allowed) or "(terminal)"}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        task.status = new_status
-        task.save(update_fields=['status', 'updated_at'])
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
 
     @action(detail=True, methods=['post'], url_path='link-input')
     def link_input(self, request, pk=None):
-        """Link input Dataset(s) to a ProdTask via overrides JSON.
-
-        Body:
-            did   — single DID, OR
-            dids  — list of DIDs (sets overrides.input_dataset_dids)
-
-        Provide one or the other, not both. The linked Dataset(s) must
-        already exist; this endpoint never creates Datasets.
-        """
+        """Thin wrapper over ``services.prodtask_link_input``."""
         task = self.get_object()
-        did = request.data.get('did')
-        dids = request.data.get('dids')
-        if did and dids:
-            return Response({'detail': 'Provide one of did or dids, not both'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        if not did and not dids:
-            return Response({'detail': 'did or dids is required'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        targets = [did] if did else list(dids)
-        found = set(Dataset.objects.filter(did__in=targets)
-                    .values_list('did', flat=True))
-        missing = [d for d in targets if d not in found]
-        if missing:
-            return Response({'detail': f'Dataset(s) not found: {missing}'},
-                            status=status.HTTP_400_BAD_REQUEST)
-        ov = dict(task.overrides or {})
-        if did:
-            ov['input_dataset_did'] = did
-            ov.pop('input_dataset_dids', None)
-        else:
-            ov['input_dataset_dids'] = list(dids)
-            ov.pop('input_dataset_did', None)
-        task.overrides = ov
-        task.save(update_fields=['overrides', 'updated_at'])
+        try:
+            services.prodtask_link_input(
+                task=task,
+                did=request.data.get('did'),
+                dids=request.data.get('dids'),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
-
-    PUBLIC_CATALOG_KEYS = (
-        'public_catalog_repo', 'public_catalog_issue', 'public_catalog_pr',
-        'public_catalog_row_index', 'public_catalog_csv_path',
-        'public_catalog_row_key', 'public_catalog_page_url',
-        'public_catalog_commit_sha',
-    )
 
     @action(detail=False, methods=['post'], url_path='intake')
     def intake(self, request):
-        """Idempotent intake of a draft ProdTask from a request payload.
-
-        Idempotency key (required, one of):
-            public_catalog_issue (preferred), or
-            (public_catalog_csv_path, public_catalog_row_key)
-
-        On match, the existing ProdTask is updated (catalogue mapping
-        merged into overrides; description optionally refreshed;
-        input_dataset_did optionally set/updated). On no match, a new
-        draft is created and requires:
-
-            name           — ProdTask.name (unique)
-            dataset        — output Dataset, by DID or dataset_name
-            prod_config    — ProdConfig, by name
-            description    — optional
-            input_dataset_did — optional, set on overrides
-            public_catalog_* — any subset, persisted to overrides
-
-        New tasks are created with status='draft' and created_by from
-        the authenticated user.
-        """
-        data = request.data
-        key_issue = data.get('public_catalog_issue')
-        key_csv_path = data.get('public_catalog_csv_path')
-        key_row = data.get('public_catalog_row_key')
-        if not key_issue and not (key_csv_path and key_row):
-            return Response(
-                {'detail': 'Idempotency key required: public_catalog_issue '
-                          'or (public_catalog_csv_path, public_catalog_row_key)'},
-                status=status.HTTP_400_BAD_REQUEST,
+        """Thin wrapper over ``services.prodtask_intake``."""
+        # Permission: if the existing match is owned by another user,
+        # the service updates it. We mirror the previous behavior by
+        # checking object perms only when an existing row is found.
+        try:
+            task, created = services.prodtask_intake(
+                payload=dict(request.data),
+                created_by=request.user.username,
             )
-
-        qs = self.get_queryset()
-        if key_issue:
-            existing = qs.filter(overrides__public_catalog_issue=key_issue).first()
-        else:
-            existing = qs.filter(
-                overrides__public_catalog_csv_path=key_csv_path,
-                overrides__public_catalog_row_key=key_row,
-            ).first()
-
-        new_catalog = {k: data[k] for k in self.PUBLIC_CATALOG_KEYS if k in data}
-        new_input_did = data.get('input_dataset_did')
-
-        if existing:
-            self.check_object_permissions(request, existing)
-            ov = dict(existing.overrides or {})
-            ov.update(new_catalog)
-            if new_input_did:
-                ov['input_dataset_did'] = new_input_did
-            existing.overrides = ov
-            update_fields = ['overrides', 'updated_at']
-            if data.get('description') is not None:
-                existing.description = data['description']
-                update_fields.append('description')
-            existing.save(update_fields=update_fields)
-            return Response(self.get_serializer(existing).data,
-                            status=status.HTTP_200_OK)
-
-        # Create new draft
-        name = data.get('name')
-        dataset_handle = data.get('dataset')
-        config_handle = data.get('prod_config')
-        missing = [k for k, v in [('name', name),
-                                  ('dataset', dataset_handle),
-                                  ('prod_config', config_handle)]
-                   if not v]
-        if missing:
-            return Response(
-                {'detail': f'Creating a new task requires: {", ".join(missing)}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        output_ds = (Dataset.objects.filter(did=dataset_handle).first()
-                     or Dataset.objects.filter(dataset_name=dataset_handle).first())
-        if not output_ds:
-            return Response(
-                {'detail': f'Output dataset not found: {dataset_handle}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        config = ProdConfig.objects.filter(name=config_handle).first()
-        if not config:
-            return Response(
-                {'detail': f'ProdConfig not found: {config_handle}'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        ov = dict(new_catalog)
-        if new_input_did:
-            ov['input_dataset_did'] = new_input_did
-        task = ProdTask.objects.create(
-            name=name,
-            description=data.get('description', ''),
-            status='draft',
-            dataset=output_ds,
-            prod_config=config,
-            overrides=ov or None,
-            created_by=request.user.username,
-        )
-        return Response(self.get_serializer(task).data,
-                        status=status.HTTP_201_CREATED)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        if not created:
+            self.check_object_permissions(request, task)
+        http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(self.get_serializer(task).data, status=http_status)
 
     @action(detail=False, methods=['post'], url_path='record-submission')
     def record_submission(self, request):
@@ -593,38 +397,12 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_404_NOT_FOUND)
         self.check_object_permissions(request, task)
 
-        # Gate 1: must be in 'ready' state.
-        if task.status != 'ready':
-            return Response(
-                {'detail': f'Task must be in status=ready before submission '
-                          f'(current: {task.status!r}). Mark it ready via '
-                          f'set-status first.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Gate 2: refuse if a submission was already recorded.
-        if task.panda_task_id is not None:
-            return Response(
-                {'detail': f'Task already records '
-                          f'panda_task_id={task.panda_task_id}. '
-                          f'Refusing to overwrite.'},
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        jedi_task_id = request.data.get('jedi_task_id')
         try:
-            task.panda_task_id = int(jedi_task_id)
-        except (TypeError, ValueError):
-            return Response({'detail': 'jedi_task_id must be an integer'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        new_status = request.data.get('status', 'submitted')
-        valid = [c[0] for c in task._meta.get_field('status').choices]
-        if new_status not in valid:
-            return Response(
-                {'detail': f'Invalid status. Choose from: {", ".join(valid)}'},
-                status=status.HTTP_400_BAD_REQUEST,
+            services.prodtask_record_submission(
+                task=task,
+                jedi_task_id=request.data.get('jedi_task_id'),
+                new_status=request.data.get('status', 'submitted'),
             )
-        task.status = new_status
-        task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
