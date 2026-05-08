@@ -48,6 +48,14 @@ MEMORY_USERNAME = 'pandabot'
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
+CORUN_BASE_URL = os.environ.get('CORUN_BASE_URL', 'https://epic-devcloud.org/doc')
+CORUN_CALLBACK_URL = os.environ.get(
+    'CORUN_CALLBACK_URL',
+    'https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/',
+)
+CORUN_SUBSCRIPTION_NAME = os.environ.get(
+    'CORUN_SUBSCRIPTION_NAME', 'pandabot-swf-testbed'
+)
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
 NO_QUERY_WARN = ":warning: *This response was not based on a live data query.*"
 NO_CITE_WARN = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
@@ -108,6 +116,30 @@ if _zenodo_key:
         'repo_dir': '/data/wenauseic/github/zenodo-mcp-server',
         'update_commands': [
             'export PATH=/eic/u/wenauseic/.nvm/versions/node/v22.17.0/bin:$PATH && cd /data/wenauseic/github/zenodo-mcp-server && git pull && npm install && npm run build',
+        ],
+    })
+
+_corun_token = os.environ.get('CORUN_API_TOKEN')
+if _corun_token:
+    STDIO_MCP_SERVERS.append({
+        'name': 'corun',
+        'prefix': 'corun_',
+        'source': 'github.com/eic/corun-mcp-server',
+        'command': [
+            os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                         'swf-testbed/.venv/bin/corun-mcp-server'),
+        ],
+        'env': {
+            'CORUN_BASE_URL': CORUN_BASE_URL,
+            'CORUN_API_TOKEN': _corun_token,
+        },
+        'exclude_tools': ['wait_for_job'],
+        'repo_dir': '/data/wenauseic/github/corun-mcp-server',
+        'update_commands': [
+            'cd /data/wenauseic/github/corun-mcp-server && git pull && '
+            + os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                           'swf-testbed/.venv/bin/pip')
+            + ' install -e .',
         ],
     })
 
@@ -762,7 +794,10 @@ class PandaBot:
                 await client.initialize()
                 tools = await client.list_tools()
                 prefix = cfg.get('prefix', '')
+                exclude_tools = set(cfg.get('exclude_tools', []))
                 for t in tools:
+                    if t["name"] in exclude_tools:
+                        continue
                     at = mcp_tool_to_anthropic(t)
                     original_name = at["name"]
                     if prefix:
@@ -837,7 +872,10 @@ class PandaBot:
                 await client.initialize()
                 tools = await client.list_tools()
                 prefix = server_cfg.get('prefix', '')
+                exclude_tools = set(server_cfg.get('exclude_tools', []))
                 for t in tools:
+                    if t["name"] in exclude_tools:
+                        continue
                     at = mcp_tool_to_anthropic(t)
                     original_name = at["name"]
                     if prefix:
@@ -867,12 +905,85 @@ class PandaBot:
         if err:
             logger.warning(f"DocSearch init deferred: {err}")
 
-        # 4. Build semantic index with server-prefixed names for domain separation.
+        # 4. Register corun callback subscription if corun access is configured.
+        await self._ensure_corun_subscription()
+
+        # 5. Build semantic index with server-prefixed names for domain separation.
         # "github:get_job_logs" vs "panda:panda_list_jobs" gives the embedding
         # model semantic context to distinguish CI jobs from PanDA jobs.
         self._tool_selector.build_index(self._tool_registry, self._tool_server_map)
 
         logger.info(f"Total tools in registry: {len(self._tool_registry)}")
+
+    async def _ensure_corun_subscription(self):
+        """Ensure corun posts terminal job notifications to swf-monitor."""
+        token = os.environ.get('CORUN_API_TOKEN')
+        if not token:
+            return
+
+        if not CORUN_CALLBACK_URL.startswith('https://'):
+            logger.warning(
+                "Skipping corun subscription: CORUN_CALLBACK_URL must be https"
+            )
+            return
+
+        base = CORUN_BASE_URL.rstrip('/')
+        url = f"{base}/api/v1/notification-subscriptions/"
+        headers = {
+            'Authorization': f'Token {token}',
+            'Content-Type': 'application/json',
+        }
+        body = {
+            'name': CORUN_SUBSCRIPTION_NAME,
+            'callback_url': CORUN_CALLBACK_URL,
+            'status': 'active',
+            'data': {
+                'client': 'swf-monitor-pandabot',
+                'channel': os.environ.get('MATTERMOST_CHANNEL', 'pandabot'),
+            },
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                subscriptions = resp.json()
+                existing = next(
+                    (
+                        item for item in subscriptions
+                        if item.get('name') == CORUN_SUBSCRIPTION_NAME
+                    ),
+                    None,
+                )
+                if existing:
+                    needs_update = (
+                        existing.get('callback_url') != CORUN_CALLBACK_URL
+                        or existing.get('status') != 'active'
+                    )
+                    if needs_update:
+                        patch_url = f"{url}{existing['id']}/"
+                        patch_resp = await client.patch(
+                            patch_url, headers=headers, json=body
+                        )
+                        patch_resp.raise_for_status()
+                        logger.info(
+                            "Updated corun notification subscription %s",
+                            CORUN_SUBSCRIPTION_NAME,
+                        )
+                    else:
+                        logger.info(
+                            "Corun notification subscription %s already active",
+                            CORUN_SUBSCRIPTION_NAME,
+                        )
+                else:
+                    create_resp = await client.post(url, headers=headers, json=body)
+                    create_resp.raise_for_status()
+                    logger.info(
+                        "Created corun notification subscription %s",
+                        CORUN_SUBSCRIPTION_NAME,
+                    )
+        except Exception:
+            logger.exception("Failed to ensure corun notification subscription")
 
     def _build_tool_catalog(self):
         """One-liner catalog of all tools for the system prompt."""
@@ -904,6 +1015,8 @@ class PandaBot:
                        'pwg', 'jlab', 'jefferson'),
         'bnl-rucio': ('bnl rucio', 'brookhaven rucio', 'nprucio', 'panda rucio',
                       'bnl did', 'bnl dataset', 'bnl replica'),
+        'corun': ('corun', 'codoc', 'documentation page', 'doc page',
+                  'generate page', 'generated page', 'prompt', 'section'),
     }
 
     def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:

@@ -13,6 +13,7 @@ from .views import (
 )
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
+from .panda.corun_callback import corun_callback
 
 router = DefaultRouter()
 router.register(r'systemagents', SystemAgentViewSet, basename='systemagent')
@@ -43,6 +44,7 @@ urlpatterns = [
     path('ai-memory/', ai_memory_load, name='ai-memory-load'),
     path('dpid/verify/', dpid_verify, name='dpid-verify'),
     path('slash/panda/', panda_slash_command, name='panda-slash-command'),
+    path('corun-callback/', corun_callback, name='corun-callback'),
     # PanDA REST API — read-only JSON for external consumers.
     # See monitor_app/panda/api.py.
     path('panda/tasks/', panda_api.tasks_list, name='panda-api-tasks-list'),

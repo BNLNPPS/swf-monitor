@@ -367,6 +367,27 @@ sudo systemctl restart swf-testbed-bot.service
 sudo journalctl -u swf-panda-bot.service -f
 ```
 
+`swf-panda-bot.service` can also launch the standalone corun MCP server when
+`CORUN_API_TOKEN` is present in `production.env`. The bot uses it to queue codoc
+generation jobs through prod corun and deliberately does not expose corun's
+long-polling `wait_for_job` tool. On startup, the bot registers or refreshes a
+corun notification subscription pointing at:
+
+```text
+https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
+```
+
+Corun posts terminal job notices to that endpoint, and swf-monitor posts a
+simple completion/failure/cancel notice to the configured Mattermost channel
+(`MATTERMOST_CHANNEL`, normally `pandabot`). Required/optional env vars:
+
+```bash
+CORUN_BASE_URL=https://epic-devcloud.org/doc
+CORUN_API_TOKEN=<prod corun token>
+CORUN_CALLBACK_URL=https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
+CORUN_SUBSCRIPTION_NAME=pandabot-swf-testbed
+```
+
 ### Application Logs
 
 ```bash
