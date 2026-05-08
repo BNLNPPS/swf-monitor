@@ -59,6 +59,7 @@ CORUN_SUBSCRIPTION_NAME = os.environ.get(
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
 NO_QUERY_WARN = ":warning: *This response was not based on a live data query.*"
 NO_CITE_WARN = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
+THREAD_REPLY_MARKER = "[Thread reply]"
 
 # Stdio MCP servers — launched as subprocesses at startup.
 # update_commands: if present, the server can be updated via bot_manage_servers.
@@ -1335,6 +1336,7 @@ class PandaBot:
                 messages = await self._load_recent_dialog()
                 reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
                 reply = self._clean_reply_boilerplate(reply)
+                reply, force_thread_reply = self._extract_thread_reply_directive(reply)
                 if (
                     not (direct_addressed and len(reply.strip()) > 20)
                     and self._is_silent_reply(reply)
@@ -1359,8 +1361,12 @@ class PandaBot:
                     "Sorry, I hit an internal error while processing this "
                     "message. The exception was logged."
                 )
+                force_thread_reply = False
 
-        await self._post_reply(reply, reply_channel, root_id)
+        reply_root_id = root_id
+        if force_thread_reply and not root_id and reply_channel == self.channel_id:
+            reply_root_id = post_id
+        await self._post_reply(reply, reply_channel, reply_root_id)
 
     @staticmethod
     def _clean_reply_boilerplate(reply: str) -> str:
@@ -1388,6 +1394,14 @@ class PandaBot:
             or ('not' in words and 'speaking' in words)
             or 'no response' in text
         )
+
+    @staticmethod
+    def _extract_thread_reply_directive(reply: str) -> tuple[str, bool]:
+        """Strip the model's marker for optional thread-only commentary."""
+        text = reply.lstrip()
+        if not text.startswith(THREAD_REPLY_MARKER):
+            return reply, False
+        return text[len(THREAD_REPLY_MARKER):].lstrip('\r\n '), True
 
     async def _render_plot(self, code):
         """Execute matplotlib code and return the PNG path, or None on failure."""
@@ -1472,10 +1486,8 @@ class PandaBot:
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
-        # Reply where you were spoken to:
-        #   - Original post in a thread (root_id set) → reply in that thread.
-        #   - Original post in main channel (root_id empty) → reply in main channel,
-        #     not a new thread off the user's message.
+        # Reply where you were spoken to. Main-channel comments may be routed to
+        # a thread when the model explicitly marks them as commentary.
         try:
             logger.info("Posting reply to Mattermost...")
             post_options = {
