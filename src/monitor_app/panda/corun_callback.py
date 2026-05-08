@@ -12,6 +12,41 @@ from mattermostdriver import Driver
 logger = logging.getLogger('panda_bot')
 
 
+def _short_text(value, limit=200):
+    if value is None:
+        return ''
+    text = str(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit - 3].rstrip() + '...'
+
+
+def _format_duration(timing):
+    if timing in (None, ''):
+        return ''
+    if isinstance(timing, dict):
+        for key in ('duration_s', 'elapsed_s', 'seconds', 'total_seconds'):
+            if key in timing:
+                timing = timing[key]
+                break
+        else:
+            return ''
+    try:
+        total_seconds = int(round(float(timing)))
+    except (TypeError, ValueError):
+        return ''
+    if total_seconds < 0:
+        return ''
+
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes}m{seconds}s"
+    if minutes:
+        return f"{minutes}m{seconds}s"
+    return f"{seconds}s"
+
+
 def _mattermost_driver():
     return Driver({
         'url': config('MATTERMOST_URL', default='chat.epic-eic.org'),
@@ -23,14 +58,25 @@ def _mattermost_driver():
 
 def _message_from_payload(payload):
     status = payload.get('status', 'unknown')
-    definition = payload.get('definition_name') or payload.get('definition_id') or 'corun job'
+    display_name = (
+        payload.get('result_page_title')
+        or payload.get('definition_name')
+        or payload.get('definition_id')
+        or 'corun job'
+    )
     result_url = payload.get('result_page_url')
+    submitted_by = _short_text(payload.get('submitted_by'), limit=80)
+    duration = _format_duration(payload.get('timing'))
     error = payload.get('error')
 
-    title = f"corun job {status}: {definition}"
+    title = f"corun job {status}: {_short_text(display_name)}"
     lines = [f"**{title}**"]
     if result_url:
         lines.append(f"Result: {result_url}")
+    if submitted_by:
+        lines.append(f"Submitted by: {submitted_by}")
+    if duration:
+        lines.append(f"Duration: {duration}")
     if error:
         lines.append(f"Error: `{str(error)[:1000]}`")
     return "\n".join(lines)
