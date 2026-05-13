@@ -98,6 +98,10 @@ class MCPAuthMiddleware:
         if not (request.path == mcp_path or request.path.startswith(mcp_path + "/")):
             return self.get_response(request)
 
+        transport_response = self._validate_mcp_transport(request)
+        if transport_response:
+            return transport_response
+
         token = get_bearer_token(request)
 
         if token:
@@ -111,6 +115,31 @@ class MCPAuthMiddleware:
 
         # No token — allow through (Claude Code, local clients)
         return self.get_response(request)
+
+    def _validate_mcp_transport(self, request):
+        """Keep MCP as finite JSON POST request/response; no MCP GET/SSE."""
+        if request.method != "POST":
+            response = JsonResponse(
+                {
+                    "error": "MCP endpoint accepts POST JSON-RPC only",
+                    "allowed_methods": ["POST"],
+                },
+                status=405,
+            )
+            response["Allow"] = "POST"
+            return response
+
+        accept = request.META.get("HTTP_ACCEPT", "")
+        if any(
+            part.split(";", 1)[0].strip().lower() == "text/event-stream"
+            for part in accept.split(",")
+        ):
+            return JsonResponse(
+                {"error": "MCP server-pushed event streams are not supported"},
+                status=406,
+            )
+
+        return None
 
     def _unauthorized_response(self, request, message: str):
         """Return 401 for invalid token."""
