@@ -351,6 +351,13 @@ DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
 # MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
 DJANGO_MCP_ENDPOINT = ""
 
+# Bearer token for the FastMCP ASGI service. Read from production.env in
+# deployments. Empty default keeps Phase 1 candidate (no env set) returning
+# 503 "MCP token not configured" rather than letting unauthenticated
+# requests through; the operational token is generated and installed as
+# part of Phase 2 step 11.
+MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
+
 # MCP authentication - start with no auth for development, enable OAuth2 for production
 # DJANGO_MCP_AUTHENTICATION_CLASSES = [
 #     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
