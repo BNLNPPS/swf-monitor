@@ -258,11 +258,16 @@ AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
 AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
 AUTH0_ALGORITHMS = ["RS256"]
 
-# Django MCP Server configuration
-DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "name": "swf-testbed",
-    "stateless": True,
-    "instructions": """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
+# MCP server identity. These constants are the single source of truth for
+# both the live django-mcp-server config below and the FastMCP candidate
+# being stood up in the migration to swf_monitor_project.mcp_asgi. See
+# docs/MCP_FASTMCP_MIGRATION_PLAN.md.
+#
+# Name MUST remain "swf-testbed": clients hardcode it in .mcp.json and in
+# Claude Code permission strings like mcp__swf-monitor__*.
+MCP_SERVER_NAME = "swf-testbed"
+
+MCP_SERVER_INSTRUCTIONS = """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
 
 KEY CONCEPTS:
 - Namespaces: Isolation boundaries for different users' workflow runs (e.g., 'torre1', 'wenauseic')
@@ -332,7 +337,15 @@ FILTERING:
 - Status filters are case-insensitive
 - Context cascades: run_number → stf_filename → tf_filename
 
-Use swf_list_available_tools() to see all available tools with descriptions.""",
+Use swf_list_available_tools() to see all available tools with descriptions."""
+
+# Django MCP Server configuration — wraps the constants above so the live
+# django-mcp-server endpoint and the FastMCP candidate read the same name
+# and instructions text.
+DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
+    "name": MCP_SERVER_NAME,
+    "stateless": True,
+    "instructions": MCP_SERVER_INSTRUCTIONS,
 }
 
 # MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
