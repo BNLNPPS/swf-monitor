@@ -339,18 +339,6 @@ FILTERING:
 
 Use swf_list_available_tools() to see all available tools with descriptions."""
 
-# Django MCP Server configuration — wraps the constants above so the live
-# django-mcp-server endpoint and the FastMCP candidate read the same name
-# and instructions text.
-DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "name": MCP_SERVER_NAME,
-    "stateless": True,
-    "instructions": MCP_SERVER_INSTRUCTIONS,
-}
-
-# MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
-DJANGO_MCP_ENDPOINT = ""
-
 # Bearer token for the FastMCP ASGI service. Read from production.env in
 # deployments. Empty default keeps Phase 1 candidate (no env set) returning
 # 503 "MCP token not configured" rather than letting unauthenticated
