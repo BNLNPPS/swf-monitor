@@ -5,7 +5,7 @@ Each tool registers with the MCP server and queries Django ORM via sync_to_async
 """
 
 from asgiref.sync import sync_to_async
-from mcp_server import mcp_server as mcp
+from monitor_app.mcp import mcp
 
 
 def _list_tags_sync(tag_type, category=None, status=None, creator=None,

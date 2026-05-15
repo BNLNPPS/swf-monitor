@@ -84,6 +84,11 @@ def get_available_tools_list() -> list:
             "parameters": [],
         },
         {
+            "name": "get_server_instructions",
+            "description": "Get the swf-monitor MCP server instructions. Compatibility tool for clients and permissions lists that previously used django-mcp-server's server-instruction helper.",
+            "parameters": [],
+        },
+        {
             "name": "swf_get_system_state",
             "description": "Get comprehensive system state: user context, agent manager, workflow runner, readiness, agents, executions",
             "parameters": ["username"],

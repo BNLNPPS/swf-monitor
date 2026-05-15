@@ -21,7 +21,31 @@ Module structure:
 - pcs.py: PCS (Physics Configuration System) tag browsing and lookup
 """
 
-from mcp_server import mcp_server as mcp
+from django.conf import settings
+from mcp.server.fastmcp import FastMCP
+
+# Single FastMCP instance shared by every @mcp.tool() in this package and
+# by the standalone ASGI entrypoint in swf_monitor_project/mcp_asgi.py.
+# Tool modules in this package import this same `mcp` symbol via
+# `from monitor_app.mcp import mcp`. See docs/MCP_FASTMCP_MIGRATION_PLAN.md.
+mcp = FastMCP(
+    settings.MCP_SERVER_NAME,
+    instructions=settings.MCP_SERVER_INSTRUCTIONS,
+    stateless_http=True,
+    json_response=True,
+    streamable_http_path="/",
+)
+
+
+@mcp.tool()
+async def get_server_instructions() -> str:
+    """Get the swf-monitor MCP server instructions.
+
+    Compatibility tool for clients and permissions lists that previously
+    used django-mcp-server's server-instruction helper.
+    """
+    return settings.MCP_SERVER_INSTRUCTIONS
+
 
 # Import common utilities
 from .common import (
@@ -120,6 +144,7 @@ async def swf_list_available_tools() -> list:
 __all__ = [
     # Discovery
     'swf_list_available_tools',
+    'get_server_instructions',
     # System
     'swf_get_system_state',
     'swf_list_agents',

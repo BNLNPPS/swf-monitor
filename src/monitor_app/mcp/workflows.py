@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.db.models import Count
 from asgiref.sync import sync_to_async
 
-from mcp_server import mcp_server as mcp
+from monitor_app.mcp import mcp
 
 from ..models import Run, StfFile, TFSlice, AppLog, SystemAgent
 from ..workflow_models import WorkflowDefinition, WorkflowExecution, WorkflowMessage
