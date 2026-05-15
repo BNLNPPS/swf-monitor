@@ -67,6 +67,25 @@ required component.
    failure modes without measurable throughput loss for this workload. Keep
    `--timeout-graceful-shutdown 15` and `TimeoutStopSec=30`.
 
+## Out Of Scope
+
+This migration changes the MCP transport (django-mcp-server → FastMCP) and
+the ASGI guard around it. Nothing else. The following are explicitly not
+touched and should not be folded into this work:
+
+- `/swf-monitor/api/corun-callback/` and the rest of the Django REST API —
+  stay on mod_wsgi.
+- Django admin, the PCS web UI, and the SSE message stream — stay on
+  mod_wsgi.
+- `swf-remote` — does not talk to this MCP endpoint.
+- The pandabot ↔ corun MCP integration — pandabot is a client of the
+  separate corun MCP server; unrelated to swf-monitor's MCP transport.
+- `DbLogHandler` async logging — already fixed during the stabilization
+  pass; no further change required.
+- The `swf-monitor-mcp-watchdog.service` / `scripts/mcp_watchdog.py` pair
+  stays in place through Phase 2; retirement is a Phase 3 decision (step
+  17) gated on bake-in, not on the transport swap.
+
 ## Phase 1 — Code (dev tree, no service change)
 
 1. Add `mcp` (the official Python SDK) to `requirements.txt`. Leave
@@ -256,7 +275,10 @@ required component.
     `monitor_app/middleware.py`, the protected-resource metadata view in
     `monitor_app/views.py`, and the `.well-known/` route in
     `swf_monitor_project/urls.py`. Drop the `AUTH0_*` settings from
-    `settings.py`.
+    `settings.py`. Also remove the now-dead `LocationMatch
+    "^/swf-monitor/\.well-known/"` block from `apache-swf-monitor.conf`
+    (and any `ProxyPass`/`<Location>` entries that referenced the OAuth
+    metadata URL) so Apache config and Django URL conf stay aligned.
 
 17. Decide on the watchdog. If two clean weeks have elapsed with zero
     watchdog-induced restarts, delete `scripts/mcp_watchdog.py`,
@@ -296,8 +318,18 @@ live endpoint and the candidate, and asserts:
    503; a `GET` returns 405; an unauthenticated `GET /health` returns 200
    with `{"status": "ok"}`.
 
-7. **Bot startup.** After cutover, both PanDA bot and testbed bot journal
-   lines show the expected tool counts as listed in Phase 2 step 11.
+7. **`swf_list_available_tools` parity with `tools/list`.** The hardcoded
+   list returned by `get_available_tools_list()` in
+   `monitor_app/mcp/common.py` is what an LLM sees when it introspects;
+   `tools/list` is what it gets when it asks. Drift between the two has
+   bitten before — a tool callable via `tools/call` but missing from the
+   self-describer is functionally invisible to clients that rely on the
+   discovery helper. Assert: `set(get_available_tools_list())` ==
+   `set(tools/list against candidate)`. Reconcile by editing the
+   hardcoded list, not by silently shipping the gap.
+
+8. **Bot startup.** After cutover, both PanDA bot and testbed bot journal
+   lines show the expected tool counts as listed in Phase 2 step 13.
 
 The smoke script must exit non-zero on any failure and print a clear diff
 when a check fails.
