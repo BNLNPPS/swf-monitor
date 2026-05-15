@@ -148,13 +148,28 @@ required component.
    `MCP_BEARER_TOKEN` is a new setting read from `production.env`. Generate
    with `python -c "import secrets; print('swf_'+secrets.token_urlsafe(32))"`.
 
-6. Remove the MCP URL mount from `swf_monitor_project/urls.py` and remove
-   `DJANGO_MCP_GLOBAL_SERVER_CONFIG` and `DJANGO_MCP_ENDPOINT` from
-   `settings.py`. (Auth0 settings stay until Phase 3.)
+6. Remove `DJANGO_MCP_GLOBAL_SERVER_CONFIG` and `DJANGO_MCP_ENDPOINT` from
+   `settings.py` once the new constants land. **Keep the MCP URL mount in
+   `swf_monitor_project/urls.py` through Phase 1.** Removing it now would
+   break the live django-mcp-server endpoint on the next service restart
+   (deploys do restart, and uvicorn re-imports the URLconf). The mount
+   comes out in Phase 2 in the same change that flips the systemd unit so
+   the old endpoint never goes dark before its FastMCP replacement is in
+   place. (Auth0 settings stay until Phase 3.)
 
 7. Write `scripts/mcp_migration_smoke.py` — a parity probe that runs against
    two endpoints (the live django-mcp-server URL and a candidate URL) and
    exits non-zero if any check fails. See "Parity Checks" below.
+
+   **Auth asymmetry during the parity window.** Live (post `af0292c`) still
+   allows unauthenticated requests — `MCPAuthMiddleware` only enforces a
+   token if one is sent. The candidate at `:8013` requires
+   `Authorization: Bearer <MCP_BEARER_TOKEN>` on every non-`/health`
+   request. The smoke script must therefore take per-endpoint auth config
+   (e.g. `--live-token`, `--candidate-token`, either may be empty) rather
+   than the candidate accepting a temporary "disable auth" env knob. A
+   migration-only auth bypass on the candidate would have to be removed
+   later and is exactly the kind of code we don't want shipped.
 
 8. Stand the candidate ASGI up on a non-conflicting port (suggest `:8013`)
    pointed at the same Postgres + production env, run the smoke script
@@ -171,7 +186,39 @@ required component.
    - keep `--host 127.0.0.1 --port 8001 --timeout-graceful-shutdown 15
      --proxy-headers --forwarded-allow-ips 127.0.0.1` and `TimeoutStopSec=30`
 
-10. Install the unit and reload (the deploy script does not install systemd
+10. Remove the django-mcp-server URL mount. Drop
+
+    ```python
+    path("mcp/", include("mcp_server.urls")),
+    ```
+
+    from `swf_monitor_project/urls.py`. This deletion ships in the same
+    commit that flips the systemd unit so the live django-mcp-server
+    endpoint does not stop responding before its FastMCP replacement is in
+    place.
+
+11. Distribute `MCP_BEARER_TOKEN` to every client environment *before* the
+    ASGI restart in step 12. The candidate has been serving authenticated
+    traffic for parity tests, but the production cutover only succeeds if
+    these clients hold the token at the moment uvicorn switches:
+
+    - `production.env` for `swf-monitor-mcp-asgi.service` (already set in
+      Phase 1 step 5)
+    - `EnvironmentFile` (or inline `Environment=`) on
+      `swf-panda-bot.service` and `swf-testbed-bot.service`; restart both
+      bot units after the env edit so the new value is picked up
+    - `swf-monitor-mcp-watchdog.service` and `scripts/mcp_watchdog.py` —
+      script must read `MCP_BEARER_TOKEN` and send
+      `Authorization: Bearer <token>` on its `initialize` and `tools/list`
+      probes
+    - local developer environments — add the token to `~/.env` on every
+      machine running Claude Code against this MCP and reference it from
+      `.mcp.json` as an `Authorization` header
+
+    Validate with one direct authed `curl` per client host against the
+    candidate `:8013` before proceeding.
+
+12. Install the unit and reload (the deploy script does not install systemd
     units automatically):
 
     ```bash
@@ -182,7 +229,7 @@ required component.
     sudo systemctl restart swf-monitor-mcp-asgi.service
     ```
 
-11. Verify in this order:
+13. Verify in this order:
 
     - `systemctl status swf-monitor-mcp-asgi.service` — active, no restarts
     - `curl -s http://127.0.0.1:8001/health` — `{"status": "ok"}`
@@ -192,7 +239,7 @@ required component.
     - testbed bot journal — `Discovered N tools via MCP`
     - one human-driven `tools/call` end-to-end via Claude Code
 
-12. Update `docs/MCP.md`: Architecture, Transport, Settings, and "Adding New
+14. Update `docs/MCP.md`: Architecture, Transport, Settings, and "Adding New
     Tools" sections currently still describe django-mcp-server. Rewrite to
     describe the FastMCP+ASGI guard architecture and the bearer token. Add
     a one-line note that an HTTP 202 response from FastMCP is normal (it is
@@ -201,17 +248,17 @@ required component.
 
 ## Phase 3 — Cleanup (after 48–72h clean operation)
 
-13. Remove `django-mcp-server` from `requirements.txt`. Update the deploy
+15. Remove `django-mcp-server` from `requirements.txt`. Update the deploy
     script to uninstall it from the venv on first deploy after this change
     (single `pip uninstall -y django-mcp-server`).
 
-14. Delete `monitor_app/auth0.py`, the OAuth portion of
+16. Delete `monitor_app/auth0.py`, the OAuth portion of
     `monitor_app/middleware.py`, the protected-resource metadata view in
     `monitor_app/views.py`, and the `.well-known/` route in
     `swf_monitor_project/urls.py`. Drop the `AUTH0_*` settings from
     `settings.py`.
 
-15. Decide on the watchdog. If two clean weeks have elapsed with zero
+17. Decide on the watchdog. If two clean weeks have elapsed with zero
     watchdog-induced restarts, delete `scripts/mcp_watchdog.py`,
     `swf-monitor-mcp-watchdog.service`, and
     `swf-monitor-mcp-watchdog.timer`, and disable the timer on the host.
@@ -446,7 +493,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart swf-monitor-mcp-asgi.service
 ```
 
-The MCP URL mount in `swf_monitor_project/urls.py` (removed in Phase 1
-step 6) must be restored before this rollback can serve traffic. Until
+The MCP URL mount in `swf_monitor_project/urls.py` (removed in Phase 2
+step 10) must be restored before this rollback can serve traffic. Until
 Phase 3 deletes `django-mcp-server` from requirements, the venv still has
 the old library available.
