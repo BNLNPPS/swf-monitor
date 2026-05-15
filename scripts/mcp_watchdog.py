@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -11,19 +12,25 @@ import urllib.request
 
 
 DEFAULT_MCP_URL = "http://127.0.0.1:8001/swf-monitor/mcp/"
-DEFAULT_HEALTH_URL = "http://127.0.0.1:8001/swf-monitor/api/mcp-health/"
+# /health is served by the FastMCP ASGI guard at the bare root (no
+# /swf-monitor prefix). The earlier Django-side /swf-monitor/api/mcp-health/
+# endpoint went away when the systemd unit was flipped to mcp_asgi.
+DEFAULT_HEALTH_URL = "http://127.0.0.1:8001/health"
 
 
-def post_json(url, payload, timeout):
+def post_json(url, payload, timeout, token=None):
     data = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+        "User-Agent": "swf-monitor-mcp-watchdog/1.0",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         url,
         data=data,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "swf-monitor-mcp-watchdog/1.0",
-        },
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -45,10 +52,17 @@ def get_json(url, timeout):
         return response.status, json.loads(body)
 
 
-def probe(health_url, mcp_url, timeout):
+def probe(health_url, mcp_url, timeout, token=None):
     started = time.monotonic()
     health_status, health = get_json(health_url, timeout)
-    if health_status != 200 or not health.get("ok"):
+    # The FastMCP /health endpoint returns {"status": "ok"}; the older
+    # Django /api/mcp-health/ endpoint returned {"ok": true, ...}. Accept
+    # both shapes so an accidental rollback doesn't break the watchdog.
+    health_ok = (
+        health.get("status") == "ok"
+        or health.get("ok") is True
+    )
+    if health_status != 200 or not health_ok:
         raise RuntimeError(f"health failed: status={health_status} body={health}")
 
     init_status, init = post_json(
@@ -67,6 +81,7 @@ def probe(health_url, mcp_url, timeout):
             },
         },
         timeout,
+        token=token,
     )
     if init_status != 200 or "result" not in init:
         raise RuntimeError(f"initialize failed: status={init_status} body={init}")
@@ -79,6 +94,7 @@ def probe(health_url, mcp_url, timeout):
             "method": "tools/list",
         },
         timeout,
+        token=token,
     )
     tool_list = tools.get("result", {}).get("tools")
     if tools_status != 200 or not isinstance(tool_list, list):
@@ -109,10 +125,18 @@ def main():
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--restart", action="store_true")
     parser.add_argument("--service", default="swf-monitor-mcp-asgi.service")
+    parser.add_argument(
+        "--token",
+        default=os.environ.get("MCP_BEARER_TOKEN", ""),
+        help="Bearer token for the MCP initialize/tools-list probes "
+             "(default: MCP_BEARER_TOKEN env var, empty for none).",
+    )
     args = parser.parse_args()
 
     try:
-        elapsed, tool_count = probe(args.health_url, args.mcp_url, args.timeout)
+        elapsed, tool_count = probe(
+            args.health_url, args.mcp_url, args.timeout, token=args.token or None,
+        )
     except (urllib.error.URLError, TimeoutError, RuntimeError, json.JSONDecodeError) as e:
         print(f"MCP watchdog probe failed: {e}", file=sys.stderr)
         if args.restart:

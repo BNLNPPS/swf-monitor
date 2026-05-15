@@ -9,16 +9,15 @@ Group=eic
 WorkingDirectory=/opt/swf-monitor/current/src
 EnvironmentFile=/opt/swf-monitor/config/env/production.env
 Environment=DJANGO_SETTINGS_MODULE=swf_monitor_project.settings
-# uvicorn workers serve stateless MCP POST request/response traffic. Do not
-# scale this as a substitute for fixing MCP lifecycle bugs: too many workers
-# multiply stuck-process and DB-connection failure modes.
-# Bound to loopback only; Apache ProxyPass fronts it.
+# Lifespan-managed FastMCP service (Phase 2 cutover). Workers held at 2
+# now that the per-request StreamableHTTPSessionManager is gone -- the
+# old 4-worker --limit-concurrency 32 was defensive bookkeeping against
+# that bug. Bound to loopback only; Apache ProxyPass fronts it.
 ExecStart=/opt/swf-monitor/current/.venv/bin/uvicorn \
-    swf_monitor_project.asgi:application \
+    swf_monitor_project.mcp_asgi:application \
     --host 127.0.0.1 \
     --port 8001 \
-    --workers 4 \
-    --limit-concurrency 32 \
+    --workers 2 \
     --timeout-graceful-shutdown 15 \
     --log-level info \
     --proxy-headers \
