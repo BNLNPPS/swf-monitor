@@ -33,6 +33,10 @@ MEMORY_USERNAME = 'testbedbot'
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
+# Bearer token for the FastMCP /swf-monitor/mcp/ endpoint. Empty means
+# unauthenticated; post-Phase-2 cutover this MUST be set in
+# production.env so the bot's POSTs pass the FastMCP guard.
+MCP_BEARER_TOKEN = os.environ.get('MCP_BEARER_TOKEN', '')
 BOT_TOOL_PREFIXES = ('swf_', 'panda_', 'pcs_')
 
 # Mattermost username -> testbed username
@@ -91,8 +95,9 @@ def load_user_map():
 class MCPClient:
     """Minimal MCP client using HTTP POST only — no SSE, no GET streams."""
 
-    def __init__(self, url: str, client_name: str = "testbed-bot"):
+    def __init__(self, url: str, token: str = "", client_name: str = "testbed-bot"):
         self.url = url
+        self.token = token
         self.session_id = None
         self._request_id = 0
         self._http = httpx.AsyncClient(timeout=60)
@@ -104,6 +109,8 @@ class MCPClient:
         if params:
             body["params"] = params
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         resp = await self._http.post(self.url, json=body, headers=headers)
@@ -162,6 +169,7 @@ class TestbedBot:
             'TESTBED_BOT_CHANNEL', 'swf-testbed-bot'
         )
         self.mcp_url = MCP_URL
+        self.mcp_bearer_token = MCP_BEARER_TOKEN
 
         self.user_map = load_user_map()
         logger.info(f"User map: {self.user_map}")
@@ -211,7 +219,7 @@ class TestbedBot:
 
     async def _setup_mcp(self):
         """Discover tools and server instructions via MCP."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
             tools = await mcp.list_tools()
@@ -232,7 +240,7 @@ class TestbedBot:
 
     async def _load_recent_dialog(self):
         """Load recent dialog from the database — all users, all contexts."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         messages = []
         try:
             await mcp.initialize()
@@ -261,7 +269,7 @@ class TestbedBot:
 
     async def _record_exchange(self, question, answer, post_id='', root_id=''):
         """Record a Q&A exchange to the unified memory."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
             for role, content in [('user', question), ('assistant', answer)]:
@@ -466,7 +474,7 @@ class TestbedBot:
 
         reply = "Sorry, I encountered an error processing your question."
 
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
 

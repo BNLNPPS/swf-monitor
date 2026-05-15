@@ -48,6 +48,11 @@ MEMORY_USERNAME = 'pandabot'
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
+# Bearer token for the FastMCP /swf-monitor/mcp/ endpoint. Empty means
+# unauthenticated, which is fine against a pre-Phase-2 server that does
+# not enforce auth; post-cutover this MUST be set in production.env so
+# the bot's POSTs pass the FastMCP guard.
+MCP_BEARER_TOKEN = os.environ.get('MCP_BEARER_TOKEN', '')
 CORUN_BASE_URL = os.environ.get('CORUN_BASE_URL', 'https://epic-devcloud.org/doc')
 CORUN_CALLBACK_URL = os.environ.get(
     'CORUN_CALLBACK_URL',
@@ -433,8 +438,9 @@ def _load_system_preamble():
 class MCPClient:
     """Minimal MCP client using HTTP POST only — no SSE, no GET streams."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, token: str = ""):
         self.url = url
+        self.token = token
         self.session_id = None
         self._request_id = 0
         self._http = httpx.AsyncClient(timeout=60)
@@ -445,6 +451,8 @@ class MCPClient:
         if params:
             body["params"] = params
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         resp = await self._http.post(self.url, json=body, headers=headers)
@@ -648,6 +656,7 @@ class PandaBot:
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
         self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
         self.mcp_url = MCP_URL
+        self.mcp_bearer_token = MCP_BEARER_TOKEN
 
         self.claude = anthropic.AsyncAnthropic()
 
@@ -843,7 +852,7 @@ class PandaBot:
         on relevance rather than loaded all at once.
         """
         # 1. HTTP MCP server (Django — PanDA, PCS, memory tools)
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
             tools = await mcp.list_tools()
@@ -1116,7 +1125,7 @@ class PandaBot:
 
     async def _load_recent_dialog(self):
         """Load recent dialog from the database — all users, all contexts."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         messages = []
         try:
             await mcp.initialize()
@@ -1145,7 +1154,7 @@ class PandaBot:
 
     async def _record_exchange(self, question, answer, post_id='', root_id=''):
         """Record a Q&A exchange to the unified memory."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
             for role, content in [('user', question), ('assistant', answer)]:
@@ -1535,7 +1544,7 @@ class PandaBot:
         suggested_names = []
         tools_used = []
 
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
 
