@@ -32,29 +32,34 @@
   <text x="600" y="42" text-anchor="middle" font-size="22" font-weight="bold">ePIC Automated Production Workflow</text>
 
 
-  <!-- ====== UPSTREAM: PCS Tasks Compose ====== -->
-  <rect x="40" y="78" width="1120" height="120" rx="12" fill="#fff8f0" stroke="#e65100" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="600" y="100" text-anchor="middle" font-weight="bold" font-size="16" fill="#bf360c">PCS Tasks Compose — upstream</text>
-  <text x="600" y="118" text-anchor="middle" font-size="13" font-style="italic" fill="#666">compose into prod tasks · yellow-diff suggestions · clone</text>
+  <!-- ====== UPSTREAM: Requests + PCS Tasks Compose ====== -->
+  <rect x="40" y="104" width="180" height="76" rx="8" fill="#ede7f6" stroke="#5e35b1" stroke-width="1.8" filter="url(#shadow)"/>
+  <text x="130" y="133" text-anchor="middle" font-weight="bold" font-size="15" fill="#4527a0">PWG, DSC</text>
+  <text x="130" y="154" text-anchor="middle" font-weight="bold" font-size="15" fill="#4527a0">prod requests</text>
 
-  <rect x="120" y="130" width="200" height="50" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="220" y="151" text-anchor="middle" font-weight="bold" font-size="14">Tags (p · e · s · r)</text>
-  <text x="220" y="171" text-anchor="middle" font-size="12" font-style="italic" fill="#666">3rd party evgen</text>
-  <line x1="322" y1="155" x2="368" y2="155" stroke="#bf360c" stroke-width="1.6" marker-end="url(#arrow-orange)"/>
+  <line x1="222" y1="142" x2="258" y2="142" stroke="#5e35b1" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#arrow-purple)"/>
 
-  <rect x="370" y="130" width="200" height="50" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="470" y="160" text-anchor="middle" font-weight="bold">Datasets</text>
-  <line x1="572" y1="155" x2="618" y2="155" stroke="#bf360c" stroke-width="1.6" marker-end="url(#arrow-orange)"/>
+  <rect x="260" y="78" width="900" height="120" rx="12" fill="#fff8f0" stroke="#e65100" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="710" y="108" text-anchor="middle" font-weight="bold" font-size="16" fill="#bf360c">Physics Configuration System (PCS) Task Composition</text>
 
-  <rect x="620" y="130" width="200" height="50" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="720" y="160" text-anchor="middle" font-weight="bold">Production Configs</text>
-  <line x1="822" y1="155" x2="868" y2="155" stroke="#bf360c" stroke-width="1.6" marker-end="url(#arrow-orange)"/>
+  <rect x="300" y="130" width="150" height="50" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="375" y="151" text-anchor="middle" font-weight="bold" font-size="13">Tags (p · e · s · r)</text>
+  <text x="375" y="171" text-anchor="middle" font-weight="bold" font-size="13">3rd party evgen</text>
+  <line x1="452" y1="155" x2="488" y2="155" stroke="#bf360c" stroke-width="1.6" marker-end="url(#arrow-orange)"/>
 
-  <rect x="870" y="130" width="200" height="50" rx="6" fill="#ffd180" stroke="#bf360c" stroke-width="2" filter="url(#shadow)"/>
-  <text x="970" y="160" text-anchor="middle" font-weight="bold">Prod Tasks (draft)</text>
+  <rect x="490" y="130" width="150" height="50" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="565" y="160" text-anchor="middle" font-weight="bold">Datasets</text>
+  <line x1="642" y1="155" x2="678" y2="155" stroke="#bf360c" stroke-width="1.6" marker-end="url(#arrow-orange)"/>
+
+  <rect x="680" y="130" width="160" height="50" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="760" y="160" text-anchor="middle" font-weight="bold" font-size="14">Production Configs</text>
+  <line x1="842" y1="155" x2="878" y2="155" stroke="#bf360c" stroke-width="1.6" marker-end="url(#arrow-orange)"/>
+
+  <rect x="880" y="130" width="150" height="50" rx="6" fill="#ffd180" stroke="#bf360c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="955" y="160" text-anchor="middle" font-weight="bold">Prod Tasks</text>
 
   <!-- PCS Prod Tasks → Prepping (rightmost catalog column, straight down) -->
-  <line x1="970" y1="180" x2="970" y2="290" stroke="#bf360c" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="955" y1="180" x2="970" y2="290" stroke="#bf360c" stroke-width="2" marker-end="url(#arrow)"/>
   <text x="985" y="234" font-size="13" fill="#bf360c" font-style="italic">new task</text>
 
   <!-- ====== CATALOG ====== -->
@@ -85,7 +90,8 @@
   <text x="600" y="450" text-anchor="middle" font-size="14">AI monitoring · diagnostics</text>
   <text x="600" y="476" text-anchor="middle" font-size="14" fill="#555">Operator actions</text>
   <text x="600" y="496" text-anchor="middle" font-size="14">submit to panda</text>
-  <text x="600" y="514" text-anchor="middle" font-size="14">manage retries · alarm system</text>
+  <text x="600" y="514" text-anchor="middle" font-size="14">manage priorities</text>
+  <text x="600" y="532" text-anchor="middle" font-size="14">manage retries · alarm system</text>
 
   <!-- Prepping (RIGHT) -->
   <rect x="810" y="294" width="320" height="252" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2.5" filter="url(#shadow)"/>
@@ -103,13 +109,13 @@
 
   <!-- ====== DOWNSTREAM: PanDA ====== -->
   <rect x="40" y="620" width="320" height="90" rx="10" fill="#fff9c4" stroke="#f9a825" stroke-width="2" filter="url(#shadow)"/>
-  <text x="200" y="652" text-anchor="middle" font-weight="bold" font-size="17" fill="#9c6f00">PanDA — workflow execution</text>
-  <text x="200" y="678" text-anchor="middle" font-size="14" fill="#555">processes submitted tasks</text>
+  <text x="200" y="652" text-anchor="middle" font-weight="bold" font-size="17" fill="#9c6f00">Submission</text>
+  <text x="200" y="678" text-anchor="middle" font-size="14" fill="#555">PanDA · HTCondor</text>
   <text x="200" y="697" text-anchor="middle" font-size="14" fill="#555">produces Rucio data products</text>
 
   <!-- Current → PanDA: submit to panda -->
   <line x1="600" y1="546" x2="200" y2="618" stroke="#388e3c" stroke-width="2.4" marker-end="url(#arrow-freeze)"/>
-  <text x="380" y="585" text-anchor="middle" font-size="13" fill="#388e3c" font-style="italic">submit to panda</text>
+  <text x="380" y="585" text-anchor="middle" font-size="13" fill="#388e3c" font-style="italic">submit</text>
 
   <!-- ====== MONITORING · OBSERVABILITY · CONTROLS ====== -->
   <rect x="380" y="620" width="780" height="200" rx="10" fill="#fce4ec" stroke="#ad1457" stroke-width="1.8" stroke-dasharray="6 4"/>
@@ -149,5 +155,5 @@
   <text x="530" y="608" font-size="13" fill="#ad1457" font-style="italic">status feedback &amp; controls</text>
 
   <!-- Footer -->
-  <text x="600" y="846" text-anchor="middle" font-size="12" fill="#999">v0.5 · 2026-05-15 · accompanies docs/EPICPROD_TASK_CATALOG.md</text>
+  <text x="600" y="846" text-anchor="middle" font-size="12" fill="#999">v0.7 · 2026-05-17 · request intake variant · accompanies docs/EPICPROD_TASK_CATALOG.md</text>
 </svg>
