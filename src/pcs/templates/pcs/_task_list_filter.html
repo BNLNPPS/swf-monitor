@@ -6,6 +6,15 @@
 .pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
 
+/* DataTables 1.13.8 packs the up/down sort glyphs only 0.5em apart and
+   the arrow characters are ~0.5em wide, so they touch. Push the up arrow
+   a little further left to give the pair a clear horizontal gap. */
+.pcs-tlf-list thead th.sorting::before,
+.pcs-tlf-list thead th.sorting_asc::before,
+.pcs-tlf-list thead th.sorting_desc::before {
+  right: 1.4em !important;
+}
+
 /* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
 .pwg-edt            { background-color: #d0e8ff !important; }
 .pwg-inclusive      { background-color: #d4f4d4 !important; }
@@ -108,7 +117,7 @@ Context expected:
     <span id="pcs-tlf-requestor-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
-    <span class="pcs-tlf-label">Generator:</span>
+    <span class="pcs-tlf-label">evgen:</span>
     <a href="#" data-filter="evgen" data-value="" class="filter-link filter-active">All</a>
     <span id="pcs-tlf-evgen-opts"></span>
   </div>
