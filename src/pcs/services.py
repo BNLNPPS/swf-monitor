@@ -9,9 +9,12 @@ to its native shape (DRF Response, MCP error dict).
 """
 import csv as _csv
 import hashlib as _hashlib
+import logging as _logging
 import re as _re
 
 from django.db import transaction
+
+_log = _logging.getLogger(__name__)
 
 from .models import (
     Dataset, ProdConfig, ProdTask,
@@ -355,22 +358,44 @@ DEFAULT_DATASETS_CSV_PATH = (
 )
 
 
+_YESNO_RECOGNISED = {'', 'yes', 'y', 'no', 'n', 'true', 'false', '0', '1'}
+
+
 def _yesno(value):
-    """Parse Sakib's Yes/No into a boolean; everything else → False."""
-    return str(value or '').strip().lower() in ('yes', 'y', 'true', '1')
+    """Parse Sakib's Yes/No into a boolean; everything else -> False.
+
+    Logs a WARN when a non-empty value is unrecognised (e.g. 'Maybe'),
+    so silent drops surface in the log. NO-SILENT-FAILURES rule.
+    """
+    s = str(value or '').strip().lower()
+    if s and s not in _YESNO_RECOGNISED:
+        _log.warning('_yesno: unrecognised value %r treated as False', value)
+    return s in ('yes', 'y', 'true', '1')
 
 
 _GH_EIC_RELEASE_RE = _re.compile(r'https?://github\.com/eic/([^/]+)/releases\b', _re.I)
 _GH_OTHER_RELEASE_RE = _re.compile(r'https?://github\.com/([^/]+)/([^/]+)/releases\b', _re.I)
+_GL_EIC_RE   = _re.compile(r'https?://gitlab\.com/eic/([^?#]+?)/-/', _re.I)
+_GL_OTHER_RE = _re.compile(r'https?://gitlab\.com/([^?#]+?)/-/', _re.I)
+
+# Owner / group prefixes to strip from the extracted evgen identifier.
+# They're consistent organisational namespaces, not generator names, so
+# leaving them in just makes the filter values noisy and prevents merging
+# of variants. Add new prefixes here as new sources appear.
+_EVGEN_STRIP_PREFIXES = ('JeffersonLab/', 'mceg/')
 
 
 def _extract_evgen(value):
     """Derive a short evgen identifier from a Generator/Dataset Version cell.
 
-    - https://github.com/eic/<repo>/releases/...   -> '<repo>'
-    - https://github.com/<owner>/<repo>/releases/... (non-eic) -> '<owner>/<repo>'
-    - other URLs (gitlab etc.)                     -> the raw string, untouched
-    - plain strings ('starlight', 'Pythia 8', ...) -> unchanged
+    - github.com/eic/<repo>/releases/...            -> '<repo>'
+    - github.com/<owner>/<repo>/releases/... (non-eic) -> '<owner>/<repo>'
+    - gitlab.com/eic/<path>/-/...                   -> '<path>'  (collapses
+                                                       tag variants of the
+                                                       same project under
+                                                       one filter value)
+    - gitlab.com/<path>/-/... (non-eic)             -> '<path>'
+    - plain strings ('starlight', 'Pythia 8', ...)  -> unchanged
 
     Stored at ingest in overrides.csv_import.evgen so the catalog can
     filter and group by generator without re-parsing per render. The
@@ -379,19 +404,32 @@ def _extract_evgen(value):
     s = str(value or '').strip()
     if not s:
         return ''
+    out = s
     m = _GH_EIC_RELEASE_RE.match(s)
     if m:
-        return m.group(1)
-    m = _GH_OTHER_RELEASE_RE.match(s)
-    if m:
-        return f'{m.group(1)}/{m.group(2)}'
-    return s
+        out = m.group(1)
+    elif (m := _GH_OTHER_RELEASE_RE.match(s)):
+        out = f'{m.group(1)}/{m.group(2)}'
+    elif (m := _GL_EIC_RE.match(s)):
+        out = m.group(1)
+    elif (m := _GL_OTHER_RE.match(s)):
+        out = m.group(1)
+    for prefix in _EVGEN_STRIP_PREFIXES:
+        if out.startswith(prefix):
+            return out[len(prefix):]
+    return out
 
 
 def _parse_event_count(value):
     """Parse Sakib's event-count strings ('400k', '1M', '2.75M', plain
-    integers) into an absolute event count. Returns None for unparseable
-    or empty input."""
+    integers) into an absolute event count.
+
+    Returns None for empty input (legitimate); WARN-logs and returns
+    None for non-empty unparseable input. NO-SILENT-FAILURES rule —
+    the previous strict int() parse dropped every populated row in
+    the CSV without surfacing it anywhere.
+    """
+    raw = value
     s = str(value or '').strip().replace(',', '').replace(' ', '')
     if not s:
         return None
@@ -405,6 +443,7 @@ def _parse_event_count(value):
     try:
         return int(round(float(s) * mult))
     except (TypeError, ValueError):
+        _log.warning('_parse_event_count: unparseable value %r', raw)
         return None
 
 
@@ -491,9 +530,11 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             dataset_name = f'csv_import.{slug}'
             task_name = f'csv_import.{slug}'
 
+            raw_priority = (row.get('Priority') or '').strip()
             try:
-                priority = int((row.get('Priority') or '').strip())
+                priority = int(raw_priority) if raw_priority else None
             except (TypeError, ValueError):
+                _log.warning('csv_import row %d: unparseable Priority %r', i, raw_priority)
                 priority = None
             nevents = _parse_event_count(row.get('Number of Events'))
 

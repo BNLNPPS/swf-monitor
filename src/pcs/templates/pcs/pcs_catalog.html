@@ -18,12 +18,6 @@
     </form>
   </div>
 
-  {% if messages %}
-    {% for m in messages %}
-      <div class="alert alert-{{ m.tags|default:'info' }} py-1 mb-2">{{ m }}</div>
-    {% endfor %}
-  {% endif %}
-
   {% include "pcs/_task_list_filter.html" %}
 </div>
 {% endblock %}

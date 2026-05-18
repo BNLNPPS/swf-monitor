@@ -6,6 +6,7 @@ Tag list views use server-side DataTables via monitor_app._datatable_base.html.
 Read operations are public; create/edit/lock require login.
 """
 import json
+from functools import wraps
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
@@ -13,6 +14,33 @@ from django.urls import reverse
 from django.http import JsonResponse
 from django.contrib import messages
 from django.db.models import Count, Q
+
+
+# ---------------------------------------------------------------------------
+# Auth / method-guard decorators that flash instead of silently redirecting.
+# Project-wide NO-SILENT-FAILURES rule: an action-button click that hits a
+# guard must tell the user what happened, never just refresh the page.
+# ---------------------------------------------------------------------------
+
+def _login_required_flash(view):
+    """Like @login_required but flashes an explicit error before the redirect."""
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            messages.error(request, 'Sign in required for this action.')
+            return redirect(f"{reverse('login')}?next={request.get_full_path()}")
+        return view(request, *args, **kwargs)
+    return wrapped
+
+
+def _post_only_redirect(request, fallback_url, action_label='This action'):
+    """Helper used by POST-only views: flash a warning, redirect to fallback.
+
+    Use at the top of any POST-only handler instead of a bare
+    ``if request.method != 'POST': return redirect(...)`` block.
+    """
+    messages.warning(request, f'{action_label} only responds to POST submissions.')
+    return redirect(fallback_url)
 
 from monitor_app.utils import DataTablesProcessor, get_filter_params, format_datetime
 
@@ -111,7 +139,7 @@ def physics_categories_list(request):
     return render(request, 'pcs/physics_categories_list.html', {'categories': categories})
 
 
-@login_required
+@_login_required_flash
 def physics_category_create(request):
     if request.method == 'POST':
         form = PhysicsCategoryForm(request.POST)
@@ -249,7 +277,7 @@ def tag_detail(request, tag_type, tag_number):
     return render(request, 'pcs/tag_detail.html', context)
 
 
-@login_required
+@_login_required_flash
 def tag_create(request, tag_type):
     schema = TAG_SCHEMAS[tag_type]
 
@@ -429,10 +457,12 @@ def param_defs_api(request, tag_type):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
-@login_required
+@_login_required_flash
 def tag_delete(request, tag_type, tag_number):
     if request.method != 'POST':
-        return redirect('pcs:tag_compose', tag_type=tag_type)
+        return _post_only_redirect(
+            request, reverse('pcs:tag_compose', kwargs={'tag_type': tag_type}),
+            action_label='Tag delete')
     model = TAG_MODELS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
     if tag.status == 'locked':
@@ -447,12 +477,12 @@ def tag_delete(request, tag_type, tag_number):
     return redirect('pcs:tag_compose', tag_type=tag_type)
 
 
-@login_required
+@_login_required_flash
 def tag_lock(request, tag_type, tag_number):
     compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
     selected_url = f'{compose_url}?selected={tag_number}'
     if request.method != 'POST':
-        return redirect(selected_url)
+        return _post_only_redirect(request, selected_url, action_label='Tag lock')
     model = TAG_MODELS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
     if tag.created_by != request.user.username:
@@ -466,7 +496,7 @@ def tag_lock(request, tag_type, tag_number):
     return redirect(selected_url)
 
 
-@login_required
+@_login_required_flash
 def tag_edit(request, tag_type, tag_number):
     model = TAG_MODELS[tag_type]
     schema = TAG_SCHEMAS[tag_type]
@@ -684,7 +714,7 @@ def dataset_detail(request, pk):
     return render(request, 'pcs/dataset_detail.html', context)
 
 
-@login_required
+@_login_required_flash
 def dataset_create(request):
     if request.method == 'POST':
         form = DatasetForm(request.POST)
@@ -710,10 +740,12 @@ def dataset_create(request):
     return render(request, 'pcs/dataset_create.html', {'form': form})
 
 
-@login_required
+@_login_required_flash
 def dataset_add_block(request, pk):
     if request.method != 'POST':
-        return redirect('pcs:dataset_detail', pk=pk)
+        return _post_only_redirect(
+            request, reverse('pcs:dataset_detail', kwargs={'pk': pk}),
+            action_label='Add-block')
     dataset = get_object_or_404(Dataset, pk=pk)
     new_block_num = dataset.blocks + 1
     Dataset.objects.filter(dataset_name=dataset.dataset_name).update(blocks=new_block_num)
@@ -845,7 +877,7 @@ def prod_config_detail(request, pk):
     return render(request, 'pcs/prod_config_detail.html', {'config': config})
 
 
-@login_required
+@_login_required_flash
 def prod_config_create(request):
     if request.method == 'POST':
         form = ProdConfigForm(request.POST)
@@ -858,7 +890,7 @@ def prod_config_create(request):
     return render(request, 'pcs/prod_config_form.html', {'form': form})
 
 
-@login_required
+@_login_required_flash
 def prod_config_edit(request, pk):
     config = get_object_or_404(ProdConfig, pk=pk)
     if request.method == 'POST':
@@ -880,7 +912,7 @@ TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
 LIFECYCLE_KEYS = ('past', 'current', 'future')
 
 
-@login_required
+@_login_required_flash
 def pcs_catalog_csv_update(request):
     """POST handler for the 'Update from CSV' button on the catalog.
 
@@ -888,7 +920,9 @@ def pcs_catalog_csv_update(request):
     the catalog with a flash summary. POST-only.
     """
     if request.method != 'POST':
-        return redirect(reverse('pcs:pcs_catalog'))
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update from CSV')
     from .services import import_default_datasets_csv, ServiceError
     try:
         summary = import_default_datasets_csv(
@@ -908,8 +942,15 @@ def pcs_catalog_csv_update(request):
     return redirect(reverse('pcs:pcs_catalog'))
 
 
+@_login_required_flash
 def pcs_catalog(request):
-    """Production Task Catalog — lifecycle-grouped task listing."""
+    """Production Task Catalog — lifecycle-grouped task listing.
+
+    Authenticated-only: the page hosts action buttons (CSV refresh,
+    bulk actions, future per-task actions) whose POST handlers require
+    sign-in. Catching auth at the GET prevents the silent-fail trap
+    where an anonymous user sees buttons that quietly do nothing.
+    """
     filters = _parse_catalog_filters(request)
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
     if active_lifecycle not in LIFECYCLE_KEYS:
@@ -1122,10 +1163,12 @@ def prod_task_compose(request):
     return render(request, 'pcs/prod_task_compose.html', context)
 
 
-@login_required
+@_login_required_flash
 def prod_task_delete(request, pk):
     if request.method != 'POST':
-        return redirect('pcs:prod_task_detail', pk=pk)
+        return _post_only_redirect(
+            request, reverse('pcs:prod_task_detail', kwargs={'pk': pk}),
+            action_label='Task delete')
     task = get_object_or_404(ProdTask, pk=pk)
     if task.status != 'draft':
         messages.error(request, "Only draft tasks can be deleted.")

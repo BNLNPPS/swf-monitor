@@ -109,15 +109,6 @@ Context expected:
   {% endif %}
 {% endif %}
 
-<div class="pcs-tlf-legend small text-muted mb-3">
-  <strong>Legend:</strong>
-  <strong>New</strong>: new request &middot;
-  <strong>pTDR</strong>: possible pre-TDR use &middot;
-  <strong>ES</strong>: Early Science use &middot;
-  <strong>Other</strong>: other use (full text on a 3rd row when given) &middot;
-  <strong>Background</strong>: background-study dataset
-</div>
-
 <div id="pcs-tlf-bar" class="pcs-tlf-bar mb-2">
   <div class="pcs-tlf-bar-row d-flex align-items-center gap-2">
     <span class="pcs-tlf-label">Search:</span>
@@ -158,11 +149,22 @@ Context expected:
     <span id="pcs-tlf-nevents-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
-    <span class="pcs-tlf-label">Use:</span>
+    <span class="pcs-tlf-label">Flags:</span>
+    <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
     <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
-    <a href="#" data-toggle="early_science_use" class="filter-link">ES (<span data-count="early_science_use">0</span>)</a>
+    <a href="#" data-toggle="early_science_use" class="filter-link">early (<span data-count="early_science_use">0</span>)</a>
     <a href="#" data-toggle="other_use" class="filter-link">Other (<span data-count="other_use">0</span>)</a>
+    <a href="#" data-toggle="background" class="filter-link">Backgd (<span data-count="background">0</span>)</a>
   </div>
+</div>
+
+<div class="pcs-tlf-legend small text-muted mb-3 mt-2">
+  <strong>Legend (Flags):</strong>
+  <strong>New</strong>: new request &middot;
+  <strong>pTDR</strong>: possible pre-TDR use &middot;
+  <strong>early</strong>: early-science use &middot;
+  <strong>Other</strong>: other use (full text on a 3rd row when given) &middot;
+  <strong>Backgd</strong>: background-study dataset
 </div>
 
 <div class="dataTables_wrapper pcs-tlf-list-wrap table-responsive">
@@ -174,11 +176,11 @@ Context expected:
         <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
         <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
         <th data-sort="status" class="pcs-sort sorting">Status</th>
-        <th data-sort="nevents" class="pcs-sort sorting">N events (M)</th>
-        <th data-sort="background" class="pcs-sort sorting">Background</th>
+        <th data-sort="nevents" class="pcs-sort sorting">Nev (M)</th>
+        <th data-sort="background" class="pcs-sort sorting">Backgd</th>
         <th data-sort="new_request" class="pcs-sort sorting">New</th>
         <th data-sort="pre_tdr_use" class="pcs-sort sorting">pTDR</th>
-        <th data-sort="early_science_use" class="pcs-sort sorting">ES</th>
+        <th data-sort="early_science_use" class="pcs-sort sorting">early</th>
         <th data-sort="priority" class="pcs-sort sorting">Priority</th>
       </tr>
     </thead>
@@ -193,6 +195,8 @@ Context expected:
           data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
           data-early-science="{% if t.early_science_use %}1{% else %}0{% endif %}"
           data-other="{% if t.other_use %}1{% else %}0{% endif %}"
+          data-new-request="{% if t.new_request %}1{% else %}0{% endif %}"
+          data-background="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}"
           data-priority="{{ t.priority|default:'' }}"
           data-nevents="{{ nev|millions }}"
           data-evgen="{{ evgen }}"
@@ -262,11 +266,13 @@ Context expected:
      so the catalog stays bookmarkable. */
 
   const STR = ['status','requestor','evgen','submission_path','priority','nevents'];
-  const BOOL = ['pre_tdr_use','early_science_use','other_use'];
+  const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background'];
   const DS = { status:'status', requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
                priority:'priority', nevents:'nevents' };
-  const BD = { pre_tdr_use:'preTdr', early_science_use:'earlyScience', other_use:'other' };
+  const BD = { new_request:'newRequest', pre_tdr_use:'preTdr',
+               early_science_use:'earlyScience', other_use:'other',
+               background:'background' };
 
   const tableEl = document.querySelector('table.pcs-tlf-list');
   const tbodyEl = tableEl ? tableEl.tBodies[0] : null;
@@ -283,9 +289,11 @@ Context expected:
     submission_path: initial.get('submission_path') || '',
     priority: initial.get('priority') || '',
     nevents: initial.get('nevents') || '',
+    new_request: initial.get('new_request') === '1',
     pre_tdr_use: initial.get('pre_tdr_use') === '1',
     early_science_use: initial.get('early_science_use') === '1',
     other_use: initial.get('other_use') === '1',
+    background: initial.get('background') === '1',
   };
 
   function rowMatches(tr, skip) {
@@ -313,7 +321,7 @@ Context expected:
     // filters, bucketed by the row's own value of that filter. Boolean
     // filters count rows that would still match if that boolean were ON.
     const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{}, priority:{}, nevents:{} };
-    const boolCounts = { pre_tdr_use:0, early_science_use:0, other_use:0 };
+    const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
         if (rowMatches(tr, k)) {
@@ -356,7 +364,7 @@ Context expected:
     const u = new URL(window.location.href);
     const p = u.searchParams;
     ['q','status','requestor','evgen','submission_path','priority','nevents',
-     'pre_tdr_use','early_science_use','other_use'].forEach(k => p.delete(k));
+     'new_request','pre_tdr_use','early_science_use','other_use','background'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
     for (const k of BOOL) if (state[k]) p.set(k, '1');
