@@ -6,7 +6,21 @@
   <div class="d-flex align-items-center mb-3">
     <h2 class="me-3 mb-0">Production Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline-primary"
+              title="Re-import eic/epic-prod/docs/_data/datasets.csv into the catalog"
+              onclick="return confirm('Re-import the default-datasets CSV into the catalog?');">
+        Update from CSV
+      </button>
+    </form>
   </div>
+
+  {% if messages %}
+    {% for m in messages %}
+      <div class="alert alert-{{ m.tags|default:'info' }} py-1 mb-2">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
 
   {% include "pcs/_task_list_filter.html" %}
 </div>

@@ -880,6 +880,34 @@ TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
 LIFECYCLE_KEYS = ('past', 'current', 'future')
 
 
+@login_required
+def pcs_catalog_csv_update(request):
+    """POST handler for the 'Update from CSV' button on the catalog.
+
+    Runs the default-datasets CSV import service and redirects back to
+    the catalog with a flash summary. POST-only.
+    """
+    if request.method != 'POST':
+        return redirect(reverse('pcs:pcs_catalog'))
+    from .services import import_default_datasets_csv, ServiceError
+    try:
+        summary = import_default_datasets_csv(
+            created_by=getattr(request.user, 'username', '') or 'csv_import',
+        )
+    except (ServiceError, FileNotFoundError, OSError) as e:
+        messages.error(request, f'CSV import failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog'))
+    msg = (f'CSV import: {summary["created"]} new, '
+           f'{summary["updated"]} updated, '
+           f'{len(summary["errors"])} errors '
+           f'(of {summary["rows"]} rows)')
+    if summary['errors']:
+        messages.warning(request, msg)
+    else:
+        messages.success(request, msg)
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
 def pcs_catalog(request):
     """Production Task Catalog — lifecycle-grouped task listing."""
     filters = _parse_catalog_filters(request)

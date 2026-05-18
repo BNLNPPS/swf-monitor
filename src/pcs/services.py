@@ -7,6 +7,9 @@ take plain Python types (no HTTP request, no MCP context) and return
 model instances or raise ServiceError. The caller translates errors
 to its native shape (DRF Response, MCP error dict).
 """
+import csv as _csv
+import hashlib as _hashlib
+
 from django.db import transaction
 
 from .models import (
@@ -340,6 +343,170 @@ def campaign_clone_to_new(source, *, name, created_by,
 # ---------------------------------------------------------------------------
 # Submission state changes
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Default-datasets CSV import (Sakib's epic-prod docs/_data/datasets.csv)
+# ---------------------------------------------------------------------------
+
+# Local path to the cloned epic-prod CSV on swf-testbed.
+DEFAULT_DATASETS_CSV_PATH = (
+    '/data/wenauseic/github/epic-prod/docs/_data/datasets.csv'
+)
+
+
+def _yesno(value):
+    """Parse Sakib's Yes/No into a boolean; everything else → False."""
+    return str(value or '').strip().lower() in ('yes', 'y', 'true', '1')
+
+
+def _csvimport_slug(dataset_path, gen_version):
+    """Short stable slug derived from the (path, generator) idempotency key."""
+    key = f'{dataset_path}|{gen_version}'.encode()
+    return _hashlib.sha1(key).hexdigest()[:12]
+
+
+def _ensure_csvimport_anchors():
+    """Resolve the placeholder Dataset-FK targets used by CSV-imported rows.
+
+    Returns ``(physics_tag, evgen_tag, simu_tag, reco_tag, prod_config,
+    campaign)``. All must already exist; this is a lookup, not a
+    creator. ``PROTECT`` FKs from Dataset to Tag and from ProdTask to
+    ProdConfig mean we cannot synthesize ad hoc — we pin to whatever's
+    already locked in the DB. The prod team can replace these per-task
+    when they bind a real Dataset/Config to a CSV-imported task.
+    """
+    def first_locked(model, label):
+        t = model.objects.filter(status='locked').order_by('tag_number').first()
+        if not t:
+            raise ServiceError(f'No locked {label} tag available for CSV import')
+        return t
+
+    physics = first_locked(PhysicsTag, 'physics')
+    evgen = first_locked(EvgenTag, 'evgen')
+    simu = first_locked(SimuTag, 'simu')
+    reco = first_locked(RecoTag, 'reco')
+
+    cfg = (ProdConfig.objects.filter(name__icontains='26.02.0 Standard').first()
+           or ProdConfig.objects.first())
+    if not cfg:
+        raise ServiceError('No ProdConfig available for CSV import anchor')
+
+    campaign = Campaign.objects.filter(lifecycle='current').order_by('-updated_at').first()
+    if not campaign:
+        raise ServiceError('No current Campaign for CSV import')
+
+    return physics, evgen, simu, reco, cfg, campaign
+
+
+def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
+    """Import Sakib's epic-prod datasets.csv into the catalog.
+
+    Each CSV row becomes (idempotently):
+      - one Dataset (placeholder tags + ``26.02.0`` campaign labels,
+        full row preserved in ``metadata['csv_import']``),
+      - one ProdTask (status='csv_import', linked to the Dataset, the
+        anchor ProdConfig, and the current Campaign).
+
+    Idempotency key per row: ``(Dataset Path, Generator/Dataset Version)``.
+    Re-running updates the existing rows in place.
+
+    Returns dict::
+
+        {'rows': int, 'created': int, 'updated': int, 'errors': [str, ...]}
+    """
+    path = csv_path or DEFAULT_DATASETS_CSV_PATH
+    physics, evgen, simu, reco, cfg, campaign = _ensure_csvimport_anchors()
+
+    with open(path, newline='') as f:
+        rows = list(_csv.DictReader(f))
+
+    summary = {'rows': len(rows), 'created': 0, 'updated': 0, 'errors': []}
+
+    with transaction.atomic():
+        for i, row in enumerate(rows, 1):
+            ds_path = (row.get('Dataset Path') or '').strip()
+            gen_ver = (row.get('Generator/Dataset Version') or '').strip()
+            if not ds_path and not gen_ver:
+                summary['errors'].append(f'row {i}: empty path and gen_version, skipped')
+                continue
+
+            slug = _csvimport_slug(ds_path, gen_ver)
+            dataset_name = f'csv_import.{slug}'
+            task_name = f'csv_import.{slug}'
+
+            try:
+                priority = int((row.get('Priority') or '').strip())
+            except (TypeError, ValueError):
+                priority = None
+            try:
+                nevents = int((row.get('Number of Events') or '').strip())
+            except (TypeError, ValueError):
+                nevents = None
+
+            metadata = {
+                'stage': 'evgen',
+                'source': {'kind': 'csv_manifest', 'location': ds_path},
+                'csv_import': {k: (v or '').strip() for k, v in row.items()},
+            }
+            if gen_ver:
+                metadata['source']['gen_version'] = gen_ver
+
+            ds = Dataset.objects.filter(dataset_name=dataset_name, block_num=1).first()
+            if ds:
+                ds.description = (row.get('Description') or '').strip()
+                ds.metadata = metadata
+                ds.save()
+                ds_created = False
+            else:
+                ds = Dataset(
+                    dataset_name=dataset_name,
+                    scope='group.EIC',
+                    detector_version='26.02.0',
+                    detector_config='epic_craterlake',
+                    physics_tag=physics, evgen_tag=evgen,
+                    simu_tag=simu, reco_tag=reco,
+                    description=(row.get('Description') or '').strip(),
+                    metadata=metadata,
+                    created_by=created_by,
+                )
+                ds.save()
+                ds_created = True
+
+            task_defaults = dict(
+                description=(row.get('Description') or '').strip(),
+                status='csv_import',
+                dataset=ds,
+                prod_config=cfg,
+                campaign=campaign,
+                requestor=(row.get('DSC or PWG') or '').strip(),
+                priority=priority,
+                pre_tdr_use=_yesno(row.get('Pre-TDR Use')),
+                early_science_use=_yesno(row.get('Early Science Use')),
+                other_use=_yesno(row.get('Other Use')),
+                new_request=_yesno(row.get('New Request')),
+                overrides={
+                    'csv_import': {
+                        'background': (row.get('Background') or '').strip(),
+                        'nevents': nevents,
+                        'issue_url': (row.get('Issue') or '').strip(),
+                        'gen_version': gen_ver,
+                    },
+                },
+                created_by=created_by,
+            )
+
+            existing = ProdTask.objects.filter(name=task_name).first()
+            if existing:
+                for k, v in task_defaults.items():
+                    setattr(existing, k, v)
+                existing.save()
+                summary['updated'] += 1
+            else:
+                ProdTask.objects.create(name=task_name, **task_defaults)
+                summary['created'] += 1
+
+    return summary
+
 
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     """

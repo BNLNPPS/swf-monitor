@@ -9,6 +9,7 @@ urlpatterns = [
 
     # Catalog (campaign-aware production task catalog)
     path('catalog/', views.pcs_catalog, name='pcs_catalog'),
+    path('catalog/csv-update/', views.pcs_catalog_csv_update, name='pcs_catalog_csv_update'),
 
     # Physics Categories
     path('categories/', views.physics_categories_list, name='physics_categories_list'),

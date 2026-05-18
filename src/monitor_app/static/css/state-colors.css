@@ -249,3 +249,10 @@
 /* STF file lifecycle: registered/processing/processed/done/failed —
    the first two need fills (others already covered). */
 .processing_fill { color:black; background-color:#C7E9A9 !important; }
+
+/* PCS ProdTask statuses not in the BigMon base palette.
+   draft: new/under-construction → light blue (new family).
+   csv_import: imported from external CSV, not yet processed by the
+   prod team → grey (inert, closed family). */
+.draft_fill { color:black; background-color:#e6f0f6 !important; }
+.csv_import_fill { color:black; background-color:#bdbdbd !important; }
