@@ -701,6 +701,35 @@ def _parse_past_index(text):
         yield done
 
 
+_PAST_BEAM_RE = _re.compile(r'(\d+x\d+)')
+_PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:to\d+)?)')
+_PAST_PHYS_TOP = ('DIS', 'SIDIS', 'DDIS', 'EXCLUSIVE', 'BACKGROUNDS')
+
+
+def _extract_past_filters(did):
+    """Pull faceted-filter fields from a past-output DID.
+
+    Returns {detector, beam, physics, q2}. Empty string for any
+    dimension the path doesn't carry — those rows still show under
+    each filter's 'All' but not under any specific value.
+    """
+    parts = did.split(':', 1)
+    rest_str = (parts[1] if len(parts) == 2 else did).lstrip('/')
+    segs = rest_str.split('/')
+    detector = segs[2] if len(segs) > 2 else ''
+    tail = segs[3:]
+    tail_str = '/'.join(tail)
+    beam_m = _PAST_BEAM_RE.search(tail_str)
+    q2_m   = _PAST_Q2_RE.search(tail_str)
+    physics = next((p for p in _PAST_PHYS_TOP if p in tail), '')
+    return {
+        'detector': detector,
+        'beam':     beam_m.group(1) if beam_m else '',
+        'physics':  physics,
+        'q2':       q2_m.group(1) if q2_m else '',
+    }
+
+
 def _decompose_past_did(did):
     """Break an epic-prod DID into the path-level fields we filter on.
 
@@ -809,6 +838,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                             'rses': block['rses'],
                             'complete': block['complete'],
                             'path': decomposed,
+                            'filters': _extract_past_filters(epic_did),
                             'index_path': index_path,
                         },
                     }

@@ -11,6 +11,9 @@
 .pcs-pdl-summary { margin-bottom: 0.4em; }
 .pcs-pdl-list td, .pcs-pdl-list th { vertical-align: top; }
 .pcs-pdl-rse-bad { color: #dc3545; }
+.pcs-pdl-filterbar a.filter-link { margin-right: 0.6em; color: #007bff; text-decoration: none; }
+.pcs-pdl-filterbar a.filter-link:hover { text-decoration: underline; }
+.pcs-pdl-filterbar a.filter-link.filter-active { font-weight: bold; text-decoration: underline; color: #0056b3; }
 </style>
 
 <div class="container-fluid mt-3 pcs-catalog">
@@ -59,6 +62,29 @@
   </div>
 
   {% if active_release %}
+    <div id="pcs-pdl-filterbar" class="pcs-pdl-filterbar small mb-2">
+      <div class="mb-1">
+        <span class="pcs-pdl-section-label">Detector:</span>
+        <a href="#" data-filter="detector" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-detector-opts"></span>
+      </div>
+      <div class="mb-1">
+        <span class="pcs-pdl-section-label">Beam:</span>
+        <a href="#" data-filter="beam" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-beam-opts"></span>
+      </div>
+      <div class="mb-1">
+        <span class="pcs-pdl-section-label">Physics:</span>
+        <a href="#" data-filter="physics" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-physics-opts"></span>
+      </div>
+      <div>
+        <span class="pcs-pdl-section-label">Q&sup2;:</span>
+        <a href="#" data-filter="q2" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-q2-opts"></span>
+      </div>
+    </div>
+
     <div class="pcs-pdl-summary">
       <strong>{% if active_release == 'all' %}All 2026{% else %}{{ active_release }}{% endif %}{% if active_stage %} &mdash; {% if active_stage == 'FULL' %}Simu{% else %}Reco{% endif %} only{% endif %}</strong>
       &middot; {{ selected_campaign_count }} campaign{{ selected_campaign_count|pluralize }}
@@ -80,7 +106,11 @@
       <tbody>
       {% for t in tasks %}
         {% with output=t.overrides.past_output ds_did=t.dataset.metadata.source.location %}
-        <tr>
+        <tr class="pcs-pdl-row"
+            data-detector="{{ output.filters.detector|default:'' }}"
+            data-beam="{{ output.filters.beam|default:'' }}"
+            data-physics="{{ output.filters.physics|default:'' }}"
+            data-q2="{{ output.filters.q2|default:'' }}">
           <td><input type="checkbox" class="pcs-pdl-cb" name="task" value="{{ t.pk }}"></td>
           <td class="small text-muted">{{ forloop.counter }}</td>
           <td class="small">
@@ -111,9 +141,89 @@
 <script>
 (function() {
   const all = document.getElementById('pcs-pdl-selectall');
-  if (!all) return;
   const cbs = document.querySelectorAll('.pcs-pdl-cb');
-  all.addEventListener('change', () => cbs.forEach(c => c.checked = all.checked));
+  if (all) all.addEventListener('change', () => cbs.forEach(c => c.checked = all.checked));
+
+  /* Faceted filter — Detector / Beam / Physics / Q2. Same panda-jobs
+     convention as the Current tab's filter bar: per-filter horizontal
+     value (count) links, counts faceted on the other active filters. */
+  const FILTERS = ['detector','beam','physics','q2'];
+  const DS_KEY  = { detector:'detector', beam:'beam', physics:'physics', q2:'q2' };
+  const rows    = Array.from(document.querySelectorAll('tr.pcs-pdl-row'));
+  if (!rows.length) return;
+
+  const initial = new URL(window.location.href).searchParams;
+  const state = Object.fromEntries(FILTERS.map(k => [k, initial.get(k) || '']));
+
+  function rowMatches(tr, skip) {
+    for (const k of FILTERS) {
+      if (k === skip) continue;
+      if (state[k] && tr.dataset[DS_KEY[k]] !== state[k]) return false;
+    }
+    return true;
+  }
+
+  function escape(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function renderBar() {
+    const counts = Object.fromEntries(FILTERS.map(k => [k, {}]));
+    for (const tr of rows) {
+      for (const k of FILTERS) {
+        if (rowMatches(tr, k)) {
+          const v = tr.dataset[DS_KEY[k]];
+          if (v) counts[k][v] = (counts[k][v] || 0) + 1;
+        }
+      }
+    }
+    for (const k of FILTERS) {
+      const span = document.getElementById('pcs-pdl-' + k + '-opts');
+      if (!span) continue;
+      const entries = Object.entries(counts[k]).sort((a, b) => {
+        const na = parseFloat(a[0]), nb = parseFloat(b[0]);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return a[0].localeCompare(b[0]);
+      });
+      span.innerHTML = entries.map(([v, n]) => {
+        const active = state[k] === v ? ' filter-active' : '';
+        return `<a href="#" data-filter="${k}" data-value="${escape(v)}"`
+             + ` class="filter-link${active}">${escape(v)} (${n})</a>`;
+      }).join('');
+      const allLink = document.querySelector(
+        `#pcs-pdl-filterbar .filter-link[data-filter="${k}"][data-value=""]`);
+      if (allLink) allLink.classList.toggle('filter-active', !state[k]);
+    }
+  }
+
+  function syncUrl() {
+    const u = new URL(window.location.href);
+    const p = u.searchParams;
+    FILTERS.forEach(k => p.delete(k));
+    for (const k of FILTERS) if (state[k]) p.set(k, state[k]);
+    history.replaceState(null, '', u.toString());
+  }
+
+  function applyFilters() {
+    for (const tr of rows) {
+      tr.style.display = rowMatches(tr, null) ? '' : 'none';
+    }
+    renderBar();
+    syncUrl();
+  }
+
+  document.getElementById('pcs-pdl-filterbar')?.addEventListener('click', e => {
+    const a = e.target.closest('a.filter-link');
+    if (!a) return;
+    e.preventDefault();
+    const k = a.dataset.filter;
+    const v = a.dataset.value || '';
+    state[k] = (state[k] === v && v !== '') ? '' : v;
+    applyFilters();
+  });
+
+  applyFilters();
 })();
 </script>
 {% endblock %}
