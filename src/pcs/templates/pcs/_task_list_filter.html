@@ -117,6 +117,36 @@ Context expected:
     <span id="pcs-tlf-nevents-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Geometry:</span>
+    <a href="#" data-filter="detector" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-detector-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Beam:</span>
+    <a href="#" data-filter="beam" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-beam-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Physics:</span>
+    <a href="#" data-filter="physics" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-physics-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Q&sup2;:</span>
+    <a href="#" data-filter="q2" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-q2-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Species:</span>
+    <a href="#" data-filter="species" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-species-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Energy:</span>
+    <a href="#" data-filter="energy" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-energy-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Flags:</span>
     <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
     <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
@@ -154,7 +184,7 @@ Context expected:
     </thead>
     <tbody>
       {% for t in tasks %}
-      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents other_text=t.overrides.csv_import.other_use_text|default:'' %}
+      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents other_text=t.overrides.csv_import.other_use_text|default:'' path_filters=t.overrides.csv_import.filters %}
       <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
           data-task-id="{{ t.pk }}"
           data-status="{{ t.status|default:'' }}"
@@ -168,6 +198,12 @@ Context expected:
           data-priority="{{ t.priority|default:'' }}"
           data-nevents="{{ nev|millions }}"
           data-evgen="{{ evgen }}"
+          data-detector="{{ path_filters.detector|default:'' }}"
+          data-beam="{{ path_filters.beam|default:'' }}"
+          data-physics="{{ path_filters.physics|default:'' }}"
+          data-q2="{{ path_filters.q2|default:'' }}"
+          data-species="{{ path_filters.species|default:'' }}"
+          data-energy="{{ path_filters.energy|default:'' }}"
           data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
         <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
@@ -229,14 +265,25 @@ Context expected:
      state of the other filters. Initial state comes from URL query params
      so the catalog stays bookmarkable. */
 
-  const STR = ['status','requestor','evgen','submission_path','priority','nevents'];
+  const STR = ['status','requestor','evgen','submission_path','priority','nevents',
+               'detector','beam','physics','q2','species','energy'];
   const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background'];
   const DS = { status:'status', requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
-               priority:'priority', nevents:'nevents' };
+               priority:'priority', nevents:'nevents',
+               detector:'detector', beam:'beam', physics:'physics',
+               q2:'q2', species:'species', energy:'energy' };
   const BD = { new_request:'newRequest', pre_tdr_use:'preTdr',
                early_science_use:'earlyScience', other_use:'other',
                background:'background' };
+
+  // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
+  function energyMeV(s) {
+    const m = String(s).match(/^([\d.]+)\s*(eV|keV|MeV|GeV|TeV)$/i);
+    if (!m) return null;
+    const mult = {ev:1e-6, kev:1e-3, mev:1, gev:1e3, tev:1e6}[m[2].toLowerCase()];
+    return parseFloat(m[1]) * mult;
+  }
 
   const tableEl = document.querySelector('table.pcs-tlf-list');
   const tbodyEl = tableEl ? tableEl.tBodies[0] : null;
@@ -253,6 +300,12 @@ Context expected:
     submission_path: initial.get('submission_path') || '',
     priority: initial.get('priority') || '',
     nevents: initial.get('nevents') || '',
+    detector: initial.get('detector') || '',
+    beam: initial.get('beam') || '',
+    physics: initial.get('physics') || '',
+    q2: initial.get('q2') || '',
+    species: initial.get('species') || '',
+    energy: initial.get('energy') || '',
     new_request: initial.get('new_request') === '1',
     pre_tdr_use: initial.get('pre_tdr_use') === '1',
     early_science_use: initial.get('early_science_use') === '1',
@@ -284,7 +337,9 @@ Context expected:
     // Faceted counts: for each str filter, count rows that match all OTHER
     // filters, bucketed by the row's own value of that filter. Boolean
     // filters count rows that would still match if that boolean were ON.
-    const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{}, priority:{}, nevents:{} };
+    const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{},
+                        priority:{}, nevents:{},
+                        detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
     const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
@@ -302,6 +357,10 @@ Context expected:
       const span = document.getElementById('pcs-tlf-' + k + '-opts');
       if (!span) continue;
       const entries = Object.entries(strCounts[k]).sort((a,b) => {
+        if (k === 'energy') {
+          const ea = energyMeV(a[0]), eb = energyMeV(b[0]);
+          if (ea !== null && eb !== null) return ea - eb;
+        }
         // Numeric sort when both values parse as numbers, otherwise alphabetic.
         const na = parseFloat(a[0]), nb = parseFloat(b[0]);
         if (!isNaN(na) && !isNaN(nb)) return na - nb;
@@ -328,6 +387,7 @@ Context expected:
     const u = new URL(window.location.href);
     const p = u.searchParams;
     ['q','status','requestor','evgen','submission_path','priority','nevents',
+     'detector','beam','physics','q2','species','energy',
      'new_request','pre_tdr_use','early_science_use','other_use','background'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);

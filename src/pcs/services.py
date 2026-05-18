@@ -587,6 +587,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                         'gen_version': gen_ver,
                         'evgen': _extract_evgen(gen_ver),
                         'other_use_text': (row.get('Other Use') or '').strip(),
+                        'filters': _extract_csv_filters(ds_path, ds.detector_config),
                     },
                 },
                 created_by=created_by,
@@ -623,7 +624,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
 EPIC_PROD_PATH = '/data/wenauseic/github/epic-prod'
 PAST_CAMPAIGN_STAGES = ('FULL', 'RECO')
-PAST_CAMPAIGN_YEAR_PREFIX = '26.'   # 2026 campaigns only this pass
+PAST_CAMPAIGN_YEAR_PREFIXES = ('25.', '26.')   # 2025 + 2026 campaigns
 
 _PAST_DID_RE   = _re.compile(r'^===\s*(epic:/\S+)\s*===\s*$')
 _PAST_RSE_RE   = _re.compile(r'RSE:\s*(\S+)\s+Files:\s*(\d+)/(\d+)\s*\(([^)]+)\)')
@@ -706,45 +707,74 @@ _PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:to\d+)?)')
 _PAST_PHYS_TOP = ('DIS', 'SIDIS', 'DDIS', 'EXCLUSIVE', 'SINGLE', 'BACKGROUNDS')
 
 
-def _extract_past_filters(did):
-    """Pull faceted-filter fields from a past-output DID.
+_PAST_ENERGY_BARE_RE = _re.compile(
+    r'\b(\d+(?:\.\d+)?(?:eV|keV|MeV|GeV|TeV))\b', _re.I)
 
-    Returns {detector, beam, physics, q2, species, energy}. Empty
-    string for any dimension the path doesn't carry — those rows
-    still show under each filter's 'All' but not under any specific
-    value. `species` and `energy` are only populated for SINGLE
-    physics rows (path shape /SINGLE/<species>/<energy>/<rest>).
+
+def _extract_path_filters(segments):
+    """Extract {beam, physics, q2, species, energy} from a list of path
+    segments. Shared by the past-output DID and the current-tab CSV
+    input-dataset path so both filter bars speak the same vocabulary.
     """
+    seg_str = '/'.join(segments)
+    beam_m = _PAST_BEAM_RE.search(seg_str)
+    q2_m   = _PAST_Q2_RE.search(seg_str)
+    physics = next((p for p in _PAST_PHYS_TOP if p in segments), '')
+    species, energy = '', ''
+    if physics == 'SINGLE':
+        i = segments.index('SINGLE')
+        if len(segments) > i + 1:
+            species = segments[i + 1]
+        if len(segments) > i + 2:
+            energy = segments[i + 2]
+    if not energy:
+        em = _PAST_ENERGY_BARE_RE.search(seg_str)
+        if em:
+            energy = em.group(1)
+    # Fold DIS subtype (NC / CC) directly into physics so the Physics
+    # filter shows NC and CC as siblings of DIS, not a separate row.
+    dis_type = next((t for t in ('NC', 'CC') if t in segments), '')
+    if physics == 'DIS' and dis_type:
+        physics = dis_type
+    return {
+        'beam':    beam_m.group(1) if beam_m else '',
+        'physics': physics,
+        'q2':      q2_m.group(1) if q2_m else '',
+        'species': species,
+        'energy':  energy,
+    }
+
+
+def _extract_past_filters(did):
+    """Past-output filter fields: detector (from path segment 3) plus
+    the shared {beam, physics, q2, species, energy}. Empty string for
+    any dimension the path doesn't carry."""
     parts = did.split(':', 1)
     rest_str = (parts[1] if len(parts) == 2 else did).lstrip('/')
     segs = rest_str.split('/')
     detector = segs[2] if len(segs) > 2 else ''
-    tail = segs[3:]
-    tail_str = '/'.join(tail)
-    beam_m = _PAST_BEAM_RE.search(tail_str)
-    q2_m   = _PAST_Q2_RE.search(tail_str)
-    physics = next((p for p in _PAST_PHYS_TOP if p in tail), '')
-    species, energy = '', ''
-    if physics == 'SINGLE':
-        i = tail.index('SINGLE')
-        if len(tail) > i + 1:
-            species = tail[i + 1]
-        if len(tail) > i + 2:
-            energy = tail[i + 2]
-    # Fold DIS subtype (NC / CC) directly into physics so the Physics
-    # filter shows NC and CC as siblings of DIS rather than a separate
-    # NC/CC row. Plain-DIS rows (no subtype tagged) stay as 'DIS'.
-    dis_type = next((t for t in ('NC', 'CC') if t in tail), '')
-    if physics == 'DIS' and dis_type:
-        physics = dis_type
-    return {
-        'detector': detector,
-        'beam':     beam_m.group(1) if beam_m else '',
-        'physics':  physics,
-        'q2':       q2_m.group(1) if q2_m else '',
-        'species':  species,
-        'energy':   energy,
-    }
+    out = _extract_path_filters(segs[3:])
+    out['detector'] = detector
+    return out
+
+
+def _extract_csv_filters(path, detector_config):
+    """Current-tab filter fields from a CSV input dataset path.
+
+    Path shape: /volatile/eic/EPIC/EVGEN/<physics>/<gen>/.../<beam>/...
+    Geometry comes from the dataset's detector_config field (not the
+    path); everything else from the path tail after the EVGEN prefix.
+    """
+    segs = (path or '').lstrip('/').split('/')
+    # Drop the fixed prefix volatile/eic/EPIC/EVGEN when present, but
+    # be tolerant if a different shape appears later.
+    if len(segs) >= 4 and segs[:4] == ['volatile', 'eic', 'EPIC', 'EVGEN']:
+        tail = segs[4:]
+    else:
+        tail = segs
+    out = _extract_path_filters(tail)
+    out['detector'] = detector_config or ''
+    return out
 
 
 def _decompose_past_did(did):
@@ -808,7 +838,8 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
             continue
         versions_by_stage[stage] = [
             e['text'] for e in entries
-            if isinstance(e, dict) and e.get('text', '').startswith(PAST_CAMPAIGN_YEAR_PREFIX)
+            if isinstance(e, dict)
+            and any(e.get('text', '').startswith(p) for p in PAST_CAMPAIGN_YEAR_PREFIXES)
             and e['text'] != 'main'
         ]
 

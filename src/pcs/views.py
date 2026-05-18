@@ -1002,32 +1002,52 @@ def pcs_catalog(request):
          'campaigns': campaigns_by_lifecycle['future']},
     ]
 
-    # Past lifecycle: per-release view of output datasets. Each release is
-    # one SW version (e.g. 26.04.1) covering up to two stages (FULL=Simu,
-    # RECO=Reco). ?release=<v> picks one release (default: most recent);
-    # ?release=all spans all 2026. ?stage=FULL|RECO filters within the
-    # chosen release.
+    # Past lifecycle: per-release view of output datasets. Each release
+    # is one SW version (e.g. 26.04.1) covering up to two stages
+    # (FULL=Simu, RECO=Reco). ?release=<v> picks one release; default is
+    # the most recent. ?release=all spans every past release; release=
+    # all_2025 / all_2026 spans that year. ?stage=FULL|RECO filters
+    # within the chosen release set.
     if active_lifecycle == 'past':
         past_campaigns = list(campaigns_by_lifecycle['past'])
         # Time flows left to right; releases ordered ASC.
         release_versions = sorted(
             {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
         )
+        def _version_year(v):
+            head = v.split('.', 1)[0]
+            return ('20' + head) if head.isdigit() and len(head) == 2 else ''
+        # {'2025': [versions...], '2026': [...]} in ASC release order.
+        releases_by_year = {}
+        for v in release_versions:
+            yr = _version_year(v)
+            if yr:
+                releases_by_year.setdefault(yr, []).append(v)
+        years_sorted = sorted(releases_by_year.keys())
 
         requested_release = (request.GET.get('release') or '').strip()
         if requested_release == 'all':
             active_release = 'all'
+        elif (requested_release.startswith('all_')
+              and requested_release[4:] in years_sorted):
+            active_release = requested_release
         elif requested_release in release_versions:
             active_release = requested_release
         else:
-            # Default landing = most recent release (last in ASC order).
+            # Default landing = most recent release (last in ASC).
             active_release = release_versions[-1] if release_versions else ''
 
         requested_stage = (request.GET.get('stage') or '').strip().upper()
         active_stage = requested_stage if requested_stage in ('FULL', 'RECO') else ''
 
         def in_release(c):
-            return active_release == 'all' or c.name.endswith('/' + active_release)
+            if active_release == 'all':
+                return True
+            if active_release.startswith('all_'):
+                year = active_release[4:]
+                versions = releases_by_year.get(year, [])
+                return any(c.name.endswith('/' + v) for v in versions)
+            return c.name.endswith('/' + active_release)
         release_campaigns = [c for c in past_campaigns if in_release(c)]
 
         def in_stage(c, s):
@@ -1063,11 +1083,19 @@ def pcs_catalog(request):
         agg_size = sum((c.data or {}).get('past_summary', {}).get('data_size_bytes', 0)
                        for c in selected_campaigns)
 
+        # Year groups for the template's per-year nav blocks.
+        release_year_groups = [
+            {'year': yr, 'versions': releases_by_year[yr],
+             'all_key': f'all_{yr}'}
+            for yr in years_sorted
+        ]
+
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
             'release_versions': release_versions,
+            'release_year_groups': release_year_groups,
             'active_release': active_release,
             'active_stage': active_stage,
             'stage_counts': stage_counts,
