@@ -64,9 +64,7 @@ Context expected:
   {% for tab in lifecycle_tabs %}
     <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
        href="?lifecycle={{ tab.key }}">
-      {{ tab.label }}{% if tab.campaigns %} <span class="text-muted">·</span>
-        {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-      {% endif %}
+      {{ tab.label }}
     </a>
   {% endfor %}
 </div>
