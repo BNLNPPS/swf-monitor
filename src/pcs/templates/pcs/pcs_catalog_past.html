@@ -89,10 +89,25 @@
         <a href="#" data-filter="physics" data-value="" class="filter-link filter-active">All</a>
         <span id="pcs-pdl-physics-opts"></span>
       </div>
-      <div>
+      <div class="mb-1">
+        <span class="pcs-pdl-section-label">NC/CC:</span>
+        <a href="#" data-filter="dis_type" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-dis_type-opts"></span>
+      </div>
+      <div class="mb-1">
         <span class="pcs-pdl-section-label">Q&sup2;:</span>
         <a href="#" data-filter="q2" data-value="" class="filter-link filter-active">All</a>
         <span id="pcs-pdl-q2-opts"></span>
+      </div>
+      <div class="mb-1">
+        <span class="pcs-pdl-section-label">Species:</span>
+        <a href="#" data-filter="species" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-species-opts"></span>
+      </div>
+      <div>
+        <span class="pcs-pdl-section-label">Energy:</span>
+        <a href="#" data-filter="energy" data-value="" class="filter-link filter-active">All</a>
+        <span id="pcs-pdl-energy-opts"></span>
       </div>
     </div>
 
@@ -123,10 +138,13 @@
             data-beam="{{ output.filters.beam|default:'' }}"
             data-physics="{{ output.filters.physics|default:'' }}"
             data-q2="{{ output.filters.q2|default:'' }}"
+            data-dis-type="{{ output.filters.dis_type|default:'' }}"
+            data-species="{{ output.filters.species|default:'' }}"
+            data-energy="{{ output.filters.energy|default:'' }}"
             data-search="{{ ds_did|lower }}">
           <td><input type="checkbox" class="pcs-pdl-cb" name="task" value="{{ t.pk }}"></td>
           <td class="small text-muted">{{ forloop.counter }}</td>
-          <td class="small"><strong>{% if output.stage == 'FULL' %}SIMU{% else %}{{ output.stage }}{% endif %}</strong></td>
+          <td class="small">{% if output.stage == 'FULL' %}SIMU{% else %}{{ output.stage }}{% endif %}</td>
           <td class="small">
             <div><strong class="text-muted">Output:</strong> {{ ds_did }}</div>
             <div class="text-muted">
@@ -161,8 +179,10 @@
   /* Faceted filter — Detector / Beam / Physics / Q2. Same panda-jobs
      convention as the Current tab's filter bar: per-filter horizontal
      value (count) links, counts faceted on the other active filters. */
-  const FILTERS = ['detector','beam','physics','q2'];
-  const DS_KEY  = { detector:'detector', beam:'beam', physics:'physics', q2:'q2' };
+  const FILTERS = ['detector','beam','physics','dis_type','q2','species','energy'];
+  const DS_KEY  = { detector:'detector', beam:'beam', physics:'physics',
+                    dis_type:'disType', q2:'q2',
+                    species:'species', energy:'energy' };
   const rows    = Array.from(document.querySelectorAll('tr.pcs-pdl-row'));
   if (!rows.length) return;
 

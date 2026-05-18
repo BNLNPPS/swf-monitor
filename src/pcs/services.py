@@ -703,15 +703,17 @@ def _parse_past_index(text):
 
 _PAST_BEAM_RE = _re.compile(r'(\d+x\d+)')
 _PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:to\d+)?)')
-_PAST_PHYS_TOP = ('DIS', 'SIDIS', 'DDIS', 'EXCLUSIVE', 'BACKGROUNDS')
+_PAST_PHYS_TOP = ('DIS', 'SIDIS', 'DDIS', 'EXCLUSIVE', 'SINGLE', 'BACKGROUNDS')
 
 
 def _extract_past_filters(did):
     """Pull faceted-filter fields from a past-output DID.
 
-    Returns {detector, beam, physics, q2}. Empty string for any
-    dimension the path doesn't carry — those rows still show under
-    each filter's 'All' but not under any specific value.
+    Returns {detector, beam, physics, q2, species, energy}. Empty
+    string for any dimension the path doesn't carry — those rows
+    still show under each filter's 'All' but not under any specific
+    value. `species` and `energy` are only populated for SINGLE
+    physics rows (path shape /SINGLE/<species>/<energy>/<rest>).
     """
     parts = did.split(':', 1)
     rest_str = (parts[1] if len(parts) == 2 else did).lstrip('/')
@@ -722,11 +724,22 @@ def _extract_past_filters(did):
     beam_m = _PAST_BEAM_RE.search(tail_str)
     q2_m   = _PAST_Q2_RE.search(tail_str)
     physics = next((p for p in _PAST_PHYS_TOP if p in tail), '')
+    species, energy = '', ''
+    if physics == 'SINGLE':
+        i = tail.index('SINGLE')
+        if len(tail) > i + 1:
+            species = tail[i + 1]
+        if len(tail) > i + 2:
+            energy = tail[i + 2]
+    dis_type = next((t for t in ('NC', 'CC') if t in tail), '')
     return {
         'detector': detector,
         'beam':     beam_m.group(1) if beam_m else '',
         'physics':  physics,
+        'dis_type': dis_type,
         'q2':       q2_m.group(1) if q2_m else '',
+        'species':  species,
+        'energy':   energy,
     }
 
 
