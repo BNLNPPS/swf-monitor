@@ -95,6 +95,25 @@ def state_title(value):
     return _state_description(value)
 
 
+@register.filter(name='state_label')
+def state_label(value):
+    """Render a state value as a human-friendly cell label.
+
+    Replaces underscores with spaces and title-cases, so ``csv_import``
+    renders as ``CSV Import`` … no, as ``Csv Import``. Python ``.title()``
+    will downcase ``CSV`` — common acronyms get explicit mapping below.
+    """
+    if not value:
+        return ''
+    s = str(value)
+    upper_words = {'csv': 'CSV', 'mc': 'MC', 'id': 'ID', 'url': 'URL', 'api': 'API'}
+    parts = s.replace('_', ' ').split()
+    out = []
+    for p in parts:
+        out.append(upper_words.get(p.lower(), p.capitalize()))
+    return ' '.join(out)
+
+
 @register.simple_tag(name='copy_btn')
 def copy_btn(value):
     """One-click clipboard button for an ID/value.

@@ -1,4 +1,36 @@
 {% load swf_fmt %}
+<style>
+.pcs-tlf-list th.pcs-sort {
+  cursor: pointer;
+  position: relative;
+  padding-right: 1.4em !important;
+  white-space: nowrap;
+  user-select: none;
+}
+.pcs-tlf-list th.pcs-sort::after {
+  content: "▴\A▾";
+  white-space: pre;
+  position: absolute;
+  right: 0.4em;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.55em;
+  line-height: 1;
+  color: #aaa;
+  letter-spacing: 0;
+}
+.pcs-tlf-list th.pcs-sort.pcs-sort-asc::after {
+  content: "▴";
+  font-size: 0.85em;
+  color: #222;
+}
+.pcs-tlf-list th.pcs-sort.pcs-sort-desc::after {
+  content: "▾";
+  font-size: 0.85em;
+  color: #222;
+}
+.pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
+</style>
 {% comment %}
 Shared task-list + filter partial used by:
   - full-page Catalog (show_tabs=True, columns_mode='full')
@@ -100,43 +132,55 @@ Context expected:
     <thead>
       <tr>
         <th style="width:1.5em"><input type="checkbox" id="pcs-tlf-selectall" aria-label="Select all visible"></th>
-        <th>Name</th>
-        <th>Status</th>
-        {% if show_tabs %}<th>Campaign</th>{% endif %}
-        <th>Requestor</th>
-        <th>Priority</th>
-        <th>Path</th>
-        {% if columns_mode == 'full' %}
-        <th>Use</th>
-        <th>Dataset</th>
-        <th>Request</th>
-        {% endif %}
-        <th>Updated</th>
+        <th data-sort="index" class="pcs-sort">#</th>
+        <th data-sort="requestor" class="pcs-sort">Requestor</th>
+        <th data-sort="dataset" class="pcs-sort">Dataset</th>
+        <th data-sort="nevents" class="pcs-sort">N events</th>
+        <th data-sort="background" class="pcs-sort">Background</th>
+        <th data-sort="new_request" class="pcs-sort">New</th>
+        <th data-sort="pre_tdr_use" class="pcs-sort">pre-TDR</th>
+        <th data-sort="early_science_use" class="pcs-sort">ES</th>
+        <th data-sort="other_use" class="pcs-sort">Other</th>
+        <th data-sort="priority" class="pcs-sort">Priority</th>
+        <th data-sort="status" class="pcs-sort">Status</th>
       </tr>
     </thead>
     <tbody>
       {% for t in tasks %}
-      <tr{% if focused_task_id == t.pk %} class="table-active"{% endif %}>
-        <td><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
-        <td class="small"><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ t.name }}</a></td>
-        <td class="{{ t.status|state_class }}" title="{{ t.status|state_title }}">{{ t.status }}</td>
-        {% if show_tabs %}<td class="small">{{ t.campaign.name|default:"—" }}</td>{% endif %}
-        <td class="small">{{ t.requestor|default:"—" }}</td>
-        <td class="small">{{ t.priority|default:"—" }}</td>
-        <td class="small">{{ t.prod_config.submission_path }}</td>
-        {% if columns_mode == 'full' %}
-        <td class="small">
-          {% if t.pre_tdr_use %}pre-TDR{% endif %}
-          {% if t.early_science_use %}{% if t.pre_tdr_use %}, {% endif %}ES{% endif %}
-          {% if t.other_use %}{% if t.pre_tdr_use or t.early_science_use %}, {% endif %}other{% endif %}
+      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents %}
+      <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}" data-task-id="{{ t.pk }}">
+        <td rowspan="2" class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
+        <td rowspan="2" class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
+        <td rowspan="2" class="align-middle small">{{ t.requestor|default:"—" }}</td>
+        <td class="small" data-sort-val="{{ ds_path }}">
+          <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
+          {% if gen_ver %}
+            <div class="text-muted">
+              {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ gen_ver }}</a>{% else %}{{ gen_ver }}{% endif %}
+            </div>
+          {% endif %}
         </td>
-        <td class="small text-muted">{{ t.dataset.dataset_name }}</td>
-        <td class="small">{% if t.request_id %}<a href="#req-{{ t.request_id }}">req#{{ t.request_id }}</a>{% else %}—{% endif %}</td>
-        {% endif %}
-        <td class="small text-muted">{{ t.updated_at|date:"Y-m-d H:i" }}</td>
+        <td class="small" data-sort-val="{{ nev|default:'' }}">{{ nev|default:"" }}</td>
+        <td class="small">{{ bg|default:"" }}</td>
+        <td class="small text-center">{% if t.new_request %}Yes{% endif %}</td>
+        <td class="small text-center">{% if t.pre_tdr_use %}Yes{% endif %}</td>
+        <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
+        <td class="small text-center">{% if t.other_use %}Yes{% endif %}</td>
+        <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
+        <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
       </tr>
+      <tr class="pcs-tlf-row pcs-tlf-desc{% if focused_task_id == t.pk %} table-active{% endif %}">
+        <td colspan="9" class="small text-muted ps-2">
+          {% if t.description %}{{ t.description|linebreaksbr }}{% endif %}
+          {% if issue %}
+            {% if t.description %} · {% endif %}
+            <a href="{{ issue }}" target="_blank" rel="noopener">issue</a>
+          {% endif %}
+        </td>
+      </tr>
+      {% endwith %}
       {% empty %}
-      <tr><td colspan="{% if show_tabs %}{% if columns_mode == 'full' %}11{% else %}8{% endif %}{% else %}{% if columns_mode == 'full' %}10{% else %}7{% endif %}{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr><td colspan="12" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -156,8 +200,11 @@ Context expected:
 
 <script>
 (function() {
-  const root = document.currentScript.previousElementSibling.parentElement;
-  // currentScript fallback: scope queries to document if needed
+  /* Bulk-select state + paired-row column sort.
+     Each task is two adjacent TRs: .pcs-tlf-data (sortable) and .pcs-tlf-desc
+     (always moves with its sibling). Sort keys come from data-sort-val on the
+     TDs of the data row, indexed positionally against the header's data-sort. */
+
   const selectAll = document.getElementById('pcs-tlf-selectall');
   const cbs = document.querySelectorAll('.pcs-tlf-cb');
   const count = document.getElementById('pcs-tlf-count');
@@ -178,10 +225,86 @@ Context expected:
     b.addEventListener('click', () => {
       const action = b.dataset.bulk;
       const ids = Array.from(cbs).filter(c => c.checked).map(c => c.value);
-      // v1: stub. Real endpoints land with phase-3 submission wiring.
       alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
     });
   });
   refresh();
+
+  /* Paired-row sort. */
+  const table = document.querySelector('table.pcs-tlf-list');
+  if (!table) return;
+  const tbody = table.tBodies[0];
+  if (!tbody) return;
+
+  // Build pairs: each .pcs-tlf-data row plus its following .pcs-tlf-desc row.
+  function buildPairs() {
+    const rows = Array.from(tbody.children);
+    const pairs = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].classList.contains('pcs-tlf-data')) {
+        const next = rows[i + 1];
+        if (next && next.classList.contains('pcs-tlf-desc')) {
+          pairs.push([rows[i], next]);
+          i++;
+        } else {
+          pairs.push([rows[i]]);
+        }
+      }
+    }
+    return pairs;
+  }
+
+  function cellSortValue(dataRow, colIdx) {
+    const cells = dataRow.children;
+    if (colIdx >= cells.length) return '';
+    const td = cells[colIdx];
+    const v = td.getAttribute('data-sort-val');
+    return v !== null ? v : (td.textContent || '').trim();
+  }
+
+  function compareValues(a, b) {
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  }
+
+  const headers = table.querySelectorAll('thead th.pcs-sort');
+  let activeIdx = -1;
+  let activeDir = 1;  // 1 asc, -1 desc
+
+  function renderIndicators() {
+    headers.forEach((h, i) => {
+      h.classList.remove('pcs-sort-asc', 'pcs-sort-desc');
+      if (i === activeIdx) {
+        h.classList.add(activeDir === 1 ? 'pcs-sort-asc' : 'pcs-sort-desc');
+      }
+    });
+  }
+  renderIndicators();
+
+  headers.forEach((h, i) => {
+    h.addEventListener('click', () => {
+      if (activeIdx === i) {
+        activeDir = -activeDir;
+      } else {
+        activeIdx = i;
+        activeDir = 1;
+      }
+      // Header columns include the checkbox col at index 0, which is also a TH.
+      // The sortable headers start at index 1 in the THs of the row. But the
+      // header NodeList "headers" is filtered to .pcs-sort only, so its index
+      // i corresponds to the (i+1)-th cell in the data row (offset by the
+      // checkbox TD).
+      const colIdx = i + 1;
+      const pairs = buildPairs();
+      pairs.sort((p1, p2) => {
+        const v1 = cellSortValue(p1[0], colIdx);
+        const v2 = cellSortValue(p2[0], colIdx);
+        return compareValues(v1, v2) * activeDir;
+      });
+      pairs.forEach(pair => pair.forEach(tr => tbody.appendChild(tr)));
+      renderIndicators();
+    });
+  });
 })();
 </script>
