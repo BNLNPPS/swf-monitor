@@ -1483,36 +1483,53 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
     return summary
 
 
-def rename_pcs_current_campaign(new_name, *, created_by='operator'):
-    """Rename the PCS lifecycle='current' Campaign to new_name in place.
+def set_pcs_campaign_lifecycle(new_name, target_lifecycle, *, created_by='operator'):
+    """Set the PCS Campaign with lifecycle=`target_lifecycle` to `new_name`.
 
-    All ProdTask FKs are preserved automatically (we mutate the same row,
-    not the relationship). The next 'Update from Rucio' picks up the new
-    name (writes a new snapshot file, queries /RECO/<new_name>/* etc.).
-
-    Operator-initiated only — never call this from a refresh / sync
-    handler (see feedback-humans-switch-lifecycle).
+    target_lifecycle is 'current' or 'last' (singular slots — at most one
+    Campaign at a time). If the slot is occupied, the existing occupant
+    is renamed in place; ProdTask FKs are preserved (same row mutated).
+    If empty, a new Campaign(lifecycle=target_lifecycle) is created.
+    Operator-initiated only — never call from a sync / refresh handler
+    (see feedback-humans-switch-lifecycle).
     """
     if not new_name:
-        raise ServiceError('rename_pcs_current_campaign: empty target name')
-    current = (Campaign.objects.filter(lifecycle='current')
-               .order_by('-updated_at').first())
-    if not current:
-        raise ServiceError('no current Campaign in PCS')
-    if current.name == new_name:
-        return {'changed': False, 'name': new_name}
-    # Avoid colliding with an existing Campaign of that name (e.g. a past
-    # 'RECO/<name>' isn't a conflict, but a plain '<name>' would be).
-    if Campaign.objects.filter(name=new_name).exclude(pk=current.pk).exists():
+        raise ServiceError('set_pcs_campaign_lifecycle: empty target name')
+    if target_lifecycle not in ('current', 'last'):
+        raise ServiceError(f'unsupported lifecycle {target_lifecycle!r}')
+    existing = (Campaign.objects.filter(lifecycle=target_lifecycle)
+                .order_by('-updated_at').first())
+    if existing is not None:
+        if existing.name == new_name:
+            return {'changed': False, 'name': new_name, 'lifecycle': target_lifecycle}
+        if Campaign.objects.filter(name=new_name).exclude(pk=existing.pk).exists():
+            raise ServiceError(
+                f'Campaign named {new_name!r} already exists; '
+                f'cannot rename {existing.name!r} into it')
+        old_name = existing.name
+        existing.name = new_name
+        existing.save(update_fields=['name', 'updated_at'])
+        _log.info('PCS %s campaign renamed: %s -> %s (by %s)',
+                  target_lifecycle, old_name, new_name, created_by)
+        return {'changed': True, 'old_name': old_name, 'name': new_name,
+                'lifecycle': target_lifecycle, 'created': False}
+    # No existing slot — create one. Refuse if any Campaign already uses
+    # this name (avoid hijacking past 'FULL/26.04.1' / 'RECO/26.04.1').
+    if Campaign.objects.filter(name=new_name).exists():
         raise ServiceError(
             f'Campaign named {new_name!r} already exists; '
-            f'cannot rename {current.name!r} into it')
-    old_name = current.name
-    current.name = new_name
-    current.save(update_fields=['name', 'updated_at'])
-    _log.info('PCS current campaign renamed: %s -> %s (by %s)',
-              old_name, new_name, created_by)
-    return {'changed': True, 'old_name': old_name, 'name': new_name}
+            f'cannot create a new {target_lifecycle} with that name')
+    Campaign.objects.create(name=new_name, lifecycle=target_lifecycle,
+                            created_by=created_by)
+    _log.info('PCS %s campaign created: %s (by %s)',
+              target_lifecycle, new_name, created_by)
+    return {'changed': True, 'old_name': None, 'name': new_name,
+            'lifecycle': target_lifecycle, 'created': True}
+
+
+# Backwards-compat wrapper.
+def rename_pcs_current_campaign(new_name, *, created_by='operator'):
+    return set_pcs_campaign_lifecycle(new_name, 'current', created_by=created_by)
 
 
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):

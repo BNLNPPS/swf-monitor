@@ -26,21 +26,25 @@
     </form>
   </div>
 
-  {% if rucio_detected %}
-  <div class="alert alert-warning py-2 px-3 mb-3 small">
-    <div class="mb-1">
-      <strong>Active 26.x releases in JLab Rucio</strong>
+  {# Banner shows ONLY when the most-recent detected release isn't
+     already the PCS current — i.e. when the operator actually has a
+     decision to make. Hides itself the moment current matches latest. #}
+  {% if rucio_detected and rucio_detected.0.version != rucio_current_name %}
+  <div class="border rounded p-2 mb-3 small bg-light">
+    <div class="mb-1 text-muted">
+      Detected newer 26.x release in JLab Rucio
       (PCS current: <strong>{{ rucio_current_name }}</strong>):
     </div>
     <div class="d-flex flex-wrap align-items-center gap-2">
     {% for r in rucio_detected %}
-      <span>{{ r.version }} <span class="text-muted">({{ r.count }} datasets)</span>
+      <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
         {% if r.version != rucio_current_name %}
           <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
             {% csrf_token %}
             <input type="hidden" name="name" value="{{ r.version }}">
             <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1"
-                    onclick="return confirm('Rename PCS current campaign to {{ r.version }}?');">Make current</button>
+                    title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
+                    onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
           </form>
         {% else %}
           <span class="badge bg-success">current</span>

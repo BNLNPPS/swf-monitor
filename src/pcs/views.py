@@ -909,7 +909,7 @@ def prod_config_edit(request, pk):
 TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
 
 
-LIFECYCLE_KEYS = ('past', 'current', 'future')
+LIFECYCLE_KEYS = ('past', 'last', 'current', 'future')
 
 
 @_login_required_flash
@@ -955,7 +955,8 @@ def pcs_catalog_set_current(request):
             request, reverse('pcs:pcs_catalog'),
             action_label='Make current')
     target = (request.POST.get('name') or '').strip()
-    from .services import rename_pcs_current_campaign, ServiceError
+    from .services import (rename_pcs_current_campaign,
+                           import_jlab_rucio_current_snapshot, ServiceError)
     try:
         result = rename_pcs_current_campaign(
             target,
@@ -964,14 +965,26 @@ def pcs_catalog_set_current(request):
     except ServiceError as e:
         messages.error(request, f'Switch failed: {e}')
         return redirect(reverse('pcs:pcs_catalog'))
-    if result.get('changed'):
+    if not result.get('changed'):
+        messages.info(request, f"PCS current campaign already {target}.")
+        return redirect(reverse('pcs:pcs_catalog'))
+    # Pull the snapshot for the new current as part of the same click —
+    # operator already consented by clicking 'Make current'; no point
+    # making them hunt for 'Update from Rucio' next.
+    try:
+        snap = import_jlab_rucio_current_snapshot(
+            created_by=getattr(request.user, 'username', '') or 'operator',
+        )
+        counts = ', '.join(f'{k}={v}' for k, v in snap['paths'].items())
         messages.success(
             request,
-            f"PCS current campaign renamed: "
-            f"{result['old_name']} -> {result['name']}. "
-            f"Click 'Update from Rucio' to pull the new snapshot.")
-    else:
-        messages.info(request, f"PCS current campaign already {target}.")
+            f"PCS current: {result['old_name']} -> {result['name']}. "
+            f"Snapshot pulled: {counts}. {len(snap['errors'])} errors.")
+    except (ServiceError, OSError) as e:
+        messages.warning(
+            request,
+            f"PCS current renamed to {result['name']} but snapshot pull "
+            f"failed: {e}. Click 'Update from Rucio' to retry.")
     return redirect(reverse('pcs:pcs_catalog'))
 
 
@@ -1062,6 +1075,8 @@ def pcs_catalog(request):
     lifecycle_tabs = [
         {'key': 'past',    'label': 'Past',    'color': 'secondary',
          'campaigns': campaigns_by_lifecycle['past']},
+        {'key': 'last',    'label': 'Last',    'color': 'info',
+         'campaigns': campaigns_by_lifecycle['last']},
         {'key': 'current', 'label': 'Current', 'color': 'success',
          'campaigns': campaigns_by_lifecycle['current']},
         {'key': 'future',  'label': 'Future',  'color': 'primary',
@@ -1185,18 +1200,19 @@ def pcs_catalog(request):
     rucio_unmatched_campaign = ''
     rucio_detected = []
     rucio_current_name = ''
-    if active_lifecycle == 'current':
-        current = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
-        if current is not None:
+    if active_lifecycle in ('current', 'last'):
+        camp_list = campaigns_by_lifecycle[active_lifecycle]
+        target = camp_list[0] if camp_list else None
+        if target is not None:
             from .services import load_rucio_snapshot, summarize_rucio_timeline
-            snap = load_rucio_snapshot(current.name)
+            snap = load_rucio_snapshot(target.name)
             if snap is not None:
                 rucio_timeline = summarize_rucio_timeline(snap)
-                rucio_timeline['campaign_name'] = current.name
-            rucio_unmatched = (current.data or {}).get('rucio_unmatched', []) or []
-            rucio_unmatched_campaign = current.name
-            rucio_detected = (current.data or {}).get('detected_releases', []) or []
-            rucio_current_name = current.name
+                rucio_timeline['campaign_name'] = target.name
+            rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
+            rucio_unmatched_campaign = target.name
+            rucio_detected = (target.data or {}).get('detected_releases', []) or []
+            rucio_current_name = target.name
 
     context = {
         'tasks': list(qs),
