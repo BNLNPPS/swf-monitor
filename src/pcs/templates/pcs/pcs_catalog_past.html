@@ -10,7 +10,6 @@
 .pcs-pdl-section-label { font-weight: 600; margin-right: 0.6em; }
 .pcs-pdl-summary { margin-bottom: 0.4em; }
 .pcs-pdl-list td, .pcs-pdl-list th { vertical-align: top; }
-.pcs-pdl-rse-ok  { color: #198754; }
 .pcs-pdl-rse-bad { color: #dc3545; }
 </style>
 
@@ -40,37 +39,35 @@
   {% endif %}
 
   <div class="pcs-pdl-nav small mb-2">
-    {% if simu_campaigns %}
-    <div class="mb-1">
-      <span class="pcs-pdl-section-label">Simu:</span>
-      {% for c in simu_campaigns %}
-        <a href="?lifecycle=past&amp;campaign={{ c.name|urlencode }}"
-           class="{% if active_campaign and c.pk == active_campaign.pk %}active{% endif %}">{{ c.name|cut:"FULL/" }}</a>
-      {% endfor %}
-    </div>
-    {% endif %}
-    {% if reco_campaigns %}
-    <div>
-      <span class="pcs-pdl-section-label">Reco:</span>
-      {% for c in reco_campaigns %}
-        <a href="?lifecycle=past&amp;campaign={{ c.name|urlencode }}"
-           class="{% if active_campaign and c.pk == active_campaign.pk %}active{% endif %}">{{ c.name|cut:"RECO/" }}</a>
-      {% endfor %}
-    </div>
-    {% endif %}
+    <span class="pcs-pdl-section-label">Release:</span>
+    {% for v in release_versions %}
+      <a href="?lifecycle=past&amp;release={{ v|urlencode }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+         class="{% if active_release == v %}active{% endif %}">{{ v }}</a>
+    {% endfor %}
+    <a href="?lifecycle=past&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+       class="{% if active_release == 'all' %}active{% endif %}">All 2026</a>
   </div>
 
-  {% if active_campaign %}
-    {% with summary=active_campaign.data.past_summary %}
+  <div class="pcs-pdl-nav small mb-2">
+    <span class="pcs-pdl-section-label">Stage:</span>
+    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}"
+       class="{% if not active_stage %}active{% endif %}">All ({{ stage_counts.all }})</a>
+    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}&amp;stage=FULL"
+       class="{% if active_stage == 'FULL' %}active{% endif %}">Simu ({{ stage_counts.FULL }})</a>
+    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}&amp;stage=RECO"
+       class="{% if active_stage == 'RECO' %}active{% endif %}">Reco ({{ stage_counts.RECO }})</a>
+  </div>
+
+  {% if active_release %}
     <div class="pcs-pdl-summary">
-      <strong>{{ active_campaign.name }}</strong>
+      <strong>{% if active_release == 'all' %}All 2026{% else %}{{ active_release }}{% endif %}{% if active_stage %} &mdash; {% if active_stage == 'FULL' %}Simu{% else %}Reco{% endif %} only{% endif %}</strong>
+      &middot; {{ selected_campaign_count }} campaign{{ selected_campaign_count|pluralize }}
       &middot; {{ tasks|length }} dataset{{ tasks|length|pluralize }}
-      {% if summary %}
-        &middot; {{ summary.file_count }} files
-        &middot; {{ summary.data_size_bytes|filesizeformat }}
+      {% if aggregate_file_count or aggregate_data_size %}
+        &middot; {{ aggregate_file_count }} files
+        &middot; {{ aggregate_data_size|filesizeformat }}
       {% endif %}
     </div>
-    {% endwith %}
 
     <table class="table table-sm pcs-pdl-list mb-1">
       <thead>
@@ -92,9 +89,7 @@
               {{ t.dataset.file_count }} files
               &middot; {{ t.dataset.data_size|filesizeformat }}
               {% if output.rses %}&middot;
-                {% for r in output.rses %}
-                  {{ r.name }}<span class="{% if r.status == 'complete' %}pcs-pdl-rse-ok{% else %}pcs-pdl-rse-bad{% endif %}">{% if r.status == 'complete' %}&#10004;{% else %}&#10008;{% endif %}</span>
-                {% endfor %}
+                {% for r in output.rses %}{% if not forloop.first %}, {% endif %}{{ r.name }}{% if r.status != 'complete' %} <span class="pcs-pdl-rse-bad">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}
               {% endif %}
             </div>
           </td>

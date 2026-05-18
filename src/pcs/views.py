@@ -1002,36 +1002,78 @@ def pcs_catalog(request):
          'campaigns': campaigns_by_lifecycle['future']},
     ]
 
-    # Past lifecycle: per-campaign view of output datasets. Default to the
-    # most recent past campaign; ?campaign=<name> picks a specific one.
+    # Past lifecycle: per-release view of output datasets. Each release is
+    # one SW version (e.g. 26.04.1) covering up to two stages (FULL=Simu,
+    # RECO=Reco). ?release=<v> picks one release (default: most recent);
+    # ?release=all spans all 2026. ?stage=FULL|RECO filters within the
+    # chosen release.
     if active_lifecycle == 'past':
-        past_campaigns = sorted(
-            campaigns_by_lifecycle['past'], key=lambda c: c.name, reverse=True,
+        past_campaigns = list(campaigns_by_lifecycle['past'])
+        # Time flows left to right; releases ordered ASC.
+        release_versions = sorted(
+            {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
         )
-        simu_campaigns = [c for c in past_campaigns if c.name.startswith('FULL/')]
-        reco_campaigns = [c for c in past_campaigns if c.name.startswith('RECO/')]
-        requested = (request.GET.get('campaign') or '').strip()
-        active_campaign = None
-        if requested:
-            active_campaign = next(
-                (c for c in past_campaigns if c.name == requested), None)
-        if active_campaign is None and past_campaigns:
-            active_campaign = past_campaigns[0]
-        past_tasks = []
-        if active_campaign is not None:
-            past_tasks = list(
-                ProdTask.objects
-                .select_related('campaign', 'dataset')
-                .filter(campaign=active_campaign, status='past_output')
-                .order_by('dataset__dataset_name')
-            )
+
+        requested_release = (request.GET.get('release') or '').strip()
+        if requested_release == 'all':
+            active_release = 'all'
+        elif requested_release in release_versions:
+            active_release = requested_release
+        else:
+            # Default landing = most recent release (last in ASC order).
+            active_release = release_versions[-1] if release_versions else ''
+
+        requested_stage = (request.GET.get('stage') or '').strip().upper()
+        active_stage = requested_stage if requested_stage in ('FULL', 'RECO') else ''
+
+        def in_release(c):
+            return active_release == 'all' or c.name.endswith('/' + active_release)
+        release_campaigns = [c for c in past_campaigns if in_release(c)]
+
+        def in_stage(c, s):
+            return c.name.startswith(s + '/')
+        selected_campaigns = [c for c in release_campaigns
+                              if not active_stage or in_stage(c, active_stage)]
+
+        # Stage-facet counts: number of past_output rows under each stage
+        # in the active release.
+        per_campaign_count = dict(
+            ProdTask.objects
+            .filter(campaign__in=release_campaigns, status='past_output')
+            .values_list('campaign__name')
+            .annotate(Count('id'))
+        )
+        def count_for(stage):
+            return sum(n for name, n in per_campaign_count.items()
+                       if name.startswith(stage + '/'))
+        stage_counts = {
+            'all':  sum(per_campaign_count.values()),
+            'FULL': count_for('FULL'),
+            'RECO': count_for('RECO'),
+        }
+
+        past_tasks = list(
+            ProdTask.objects
+            .select_related('campaign', 'dataset')
+            .filter(campaign__in=selected_campaigns, status='past_output')
+            .order_by('campaign__name', 'dataset__dataset_name')
+        )
+        agg_files = sum((c.data or {}).get('past_summary', {}).get('file_count', 0)
+                        for c in selected_campaigns)
+        agg_size = sum((c.data or {}).get('past_summary', {}).get('data_size_bytes', 0)
+                       for c in selected_campaigns)
+
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
-            'simu_campaigns': simu_campaigns,
-            'reco_campaigns': reco_campaigns,
-            'active_campaign': active_campaign,
+            'release_versions': release_versions,
+            'active_release': active_release,
+            'active_stage': active_stage,
+            'stage_counts': stage_counts,
+            'selected_campaign_count': len(selected_campaigns),
+            'aggregate_file_count': agg_files,
+            'aggregate_data_size': agg_size,
             'tasks': past_tasks,
         })
 
