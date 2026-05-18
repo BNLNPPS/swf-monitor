@@ -6,13 +6,34 @@
 .pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
 
-/* DataTables 1.13.8 packs the up/down sort glyphs only 0.5em apart and
-   the arrow characters are ~0.5em wide, so they touch. Push the up arrow
-   a little further left to give the pair a clear horizontal gap. */
+/* DataTables 1.13.8 packs the up/down sort glyphs side-by-side and they
+   overlap. Stack them vertically at a single right offset — ▲ above,
+   ▼ below — with a small aesthetic gap between them. Extra TH padding
+   gives the pair room to breathe. */
+.pcs-tlf-list thead th.pcs-sort {
+  padding-top:    0.35em !important;
+  padding-bottom: 0.35em !important;
+  padding-right:  1.4em  !important;
+}
 .pcs-tlf-list thead th.sorting::before,
 .pcs-tlf-list thead th.sorting_asc::before,
 .pcs-tlf-list thead th.sorting_desc::before {
-  right: 1.4em !important;
+  content: "\25B2" !important;   /* ▲ */
+  right: 0.5em !important;
+  top:   0.2em  !important;
+  bottom: auto  !important;
+  font-size: 0.55em !important;
+  line-height: 1 !important;
+}
+.pcs-tlf-list thead th.sorting::after,
+.pcs-tlf-list thead th.sorting_asc::after,
+.pcs-tlf-list thead th.sorting_desc::after {
+  content: "\25BC" !important;   /* ▼ */
+  right: 0.5em !important;
+  top:   auto   !important;
+  bottom: 0.2em !important;
+  font-size: 0.55em !important;
+  line-height: 1 !important;
 }
 
 /* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
@@ -179,11 +200,11 @@ Context expected:
         <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
         <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
-        <td class="small pcs-tlf-cell-dataset" data-sort-val="{{ ds_path }}">
+        <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}">
           <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
           {% if gen_ver %}
             <div class="text-muted">
-              {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ evgen|default:gen_ver }}</a>{% else %}{{ evgen|default:gen_ver }}{% endif %}
+              {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ gen_ver }}</a>{% else %}{{ gen_ver }}{% endif %}
             </div>
           {% endif %}
         </td>
@@ -197,7 +218,7 @@ Context expected:
       </tr>
       {% if t.description or issue %}
       <tr class="pcs-tlf-row pcs-tlf-desc{% if focused_task_id == t.pk %} table-active{% endif %}">
-        <td colspan="8" class="small text-muted ps-2">
+        <td colspan="7" class="small text-muted ps-2">
           {% if t.description %}{{ t.description|linebreaksbr }}{% endif %}
           {% if issue %}
             {% if t.description %} · {% endif %}
@@ -208,7 +229,7 @@ Context expected:
       {% endif %}
       {% if other_text|informative_text %}
       <tr class="pcs-tlf-row pcs-tlf-other{% if focused_task_id == t.pk %} table-active{% endif %}">
-        <td colspan="8" class="small ps-2"><strong class="text-muted">Other use:</strong> {{ other_text }}</td>
+        <td colspan="7" class="small ps-2"><strong class="text-muted">Other use:</strong> {{ other_text }}</td>
       </tr>
       {% endif %}
       {% endwith %}
