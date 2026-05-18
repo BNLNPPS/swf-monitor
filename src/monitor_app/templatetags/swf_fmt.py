@@ -114,6 +114,18 @@ def state_label(value):
     return ' '.join(out)
 
 
+@register.filter(name='informative_text')
+def informative_text(value):
+    """Truthy when value carries information beyond a Yes/No marker.
+
+    Used to decide whether a free-form 'Other Use' string is worth
+    rendering on its own row: empty / 'Yes' / 'No' / 'Maybe' all
+    return False; anything else returns True.
+    """
+    s = str(value or '').strip().lower()
+    return s not in ('', 'yes', 'y', 'no', 'n', 'maybe', 'true', 'false', '0', '1')
+
+
 @register.simple_tag(name='copy_btn')
 def copy_btn(value):
     """One-click clipboard button for an ID/value.

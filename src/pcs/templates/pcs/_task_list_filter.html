@@ -79,6 +79,15 @@ Context expected:
   {% endif %}
 {% endif %}
 
+<div class="pcs-tlf-legend small text-muted mb-2">
+  <strong>Legend:</strong>
+  New: new request &middot;
+  pTDR: possible pre-TDR use &middot;
+  ES: Early Science use &middot;
+  Other: other use (full text on a 3rd row when given) &middot;
+  Background: background-study dataset
+</div>
+
 <div id="pcs-tlf-bar" class="pcs-tlf-bar mb-2">
   <div class="pcs-tlf-bar-row d-flex align-items-center gap-2">
     <span class="pcs-tlf-label">Search:</span>
@@ -105,7 +114,7 @@ Context expected:
   </div>
   <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Use:</span>
-    <a href="#" data-toggle="pre_tdr_use" class="filter-link">pre-TDR (<span data-count="pre_tdr_use">0</span>)</a>
+    <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
     <a href="#" data-toggle="early_science_use" class="filter-link">ES (<span data-count="early_science_use">0</span>)</a>
     <a href="#" data-toggle="other_use" class="filter-link">Other (<span data-count="other_use">0</span>)</a>
   </div>
@@ -123,7 +132,7 @@ Context expected:
         <th data-sort="nevents" class="pcs-sort sorting">N events</th>
         <th data-sort="background" class="pcs-sort sorting">Background</th>
         <th data-sort="new_request" class="pcs-sort sorting">New</th>
-        <th data-sort="pre_tdr_use" class="pcs-sort sorting">pre-TDR</th>
+        <th data-sort="pre_tdr_use" class="pcs-sort sorting">pTDR</th>
         <th data-sort="early_science_use" class="pcs-sort sorting">ES</th>
         <th data-sort="other_use" class="pcs-sort sorting">Other</th>
         <th data-sort="priority" class="pcs-sort sorting">Priority</th>
@@ -131,7 +140,7 @@ Context expected:
     </thead>
     <tbody>
       {% for t in tasks %}
-      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents %}
+      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents other_text=t.overrides.csv_import.other_use_text|default:'' %}
       <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
           data-task-id="{{ t.pk }}"
           data-status="{{ t.status|default:'' }}"
@@ -141,9 +150,9 @@ Context expected:
           data-early-science="{% if t.early_science_use %}1{% else %}0{% endif %}"
           data-other="{% if t.other_use %}1{% else %}0{% endif %}"
           data-search="{{ t.name|default:''|lower }} {{ t.description|default:''|lower }}">
-        <td{% if t.description or issue %} rowspan="2"{% endif %} class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
-        <td{% if t.description or issue %} rowspan="2"{% endif %} class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
-        <td{% if t.description or issue %} rowspan="2"{% endif %} class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
+        <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
+        <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
+        <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
         <td class="small pcs-tlf-cell-dataset" data-sort-val="{{ ds_path }}">
           <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
           {% if gen_ver %}
@@ -154,7 +163,7 @@ Context expected:
         </td>
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
         <td class="small" data-sort-val="{{ nev|default:'' }}">{{ nev|default:"" }}</td>
-        <td class="small">{{ bg|default:"" }}</td>
+        <td class="small text-center" data-sort-val="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}">{% if bg|lower == 'yes' %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.new_request %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.pre_tdr_use %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
@@ -170,6 +179,11 @@ Context expected:
             <a href="{{ issue }}" target="_blank" rel="noopener">issue</a>
           {% endif %}
         </td>
+      </tr>
+      {% endif %}
+      {% if other_text|informative_text %}
+      <tr class="pcs-tlf-row pcs-tlf-other{% if focused_task_id == t.pk %} table-active{% endif %}">
+        <td colspan="9" class="small ps-2"><strong class="text-muted">Other use:</strong> {{ other_text }}</td>
       </tr>
       {% endif %}
       {% endwith %}
@@ -293,13 +307,25 @@ Context expected:
     history.replaceState(null, '', u.toString());
   }
 
+  function trailingRows(tr) {
+    // Each task starts with a pcs-tlf-data TR and may be followed by
+    // any number of trailing rows (pcs-tlf-desc, pcs-tlf-other, ...).
+    // Walk until the next pcs-tlf-data or end.
+    const out = [];
+    let n = tr.nextElementSibling;
+    while (n && !n.classList.contains('pcs-tlf-data')) {
+      out.push(n);
+      n = n.nextElementSibling;
+    }
+    return out;
+  }
+
   function applyFilters() {
     let visible = 0;
     for (const tr of dataRows) {
       const show = rowMatches(tr, null);
       tr.style.display = show ? '' : 'none';
-      const desc = tr.nextElementSibling;
-      if (desc && desc.classList.contains('pcs-tlf-desc')) desc.style.display = show ? '' : 'none';
+      trailingRows(tr).forEach(r => { r.style.display = show ? '' : 'none'; });
       if (show) visible++;
     }
     if (emptyRow) emptyRow.style.display = (visible === 0 && dataRows.length > 0) ? '' : 'none';
@@ -337,31 +363,40 @@ Context expected:
 
   applyFilters();
 
-  /* Bulk-select state + paired-row column sort.
-     Each task is two adjacent TRs: .pcs-tlf-data (sortable) and .pcs-tlf-desc
-     (always moves with its sibling). Sort keys come from data-sort-val on the
-     TDs of the data row, indexed positionally against the header's data-sort. */
+  /* Bulk-select state + multi-row column sort.
+     Each task is one .pcs-tlf-data TR plus any number of trailing rows
+     (.pcs-tlf-desc, .pcs-tlf-other); rows move/show/hide together.
+     Select-all only touches checkboxes on currently-visible data rows. */
 
   const selectAll = document.getElementById('pcs-tlf-selectall');
-  const cbs = document.querySelectorAll('.pcs-tlf-cb');
+  const allCbs = document.querySelectorAll('.pcs-tlf-cb');
   const count = document.getElementById('pcs-tlf-count');
   const bulkButtons = document.querySelectorAll('.pcs-tlf-bulk [data-bulk]');
+  function visibleCbs() {
+    return Array.from(allCbs).filter(c => {
+      const tr = c.closest('tr.pcs-tlf-data');
+      return tr && tr.style.display !== 'none';
+    });
+  }
   function refresh() {
-    const n = Array.from(cbs).filter(c => c.checked).length;
+    const n = Array.from(allCbs).filter(c => c.checked).length;
     if (count) count.textContent = n;
     bulkButtons.forEach(b => b.disabled = (n === 0));
   }
   if (selectAll) {
     selectAll.addEventListener('change', () => {
-      cbs.forEach(c => c.checked = selectAll.checked);
+      // Touch only visible rows — filter-hidden tasks must not be
+      // included in a "select all" action.
+      const targets = visibleCbs();
+      targets.forEach(c => c.checked = selectAll.checked);
       refresh();
     });
   }
-  cbs.forEach(c => c.addEventListener('change', refresh));
+  allCbs.forEach(c => c.addEventListener('change', refresh));
   bulkButtons.forEach(b => {
     b.addEventListener('click', () => {
       const action = b.dataset.bulk;
-      const ids = Array.from(cbs).filter(c => c.checked).map(c => c.value);
+      const ids = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
       alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
     });
   });
@@ -373,22 +408,25 @@ Context expected:
   const tbody = table.tBodies[0];
   if (!tbody) return;
 
-  // Build pairs: each .pcs-tlf-data row plus its following .pcs-tlf-desc row.
-  function buildPairs() {
+  // Build groups: each .pcs-tlf-data row plus all trailing non-data rows
+  // (e.g. pcs-tlf-desc, pcs-tlf-other). Groups move as a unit when sorting.
+  function buildGroups() {
     const rows = Array.from(tbody.children);
-    const pairs = [];
+    const groups = [];
     for (let i = 0; i < rows.length; i++) {
       if (rows[i].classList.contains('pcs-tlf-data')) {
-        const next = rows[i + 1];
-        if (next && next.classList.contains('pcs-tlf-desc')) {
-          pairs.push([rows[i], next]);
-          i++;
-        } else {
-          pairs.push([rows[i]]);
+        const grp = [rows[i]];
+        let j = i + 1;
+        while (j < rows.length && !rows[j].classList.contains('pcs-tlf-data')
+               && rows[j].id !== 'pcs-tlf-empty') {
+          grp.push(rows[j]);
+          j++;
         }
+        groups.push(grp);
+        i = j - 1;
       }
     }
-    return pairs;
+    return groups;
   }
 
   function cellSortValue(dataRow, colIdx) {
@@ -435,13 +473,15 @@ Context expected:
       // i corresponds to the (i+1)-th cell in the data row (offset by the
       // checkbox TD).
       const colIdx = i + 1;
-      const pairs = buildPairs();
-      pairs.sort((p1, p2) => {
-        const v1 = cellSortValue(p1[0], colIdx);
-        const v2 = cellSortValue(p2[0], colIdx);
+      const groups = buildGroups();
+      groups.sort((g1, g2) => {
+        const v1 = cellSortValue(g1[0], colIdx);
+        const v2 = cellSortValue(g2[0], colIdx);
         return compareValues(v1, v2) * activeDir;
       });
-      pairs.forEach(pair => pair.forEach(tr => tbody.appendChild(tr)));
+      groups.forEach(grp => grp.forEach(tr => tbody.appendChild(tr)));
+      // Keep the empty-state row at the end of the tbody.
+      if (emptyRow) tbody.appendChild(emptyRow);
       renderIndicators();
     });
   });

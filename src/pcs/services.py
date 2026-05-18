@@ -359,6 +359,14 @@ def _yesno(value):
     return str(value or '').strip().lower() in ('yes', 'y', 'true', '1')
 
 
+def _possible(value):
+    """Truthy unless explicitly negative — 'Maybe' counts as yes.
+    Used for pTDR ('possible pre-TDR use') and Other Use, where any
+    non-empty, non-No marker indicates the use applies."""
+    s = str(value or '').strip().lower()
+    return bool(s) and s not in ('no', 'n', 'false', '0')
+
+
 def _csvimport_slug(dataset_path, gen_version):
     """Short stable slug derived from the (path, generator) idempotency key."""
     key = f'{dataset_path}|{gen_version}'.encode()
@@ -480,9 +488,9 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 campaign=campaign,
                 requestor=(row.get('DSC or PWG') or '').strip(),
                 priority=priority,
-                pre_tdr_use=_yesno(row.get('Pre-TDR Use')),
+                pre_tdr_use=_possible(row.get('Pre-TDR Use')),
                 early_science_use=_yesno(row.get('Early Science Use')),
-                other_use=_yesno(row.get('Other Use')),
+                other_use=_possible(row.get('Other Use')),
                 new_request=_yesno(row.get('New Request')),
                 overrides={
                     'csv_import': {
@@ -490,6 +498,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                         'nevents': nevents,
                         'issue_url': (row.get('Issue') or '').strip(),
                         'gen_version': gen_ver,
+                        'other_use_text': (row.get('Other Use') or '').strip(),
                     },
                 },
                 created_by=created_by,
