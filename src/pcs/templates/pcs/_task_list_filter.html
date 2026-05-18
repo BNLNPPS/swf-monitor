@@ -147,6 +147,14 @@ Context expected:
     <span id="pcs-tlf-energy-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Output:</span>
+    <a href="#" data-toggle="has_output" class="filter-link">with output (<span data-count="has_output">0</span>)</a>
+    <a href="#" data-toggle="no_output" class="filter-link">no output (<span data-count="no_output">0</span>)</a>
+    <a href="#" data-toggle="incomplete_output" class="filter-link">incomplete (<span data-count="incomplete_output">0</span>)</a>
+    <a href="#" data-toggle="has_simu" class="filter-link">Simu (<span data-count="has_simu">0</span>)</a>
+    <a href="#" data-toggle="has_reco" class="filter-link">Reco (<span data-count="has_reco">0</span>)</a>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Flags:</span>
     <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
     <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
@@ -204,6 +212,11 @@ Context expected:
           data-q2="{{ path_filters.q2|default:'' }}"
           data-species="{{ path_filters.species|default:'' }}"
           data-energy="{{ path_filters.energy|default:'' }}"
+          data-has-output="{% if t.overrides.csv_import.output.has_output %}1{% else %}0{% endif %}"
+          data-no-output="{% if t.overrides.csv_import.output and not t.overrides.csv_import.output.has_output %}1{% else %}0{% endif %}"
+          data-incomplete-output="{% if t.overrides.csv_import.output.has_incomplete %}1{% else %}0{% endif %}"
+          data-has-simu="{% if t.overrides.csv_import.output.has_simu %}1{% else %}0{% endif %}"
+          data-has-reco="{% if t.overrides.csv_import.output.has_reco %}1{% else %}0{% endif %}"
           data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
         <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
@@ -226,6 +239,13 @@ Context expected:
           {% endif %}
           {% if other_text|informative_text %}
             <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
+          {% endif %}
+          {% if t.overrides.csv_import.output.matched_count %}
+            {% with output=t.overrides.csv_import.output %}
+              <div class="text-muted"><strong>Output:</strong>
+                {% for stage, st in output.by_stage.items %}{% if not forloop.first %} &middot; {% endif %}{% if stage == 'FULL' %}Simu{% else %}Reco{% endif %}: {{ st.count }} ds, {{ st.files }} files, {{ st.bytes|filesizeformat }}{% if st.rses %}, {% for rse, c in st.rses.items %}{% if not forloop.first %} {% endif %}{{ rse }}{% if c.incomplete %} <span style="color:#dc3545">({{ c.complete }}/{{ c.complete|add:c.incomplete }})</span>{% endif %}{% endfor %}{% endif %}{% endfor %}
+              </div>
+            {% endwith %}
           {% endif %}
         </td>
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
@@ -267,7 +287,8 @@ Context expected:
 
   const STR = ['status','requestor','evgen','submission_path','priority','nevents',
                'detector','beam','physics','q2','species','energy'];
-  const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background'];
+  const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background',
+                'has_output','no_output','incomplete_output','has_simu','has_reco'];
   const DS = { status:'status', requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
                priority:'priority', nevents:'nevents',
@@ -275,7 +296,10 @@ Context expected:
                q2:'q2', species:'species', energy:'energy' };
   const BD = { new_request:'newRequest', pre_tdr_use:'preTdr',
                early_science_use:'earlyScience', other_use:'other',
-               background:'background' };
+               background:'background',
+               has_output:'hasOutput', no_output:'noOutput',
+               incomplete_output:'incompleteOutput',
+               has_simu:'hasSimu', has_reco:'hasReco' };
 
   // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
   function energyMeV(s) {
@@ -311,6 +335,11 @@ Context expected:
     early_science_use: initial.get('early_science_use') === '1',
     other_use: initial.get('other_use') === '1',
     background: initial.get('background') === '1',
+    has_output: initial.get('has_output') === '1',
+    no_output: initial.get('no_output') === '1',
+    incomplete_output: initial.get('incomplete_output') === '1',
+    has_simu: initial.get('has_simu') === '1',
+    has_reco: initial.get('has_reco') === '1',
   };
 
   function rowMatches(tr, skip) {
@@ -340,7 +369,8 @@ Context expected:
     const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{},
                         priority:{}, nevents:{},
                         detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
-    const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0 };
+    const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0,
+                         has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
         if (rowMatches(tr, k)) {
@@ -388,7 +418,8 @@ Context expected:
     const p = u.searchParams;
     ['q','status','requestor','evgen','submission_path','priority','nevents',
      'detector','beam','physics','q2','species','energy',
-     'new_request','pre_tdr_use','early_science_use','other_use','background'].forEach(k => p.delete(k));
+     'new_request','pre_tdr_use','early_science_use','other_use','background',
+     'has_output','no_output','incomplete_output','has_simu','has_reco'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
     for (const k of BOOL) if (state[k]) p.set(k, '1');

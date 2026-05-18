@@ -1064,6 +1064,140 @@ def fetch_jlab_rucio_campaign(campaign_path, *, scope='epic', token=None):
     return {'count': len(datasets), 'datasets': datasets}
 
 
+def _request_input_tail(ds_path):
+    """Return the comparable tail of a CSV input dataset path.
+
+    /volatile/eic/EPIC/EVGEN/<TAIL>  ->  '<TAIL>'  (lower-cased)
+    anything else                    ->  '' (no match)
+    """
+    if not ds_path:
+        return ''
+    parts = ds_path.strip('/').split('/')
+    if len(parts) >= 5 and parts[:4] == ['volatile', 'eic', 'EPIC', 'EVGEN']:
+        return '/'.join(parts[4:]).lower()
+    return ''
+
+
+def _did_path_tail(did):
+    """Drop scope + /STAGE/<v>/<detector>/ and return the rest, lower-cased.
+
+    epic:/RECO/26.02.0/epic_craterlake/DDIS/rapgap3.../noRad/ep/10x100/q2_1to10
+        -> 'ddis/rapgap3.../norad/ep/10x100/q2_1to10'
+    """
+    name = did.split(':', 1)[-1].lstrip('/')
+    parts = name.split('/')
+    if len(parts) <= 3:
+        return ''
+    return '/'.join(parts[3:]).lower()
+
+
+def _aggregate_rucio_match(matches):
+    """Per-stage rollup over a list of matched dataset records.
+
+    Rucio's /dids/<scope>/<name> endpoint returns length/bytes as null
+    for these datasets; the canonical file count and byte size live on
+    each RSE replica record (they all carry the same value since RSEs
+    hold replicas of the same data). Take the max across RSEs.
+    """
+    by_stage = {}
+    for m in matches:
+        st = by_stage.setdefault(m['stage'], {
+            'count': 0, 'files': 0, 'bytes': 0,
+            'rses': {}, 'incomplete': 0,
+        })
+        st['count'] += 1
+        ds_files = m.get('length') or 0
+        ds_bytes = m.get('bytes')  or 0
+        complete = True
+        for r in m.get('rse_replicas', []):
+            rse = r.get('rse')
+            if not rse:
+                continue
+            ds_files = max(ds_files, r.get('length') or 0)
+            ds_bytes = max(ds_bytes, r.get('bytes')  or 0)
+            st['rses'].setdefault(rse, {'complete': 0, 'incomplete': 0})
+            if r.get('available_length') == r.get('length') and r.get('length'):
+                st['rses'][rse]['complete'] += 1
+            else:
+                st['rses'][rse]['incomplete'] += 1
+                complete = False
+        st['files'] += ds_files
+        st['bytes'] += ds_bytes
+        if not complete:
+            st['incomplete'] += 1
+    return by_stage
+
+
+def _index_snapshot_by_tail(snapshot):
+    """Pre-index a snapshot for fast tail-prefix lookup.
+
+    Returns a list of (tail, dataset_record_with_stage) tuples sorted by
+    tail length DESC, so the most-specific tails are tried first.
+    """
+    idx = []
+    for cpath, info in snapshot.get('campaigns', {}).items():
+        # cpath = '/RECO/26.02.0' or '/FULL/26.02.0'
+        cp_parts = cpath.strip('/').split('/')
+        stage = cp_parts[0] if cp_parts else ''
+        for d in info.get('datasets', []):
+            tail = _did_path_tail(d.get('did', ''))
+            if not tail:
+                continue
+            idx.append((tail, {**d, 'stage': stage}))
+    return idx
+
+
+def match_requests_to_rucio_snapshot(snapshot, *, campaign):
+    """For every ProdTask in `campaign` whose CSV input has a usable tail,
+    stash an `overrides['csv_import']['output']` rollup of matching Rucio
+    datasets. A dataset matches when its DID-name tail (after
+    /STAGE/<v>/<detector>/) equals the input tail or extends it with one
+    or more additional path segments.
+    """
+    idx = _index_snapshot_by_tail(snapshot)
+    qs = ProdTask.objects.filter(campaign=campaign).select_related('dataset')
+    summary = {'tasks_seen': 0, 'tasks_matched': 0, 'tasks_unmatched': 0}
+    for t in qs:
+        summary['tasks_seen'] += 1
+        ds_path = t.dataset.metadata.get('source', {}).get('location', '') \
+            if (t.dataset.metadata or {}) else ''
+        input_tail = _request_input_tail(ds_path)
+        matches = []
+        if input_tail:
+            for tail, rec in idx:
+                if tail == input_tail or tail.startswith(input_tail + '/'):
+                    matches.append(rec)
+        by_stage = _aggregate_rucio_match(matches)
+        any_incomplete = any(s.get('incomplete', 0) for s in by_stage.values())
+        has_output = len(matches) > 0
+        if not has_output:
+            output_status = 'no_output'
+        elif any_incomplete:
+            output_status = 'incomplete'
+        else:
+            output_status = 'complete'
+        overrides = dict(t.overrides or {})
+        cv = dict(overrides.get('csv_import', {}) or {})
+        cv['output'] = {
+            'by_stage':      by_stage,
+            'matched_count': len(matches),
+            'campaign_name': campaign.name,
+            'status':        output_status,   # 'no_output' | 'complete' | 'incomplete'
+            'has_output':    has_output,
+            'has_incomplete': any_incomplete,
+            'has_simu':      'FULL' in by_stage,
+            'has_reco':      'RECO' in by_stage,
+        }
+        overrides['csv_import'] = cv
+        t.overrides = overrides
+        t.save(update_fields=['overrides', 'updated_at'])
+        if matches:
+            summary['tasks_matched'] += 1
+        else:
+            summary['tasks_unmatched'] += 1
+    return summary
+
+
 def import_jlab_rucio_current_snapshot(*, campaign_name=None,
                                       snapshot_dir=RUCIO_SNAPSHOT_DIR,
                                       created_by='rucio_snapshot'):
@@ -1122,6 +1256,20 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
     with open(out_path, 'w') as f:
         _json.dump(snapshot, f, indent=2)
     summary['file_bytes'] = _os.path.getsize(out_path)
+
+    # Cache the per-request Output rollup on each ProdTask in this
+    # campaign so the Current tab can render it without re-reading
+    # the snapshot file on every page load.
+    try:
+        camp = Campaign.objects.get(name=campaign_name, lifecycle='current')
+        match_summary = match_requests_to_rucio_snapshot(snapshot, campaign=camp)
+        summary['match'] = match_summary
+    except Campaign.DoesNotExist:
+        summary['errors'].append(
+            f"current campaign '{campaign_name}' not in PCS - matches skipped")
+    except Exception as e:                                    # noqa: BLE001
+        summary['errors'].append(f'request match step failed: {e}')
+
     return summary
 
 
