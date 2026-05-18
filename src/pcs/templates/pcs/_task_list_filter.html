@@ -102,9 +102,8 @@ Context expected:
       </div>
     </div>
     <div class="col-md-1 d-flex gap-1 justify-content-end">
-      <button type="submit" class="btn btn-sm btn-primary">Apply</button>
-      <a href="{{ form_action }}{% if active_campaign %}?campaign={{ active_campaign }}{% endif %}"
-         class="btn btn-sm btn-outline-secondary" title="Clear filters">×</a>
+      <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-outline-secondary"
+              title="Clear filters">×</button>
     </div>
   </div>
 </form>
@@ -130,7 +129,15 @@ Context expected:
     <tbody>
       {% for t in tasks %}
       {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents %}
-      <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}" data-task-id="{{ t.pk }}">
+      <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
+          data-task-id="{{ t.pk }}"
+          data-status="{{ t.status|default:'' }}"
+          data-requestor="{{ t.requestor|default:'' }}"
+          data-submission-path="{{ t.prod_config.data.submission_path|default:'condor' }}"
+          data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
+          data-early-science="{% if t.early_science_use %}1{% else %}0{% endif %}"
+          data-other="{% if t.other_use %}1{% else %}0{% endif %}"
+          data-search="{{ t.name|default:''|lower }} {{ t.description|default:''|lower }}">
         <td rowspan="2" class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td rowspan="2" class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
         <td rowspan="2" class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
@@ -142,6 +149,7 @@ Context expected:
             </div>
           {% endif %}
         </td>
+        <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
         <td class="small" data-sort-val="{{ nev|default:'' }}">{{ nev|default:"" }}</td>
         <td class="small">{{ bg|default:"" }}</td>
         <td class="small text-center">{% if t.new_request %}Yes{% endif %}</td>
@@ -149,7 +157,6 @@ Context expected:
         <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.other_use %}Yes{% endif %}</td>
         <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
-        <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
       </tr>
       <tr class="pcs-tlf-row pcs-tlf-desc{% if focused_task_id == t.pk %} table-active{% endif %}">
         <td colspan="9" class="small text-muted ps-2">
@@ -164,6 +171,7 @@ Context expected:
       {% empty %}
       <tr><td colspan="12" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
+      <tr id="pcs-tlf-empty" style="display:none"><td colspan="12" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
     </tbody>
   </table>
 </div>
@@ -182,6 +190,106 @@ Context expected:
 
 <script>
 (function() {
+  /* Live filter: filter controls update visible rows immediately, no Apply
+     button. The form is kept for direct-URL access (bookmarkable initial state)
+     and for accessibility; submit is intercepted because everything happens
+     client-side. URL is kept in sync via history.replaceState so the current
+     filter remains bookmarkable.
+
+     Paired-row layout: each task is two adjacent TRs (.pcs-tlf-data and
+     .pcs-tlf-desc) — both must be hidden/shown together. */
+
+  const form = document.getElementById('pcs-tlf-form');
+  const emptyRow = document.getElementById('pcs-tlf-empty');
+  const tableEl = document.querySelector('table.pcs-tlf-list');
+  const tbodyEl = tableEl ? tableEl.tBodies[0] : null;
+
+  function getControl(name) { return form ? form.elements.namedItem(name) : null; }
+
+  function readFilters() {
+    return {
+      q:                 (getControl('q')?.value || '').trim().toLowerCase(),
+      status:            getControl('status')?.value || '',
+      requestor:         getControl('requestor')?.value || '',
+      submission_path:   getControl('submission_path')?.value || '',
+      pre_tdr_use:       !!getControl('pre_tdr_use')?.checked,
+      early_science_use: !!getControl('early_science_use')?.checked,
+      other_use:         !!getControl('other_use')?.checked,
+    };
+  }
+
+  function rowMatches(tr, f) {
+    if (f.q && !(tr.dataset.search || '').includes(f.q)) return false;
+    if (f.status && tr.dataset.status !== f.status) return false;
+    if (f.requestor && tr.dataset.requestor !== f.requestor) return false;
+    if (f.submission_path && tr.dataset.submissionPath !== f.submission_path) return false;
+    if (f.pre_tdr_use && tr.dataset.preTdr !== '1') return false;
+    if (f.early_science_use && tr.dataset.earlyScience !== '1') return false;
+    if (f.other_use && tr.dataset.other !== '1') return false;
+    return true;
+  }
+
+  function applyFilters() {
+    if (!tbodyEl) return;
+    const f = readFilters();
+    let visible = 0;
+    const dataRows = tbodyEl.querySelectorAll('tr.pcs-tlf-data');
+    dataRows.forEach(tr => {
+      const show = rowMatches(tr, f);
+      tr.style.display = show ? '' : 'none';
+      const next = tr.nextElementSibling;
+      if (next && next.classList.contains('pcs-tlf-desc')) {
+        next.style.display = show ? '' : 'none';
+      }
+      if (show) visible++;
+    });
+    if (emptyRow) emptyRow.style.display = (visible === 0 && dataRows.length > 0) ? '' : 'none';
+    syncUrl(f);
+  }
+
+  function syncUrl(f) {
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
+    // Preserve non-filter params (lifecycle, campaign, anything else upstream).
+    ['q','status','requestor','submission_path',
+     'pre_tdr_use','early_science_use','other_use'].forEach(k => params.delete(k));
+    if (f.q) params.set('q', f.q);
+    if (f.status) params.set('status', f.status);
+    if (f.requestor) params.set('requestor', f.requestor);
+    if (f.submission_path) params.set('submission_path', f.submission_path);
+    if (f.pre_tdr_use) params.set('pre_tdr_use', '1');
+    if (f.early_science_use) params.set('early_science_use', '1');
+    if (f.other_use) params.set('other_use', '1');
+    history.replaceState(null, '', url.toString());
+  }
+
+  if (form) {
+    form.addEventListener('submit', e => e.preventDefault());
+    ['q','status','requestor','submission_path',
+     'pre_tdr_use','early_science_use','other_use'].forEach(name => {
+      const el = getControl(name);
+      if (!el) return;
+      const evt = (el.tagName === 'INPUT' && el.type === 'search') ? 'input' : 'change';
+      el.addEventListener(evt, applyFilters);
+    });
+    const clearBtn = document.getElementById('pcs-tlf-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        ['q','status','requestor','submission_path'].forEach(name => {
+          const el = getControl(name);
+          if (el) el.value = '';
+        });
+        ['pre_tdr_use','early_science_use','other_use'].forEach(name => {
+          const el = getControl(name);
+          if (el) el.checked = false;
+        });
+        applyFilters();
+      });
+    }
+    // Initial pass — picks up server-rendered URL params.
+    applyFilters();
+  }
+
   /* Bulk-select state + paired-row column sort.
      Each task is two adjacent TRs: .pcs-tlf-data (sortable) and .pcs-tlf-desc
      (always moves with its sibling). Sort keys come from data-sort-val on the
