@@ -731,12 +731,16 @@ def _extract_past_filters(did):
             species = tail[i + 1]
         if len(tail) > i + 2:
             energy = tail[i + 2]
+    # Fold DIS subtype (NC / CC) directly into physics so the Physics
+    # filter shows NC and CC as siblings of DIS rather than a separate
+    # NC/CC row. Plain-DIS rows (no subtype tagged) stay as 'DIS'.
     dis_type = next((t for t in ('NC', 'CC') if t in tail), '')
+    if physics == 'DIS' and dis_type:
+        physics = dis_type
     return {
         'detector': detector,
         'beam':     beam_m.group(1) if beam_m else '',
         'physics':  physics,
-        'dis_type': dis_type,
         'q2':       q2_m.group(1) if q2_m else '',
         'species':  species,
         'energy':   energy,

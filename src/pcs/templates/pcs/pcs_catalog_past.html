@@ -90,11 +90,6 @@
         <span id="pcs-pdl-physics-opts"></span>
       </div>
       <div class="mb-1">
-        <span class="pcs-pdl-section-label">NC/CC:</span>
-        <a href="#" data-filter="dis_type" data-value="" class="filter-link filter-active">All</a>
-        <span id="pcs-pdl-dis_type-opts"></span>
-      </div>
-      <div class="mb-1">
         <span class="pcs-pdl-section-label">Q&sup2;:</span>
         <a href="#" data-filter="q2" data-value="" class="filter-link filter-active">All</a>
         <span id="pcs-pdl-q2-opts"></span>
@@ -138,7 +133,6 @@
             data-beam="{{ output.filters.beam|default:'' }}"
             data-physics="{{ output.filters.physics|default:'' }}"
             data-q2="{{ output.filters.q2|default:'' }}"
-            data-dis-type="{{ output.filters.dis_type|default:'' }}"
             data-species="{{ output.filters.species|default:'' }}"
             data-energy="{{ output.filters.energy|default:'' }}"
             data-search="{{ ds_did|lower }}">
@@ -179,10 +173,18 @@
   /* Faceted filter — Detector / Beam / Physics / Q2. Same panda-jobs
      convention as the Current tab's filter bar: per-filter horizontal
      value (count) links, counts faceted on the other active filters. */
-  const FILTERS = ['detector','beam','physics','dis_type','q2','species','energy'];
+  const FILTERS = ['detector','beam','physics','q2','species','energy'];
   const DS_KEY  = { detector:'detector', beam:'beam', physics:'physics',
-                    dis_type:'disType', q2:'q2',
-                    species:'species', energy:'energy' };
+                    q2:'q2', species:'species', energy:'energy' };
+
+  // Energy filter values like '500MeV' / '5GeV' need unit-aware
+  // sort — plain numeric sort would put 5GeV (=5) before 500MeV (=500).
+  function energyMeV(s) {
+    const m = String(s).match(/^([\d.]+)\s*(eV|keV|MeV|GeV|TeV)$/i);
+    if (!m) return null;
+    const mult = {ev:1e-6, kev:1e-3, mev:1, gev:1e3, tev:1e6}[m[2].toLowerCase()];
+    return parseFloat(m[1]) * mult;
+  }
   const rows    = Array.from(document.querySelectorAll('tr.pcs-pdl-row'));
   if (!rows.length) return;
 
@@ -222,6 +224,10 @@
       const span = document.getElementById('pcs-pdl-' + k + '-opts');
       if (!span) continue;
       const entries = Object.entries(counts[k]).sort((a, b) => {
+        if (k === 'energy') {
+          const ea = energyMeV(a[0]), eb = energyMeV(b[0]);
+          if (ea !== null && eb !== null) return ea - eb;
+        }
         const na = parseFloat(a[0]), nb = parseFloat(b[0]);
         if (!isNaN(na) && !isNaN(nb)) return na - nb;
         return a[0].localeCompare(b[0]);
