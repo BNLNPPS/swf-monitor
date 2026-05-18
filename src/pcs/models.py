@@ -342,6 +342,123 @@ class ProdConfig(models.Model):
         to 'external_evgen' (current production reality)."""
         return (self.data or {}).get('workflow_mode', 'external_evgen')
 
+    @property
+    def submission_path(self):
+        """Submission path: 'condor', 'panda', or 'internal_evgen'.
+        Stored in ``data['submission_path']``; defaults to 'condor'
+        (current production submission path)."""
+        return (self.data or {}).get('submission_path', 'condor')
+
+
+CAMPAIGN_LIFECYCLE_CHOICES = [
+    ('past', 'Past'),
+    ('current', 'Current'),
+    ('future', 'Future'),
+]
+
+
+class Campaign(models.Model):
+    """
+    Production campaign — a time-ordered grouping of ProdTasks.
+
+    Lifecycle drives the catalog tabs: past (grey), current (green),
+    future (blue). ``set_current`` in the service layer enforces the
+    'one current at a time' invariant; no DB constraint, to keep
+    transitions painless.
+    """
+    name = models.CharField(max_length=100, unique=True,
+                            help_text="Campaign name, e.g. '26.02.0'")
+    lifecycle = models.CharField(max_length=10, choices=CAMPAIGN_LIFECYCLE_CHOICES,
+                                 default='future')
+    description = models.TextField(blank=True, default='')
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    clone_of = models.ForeignKey('self', null=True, blank=True,
+                                 on_delete=models.SET_NULL, related_name='clones',
+                                 help_text="Campaign this was cloned from")
+    data = models.JSONField(default=dict, blank=True,
+                            help_text="Flexible extension fields (no migration to add new keys)")
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_campaign'
+        ordering = ['-start_date', '-created_at']
+
+    def __str__(self):
+        return self.name
+
+
+PRODREQUEST_STATUS_CHOICES = [
+    ('new', 'New'),
+    ('review', 'Review'),
+    ('blocked', 'Blocked'),
+    ('ready', 'Ready'),
+    ('linked', 'Linked'),
+    ('closed', 'Closed'),
+]
+
+
+class ProdRequest(models.Model):
+    """
+    PWG/DSC production request — upstream of ProdTask.
+
+    Captures the request spreadsheet fields, system fields for intake
+    idempotency and traceability, and production-team triage state.
+    Use flags and requestor are duplicated onto ProdTask at task
+    creation; both rows are mutable independently after that.
+    """
+    # Requester-facing fields (request spreadsheet)
+    requestor = models.CharField(max_length=100, blank=True, default='',
+                                 help_text="PWG or DSC making the request")
+    simu_path = models.CharField(max_length=500, blank=True, default='',
+                                 help_text="Declared simulation/EVGEN input location")
+    gen_config = models.TextField(blank=True, default='',
+                                  help_text="Generator configuration text from the request")
+    nevents = models.BigIntegerField(null=True, blank=True,
+                                     help_text="Requested event count")
+    background = models.CharField(max_length=200, blank=True, default='',
+                                  help_text="Requested background condition")
+    description = models.TextField(blank=True, default='')
+    priority = models.IntegerField(null=True, blank=True,
+                                   help_text="Requester or production priority")
+
+    # Use flags
+    pre_tdr_use = models.BooleanField(default=False)
+    early_science_use = models.BooleanField(default=False)
+    other_use = models.BooleanField(default=False)
+    new_request = models.BooleanField(default=False)
+
+    # System / traceability
+    status = models.CharField(max_length=20, choices=PRODREQUEST_STATUS_CHOICES,
+                              default='new')
+    source_url = models.CharField(max_length=500, blank=True, default='',
+                                  help_text="Source spreadsheet or form URL")
+    source_row = models.CharField(max_length=100, blank=True, default='',
+                                  help_text="Source row identifier for idempotent import")
+
+    # Production-team triage
+    input_status = models.CharField(max_length=100, blank=True, default='',
+                                    help_text="Whether declared inputs are located/registered/usable")
+    rucio_source = models.CharField(max_length=300, blank=True, default='',
+                                    help_text="Rucio DID or container for registered input")
+    validation_status = models.CharField(max_length=100, blank=True, default='',
+                                         help_text="Validation summary")
+
+    data = models.JSONField(default=dict, blank=True,
+                            help_text="Flexible extension fields (no migration to add new keys)")
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_prod_request'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"req#{self.pk} {self.requestor or '(unspecified)'}"
+
 
 PRODTASK_STATUS_CHOICES = [
     ('draft', 'Draft'),
@@ -366,6 +483,22 @@ class ProdTask(models.Model):
     # Core composition
     dataset = models.ForeignKey(Dataset, on_delete=models.PROTECT, related_name='prod_tasks')
     prod_config = models.ForeignKey(ProdConfig, on_delete=models.PROTECT, related_name='prod_tasks')
+
+    # Campaign / Request linkage
+    campaign = models.ForeignKey(Campaign, null=True, blank=True,
+                                 on_delete=models.PROTECT, related_name='prod_tasks',
+                                 help_text="Campaign this task belongs to")
+    request = models.ForeignKey(ProdRequest, null=True, blank=True,
+                                on_delete=models.SET_NULL, related_name='prod_tasks',
+                                help_text="Originating PWG/DSC request, if any")
+
+    # Catalog row fields (seeded from request at creation; mutable thereafter)
+    requestor = models.CharField(max_length=100, blank=True, default='')
+    priority = models.IntegerField(null=True, blank=True)
+    pre_tdr_use = models.BooleanField(default=False)
+    early_science_use = models.BooleanField(default=False)
+    other_use = models.BooleanField(default=False)
+    new_request = models.BooleanField(default=False)
 
     # Task-specific submission params
     csv_file = models.CharField(max_length=500, blank=True, default='',
