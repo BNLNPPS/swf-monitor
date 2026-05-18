@@ -92,7 +92,38 @@
   </details>
   {% endif %}
 
-  {% include "pcs/_task_list_filter.html" %}
+  {% if active_lifecycle == 'last' %}
+    {% if rucio_dataset_rows %}
+    <table class="table table-sm">
+      <thead>
+        <tr>
+          <th style="width:3em">#</th>
+          <th style="width:5em">Stage</th>
+          <th>Dataset (Rucio DID)</th>
+          <th class="text-end" style="width:6em">Files</th>
+          <th class="text-end" style="width:7em">Size</th>
+          <th>RSEs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in rucio_dataset_rows %}
+        <tr>
+          <td class="small text-muted">{{ forloop.counter }}</td>
+          <td class="small">{% if d.stage == 'FULL' %}SIMU{% else %}{{ d.stage }}{% endif %}</td>
+          <td class="small"><code>{{ d.did }}</code></td>
+          <td class="small text-end">{{ d.files }}</td>
+          <td class="small text-end">{{ d.bytes|filesizeformat }}</td>
+          <td class="small">{{ d.rses|join:", " }}{% if not d.complete %} <span class="text-danger">(incomplete)</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="text-muted small mb-3">No datasets in the snapshot yet — click <em>Update from Rucio</em>.</div>
+    {% endif %}
+  {% else %}
+    {% include "pcs/_task_list_filter.html" %}
+  {% endif %}
 </div>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>

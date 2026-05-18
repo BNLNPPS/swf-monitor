@@ -1245,6 +1245,7 @@ def pcs_catalog(request):
     rucio_unmatched_campaign = ''
     rucio_detected = []
     rucio_current_name = ''
+    rucio_dataset_rows = []
     if active_lifecycle in ('current', 'last'):
         camp_list = campaigns_by_lifecycle[active_lifecycle]
         target = camp_list[0] if camp_list else None
@@ -1254,6 +1255,28 @@ def pcs_catalog(request):
             if snap is not None:
                 rucio_timeline = summarize_rucio_timeline(snap)
                 rucio_timeline['campaign_name'] = target.name
+                # Last has no linked request rows (CSV is bound to
+                # current). Synthesise rows directly from the Rucio
+                # snapshot so the table isn't empty.
+                if active_lifecycle == 'last':
+                    for cpath, info in (snap.get('campaigns') or {}).items():
+                        stage = cpath.strip('/').split('/')[0]
+                        for d in info.get('datasets') or []:
+                            rses = d.get('rse_replicas') or []
+                            files = max((r.get('length') or 0 for r in rses), default=0)
+                            bytes_ = max((r.get('bytes') or 0 for r in rses), default=0)
+                            complete = bool(rses) and all(
+                                r.get('available_length') == r.get('length') and r.get('length')
+                                for r in rses)
+                            rucio_dataset_rows.append({
+                                'did':      d['did'],
+                                'stage':    stage,
+                                'files':    files,
+                                'bytes':    bytes_,
+                                'rses':     [r['rse'] for r in rses if r.get('rse')],
+                                'complete': complete,
+                            })
+                    rucio_dataset_rows.sort(key=lambda r: r['did'])
             rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
             rucio_unmatched_campaign = target.name
             rucio_detected = (target.data or {}).get('detected_releases', []) or []
@@ -1282,6 +1305,7 @@ def pcs_catalog(request):
         'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
         'rucio_unmatched': rucio_unmatched,
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
+        'rucio_dataset_rows': rucio_dataset_rows,
         'rucio_detected': rucio_detected,
         'rucio_current_name': rucio_current_name,
     }
