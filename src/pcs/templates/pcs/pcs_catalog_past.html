@@ -56,7 +56,9 @@
     {% for tab in lifecycle_tabs %}
       <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
          href="?lifecycle={{ tab.key }}">
-        {{ tab.label }}
+        {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
+          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% endif %}
       </a>
     {% endfor %}
   </div>

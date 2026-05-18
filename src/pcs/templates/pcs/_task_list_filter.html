@@ -70,24 +70,14 @@ Context expected:
   form_action           : URL the form GETs to
 {% endcomment %}
 
-{% if show_tabs %}
-<div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
-  {% for tab in lifecycle_tabs %}
-    <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
-       href="?lifecycle={{ tab.key }}">
-      {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
-        {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-      {% endif %}
-    </a>
-  {% endfor %}
+{# Lifecycle tabs render in the page templates themselves (right after
+   the header) so the tab strip occupies the same screen position on
+   every tab — Past, Last, Current, Future. Don't put them here. #}
+{% if focused_campaign %}
+<div class="pcs-tlf-context mb-2">
+  <span class="text-muted small">Campaign:</span>
+  <strong>{{ focused_campaign.name }}</strong>
 </div>
-{% else %}
-  {% if focused_campaign %}
-  <div class="pcs-tlf-context mb-2">
-    <span class="text-muted small">Campaign:</span>
-    <strong>{{ focused_campaign.name }}</strong>
-  </div>
-  {% endif %}
 {% endif %}
 
 <div id="pcs-tlf-bar" class="pcs-tlf-bar mb-2">

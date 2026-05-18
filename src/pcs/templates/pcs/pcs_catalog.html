@@ -26,6 +26,19 @@
     </form>
   </div>
 
+  {% if show_tabs %}
+  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
+    {% for tab in lifecycle_tabs %}
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
+         href="?lifecycle={{ tab.key }}">
+        {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
+          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% endif %}
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if rucio_detected and rucio_detected.0.version != rucio_current_name and active_lifecycle == 'current' %}
     {# Current tab and current is stale: selector to switch. #}
     <div class="border rounded p-2 mb-3 small bg-light">
