@@ -1,35 +1,17 @@
 {% load swf_fmt %}
 <style>
-.pcs-tlf-list th.pcs-sort {
-  cursor: pointer;
-  position: relative;
-  padding-right: 1.4em !important;
-  white-space: nowrap;
-  user-select: none;
-}
-.pcs-tlf-list th.pcs-sort::after {
-  content: "▴\A▾";
-  white-space: pre;
-  position: absolute;
-  right: 0.4em;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 0.55em;
-  line-height: 1;
-  color: #aaa;
-  letter-spacing: 0;
-}
-.pcs-tlf-list th.pcs-sort.pcs-sort-asc::after {
-  content: "▴";
-  font-size: 0.85em;
-  color: #222;
-}
-.pcs-tlf-list th.pcs-sort.pcs-sort-desc::after {
-  content: "▾";
-  font-size: 0.85em;
-  color: #222;
-}
+/* Reuse DataTables sort indicator look on our hand-sorted table by
+   adopting DT's class names; the loaded dataTables.bootstrap5 CSS
+   styles .sorting / .sorting_asc / .sorting_desc with up/down arrows. */
+.pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
+
+/* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
+.pwg-edt            { background-color: #d0e8ff !important; }
+.pwg-inclusive      { background-color: #d4f4d4 !important; }
+.pwg-jets_hf        { background-color: #fff0cc !important; }
+.pwg-semi_inclusive { background-color: #f4d4f4 !important; }
+.pwg-tracking       { background-color: #ffe0cc !important; }
 </style>
 {% comment %}
 Shared task-list + filter partial used by:
@@ -127,22 +109,22 @@ Context expected:
   </div>
 </form>
 
-<div class="pcs-tlf-list-wrap table-responsive">
-  <table class="table table-sm pcs-tlf-list mb-1">
+<div class="dataTables_wrapper pcs-tlf-list-wrap table-responsive">
+  <table class="table table-sm pcs-tlf-list dataTable mb-1">
     <thead>
       <tr>
         <th style="width:1.5em"><input type="checkbox" id="pcs-tlf-selectall" aria-label="Select all visible"></th>
-        <th data-sort="index" class="pcs-sort">#</th>
-        <th data-sort="requestor" class="pcs-sort">Requestor</th>
-        <th data-sort="dataset" class="pcs-sort">Dataset</th>
-        <th data-sort="nevents" class="pcs-sort">N events</th>
-        <th data-sort="background" class="pcs-sort">Background</th>
-        <th data-sort="new_request" class="pcs-sort">New</th>
-        <th data-sort="pre_tdr_use" class="pcs-sort">pre-TDR</th>
-        <th data-sort="early_science_use" class="pcs-sort">ES</th>
-        <th data-sort="other_use" class="pcs-sort">Other</th>
-        <th data-sort="priority" class="pcs-sort">Priority</th>
-        <th data-sort="status" class="pcs-sort">Status</th>
+        <th data-sort="index" class="pcs-sort sorting">#</th>
+        <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
+        <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
+        <th data-sort="status" class="pcs-sort sorting">Status</th>
+        <th data-sort="nevents" class="pcs-sort sorting">N events</th>
+        <th data-sort="background" class="pcs-sort sorting">Background</th>
+        <th data-sort="new_request" class="pcs-sort sorting">New</th>
+        <th data-sort="pre_tdr_use" class="pcs-sort sorting">pre-TDR</th>
+        <th data-sort="early_science_use" class="pcs-sort sorting">ES</th>
+        <th data-sort="other_use" class="pcs-sort sorting">Other</th>
+        <th data-sort="priority" class="pcs-sort sorting">Priority</th>
       </tr>
     </thead>
     <tbody>
@@ -151,7 +133,7 @@ Context expected:
       <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}" data-task-id="{{ t.pk }}">
         <td rowspan="2" class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td rowspan="2" class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
-        <td rowspan="2" class="align-middle small">{{ t.requestor|default:"—" }}</td>
+        <td rowspan="2" class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
         <td class="small" data-sort-val="{{ ds_path }}">
           <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
           {% if gen_ver %}
@@ -274,9 +256,11 @@ Context expected:
 
   function renderIndicators() {
     headers.forEach((h, i) => {
-      h.classList.remove('pcs-sort-asc', 'pcs-sort-desc');
+      h.classList.remove('sorting', 'sorting_asc', 'sorting_desc');
       if (i === activeIdx) {
-        h.classList.add(activeDir === 1 ? 'pcs-sort-asc' : 'pcs-sort-desc');
+        h.classList.add(activeDir === 1 ? 'sorting_asc' : 'sorting_desc');
+      } else {
+        h.classList.add('sorting');
       }
     });
   }
