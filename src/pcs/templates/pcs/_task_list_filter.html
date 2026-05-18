@@ -175,20 +175,23 @@ Context expected:
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
         <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
         <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}">
-          <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
+          {% if t.campaign %}
+            <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}</div>
+          {% endif %}
+          <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
           {% if gen_ver %}
-            <div class="text-muted">
+            <div class="text-muted"><strong>Sample:</strong>
               {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ gen_ver }}</a>{% else %}{{ gen_ver }}{% endif %}
             </div>
           {% endif %}
           {% if t.description or issue %}
-            <div class="text-muted">
+            <div class="text-muted"><strong>Description:</strong>
               {% if t.description %}{{ t.description|linebreaksbr }}{% endif %}
               {% if issue %}{% if t.description %} · {% endif %}<a href="{{ issue }}" target="_blank" rel="noopener">issue</a>{% endif %}
             </div>
           {% endif %}
           {% if other_text|informative_text %}
-            <div><strong class="text-muted">Other use:</strong> {{ other_text }}</div>
+            <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
           {% endif %}
         </td>
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
