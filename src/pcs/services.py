@@ -958,6 +958,173 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     return summary
 
 
+# ---------------------------------------------------------------------------
+# JLab Rucio current-campaign snapshot
+#
+# Output datasets land at JLab Rucio under scope `epic`. The nightly
+# epic-prod GitHub Action that generates docs/{FULL,RECO}/<v>/index.md is
+# exactly this same Rucio query, dumped to markdown. We pull it directly
+# so the Current tab can show 'Output: <files / size / RSEs>' on each
+# task row without waiting for the upstream nightly rebuild.
+#
+# Credentials are the public read-only eicread/eicread account
+# (matches the PandaBot jlab-rucio MCP config). Override via env.
+# ---------------------------------------------------------------------------
+
+JLAB_RUCIO_URL      = '/'.join(['https://rucio-server.jlab.org:443'])
+JLAB_RUCIO_ACCOUNT  = 'eicread'
+JLAB_RUCIO_USERNAME = 'eicread'
+JLAB_RUCIO_PASSWORD = 'eicread'
+RUCIO_SNAPSHOT_DIR  = '/data/wenauseic/github/rucio-snapshots'
+
+
+def _jlab_rucio_auth(timeout=30):
+    """userpass-auth against JLab Rucio. Returns the X-Rucio-Auth-Token."""
+    import urllib.request as _ur
+    import ssl as _ssl
+    import os as _os
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    url = (_os.environ.get('JLAB_RUCIO_URL') or JLAB_RUCIO_URL) + '/auth/userpass'
+    req = _ur.Request(url)
+    req.add_header('X-Rucio-Account',  _os.environ.get('JLAB_RUCIO_ACCOUNT',  JLAB_RUCIO_ACCOUNT))
+    req.add_header('X-Rucio-Username', _os.environ.get('JLAB_RUCIO_USERNAME', JLAB_RUCIO_USERNAME))
+    req.add_header('X-Rucio-Password', _os.environ.get('JLAB_RUCIO_PASSWORD', JLAB_RUCIO_PASSWORD))
+    resp = _ur.urlopen(req, context=ctx, timeout=timeout)
+    token = resp.headers['X-Rucio-Auth-Token']
+    if not token:
+        raise ServiceError('JLab Rucio auth returned no token')
+    return token
+
+
+def _jlab_rucio_get(path, token, *, timeout=60, **q):
+    """GET a JLab Rucio path with the auth token; returns response text."""
+    import urllib.request as _ur
+    import urllib.parse as _up
+    import ssl as _ssl
+    import os as _os
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    url = (_os.environ.get('JLAB_RUCIO_URL') or JLAB_RUCIO_URL) + path
+    if q:
+        url += '?' + _up.urlencode(q)
+    req = _ur.Request(url)
+    req.add_header('X-Rucio-Auth-Token', token)
+    return _ur.urlopen(req, context=ctx, timeout=timeout).read().decode()
+
+
+def _ndjson(text):
+    """Parse a newline-delimited-JSON Rucio response (strings or dicts)."""
+    import json as _json
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(_json.loads(line))
+        except _json.JSONDecodeError:
+            out.append(line)
+    return out
+
+
+def fetch_jlab_rucio_campaign(campaign_path, *, scope='epic', token=None):
+    """Fetch the full Rucio snapshot for one campaign path (e.g. '/RECO/26.02.0').
+
+    Returns {count, datasets:[{did, length, bytes, rse_replicas:[{rse, ...}]}, ...]}.
+    Each dataset's rse_replicas mirrors what /replicas/<scope>/<name>/datasets
+    returns — per-RSE found/total/state/bytes, exactly the shape the
+    epic-prod nightly workflow uses to produce its index.md replica lines.
+    """
+    import json as _json
+    if token is None:
+        token = _jlab_rucio_auth()
+    names = _ndjson(_jlab_rucio_get(
+        f'/dids/{scope}/dids/search', token,
+        type='dataset', name=campaign_path + '/*'))
+    datasets = []
+    for name in names:
+        if not isinstance(name, str):
+            continue
+        meta = _json.loads(_jlab_rucio_get(f'/dids/{scope}/{name}', token))
+        try:
+            rse_records = _ndjson(
+                _jlab_rucio_get(f'/replicas/{scope}/{name}/datasets', token))
+        except Exception as e:                                # noqa: BLE001
+            _log.warning('rucio replicas %s/%s: %s', scope, name, e)
+            rse_records = []
+        datasets.append({
+            'did':          f'{scope}:{name}',
+            'length':       meta.get('length'),
+            'bytes':        meta.get('bytes'),
+            'rse_replicas': rse_records,
+        })
+    return {'count': len(datasets), 'datasets': datasets}
+
+
+def import_jlab_rucio_current_snapshot(*, campaign_name=None,
+                                      snapshot_dir=RUCIO_SNAPSHOT_DIR,
+                                      created_by='rucio_snapshot'):
+    """Pull the JLab Rucio snapshot for the PCS current campaign and save
+    it under the snapshot directory.
+
+    campaign_name: '26.02.0' (or override). If None, uses the
+        lifecycle='current' Campaign. Both /RECO/<v> and /FULL/<v> are
+        fetched.
+    snapshot_dir: writable directory. One JSON file per current campaign:
+        '<snapshot_dir>/current-<campaign>.json'.
+    NO-SILENT-FAILURES: every network / parse error is collected into
+    summary['errors'] and surfaced to the operator.
+    """
+    import json as _json
+    import os as _os
+    import time as _time
+
+    summary = {'campaign': '', 'paths': {}, 'errors': [], 'snapshot_path': ''}
+
+    if campaign_name is None:
+        current = (Campaign.objects.filter(lifecycle='current')
+                   .order_by('-updated_at').first())
+        if not current:
+            raise ServiceError('No current Campaign defined in PCS')
+        campaign_name = current.name
+    summary['campaign'] = campaign_name
+
+    _os.makedirs(snapshot_dir, exist_ok=True)
+    out_path = _os.path.join(snapshot_dir, f'current-{campaign_name}.json')
+    summary['snapshot_path'] = out_path
+
+    try:
+        token = _jlab_rucio_auth()
+    except Exception as e:                                    # noqa: BLE001
+        raise ServiceError(f'JLab Rucio auth failed: {e}')
+
+    snapshot = {
+        'fetched_at':    _time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+        'scope':         'epic',
+        'campaign_name': campaign_name,
+        'campaigns':     {},
+    }
+    for stage in ('RECO', 'FULL'):
+        cpath = f'/{stage}/{campaign_name}'
+        try:
+            snapshot['campaigns'][cpath] = fetch_jlab_rucio_campaign(
+                cpath, token=token)
+            summary['paths'][cpath] = snapshot['campaigns'][cpath]['count']
+        except Exception as e:                                # noqa: BLE001
+            summary['errors'].append(f'{cpath}: {e}')
+            snapshot['campaigns'][cpath] = {'count': 0, 'datasets': [],
+                                            'error': str(e)}
+            summary['paths'][cpath] = 0
+
+    with open(out_path, 'w') as f:
+        _json.dump(snapshot, f, indent=2)
+    summary['file_bytes'] = _os.path.getsize(out_path)
+    return summary
+
+
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     """
     Record outcome of a JEDI submission. Two gates:

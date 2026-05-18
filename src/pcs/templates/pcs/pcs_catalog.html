@@ -16,6 +16,14 @@
         Update from CSV
       </button>
     </form>
+    <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline-primary"
+              title="Refresh the JLab Rucio output snapshot for the current campaign"
+              onclick="return confirm('Refresh the JLab Rucio output snapshot for the current campaign?');">
+        Update from Rucio
+      </button>
+    </form>
   </div>
 
   {% include "pcs/_task_list_filter.html" %}

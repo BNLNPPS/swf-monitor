@@ -943,6 +943,39 @@ def pcs_catalog_csv_update(request):
 
 
 @_login_required_flash
+def pcs_catalog_rucio_update(request):
+    """POST handler for 'Update from Rucio' button on the catalog.
+
+    Pulls the JLab Rucio snapshot for the current PCS campaign
+    (both /RECO/<v>/* and /FULL/<v>/* under scope=epic) and writes
+    a JSON file under the snapshot directory. Redirects back to
+    the catalog with a flash summary. POST-only.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update from Rucio')
+    from .services import import_jlab_rucio_current_snapshot, ServiceError
+    try:
+        summary = import_jlab_rucio_current_snapshot(
+            created_by=getattr(request.user, 'username', '') or 'rucio_snapshot',
+        )
+    except (ServiceError, OSError) as e:
+        messages.error(request, f'JLab Rucio snapshot failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog'))
+    counts = ', '.join(f'{k}={v}' for k, v in summary['paths'].items())
+    msg = (f"JLab Rucio snapshot for {summary['campaign']}: {counts} "
+           f"({summary['file_bytes']:,} bytes -> "
+           f"{summary['snapshot_path']}); "
+           f"{len(summary['errors'])} errors")
+    if summary['errors']:
+        messages.warning(request, msg)
+    else:
+        messages.success(request, msg)
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
 def pcs_catalog_past_update(request):
     """POST handler for the 'Update from epic-prod' button on the Past tab.
 
