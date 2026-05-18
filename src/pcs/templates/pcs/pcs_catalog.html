@@ -92,8 +92,10 @@
   </details>
   {% endif %}
 
-  {% if active_lifecycle == 'last' %}
-    {% if rucio_dataset_rows %}
+  {% include "pcs/_task_list_filter.html" %}
+
+  {% if active_lifecycle == 'last' and rucio_dataset_rows %}
+    <h5 class="mt-4 mb-2">{{ rucio_unmatched_campaign }} — output datasets ({{ rucio_dataset_rows|length }})</h5>
     <table class="table table-sm">
       <thead>
         <tr>
@@ -118,11 +120,6 @@
         {% endfor %}
       </tbody>
     </table>
-    {% else %}
-    <div class="text-muted small mb-3">No datasets in the snapshot yet — click <em>Update from Rucio</em>.</div>
-    {% endif %}
-  {% else %}
-    {% include "pcs/_task_list_filter.html" %}
   {% endif %}
 </div>
 
