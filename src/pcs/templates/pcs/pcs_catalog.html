@@ -26,7 +26,7 @@
     </form>
   </div>
 
-  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:280px"></div>
+  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:420px"></div>
 
   {% if rucio_unmatched %}
   <details class="mb-3 small">
@@ -56,25 +56,36 @@
       + 'click <em>Update from Rucio</em> to populate the current-campaign snapshot.</div>';
     return;
   }
+  const TB = 1e12;
+  const SIMU_COLOR = '#1f77b4';
+  const RECO_COLOR = '#ff7f0e';
+  const tb = bytes => bytes.map(b => b / TB);
   const traces = [
-    {x: data.dates, y: data.simu.cum_datasets, name: 'Simu (cum datasets)',
-     mode: 'lines', line: {shape: 'hv'}, yaxis: 'y'},
-    {x: data.dates, y: data.reco.cum_datasets, name: 'Reco (cum datasets)',
-     mode: 'lines', line: {shape: 'hv'}, yaxis: 'y'},
-    {x: data.dates, y: data.simu.cum_bytes, name: 'Simu (cum bytes)',
-     mode: 'lines', line: {shape: 'hv', dash: 'dot'}, yaxis: 'y2', visible: 'legendonly'},
-    {x: data.dates, y: data.reco.cum_bytes, name: 'Reco (cum bytes)',
-     mode: 'lines', line: {shape: 'hv', dash: 'dot'}, yaxis: 'y2', visible: 'legendonly'},
+    // Top pane: cumulative datasets.
+    {x: data.dates, y: data.simu.cum_datasets, name: 'Simu',
+     legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+     xaxis: 'x', yaxis: 'y'},
+    {x: data.dates, y: data.reco.cum_datasets, name: 'Reco',
+     legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+     xaxis: 'x', yaxis: 'y'},
+    // Bottom pane: cumulative output volume (TB). Legend shared with top
+    // via legendgroup so toggling a stage hides both lines together.
+    {x: data.dates, y: tb(data.simu.cum_bytes), name: 'Simu',
+     legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+     xaxis: 'x', yaxis: 'y2', showlegend: false},
+    {x: data.dates, y: tb(data.reco.cum_bytes), name: 'Reco',
+     legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+     xaxis: 'x', yaxis: 'y2', showlegend: false},
   ];
   const layout = {
     title: {text: 'Rucio arrivals — current campaign ' + (data.campaign_name || ''),
             font: {size: 14}},
-    margin: {l: 50, r: 50, t: 40, b: 40},
-    height: 280,
-    xaxis: {title: '', type: 'date'},
-    yaxis: {title: 'cumulative datasets', rangemode: 'tozero'},
-    yaxis2: {title: 'cumulative bytes', overlaying: 'y', side: 'right', rangemode: 'tozero'},
-    legend: {orientation: 'h', y: -0.18},
+    margin: {l: 60, r: 30, t: 40, b: 40},
+    height: 420,
+    xaxis:  {anchor: 'y2', type: 'date'},
+    yaxis:  {domain: [0.56, 1.0], title: 'datasets',  rangemode: 'tozero'},
+    yaxis2: {domain: [0,    0.46], title: 'output (TB)', rangemode: 'tozero'},
+    legend: {orientation: 'h', y: -0.15},
     showlegend: true,
   };
   Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true});
