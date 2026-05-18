@@ -242,7 +242,13 @@
         <span class="nav-mode nav-production">
         <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
-        <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
+        <div class="dropdown">
+            <button class="dropbtn">Tasks</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_tasks_list' %}">PanDA tasks</a>
+                <a href="{% url 'pcs:pcs_catalog' %}">Production Task Catalog</a>
+            </div>
+        </div>
         <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
         <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
         <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>

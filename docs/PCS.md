@@ -240,6 +240,15 @@ A production config is a reusable template capturing everything needed to build 
 
 Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
 
+## External Access
+
+PCS pages and REST endpoints reach external users via the swf-remote
+proxy at `epic-devcloud.org`. Every new swf-monitor URL intended for
+external access requires a corresponding `path()` entry in
+`swf-remote/src/remote_app/urls.py` — without it, the page returns
+404 to external users. See [External Access](EXTERNAL_ACCESS.md) for
+the contract.
+
 ## JEDI Integration
 
 PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution and Definition Interface) via the PanDA Python API, replacing the current approach of generating `prun` CLI commands as text. See:
