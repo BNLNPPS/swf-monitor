@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% load swf_fmt %}
+{% block title %}Production Task Catalog — Past{% endblock %}
+
+{% block content %}
+<style>
+.pcs-pdl-nav a { margin-right: 0.8em; color: #007bff; text-decoration: none; }
+.pcs-pdl-nav a:hover { text-decoration: underline; }
+.pcs-pdl-nav a.active { font-weight: bold; text-decoration: underline; color: #0056b3; }
+.pcs-pdl-section-label { font-weight: 600; margin-right: 0.6em; }
+.pcs-pdl-summary { margin-bottom: 0.4em; }
+.pcs-pdl-list td, .pcs-pdl-list th { vertical-align: top; }
+.pcs-pdl-rse-ok  { color: #198754; }
+.pcs-pdl-rse-bad { color: #dc3545; }
+</style>
+
+<div class="container-fluid mt-3 pcs-catalog">
+  <div class="d-flex align-items-center mb-3">
+    <h2 class="me-3 mb-0">Production Task Catalog</h2>
+    <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    <form method="post" action="{% url 'pcs:pcs_catalog_past_update' %}" class="ms-2 d-inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline-primary"
+              title="Re-import 2026 FULL/RECO campaign output from epic-prod"
+              onclick="return confirm('Re-import 2026 past-campaign output datasets from epic-prod?');">
+        Update from epic-prod
+      </button>
+    </form>
+  </div>
+
+  {% if show_tabs %}
+  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
+    {% for tab in lifecycle_tabs %}
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
+         href="?lifecycle={{ tab.key }}">
+        {{ tab.label }}
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="pcs-pdl-nav small mb-2">
+    {% if simu_campaigns %}
+    <div class="mb-1">
+      <span class="pcs-pdl-section-label">Simu:</span>
+      {% for c in simu_campaigns %}
+        <a href="?lifecycle=past&amp;campaign={{ c.name|urlencode }}"
+           class="{% if active_campaign and c.pk == active_campaign.pk %}active{% endif %}">{{ c.name|cut:"FULL/" }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if reco_campaigns %}
+    <div>
+      <span class="pcs-pdl-section-label">Reco:</span>
+      {% for c in reco_campaigns %}
+        <a href="?lifecycle=past&amp;campaign={{ c.name|urlencode }}"
+           class="{% if active_campaign and c.pk == active_campaign.pk %}active{% endif %}">{{ c.name|cut:"RECO/" }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  {% if active_campaign %}
+    {% with summary=active_campaign.data.past_summary %}
+    <div class="pcs-pdl-summary">
+      <strong>{{ active_campaign.name }}</strong>
+      &middot; {{ tasks|length }} dataset{{ tasks|length|pluralize }}
+      {% if summary %}
+        &middot; {{ summary.file_count }} files
+        &middot; {{ summary.data_size_bytes|filesizeformat }}
+      {% endif %}
+    </div>
+    {% endwith %}
+
+    <table class="table table-sm pcs-pdl-list mb-1">
+      <thead>
+        <tr>
+          <th style="width:1.5em"><input type="checkbox" id="pcs-pdl-selectall" aria-label="Select all"></th>
+          <th style="width:3em">#</th>
+          <th>Dataset</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in tasks %}
+        {% with output=t.overrides.past_output ds_did=t.dataset.metadata.source.location %}
+        <tr>
+          <td><input type="checkbox" class="pcs-pdl-cb" name="task" value="{{ t.pk }}"></td>
+          <td class="small text-muted">{{ forloop.counter }}</td>
+          <td class="small">
+            <div><strong class="text-muted">Output:</strong> {{ ds_did }}</div>
+            <div class="text-muted">
+              {{ t.dataset.file_count }} files
+              &middot; {{ t.dataset.data_size|filesizeformat }}
+              {% if output.rses %}&middot;
+                {% for r in output.rses %}
+                  {{ r.name }}<span class="{% if r.status == 'complete' %}pcs-pdl-rse-ok{% else %}pcs-pdl-rse-bad{% endif %}">{% if r.status == 'complete' %}&#10004;{% else %}&#10008;{% endif %}</span>
+                {% endfor %}
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endwith %}
+      {% empty %}
+        <tr><td colspan="3" class="text-center text-muted py-3">No datasets recorded for this campaign yet — click <em>Update from epic-prod</em>.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <div class="alert alert-info">
+      No past campaigns ingested yet. Click <strong>Update from epic-prod</strong> above to populate from
+      the cloned <code>epic-prod</code> tree.
+    </div>
+  {% endif %}
+</div>
+
+<script>
+(function() {
+  const all = document.getElementById('pcs-pdl-selectall');
+  if (!all) return;
+  const cbs = document.querySelectorAll('.pcs-pdl-cb');
+  all.addEventListener('change', () => cbs.forEach(c => c.checked = all.checked));
+})();
+</script>
+{% endblock %}

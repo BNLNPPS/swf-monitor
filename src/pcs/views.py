@@ -993,6 +993,47 @@ def pcs_catalog(request):
         k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
         for k in LIFECYCLE_KEYS
     }
+    lifecycle_tabs = [
+        {'key': 'past',    'label': 'Past',    'color': 'secondary',
+         'campaigns': campaigns_by_lifecycle['past']},
+        {'key': 'current', 'label': 'Current', 'color': 'success',
+         'campaigns': campaigns_by_lifecycle['current']},
+        {'key': 'future',  'label': 'Future',  'color': 'primary',
+         'campaigns': campaigns_by_lifecycle['future']},
+    ]
+
+    # Past lifecycle: per-campaign view of output datasets. Default to the
+    # most recent past campaign; ?campaign=<name> picks a specific one.
+    if active_lifecycle == 'past':
+        past_campaigns = sorted(
+            campaigns_by_lifecycle['past'], key=lambda c: c.name, reverse=True,
+        )
+        simu_campaigns = [c for c in past_campaigns if c.name.startswith('FULL/')]
+        reco_campaigns = [c for c in past_campaigns if c.name.startswith('RECO/')]
+        requested = (request.GET.get('campaign') or '').strip()
+        active_campaign = None
+        if requested:
+            active_campaign = next(
+                (c for c in past_campaigns if c.name == requested), None)
+        if active_campaign is None and past_campaigns:
+            active_campaign = past_campaigns[0]
+        past_tasks = []
+        if active_campaign is not None:
+            past_tasks = list(
+                ProdTask.objects
+                .select_related('campaign', 'dataset')
+                .filter(campaign=active_campaign, status='past_output')
+                .order_by('dataset__dataset_name')
+            )
+        return render(request, 'pcs/pcs_catalog_past.html', {
+            'show_tabs': True,
+            'active_lifecycle': active_lifecycle,
+            'lifecycle_tabs': lifecycle_tabs,
+            'simu_campaigns': simu_campaigns,
+            'reco_campaigns': reco_campaigns,
+            'active_campaign': active_campaign,
+            'tasks': past_tasks,
+        })
 
     qs = ProdTask.objects.select_related(
         'campaign', 'dataset', 'prod_config', 'request',
@@ -1004,14 +1045,7 @@ def pcs_catalog(request):
         'show_tabs': True,
         'columns_mode': 'full',
         'active_lifecycle': active_lifecycle,
-        'lifecycle_tabs': [
-            {'key': 'past',    'label': 'Past',    'color': 'secondary',
-             'campaigns': campaigns_by_lifecycle['past']},
-            {'key': 'current', 'label': 'Current', 'color': 'success',
-             'campaigns': campaigns_by_lifecycle['current']},
-            {'key': 'future',  'label': 'Future',  'color': 'primary',
-             'campaigns': campaigns_by_lifecycle['future']},
-        ],
+        'lifecycle_tabs': lifecycle_tabs,
         'active_campaigns': campaigns_by_lifecycle[active_lifecycle],
         'focused_campaign': None,
         'focused_task_id': None,
