@@ -245,12 +245,21 @@ def prodtask_link_input(*, task, did=None, dids=None):
     return task
 
 
+def _known_prodtask_statuses():
+    """Universe of legal ProdTask status values, derived from the
+    transition map rather than a CharField choices enum."""
+    known = set(PRODTASK_TRANSITIONS.keys())
+    for trans in PRODTASK_TRANSITIONS.values():
+        known.update(trans)
+    return known
+
+
 def prodtask_set_status(*, task, new_status):
     """Lifecycle transition with rule enforcement."""
-    valid = [c[0] for c in task._meta.get_field('status').choices]
+    valid = _known_prodtask_statuses()
     if new_status not in valid:
         raise ServiceError(
-            f'Invalid status. Choose from: {", ".join(valid)}'
+            f'Invalid status. Choose from: {", ".join(sorted(valid))}'
         )
     allowed = PRODTASK_TRANSITIONS.get(task.status, set())
     if new_status != task.status and new_status not in allowed:
@@ -356,10 +365,10 @@ def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     except (TypeError, ValueError):
         raise ServiceError('jedi_task_id must be an integer')
 
-    valid = [c[0] for c in task._meta.get_field('status').choices]
+    valid = _known_prodtask_statuses()
     if new_status not in valid:
         raise ServiceError(
-            f'Invalid status. Choose from: {", ".join(valid)}'
+            f'Invalid status. Choose from: {", ".join(sorted(valid))}'
         )
     task.status = new_status
     task.save(update_fields=['panda_task_id', 'status', 'updated_at'])

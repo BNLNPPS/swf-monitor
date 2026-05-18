@@ -368,8 +368,7 @@ class Campaign(models.Model):
     """
     name = models.CharField(max_length=100, unique=True,
                             help_text="Campaign name, e.g. '26.02.0'")
-    lifecycle = models.CharField(max_length=10, choices=CAMPAIGN_LIFECYCLE_CHOICES,
-                                 default='future')
+    lifecycle = models.CharField(max_length=20, default='future')
     description = models.TextField(blank=True, default='')
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
@@ -431,8 +430,7 @@ class ProdRequest(models.Model):
     new_request = models.BooleanField(default=False)
 
     # System / traceability
-    status = models.CharField(max_length=20, choices=PRODREQUEST_STATUS_CHOICES,
-                              default='new')
+    status = models.CharField(max_length=20, default='new')
     source_url = models.CharField(max_length=500, blank=True, default='',
                                   help_text="Source spreadsheet or form URL")
     source_row = models.CharField(max_length=100, blank=True, default='',
@@ -478,7 +476,7 @@ class ProdTask(models.Model):
     name = models.CharField(max_length=255, unique=True,
                             help_text="Task name (auto-derived from dataset or manual)")
     description = models.TextField(blank=True, default='')
-    status = models.CharField(max_length=20, choices=PRODTASK_STATUS_CHOICES, default='draft')
+    status = models.CharField(max_length=20, default='draft')
 
     # Core composition
     dataset = models.ForeignKey(Dataset, on_delete=models.PROTECT, related_name='prod_tasks')
