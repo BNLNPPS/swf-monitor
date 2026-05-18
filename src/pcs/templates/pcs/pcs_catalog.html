@@ -26,33 +26,54 @@
     </form>
   </div>
 
-  {# Banner shows ONLY when the most-recent detected release isn't
-     already the PCS current — i.e. when the operator actually has a
-     decision to make. Hides itself the moment current matches latest. #}
-  {% if rucio_detected and rucio_detected.0.version != rucio_current_name %}
-  <div class="border rounded p-2 mb-3 small bg-light">
-    <div class="mb-1 text-muted">
-      Detected newer 26.x release in JLab Rucio
-      (PCS current: <strong>{{ rucio_current_name }}</strong>):
-    </div>
-    <div class="d-flex flex-wrap align-items-center gap-2">
-    {% for r in rucio_detected %}
-      <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
+  {% if active_lifecycle == 'last' and not rucio_unmatched_campaign and rucio_detected %}
+    {# Last tab, no Last set: selector to designate one. #}
+    <div class="border rounded p-2 mb-3 small bg-light">
+      <div class="mb-1 text-muted">
+        No <strong>last</strong> release set. Pick one from the active 26.x releases
+        in JLab Rucio (PCS current: <strong>{{ rucio_current_name }}</strong>):
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+      {% for r in rucio_detected %}
         {% if r.version != rucio_current_name %}
-          <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
+        <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
+          <form method="post" action="{% url 'pcs:pcs_catalog_set_last' %}" class="d-inline">
             {% csrf_token %}
             <input type="hidden" name="name" value="{{ r.version }}">
-            <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1"
-                    title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
-                    onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
+            <button type="submit" class="btn btn-sm btn-outline-info py-0 px-2 ms-1"
+                    title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot"
+                    onclick="return confirm('Set PCS last to {{ r.version }} and pull snapshot?');">Make last</button>
           </form>
-        {% else %}
-          <span class="badge bg-success">current</span>
+        </span>
         {% endif %}
-      </span>
-    {% endfor %}
+      {% endfor %}
+      </div>
     </div>
-  </div>
+  {% elif rucio_detected and rucio_detected.0.version != rucio_current_name and active_lifecycle == 'current' %}
+    {# Current tab and current is stale: selector to switch. #}
+    <div class="border rounded p-2 mb-3 small bg-light">
+      <div class="mb-1 text-muted">
+        Detected newer 26.x release in JLab Rucio
+        (PCS current: <strong>{{ rucio_current_name }}</strong>):
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+      {% for r in rucio_detected %}
+        <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
+          {% if r.version != rucio_current_name %}
+            <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
+              {% csrf_token %}
+              <input type="hidden" name="name" value="{{ r.version }}">
+              <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1"
+                      title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
+                      onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
+            </form>
+          {% else %}
+            <span class="badge bg-success">current</span>
+          {% endif %}
+        </span>
+      {% endfor %}
+      </div>
+    </div>
   {% endif %}
 
   <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>

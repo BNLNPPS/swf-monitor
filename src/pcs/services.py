@@ -1161,6 +1161,71 @@ def _index_snapshot_by_tail(snapshot):
     return idx
 
 
+_Q2_MIN_RE   = _re.compile(r'^minQ2=([\d.]+)$', _re.I)
+_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)to([\d.]+)$', _re.I)
+_Q2_POINT_RE = _re.compile(r'^q2_([\d.]+)$', _re.I)
+
+
+def _q2_range(s):
+    """Convert a Q² label into a (lo, hi) numeric range.
+
+    'minQ2=1'    -> (1, inf)
+    'q2_1to10'   -> (1, 10)
+    'q2_20'      -> (20, 20)
+    anything else / empty -> None
+    """
+    if not s:
+        return None
+    m = _Q2_MIN_RE.match(s)
+    if m:
+        return (float(m.group(1)), float('inf'))
+    m = _Q2_RANGE_RE.match(s)
+    if m:
+        return (float(m.group(1)), float(m.group(2)))
+    m = _Q2_POINT_RE.match(s)
+    if m:
+        v = float(m.group(1))
+        return (v, v)
+    return None
+
+
+def _q2_overlap(req_q2, did_q2):
+    """True if request and DID Q² labels could plausibly intersect."""
+    if not req_q2 or not did_q2:
+        return True   # absent on either side: don't block the match
+    a = _q2_range(req_q2)
+    b = _q2_range(did_q2)
+    if a is None or b is None:
+        return req_q2 == did_q2  # exact string fallback
+    return a[0] <= b[1] and b[0] <= a[1]
+
+
+def _filter_match(req, did):
+    """True if a request's filter fields match an output DID's.
+
+    Matches on the semantic axes shared by both schemas (detector,
+    beam, physics, Q²) rather than on path strings — the output DID
+    carries extra segments (generator, radiation, charge) and a
+    different Q² spelling that defeat string matching. See
+    project-pcs-request-vs-output-paths.
+    """
+    for k in ('detector', 'beam', 'physics'):
+        rv, dv = req.get(k), did.get(k)
+        if rv and dv and rv != dv:
+            return False
+        if rv and not dv:
+            return False
+    if not _q2_overlap(req.get('q2'), did.get('q2')):
+        return False
+    # Species/energy only meaningful for SINGLE-physics paths; require
+    # both sides to agree when both populated.
+    for k in ('species', 'energy'):
+        rv, dv = req.get(k), did.get(k)
+        if rv and dv and rv != dv:
+            return False
+    return True
+
+
 def _did_tail_segments(did_tail):
     return did_tail.split('/') if did_tail else []
 
@@ -1193,21 +1258,28 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     ``campaign.data['rucio_unmatched']`` so the catalog view can surface
     them as synthetic table rows (unmatched output popping up).
     """
+    # Precompute (rec, did_filters) so the matcher loop is O(req * did).
     idx = _index_snapshot_by_tail(snapshot)
-    idx_segs = [(_did_tail_segments(tail), rec) for tail, rec in idx]
+    idx_filtered = [(rec, _extract_past_filters(rec['did']))
+                    for _tail, rec in idx]
     qs = ProdTask.objects.filter(campaign=campaign).select_related('dataset')
     summary = {'tasks_seen': 0, 'tasks_matched': 0, 'tasks_unmatched': 0}
     matched_dids = set()
     for t in qs:
         summary['tasks_seen'] += 1
-        ds_path = t.dataset.metadata.get('source', {}).get('location', '') \
-            if (t.dataset.metadata or {}) else ''
-        input_tail = _request_input_tail(ds_path)
-        req_segs = _did_tail_segments(input_tail)
+        # Prefer the persisted csv_import.filters block (already extracted
+        # at ingest time) and fall back to a fresh extract from the CSV
+        # input path for ProdTasks that predate the filter ingest.
+        req_filters = ((t.overrides or {}).get('csv_import') or {}).get('filters') or {}
+        if not req_filters:
+            ds_path = (t.dataset.metadata or {}).get('source', {}).get('location', '') \
+                if (t.dataset.metadata or {}) else ''
+            req_filters = _extract_csv_filters(ds_path, t.dataset.detector_config) \
+                if ds_path else {}
         matches = []
-        if req_segs:
-            for did_segs, rec in idx_segs:
-                if _path_aligned_match(did_segs, req_segs):
+        if req_filters and any(req_filters.get(k) for k in ('beam', 'physics')):
+            for rec, did_filters in idx_filtered:
+                if _filter_match(req_filters, did_filters):
                     matches.append(rec)
         for m in matches:
             matched_dids.add(m['did'])
@@ -1323,7 +1395,11 @@ def summarize_rucio_timeline(snapshot, *, bin_hours=12):
         return {'dates': [], 'bin_hours': bin_hours, 'simu': {}, 'reco': {}}
 
     first = _dt.datetime.fromisoformat(arrivals[0][0])
-    last  = _dt.datetime.fromisoformat(arrivals[-1][0])
+    last_arr = _dt.datetime.fromisoformat(arrivals[-1][0])
+    # Extend the axis to the current bin (UTC) so a quiet stretch
+    # between the last arrival and now shows as a flat segment.
+    # Don't go past 'now' — no empty future bins on the axis.
+    last = max(last_arr, _bucket(_dt.datetime.utcnow()))
     span = last - first
     n_bins = int(span.total_seconds() // bin_size.total_seconds()) + 1
     dates = [(first + i * bin_size).strftime('%Y-%m-%dT%H:%M:%S')
@@ -1427,6 +1503,8 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
 
     summary = {'campaign': '', 'paths': {}, 'errors': [], 'snapshot_path': ''}
 
+    # If no name given, default to lifecycle='current'. Callers may pass
+    # a 'last' campaign name explicitly.
     if campaign_name is None:
         current = (Campaign.objects.filter(lifecycle='current')
                    .order_by('-updated_at').first())
@@ -1482,16 +1560,21 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
     # campaign so the Current tab can render it without re-reading
     # the snapshot file on every page load.
     try:
-        camp = Campaign.objects.get(name=campaign_name, lifecycle='current')
+        camp = Campaign.objects.get(name=campaign_name)
         # Stash the detected-releases list on the Campaign for the
         # banner; rename / promotion is a separate operator action.
         camp.data = {**(camp.data or {}), 'detected_releases': detected}
         camp.save(update_fields=['data', 'updated_at'])
-        match_summary = match_requests_to_rucio_snapshot(snapshot, campaign=camp)
-        summary['match'] = match_summary
+        # Match the request set to the Rucio snapshot only for the
+        # 'current' campaign — the 'last' campaign has no linked
+        # request rows (CSV requests are bound to current), so there's
+        # nothing to roll up.
+        if camp.lifecycle == 'current':
+            match_summary = match_requests_to_rucio_snapshot(snapshot, campaign=camp)
+            summary['match'] = match_summary
     except Campaign.DoesNotExist:
         summary['errors'].append(
-            f"current campaign '{campaign_name}' not in PCS - matches skipped")
+            f"campaign '{campaign_name}' not in PCS - skipping match step")
     except Exception as e:                                    # noqa: BLE001
         summary['errors'].append(f'request match step failed: {e}')
 

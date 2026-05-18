@@ -989,6 +989,42 @@ def pcs_catalog_set_current(request):
 
 
 @_login_required_flash
+def pcs_catalog_set_last(request):
+    """POST handler for 'Make last' button (Last tab selector).
+
+    Sets the PCS lifecycle='last' Campaign to the named release and
+    pulls its Rucio snapshot in the same click.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog') + '?lifecycle=last',
+            action_label='Make last')
+    target = (request.POST.get('name') or '').strip()
+    from .services import (set_pcs_campaign_lifecycle,
+                           import_jlab_rucio_current_snapshot, ServiceError)
+    try:
+        result = set_pcs_campaign_lifecycle(
+            target, 'last',
+            created_by=getattr(request.user, 'username', '') or 'operator')
+    except ServiceError as e:
+        messages.error(request, f'Make last failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=last')
+    try:
+        snap = import_jlab_rucio_current_snapshot(
+            campaign_name=target,
+            created_by=getattr(request.user, 'username', '') or 'operator')
+        counts = ', '.join(f'{k}={v}' for k, v in snap['paths'].items())
+        messages.success(
+            request,
+            f"PCS last set to {result['name']}. Snapshot: {counts}.")
+    except (ServiceError, OSError) as e:
+        messages.warning(
+            request,
+            f"PCS last set to {result['name']} but snapshot pull failed: {e}")
+    return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=last')
+
+
+@_login_required_flash
 def pcs_catalog_rucio_update(request):
     """POST handler for 'Update from Rucio' button on the catalog.
 
@@ -1002,19 +1038,28 @@ def pcs_catalog_rucio_update(request):
             request, reverse('pcs:pcs_catalog'),
             action_label='Update from Rucio')
     from .services import import_jlab_rucio_current_snapshot, ServiceError
-    try:
-        summary = import_jlab_rucio_current_snapshot(
-            created_by=getattr(request.user, 'username', '') or 'rucio_snapshot',
-        )
-    except (ServiceError, OSError) as e:
-        messages.error(request, f'JLab Rucio snapshot failed: {e}')
+    user = getattr(request.user, 'username', '') or 'rucio_snapshot'
+    # Pull snapshots for both the current and (when set) the last
+    # campaign in one click — operator already consented to a refresh.
+    targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
+                   .order_by('lifecycle'))
+    if not targets:
+        messages.error(request, 'No current Campaign defined in PCS.')
         return redirect(reverse('pcs:pcs_catalog'))
-    counts = ', '.join(f'{k}={v}' for k, v in summary['paths'].items())
-    msg = (f"JLab Rucio snapshot for {summary['campaign']}: {counts} "
-           f"({summary['file_bytes']:,} bytes -> "
-           f"{summary['snapshot_path']}); "
-           f"{len(summary['errors'])} errors")
-    if summary['errors']:
+    summaries, overall_errors = [], []
+    for camp in targets:
+        try:
+            summaries.append(import_jlab_rucio_current_snapshot(
+                campaign_name=camp.name, created_by=user))
+        except (ServiceError, OSError) as e:
+            overall_errors.append(f'{camp.lifecycle} {camp.name}: {e}')
+    parts = [
+        f"{s['campaign']} (" + ', '.join(f'{k}={v}' for k, v in s['paths'].items()) + ')'
+        for s in summaries
+    ]
+    msg = 'JLab Rucio snapshot: ' + ' | '.join(parts) if parts else 'no snapshot pulled'
+    if overall_errors:
+        msg += ' | errors: ' + '; '.join(overall_errors)
         messages.warning(request, msg)
     else:
         messages.success(request, msg)
@@ -1213,6 +1258,13 @@ def pcs_catalog(request):
             rucio_unmatched_campaign = target.name
             rucio_detected = (target.data or {}).get('detected_releases', []) or []
             rucio_current_name = target.name
+        elif active_lifecycle == 'last':
+            # Last not set yet — borrow the detected-releases list from
+            # the current campaign so the operator has options for the
+            # 'Make last' selector.
+            cur = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
+            rucio_detected = (cur.data or {}).get('detected_releases', []) if cur else []
+            rucio_current_name = cur.name if cur else ''
 
     context = {
         'tasks': list(qs),
