@@ -1134,7 +1134,12 @@ def pcs_catalog(request):
     # the most recent. ?release=all spans every past release; release=
     # all_2025 / all_2026 spans that year. ?stage=FULL|RECO filters
     # within the chosen release set.
-    if active_lifecycle == 'past':
+    #
+    # Last lifecycle reuses the same path with release pinned to the
+    # Last campaign's name (e.g. 26.04.1) and adds the Rucio timeline
+    # plot above the table — a hybrid of Past's row model and Current's
+    # snapshot view.
+    if active_lifecycle in ('past', 'last'):
         past_campaigns = list(campaigns_by_lifecycle['past'])
         # Time flows left to right; releases ordered ASC.
         release_versions = sorted(
@@ -1153,17 +1158,25 @@ def pcs_catalog(request):
         # preference; releases within each year stay ASC.
         years_sorted = sorted(releases_by_year.keys(), reverse=True)
 
-        requested_release = (request.GET.get('release') or '').strip()
-        if requested_release == 'all':
-            active_release = 'all'
-        elif (requested_release.startswith('all_')
-              and requested_release[4:] in years_sorted):
-            active_release = requested_release
-        elif requested_release in release_versions:
-            active_release = requested_release
+        if active_lifecycle == 'last':
+            # Pin release to the Last campaign's version; no nav. The
+            # Last Campaign carries its version directly as its name
+            # (e.g. '26.04.1'); past campaigns for the same version are
+            # named 'FULL/26.04.1' and 'RECO/26.04.1'.
+            last_camps = campaigns_by_lifecycle['last']
+            active_release = last_camps[0].name if last_camps else ''
         else:
-            # Default landing = most recent release (last in ASC).
-            active_release = release_versions[-1] if release_versions else ''
+            requested_release = (request.GET.get('release') or '').strip()
+            if requested_release == 'all':
+                active_release = 'all'
+            elif (requested_release.startswith('all_')
+                  and requested_release[4:] in years_sorted):
+                active_release = requested_release
+            elif requested_release in release_versions:
+                active_release = requested_release
+            else:
+                # Default landing = most recent release (last in ASC).
+                active_release = release_versions[-1] if release_versions else ''
 
         requested_stage = (request.GET.get('stage') or '').strip().upper()
         active_stage = requested_stage if requested_stage in ('FULL', 'RECO') else ''
@@ -1218,6 +1231,34 @@ def pcs_catalog(request):
             for yr in years_sorted
         ]
 
+        # Last lifecycle add-on: Rucio snapshot/timeline + Make-last
+        # selector + unmatched details, layered on top of the
+        # past-style table.
+        rucio_timeline = None
+        rucio_unmatched = []
+        rucio_unmatched_campaign = ''
+        rucio_detected = []
+        rucio_current_name = ''
+        if active_lifecycle == 'last':
+            last_camps = campaigns_by_lifecycle['last']
+            target = last_camps[0] if last_camps else None
+            if target is not None:
+                from .services import load_rucio_snapshot, summarize_rucio_timeline
+                snap = load_rucio_snapshot(target.name)
+                if snap is not None:
+                    rucio_timeline = summarize_rucio_timeline(snap)
+                    rucio_timeline['campaign_name'] = target.name
+                rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
+                rucio_unmatched_campaign = target.name
+                rucio_detected = (target.data or {}).get('detected_releases', []) or []
+                rucio_current_name = target.name
+            else:
+                # No Last set yet — borrow detected releases from
+                # current so the operator has options to pick from.
+                cur = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
+                rucio_detected = (cur.data or {}).get('detected_releases', []) if cur else []
+                rucio_current_name = cur.name if cur else ''
+
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
             'active_lifecycle': active_lifecycle,
@@ -1231,6 +1272,11 @@ def pcs_catalog(request):
             'aggregate_file_count': agg_files,
             'aggregate_data_size': agg_size,
             'tasks': past_tasks,
+            'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
+            'rucio_unmatched': rucio_unmatched,
+            'rucio_unmatched_campaign': rucio_unmatched_campaign,
+            'rucio_detected': rucio_detected,
+            'rucio_current_name': rucio_current_name,
         })
 
     qs = ProdTask.objects.select_related(
@@ -1245,9 +1291,8 @@ def pcs_catalog(request):
     rucio_unmatched_campaign = ''
     rucio_detected = []
     rucio_current_name = ''
-    rucio_dataset_rows = []
-    if active_lifecycle in ('current', 'last'):
-        camp_list = campaigns_by_lifecycle[active_lifecycle]
+    if active_lifecycle == 'current':
+        camp_list = campaigns_by_lifecycle['current']
         target = camp_list[0] if camp_list else None
         if target is not None:
             from .services import load_rucio_snapshot, summarize_rucio_timeline
@@ -1255,39 +1300,10 @@ def pcs_catalog(request):
             if snap is not None:
                 rucio_timeline = summarize_rucio_timeline(snap)
                 rucio_timeline['campaign_name'] = target.name
-                # Last has no linked request rows (CSV is bound to
-                # current). Synthesise rows directly from the Rucio
-                # snapshot so the table isn't empty.
-                if active_lifecycle == 'last':
-                    for cpath, info in (snap.get('campaigns') or {}).items():
-                        stage = cpath.strip('/').split('/')[0]
-                        for d in info.get('datasets') or []:
-                            rses = d.get('rse_replicas') or []
-                            files = max((r.get('length') or 0 for r in rses), default=0)
-                            bytes_ = max((r.get('bytes') or 0 for r in rses), default=0)
-                            complete = bool(rses) and all(
-                                r.get('available_length') == r.get('length') and r.get('length')
-                                for r in rses)
-                            rucio_dataset_rows.append({
-                                'did':      d['did'],
-                                'stage':    stage,
-                                'files':    files,
-                                'bytes':    bytes_,
-                                'rses':     [r['rse'] for r in rses if r.get('rse')],
-                                'complete': complete,
-                            })
-                    rucio_dataset_rows.sort(key=lambda r: r['did'])
             rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
             rucio_unmatched_campaign = target.name
             rucio_detected = (target.data or {}).get('detected_releases', []) or []
             rucio_current_name = target.name
-        elif active_lifecycle == 'last':
-            # Last not set yet — borrow the detected-releases list from
-            # the current campaign so the operator has options for the
-            # 'Make last' selector.
-            cur = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
-            rucio_detected = (cur.data or {}).get('detected_releases', []) if cur else []
-            rucio_current_name = cur.name if cur else ''
 
     context = {
         'tasks': list(qs),
@@ -1305,7 +1321,6 @@ def pcs_catalog(request):
         'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
         'rucio_unmatched': rucio_unmatched,
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
-        'rucio_dataset_rows': rucio_dataset_rows,
         'rucio_detected': rucio_detected,
         'rucio_current_name': rucio_current_name,
     }
