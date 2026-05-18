@@ -1,0 +1,199 @@
+{% comment %}
+Shared task-list + filter partial. Reused by:
+  - the full-page Catalog (show_tabs=True, columns_mode='full')
+  - the Workbench left panel (show_tabs=False, columns_mode='workbench')
+
+Context expected:
+  tasks                 : iterable of ProdTask, select_related as appropriate
+  show_tabs             : bool — render campaign tab bar
+  columns_mode          : 'full' | 'workbench' — drives column visibility
+  active_campaign       : str | None — currently-active campaign name (tab mode)
+  campaign_current      : Campaign | None
+  campaigns_past        : iterable of Campaign
+  campaigns_future      : iterable of Campaign
+  focused_campaign      : Campaign | None — workbench: campaign of focused task
+  focused_task_id       : int | None — workbench: highlight this row
+  filters               : dict — current filter values for echo
+  requestor_options     : iterable of str — pulldown choices
+  status_choices        : iterable of (key, label) tuples
+  form_action           : URL the form GETs to (catalog or compose)
+{% endcomment %}
+
+<form method="get" action="{{ form_action }}" id="pcs-tlf-form" class="pcs-tlf">
+  {% if show_tabs %}
+  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Campaign tabs">
+    {% for c in campaigns_past %}
+      <a class="btn btn-sm btn-outline-secondary{% if active_campaign == c.name %} active{% endif %}"
+         href="?campaign={{ c.name }}"
+         title="Past campaign">{{ c.name }}</a>
+    {% endfor %}
+    {% if campaign_current %}
+      <a class="btn btn-sm btn-outline-success{% if active_campaign == campaign_current.name %} active{% endif %}"
+         href="?campaign={{ campaign_current.name }}"
+         title="Current campaign">{{ campaign_current.name }}</a>
+    {% endif %}
+    {% for c in campaigns_future %}
+      <a class="btn btn-sm btn-outline-primary{% if active_campaign == c.name %} active{% endif %}"
+         href="?campaign={{ c.name }}"
+         title="Future campaign">{{ c.name }}</a>
+    {% endfor %}
+  </div>
+  {% if active_campaign %}
+    <input type="hidden" name="campaign" value="{{ active_campaign }}">
+  {% endif %}
+  {% else %}
+    {% if focused_campaign %}
+    <div class="pcs-tlf-context mb-2">
+      <span class="text-muted small">Campaign:</span>
+      <strong>{{ focused_campaign.name }}</strong>
+      <span class="badge bg-{% if focused_campaign.lifecycle == 'current' %}success{% elif focused_campaign.lifecycle == 'future' %}primary{% else %}secondary{% endif %}">{{ focused_campaign.lifecycle }}</span>
+    </div>
+    {% endif %}
+  {% endif %}
+
+  <div class="row g-2 mb-2 pcs-tlf-row align-items-center">
+    <div class="col-md-2">
+      <input type="search" name="q" value="{{ filters.q|default:'' }}"
+             class="form-control form-control-sm" placeholder="Search name/desc…">
+    </div>
+    <div class="col-md-2">
+      <select name="status" class="form-select form-select-sm">
+        <option value="">All statuses</option>
+        {% for k, v in status_choices %}
+        <option value="{{ k }}"{% if filters.status == k %} selected{% endif %}>{{ v }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select name="requestor" class="form-select form-select-sm">
+        <option value="">All requestors</option>
+        {% for r in requestor_options %}
+        <option value="{{ r }}"{% if filters.requestor == r %} selected{% endif %}>{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <select name="submission_path" class="form-select form-select-sm">
+        <option value="">All paths</option>
+        <option value="condor"{% if filters.submission_path == 'condor' %} selected{% endif %}>condor</option>
+        <option value="panda"{% if filters.submission_path == 'panda' %} selected{% endif %}>panda</option>
+        <option value="internal_evgen"{% if filters.submission_path == 'internal_evgen' %} selected{% endif %}>internal_evgen</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="pre_tdr_use" value="1"
+               id="pcs-tlf-pretdr"{% if filters.pre_tdr_use %} checked{% endif %}>
+        <label class="form-check-label small" for="pcs-tlf-pretdr">pre-TDR</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="early_science_use" value="1"
+               id="pcs-tlf-es"{% if filters.early_science_use %} checked{% endif %}>
+        <label class="form-check-label small" for="pcs-tlf-es">ES</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="other_use" value="1"
+               id="pcs-tlf-other"{% if filters.other_use %} checked{% endif %}>
+        <label class="form-check-label small" for="pcs-tlf-other">other</label>
+      </div>
+    </div>
+    <div class="col-md-1 d-flex gap-1 justify-content-end">
+      <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+      <a href="{{ form_action }}{% if active_campaign %}?campaign={{ active_campaign }}{% endif %}"
+         class="btn btn-sm btn-outline-secondary" title="Clear filters">×</a>
+    </div>
+  </div>
+</form>
+
+<div class="pcs-tlf-list-wrap table-responsive">
+  <table class="table table-sm pcs-tlf-list mb-1">
+    <thead>
+      <tr>
+        <th style="width:1.5em"><input type="checkbox" id="pcs-tlf-selectall" aria-label="Select all visible"></th>
+        <th>Name</th>
+        <th>Status</th>
+        {% if show_tabs %}<th>Campaign</th>{% endif %}
+        <th>Requestor</th>
+        <th>Priority</th>
+        <th>Path</th>
+        {% if columns_mode == 'full' %}
+        <th>Use</th>
+        <th>Dataset</th>
+        <th>Request</th>
+        {% endif %}
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+      <tr{% if focused_task_id == t.pk %} class="table-active"{% endif %}>
+        <td><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
+        <td><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ t.name }}</a></td>
+        <td>
+          <span class="badge bg-{% if t.status == 'completed' %}success{% elif t.status == 'failed' %}danger{% elif t.status == 'submitted' %}info{% elif t.status == 'ready' %}primary{% else %}secondary{% endif %}">{{ t.status }}</span>
+        </td>
+        {% if show_tabs %}<td>{{ t.campaign.name|default:"—" }}</td>{% endif %}
+        <td>{{ t.requestor|default:"—" }}</td>
+        <td>{{ t.priority|default:"—" }}</td>
+        <td><code class="small">{{ t.prod_config.submission_path }}</code></td>
+        {% if columns_mode == 'full' %}
+        <td class="small">
+          {% if t.pre_tdr_use %}<span class="badge bg-info">pre-TDR</span> {% endif %}
+          {% if t.early_science_use %}<span class="badge bg-info">ES</span> {% endif %}
+          {% if t.other_use %}<span class="badge bg-info">other</span>{% endif %}
+        </td>
+        <td class="small text-muted">{{ t.dataset.dataset_name }}</td>
+        <td>{% if t.request_id %}<a href="#req-{{ t.request_id }}">req#{{ t.request_id }}</a>{% else %}—{% endif %}</td>
+        {% endif %}
+        <td class="small text-muted">{{ t.updated_at|date:"Y-m-d H:i" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="{% if show_tabs %}{% if columns_mode == 'full' %}11{% else %}8{% endif %}{% else %}{% if columns_mode == 'full' %}10{% else %}7{% endif %}{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pcs-tlf-bulk mt-1 d-flex align-items-center gap-2">
+  <span class="text-muted small"><span id="pcs-tlf-count">0</span> selected</span>
+  <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Bulk actions">
+    <button type="button" class="btn btn-outline-primary" data-bulk="submit" disabled>Submit</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="archive" disabled>Archive</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="withdraw" disabled>Withdraw</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="clone" disabled>Clone</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="priority" disabled>Set priority…</button>
+  </div>
+  <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
+</div>
+
+<script>
+(function() {
+  const root = document.currentScript.previousElementSibling.parentElement;
+  // currentScript fallback: scope queries to document if needed
+  const selectAll = document.getElementById('pcs-tlf-selectall');
+  const cbs = document.querySelectorAll('.pcs-tlf-cb');
+  const count = document.getElementById('pcs-tlf-count');
+  const bulkButtons = document.querySelectorAll('.pcs-tlf-bulk [data-bulk]');
+  function refresh() {
+    const n = Array.from(cbs).filter(c => c.checked).length;
+    if (count) count.textContent = n;
+    bulkButtons.forEach(b => b.disabled = (n === 0));
+  }
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      cbs.forEach(c => c.checked = selectAll.checked);
+      refresh();
+    });
+  }
+  cbs.forEach(c => c.addEventListener('change', refresh));
+  bulkButtons.forEach(b => {
+    b.addEventListener('click', () => {
+      const action = b.dataset.bulk;
+      const ids = Array.from(cbs).filter(c => c.checked).map(c => c.value);
+      // v1: stub. Real endpoints land with phase-3 submission wiring.
+      alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
+    });
+  });
+  refresh();
+})();
+</script>

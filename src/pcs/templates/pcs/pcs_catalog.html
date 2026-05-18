@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}ePIC Production Task Catalog{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-3 pcs-catalog">
+  <div class="d-flex align-items-center mb-2">
+    <h2 class="me-3 mb-0">ePIC Production Task Catalog</h2>
+    <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    <a href="{% url 'pcs:prod_task_compose' %}{% if active_campaign %}?campaign={{ active_campaign }}{% endif %}"
+       class="btn btn-sm btn-outline-primary ms-2">Workbench</a>
+  </div>
+  <p class="text-muted small mb-3">
+    Campaign-aware production task catalog. Tabs run left-to-right in time:
+    <span class="badge bg-outline-secondary border">past</span>
+    <span class="badge bg-success">current</span>
+    <span class="badge bg-primary">future</span>.
+    Filters and active campaign are encoded in URL query params; this page is bookmarkable.
+  </p>
+
+  {% include "pcs/_task_list_filter.html" %}
+</div>
+
+<style>
+.pcs-catalog .pcs-tlf-tabs .btn { font-size: 0.95em; }
+.pcs-catalog .pcs-tlf-list a { font-family: monospace; }
+.pcs-catalog .pcs-tlf-list th { font-size: 0.9em; }
+</style>
+{% endblock %}

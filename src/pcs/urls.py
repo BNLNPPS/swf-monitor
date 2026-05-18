@@ -7,6 +7,9 @@ urlpatterns = [
     # Hub
     path('', views.pcs_hub, name='pcs_hub'),
 
+    # Catalog (campaign-aware production task catalog)
+    path('catalog/', views.pcs_catalog, name='pcs_catalog'),
+
     # Physics Categories
     path('categories/', views.physics_categories_list, name='physics_categories_list'),
     path('categories/create/', views.physics_category_create, name='physics_category_create'),

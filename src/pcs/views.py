@@ -19,7 +19,69 @@ from monitor_app.utils import DataTablesProcessor, get_filter_params, format_dat
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
     Dataset, ProdConfig, ProdTask,
+    Campaign, ProdRequest,
+    PRODTASK_STATUS_CHOICES,
 )
+
+# Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
+# surfaces these plus any distinct values already in the DB.
+REQUESTOR_SEED_OPTIONS = (
+    'DIS', 'SIDIS', 'EXCLUSIVE', 'JET', 'HF', 'EW', 'BSM',
+    'TRACKING-DSC', 'CALORIMETRY-DSC', 'PID-DSC',
+)
+
+
+def _requestor_options():
+    """Distinct existing requestors ∪ seed options, sorted."""
+    from itertools import chain
+    seen = set(chain(
+        ProdRequest.objects.exclude(requestor='').values_list('requestor', flat=True),
+        ProdTask.objects.exclude(requestor='').values_list('requestor', flat=True),
+        REQUESTOR_SEED_OPTIONS,
+    ))
+    return sorted(seen)
+
+
+def _parse_catalog_filters(request):
+    """Parse catalog filter query params into a dict of clean values."""
+    return {
+        'q': (request.GET.get('q') or '').strip(),
+        'status': (request.GET.get('status') or '').strip(),
+        'requestor': (request.GET.get('requestor') or '').strip(),
+        'submission_path': (request.GET.get('submission_path') or '').strip(),
+        'pre_tdr_use': request.GET.get('pre_tdr_use') == '1',
+        'early_science_use': request.GET.get('early_science_use') == '1',
+        'other_use': request.GET.get('other_use') == '1',
+    }
+
+
+def _apply_catalog_filters(qs, filters):
+    """Apply a parsed-filters dict to a ProdTask queryset."""
+    if filters['q']:
+        qs = qs.filter(Q(name__icontains=filters['q'])
+                       | Q(description__icontains=filters['q']))
+    if filters['status']:
+        qs = qs.filter(status=filters['status'])
+    if filters['requestor']:
+        qs = qs.filter(requestor=filters['requestor'])
+    if filters['submission_path']:
+        # submission_path lives in ProdConfig.data JSON; default 'condor'
+        if filters['submission_path'] == 'condor':
+            # Match rows where data is null/missing the key (default) OR key='condor'
+            qs = qs.filter(
+                Q(prod_config__data__submission_path='condor')
+                | Q(prod_config__data__submission_path__isnull=True)
+                | Q(prod_config__data__isnull=True)
+            )
+        else:
+            qs = qs.filter(prod_config__data__submission_path=filters['submission_path'])
+    if filters['pre_tdr_use']:
+        qs = qs.filter(pre_tdr_use=True)
+    if filters['early_science_use']:
+        qs = qs.filter(early_science_use=True)
+    if filters['other_use']:
+        qs = qs.filter(other_use=True)
+    return qs
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
@@ -813,6 +875,53 @@ def prod_config_edit(request, pk):
 # ── Production Tasks ─────────────────────────────────────────────
 
 TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
+
+
+def pcs_catalog(request):
+    """
+    ePIC Production Task Catalog — campaign-aware task listing.
+
+    Campaign tabs (past/current/future) order time left-to-right.
+    Filters and active campaign are encoded in URL query params so
+    views are bookmarkable. Bulk actions are UI stubs in v1; wiring
+    lands with submission integration.
+    """
+    filters = _parse_catalog_filters(request)
+    active_name = (request.GET.get('campaign') or '').strip()
+
+    campaign_current = Campaign.objects.filter(lifecycle='current').order_by('-updated_at').first()
+    campaigns_past = list(Campaign.objects.filter(lifecycle='past').order_by('name'))
+    campaigns_future = list(Campaign.objects.filter(lifecycle='future').order_by('name'))
+
+    # Default to current campaign if no explicit choice and a current exists.
+    if not active_name and campaign_current:
+        active_name = campaign_current.name
+
+    active_campaign = Campaign.objects.filter(name=active_name).first() if active_name else None
+
+    qs = ProdTask.objects.select_related(
+        'campaign', 'dataset', 'prod_config', 'request',
+    ).order_by('-updated_at')
+    if active_campaign:
+        qs = qs.filter(campaign=active_campaign)
+    qs = _apply_catalog_filters(qs, filters)
+
+    context = {
+        'tasks': list(qs),
+        'show_tabs': True,
+        'columns_mode': 'full',
+        'active_campaign': active_name,
+        'campaign_current': campaign_current,
+        'campaigns_past': campaigns_past,
+        'campaigns_future': campaigns_future,
+        'focused_campaign': None,
+        'focused_task_id': None,
+        'filters': filters,
+        'requestor_options': _requestor_options(),
+        'status_choices': PRODTASK_STATUS_CHOICES,
+        'form_action': reverse('pcs:pcs_catalog'),
+    }
+    return render(request, 'pcs/pcs_catalog.html', context)
 
 
 def prod_tasks_list(request):
