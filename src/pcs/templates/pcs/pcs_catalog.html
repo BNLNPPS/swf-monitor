@@ -55,7 +55,7 @@
   </div>
   {% endif %}
 
-  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:420px"></div>
+  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
 
   {% if rucio_unmatched %}
   <details class="mb-3 small">
@@ -89,32 +89,47 @@
   const SIMU_COLOR = '#1f77b4';
   const RECO_COLOR = '#ff7f0e';
   const tb = bytes => bytes.map(b => b / TB);
+  // Three stacked panes, sharing the time axis at the bottom:
+  //   top    = cumulative datasets
+  //   middle = cumulative files (registered)
+  //   bottom = cumulative output (TB)
+  // One legend entry per stage; toggling hides all three panes for
+  // that stage via legendgroup.
   const traces = [
-    // Top pane: cumulative datasets.
+    // Top pane.
     {x: data.dates, y: data.simu.cum_datasets, name: 'Simu',
      legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
      xaxis: 'x', yaxis: 'y'},
     {x: data.dates, y: data.reco.cum_datasets, name: 'Reco',
      legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
      xaxis: 'x', yaxis: 'y'},
-    // Bottom pane: cumulative output volume (TB). Legend shared with top
-    // via legendgroup so toggling a stage hides both lines together.
-    {x: data.dates, y: tb(data.simu.cum_bytes), name: 'Simu',
-     legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+    // Middle pane.
+    {x: data.dates, y: data.simu.cum_files, legendgroup: 'simu',
+     mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
      xaxis: 'x', yaxis: 'y2', showlegend: false},
-    {x: data.dates, y: tb(data.reco.cum_bytes), name: 'Reco',
-     legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+    {x: data.dates, y: data.reco.cum_files, legendgroup: 'reco',
+     mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
      xaxis: 'x', yaxis: 'y2', showlegend: false},
+    // Bottom pane.
+    {x: data.dates, y: tb(data.simu.cum_bytes), legendgroup: 'simu',
+     mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+     xaxis: 'x', yaxis: 'y3', showlegend: false},
+    {x: data.dates, y: tb(data.reco.cum_bytes), legendgroup: 'reco',
+     mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+     xaxis: 'x', yaxis: 'y3', showlegend: false},
   ];
   const layout = {
     title: {text: 'Rucio arrivals — current campaign ' + (data.campaign_name || ''),
             font: {size: 14}},
-    margin: {l: 60, r: 30, t: 40, b: 40},
-    height: 420,
-    xaxis:  {anchor: 'y2', type: 'date'},
-    yaxis:  {domain: [0.56, 1.0], title: 'datasets',  rangemode: 'tozero'},
-    yaxis2: {domain: [0,    0.46], title: 'output (TB)', rangemode: 'tozero'},
-    legend: {orientation: 'h', y: -0.15},
+    margin: {l: 70, r: 30, t: 40, b: 40},
+    height: 540,
+    // Single shared x axis, anchored to the bottom pane's y3.
+    xaxis:  {anchor: 'y3', type: 'date'},
+    yaxis:  {domain: [0.70, 1.00], title: 'datasets', rangemode: 'tozero'},
+    yaxis2: {domain: [0.36, 0.66], title: 'files (registered)',
+             rangemode: 'tozero'},
+    yaxis3: {domain: [0.00, 0.32], title: 'output (TB)', rangemode: 'tozero'},
+    legend: {orientation: 'h', y: -0.12},
     showlegend: true,
   };
   Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true});

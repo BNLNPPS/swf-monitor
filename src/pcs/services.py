@@ -1272,18 +1272,32 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     return summary
 
 
-def summarize_rucio_timeline(snapshot):
-    """Build a per-day cumulative arrival timeline from a Rucio snapshot.
+def summarize_rucio_timeline(snapshot, *, bin_hours=12):
+    """Build a per-bin cumulative arrival timeline from a Rucio snapshot.
 
     'Arrival' = the earliest created_at across all RSE replicas of a
-    dataset. Datasets without any usable timestamp are dropped. Returns
-    a dict suitable for Plotly:
-        {'dates': ['YYYY-MM-DD', ...],
+    dataset. Datasets without any usable timestamp are dropped. Each
+    arrival lands in the nearest `bin_hours`-wide bin (default 12h,
+    aligned to UTC midnight). Returns a dict suitable for Plotly:
+
+        {'dates': ['YYYY-MM-DDTHH:00:00', ...],
+         'bin_hours': 12,
          'simu': {'cum_datasets':[...], 'cum_files':[...], 'cum_bytes':[...]},
          'reco': {'cum_datasets':[...], 'cum_files':[...], 'cum_bytes':[...]}}
     """
     from email.utils import parsedate_to_datetime as _pd
-    arrivals = []  # (date_iso, stage, files, bytes)
+    import datetime as _dt
+    bin_size = _dt.timedelta(hours=bin_hours)
+
+    def _bucket(dt):
+        """Floor `dt` to the nearest `bin_hours`-bin aligned to UTC midnight."""
+        midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        offset = (dt - midnight).total_seconds()
+        return midnight + _dt.timedelta(
+            seconds=(int(offset) // int(bin_size.total_seconds()))
+                    * int(bin_size.total_seconds()))
+
+    arrivals = []  # (bucket_iso, stage, files, bytes)
     for cpath, info in (snapshot.get('campaigns') or {}).items():
         cp_parts = cpath.strip('/').split('/')
         stage = cp_parts[0] if cp_parts else ''
@@ -1302,36 +1316,37 @@ def summarize_rucio_timeline(snapshot):
                 bytes_ = max(bytes_, r.get('bytes')  or 0)
             if not tsps:
                 continue
-            arrivals.append((min(tsps).date().isoformat(), stage, files, bytes_))
+            arrivals.append((_bucket(min(tsps)).strftime('%Y-%m-%dT%H:%M:%S'),
+                             stage, files, bytes_))
     arrivals.sort()
     if not arrivals:
-        return {'dates': [], 'simu': {}, 'reco': {}}
+        return {'dates': [], 'bin_hours': bin_hours, 'simu': {}, 'reco': {}}
 
-    # Build the dense day axis from first to last arrival.
-    import datetime as _dt
-    first = _dt.date.fromisoformat(arrivals[0][0])
-    last  = _dt.date.fromisoformat(arrivals[-1][0])
-    n_days = (last - first).days + 1
-    dates = [(first + _dt.timedelta(days=i)).isoformat() for i in range(n_days)]
+    first = _dt.datetime.fromisoformat(arrivals[0][0])
+    last  = _dt.datetime.fromisoformat(arrivals[-1][0])
+    span = last - first
+    n_bins = int(span.total_seconds() // bin_size.total_seconds()) + 1
+    dates = [(first + i * bin_size).strftime('%Y-%m-%dT%H:%M:%S')
+             for i in range(n_bins)]
     idx = {d: i for i, d in enumerate(dates)}
 
     def _empty():
-        return {'cum_datasets': [0]*n_days, 'cum_files': [0]*n_days, 'cum_bytes': [0]*n_days}
-    out = {'dates': dates, 'simu': _empty(), 'reco': _empty()}
-    daily = {'FULL': _empty(), 'RECO': _empty()}
+        return {'cum_datasets': [0]*n_bins, 'cum_files': [0]*n_bins, 'cum_bytes': [0]*n_bins}
+    out = {'dates': dates, 'bin_hours': bin_hours, 'simu': _empty(), 'reco': _empty()}
+    per_bin = {'FULL': _empty(), 'RECO': _empty()}
     for d, stage, files, bytes_ in arrivals:
-        if stage not in daily:
+        if stage not in per_bin or d not in idx:
             continue
         i = idx[d]
-        daily[stage]['cum_datasets'][i] += 1
-        daily[stage]['cum_files'][i]    += files
-        daily[stage]['cum_bytes'][i]    += bytes_
+        per_bin[stage]['cum_datasets'][i] += 1
+        per_bin[stage]['cum_files'][i]    += files
+        per_bin[stage]['cum_bytes'][i]    += bytes_
     for stage, key in (('FULL', 'simu'), ('RECO', 'reco')):
         cd = cf = cb = 0
-        for i in range(n_days):
-            cd += daily[stage]['cum_datasets'][i]
-            cf += daily[stage]['cum_files'][i]
-            cb += daily[stage]['cum_bytes'][i]
+        for i in range(n_bins):
+            cd += per_bin[stage]['cum_datasets'][i]
+            cf += per_bin[stage]['cum_files'][i]
+            cb += per_bin[stage]['cum_bytes'][i]
             out[key]['cum_datasets'][i] = cd
             out[key]['cum_files'][i]    = cf
             out[key]['cum_bytes'][i]    = cb
