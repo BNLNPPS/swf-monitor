@@ -6,36 +6,6 @@
 .pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
 
-/* DataTables 1.13.8 packs the up/down sort glyphs side-by-side and they
-   overlap. Stack them vertically at a single right offset — ▲ above,
-   ▼ below — with a small aesthetic gap between them. Extra TH padding
-   gives the pair room to breathe. */
-.pcs-tlf-list thead th.pcs-sort {
-  padding-top:    0.35em !important;
-  padding-bottom: 0.35em !important;
-  padding-right:  1.4em  !important;
-}
-.pcs-tlf-list thead th.sorting::before,
-.pcs-tlf-list thead th.sorting_asc::before,
-.pcs-tlf-list thead th.sorting_desc::before {
-  content: "\25B2" !important;   /* ▲ */
-  right: 0.5em !important;
-  top:   0.2em  !important;
-  bottom: auto  !important;
-  font-size: 0.55em !important;
-  line-height: 1 !important;
-}
-.pcs-tlf-list thead th.sorting::after,
-.pcs-tlf-list thead th.sorting_asc::after,
-.pcs-tlf-list thead th.sorting_desc::after {
-  content: "\25BC" !important;   /* ▼ */
-  right: 0.5em !important;
-  top:   auto   !important;
-  bottom: 0.2em !important;
-  font-size: 0.55em !important;
-  line-height: 1 !important;
-}
-
 /* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
 .pwg-edt            { background-color: #d0e8ff !important; }
 .pwg-inclusive      { background-color: #d4f4d4 !important; }
@@ -129,12 +99,12 @@ Context expected:
     <span id="pcs-tlf-requestor-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
-    <span class="pcs-tlf-label">evgen:</span>
+    <span class="pcs-tlf-label">Sample:</span>
     <a href="#" data-filter="evgen" data-value="" class="filter-link filter-active">All</a>
     <span id="pcs-tlf-evgen-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
-    <span class="pcs-tlf-label">Submission path:</span>
+    <span class="pcs-tlf-label">Submission:</span>
     <a href="#" data-filter="submission_path" data-value="" class="filter-link filter-active">All</a>
     <span id="pcs-tlf-submission_path-opts"></span>
   </div>
