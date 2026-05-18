@@ -26,6 +26,31 @@
     </form>
   </div>
 
+  {% if rucio_detected %}
+  <div class="alert alert-warning py-2 px-3 mb-3 small">
+    <div class="mb-1">
+      <strong>Active 26.x releases in JLab Rucio</strong>
+      (PCS current: <strong>{{ rucio_current_name }}</strong>):
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+    {% for r in rucio_detected %}
+      <span>{{ r.version }} <span class="text-muted">({{ r.count }} datasets)</span>
+        {% if r.version != rucio_current_name %}
+          <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
+            {% csrf_token %}
+            <input type="hidden" name="name" value="{{ r.version }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1"
+                    onclick="return confirm('Rename PCS current campaign to {{ r.version }}?');">Make current</button>
+          </form>
+        {% else %}
+          <span class="badge bg-success">current</span>
+        {% endif %}
+      </span>
+    {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <div id="pcs-rucio-timeline" class="mb-3" style="min-height:420px"></div>
 
   {% if rucio_unmatched %}

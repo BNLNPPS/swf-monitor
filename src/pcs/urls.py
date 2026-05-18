@@ -12,6 +12,7 @@ urlpatterns = [
     path('catalog/csv-update/', views.pcs_catalog_csv_update, name='pcs_catalog_csv_update'),
     path('catalog/past-update/', views.pcs_catalog_past_update, name='pcs_catalog_past_update'),
     path('catalog/rucio-update/', views.pcs_catalog_rucio_update, name='pcs_catalog_rucio_update'),
+    path('catalog/set-current/', views.pcs_catalog_set_current, name='pcs_catalog_set_current'),
 
     # Physics Categories
     path('categories/', views.physics_categories_list, name='physics_categories_list'),

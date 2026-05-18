@@ -1451,11 +1451,27 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
         _json.dump(snapshot, f, indent=2)
     summary['file_bytes'] = _os.path.getsize(out_path)
 
+    # Detect active 26.x releases in JLab Rucio + stash on the PCS
+    # current Campaign so the catalog can surface a 'Switch current'
+    # banner. AI proposes; human switches (feedback-humans-switch-
+    # lifecycle).
+    try:
+        token = _jlab_rucio_auth()
+        detected = _detect_active_releases(token=token)
+    except Exception as e:                                    # noqa: BLE001
+        summary['errors'].append(f'detect_active_releases: {e}')
+        detected = []
+    summary['detected_releases'] = detected
+
     # Cache the per-request Output rollup on each ProdTask in this
     # campaign so the Current tab can render it without re-reading
     # the snapshot file on every page load.
     try:
         camp = Campaign.objects.get(name=campaign_name, lifecycle='current')
+        # Stash the detected-releases list on the Campaign for the
+        # banner; rename / promotion is a separate operator action.
+        camp.data = {**(camp.data or {}), 'detected_releases': detected}
+        camp.save(update_fields=['data', 'updated_at'])
         match_summary = match_requests_to_rucio_snapshot(snapshot, campaign=camp)
         summary['match'] = match_summary
     except Campaign.DoesNotExist:
@@ -1465,6 +1481,38 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
         summary['errors'].append(f'request match step failed: {e}')
 
     return summary
+
+
+def rename_pcs_current_campaign(new_name, *, created_by='operator'):
+    """Rename the PCS lifecycle='current' Campaign to new_name in place.
+
+    All ProdTask FKs are preserved automatically (we mutate the same row,
+    not the relationship). The next 'Update from Rucio' picks up the new
+    name (writes a new snapshot file, queries /RECO/<new_name>/* etc.).
+
+    Operator-initiated only — never call this from a refresh / sync
+    handler (see feedback-humans-switch-lifecycle).
+    """
+    if not new_name:
+        raise ServiceError('rename_pcs_current_campaign: empty target name')
+    current = (Campaign.objects.filter(lifecycle='current')
+               .order_by('-updated_at').first())
+    if not current:
+        raise ServiceError('no current Campaign in PCS')
+    if current.name == new_name:
+        return {'changed': False, 'name': new_name}
+    # Avoid colliding with an existing Campaign of that name (e.g. a past
+    # 'RECO/<name>' isn't a conflict, but a plain '<name>' would be).
+    if Campaign.objects.filter(name=new_name).exclude(pk=current.pk).exists():
+        raise ServiceError(
+            f'Campaign named {new_name!r} already exists; '
+            f'cannot rename {current.name!r} into it')
+    old_name = current.name
+    current.name = new_name
+    current.save(update_fields=['name', 'updated_at'])
+    _log.info('PCS current campaign renamed: %s -> %s (by %s)',
+              old_name, new_name, created_by)
+    return {'changed': True, 'old_name': old_name, 'name': new_name}
 
 
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):

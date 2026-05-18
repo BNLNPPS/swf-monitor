@@ -943,6 +943,39 @@ def pcs_catalog_csv_update(request):
 
 
 @_login_required_flash
+def pcs_catalog_set_current(request):
+    """POST handler for the 'Make current' button.
+
+    Renames the existing PCS lifecycle='current' Campaign to whatever
+    target the operator selected on the banner. AI never auto-flips
+    this — humans switch.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Make current')
+    target = (request.POST.get('name') or '').strip()
+    from .services import rename_pcs_current_campaign, ServiceError
+    try:
+        result = rename_pcs_current_campaign(
+            target,
+            created_by=getattr(request.user, 'username', '') or 'operator',
+        )
+    except ServiceError as e:
+        messages.error(request, f'Switch failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog'))
+    if result.get('changed'):
+        messages.success(
+            request,
+            f"PCS current campaign renamed: "
+            f"{result['old_name']} -> {result['name']}. "
+            f"Click 'Update from Rucio' to pull the new snapshot.")
+    else:
+        messages.info(request, f"PCS current campaign already {target}.")
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
 def pcs_catalog_rucio_update(request):
     """POST handler for 'Update from Rucio' button on the catalog.
 
@@ -1150,6 +1183,8 @@ def pcs_catalog(request):
     rucio_timeline = None
     rucio_unmatched = []
     rucio_unmatched_campaign = ''
+    rucio_detected = []
+    rucio_current_name = ''
     if active_lifecycle == 'current':
         current = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
         if current is not None:
@@ -1160,6 +1195,8 @@ def pcs_catalog(request):
                 rucio_timeline['campaign_name'] = current.name
             rucio_unmatched = (current.data or {}).get('rucio_unmatched', []) or []
             rucio_unmatched_campaign = current.name
+            rucio_detected = (current.data or {}).get('detected_releases', []) or []
+            rucio_current_name = current.name
 
     context = {
         'tasks': list(qs),
@@ -1177,6 +1214,8 @@ def pcs_catalog(request):
         'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
         'rucio_unmatched': rucio_unmatched,
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
+        'rucio_detected': rucio_detected,
+        'rucio_current_name': rucio_current_name,
     }
     return render(request, 'pcs/pcs_catalog.html', context)
 
