@@ -1120,7 +1120,7 @@ def pcs_catalog(request):
     lifecycle_tabs = [
         {'key': 'past',    'label': 'Past',    'color': 'secondary',
          'campaigns': campaigns_by_lifecycle['past']},
-        {'key': 'last',    'label': 'Last',    'color': 'info',
+        {'key': 'last',    'label': 'Last',    'color': 'last-green',
          'campaigns': campaigns_by_lifecycle['last']},
         {'key': 'current', 'label': 'Current', 'color': 'success',
          'campaigns': campaigns_by_lifecycle['current']},

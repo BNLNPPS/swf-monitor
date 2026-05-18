@@ -3,6 +3,17 @@
 /* Reuse DataTables sort indicator look on our hand-sorted table by
    adopting DT's class names; the loaded dataTables.bootstrap5 CSS
    styles .sorting / .sorting_asc / .sorting_desc with up/down arrows. */
+/* Muted green for the Last lifecycle tab — same family as Current's
+   success-green but a notch darker / less saturated so the two read
+   as related but distinct. */
+.btn-outline-last-green {
+  color: #4a8060; border-color: #4a8060;
+}
+.btn-outline-last-green:hover,
+.btn-outline-last-green.active {
+  background-color: #4a8060; color: #fff; border-color: #4a8060;
+}
+
 .pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
 
