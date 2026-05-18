@@ -975,7 +975,7 @@ JLAB_RUCIO_URL      = '/'.join(['https://rucio-server.jlab.org:443'])
 JLAB_RUCIO_ACCOUNT  = 'eicread'
 JLAB_RUCIO_USERNAME = 'eicread'
 JLAB_RUCIO_PASSWORD = 'eicread'
-RUCIO_SNAPSHOT_DIR  = '/data/wenauseic/github/rucio-snapshots'
+RUCIO_SNAPSHOT_DIR  = '/opt/swf-monitor/shared/rucio-snapshots'
 
 
 def _jlab_rucio_auth(timeout=30):
