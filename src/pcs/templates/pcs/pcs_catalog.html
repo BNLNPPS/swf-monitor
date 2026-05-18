@@ -6,8 +6,6 @@
   <div class="d-flex align-items-center mb-2">
     <h2 class="me-3 mb-0">Production Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
-    <a href="{% url 'pcs:prod_task_compose' %}{% if active_campaign %}?campaign={{ active_campaign }}{% endif %}"
-       class="btn btn-sm btn-outline-primary ms-2">Workbench</a>
   </div>
   <p class="text-muted small mb-3">
     Campaign-aware production task catalog. Tabs run left-to-right in time:

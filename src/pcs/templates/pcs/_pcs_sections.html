@@ -1,5 +1,20 @@
 {# Shared PCS sections — included by both PCS hub and Production hub #}
 
+<h3 class="mb-3">ePIC Production</h3>
+{# Time flows left to right: production requests on the left (in development),
+   derived tasks on the right. #}
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+                <p class="mb-2"><strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Production Task Catalog</a></strong>
+                <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
+                <p class="card-text">Production tasks across campaigns, with tabs ordered left-to-right in time (past, current, future). Filterable, bookmarkable, with bulk-select.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <h3 class="mb-3">Tags</h3>
 <div class="row mb-4" style="display:flex; flex-wrap:wrap;">
     <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
@@ -50,17 +65,6 @@
 </div>
 
 <h3 class="mb-3">Production Task Creation</h3>
-<div class="row mb-3">
-    <div class="col-md-12 mb-3">
-        <div class="card h-100 border-primary border-2">
-            <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Production Task Catalog</a></strong>
-                <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
-                <p class="card-text">Primary view of production tasks across campaigns. Tabs order time left-to-right (past, current, future). Filterable, bookmarkable, with bulk-select. Links to the task workbench for inspection, cloning, and editing.</p>
-            </div>
-        </div>
-    </div>
-</div>
 <div class="row mb-4">
     <div class="col-md-4 mb-3">
         <div class="card h-100">
@@ -81,11 +85,11 @@
         </div>
     </div>
     <div class="col-md-4 mb-3">
-        <div class="card h-100">
+        <div class="card h-100 border-primary">
             <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Task Workbench</a></strong>
+                <p class="mb-2"><strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Prod Task Creation</a></strong>
                 <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
-                <p class="card-text">2-panel compose UI for inspection, cloning, editing, and parameter copying across tasks.</p>
+                <p class="card-text">Compose Dataset + Config into full production task specs with submission commands.</p>
             </div>
         </div>
     </div>
