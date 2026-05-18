@@ -1030,37 +1030,51 @@ def _ndjson(text):
     return out
 
 
-def fetch_jlab_rucio_campaign(campaign_path, *, scope='epic', token=None):
+def fetch_jlab_rucio_campaign(campaign_path, *, scope='epic', token=None,
+                              max_workers=16):
     """Fetch the full Rucio snapshot for one campaign path (e.g. '/RECO/26.02.0').
 
     Returns {count, datasets:[{did, length, bytes, rse_replicas:[{rse, ...}]}, ...]}.
     Each dataset's rse_replicas mirrors what /replicas/<scope>/<name>/datasets
     returns — per-RSE found/total/state/bytes, exactly the shape the
     epic-prod nightly workflow uses to produce its index.md replica lines.
+
+    Per-dataset metadata + replica fetches run in a ThreadPoolExecutor so a
+    365-dataset campaign completes in ~5-10s instead of ~80s, keeping the
+    'Update from Rucio' button under Apache's request timeout.
     """
     import json as _json
+    from concurrent.futures import ThreadPoolExecutor as _Pool
     if token is None:
         token = _jlab_rucio_auth()
     names = _ndjson(_jlab_rucio_get(
         f'/dids/{scope}/dids/search', token,
         type='dataset', name=campaign_path + '/*'))
-    datasets = []
-    for name in names:
+
+    def _one(name):
         if not isinstance(name, str):
-            continue
-        meta = _json.loads(_jlab_rucio_get(f'/dids/{scope}/{name}', token))
+            return None
+        try:
+            meta = _json.loads(_jlab_rucio_get(f'/dids/{scope}/{name}', token))
+        except Exception as e:                                # noqa: BLE001
+            _log.warning('rucio meta %s/%s: %s', scope, name, e)
+            meta = {}
         try:
             rse_records = _ndjson(
                 _jlab_rucio_get(f'/replicas/{scope}/{name}/datasets', token))
         except Exception as e:                                # noqa: BLE001
             _log.warning('rucio replicas %s/%s: %s', scope, name, e)
             rse_records = []
-        datasets.append({
+        return {
             'did':          f'{scope}:{name}',
             'length':       meta.get('length'),
             'bytes':        meta.get('bytes'),
             'rse_replicas': rse_records,
-        })
+        }
+
+    with _Pool(max_workers=max_workers) as pool:
+        results = list(pool.map(_one, names))
+    datasets = [r for r in results if r is not None]
     return {'count': len(datasets), 'datasets': datasets}
 
 
