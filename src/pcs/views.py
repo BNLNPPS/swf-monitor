@@ -877,28 +877,24 @@ def prod_config_edit(request, pk):
 TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
 
 
-# UI lifecycle label → DB Campaign.lifecycle value
-LIFECYCLE_UI_TO_DB = {'past': 'past', 'present': 'current', 'future': 'future'}
-LIFECYCLE_UI_ORDER = ('past', 'present', 'future')
+LIFECYCLE_KEYS = ('past', 'current', 'future')
 
 
 def pcs_catalog(request):
     """Production Task Catalog — lifecycle-grouped task listing."""
     filters = _parse_catalog_filters(request)
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
-    if active_lifecycle not in LIFECYCLE_UI_TO_DB:
-        active_lifecycle = 'present'
+    if active_lifecycle not in LIFECYCLE_KEYS:
+        active_lifecycle = 'current'
 
-    campaigns_by_db = {
-        db: list(Campaign.objects.filter(lifecycle=db).order_by('name'))
-        for db in ('past', 'current', 'future')
+    campaigns_by_lifecycle = {
+        k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
+        for k in LIFECYCLE_KEYS
     }
-    active_db = LIFECYCLE_UI_TO_DB[active_lifecycle]
-    active_campaigns = campaigns_by_db[active_db]
 
     qs = ProdTask.objects.select_related(
         'campaign', 'dataset', 'prod_config', 'request',
-    ).filter(campaign__lifecycle=active_db).order_by('-updated_at')
+    ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
     qs = _apply_catalog_filters(qs, filters)
 
     context = {
@@ -908,13 +904,13 @@ def pcs_catalog(request):
         'active_lifecycle': active_lifecycle,
         'lifecycle_tabs': [
             {'key': 'past',    'label': 'Past',    'color': 'secondary',
-             'campaigns': campaigns_by_db['past']},
-            {'key': 'present', 'label': 'Present', 'color': 'success',
-             'campaigns': campaigns_by_db['current']},
+             'campaigns': campaigns_by_lifecycle['past']},
+            {'key': 'current', 'label': 'Current', 'color': 'success',
+             'campaigns': campaigns_by_lifecycle['current']},
             {'key': 'future',  'label': 'Future',  'color': 'primary',
-             'campaigns': campaigns_by_db['future']},
+             'campaigns': campaigns_by_lifecycle['future']},
         ],
-        'active_campaigns': active_campaigns,
+        'active_campaigns': campaigns_by_lifecycle[active_lifecycle],
         'focused_campaign': None,
         'focused_task_id': None,
         'filters': filters,
