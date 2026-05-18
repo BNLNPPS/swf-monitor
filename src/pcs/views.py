@@ -1145,6 +1145,18 @@ def pcs_catalog(request):
     ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
     qs = _apply_catalog_filters(qs, filters)
 
+    # Rucio arrivals timeline for the current campaign (when a snapshot
+    # exists). Surfaced at the top of the page as a Plotly chart.
+    rucio_timeline = None
+    if active_lifecycle == 'current':
+        current = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
+        if current is not None:
+            from .services import load_rucio_snapshot, summarize_rucio_timeline
+            snap = load_rucio_snapshot(current.name)
+            if snap is not None:
+                rucio_timeline = summarize_rucio_timeline(snap)
+                rucio_timeline['campaign_name'] = current.name
+
     context = {
         'tasks': list(qs),
         'show_tabs': True,
@@ -1158,6 +1170,7 @@ def pcs_catalog(request):
         'requestor_options': _requestor_options(),
         'status_choices': PRODTASK_STATUS_CHOICES,
         'form_action': reverse('pcs:pcs_catalog'),
+        'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
     }
     return render(request, 'pcs/pcs_catalog.html', context)
 

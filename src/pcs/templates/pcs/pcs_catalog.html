@@ -26,6 +26,44 @@
     </form>
   </div>
 
+  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:280px"></div>
+
   {% include "pcs/_task_list_filter.html" %}
 </div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(function() {
+  const data = {{ rucio_timeline_json|safe }};
+  const el = document.getElementById('pcs-rucio-timeline');
+  if (!el) return;
+  if (!data || !data.dates || !data.dates.length) {
+    el.innerHTML = '<div class="text-muted small">No Rucio arrivals timeline available — '
+      + 'click <em>Update from Rucio</em> to populate the current-campaign snapshot.</div>';
+    return;
+  }
+  const traces = [
+    {x: data.dates, y: data.simu.cum_datasets, name: 'Simu (cum datasets)',
+     mode: 'lines', line: {shape: 'hv'}, yaxis: 'y'},
+    {x: data.dates, y: data.reco.cum_datasets, name: 'Reco (cum datasets)',
+     mode: 'lines', line: {shape: 'hv'}, yaxis: 'y'},
+    {x: data.dates, y: data.simu.cum_bytes, name: 'Simu (cum bytes)',
+     mode: 'lines', line: {shape: 'hv', dash: 'dot'}, yaxis: 'y2', visible: 'legendonly'},
+    {x: data.dates, y: data.reco.cum_bytes, name: 'Reco (cum bytes)',
+     mode: 'lines', line: {shape: 'hv', dash: 'dot'}, yaxis: 'y2', visible: 'legendonly'},
+  ];
+  const layout = {
+    title: {text: 'Rucio arrivals — current campaign ' + (data.campaign_name || ''),
+            font: {size: 14}},
+    margin: {l: 50, r: 50, t: 40, b: 40},
+    height: 280,
+    xaxis: {title: '', type: 'date'},
+    yaxis: {title: 'cumulative datasets', rangemode: 'tozero'},
+    yaxis2: {title: 'cumulative bytes', overlaying: 'y', side: 'right', rangemode: 'tozero'},
+    legend: {orientation: 'h', y: -0.18},
+    showlegend: true,
+  };
+  Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true});
+})();
+</script>
 {% endblock %}

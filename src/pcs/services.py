@@ -1198,6 +1198,87 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     return summary
 
 
+def summarize_rucio_timeline(snapshot):
+    """Build a per-day cumulative arrival timeline from a Rucio snapshot.
+
+    'Arrival' = the earliest created_at across all RSE replicas of a
+    dataset. Datasets without any usable timestamp are dropped. Returns
+    a dict suitable for Plotly:
+        {'dates': ['YYYY-MM-DD', ...],
+         'simu': {'cum_datasets':[...], 'cum_files':[...], 'cum_bytes':[...]},
+         'reco': {'cum_datasets':[...], 'cum_files':[...], 'cum_bytes':[...]}}
+    """
+    from email.utils import parsedate_to_datetime as _pd
+    arrivals = []  # (date_iso, stage, files, bytes)
+    for cpath, info in (snapshot.get('campaigns') or {}).items():
+        cp_parts = cpath.strip('/').split('/')
+        stage = cp_parts[0] if cp_parts else ''
+        for d in info.get('datasets') or []:
+            rses = d.get('rse_replicas') or []
+            tsps = []
+            files = bytes_ = 0
+            for r in rses:
+                ts_str = r.get('created_at')
+                if ts_str:
+                    try:
+                        tsps.append(_pd(ts_str))
+                    except Exception:                         # noqa: BLE001
+                        pass
+                files = max(files, r.get('length') or 0)
+                bytes_ = max(bytes_, r.get('bytes')  or 0)
+            if not tsps:
+                continue
+            arrivals.append((min(tsps).date().isoformat(), stage, files, bytes_))
+    arrivals.sort()
+    if not arrivals:
+        return {'dates': [], 'simu': {}, 'reco': {}}
+
+    # Build the dense day axis from first to last arrival.
+    import datetime as _dt
+    first = _dt.date.fromisoformat(arrivals[0][0])
+    last  = _dt.date.fromisoformat(arrivals[-1][0])
+    n_days = (last - first).days + 1
+    dates = [(first + _dt.timedelta(days=i)).isoformat() for i in range(n_days)]
+    idx = {d: i for i, d in enumerate(dates)}
+
+    def _empty():
+        return {'cum_datasets': [0]*n_days, 'cum_files': [0]*n_days, 'cum_bytes': [0]*n_days}
+    out = {'dates': dates, 'simu': _empty(), 'reco': _empty()}
+    daily = {'FULL': _empty(), 'RECO': _empty()}
+    for d, stage, files, bytes_ in arrivals:
+        if stage not in daily:
+            continue
+        i = idx[d]
+        daily[stage]['cum_datasets'][i] += 1
+        daily[stage]['cum_files'][i]    += files
+        daily[stage]['cum_bytes'][i]    += bytes_
+    for stage, key in (('FULL', 'simu'), ('RECO', 'reco')):
+        cd = cf = cb = 0
+        for i in range(n_days):
+            cd += daily[stage]['cum_datasets'][i]
+            cf += daily[stage]['cum_files'][i]
+            cb += daily[stage]['cum_bytes'][i]
+            out[key]['cum_datasets'][i] = cd
+            out[key]['cum_files'][i]    = cf
+            out[key]['cum_bytes'][i]    = cb
+    return out
+
+
+def load_rucio_snapshot(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
+    """Read a saved JLab Rucio snapshot. Returns None if absent."""
+    import json as _json
+    import os as _os
+    path = _os.path.join(snapshot_dir, f'current-{campaign_name}.json')
+    if not _os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return _json.load(f)
+    except (OSError, _json.JSONDecodeError) as e:
+        _log.warning('load_rucio_snapshot %s: %s', path, e)
+        return None
+
+
 def import_jlab_rucio_current_snapshot(*, campaign_name=None,
                                       snapshot_dir=RUCIO_SNAPSHOT_DIR,
                                       created_by='rucio_snapshot'):
