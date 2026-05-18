@@ -7,8 +7,11 @@ take plain Python types (no HTTP request, no MCP context) and return
 model instances or raise ServiceError. The caller translates errors
 to its native shape (DRF Response, MCP error dict).
 """
+from django.db import transaction
+
 from .models import (
     Dataset, ProdConfig, ProdTask,
+    Campaign, ProdRequest,
     PhysicsTag, EvgenTag, SimuTag, RecoTag,
 )
 
@@ -37,6 +40,15 @@ PUBLIC_CATALOG_KEYS = (
     'public_catalog_row_index', 'public_catalog_csv_path',
     'public_catalog_row_key', 'public_catalog_page_url',
     'public_catalog_commit_sha',
+)
+
+# Fields copied from ProdRequest → ProdTask at task creation. Both rows
+# are independently mutable thereafter. Per
+# memory:feedback-denormalization-ok — the duplication is intentional so
+# catalog filter/display reads direct ProdTask columns without joining.
+REQUEST_TO_TASK_COPY_FIELDS = (
+    'requestor', 'priority',
+    'pre_tdr_use', 'early_science_use', 'other_use', 'new_request',
 )
 
 
@@ -251,6 +263,74 @@ def prodtask_set_status(*, task, new_status):
     task.save(update_fields=['status', 'updated_at'])
     return task
 
+
+def prodtask_apply_request(task, request, *, save=True):
+    """Copy seed fields from ``request`` onto ``task`` (request → task).
+
+    Mutates ``task.request`` and the fields listed in
+    ``REQUEST_TO_TASK_COPY_FIELDS``. Saves by default. After this call
+    both rows are independently mutable; a later request edit does
+    *not* automatically resync to the task. Call this again explicitly
+    if a resync is desired.
+    """
+    if request is None:
+        raise ServiceError('request is required')
+    task.request = request
+    for field in REQUEST_TO_TASK_COPY_FIELDS:
+        setattr(task, field, getattr(request, field))
+    if save:
+        task.save(update_fields=['request'] + list(REQUEST_TO_TASK_COPY_FIELDS)
+                                + ['updated_at'])
+    return task
+
+
+# ---------------------------------------------------------------------------
+# Campaign
+# ---------------------------------------------------------------------------
+
+def campaign_set_current(campaign):
+    """Atomically promote ``campaign`` to lifecycle='current'.
+
+    Any other Campaign currently at 'current' is demoted to 'past'.
+    No-op if ``campaign`` is already current. Service-layer enforcement
+    (no DB constraint) — direct admin saves can violate the invariant.
+    """
+    with transaction.atomic():
+        if campaign.lifecycle == 'current':
+            return campaign
+        Campaign.objects.filter(lifecycle='current').exclude(pk=campaign.pk) \
+                        .update(lifecycle='past')
+        campaign.lifecycle = 'current'
+        campaign.save(update_fields=['lifecycle', 'updated_at'])
+    return campaign
+
+
+def campaign_clone_to_new(source, *, name, created_by,
+                          description='', lifecycle='future'):
+    """Create a new Campaign whose ``clone_of`` points to ``source``.
+
+    The new campaign is blank — tasks are not cloned by this helper.
+    Task cloning is a separate operation (potentially per-task, as
+    dataset rebinding for the new campaign's detector_version is
+    non-trivial). Use ``campaign_set_current`` separately to promote.
+    """
+    if Campaign.objects.filter(name=name).exists():
+        raise ServiceError(f'Campaign name already in use: {name}')
+    if lifecycle not in {'past', 'current', 'future'}:
+        raise ServiceError(f'Invalid lifecycle: {lifecycle!r}')
+    new_c = Campaign.objects.create(
+        name=name,
+        lifecycle=lifecycle,
+        description=description,
+        clone_of=source,
+        created_by=created_by,
+    )
+    return new_c
+
+
+# ---------------------------------------------------------------------------
+# Submission state changes
+# ---------------------------------------------------------------------------
 
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     """

@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
-                     Dataset, ProdConfig, ProdTask)
+                     Dataset, ProdConfig, ProdTask,
+                     Campaign, ProdRequest)
 
 
 @admin.register(PhysicsCategory)
@@ -62,7 +63,30 @@ class ProdConfigAdmin(admin.ModelAdmin):
 
 @admin.register(ProdTask)
 class ProdTaskAdmin(admin.ModelAdmin):
-    list_display = ('name', 'status', 'dataset', 'prod_config', 'created_by', 'updated_at')
-    list_filter = ('status',)
-    search_fields = ('name', 'description')
+    list_display = ('name', 'status', 'campaign', 'requestor', 'priority',
+                    'dataset', 'prod_config', 'created_by', 'updated_at')
+    list_filter = ('status', 'campaign', 'pre_tdr_use', 'early_science_use',
+                   'other_use', 'new_request')
+    search_fields = ('name', 'description', 'requestor')
     readonly_fields = ('condor_command', 'panda_command', 'created_at', 'updated_at')
+
+
+@admin.register(Campaign)
+class CampaignAdmin(admin.ModelAdmin):
+    list_display = ('name', 'lifecycle', 'start_date', 'end_date',
+                    'clone_of', 'created_by', 'updated_at')
+    list_filter = ('lifecycle',)
+    search_fields = ('name', 'description')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(ProdRequest)
+class ProdRequestAdmin(admin.ModelAdmin):
+    list_display = ('id', 'requestor', 'status', 'priority', 'nevents',
+                    'new_request', 'pre_tdr_use', 'early_science_use',
+                    'other_use', 'updated_at')
+    list_filter = ('status', 'requestor', 'pre_tdr_use', 'early_science_use',
+                   'other_use', 'new_request')
+    search_fields = ('requestor', 'description', 'simu_path', 'source_url',
+                     'source_row', 'rucio_source')
+    readonly_fields = ('created_at', 'updated_at')

@@ -60,8 +60,11 @@ Submission paths in use and planned:
 | PanDA-orchestrated multi-stage workflows | `internal_evgen` workflow mode in `ProdConfig`, per `PCS_DATASET_REQUEST_WORKFLOW.md`. |
 
 Catalog entries need a submission path and the parameters required by that
-path. `ProdConfig` already carries the relevant workflow mode plus the
-env-var or taskParam set used by current submission code.
+path. The submission path is carried on `ProdConfig` as
+`ProdConfig.data['submission_path'] ∈ {condor, panda, internal_evgen}`
+(default `condor`), alongside the existing `workflow_mode` and the env-var
+or taskParam set used by current submission code. See `PCS.md` § Production
+Configs for the `ProdConfig.data` key reference.
 
 ## 3. Current Production Practice
 
