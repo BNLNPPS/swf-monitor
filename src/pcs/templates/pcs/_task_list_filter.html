@@ -12,6 +12,32 @@
 .pwg-jets_hf        { background-color: #fff0cc !important; }
 .pwg-semi_inclusive { background-color: #f4d4f4 !important; }
 .pwg-tracking       { background-color: #ffe0cc !important; }
+
+/* Filter bar — mirrors the convention used by panda jobs / logs / tasks
+   (see monitor_app/_datatable_dynamic_base.html): horizontal lists of
+   value (count) links with bold+underline indicating the active value. */
+.pcs-tlf-bar .filter-link {
+  margin-right: 0.6em;
+  color: #007bff;
+  text-decoration: none;
+}
+.pcs-tlf-bar .filter-link:hover { text-decoration: underline; }
+.pcs-tlf-bar .filter-link.filter-active {
+  font-weight: bold;
+  text-decoration: underline;
+  color: #0056b3;
+}
+.pcs-tlf-bar-row { margin-bottom: 0.4em; }
+.pcs-tlf-label   { font-weight: 600; margin-right: 0.5em; }
+
+/* Dataset cell takes all leftover horizontal space and wraps long URLs
+   so the table fits the viewport without horizontal scroll. */
+.pcs-tlf-list td.pcs-tlf-cell-dataset {
+  width: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.pcs-tlf-list tr.pcs-tlf-desc td { word-break: break-word; overflow-wrap: anywhere; }
 </style>
 {% comment %}
 Shared task-list + filter partial used by:
@@ -33,80 +59,57 @@ Context expected:
   form_action           : URL the form GETs to
 {% endcomment %}
 
-<form method="get" action="{{ form_action }}" id="pcs-tlf-form" class="pcs-tlf">
-  {% if show_tabs %}
-  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
-    {% for tab in lifecycle_tabs %}
-      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
-         href="?lifecycle={{ tab.key }}">
-        {{ tab.label }}{% if tab.campaigns %} <span class="text-muted">·</span>
-          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-        {% endif %}
-      </a>
-    {% endfor %}
+{% if show_tabs %}
+<div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
+  {% for tab in lifecycle_tabs %}
+    <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
+       href="?lifecycle={{ tab.key }}">
+      {{ tab.label }}{% if tab.campaigns %} <span class="text-muted">·</span>
+        {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+      {% endif %}
+    </a>
+  {% endfor %}
+</div>
+{% else %}
+  {% if focused_campaign %}
+  <div class="pcs-tlf-context mb-2">
+    <span class="text-muted small">Campaign:</span>
+    <strong>{{ focused_campaign.name }}</strong>
   </div>
-  <input type="hidden" name="lifecycle" value="{{ active_lifecycle }}">
-  {% else %}
-    {% if focused_campaign %}
-    <div class="pcs-tlf-context mb-2">
-      <span class="text-muted small">Campaign:</span>
-      <strong>{{ focused_campaign.name }}</strong>
-    </div>
-    {% endif %}
   {% endif %}
+{% endif %}
 
-  <div class="row g-2 mb-2 pcs-tlf-row align-items-center">
-    <div class="col-md-2">
-      <input type="search" name="q" value="{{ filters.q|default:'' }}"
-             class="form-control form-control-sm" placeholder="Search name/desc…">
-    </div>
-    <div class="col-md-2">
-      <select name="status" class="form-select form-select-sm">
-        <option value="">All status</option>
-        {% for k, v in status_choices %}
-        <option value="{{ k }}"{% if filters.status == k %} selected{% endif %}>{{ v }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-2">
-      <select name="requestor" class="form-select form-select-sm">
-        <option value="">All requestors</option>
-        {% for r in requestor_options %}
-        <option value="{{ r }}"{% if filters.requestor == r %} selected{% endif %}>{{ r }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="col-md-2">
-      <select name="submission_path" class="form-select form-select-sm">
-        <option value="">All paths</option>
-        <option value="condor"{% if filters.submission_path == 'condor' %} selected{% endif %}>condor</option>
-        <option value="panda"{% if filters.submission_path == 'panda' %} selected{% endif %}>panda</option>
-        <option value="internal_evgen"{% if filters.submission_path == 'internal_evgen' %} selected{% endif %}>internal_evgen</option>
-      </select>
-    </div>
-    <div class="col-md-3">
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="pre_tdr_use" value="1"
-               id="pcs-tlf-pretdr"{% if filters.pre_tdr_use %} checked{% endif %}>
-        <label class="form-check-label small" for="pcs-tlf-pretdr">pre-TDR</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="early_science_use" value="1"
-               id="pcs-tlf-es"{% if filters.early_science_use %} checked{% endif %}>
-        <label class="form-check-label small" for="pcs-tlf-es">ES</label>
-      </div>
-      <div class="form-check form-check-inline">
-        <input class="form-check-input" type="checkbox" name="other_use" value="1"
-               id="pcs-tlf-other"{% if filters.other_use %} checked{% endif %}>
-        <label class="form-check-label small" for="pcs-tlf-other">other</label>
-      </div>
-    </div>
-    <div class="col-md-1 d-flex gap-1 justify-content-end">
-      <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-outline-secondary"
-              title="Clear filters">×</button>
-    </div>
+<div id="pcs-tlf-bar" class="pcs-tlf-bar mb-2">
+  <div class="pcs-tlf-bar-row d-flex align-items-center gap-2">
+    <span class="pcs-tlf-label">Search:</span>
+    <input type="search" id="pcs-tlf-q" value="{{ filters.q|default:'' }}"
+           class="form-control form-control-sm" style="width:24em;"
+           placeholder="name / description…">
+    <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-outline-secondary"
+            title="Clear all filters">Clear</button>
   </div>
-</form>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Status:</span>
+    <a href="#" data-filter="status" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-status-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Requestor:</span>
+    <a href="#" data-filter="requestor" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-requestor-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Submission path:</span>
+    <a href="#" data-filter="submission_path" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-submission_path-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Use:</span>
+    <a href="#" data-toggle="pre_tdr_use" class="filter-link">pre-TDR (<span data-count="pre_tdr_use">0</span>)</a>
+    <a href="#" data-toggle="early_science_use" class="filter-link">ES (<span data-count="early_science_use">0</span>)</a>
+    <a href="#" data-toggle="other_use" class="filter-link">Other (<span data-count="other_use">0</span>)</a>
+  </div>
+</div>
 
 <div class="dataTables_wrapper pcs-tlf-list-wrap table-responsive">
   <table class="table table-sm pcs-tlf-list dataTable mb-1">
@@ -133,15 +136,15 @@ Context expected:
           data-task-id="{{ t.pk }}"
           data-status="{{ t.status|default:'' }}"
           data-requestor="{{ t.requestor|default:'' }}"
-          data-submission-path="{{ t.prod_config.data.submission_path|default:'condor' }}"
+          data-submission-path="{% if t.prod_config.data.submission_path == 'panda' %}panda{% else %}condor{% endif %}"
           data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
           data-early-science="{% if t.early_science_use %}1{% else %}0{% endif %}"
           data-other="{% if t.other_use %}1{% else %}0{% endif %}"
           data-search="{{ t.name|default:''|lower }} {{ t.description|default:''|lower }}">
-        <td rowspan="2" class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
-        <td rowspan="2" class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
-        <td rowspan="2" class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
-        <td class="small" data-sort-val="{{ ds_path }}">
+        <td{% if t.description or issue %} rowspan="2"{% endif %} class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
+        <td{% if t.description or issue %} rowspan="2"{% endif %} class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
+        <td{% if t.description or issue %} rowspan="2"{% endif %} class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
+        <td class="small pcs-tlf-cell-dataset" data-sort-val="{{ ds_path }}">
           <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
           {% if gen_ver %}
             <div class="text-muted">
@@ -158,6 +161,7 @@ Context expected:
         <td class="small text-center">{% if t.other_use %}Yes{% endif %}</td>
         <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
       </tr>
+      {% if t.description or issue %}
       <tr class="pcs-tlf-row pcs-tlf-desc{% if focused_task_id == t.pk %} table-active{% endif %}">
         <td colspan="9" class="small text-muted ps-2">
           {% if t.description %}{{ t.description|linebreaksbr }}{% endif %}
@@ -167,6 +171,7 @@ Context expected:
           {% endif %}
         </td>
       </tr>
+      {% endif %}
       {% endwith %}
       {% empty %}
       <tr><td colspan="12" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
@@ -190,105 +195,147 @@ Context expected:
 
 <script>
 (function() {
-  /* Live filter: filter controls update visible rows immediately, no Apply
-     button. The form is kept for direct-URL access (bookmarkable initial state)
-     and for accessibility; submit is intercepted because everything happens
-     client-side. URL is kept in sync via history.replaceState so the current
-     filter remains bookmarkable.
+  /* Live faceted filter — mirrors the panda jobs / logs / tasks convention
+     (see monitor_app/_datatable_dynamic_base.html): for each filter column
+     a horizontal "value (count)" link list, with counts faceted by the
+     state of the other filters. Initial state comes from URL query params
+     so the catalog stays bookmarkable. */
 
-     Paired-row layout: each task is two adjacent TRs (.pcs-tlf-data and
-     .pcs-tlf-desc) — both must be hidden/shown together. */
+  const STR = ['status','requestor','submission_path'];
+  const BOOL = ['pre_tdr_use','early_science_use','other_use'];
+  const DS = { status:'status', requestor:'requestor', submission_path:'submissionPath' };
+  const BD = { pre_tdr_use:'preTdr', early_science_use:'earlyScience', other_use:'other' };
 
-  const form = document.getElementById('pcs-tlf-form');
-  const emptyRow = document.getElementById('pcs-tlf-empty');
   const tableEl = document.querySelector('table.pcs-tlf-list');
   const tbodyEl = tableEl ? tableEl.tBodies[0] : null;
+  const dataRows = tbodyEl ? Array.from(tbodyEl.querySelectorAll('tr.pcs-tlf-data')) : [];
+  const emptyRow = document.getElementById('pcs-tlf-empty');
+  const qInput = document.getElementById('pcs-tlf-q');
 
-  function getControl(name) { return form ? form.elements.namedItem(name) : null; }
+  const initial = new URL(window.location.href).searchParams;
+  const state = {
+    q: (initial.get('q') || '').trim(),
+    status: initial.get('status') || '',
+    requestor: initial.get('requestor') || '',
+    submission_path: initial.get('submission_path') || '',
+    pre_tdr_use: initial.get('pre_tdr_use') === '1',
+    early_science_use: initial.get('early_science_use') === '1',
+    other_use: initial.get('other_use') === '1',
+  };
 
-  function readFilters() {
-    return {
-      q:                 (getControl('q')?.value || '').trim().toLowerCase(),
-      status:            getControl('status')?.value || '',
-      requestor:         getControl('requestor')?.value || '',
-      submission_path:   getControl('submission_path')?.value || '',
-      pre_tdr_use:       !!getControl('pre_tdr_use')?.checked,
-      early_science_use: !!getControl('early_science_use')?.checked,
-      other_use:         !!getControl('other_use')?.checked,
-    };
-  }
-
-  function rowMatches(tr, f) {
-    if (f.q && !(tr.dataset.search || '').includes(f.q)) return false;
-    if (f.status && tr.dataset.status !== f.status) return false;
-    if (f.requestor && tr.dataset.requestor !== f.requestor) return false;
-    if (f.submission_path && tr.dataset.submissionPath !== f.submission_path) return false;
-    if (f.pre_tdr_use && tr.dataset.preTdr !== '1') return false;
-    if (f.early_science_use && tr.dataset.earlyScience !== '1') return false;
-    if (f.other_use && tr.dataset.other !== '1') return false;
+  function rowMatches(tr, skip) {
+    if (skip !== 'q' && state.q) {
+      if (!(tr.dataset.search || '').includes(state.q.toLowerCase())) return false;
+    }
+    for (const k of STR) {
+      if (k === skip) continue;
+      if (state[k] && tr.dataset[DS[k]] !== state[k]) return false;
+    }
+    for (const k of BOOL) {
+      if (k === skip) continue;
+      if (state[k] && tr.dataset[BD[k]] !== '1') return false;
+    }
     return true;
   }
 
-  function applyFilters() {
-    if (!tbodyEl) return;
-    const f = readFilters();
-    let visible = 0;
-    const dataRows = tbodyEl.querySelectorAll('tr.pcs-tlf-data');
-    dataRows.forEach(tr => {
-      const show = rowMatches(tr, f);
-      tr.style.display = show ? '' : 'none';
-      const next = tr.nextElementSibling;
-      if (next && next.classList.contains('pcs-tlf-desc')) {
-        next.style.display = show ? '' : 'none';
+  function escapeAttr(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function renderBar() {
+    // Faceted counts: for each str filter, count rows that match all OTHER
+    // filters, bucketed by the row's own value of that filter. Boolean
+    // filters count rows that would still match if that boolean were ON.
+    const strCounts = { status:{}, requestor:{}, submission_path:{} };
+    const boolCounts = { pre_tdr_use:0, early_science_use:0, other_use:0 };
+    for (const tr of dataRows) {
+      for (const k of STR) {
+        if (rowMatches(tr, k)) {
+          const v = tr.dataset[DS[k]];
+          if (v) strCounts[k][v] = (strCounts[k][v] || 0) + 1;
+        }
       }
-      if (show) visible++;
-    });
-    if (emptyRow) emptyRow.style.display = (visible === 0 && dataRows.length > 0) ? '' : 'none';
-    syncUrl(f);
-  }
-
-  function syncUrl(f) {
-    const url = new URL(window.location.href);
-    const params = url.searchParams;
-    // Preserve non-filter params (lifecycle, campaign, anything else upstream).
-    ['q','status','requestor','submission_path',
-     'pre_tdr_use','early_science_use','other_use'].forEach(k => params.delete(k));
-    if (f.q) params.set('q', f.q);
-    if (f.status) params.set('status', f.status);
-    if (f.requestor) params.set('requestor', f.requestor);
-    if (f.submission_path) params.set('submission_path', f.submission_path);
-    if (f.pre_tdr_use) params.set('pre_tdr_use', '1');
-    if (f.early_science_use) params.set('early_science_use', '1');
-    if (f.other_use) params.set('other_use', '1');
-    history.replaceState(null, '', url.toString());
-  }
-
-  if (form) {
-    form.addEventListener('submit', e => e.preventDefault());
-    ['q','status','requestor','submission_path',
-     'pre_tdr_use','early_science_use','other_use'].forEach(name => {
-      const el = getControl(name);
-      if (!el) return;
-      const evt = (el.tagName === 'INPUT' && el.type === 'search') ? 'input' : 'change';
-      el.addEventListener(evt, applyFilters);
-    });
-    const clearBtn = document.getElementById('pcs-tlf-clear');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        ['q','status','requestor','submission_path'].forEach(name => {
-          const el = getControl(name);
-          if (el) el.value = '';
-        });
-        ['pre_tdr_use','early_science_use','other_use'].forEach(name => {
-          const el = getControl(name);
-          if (el) el.checked = false;
-        });
-        applyFilters();
-      });
+      for (const k of BOOL) {
+        if (rowMatches(tr, k) && tr.dataset[BD[k]] === '1') boolCounts[k]++;
+      }
     }
-    // Initial pass — picks up server-rendered URL params.
-    applyFilters();
+
+    for (const k of STR) {
+      const span = document.getElementById('pcs-tlf-' + k + '-opts');
+      if (!span) continue;
+      const entries = Object.entries(strCounts[k]).sort((a,b) => a[0].localeCompare(b[0]));
+      span.innerHTML = entries.map(([v,n]) => {
+        const active = state[k] === v ? ' filter-active' : '';
+        return `<a href="#" data-filter="${k}" data-value="${escapeAttr(v)}"`
+             + ` class="filter-link${active}">${escapeAttr(v)} (${n})</a>`;
+      }).join('');
+      const allLink = document.querySelector(
+        `#pcs-tlf-bar .filter-link[data-filter="${k}"][data-value=""]`);
+      if (allLink) allLink.classList.toggle('filter-active', !state[k]);
+    }
+    for (const k of BOOL) {
+      const c = document.querySelector(`[data-count="${k}"]`);
+      if (c) c.textContent = boolCounts[k];
+      const a = document.querySelector(`#pcs-tlf-bar .filter-link[data-toggle="${k}"]`);
+      if (a) a.classList.toggle('filter-active', state[k]);
+    }
   }
+
+  function syncUrl() {
+    const u = new URL(window.location.href);
+    const p = u.searchParams;
+    ['q','status','requestor','submission_path',
+     'pre_tdr_use','early_science_use','other_use'].forEach(k => p.delete(k));
+    if (state.q) p.set('q', state.q);
+    for (const k of STR)  if (state[k]) p.set(k, state[k]);
+    for (const k of BOOL) if (state[k]) p.set(k, '1');
+    history.replaceState(null, '', u.toString());
+  }
+
+  function applyFilters() {
+    let visible = 0;
+    for (const tr of dataRows) {
+      const show = rowMatches(tr, null);
+      tr.style.display = show ? '' : 'none';
+      const desc = tr.nextElementSibling;
+      if (desc && desc.classList.contains('pcs-tlf-desc')) desc.style.display = show ? '' : 'none';
+      if (show) visible++;
+    }
+    if (emptyRow) emptyRow.style.display = (visible === 0 && dataRows.length > 0) ? '' : 'none';
+    renderBar();
+    syncUrl();
+  }
+
+  // Click handler on the bar — single delegate covers All, value links, and toggles.
+  document.getElementById('pcs-tlf-bar')?.addEventListener('click', e => {
+    const a = e.target.closest('a.filter-link');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.filter !== undefined) {
+      const k = a.dataset.filter;
+      const v = a.dataset.value || '';
+      state[k] = (state[k] === v && v !== '') ? '' : v;
+    } else if (a.dataset.toggle) {
+      const k = a.dataset.toggle;
+      state[k] = !state[k];
+    }
+    applyFilters();
+  });
+
+  if (qInput) {
+    qInput.value = state.q;
+    qInput.addEventListener('input', () => { state.q = qInput.value.trim(); applyFilters(); });
+  }
+  document.getElementById('pcs-tlf-clear')?.addEventListener('click', () => {
+    state.q = '';
+    if (qInput) qInput.value = '';
+    for (const k of STR)  state[k] = '';
+    for (const k of BOOL) state[k] = false;
+    applyFilters();
+  });
+
+  applyFilters();
 
   /* Bulk-select state + paired-row column sort.
      Each task is two adjacent TRs: .pcs-tlf-data (sortable) and .pcs-tlf-desc

@@ -255,4 +255,4 @@
    csv_import: imported from external CSV, not yet processed by the
    prod team → grey (inert, closed family). */
 .draft_fill { color:black; background-color:#e6f0f6 !important; }
-.csv_import_fill { color:black; background-color:#bdbdbd !important; }
+.csv_import_fill { color:black; background-color:#dedede !important; }

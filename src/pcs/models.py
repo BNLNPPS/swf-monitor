@@ -344,9 +344,11 @@ class ProdConfig(models.Model):
 
     @property
     def submission_path(self):
-        """Submission path: 'condor', 'panda', or 'internal_evgen'.
-        Stored in ``data['submission_path']``; defaults to 'condor'
-        (current production submission path)."""
+        """Submission path: 'condor' or 'panda'. Stored in
+        ``data['submission_path']``; defaults to 'condor' (current
+        production submission path). Whether evgen is run in-house
+        or read from input files is a separate axis (workflow_mode)
+        and is independent of the submission path."""
         return (self.data or {}).get('submission_path', 'condor')
 
 
