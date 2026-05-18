@@ -943,6 +943,39 @@ def pcs_catalog_csv_update(request):
 
 
 @_login_required_flash
+def pcs_catalog_past_update(request):
+    """POST handler for the 'Update from epic-prod' button on the Past tab.
+
+    Runs the past-campaign output ingest (FULL + RECO 2026 versions from
+    the cloned epic-prod docs tree) and redirects back to the catalog
+    Past view with a flash summary. POST-only.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request,
+            reverse('pcs:pcs_catalog') + '?lifecycle=past',
+            action_label='Update from epic-prod')
+    from .services import import_epic_prod_past_campaigns, ServiceError
+    try:
+        summary = import_epic_prod_past_campaigns(
+            created_by=getattr(request.user, 'username', '') or 'past_import',
+        )
+    except (ServiceError, FileNotFoundError, OSError) as e:
+        messages.error(request, f'Past-campaign import failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=past')
+    msg = (f'epic-prod past import: {summary["created"]} new, '
+           f'{summary["updated"]} updated, '
+           f'across {summary["campaigns"]} campaigns, '
+           f'{len(summary["errors"])} errors '
+           f'(of {summary["rows"]} rows)')
+    if summary['errors']:
+        messages.warning(request, msg)
+    else:
+        messages.success(request, msg)
+    return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=past')
+
+
+@_login_required_flash
 def pcs_catalog(request):
     """Production Task Catalog — lifecycle-grouped task listing.
 

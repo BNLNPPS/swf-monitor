@@ -617,6 +617,269 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Past-campaign output ingest (epic-prod FULL/RECO/<version>/index.md)
+# ---------------------------------------------------------------------------
+
+EPIC_PROD_PATH = '/data/wenauseic/github/epic-prod'
+PAST_CAMPAIGN_STAGES = ('FULL', 'RECO')
+PAST_CAMPAIGN_YEAR_PREFIX = '26.'   # 2026 campaigns only this pass
+
+_PAST_DID_RE   = _re.compile(r'^===\s*(epic:/\S+)\s*===\s*$')
+_PAST_RSE_RE   = _re.compile(r'RSE:\s*(\S+)\s+Files:\s*(\d+)/(\d+)\s*\(([^)]+)\)')
+_PAST_SIZE_RE  = _re.compile(r'Total Size:\s*([\d.]+)\s*([KMGTP]?B)\s*\((\d+)\s*files?\)', _re.I)
+_PAST_SUMMARY_RE = _re.compile(r'^===\s*CAMPAIGN SUMMARY\s*===\s*$')
+
+_SIZE_UNIT_BYTES = {'B': 1, 'KB': 1_000, 'MB': 1_000_000,
+                    'GB': 1_000_000_000, 'TB': 1_000_000_000_000,
+                    'PB': 1_000_000_000_000_000}
+
+
+def _parse_size_to_bytes(value, unit):
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        _log.warning('past_ingest: unparseable size value %r', value)
+        return 0
+    mult = _SIZE_UNIT_BYTES.get(unit.upper())
+    if mult is None:
+        _log.warning('past_ingest: unrecognised size unit %r', unit)
+        return 0
+    return int(round(n * mult))
+
+
+def _parse_past_index(text):
+    """Parse an epic-prod docs/<STAGE>/<version>/index.md file.
+
+    Yields dicts: {did, rses: [{name, files, total, status}], file_count,
+    data_size_bytes, complete}. The campaign summary block at the end is
+    skipped.
+    """
+    block = None
+
+    def _emit():
+        nonlocal block
+        if block:
+            yield_block, block = block, None
+            return yield_block
+        return None
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line == '```':
+            continue
+        if _PAST_SUMMARY_RE.match(line):
+            done = _emit()
+            if done is not None:
+                yield done
+            break
+        m = _PAST_DID_RE.match(line)
+        if m:
+            done = _emit()
+            if done is not None:
+                yield done
+            block = {'did': m.group(1), 'rses': [], 'file_count': 0,
+                     'data_size_bytes': 0, 'complete': True}
+            continue
+        if block is None:
+            continue
+        m = _PAST_RSE_RE.search(line)
+        if m:
+            files, total, status = int(m.group(2)), int(m.group(3)), m.group(4).strip()
+            block['rses'].append({'name': m.group(1), 'files': files,
+                                  'total': total, 'status': status})
+            if status != 'complete':
+                block['complete'] = False
+            continue
+        m = _PAST_SIZE_RE.search(line)
+        if m:
+            block['data_size_bytes'] = _parse_size_to_bytes(m.group(1), m.group(2))
+            block['file_count'] = int(m.group(3))
+            continue
+    done = _emit()
+    if done is not None:
+        yield done
+
+
+def _decompose_past_did(did):
+    """Break an epic-prod DID into the path-level fields we filter on.
+
+    Expected form: epic:/STAGE/version/detector_config/<bg-chain>/<phys-chain>/beam/paramset
+    Everything after detector_config is best-effort; what we don't recognise
+    stays in metadata['past_output']['path_remainder'] for the row to render
+    verbatim. NO-SILENT-FAILURES: a DID that doesn't even split into the
+    leading STAGE/version/detector parts is logged.
+    """
+    parts = did.split(':', 1)
+    rest = parts[1] if len(parts) == 2 else did
+    rest = rest.lstrip('/')
+    segs = rest.split('/')
+    if len(segs) < 3:
+        _log.warning('past_ingest: DID %r has too few segments', did)
+        return {}
+    out = {'stage': segs[0], 'version': segs[1], 'detector_config': segs[2]}
+    if len(segs) > 3:
+        out['path_remainder'] = '/'.join(segs[3:])
+    return out
+
+
+def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
+                                    created_by='past_import'):
+    """Import 2026 past-campaign output datasets from a cloned epic-prod.
+
+    Walks ``docs/FULL/<v>/index.md`` and ``docs/RECO/<v>/index.md`` for
+    every 2026 version listed in ``docs/_data/{full,reco}_content.yml``.
+    The 'main' alias is excluded (it's a moving target, not a frozen
+    archive).
+
+    For each parsed dataset we get-or-create:
+      - Campaign(name='{STAGE}/{version}', lifecycle='past')
+      - Dataset(did=PCS internal DID, dataset_name='past.{STAGE}.{ver}.{slug}'),
+        with the epic-prod Rucio DID stored in metadata['source']['location']
+        and the per-RSE breakdown in metadata['past_output'].
+      - ProdTask(name='past.{STAGE}.{ver}.{slug}', status='past_output',
+        linked to the Dataset, anchor ProdConfig, and Campaign).
+
+    Idempotency key: (STAGE, version, epic_prod_did). Re-running refreshes
+    file_count / data_size / rse breakdown but leaves any operator-touched
+    status / overrides intact (same rule as csv_import).
+    """
+    import os as _os
+    import yaml as _yaml
+    physics, evgen, simu, reco, cfg, _ = _ensure_csvimport_anchors()
+
+    summary = {'campaigns': 0, 'rows': 0, 'created': 0, 'updated': 0, 'errors': []}
+
+    versions_by_stage = {}
+    for stage in PAST_CAMPAIGN_STAGES:
+        yml_name = f'{stage.lower()}_content.yml'
+        yml_path = _os.path.join(epic_prod_path, 'docs', '_data', yml_name)
+        try:
+            with open(yml_path) as f:
+                entries = _yaml.safe_load(f) or []
+        except (OSError, _yaml.YAMLError) as e:
+            summary['errors'].append(f'{stage}: cannot read {yml_name}: {e}')
+            continue
+        versions_by_stage[stage] = [
+            e['text'] for e in entries
+            if isinstance(e, dict) and e.get('text', '').startswith(PAST_CAMPAIGN_YEAR_PREFIX)
+            and e['text'] != 'main'
+        ]
+
+    with transaction.atomic():
+        for stage, versions in versions_by_stage.items():
+            for version in versions:
+                campaign_name = f'{stage}/{version}'
+                index_path = _os.path.join(epic_prod_path, 'docs', stage, version, 'index.md')
+                try:
+                    with open(index_path) as f:
+                        text = f.read()
+                except OSError as e:
+                    summary['errors'].append(f'{campaign_name}: {e}')
+                    continue
+
+                campaign, _ = Campaign.objects.get_or_create(
+                    name=campaign_name,
+                    defaults={'lifecycle': 'past',
+                              'description': f'{stage} campaign {version} '
+                                             f'(epic-prod {index_path})',
+                              'created_by': created_by},
+                )
+                if campaign.lifecycle != 'past':
+                    campaign.lifecycle = 'past'
+                    campaign.save(update_fields=['lifecycle'])
+                summary['campaigns'] += 1
+
+                campaign_files = 0
+                campaign_bytes = 0
+                for block in _parse_past_index(text):
+                    summary['rows'] += 1
+                    epic_did = block['did']
+                    slug = _hashlib.sha1(epic_did.encode()).hexdigest()[:12]
+                    pcs_name = f'past.{stage}.{version}.{slug}'
+                    decomposed = _decompose_past_did(epic_did)
+
+                    metadata = {
+                        'stage': stage.lower(),
+                        'source': {'kind': 'rucio_did', 'location': epic_did},
+                        'past_output': {
+                            'campaign_name': campaign_name,
+                            'stage': stage,
+                            'version': version,
+                            'rses': block['rses'],
+                            'complete': block['complete'],
+                            'path': decomposed,
+                            'index_path': index_path,
+                        },
+                    }
+
+                    pcs_did = f'group.EIC:{pcs_name}.b1'
+                    ds, ds_created = Dataset.objects.get_or_create(
+                        dataset_name=pcs_name, block_num=1,
+                        defaults=dict(
+                            scope='group.EIC', did=pcs_did,
+                            detector_version=version,
+                            detector_config=decomposed.get('detector_config', ''),
+                            physics_tag=physics, evgen_tag=evgen,
+                            simu_tag=simu, reco_tag=reco,
+                            file_count=block['file_count'],
+                            data_size=block['data_size_bytes'],
+                            description='',
+                            metadata=metadata,
+                            created_by=created_by,
+                        ),
+                    )
+                    if not ds_created:
+                        ds.file_count = block['file_count']
+                        ds.data_size = block['data_size_bytes']
+                        ds.metadata = metadata
+                        ds.detector_version = version
+                        ds.detector_config = decomposed.get('detector_config', '')
+                        ds.save()
+
+                    task_defaults = dict(
+                        description='',
+                        dataset=ds,
+                        prod_config=cfg,
+                        campaign=campaign,
+                        overrides={'past_output': metadata['past_output']},
+                        created_by=created_by,
+                    )
+                    existing = ProdTask.objects.filter(name=pcs_name).first()
+                    if existing:
+                        preserve_status = existing.status != 'past_output'
+                        for k, v in task_defaults.items():
+                            if k == 'overrides':
+                                merged = dict(existing.overrides or {})
+                                merged.update(v)
+                                v = merged
+                            setattr(existing, k, v)
+                        if not preserve_status:
+                            existing.status = 'past_output'
+                        existing.save()
+                        summary['updated'] += 1
+                    else:
+                        ProdTask.objects.create(name=pcs_name,
+                                                status='past_output',
+                                                **task_defaults)
+                        summary['created'] += 1
+                    campaign_files += block['file_count']
+                    campaign_bytes += block['data_size_bytes']
+
+                campaign.data = {
+                    **(campaign.data or {}),
+                    'past_summary': {
+                        'file_count': campaign_files,
+                        'data_size_bytes': campaign_bytes,
+                        'stage': stage,
+                        'version': version,
+                    },
+                }
+                campaign.save(update_fields=['data', 'updated_at'])
+
+    return summary
+
+
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     """
     Record outcome of a JEDI submission. Two gates:
