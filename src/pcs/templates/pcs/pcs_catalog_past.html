@@ -46,7 +46,8 @@
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Release:</span>
     <a href="?lifecycle=past&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
-       class="{% if active_release == 'all' %}active{% endif %}">All</a>
+       class="{% if active_release == 'all' %}active{% endif %}"
+       style="font-weight:600">All</a>
     {% for grp in release_year_groups %}
       <span class="text-muted mx-1">|</span>
       <a href="?lifecycle=past&amp;release={{ grp.all_key }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"

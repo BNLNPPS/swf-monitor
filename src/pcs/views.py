@@ -1023,7 +1023,9 @@ def pcs_catalog(request):
             yr = _version_year(v)
             if yr:
                 releases_by_year.setdefault(yr, []).append(v)
-        years_sorted = sorted(releases_by_year.keys())
+        # Year groups listed newest-first (2026 then 2025) per Torre's
+        # preference; releases within each year stay ASC.
+        years_sorted = sorted(releases_by_year.keys(), reverse=True)
 
         requested_release = (request.GET.get('release') or '').strip()
         if requested_release == 'all':
