@@ -1,52 +1,42 @@
+{% load swf_fmt %}
 {% comment %}
-Shared task-list + filter partial. Reused by:
-  - the full-page Catalog (show_tabs=True, columns_mode='full')
-  - the Workbench left panel (show_tabs=False, columns_mode='workbench')
+Shared task-list + filter partial used by:
+  - full-page Catalog (show_tabs=True, columns_mode='full')
+  - Workbench left panel (show_tabs=False, columns_mode='workbench')
 
 Context expected:
   tasks                 : iterable of ProdTask, select_related as appropriate
-  show_tabs             : bool — render campaign tab bar
+  show_tabs             : bool — render lifecycle tab bar
   columns_mode          : 'full' | 'workbench' — drives column visibility
-  active_campaign       : str | None — currently-active campaign name (tab mode)
-  campaign_current      : Campaign | None
-  campaigns_past        : iterable of Campaign
-  campaigns_future      : iterable of Campaign
+  active_lifecycle      : 'past'|'present'|'future' — active tab
+  lifecycle_tabs        : list of {key,label,color,campaigns} — three lifecycle slots
+  active_campaigns      : list of Campaign in the active lifecycle slot
   focused_campaign      : Campaign | None — workbench: campaign of focused task
   focused_task_id       : int | None — workbench: highlight this row
   filters               : dict — current filter values for echo
   requestor_options     : iterable of str — pulldown choices
   status_choices        : iterable of (key, label) tuples
-  form_action           : URL the form GETs to (catalog or compose)
+  form_action           : URL the form GETs to
 {% endcomment %}
 
 <form method="get" action="{{ form_action }}" id="pcs-tlf-form" class="pcs-tlf">
   {% if show_tabs %}
-  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Campaign tabs">
-    {% for c in campaigns_past %}
-      <a class="btn btn-sm btn-outline-secondary{% if active_campaign == c.name %} active{% endif %}"
-         href="?campaign={{ c.name }}"
-         title="Past campaign">{{ c.name }}</a>
-    {% endfor %}
-    {% if campaign_current %}
-      <a class="btn btn-sm btn-outline-success{% if active_campaign == campaign_current.name %} active{% endif %}"
-         href="?campaign={{ campaign_current.name }}"
-         title="Current campaign">{{ campaign_current.name }}</a>
-    {% endif %}
-    {% for c in campaigns_future %}
-      <a class="btn btn-sm btn-outline-primary{% if active_campaign == c.name %} active{% endif %}"
-         href="?campaign={{ c.name }}"
-         title="Future campaign">{{ c.name }}</a>
+  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
+    {% for tab in lifecycle_tabs %}
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
+         href="?lifecycle={{ tab.key }}">
+        {{ tab.label }}{% if tab.campaigns %} <span class="text-muted">·</span>
+          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% endif %}
+      </a>
     {% endfor %}
   </div>
-  {% if active_campaign %}
-    <input type="hidden" name="campaign" value="{{ active_campaign }}">
-  {% endif %}
+  <input type="hidden" name="lifecycle" value="{{ active_lifecycle }}">
   {% else %}
     {% if focused_campaign %}
     <div class="pcs-tlf-context mb-2">
       <span class="text-muted small">Campaign:</span>
       <strong>{{ focused_campaign.name }}</strong>
-      <span class="badge bg-{% if focused_campaign.lifecycle == 'current' %}success{% elif focused_campaign.lifecycle == 'future' %}primary{% else %}secondary{% endif %}">{{ focused_campaign.lifecycle }}</span>
     </div>
     {% endif %}
   {% endif %}
@@ -58,7 +48,7 @@ Context expected:
     </div>
     <div class="col-md-2">
       <select name="status" class="form-select form-select-sm">
-        <option value="">All statuses</option>
+        <option value="">All status</option>
         {% for k, v in status_choices %}
         <option value="{{ k }}"{% if filters.status == k %} selected{% endif %}>{{ v }}</option>
         {% endfor %}
@@ -128,22 +118,20 @@ Context expected:
       {% for t in tasks %}
       <tr{% if focused_task_id == t.pk %} class="table-active"{% endif %}>
         <td><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
-        <td><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ t.name }}</a></td>
-        <td>
-          <span class="badge bg-{% if t.status == 'completed' %}success{% elif t.status == 'failed' %}danger{% elif t.status == 'submitted' %}info{% elif t.status == 'ready' %}primary{% else %}secondary{% endif %}">{{ t.status }}</span>
-        </td>
-        {% if show_tabs %}<td>{{ t.campaign.name|default:"—" }}</td>{% endif %}
-        <td>{{ t.requestor|default:"—" }}</td>
-        <td>{{ t.priority|default:"—" }}</td>
-        <td><code class="small">{{ t.prod_config.submission_path }}</code></td>
+        <td class="small"><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ t.name }}</a></td>
+        <td class="{{ t.status|state_class }}" title="{{ t.status|state_title }}">{{ t.status }}</td>
+        {% if show_tabs %}<td class="small">{{ t.campaign.name|default:"—" }}</td>{% endif %}
+        <td class="small">{{ t.requestor|default:"—" }}</td>
+        <td class="small">{{ t.priority|default:"—" }}</td>
+        <td class="small">{{ t.prod_config.submission_path }}</td>
         {% if columns_mode == 'full' %}
         <td class="small">
-          {% if t.pre_tdr_use %}<span class="badge bg-info">pre-TDR</span> {% endif %}
-          {% if t.early_science_use %}<span class="badge bg-info">ES</span> {% endif %}
-          {% if t.other_use %}<span class="badge bg-info">other</span>{% endif %}
+          {% if t.pre_tdr_use %}pre-TDR{% endif %}
+          {% if t.early_science_use %}{% if t.pre_tdr_use %}, {% endif %}ES{% endif %}
+          {% if t.other_use %}{% if t.pre_tdr_use or t.early_science_use %}, {% endif %}other{% endif %}
         </td>
         <td class="small text-muted">{{ t.dataset.dataset_name }}</td>
-        <td>{% if t.request_id %}<a href="#req-{{ t.request_id }}">req#{{ t.request_id }}</a>{% else %}—{% endif %}</td>
+        <td class="small">{% if t.request_id %}<a href="#req-{{ t.request_id }}">req#{{ t.request_id }}</a>{% else %}—{% endif %}</td>
         {% endif %}
         <td class="small text-muted">{{ t.updated_at|date:"Y-m-d H:i" }}</td>
       </tr>

@@ -877,43 +877,44 @@ def prod_config_edit(request, pk):
 TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
 
 
+# UI lifecycle label → DB Campaign.lifecycle value
+LIFECYCLE_UI_TO_DB = {'past': 'past', 'present': 'current', 'future': 'future'}
+LIFECYCLE_UI_ORDER = ('past', 'present', 'future')
+
+
 def pcs_catalog(request):
-    """
-    ePIC Production Task Catalog — campaign-aware task listing.
-
-    Campaign tabs (past/current/future) order time left-to-right.
-    Filters and active campaign are encoded in URL query params so
-    views are bookmarkable. Bulk actions are UI stubs in v1; wiring
-    lands with submission integration.
-    """
+    """Production Task Catalog — lifecycle-grouped task listing."""
     filters = _parse_catalog_filters(request)
-    active_name = (request.GET.get('campaign') or '').strip()
+    active_lifecycle = (request.GET.get('lifecycle') or '').strip()
+    if active_lifecycle not in LIFECYCLE_UI_TO_DB:
+        active_lifecycle = 'present'
 
-    campaign_current = Campaign.objects.filter(lifecycle='current').order_by('-updated_at').first()
-    campaigns_past = list(Campaign.objects.filter(lifecycle='past').order_by('name'))
-    campaigns_future = list(Campaign.objects.filter(lifecycle='future').order_by('name'))
-
-    # Default to current campaign if no explicit choice and a current exists.
-    if not active_name and campaign_current:
-        active_name = campaign_current.name
-
-    active_campaign = Campaign.objects.filter(name=active_name).first() if active_name else None
+    campaigns_by_db = {
+        db: list(Campaign.objects.filter(lifecycle=db).order_by('name'))
+        for db in ('past', 'current', 'future')
+    }
+    active_db = LIFECYCLE_UI_TO_DB[active_lifecycle]
+    active_campaigns = campaigns_by_db[active_db]
 
     qs = ProdTask.objects.select_related(
         'campaign', 'dataset', 'prod_config', 'request',
-    ).order_by('-updated_at')
-    if active_campaign:
-        qs = qs.filter(campaign=active_campaign)
+    ).filter(campaign__lifecycle=active_db).order_by('-updated_at')
     qs = _apply_catalog_filters(qs, filters)
 
     context = {
         'tasks': list(qs),
         'show_tabs': True,
         'columns_mode': 'full',
-        'active_campaign': active_name,
-        'campaign_current': campaign_current,
-        'campaigns_past': campaigns_past,
-        'campaigns_future': campaigns_future,
+        'active_lifecycle': active_lifecycle,
+        'lifecycle_tabs': [
+            {'key': 'past',    'label': 'Past',    'color': 'secondary',
+             'campaigns': campaigns_by_db['past']},
+            {'key': 'present', 'label': 'Present', 'color': 'success',
+             'campaigns': campaigns_by_db['current']},
+            {'key': 'future',  'label': 'Future',  'color': 'primary',
+             'campaigns': campaigns_by_db['future']},
+        ],
+        'active_campaigns': active_campaigns,
         'focused_campaign': None,
         'focused_task_id': None,
         'filters': filters,
