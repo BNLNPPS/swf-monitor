@@ -28,6 +28,20 @@
 
   <div id="pcs-rucio-timeline" class="mb-3" style="min-height:280px"></div>
 
+  {% if rucio_unmatched %}
+  <details class="mb-3 small">
+    <summary class="text-muted">
+      <strong style="color:#dc3545">&#9888; {{ rucio_unmatched|length }} unmatched Rucio output{{ rucio_unmatched|length|pluralize }}</strong>
+      for campaign {{ rucio_unmatched_campaign }} (no request in this table matched these DIDs)
+    </summary>
+    <ul class="mt-2 mb-0" style="font-family:monospace; font-size:0.85em;">
+    {% for u in rucio_unmatched %}
+      <li>{{ u.did }} &middot; {{ u.files }} files &middot; {{ u.bytes|filesizeformat }}{% if u.incomplete %} <span style="color:#dc3545">(incomplete)</span>{% endif %}</li>
+    {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
   {% include "pcs/_task_list_filter.html" %}
 </div>
 

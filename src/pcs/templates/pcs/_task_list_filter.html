@@ -64,7 +64,9 @@ Context expected:
   {% for tab in lifecycle_tabs %}
     <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
        href="?lifecycle={{ tab.key }}">
-      {{ tab.label }}
+      {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
+        {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+      {% endif %}
     </a>
   {% endfor %}
 </div>
@@ -260,6 +262,7 @@ Context expected:
       {% empty %}
       <tr><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
+
       <tr id="pcs-tlf-empty" style="display:none"><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
     </tbody>
   </table>

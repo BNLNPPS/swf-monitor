@@ -1148,6 +1148,8 @@ def pcs_catalog(request):
     # Rucio arrivals timeline for the current campaign (when a snapshot
     # exists). Surfaced at the top of the page as a Plotly chart.
     rucio_timeline = None
+    rucio_unmatched = []
+    rucio_unmatched_campaign = ''
     if active_lifecycle == 'current':
         current = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
         if current is not None:
@@ -1156,6 +1158,8 @@ def pcs_catalog(request):
             if snap is not None:
                 rucio_timeline = summarize_rucio_timeline(snap)
                 rucio_timeline['campaign_name'] = current.name
+            rucio_unmatched = (current.data or {}).get('rucio_unmatched', []) or []
+            rucio_unmatched_campaign = current.name
 
     context = {
         'tasks': list(qs),
@@ -1171,6 +1175,8 @@ def pcs_catalog(request):
         'status_choices': PRODTASK_STATUS_CHOICES,
         'form_action': reverse('pcs:pcs_catalog'),
         'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
+        'rucio_unmatched': rucio_unmatched,
+        'rucio_unmatched_campaign': rucio_unmatched_campaign,
     }
     return render(request, 'pcs/pcs_catalog.html', context)
 

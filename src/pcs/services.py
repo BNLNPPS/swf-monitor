@@ -1147,26 +1147,56 @@ def _index_snapshot_by_tail(snapshot):
     return idx
 
 
+def _did_tail_segments(did_tail):
+    return did_tail.split('/') if did_tail else []
+
+
+def _path_aligned_match(did_segs, req_segs):
+    """Is `req_segs` a contiguous subsequence of `did_segs`?
+
+    Rucio output paths often carry a background-mixing chain prefix
+    (e.g. Bkg_Exact1S_2us/GoldCt/5um/) AND a Q²-bin suffix that the
+    CSV input tail doesn't carry. Subsequence matching handles both.
+    """
+    if not req_segs or len(req_segs) > len(did_segs):
+        return False
+    n = len(req_segs)
+    for i in range(len(did_segs) - n + 1):
+        if did_segs[i:i + n] == req_segs:
+            return True
+    return False
+
+
 def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     """For every ProdTask in `campaign` whose CSV input has a usable tail,
     stash an `overrides['csv_import']['output']` rollup of matching Rucio
-    datasets. A dataset matches when its DID-name tail (after
-    /STAGE/<v>/<detector>/) equals the input tail or extends it with one
-    or more additional path segments.
+    datasets. A Rucio dataset matches when its DID-name tail
+    (after /STAGE/<v>/<detector>/) contains the request input tail as a
+    contiguous, path-aligned segment sequence — so BG-mixing prefixes
+    and Q²-bin suffixes in the output don't break the match.
+
+    Also stashes the unmatched Rucio datasets on
+    ``campaign.data['rucio_unmatched']`` so the catalog view can surface
+    them as synthetic table rows (unmatched output popping up).
     """
     idx = _index_snapshot_by_tail(snapshot)
+    idx_segs = [(_did_tail_segments(tail), rec) for tail, rec in idx]
     qs = ProdTask.objects.filter(campaign=campaign).select_related('dataset')
     summary = {'tasks_seen': 0, 'tasks_matched': 0, 'tasks_unmatched': 0}
+    matched_dids = set()
     for t in qs:
         summary['tasks_seen'] += 1
         ds_path = t.dataset.metadata.get('source', {}).get('location', '') \
             if (t.dataset.metadata or {}) else ''
         input_tail = _request_input_tail(ds_path)
+        req_segs = _did_tail_segments(input_tail)
         matches = []
-        if input_tail:
-            for tail, rec in idx:
-                if tail == input_tail or tail.startswith(input_tail + '/'):
+        if req_segs:
+            for did_segs, rec in idx_segs:
+                if _path_aligned_match(did_segs, req_segs):
                     matches.append(rec)
+        for m in matches:
+            matched_dids.add(m['did'])
         by_stage = _aggregate_rucio_match(matches)
         any_incomplete = any(s.get('incomplete', 0) for s in by_stage.values())
         has_output = len(matches) > 0
@@ -1195,6 +1225,36 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
             summary['tasks_matched'] += 1
         else:
             summary['tasks_unmatched'] += 1
+
+    # Unmatched Rucio datasets: in the snapshot but no request matched.
+    # Light-weight records — just the fields the catalog row needs.
+    unmatched = []
+    for cpath, info in (snapshot.get('campaigns') or {}).items():
+        cp_parts = cpath.strip('/').split('/')
+        stage = cp_parts[0] if cp_parts else ''
+        for d in info.get('datasets') or []:
+            did = d.get('did', '')
+            if did and did not in matched_dids:
+                # Aggregate to a single-stage rollup of the SAME shape used
+                # for matched-request output so the template can reuse the
+                # output-line rendering.
+                rollup = _aggregate_rucio_match([{**d, 'stage': stage}])
+                files = sum(s['files'] for s in rollup.values())
+                bytes_ = sum(s['bytes'] for s in rollup.values())
+                any_incomplete = any(s.get('incomplete', 0) for s in rollup.values())
+                unmatched.append({
+                    'did':        did,
+                    'stage':      stage,
+                    'files':      files,
+                    'bytes':      bytes_,
+                    'rse_names':  sorted({r.get('rse', '') for r in d.get('rse_replicas', []) if r.get('rse')}),
+                    'by_stage':   rollup,
+                    'incomplete': any_incomplete,
+                    'filters':    _extract_past_filters(did),
+                })
+    campaign.data = {**(campaign.data or {}), 'rucio_unmatched': unmatched}
+    campaign.save(update_fields=['data', 'updated_at'])
+    summary['rucio_unmatched'] = len(unmatched)
     return summary
 
 
@@ -1262,6 +1322,45 @@ def summarize_rucio_timeline(snapshot):
             out[key]['cum_files'][i]    = cf
             out[key]['cum_bytes'][i]    = cb
     return out
+
+
+def _detect_active_releases(token=None, *, year_prefix='26.'):
+    """Per-release dataset counts under epic:/RECO/<v>/ in JLab Rucio.
+
+    Returns list of {version, count} for every <year_prefix>x.y release
+    that has at least one dataset, sorted newest-first by component
+    version. 'main' excluded. Trial runs that land a handful of
+    datasets before real production starts are deliberately NOT
+    filtered out here — the operator judges from the counts, and
+    nothing is auto-promoted. Humans switch (see
+    feedback-humans-switch-lifecycle).
+    """
+    if token is None:
+        token = _jlab_rucio_auth()
+    names = _ndjson(_jlab_rucio_get(
+        '/dids/epic/dids/search', token, type='dataset', name='/RECO/*'))
+    from collections import Counter as _Counter
+    counts = _Counter()
+    for n in names:
+        if not isinstance(n, str):
+            continue
+        parts = n.lstrip('/').split('/')
+        if len(parts) < 2:
+            continue
+        v = parts[1]
+        if v == 'main' or not v.startswith(year_prefix):
+            continue
+        counts[v] += 1
+    def _key(v):
+        out = []
+        for part in v.split('.'):
+            try:
+                out.append((0, int(part)))
+            except ValueError:
+                out.append((1, part))
+        return tuple(out)
+    return [{'version': v, 'count': counts[v]}
+            for v in sorted(counts, key=_key, reverse=True)]
 
 
 def load_rucio_snapshot(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
