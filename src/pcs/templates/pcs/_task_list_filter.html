@@ -79,13 +79,13 @@ Context expected:
   {% endif %}
 {% endif %}
 
-<div class="pcs-tlf-legend small text-muted mb-2">
+<div class="pcs-tlf-legend small text-muted mb-3">
   <strong>Legend:</strong>
-  New: new request &middot;
-  pTDR: possible pre-TDR use &middot;
-  ES: Early Science use &middot;
-  Other: other use (full text on a 3rd row when given) &middot;
-  Background: background-study dataset
+  <strong>New</strong>: new request &middot;
+  <strong>pTDR</strong>: possible pre-TDR use &middot;
+  <strong>ES</strong>: Early Science use &middot;
+  <strong>Other</strong>: other use (full text on a 3rd row when given) &middot;
+  <strong>Background</strong>: background-study dataset
 </div>
 
 <div id="pcs-tlf-bar" class="pcs-tlf-bar mb-2">
@@ -93,7 +93,7 @@ Context expected:
     <span class="pcs-tlf-label">Search:</span>
     <input type="search" id="pcs-tlf-q" value="{{ filters.q|default:'' }}"
            class="form-control form-control-sm" style="width:24em;"
-           placeholder="name / description…">
+           placeholder="dataset / description…">
     <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-outline-secondary"
             title="Clear all filters">Clear</button>
   </div>
@@ -108,9 +108,24 @@ Context expected:
     <span id="pcs-tlf-requestor-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Generator:</span>
+    <a href="#" data-filter="evgen" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-evgen-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Submission path:</span>
     <a href="#" data-filter="submission_path" data-value="" class="filter-link filter-active">All</a>
     <span id="pcs-tlf-submission_path-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Priority:</span>
+    <a href="#" data-filter="priority" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-priority-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">N events (M):</span>
+    <a href="#" data-filter="nevents" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-nevents-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Use:</span>
@@ -129,18 +144,17 @@ Context expected:
         <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
         <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
         <th data-sort="status" class="pcs-sort sorting">Status</th>
-        <th data-sort="nevents" class="pcs-sort sorting">N events</th>
+        <th data-sort="nevents" class="pcs-sort sorting">N events (M)</th>
         <th data-sort="background" class="pcs-sort sorting">Background</th>
         <th data-sort="new_request" class="pcs-sort sorting">New</th>
         <th data-sort="pre_tdr_use" class="pcs-sort sorting">pTDR</th>
         <th data-sort="early_science_use" class="pcs-sort sorting">ES</th>
-        <th data-sort="other_use" class="pcs-sort sorting">Other</th>
         <th data-sort="priority" class="pcs-sort sorting">Priority</th>
       </tr>
     </thead>
     <tbody>
       {% for t in tasks %}
-      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents other_text=t.overrides.csv_import.other_use_text|default:'' %}
+      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents other_text=t.overrides.csv_import.other_use_text|default:'' %}
       <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
           data-task-id="{{ t.pk }}"
           data-status="{{ t.status|default:'' }}"
@@ -149,30 +163,32 @@ Context expected:
           data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
           data-early-science="{% if t.early_science_use %}1{% else %}0{% endif %}"
           data-other="{% if t.other_use %}1{% else %}0{% endif %}"
-          data-search="{{ t.name|default:''|lower }} {{ t.description|default:''|lower }}">
+          data-priority="{{ t.priority|default:'' }}"
+          data-nevents="{{ nev|millions }}"
+          data-evgen="{{ evgen }}"
+          data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
         <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
-        <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small{% if t.requestor %} pwg-{{ t.requestor }}{% endif %}">{{ t.requestor|default:"—" }}</td>
+        <td{% if other_text|informative_text %} rowspan="{% if t.description or issue %}3{% else %}2{% endif %}"{% elif t.description or issue %} rowspan="2"{% endif %} class="align-middle small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
         <td class="small pcs-tlf-cell-dataset" data-sort-val="{{ ds_path }}">
           <div><a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
           {% if gen_ver %}
             <div class="text-muted">
-              {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ gen_ver }}</a>{% else %}{{ gen_ver }}{% endif %}
+              {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ evgen|default:gen_ver }}</a>{% else %}{{ evgen|default:gen_ver }}{% endif %}
             </div>
           {% endif %}
         </td>
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
-        <td class="small" data-sort-val="{{ nev|default:'' }}">{{ nev|default:"" }}</td>
+        <td class="small text-end" data-sort-val="{{ nev|default:'' }}">{{ nev|millions }}</td>
         <td class="small text-center" data-sort-val="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}">{% if bg|lower == 'yes' %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.new_request %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.pre_tdr_use %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
-        <td class="small text-center">{% if t.other_use %}Yes{% endif %}</td>
         <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
       </tr>
       {% if t.description or issue %}
       <tr class="pcs-tlf-row pcs-tlf-desc{% if focused_task_id == t.pk %} table-active{% endif %}">
-        <td colspan="9" class="small text-muted ps-2">
+        <td colspan="8" class="small text-muted ps-2">
           {% if t.description %}{{ t.description|linebreaksbr }}{% endif %}
           {% if issue %}
             {% if t.description %} · {% endif %}
@@ -183,14 +199,14 @@ Context expected:
       {% endif %}
       {% if other_text|informative_text %}
       <tr class="pcs-tlf-row pcs-tlf-other{% if focused_task_id == t.pk %} table-active{% endif %}">
-        <td colspan="9" class="small ps-2"><strong class="text-muted">Other use:</strong> {{ other_text }}</td>
+        <td colspan="8" class="small ps-2"><strong class="text-muted">Other use:</strong> {{ other_text }}</td>
       </tr>
       {% endif %}
       {% endwith %}
       {% empty %}
-      <tr><td colspan="12" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
-      <tr id="pcs-tlf-empty" style="display:none"><td colspan="12" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr id="pcs-tlf-empty" style="display:none"><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
     </tbody>
   </table>
 </div>
@@ -215,9 +231,11 @@ Context expected:
      state of the other filters. Initial state comes from URL query params
      so the catalog stays bookmarkable. */
 
-  const STR = ['status','requestor','submission_path'];
+  const STR = ['status','requestor','evgen','submission_path','priority','nevents'];
   const BOOL = ['pre_tdr_use','early_science_use','other_use'];
-  const DS = { status:'status', requestor:'requestor', submission_path:'submissionPath' };
+  const DS = { status:'status', requestor:'requestor', evgen:'evgen',
+               submission_path:'submissionPath',
+               priority:'priority', nevents:'nevents' };
   const BD = { pre_tdr_use:'preTdr', early_science_use:'earlyScience', other_use:'other' };
 
   const tableEl = document.querySelector('table.pcs-tlf-list');
@@ -231,7 +249,10 @@ Context expected:
     q: (initial.get('q') || '').trim(),
     status: initial.get('status') || '',
     requestor: initial.get('requestor') || '',
+    evgen: initial.get('evgen') || '',
     submission_path: initial.get('submission_path') || '',
+    priority: initial.get('priority') || '',
+    nevents: initial.get('nevents') || '',
     pre_tdr_use: initial.get('pre_tdr_use') === '1',
     early_science_use: initial.get('early_science_use') === '1',
     other_use: initial.get('other_use') === '1',
@@ -261,7 +282,7 @@ Context expected:
     // Faceted counts: for each str filter, count rows that match all OTHER
     // filters, bucketed by the row's own value of that filter. Boolean
     // filters count rows that would still match if that boolean were ON.
-    const strCounts = { status:{}, requestor:{}, submission_path:{} };
+    const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{}, priority:{}, nevents:{} };
     const boolCounts = { pre_tdr_use:0, early_science_use:0, other_use:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
@@ -278,7 +299,12 @@ Context expected:
     for (const k of STR) {
       const span = document.getElementById('pcs-tlf-' + k + '-opts');
       if (!span) continue;
-      const entries = Object.entries(strCounts[k]).sort((a,b) => a[0].localeCompare(b[0]));
+      const entries = Object.entries(strCounts[k]).sort((a,b) => {
+        // Numeric sort when both values parse as numbers, otherwise alphabetic.
+        const na = parseFloat(a[0]), nb = parseFloat(b[0]);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return a[0].localeCompare(b[0]);
+      });
       span.innerHTML = entries.map(([v,n]) => {
         const active = state[k] === v ? ' filter-active' : '';
         return `<a href="#" data-filter="${k}" data-value="${escapeAttr(v)}"`
@@ -299,7 +325,7 @@ Context expected:
   function syncUrl() {
     const u = new URL(window.location.href);
     const p = u.searchParams;
-    ['q','status','requestor','submission_path',
+    ['q','status','requestor','evgen','submission_path','priority','nevents',
      'pre_tdr_use','early_science_use','other_use'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);

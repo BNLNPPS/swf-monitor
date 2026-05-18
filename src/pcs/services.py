@@ -9,6 +9,7 @@ to its native shape (DRF Response, MCP error dict).
 """
 import csv as _csv
 import hashlib as _hashlib
+import re as _re
 
 from django.db import transaction
 
@@ -359,6 +360,54 @@ def _yesno(value):
     return str(value or '').strip().lower() in ('yes', 'y', 'true', '1')
 
 
+_GH_EIC_RELEASE_RE = _re.compile(r'https?://github\.com/eic/([^/]+)/releases\b', _re.I)
+_GH_OTHER_RELEASE_RE = _re.compile(r'https?://github\.com/([^/]+)/([^/]+)/releases\b', _re.I)
+
+
+def _extract_evgen(value):
+    """Derive a short evgen identifier from a Generator/Dataset Version cell.
+
+    - https://github.com/eic/<repo>/releases/...   -> '<repo>'
+    - https://github.com/<owner>/<repo>/releases/... (non-eic) -> '<owner>/<repo>'
+    - other URLs (gitlab etc.)                     -> the raw string, untouched
+    - plain strings ('starlight', 'Pythia 8', ...) -> unchanged
+
+    Stored at ingest in overrides.csv_import.evgen so the catalog can
+    filter and group by generator without re-parsing per render. The
+    catalog will eventually bind these to canonical EvgenTag entries.
+    """
+    s = str(value or '').strip()
+    if not s:
+        return ''
+    m = _GH_EIC_RELEASE_RE.match(s)
+    if m:
+        return m.group(1)
+    m = _GH_OTHER_RELEASE_RE.match(s)
+    if m:
+        return f'{m.group(1)}/{m.group(2)}'
+    return s
+
+
+def _parse_event_count(value):
+    """Parse Sakib's event-count strings ('400k', '1M', '2.75M', plain
+    integers) into an absolute event count. Returns None for unparseable
+    or empty input."""
+    s = str(value or '').strip().replace(',', '').replace(' ', '')
+    if not s:
+        return None
+    mult = 1
+    if s[-1] in ('k', 'K'):
+        mult, s = 1_000, s[:-1]
+    elif s[-1] in ('m', 'M'):
+        mult, s = 1_000_000, s[:-1]
+    elif s[-1] in ('b', 'B', 'g', 'G'):
+        mult, s = 1_000_000_000, s[:-1]
+    try:
+        return int(round(float(s) * mult))
+    except (TypeError, ValueError):
+        return None
+
+
 def _possible(value):
     """Truthy unless explicitly negative — 'Maybe' counts as yes.
     Used for pTDR ('possible pre-TDR use') and Other Use, where any
@@ -446,10 +495,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 priority = int((row.get('Priority') or '').strip())
             except (TypeError, ValueError):
                 priority = None
-            try:
-                nevents = int((row.get('Number of Events') or '').strip())
-            except (TypeError, ValueError):
-                nevents = None
+            nevents = _parse_event_count(row.get('Number of Events'))
 
             metadata = {
                 'stage': 'evgen',
@@ -486,7 +532,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 dataset=ds,
                 prod_config=cfg,
                 campaign=campaign,
-                requestor=(row.get('DSC or PWG') or '').strip(),
+                requestor=(row.get('DSC or PWG') or '').strip().upper(),
                 priority=priority,
                 pre_tdr_use=_possible(row.get('Pre-TDR Use')),
                 early_science_use=_yesno(row.get('Early Science Use')),
@@ -498,6 +544,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                         'nevents': nevents,
                         'issue_url': (row.get('Issue') or '').strip(),
                         'gen_version': gen_ver,
+                        'evgen': _extract_evgen(gen_ver),
                         'other_use_text': (row.get('Other Use') or '').strip(),
                     },
                 },
@@ -506,7 +553,19 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             existing = ProdTask.objects.filter(name=task_name).first()
             if existing:
+                # Preserve status once an operator has moved the task off
+                # csv_import — re-imports must not roll back lifecycle.
+                preserve_status = existing.status != 'csv_import'
                 for k, v in task_defaults.items():
+                    if k == 'status' and preserve_status:
+                        continue
+                    if k == 'overrides':
+                        # Merge so non-csv_import override keys (added by
+                        # operators or other code paths) are preserved;
+                        # the csv_import bucket itself is fully refreshed.
+                        merged = dict(existing.overrides or {})
+                        merged.update(v)
+                        v = merged
                     setattr(existing, k, v)
                 existing.save()
                 summary['updated'] += 1

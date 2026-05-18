@@ -114,6 +114,26 @@ def state_label(value):
     return ' '.join(out)
 
 
+@register.filter(name='millions')
+def millions(value):
+    """Format an event count as a number of millions; blank for empty.
+
+    500_000 -> '0.5', 12_000_000 -> '12', 12_500_000 -> '12.5',
+    1_234_000_000 -> '1,234'. Up to two decimal places, trailing
+    zeros trimmed; thousands separator on whole-million values.
+    """
+    if value in (None, ''):
+        return ''
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    m = n / 1_000_000
+    if m == int(m):
+        return f'{int(m):,}'
+    return f'{m:,.2f}'.rstrip('0').rstrip('.')
+
+
 @register.filter(name='informative_text')
 def informative_text(value):
     """Truthy when value carries information beyond a Yes/No marker.

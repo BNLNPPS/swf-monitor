@@ -274,3 +274,31 @@ config, relative manifest path, parsed physics parameters, manifest
 availability, BG config references, and the corresponding Rucio DID when
 EVGEN inputs are registered. The public Campaign Datasets page is planning
 documentation rather than the operational input catalog.
+
+## 9. Column Mapping to the Canonical Default Datasets Page
+
+The PCS catalog covers every column shown on the static canonical page
+[default_datasets](https://eic.github.io/epic-prod/documentation/default_datasets)
+(source: `eic/epic-prod/docs/_documentation/default_datasets.md`). The
+mapping below states where each canonical column appears in the PCS
+catalog and notes the few presentational departures.
+
+| Canonical column | PCS catalog location |
+|---|---|
+| Index | `#` column. |
+| DSC or PWG | Requestor column. Uppercased at ingest; PWG background color preserved. |
+| Dataset Path | Dataset cell, top line; clickable to the task detail page. |
+| Generator/Dataset Version | Dataset cell, secondary line; clickable when the value is a URL. |
+| Number of Events | `N events (M)` column; values rendered in millions. |
+| Background | Background column; rendered as `Yes` / blank to match the convention used by the other binary indicators. The canonical page renders the literal `Yes` / `No`. |
+| New Request | `New` column. |
+| Pre-TDR Use | `pTDR` column. The PCS field is defined as *possible pre-TDR use*, so `Maybe` values from the CSV are imported as truthy. |
+| Early Science Use | `ES` column. |
+| Other Use | The Use filter row carries an `Other (n)` toggle; rows whose raw value is informative (anything beyond `Yes` / `No` / `Maybe`) also render a third paired row `Other use: <text>`. The PCS catalog drops the dedicated `Other` column the canonical page uses. |
+| Description | Second paired row under each task. |
+| Priority | Priority column. |
+
+The PCS catalog additionally renders system state (the `Status` column),
+the originating CSV `Issue` URL (appended next to the description), a
+bulk-selection checkbox, and the live filter / sort bar. None of these
+are present on the canonical page.
