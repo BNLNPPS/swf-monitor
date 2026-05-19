@@ -228,7 +228,7 @@ Context expected:
           {% if t.campaign %}
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}</div>
           {% endif %}
-          <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_detail' t.pk %}">{{ ds_path }}</a></div>
+          <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ ds_path }}</a></div>
           {% if gen_ver %}
             <div class="text-muted"><strong>Sample:</strong>
               {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ gen_ver }}</a>{% else %}{{ gen_ver }}{% endif %}

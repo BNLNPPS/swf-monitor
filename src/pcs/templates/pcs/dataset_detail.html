@@ -84,7 +84,7 @@
             <h6 class="mt-2">As output ({{ output_tasks|length }})</h6>
             <ul class="mb-3">
                 {% for t in output_tasks %}
-                <li><a href="{% url 'pcs:prod_task_detail' pk=t.pk %}">{{ t.name }}</a>
+                <li><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ t.name }}</a>
                     <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
                 {% endfor %}
             </ul>
@@ -93,7 +93,7 @@
             <h6 class="mt-2">As input ({{ input_tasks|length }})</h6>
             <ul class="mb-3">
                 {% for t in input_tasks %}
-                <li><a href="{% url 'pcs:prod_task_detail' pk=t.pk %}">{{ t.name }}</a>
+                <li><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ t.name }}</a>
                     <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
                 {% endfor %}
             </ul>
@@ -102,7 +102,7 @@
             <h6 class="mt-2">As intermediate ({{ intermediate_tasks|length }})</h6>
             <ul class="mb-0">
                 {% for t in intermediate_tasks %}
-                <li><a href="{% url 'pcs:prod_task_detail' pk=t.pk %}">{{ t.name }}</a>
+                <li><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ t.name }}</a>
                     <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
                 {% endfor %}
             </ul>
