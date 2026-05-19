@@ -1490,12 +1490,38 @@ def prod_task_compose(request):
             'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
 
+    # Workbench left-panel task list: same partial-friendly shape the catalog
+    # uses, but scoped to one campaign. Default = the current campaign; if
+    # ?selected=<name> resolves to a task in a different campaign, scope
+    # follows that task's campaign so the workbench reflects what the user
+    # is focusing on (per EPICPROD_TASK_CATALOG.md §6).
+    selected_name = request.GET.get('selected') or None
+    focused_task = None
+    if selected_name:
+        focused_task = ProdTask.objects.select_related('campaign').filter(name=selected_name).first()
+    workbench_campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
+    if workbench_campaign is None:
+        workbench_campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+    workbench_tasks = []
+    if workbench_campaign is not None:
+        workbench_tasks = list(
+            ProdTask.objects
+            .select_related('campaign', 'dataset', 'prod_config', 'request')
+            .filter(campaign=workbench_campaign)
+            .order_by('dataset__dataset_name')
+        )
+
     context = {
         'datasets_json': json.dumps(datasets_data),
         'configs_json': json.dumps(configs_data),
         'tasks_json': json.dumps(tasks_data),
-        'selected_item_json': json.dumps(request.GET.get('selected') or None),
+        'selected_item_json': json.dumps(selected_name),
         'username': request.user.username if request.user.is_authenticated else '',
+        # Workbench left-panel context (consumed by _task_workbench_list.html):
+        'tasks': workbench_tasks,
+        'focused_task_id': focused_task.id if focused_task else None,
+        'focused_campaign': workbench_campaign,
+        'filters': {},
     }
     return render(request, 'pcs/prod_task_compose.html', context)
 

@@ -74,9 +74,16 @@
             <button class="btn btn-primary btn-sm" id="btn-new-task" style="display:none; margin-bottom:.35rem;">New Task</button>
             {% endif %}
         </div>
-        <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
-        <div class="filter-row" id="browser-filters"></div>
-        <div class="item-list" id="item-list" tabindex="0"></div>
+        {# Datasets / Configs tabs: existing JS-driven list + free-text search. #}
+        <div id="generic-list-host">
+            <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
+            <div class="filter-row" id="browser-filters"></div>
+            <div class="item-list" id="item-list" tabindex="0"></div>
+        </div>
+        {# Tasks tab: server-rendered catalog-style list with collapsed filter bar. #}
+        <div id="tasks-list-host" style="display:none; flex:1; min-height:0; flex-direction:column;">
+            {% include "pcs/_task_workbench_list.html" %}
+        </div>
     </div>
 
     <!-- RIGHT PANE -->
@@ -295,6 +302,9 @@
         updateUrl();
     }
 
+    const genericListHost = document.getElementById('generic-list-host');
+    const tasksListHost   = document.getElementById('tasks-list-host');
+
     // ── Tab switching ──
     function switchTab(tabName) {
         document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
@@ -302,8 +312,13 @@
         browseType = tabName;
         selectedItemId = null;
         searchBox.value = '';
+        // Tasks tab uses the server-rendered workbench partial; everything
+        // else uses the JS-driven generic list.
+        const onTasks = (tabName === 'tasks');
+        genericListHost.style.display = onTasks ? 'none' : '';
+        tasksListHost.style.display   = onTasks ? 'flex' : 'none';
         // Show "New Task" in left panel only on tasks tab in browse mode
-        if (btnNewTask) btnNewTask.style.display = (mode === 'browse' && tabName === 'tasks') ? 'block' : 'none';
+        if (btnNewTask) btnNewTask.style.display = (mode === 'browse' && onTasks) ? 'block' : 'none';
         if (mode === 'browse') {
             browseEmpty.style.display = 'block';
             browseContent.style.display = 'none';
@@ -314,6 +329,16 @@
         }
         renderList();
         updateUrl();
+    }
+
+    // ── Workbench partial: route row clicks to the existing detail flow ──
+    const wbRoot = document.getElementById('pcs-wb-root');
+    if (wbRoot) {
+        wbRoot.addEventListener('pcs-wb:select', (e) => {
+            const tid = e.detail && e.detail.taskId;
+            if (!Number.isFinite(tid)) return;
+            onItemClick('task', tid);
+        });
     }
     document.querySelectorAll('.browser-tab').forEach(tab => {
         tab.addEventListener('click', function() { switchTab(this.dataset.browse); });
