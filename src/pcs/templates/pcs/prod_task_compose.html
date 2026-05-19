@@ -619,36 +619,69 @@
         if (!t) return;
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
-        panelTitle.textContent = t.name;
+        const ds = allDatasets.find(d => d.id === t.dataset_id);
+        const cfg = allConfigs.find(c => c.id === t.prod_config_id);
+        const csvImp = (t.overrides && t.overrides.csv_import) || null;
+
+        // Title: dataset path (matches the workbench row title), with the
+        // standard ePIC volatile prefix stripped. Full path on hover. The
+        // internal csv_import.<slug> name is only a stable key, not a label.
+        const PFX = '/volatile/eic/EPIC/';
+        const dsPath = (ds && ds.source_location) || t.dataset_name || t.name;
+        panelTitle.textContent = dsPath.startsWith(PFX) ? dsPath.slice(PFX.length) : dsPath;
+        panelTitle.title = dsPath;
+
         const isOwner = currentUser && t.created_by === currentUser;
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
         if (btnEditTask) btnEditTask.style.display = isOwner ? 'inline-block' : 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = isOwner ? 'inline-block' : 'none';
-        const ds = allDatasets.find(d => d.id === t.dataset_id);
-        const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
         if (t.description) html += `<p>${t.description}</p>`;
 
-        // Dataset + detector info
-        html += `<h6>Dataset</h6>
-            <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
-                ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
-            </table>`;
-
-        // Expanded tags with parameters
-        if (ds) {
-            let tagsHtml = '';
-            [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
-                const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-                tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
-            });
-            html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
-                <tbody>${tagsHtml}</tbody></table>`;
+        if (csvImp) {
+            // CSV-imported task: the dataset's physics/evgen/simu/reco tags are
+            // auto-generated placeholders. Show the path-decomposed filter
+            // fields (carried in overrides.csv_import) — these are the real
+            // physics characterization the user cares about.
+            const f = csvImp.filters || {};
+            const nevM = csvImp.nevents ? `${(Number(csvImp.nevents)/1e6).toFixed(1)} M` : '';
+            const rows = [
+                ['Path',        `<code>${dsPath}</code>`],
+                ['Sample',      csvImp.evgen],
+                ['Gen version', csvImp.gen_version],
+                ['Geom',        f.detector],
+                ['Beam',        f.beam],
+                ['Physics',     f.physics],
+                ['Q&sup2;',     f.q2],
+                ['Species',     f.species],
+                ['Energy',      f.energy],
+                ['Nev',         nevM],
+                ['Background',  csvImp.background],
+                ['Detector',    ds ? `${ds.detector_version} / ${ds.detector_config}` : ''],
+            ].filter(([,v]) => v && v !== '-');
+            html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;"><tbody>${
+                rows.map(([k,v]) => `<tr><td style="width:30%"><strong>${k}</strong></td><td>${v}</td></tr>`).join('')
+            }</tbody></table>`;
+        } else {
+            // Non-CSV task: show the dataset's real tag metadata.
+            html += `<h6>Dataset</h6>
+                <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                    <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
+                    ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
+                </table>`;
+            if (ds) {
+                let tagsHtml = '';
+                [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
+                    const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
+                    tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+                });
+                html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+                    <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+                    <tbody>${tagsHtml}</tbody></table>`;
+            }
         }
 
         // Config summary
@@ -853,10 +886,15 @@
     let autoId = null;
     if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
     if (!autoId) {
-        const firstList = browseType === 'tasks' ? allTasks
-                        : browseType === 'datasets' ? allDatasets
-                        : allConfigs;
-        if (firstList.length > 0) autoId = firstList[0].id;
+        if (browseType === 'tasks') {
+            // Mirror the workbench's current-campaign-first ordering so the
+            // initial right-pane detail corresponds to the first visible row.
+            const firstWb = document.querySelector('#pcs-wb-list .pcs-wb-row');
+            if (firstWb) autoId = parseInt(firstWb.dataset.taskId, 10);
+        } else {
+            const firstList = browseType === 'datasets' ? allDatasets : allConfigs;
+            if (firstList.length > 0) autoId = firstList[0].id;
+        }
     }
     if (autoId) {
         selectedItemId = autoId;
@@ -864,6 +902,14 @@
         else if (browseType === 'datasets') showDatasetDetail(autoId);
         else if (browseType === 'configs')  showConfigDetail(autoId);
         renderList();
+        // Mirror selection in the workbench list (server-rendered, so JS-driven
+        // renderList() can't reach it).
+        if (browseType === 'tasks') {
+            document.querySelectorAll('#pcs-wb-list .pcs-wb-row').forEach(r =>
+                r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
+            const sel = document.querySelector(`#pcs-wb-list .pcs-wb-row[data-task-id="${autoId}"]`);
+            if (sel) sel.scrollIntoView({block: 'nearest'});
+        }
         updateUrl();
     }
 })();

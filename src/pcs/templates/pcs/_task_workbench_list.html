@@ -50,6 +50,7 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 .pcs-wb-values .v-link:hover { text-decoration: underline; }
 .pcs-wb-values .v-link.active { font-weight: 700; color: #0a3d80;
                                   text-decoration: underline; }
+.pcs-wb-values .v-link .facet-count { color: #adb5bd; }
 .pcs-wb-values .v-toggle { color: #495057; border: 1px solid #ced4da;
                             border-radius: .25rem; padding: 0 .4rem;
                             margin-right: .35rem; text-decoration: none; }
@@ -64,34 +65,35 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 .pcs-wb-row:hover    { background: #f8f9fa; }
 .pcs-wb-row.selected { background: #e7f1ff; border-left-color: #0d6efd; }
 .pcs-wb-row .r1, .pcs-wb-row .r2, .pcs-wb-row .r3 {
-  display: flex; align-items: baseline; gap: .35rem; flex-wrap: wrap;
+  display: flex; align-items: baseline; gap: .35rem; min-width: 0;
 }
-.pcs-wb-row .r1 { font-size: .95rem; }
-.pcs-wb-row .r2 { font-size: .85rem; color: #495057; margin-top: .1rem; }
-.pcs-wb-row .r3 { font-size: .82rem; color: #6c757d; margin-top: .1rem; }
-.pcs-wb-row .ds-path   { font-weight: 600; word-break: break-word; overflow-wrap: anywhere; flex: 1 1 auto; }
+.pcs-wb-row .r1 { font-size: .95rem; flex-wrap: nowrap; }
+.pcs-wb-row .r2 { font-size: .85rem; color: #495057; margin-top: .1rem; flex-wrap: wrap; }
+.pcs-wb-row .r3 { font-size: .82rem; color: #6c757d; margin-top: .1rem; flex-wrap: wrap; }
+.pcs-wb-row .ds-path   { flex: 1 1 0; min-width: 0; overflow: hidden;
+                          text-overflow: ellipsis; white-space: nowrap; }
 .pcs-wb-row .req-chip  { padding: .02rem .4rem; border-radius: .25rem;
-                          font-size: .78rem; font-weight: 600;
+                          font-size: .78rem;
                           background: #e9ecef; color: #212529; }
 .pcs-wb-row .req-chip.pwg-edt            { background: #d0e8ff; }
 .pcs-wb-row .req-chip.pwg-inclusive      { background: #d4f4d4; }
 .pcs-wb-row .req-chip.pwg-jets_hf        { background: #fff0cc; }
 .pcs-wb-row .req-chip.pwg-semi_inclusive { background: #f4d4f4; }
 .pcs-wb-row .req-chip.pwg-tracking       { background: #ffe0cc; }
-.pcs-wb-row .nev      { color: #212529; font-weight: 600; white-space: nowrap; }
+.pcs-wb-row .nev      { color: #212529; white-space: nowrap; }
 .pcs-wb-row .prio     { color: #495057; white-space: nowrap; }
 .pcs-wb-row .sample   { font-style: italic; word-break: break-word; overflow-wrap: anywhere; flex: 1 1 auto; }
 .pcs-wb-row .flag-pill { display: inline-block; padding: 0 .35rem;
                           border-radius: .65rem; font-size: .72rem;
-                          font-weight: 600; color: #fff; line-height: 1.5; }
+                          color: #fff; line-height: 1.5; }
 .pcs-wb-row .pill-bg   { background: #6c757d; }
 .pcs-wb-row .pill-new  { background: #198754; }
 .pcs-wb-row .pill-ptdr { background: #0d6efd; }
 .pcs-wb-row .pill-es   { background: #6f42c1; }
 .pcs-wb-row .pill-other{ background: #fd7e14; }
 .pcs-wb-row .pill-noout{ background: #adb5bd; }
-.pcs-wb-row .out-simu  { color: #1f77b4; font-weight: 600; }
-.pcs-wb-row .out-reco  { color: #b06000; font-weight: 600; }
+.pcs-wb-row .out-simu  { color: #1f77b4; }
+.pcs-wb-row .out-reco  { color: #b06000; }
 .pcs-wb-row .out-incomplete { color: #dc3545; }
 .pcs-wb-row .status-badge { padding: .02rem .4rem; border-radius: .2rem;
                               font-size: .76rem; white-space: nowrap; }
@@ -140,7 +142,7 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 
   <div class="pcs-wb-list" id="pcs-wb-list" tabindex="0">
     {% for t in tasks %}
-    {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters output=t.overrides.csv_import.output %}
+    {% with ds_path_full=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters output=t.overrides.csv_import.output %}
     <div class="pcs-wb-row{% if focused_task_id == t.pk %} selected{% endif %}"
          data-task-id="{{ t.pk }}"
          data-status="{{ t.status|default:'' }}"
@@ -165,16 +167,16 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
          data-incomplete-output="{% if output.has_incomplete %}1{% else %}0{% endif %}"
          data-has-simu="{% if output.has_simu %}1{% else %}0{% endif %}"
          data-has-reco="{% if output.has_reco %}1{% else %}0{% endif %}"
-         data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
+         data-search="{{ ds_path_full|lower }} {{ t.description|default:''|lower }}">
 
       <div class="r1">
-        <span class="req-chip{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</span>
-        <span class="ds-path">{{ ds_path }}</span>
+        <span class="ds-path" title="{{ ds_path_full }}">{{ ds_path_full|cut:"/volatile/eic/EPIC/" }}</span>
         <span class="status-badge {{ t.status|state_class }}" title="{{ t.status|state_title }}">{{ t.status|state_label }}</span>
         {% if t.priority %}<span class="prio">P={{ t.priority }}</span>{% endif %}
       </div>
 
       <div class="r2">
+        <span class="req-chip{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</span>
         {% if gen_ver %}<span class="sample">{{ gen_ver }}</span>{% endif %}
         {% if nev %}<span class="nev">{{ nev|millions }} M</span>{% endif %}
         {% if bg|lower == 'yes' %}<span class="flag-pill pill-bg" title="Background-study dataset">Bg</span>{% endif %}
