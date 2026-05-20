@@ -304,6 +304,10 @@ The present GitHub/Jekyll public catalog webpage provides a static snapshot of p
 
 PCS already has dynamic listings and edit/copy/delete/update extensible functionality in its web interface, including the task interface. PCS dynamic changes should still preserve traceability/audit/review, perhaps by GitHub PRs at first and later by PCS-native audit logs and approval workflows. This dynamic interface will be developed as a candidate for adoption as the official public catalog interface, once PCS and automated production is proven and established on an ePIC owned server. 
 
+## Roles and Approval
+
+Once PCS is integrated with the ePIC phonebook and COmanage, role assertions gate the dynamic catalog. PWG members author Physics Configs within templated requirements enforced by PCS. Production managers approve those configurations before they propagate to automated production.
+
 ## Implementation Plan
 
 1. Extend `Dataset` with stage and source metadata.
