@@ -4,7 +4,7 @@
 
 {% block content %}
 {% csrf_token %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
@@ -23,10 +23,15 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Configuration</h5>
-            <table class="table table-sm table-bordered" style="max-width: 600px;">
+            <table class="table table-sm table-bordered">
                 <tr><td><strong>Scope</strong></td><td>{{ dataset.scope }}</td></tr>
                 <tr><td><strong>Detector Version</strong></td><td>{{ dataset.detector_version }}</td></tr>
                 <tr><td><strong>Detector Config</strong></td><td>{{ dataset.detector_config }}</td></tr>
+                <tr><td><strong>Stage</strong></td><td>{{ dataset.stage|default:"-" }}</td></tr>
+                <tr><td><strong>External</strong></td><td>{{ dataset.is_external|yesno:"yes,no" }}</td></tr>
+                <tr><td><strong>Source Kind</strong></td><td>{{ dataset.source_kind|default:"-" }}</td></tr>
+                <tr><td><strong>Source Location</strong></td><td>{% if dataset.source_location %}<code>{{ dataset.source_location }}</code>{% else %}-{% endif %}</td></tr>
+                <tr><td><strong>Validation</strong></td><td>{{ dataset.validation_status|default:"-" }}</td></tr>
             </table>
         </div>
     </div>
@@ -34,7 +39,7 @@
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Tags</h5>
-            <table class="table table-sm table-bordered" style="max-width: 800px;">
+            <table class="table table-sm table-bordered">
                 <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Key Parameters</th></tr></thead>
                 <tbody>
                     <tr>
@@ -65,6 +70,46 @@
             </table>
         </div>
     </div>
+
+    {% if output_tasks or input_tasks or intermediate_tasks %}
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5 class="card-title">Used by Production Tasks</h5>
+            <p class="text-muted mb-2" style="font-size: 0.9em;">
+                Roles derived from
+                <code>ProdTask.overrides.{input,output,intermediate}_dataset_dids</code>
+                plus the legacy <code>ProdTask.dataset</code> FK (output).
+            </p>
+            {% if output_tasks %}
+            <h6 class="mt-2">As output ({{ output_tasks|length }})</h6>
+            <ul class="mb-3">
+                {% for t in output_tasks %}
+                <li><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ t.name }}</a>
+                    <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if input_tasks %}
+            <h6 class="mt-2">As input ({{ input_tasks|length }})</h6>
+            <ul class="mb-3">
+                {% for t in input_tasks %}
+                <li><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ t.name }}</a>
+                    <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if intermediate_tasks %}
+            <h6 class="mt-2">As intermediate ({{ intermediate_tasks|length }})</h6>
+            <ul class="mb-0">
+                {% for t in intermediate_tasks %}
+                <li><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ t.name }}</a>
+                    <span class="badge bg-{% if t.status == 'draft' %}secondary{% elif t.status == 'ready' %}primary{% elif t.status == 'submitted' %}info{% elif t.status == 'completed' %}success{% else %}danger{% endif %}">{{ t.status }}</span></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 
     <div class="card mb-3">
         <div class="card-body">

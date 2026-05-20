@@ -48,7 +48,12 @@ class MonitorAppConfig(AppConfig):
             
             # Get the singleton connection manager
             manager = ActiveMQConnectionManager()
-            
+
+            # This process owns the listener; connect() should subscribe to
+            # the topic. In other processes (uvicorn worker, bots) this flag
+            # stays False and send_message()'s lazy connect stays send-only.
+            manager._should_subscribe = True
+
             # Attempt to connect
             if manager.connect():
                 # Register cleanup function to run when Django shuts down

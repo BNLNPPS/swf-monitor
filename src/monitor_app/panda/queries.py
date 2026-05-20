@@ -14,7 +14,7 @@ from django.db import connections
 from .constants import (
     PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
-    STUDY_FIELDS, FILE_FIELDS,
+    STUDY_FIELDS, FILE_FIELDS, JOB_STATUS_CATEGORIES,
 )
 from .sql import (
     build_union_query, build_count_query,
@@ -306,10 +306,110 @@ def diagnose_jobs(days=7, username=None, site=None, taskid=None,
     }
 
 
+def _compute_failurerate(nfailed, nfinished):
+    """Compute file-like failure rate from job-level counts.
+
+    Useful because the native JEDI `failurerate` column is commonly NULL in
+    this PanDA instance — the upstream post-processing that populates it
+    isn't running for ePIC task types. Returns None when no jobs have
+    reached a terminal success/fail state (avoids 0/0 noise).
+    """
+    denom = (nfailed or 0) + (nfinished or 0)
+    if denom == 0:
+        return None
+    return round((nfailed or 0) / denom, 4)
+
+
+def _compute_progress(nactive, nfinished, nfailed):
+    """Integer-percent progress derived from job-level counts.
+
+    Substitute for the native JEDI `progress` column, which is NULL here for
+    the same reason as `failurerate`. Semantics: fraction of known jobs that
+    have reached a terminal state (finished or failed), as an integer %.
+    Returns None when there are no known jobs yet.
+    """
+    total = (nactive or 0) + (nfinished or 0) + (nfailed or 0)
+    if total == 0:
+        return None
+    return round(100 * ((nfinished or 0) + (nfailed or 0)) / total)
+
+
+def _get_task_job_counts(jeditaskids):
+    """Return per-task job counts:
+    {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries, nfinalfailed}}.
+
+    Aggregates over jobsactive4 + jobsarchived4 bucketed by JOB_STATUS_CATEGORIES.
+    Cancelled and closed are deliberately not reported — alarms surface what
+    operators don't know. Missing tasks get zero counts across all keys.
+
+    Extras beyond JOB_STATUS_CATEGORIES:
+    - nrunning: count of job records with jobstatus='running' (subset of nactive).
+    - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
+      schema every retry creates a new job record, so this is the total
+      retry count for the task. The retry limit is 3.
+    - nfinalfailed: count of job records with jobstatus='failed' AND
+      attemptnr >= 3. These are final failures — the job exhausted its
+      retry budget. Distinguishes true failures from transient-fail-then-
+      retry-succeeds, which matters for alarms (see goal-panda-alarms).
+    """
+    zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
+                   'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0}
+    if not jeditaskids:
+        return {}
+
+    # Build flat {status: category} lookup once
+    status_to_cat = {}
+    for cat, statuses in JOB_STATUS_CATEGORIES.items():
+        for s in statuses:
+            status_to_cat[s] = cat
+
+    placeholders = ','.join(['%s'] * len(jeditaskids))
+    sql = f"""
+        SELECT "jeditaskid", "jobstatus",
+               COUNT(*) AS n,
+               SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
+               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= 3 THEN 1 ELSE 0 END) AS nfinalfailed_part
+        FROM (
+            SELECT "jeditaskid", "jobstatus", "attemptnr"
+                FROM "{PANDA_SCHEMA}"."jobsactive4"
+                WHERE "jeditaskid" IN ({placeholders})
+            UNION ALL
+            SELECT "jeditaskid", "jobstatus", "attemptnr"
+                FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                WHERE "jeditaskid" IN ({placeholders})
+        ) combined
+        GROUP BY "jeditaskid", "jobstatus"
+    """
+    params = list(jeditaskids) + list(jeditaskids)
+
+    counts = {tid: dict(zero_counts) for tid in jeditaskids}
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, params)
+            for tid, jobstatus, n, nretries_part, nfinalfailed_part in cursor.fetchall():
+                cat = status_to_cat.get(jobstatus)
+                if cat is not None:
+                    counts[tid][f'n{cat}'] += n
+                # else: cancelled, closed, unknown — skipped by design
+                if jobstatus == 'running':
+                    counts[tid]['nrunning'] += n
+                counts[tid]['nretries'] += nretries_part or 0
+                counts[tid]['nfinalfailed'] += nfinalfailed_part or 0
+    except Exception as e:
+        logger.error(f"_get_task_job_counts failed: {e}")
+        # On failure, return zeros so caller still gets a consistent shape.
+    return counts
+
+
 def list_tasks(days=7, status=None, username=None, taskname=None,
                reqid=None, workinggroup=None, taskid=None,
                processingtype=None, limit=25, before_id=None):
-    """List JEDI tasks with summary statistics and cursor-based pagination."""
+    """List JEDI tasks with summary statistics and cursor-based pagination.
+
+    Each task dict is augmented with per-task job counts (nactive, nfinished,
+    nfailed) via _get_task_job_counts. See JOB_STATUS_CATEGORIES in
+    constants.py for the bucketing; cancelled and closed are excluded.
+    """
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
     params = [cutoff]
@@ -388,6 +488,21 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     except Exception as e:
         logger.error(f"list_tasks query failed: {e}")
         return {"error": str(e)}
+
+    # Per-task job counts (nactive, nfinished, nfailed, nrunning, nretries,
+    # nfinalfailed) — one extra query. computed_failurerate (all failures)
+    # and computed_finalfailurerate (attemptnr>=3 only — retry-exhausted)
+    # serve as usable substitutes for the native JEDI failurerate column,
+    # which is NULL in this deployment. Alarms use the final-failure rate.
+    zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
+            'nretries': 0, 'nfinalfailed': 0}
+    job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
+    for t in tasks:
+        c = job_counts.get(t['jeditaskid'], dict(zero))
+        t.update(c)
+        t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
+        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
+        t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
 
     has_more = len(rows) > limit
     next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
@@ -1282,11 +1397,28 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
     )
 
     rows = []
+    n_base = len(TASK_LIST_FIELDS)
     try:
         with conn.cursor() as cursor:
             cursor.execute(sql, full_params)
             for row in cursor.fetchall():
-                rows.append(row_to_dict(row, TASK_LIST_FIELDS))
+                # build_task_query_dt returns TASK_LIST_FIELDS + 9 aggregate
+                # columns (in order): nactive, nfinished, nfailed, nrunning,
+                # nretries, computed_failurerate, computed_progress,
+                # nfinalfailed, computed_finalfailurerate.
+                task = row_to_dict(row[:n_base], TASK_LIST_FIELDS)
+                task['nactive'] = row[n_base]
+                task['nfinished'] = row[n_base + 1]
+                task['nfailed'] = row[n_base + 2]
+                task['nrunning'] = row[n_base + 3]
+                task['nretries'] = row[n_base + 4]
+                fr = row[n_base + 5]
+                task['computed_failurerate'] = float(fr) if fr is not None else None
+                task['computed_progress'] = row[n_base + 6]  # already integer or None
+                task['nfinalfailed'] = row[n_base + 7]
+                ffr = row[n_base + 8]
+                task['computed_finalfailurerate'] = float(ffr) if ffr is not None else None
+                rows.append(task)
     except Exception as e:
         logger.error(f"list_tasks_dt query failed: {e}")
         return [], total, filtered
@@ -1399,4 +1531,11 @@ def get_task(jeditaskid):
         return {"error": f"Task {jeditaskid} not found"}
 
     task = row_to_dict(row, TASK_LIST_FIELDS)
+    zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
+            'nretries': 0, 'nfinalfailed': 0}
+    c = _get_task_job_counts([jeditaskid]).get(jeditaskid, dict(zero))
+    task.update(c)
+    task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
+    task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
+    task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     return task

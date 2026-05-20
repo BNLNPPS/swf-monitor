@@ -1,0 +1,612 @@
+{% load swf_fmt %}
+<style>
+/* Reuse DataTables sort indicator look on our hand-sorted table by
+   adopting DT's class names; the loaded dataTables.bootstrap5 CSS
+   styles .sorting / .sorting_asc / .sorting_desc with up/down arrows. */
+/* Muted green for the Last lifecycle tab — same family as Current's
+   success-green but lighter and desaturated so it reads as related
+   but distinct, and clearly not "more current" than Current. */
+.btn-outline-last-green {
+  color: #5fa380; border-color: #5fa380;
+}
+.btn-outline-last-green:hover,
+.btn-outline-last-green.active {
+  background-color: #5fa380; color: #fff; border-color: #5fa380;
+}
+
+.pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
+.pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
+
+/* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
+.pwg-edt            { background-color: #d0e8ff !important; }
+.pwg-inclusive      { background-color: #d4f4d4 !important; }
+.pwg-jets_hf        { background-color: #fff0cc !important; }
+.pwg-semi_inclusive { background-color: #f4d4f4 !important; }
+.pwg-tracking       { background-color: #ffe0cc !important; }
+
+/* Filter bar — mirrors the convention used by panda jobs / logs / tasks
+   (see monitor_app/_datatable_dynamic_base.html): horizontal lists of
+   value (count) links with bold+underline indicating the active value. */
+.pcs-tlf-bar .filter-link {
+  margin-right: 0.6em;
+  color: #007bff;
+  text-decoration: none;
+}
+.pcs-tlf-bar .filter-link:hover { text-decoration: underline; }
+.pcs-tlf-bar .filter-link.filter-active {
+  font-weight: bold;
+  text-decoration: underline;
+  color: #0056b3;
+}
+.pcs-tlf-bar-row { margin-bottom: 0.4em; }
+.pcs-tlf-label   { font-weight: 600; margin-right: 0.5em; }
+
+/* Dataset cell takes all leftover horizontal space and wraps long URLs
+   so the table fits the viewport without horizontal scroll. */
+.pcs-tlf-list td.pcs-tlf-cell-dataset {
+  width: 100%;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.pcs-tlf-list tr.pcs-tlf-desc td { word-break: break-word; overflow-wrap: anywhere; }
+</style>
+{% comment %}
+Shared task-list + filter partial used by:
+  - full-page Catalog (show_tabs=True, columns_mode='full')
+  - Workbench left panel (show_tabs=False, columns_mode='workbench')
+
+Context expected:
+  tasks                 : iterable of ProdTask, select_related as appropriate
+  show_tabs             : bool — render lifecycle tab bar
+  columns_mode          : 'full' | 'workbench' — drives column visibility
+  active_lifecycle      : 'past'|'present'|'future' — active tab
+  lifecycle_tabs        : list of {key,label,color,campaigns} — three lifecycle slots
+  active_campaigns      : list of Campaign in the active lifecycle slot
+  focused_campaign      : Campaign | None — workbench: campaign of focused task
+  focused_task_id       : int | None — workbench: highlight this row
+  filters               : dict — current filter values for echo
+  requestor_options     : iterable of str — pulldown choices
+  status_choices        : iterable of (key, label) tuples
+  form_action           : URL the form GETs to
+{% endcomment %}
+
+{# Lifecycle tabs render in the page templates themselves (right after
+   the header) so the tab strip occupies the same screen position on
+   every tab — Past, Last, Current, Future. Don't put them here. #}
+{% if focused_campaign %}
+<div class="pcs-tlf-context mb-2">
+  <span class="text-muted small">Campaign:</span>
+  <strong>{{ focused_campaign.name }}</strong>
+</div>
+{% endif %}
+
+<div id="pcs-tlf-bar" class="pcs-tlf-bar mb-2">
+  <div class="pcs-tlf-bar-row d-flex align-items-center gap-2">
+    <span class="pcs-tlf-label">Search:</span>
+    <input type="search" id="pcs-tlf-q" value="{{ filters.q|default:'' }}"
+           class="form-control form-control-sm" style="width:24em;"
+           placeholder="dataset / description…">
+    <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-outline-secondary"
+            title="Clear all filters">Clear</button>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Status:</span>
+    <a href="#" data-filter="status" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-status-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Requestor:</span>
+    <a href="#" data-filter="requestor" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-requestor-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Sample:</span>
+    <a href="#" data-filter="evgen" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-evgen-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Submission:</span>
+    <a href="#" data-filter="submission_path" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-submission_path-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Priority:</span>
+    <a href="#" data-filter="priority" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-priority-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">N events (M):</span>
+    <a href="#" data-filter="nevents" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-nevents-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Geometry:</span>
+    <a href="#" data-filter="detector" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-detector-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Beam:</span>
+    <a href="#" data-filter="beam" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-beam-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Physics:</span>
+    <a href="#" data-filter="physics" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-physics-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Q&sup2;:</span>
+    <a href="#" data-filter="q2" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-q2-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Species:</span>
+    <a href="#" data-filter="species" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-species-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Energy:</span>
+    <a href="#" data-filter="energy" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-energy-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Output:</span>
+    <a href="#" data-toggle="has_output" class="filter-link">with output (<span data-count="has_output">0</span>)</a>
+    <a href="#" data-toggle="no_output" class="filter-link">no output (<span data-count="no_output">0</span>)</a>
+    <a href="#" data-toggle="incomplete_output" class="filter-link">incomplete (<span data-count="incomplete_output">0</span>)</a>
+    <a href="#" data-toggle="has_simu" class="filter-link">Simu (<span data-count="has_simu">0</span>)</a>
+    <a href="#" data-toggle="has_reco" class="filter-link">Reco (<span data-count="has_reco">0</span>)</a>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Flags:</span>
+    <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
+    <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
+    <a href="#" data-toggle="early_science_use" class="filter-link">early (<span data-count="early_science_use">0</span>)</a>
+    <a href="#" data-toggle="other_use" class="filter-link">Other (<span data-count="other_use">0</span>)</a>
+    <a href="#" data-toggle="background" class="filter-link">Backgd (<span data-count="background">0</span>)</a>
+  </div>
+</div>
+
+<div class="pcs-tlf-legend small text-muted mb-3 mt-2">
+  <strong>Legend (Flags):</strong>
+  <strong>New</strong>: new request &middot;
+  <strong>pTDR</strong>: possible pre-TDR use &middot;
+  <strong>early</strong>: early-science use &middot;
+  <strong>Other</strong>: other use (full text description when given) &middot;
+  <strong>Backgd</strong>: background-study dataset
+</div>
+
+<div class="dataTables_wrapper pcs-tlf-list-wrap table-responsive">
+  <table class="table table-sm pcs-tlf-list dataTable mb-1">
+    <thead>
+      <tr>
+        <th style="width:1.5em"><input type="checkbox" id="pcs-tlf-selectall" aria-label="Select all visible"></th>
+        <th data-sort="index" class="pcs-sort sorting">#</th>
+        <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
+        <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
+        <th data-sort="status" class="pcs-sort sorting">Status</th>
+        <th data-sort="nevents" class="pcs-sort sorting">Nev (M)</th>
+        <th data-sort="background" class="pcs-sort sorting">Backgd</th>
+        <th data-sort="new_request" class="pcs-sort sorting">New</th>
+        <th data-sort="pre_tdr_use" class="pcs-sort sorting">pTDR</th>
+        <th data-sort="early_science_use" class="pcs-sort sorting">early</th>
+        <th data-sort="priority" class="pcs-sort sorting">Priority</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+      {% with ds_path=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' issue=t.overrides.csv_import.issue_url bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents other_text=t.overrides.csv_import.other_use_text|default:'' path_filters=t.overrides.csv_import.filters %}
+      <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
+          data-task-id="{{ t.pk }}"
+          data-status="{{ t.status|default:'' }}"
+          data-requestor="{{ t.requestor|default:'' }}"
+          data-submission-path="{% if t.prod_config.data.submission_path == 'panda' %}panda{% else %}condor{% endif %}"
+          data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
+          data-early-science="{% if t.early_science_use %}1{% else %}0{% endif %}"
+          data-other="{% if t.other_use %}1{% else %}0{% endif %}"
+          data-new-request="{% if t.new_request %}1{% else %}0{% endif %}"
+          data-background="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}"
+          data-priority="{{ t.priority|default:'' }}"
+          data-nevents="{{ nev|millions }}"
+          data-evgen="{{ evgen }}"
+          data-detector="{{ path_filters.detector|default:'' }}"
+          data-beam="{{ path_filters.beam|default:'' }}"
+          data-physics="{{ path_filters.physics|default:'' }}"
+          data-q2="{{ path_filters.q2|default:'' }}"
+          data-species="{{ path_filters.species|default:'' }}"
+          data-energy="{{ path_filters.energy|default:'' }}"
+          data-has-output="{% if t.overrides.csv_import.output.has_output %}1{% else %}0{% endif %}"
+          data-no-output="{% if t.overrides.csv_import.output and not t.overrides.csv_import.output.has_output %}1{% else %}0{% endif %}"
+          data-incomplete-output="{% if t.overrides.csv_import.output.has_incomplete %}1{% else %}0{% endif %}"
+          data-has-simu="{% if t.overrides.csv_import.output.has_simu %}1{% else %}0{% endif %}"
+          data-has-reco="{% if t.overrides.csv_import.output.has_reco %}1{% else %}0{% endif %}"
+          data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
+        <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
+        <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
+        <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
+        <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}">
+          {% if t.campaign %}
+            <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}</div>
+          {% endif %}
+          <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}">{{ ds_path }}</a></div>
+          {% if gen_ver %}
+            <div class="text-muted"><strong>Sample:</strong>
+              {% if gen_ver|slice:":4" == "http" %}<a href="{{ gen_ver }}" target="_blank" rel="noopener">{{ gen_ver }}</a>{% else %}{{ gen_ver }}{% endif %}
+            </div>
+          {% endif %}
+          {% if t.description or issue %}
+            <div class="text-muted"><strong>Description:</strong>
+              {% if t.description %}{{ t.description|linebreaksbr }}{% endif %}
+              {% if issue %}{% if t.description %} · {% endif %}<a href="{{ issue }}" target="_blank" rel="noopener">issue</a>{% endif %}
+            </div>
+          {% endif %}
+          {% if other_text|informative_text %}
+            <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
+          {% endif %}
+          {% if t.overrides.csv_import.output.matched_count %}
+            {% with output=t.overrides.csv_import.output %}
+              <div class="text-muted"><strong>Output:</strong>
+                {% for stage, st in output.by_stage.items %}{% if not forloop.first %} &middot; {% endif %}{% if stage == 'FULL' %}Simu{% else %}Reco{% endif %}: {{ st.count }} ds, {{ st.files }} files, {{ st.bytes|filesizeformat }}{% if st.rses %}, {% for rse, c in st.rses.items %}{% if not forloop.first %} {% endif %}{{ rse }}{% if c.incomplete %} <span style="color:#dc3545">({{ c.complete }}/{{ c.complete|add:c.incomplete }})</span>{% endif %}{% endfor %}{% endif %}{% endfor %}
+              </div>
+            {% endwith %}
+          {% endif %}
+        </td>
+        <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
+        <td class="small text-end" data-sort-val="{{ nev|default:'' }}">{{ nev|millions }}</td>
+        <td class="small text-center" data-sort-val="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}">{% if bg|lower == 'yes' %}Yes{% endif %}</td>
+        <td class="small text-center">{% if t.new_request %}Yes{% endif %}</td>
+        <td class="small text-center">{% if t.pre_tdr_use %}Yes{% endif %}</td>
+        <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
+        <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
+      </tr>
+      {% endwith %}
+      {% empty %}
+      <tr><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      {% endfor %}
+
+      <tr id="pcs-tlf-empty" style="display:none"><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="pcs-tlf-bulk mt-1 d-flex align-items-center gap-2">
+  <span class="text-muted small"><span id="pcs-tlf-count">0</span> selected</span>
+  <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Bulk actions">
+    <button type="button" class="btn btn-outline-primary" data-bulk="submit" disabled>Submit</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="archive" disabled>Archive</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="withdraw" disabled>Withdraw</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="clone" disabled>Clone</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="priority" disabled>Set priority…</button>
+  </div>
+  <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
+</div>
+
+<script>
+(function() {
+  /* Live faceted filter — mirrors the panda jobs / logs / tasks convention
+     (see monitor_app/_datatable_dynamic_base.html): for each filter column
+     a horizontal "value (count)" link list, with counts faceted by the
+     state of the other filters. Initial state comes from URL query params
+     so the catalog stays bookmarkable. */
+
+  const STR = ['status','requestor','evgen','submission_path','priority','nevents',
+               'detector','beam','physics','q2','species','energy'];
+  const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background',
+                'has_output','no_output','incomplete_output','has_simu','has_reco'];
+  const DS = { status:'status', requestor:'requestor', evgen:'evgen',
+               submission_path:'submissionPath',
+               priority:'priority', nevents:'nevents',
+               detector:'detector', beam:'beam', physics:'physics',
+               q2:'q2', species:'species', energy:'energy' };
+  const BD = { new_request:'newRequest', pre_tdr_use:'preTdr',
+               early_science_use:'earlyScience', other_use:'other',
+               background:'background',
+               has_output:'hasOutput', no_output:'noOutput',
+               incomplete_output:'incompleteOutput',
+               has_simu:'hasSimu', has_reco:'hasReco' };
+
+  // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
+  function energyMeV(s) {
+    const m = String(s).match(/^([\d.]+)\s*(eV|keV|MeV|GeV|TeV)$/i);
+    if (!m) return null;
+    const mult = {ev:1e-6, kev:1e-3, mev:1, gev:1e3, tev:1e6}[m[2].toLowerCase()];
+    return parseFloat(m[1]) * mult;
+  }
+
+  const tableEl = document.querySelector('table.pcs-tlf-list');
+  const tbodyEl = tableEl ? tableEl.tBodies[0] : null;
+  const dataRows = tbodyEl ? Array.from(tbodyEl.querySelectorAll('tr.pcs-tlf-data')) : [];
+  const emptyRow = document.getElementById('pcs-tlf-empty');
+  const qInput = document.getElementById('pcs-tlf-q');
+
+  const initial = new URL(window.location.href).searchParams;
+  const state = {
+    q: (initial.get('q') || '').trim(),
+    status: initial.get('status') || '',
+    requestor: initial.get('requestor') || '',
+    evgen: initial.get('evgen') || '',
+    submission_path: initial.get('submission_path') || '',
+    priority: initial.get('priority') || '',
+    nevents: initial.get('nevents') || '',
+    detector: initial.get('detector') || '',
+    beam: initial.get('beam') || '',
+    physics: initial.get('physics') || '',
+    q2: initial.get('q2') || '',
+    species: initial.get('species') || '',
+    energy: initial.get('energy') || '',
+    new_request: initial.get('new_request') === '1',
+    pre_tdr_use: initial.get('pre_tdr_use') === '1',
+    early_science_use: initial.get('early_science_use') === '1',
+    other_use: initial.get('other_use') === '1',
+    background: initial.get('background') === '1',
+    has_output: initial.get('has_output') === '1',
+    no_output: initial.get('no_output') === '1',
+    incomplete_output: initial.get('incomplete_output') === '1',
+    has_simu: initial.get('has_simu') === '1',
+    has_reco: initial.get('has_reco') === '1',
+  };
+
+  function rowMatches(tr, skip) {
+    if (skip !== 'q' && state.q) {
+      if (!(tr.dataset.search || '').includes(state.q.toLowerCase())) return false;
+    }
+    for (const k of STR) {
+      if (k === skip) continue;
+      if (state[k] && tr.dataset[DS[k]] !== state[k]) return false;
+    }
+    for (const k of BOOL) {
+      if (k === skip) continue;
+      if (state[k] && tr.dataset[BD[k]] !== '1') return false;
+    }
+    return true;
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function renderBar() {
+    // Faceted counts: for each str filter, count rows that match all OTHER
+    // filters, bucketed by the row's own value of that filter. Boolean
+    // filters count rows that would still match if that boolean were ON.
+    const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{},
+                        priority:{}, nevents:{},
+                        detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
+    const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0,
+                         has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0 };
+    for (const tr of dataRows) {
+      for (const k of STR) {
+        if (rowMatches(tr, k)) {
+          const v = tr.dataset[DS[k]];
+          if (v) strCounts[k][v] = (strCounts[k][v] || 0) + 1;
+        }
+      }
+      for (const k of BOOL) {
+        if (rowMatches(tr, k) && tr.dataset[BD[k]] === '1') boolCounts[k]++;
+      }
+    }
+
+    for (const k of STR) {
+      const span = document.getElementById('pcs-tlf-' + k + '-opts');
+      if (!span) continue;
+      const entries = Object.entries(strCounts[k]).sort((a,b) => {
+        if (k === 'energy') {
+          const ea = energyMeV(a[0]), eb = energyMeV(b[0]);
+          if (ea !== null && eb !== null) return ea - eb;
+        }
+        // Numeric sort when both values parse as numbers, otherwise alphabetic.
+        const na = parseFloat(a[0]), nb = parseFloat(b[0]);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return a[0].localeCompare(b[0]);
+      });
+      span.innerHTML = entries.map(([v,n]) => {
+        const active = state[k] === v ? ' filter-active' : '';
+        return `<a href="#" data-filter="${k}" data-value="${escapeAttr(v)}"`
+             + ` class="filter-link${active}">${escapeAttr(v)} (${n})</a>`;
+      }).join('');
+      const allLink = document.querySelector(
+        `#pcs-tlf-bar .filter-link[data-filter="${k}"][data-value=""]`);
+      if (allLink) allLink.classList.toggle('filter-active', !state[k]);
+    }
+    for (const k of BOOL) {
+      const c = document.querySelector(`[data-count="${k}"]`);
+      if (c) c.textContent = boolCounts[k];
+      const a = document.querySelector(`#pcs-tlf-bar .filter-link[data-toggle="${k}"]`);
+      if (a) a.classList.toggle('filter-active', state[k]);
+    }
+  }
+
+  function syncUrl() {
+    const u = new URL(window.location.href);
+    const p = u.searchParams;
+    ['q','status','requestor','evgen','submission_path','priority','nevents',
+     'detector','beam','physics','q2','species','energy',
+     'new_request','pre_tdr_use','early_science_use','other_use','background',
+     'has_output','no_output','incomplete_output','has_simu','has_reco'].forEach(k => p.delete(k));
+    if (state.q) p.set('q', state.q);
+    for (const k of STR)  if (state[k]) p.set(k, state[k]);
+    for (const k of BOOL) if (state[k]) p.set(k, '1');
+    history.replaceState(null, '', u.toString());
+  }
+
+  function trailingRows(tr) {
+    // Each task starts with a pcs-tlf-data TR and may be followed by
+    // any number of trailing rows (pcs-tlf-desc, pcs-tlf-other, ...).
+    // Walk until the next pcs-tlf-data or end.
+    const out = [];
+    let n = tr.nextElementSibling;
+    while (n && !n.classList.contains('pcs-tlf-data')) {
+      out.push(n);
+      n = n.nextElementSibling;
+    }
+    return out;
+  }
+
+  function applyFilters() {
+    let visible = 0;
+    for (const tr of dataRows) {
+      const show = rowMatches(tr, null);
+      tr.style.display = show ? '' : 'none';
+      trailingRows(tr).forEach(r => { r.style.display = show ? '' : 'none'; });
+      if (show) visible++;
+    }
+    if (emptyRow) emptyRow.style.display = (visible === 0 && dataRows.length > 0) ? '' : 'none';
+    renderBar();
+    syncUrl();
+  }
+
+  // Click handler on the bar — single delegate covers All, value links, and toggles.
+  document.getElementById('pcs-tlf-bar')?.addEventListener('click', e => {
+    const a = e.target.closest('a.filter-link');
+    if (!a) return;
+    e.preventDefault();
+    if (a.dataset.filter !== undefined) {
+      const k = a.dataset.filter;
+      const v = a.dataset.value || '';
+      state[k] = (state[k] === v && v !== '') ? '' : v;
+    } else if (a.dataset.toggle) {
+      const k = a.dataset.toggle;
+      state[k] = !state[k];
+    }
+    applyFilters();
+  });
+
+  if (qInput) {
+    qInput.value = state.q;
+    qInput.addEventListener('input', () => { state.q = qInput.value.trim(); applyFilters(); });
+  }
+  document.getElementById('pcs-tlf-clear')?.addEventListener('click', () => {
+    state.q = '';
+    if (qInput) qInput.value = '';
+    for (const k of STR)  state[k] = '';
+    for (const k of BOOL) state[k] = false;
+    applyFilters();
+  });
+
+  applyFilters();
+
+  /* Bulk-select state + multi-row column sort.
+     Each task is one .pcs-tlf-data TR plus any number of trailing rows
+     (.pcs-tlf-desc, .pcs-tlf-other); rows move/show/hide together.
+     Select-all only touches checkboxes on currently-visible data rows. */
+
+  const selectAll = document.getElementById('pcs-tlf-selectall');
+  const allCbs = document.querySelectorAll('.pcs-tlf-cb');
+  const count = document.getElementById('pcs-tlf-count');
+  const bulkButtons = document.querySelectorAll('.pcs-tlf-bulk [data-bulk]');
+  function visibleCbs() {
+    return Array.from(allCbs).filter(c => {
+      const tr = c.closest('tr.pcs-tlf-data');
+      return tr && tr.style.display !== 'none';
+    });
+  }
+  function refresh() {
+    const n = Array.from(allCbs).filter(c => c.checked).length;
+    if (count) count.textContent = n;
+    bulkButtons.forEach(b => b.disabled = (n === 0));
+  }
+  if (selectAll) {
+    selectAll.addEventListener('change', () => {
+      // Touch only visible rows — filter-hidden tasks must not be
+      // included in a "select all" action.
+      const targets = visibleCbs();
+      targets.forEach(c => c.checked = selectAll.checked);
+      refresh();
+    });
+  }
+  allCbs.forEach(c => c.addEventListener('change', refresh));
+  bulkButtons.forEach(b => {
+    b.addEventListener('click', () => {
+      const action = b.dataset.bulk;
+      const ids = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
+      alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
+    });
+  });
+  refresh();
+
+  /* Paired-row sort. */
+  const table = document.querySelector('table.pcs-tlf-list');
+  if (!table) return;
+  const tbody = table.tBodies[0];
+  if (!tbody) return;
+
+  // Build groups: each .pcs-tlf-data row plus all trailing non-data rows
+  // (e.g. pcs-tlf-desc, pcs-tlf-other). Groups move as a unit when sorting.
+  function buildGroups() {
+    const rows = Array.from(tbody.children);
+    const groups = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].classList.contains('pcs-tlf-data')) {
+        const grp = [rows[i]];
+        let j = i + 1;
+        while (j < rows.length && !rows[j].classList.contains('pcs-tlf-data')
+               && rows[j].id !== 'pcs-tlf-empty') {
+          grp.push(rows[j]);
+          j++;
+        }
+        groups.push(grp);
+        i = j - 1;
+      }
+    }
+    return groups;
+  }
+
+  function cellSortValue(dataRow, colIdx) {
+    const cells = dataRow.children;
+    if (colIdx >= cells.length) return '';
+    const td = cells[colIdx];
+    const v = td.getAttribute('data-sort-val');
+    return v !== null ? v : (td.textContent || '').trim();
+  }
+
+  function compareValues(a, b) {
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  }
+
+  const headers = table.querySelectorAll('thead th.pcs-sort');
+  let activeIdx = -1;
+  let activeDir = 1;  // 1 asc, -1 desc
+
+  function renderIndicators() {
+    headers.forEach((h, i) => {
+      h.classList.remove('sorting', 'sorting_asc', 'sorting_desc');
+      if (i === activeIdx) {
+        h.classList.add(activeDir === 1 ? 'sorting_asc' : 'sorting_desc');
+      } else {
+        h.classList.add('sorting');
+      }
+    });
+  }
+  renderIndicators();
+
+  headers.forEach((h, i) => {
+    h.addEventListener('click', () => {
+      if (activeIdx === i) {
+        activeDir = -activeDir;
+      } else {
+        activeIdx = i;
+        activeDir = 1;
+      }
+      // Header columns include the checkbox col at index 0, which is also a TH.
+      // The sortable headers start at index 1 in the THs of the row. But the
+      // header NodeList "headers" is filtered to .pcs-sort only, so its index
+      // i corresponds to the (i+1)-th cell in the data row (offset by the
+      // checkbox TD).
+      const colIdx = i + 1;
+      const groups = buildGroups();
+      groups.sort((g1, g2) => {
+        const v1 = cellSortValue(g1[0], colIdx);
+        const v2 = cellSortValue(g2[0], colIdx);
+        return compareValues(v1, v2) * activeDir;
+      });
+      groups.forEach(grp => grp.forEach(tr => tbody.appendChild(tr)));
+      // Keep the empty-state row at the end of the tbody.
+      if (emptyRow) tbody.appendChild(emptyRow);
+      renderIndicators();
+    });
+  });
+})();
+</script>

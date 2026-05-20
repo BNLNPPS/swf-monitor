@@ -116,6 +116,18 @@ if pull_and_check "rucio-eic" "$GITHUB_DIR/rucio-eic-mcp-server"; then
     fi
 fi
 
+# --- corun (Python, pip install) ---
+if pull_and_check "corun" "$GITHUB_DIR/corun-mcp-server"; then
+    echo "  rebuilding..."
+    ("$VENV_BIN/pip" install -e "$GITHUB_DIR/corun-mcp-server") 2>&1
+    if [ $? -eq 0 ]; then
+        echo "  rebuild OK"
+        CHANGED=1
+    else
+        echo "  ERROR: rebuild failed"
+    fi
+fi
+
 # --- Restart bot if anything changed ---
 if [ "$CHANGED" -eq 1 ]; then
     echo ""

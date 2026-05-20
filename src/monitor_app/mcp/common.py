@@ -84,6 +84,11 @@ def get_available_tools_list() -> list:
             "parameters": [],
         },
         {
+            "name": "get_server_instructions",
+            "description": "Get the swf-monitor MCP server instructions. Compatibility tool for clients and permissions lists that previously used django-mcp-server's server-instruction helper.",
+            "parameters": [],
+        },
+        {
             "name": "swf_get_system_state",
             "description": "Get comprehensive system state: user context, agent manager, workflow runner, readiness, agents, executions",
             "parameters": ["username"],
@@ -300,5 +305,51 @@ def get_available_tools_list() -> list:
             "name": "pcs_search_tags",
             "description": "Search PCS tags by keyword in label, description, or parameter values (e.g. 'photoproduction', 'eAu', 'pythia8').",
             "parameters": ["query", "tag_type", "limit"],
+        },
+        # PCS — datasets and prod tasks
+        {
+            "name": "pcs_dataset_list",
+            "description": "List PCS Datasets with optional filters: stage (e.g. 'evgen'), source_kind ('csv_manifest'), exact source_location, scope, name_contains.",
+            "parameters": ["stage", "source_kind", "source_location", "scope", "name_contains", "limit", "offset"],
+        },
+        {
+            "name": "pcs_dataset_get",
+            "description": "Get full details of a single Dataset by DID or dataset_name.",
+            "parameters": ["did", "dataset_name"],
+        },
+        {
+            "name": "pcs_dataset_intake",
+            "description": "Idempotent intake of an external (e.g. EVGEN CSV manifest) Dataset. Idempotent on (source_kind, source_location). Creates a Dataset(stage=evgen, source.{kind,location}=...) when no match exists.",
+            "parameters": ["source_location", "source_kind", "physics_tag", "evgen_tag", "simu_tag", "reco_tag", "detector_version", "detector_config", "scope", "stage", "description", "created_by"],
+        },
+        {
+            "name": "pcs_prodtask_list",
+            "description": "List PCS ProdTasks with optional filters: lifecycle status (draft/ready/submitted/completed/failed), public_catalog_issue, name_contains.",
+            "parameters": ["status", "public_catalog_issue", "name_contains", "limit", "offset"],
+        },
+        {
+            "name": "pcs_prodtask_get",
+            "description": "Get full details of a single ProdTask by name, including derived input/output/intermediate dataset DID lists and input_source_{kind,location,stage}.",
+            "parameters": ["name"],
+        },
+        {
+            "name": "pcs_prodtask_artifact",
+            "description": "Regenerate a ProdTask submission artifact from current PCS state. fmt = condor | panda | jedi | dump.",
+            "parameters": ["name", "fmt"],
+        },
+        {
+            "name": "pcs_prodtask_intake",
+            "description": "Idempotent intake of a draft ProdTask. Idempotency key: public_catalog_issue OR (public_catalog_csv_path, public_catalog_row_key). Updates existing on match; creates draft requiring name/dataset/prod_config when no match.",
+            "parameters": ["public_catalog_issue", "public_catalog_csv_path", "public_catalog_row_key", "name", "dataset", "prod_config", "description", "input_dataset_did", "public_catalog_repo", "public_catalog_pr", "public_catalog_row_index", "public_catalog_page_url", "public_catalog_commit_sha", "created_by"],
+        },
+        {
+            "name": "pcs_prodtask_link_input",
+            "description": "Link input Dataset(s) to a ProdTask via overrides JSON. Provide one of did or dids; linked Datasets must already exist.",
+            "parameters": ["task_name", "did", "dids"],
+        },
+        {
+            "name": "pcs_prodtask_set_status",
+            "description": "Transition a ProdTask to a new lifecycle state. Allowed: draft->ready, ready->{draft,submitted}, submitted->{completed,failed}. Submission itself is not exposed via MCP — operators run pcs-task-cmd --submit locally.",
+            "parameters": ["task_name", "status"],
         },
     ]

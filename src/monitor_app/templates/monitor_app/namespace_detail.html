@@ -1,9 +1,10 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Namespace: {{ namespace }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <h2>Namespace: {{ namespace }}</h2>
 
     <div class="card mb-4">
@@ -28,11 +29,11 @@
                     {% if ns_record %}
                     <tr>
                         <th>Created</th>
-                        <td>{{ ns_record.created_at|date:"Y-m-d H:i:s" }} UTC</td>
+                        <td>{{ ns_record.created_at|fmt_dt }}</td>
                     </tr>
                     <tr>
                         <th>Updated</th>
-                        <td>{{ ns_record.updated_at|date:"Y-m-d H:i:s" }} UTC</td>
+                        <td>{{ ns_record.updated_at|fmt_dt }}</td>
                     </tr>
                     {% endif %}
                 </tbody>

@@ -176,6 +176,8 @@ class Dataset(models.Model):
     created_by = models.CharField(max_length=100)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    EXTERNAL_SOURCE_KINDS = {'csv_manifest', 'path', 'url', 'rucio_did', 'file_list'}
+
     class Meta:
         db_table = 'pcs_dataset'
         ordering = ['-created_at']
@@ -183,6 +185,53 @@ class Dataset(models.Model):
 
     def __str__(self):
         return self.did
+
+    def get_metadata(self):
+        """Return metadata as a mutable dict, normalizing empty/null values."""
+        return self.metadata if isinstance(self.metadata, dict) else {}
+
+    def get_metadata_value(self, *path, default=None):
+        data = self.get_metadata()
+        for key in path:
+            if not isinstance(data, dict) or key not in data:
+                return default
+            data = data[key]
+        return data
+
+    @property
+    def stage(self):
+        return self.get_metadata_value('stage', default='')
+
+    @property
+    def is_external(self):
+        source_kind = self.source_kind
+        if source_kind:
+            return source_kind in self.EXTERNAL_SOURCE_KINDS
+        return bool(self.get_metadata_value('external', default=False))
+
+    @property
+    def source_kind(self):
+        return self.get_metadata_value('source', 'kind', default='')
+
+    @property
+    def source_location(self):
+        return self.get_metadata_value('source', 'location', default='')
+
+    @property
+    def validation_status(self):
+        return self.get_metadata_value('validation', 'status', default='')
+
+    @classmethod
+    def external_evgen_metadata(
+        cls, source_location, source_kind='csv_manifest', **_ignored
+    ):
+        return {
+            'stage': 'evgen',
+            'source': {
+                'kind': source_kind,
+                'location': source_location,
+            },
+        }
 
     def clean(self):
         for tag_field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']:
@@ -269,9 +318,9 @@ class ProdConfig(models.Model):
                                                help_text="Rucio replication rule definitions")
 
     # Extensible submission parameters (no migration needed for new keys).
-    # Keys: transformation, processing_type, prod_source_label, vo,
-    # n_jobs, events_per_job, events_per_file, files_per_job,
-    # corecount, no_build, skip_scout, exec_command, scope
+    # Keys: workflow_mode, transformation, processing_type,
+    # prod_source_label, vo, n_jobs, events_per_job, events_per_file,
+    # files_per_job, corecount, no_build, skip_scout, exec_command, scope
     data = models.JSONField(null=True, blank=True,
                             help_text="Additional submission parameters (JSON)")
 
@@ -285,6 +334,130 @@ class ProdConfig(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def workflow_mode(self):
+        """Production workflow mode: 'external_evgen' (default) or
+        'internal_evgen'. Stored in ``data['workflow_mode']``; defaults
+        to 'external_evgen' (current production reality)."""
+        return (self.data or {}).get('workflow_mode', 'external_evgen')
+
+    @property
+    def submission_path(self):
+        """Submission path: 'condor' or 'panda'. Stored in
+        ``data['submission_path']``; defaults to 'condor' (current
+        production submission path). Whether evgen is run in-house
+        or read from input files is a separate axis (workflow_mode)
+        and is independent of the submission path."""
+        return (self.data or {}).get('submission_path', 'condor')
+
+
+CAMPAIGN_LIFECYCLE_CHOICES = [
+    ('past', 'Past'),
+    ('current', 'Current'),
+    ('future', 'Future'),
+]
+
+
+class Campaign(models.Model):
+    """
+    Production campaign — a time-ordered grouping of ProdTasks.
+
+    Lifecycle drives the catalog tabs: past (grey), current (green),
+    future (blue). ``set_current`` in the service layer enforces the
+    'one current at a time' invariant; no DB constraint, to keep
+    transitions painless.
+    """
+    name = models.CharField(max_length=100, unique=True,
+                            help_text="Campaign name, e.g. '26.02.0'")
+    lifecycle = models.CharField(max_length=20, default='future')
+    description = models.TextField(blank=True, default='')
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    clone_of = models.ForeignKey('self', null=True, blank=True,
+                                 on_delete=models.SET_NULL, related_name='clones',
+                                 help_text="Campaign this was cloned from")
+    data = models.JSONField(default=dict, blank=True,
+                            help_text="Flexible extension fields (no migration to add new keys)")
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_campaign'
+        ordering = ['-start_date', '-created_at']
+
+    def __str__(self):
+        return self.name
+
+
+PRODREQUEST_STATUS_CHOICES = [
+    ('new', 'New'),
+    ('review', 'Review'),
+    ('blocked', 'Blocked'),
+    ('ready', 'Ready'),
+    ('linked', 'Linked'),
+    ('closed', 'Closed'),
+]
+
+
+class ProdRequest(models.Model):
+    """
+    PWG/DSC production request — upstream of ProdTask.
+
+    Captures the request spreadsheet fields, system fields for intake
+    idempotency and traceability, and production-team triage state.
+    Use flags and requestor are duplicated onto ProdTask at task
+    creation; both rows are mutable independently after that.
+    """
+    # Requester-facing fields (request spreadsheet)
+    requestor = models.CharField(max_length=100, blank=True, default='',
+                                 help_text="PWG or DSC making the request")
+    simu_path = models.CharField(max_length=500, blank=True, default='',
+                                 help_text="Declared simulation/EVGEN input location")
+    gen_config = models.TextField(blank=True, default='',
+                                  help_text="Generator configuration text from the request")
+    nevents = models.BigIntegerField(null=True, blank=True,
+                                     help_text="Requested event count")
+    background = models.CharField(max_length=200, blank=True, default='',
+                                  help_text="Requested background condition")
+    description = models.TextField(blank=True, default='')
+    priority = models.IntegerField(null=True, blank=True,
+                                   help_text="Requester or production priority")
+
+    # Use flags
+    pre_tdr_use = models.BooleanField(default=False)
+    early_science_use = models.BooleanField(default=False)
+    other_use = models.BooleanField(default=False)
+    new_request = models.BooleanField(default=False)
+
+    # System / traceability
+    status = models.CharField(max_length=20, default='new')
+    source_url = models.CharField(max_length=500, blank=True, default='',
+                                  help_text="Source spreadsheet or form URL")
+    source_row = models.CharField(max_length=100, blank=True, default='',
+                                  help_text="Source row identifier for idempotent import")
+
+    # Production-team triage
+    input_status = models.CharField(max_length=100, blank=True, default='',
+                                    help_text="Whether declared inputs are located/registered/usable")
+    rucio_source = models.CharField(max_length=300, blank=True, default='',
+                                    help_text="Rucio DID or container for registered input")
+    validation_status = models.CharField(max_length=100, blank=True, default='',
+                                         help_text="Validation summary")
+
+    data = models.JSONField(default=dict, blank=True,
+                            help_text="Flexible extension fields (no migration to add new keys)")
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_prod_request'
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f"req#{self.pk} {self.requestor or '(unspecified)'}"
 
 
 PRODTASK_STATUS_CHOICES = [
@@ -305,11 +478,27 @@ class ProdTask(models.Model):
     name = models.CharField(max_length=255, unique=True,
                             help_text="Task name (auto-derived from dataset or manual)")
     description = models.TextField(blank=True, default='')
-    status = models.CharField(max_length=20, choices=PRODTASK_STATUS_CHOICES, default='draft')
+    status = models.CharField(max_length=20, default='draft')
 
     # Core composition
     dataset = models.ForeignKey(Dataset, on_delete=models.PROTECT, related_name='prod_tasks')
     prod_config = models.ForeignKey(ProdConfig, on_delete=models.PROTECT, related_name='prod_tasks')
+
+    # Campaign / Request linkage
+    campaign = models.ForeignKey(Campaign, null=True, blank=True,
+                                 on_delete=models.PROTECT, related_name='prod_tasks',
+                                 help_text="Campaign this task belongs to")
+    request = models.ForeignKey(ProdRequest, null=True, blank=True,
+                                on_delete=models.SET_NULL, related_name='prod_tasks',
+                                help_text="Originating PWG/DSC request, if any")
+
+    # Catalog row fields (seeded from request at creation; mutable thereafter)
+    requestor = models.CharField(max_length=100, blank=True, default='')
+    priority = models.IntegerField(null=True, blank=True)
+    pre_tdr_use = models.BooleanField(default=False)
+    early_science_use = models.BooleanField(default=False)
+    other_use = models.BooleanField(default=False)
+    new_request = models.BooleanField(default=False)
 
     # Task-specific submission params
     csv_file = models.CharField(max_length=500, blank=True, default='',
@@ -339,6 +528,96 @@ class ProdTask(models.Model):
 
     def __str__(self):
         return self.name
+
+    def _dids_from_overrides(self, list_key, single_key=None):
+        """Resolve a list of DIDs from overrides JSON.
+
+        Reads ``overrides[list_key]`` if it is a non-empty list; else, if
+        ``single_key`` is provided and present, wraps that single DID; else
+        returns an empty list. JSON-only, no schema column — per
+        PCS_DATASET_REQUEST_WORKFLOW.md interim model.
+        """
+        ov = self.overrides or {}
+        dids = ov.get(list_key)
+        if isinstance(dids, list) and dids:
+            return [d for d in dids if d]
+        if single_key:
+            single = ov.get(single_key)
+            if single:
+                return [single]
+        return []
+
+    def _resolve_datasets(self, dids):
+        """Resolve a list of DIDs to Dataset objects, preserving order.
+        DIDs not found are silently dropped.
+        """
+        if not dids:
+            return []
+        by_did = {d.did: d for d in Dataset.objects.filter(did__in=dids)}
+        return [by_did[d] for d in dids if d in by_did]
+
+    @property
+    def input_datasets(self):
+        """List of input Datasets from overrides['input_dataset_dids'] or
+        the singular 'input_dataset_did' (back-compat shortcut for the
+        single-input EVGEN case)."""
+        return self._resolve_datasets(
+            self._dids_from_overrides('input_dataset_dids', 'input_dataset_did')
+        )
+
+    @property
+    def output_datasets(self):
+        """List of output Datasets from overrides['output_dataset_dids'].
+        Falls back to ``[self.dataset]`` — the legacy single-output FK —
+        when the override is unset."""
+        dids = self._dids_from_overrides('output_dataset_dids')
+        if dids:
+            return self._resolve_datasets(dids)
+        return [self.dataset] if self.dataset_id else []
+
+    @property
+    def intermediate_datasets(self):
+        """List of intermediate Datasets from overrides['intermediate_dataset_dids']."""
+        return self._resolve_datasets(
+            self._dids_from_overrides('intermediate_dataset_dids')
+        )
+
+    @property
+    def input_dataset(self):
+        """Single helper: first of ``input_datasets`` (or None)."""
+        inputs = self.input_datasets
+        return inputs[0] if inputs else None
+
+    @property
+    def output_dataset(self):
+        """Single helper: first of ``output_datasets`` — equivalent to the
+        legacy ``self.dataset`` FK when no list override is set."""
+        outputs = self.output_datasets
+        return outputs[0] if outputs else None
+
+    @property
+    def input_source_kind(self):
+        """Source kind of the external input. Linked Dataset wins; csv_file fallback."""
+        ds = self.input_dataset
+        if ds:
+            return ds.source_kind
+        return 'csv_manifest' if self.csv_file else ''
+
+    @property
+    def input_source_location(self):
+        """Source location of the external input. Linked Dataset wins; csv_file fallback."""
+        ds = self.input_dataset
+        if ds:
+            return ds.source_location
+        return self.csv_file or ''
+
+    @property
+    def input_source_stage(self):
+        """Stage of the external input. Linked Dataset wins; csv_file → 'evgen'."""
+        ds = self.input_dataset
+        if ds:
+            return ds.stage
+        return 'evgen' if self.csv_file else ''
 
     def get_effective_config(self):
         """Return ProdConfig field values with per-task overrides applied."""

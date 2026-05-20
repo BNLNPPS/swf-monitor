@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SWF Monitor MCP watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=swf-monitor-mcp-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -77,6 +77,7 @@ class DatasetForm(forms.Form):
         empty_label="Select reco tag",
     )
     description = forms.CharField(widget=forms.Textarea(attrs={'rows': 3}), required=False)
+    metadata = forms.JSONField(required=False)
     created_by = forms.CharField(max_length=100)
 
 

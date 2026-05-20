@@ -7,6 +7,14 @@ urlpatterns = [
     # Hub
     path('', views.pcs_hub, name='pcs_hub'),
 
+    # Catalog (campaign-aware production task catalog)
+    path('catalog/', views.pcs_catalog, name='pcs_catalog'),
+    path('catalog/csv-update/', views.pcs_catalog_csv_update, name='pcs_catalog_csv_update'),
+    path('catalog/past-update/', views.pcs_catalog_past_update, name='pcs_catalog_past_update'),
+    path('catalog/rucio-update/', views.pcs_catalog_rucio_update, name='pcs_catalog_rucio_update'),
+    path('catalog/set-current/', views.pcs_catalog_set_current, name='pcs_catalog_set_current'),
+    path('catalog/set-last/', views.pcs_catalog_set_last, name='pcs_catalog_set_last'),
+
     # Physics Categories
     path('categories/', views.physics_categories_list, name='physics_categories_list'),
     path('categories/create/', views.physics_category_create, name='physics_category_create'),

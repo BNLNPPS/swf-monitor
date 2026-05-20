@@ -182,6 +182,29 @@ Block `.b1` is always present. Rucio limits datasets to 100k files; PCS manages 
 
 The **task name** is the dataset name (without the `.bN` block suffix). This is what appears in PanDA as the task identifier.
 
+### External EVGEN Inputs
+
+As an interim production-planning capability, PCS can represent externally
+supplied generator-level inputs using `Dataset.metadata` rather than new schema
+fields. This is intended for the current mode where PWGs or DSCs provide EVGEN
+files or CSV manifests that PCS records but does not independently produce.
+
+Example metadata:
+
+```json
+{
+  "stage": "evgen",
+  "source": {
+    "kind": "csv_manifest",
+    "location": "path/to/input.csv"
+  }
+}
+```
+
+The dataset API exposes convenience fields derived from this metadata:
+`stage`, `external`, `source_kind`, and `source_location`. The full `metadata`
+object remains the writable transport for this interim model.
+
 ## Production Configs
 
 A production config is a reusable template capturing everything needed to build a submit command beyond what tags and datasets define.
@@ -199,6 +222,8 @@ A production config is a reusable template capturing everything needed to build 
 
 | Key | Example | Purpose |
 |-----|---------|---------|
+| `workflow_mode` | `external_evgen` | Production workflow mode: `external_evgen` (default; payload consumes a CSV-manifest input) or `internal_evgen` (payload runs evgen + sim + reco internally). Surfaced as `ProdConfig.workflow_mode`. |
+| `submission_path` | `condor` | Submission path for tasks built on this config: `condor` (default; `submit_csv.sh` via `condor_submit`), `panda` (JEDI `taskParamMap` via `Client.insertTaskParams`), or `internal_evgen` (PanDA-orchestrated multi-stage workflow). Surfaced as `ProdConfig.submission_path`. See `EPICPROD_TASK_CATALOG.md` §2. |
 | `transformation` | `runGen-00-00-02` | PanDA TRF script name/version |
 | `processing_type` | `epicproduction` | PanDA classification |
 | `prod_source_label` | `managed` | PanDA authorization (managed/test) |
@@ -215,12 +240,22 @@ A production config is a reusable template capturing everything needed to build 
 
 Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
 
+## External Access
+
+PCS pages and REST endpoints reach external users via the swf-remote
+proxy at `epic-devcloud.org`. Every new swf-monitor URL intended for
+external access requires a corresponding `path()` entry in
+`swf-remote/src/remote_app/urls.py` — without it, the page returns
+404 to external users. See [External Access](EXTERNAL_ACCESS.md) for
+the contract.
+
 ## JEDI Integration
 
 PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution and Definition Interface) via the PanDA Python API, replacing the current approach of generating `prun` CLI commands as text. See:
 
 - [JEDI Integration Design](JEDI_INTEGRATION.md) — architecture, field mapping, implementation plan
 - [JEDI ePIC Proposal](JEDI_EPIC_PROPOSAL.md) — technical proposal for PanDA team review
+- [Dataset Request Workflow](PCS_DATASET_REQUEST_WORKFLOW.md) — PCS-centered plan for Mattermost/PanDAbot dataset request intake, external datasets, public catalogue projection, and future EVGEN workflow stages
 
 ## MCP Tools
 

@@ -6,9 +6,9 @@
     <strong>Time window:</strong>
     {% for opt in days_options %}
     {% if opt.active %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_workinggroup %}&workinggroup={{ selected_workinggroup }}{% endif %}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
     {% else %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_workinggroup %}&workinggroup={{ selected_workinggroup }}{% endif %}" style="margin-right:0.8em;">{{ opt.value }}d</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}" style="margin-right:0.8em;">{{ opt.value }}d</a>
     {% endif %}
     {% endfor %}
 </div>
@@ -18,7 +18,6 @@
 {
     status: '{{ selected_status|default:"" }}',
     username: '{{ selected_username|default:"" }}',
-    workinggroup: '{{ selected_workinggroup|default:"" }}',
     days: '{{ days }}'
 }
 {% endblock %}

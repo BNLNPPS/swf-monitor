@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Rucio Endpoint: {{ endpoint.endpoint_name }}{% endblock %}
 
@@ -62,11 +63,11 @@
                                 </tr>
                                 <tr>
                                     <th>Created:</th>
-                                    <td>{{ endpoint.created_at|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ endpoint.created_at|fmt_dt }}</td>
                                 </tr>
                                 <tr>
                                     <th>Updated:</th>
-                                    <td>{{ endpoint.updated_at|date:"Y-m-d H:i:s" }}</td>
+                                    <td>{{ endpoint.updated_at|fmt_dt }}</td>
                                 </tr>
                             </table>
                         </div>

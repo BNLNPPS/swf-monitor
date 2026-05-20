@@ -54,6 +54,7 @@ from .views import (
     rucio_endpoints_all_json,
     update_panda_queues_from_github,
     update_rucio_endpoints_from_github,
+    mcp_health,
     panda_hub, prod_hub, testbed_hub,
 )
 
@@ -119,6 +120,7 @@ app_name = 'monitor_app'
 
 urlpatterns = [
     path('', home, name='home'),
+    path('api/mcp-health/', mcp_health, name='mcp_health'),
     path('dashboard/', index, name='index'),
     path('about/', about, name='about'),
     path('create/', system_agent_create, name='system_agent_create'),

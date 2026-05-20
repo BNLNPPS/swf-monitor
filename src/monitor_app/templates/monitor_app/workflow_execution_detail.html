@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% load swf_fmt %}
 
 {% block title %}Execution {{ execution.execution_id }}{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2>Execution {{ execution.execution_id }}</h2>
         <a href="{% url 'monitor_app:workflow_executions_list' %}" class="btn btn-secondary">Back to List</a>
@@ -20,7 +21,7 @@
                     <table class="table table-sm">
                         <tr>
                             <th style="width: 150px;">Execution ID:</th>
-                            <td>{{ execution.execution_id }}</td>
+                            <td>{{ execution.execution_id }} {% copy_btn execution.execution_id %}</td>
                         </tr>
                         <tr>
                             <th>Workflow:</th>
@@ -50,11 +51,7 @@
                         </tr>
                         <tr>
                             <th>Status:</th>
-                            <td>
-                                <span class="badge bg-{% if execution.status == 'completed' %}success{% elif execution.status == 'failed' %}danger{% elif execution.status == 'running' %}primary{% else %}secondary{% endif %}">
-                                    {{ execution.status }}
-                                </span>
-                            </td>
+                            <td class="{{ execution.status|state_class }}">{{ execution.status }}</td>
                         </tr>
                         <tr>
                             <th>Executed By:</th>
@@ -66,12 +63,12 @@
                         </tr>
                         <tr>
                             <th>Started:</th>
-                            <td>{{ execution.start_time }}</td>
+                            <td>{{ execution.start_time|fmt_dt }}</td>
                         </tr>
                         {% if execution.end_time %}
                         <tr>
                             <th>Ended:</th>
-                            <td>{{ execution.end_time }}</td>
+                            <td>{{ execution.end_time|fmt_dt }}</td>
                         </tr>
                         <tr>
                             <th>Duration:</th>

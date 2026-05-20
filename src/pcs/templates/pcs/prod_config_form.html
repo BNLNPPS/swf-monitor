@@ -4,7 +4,7 @@
 
 {% block content %}
 {% csrf_token %}
-<div class="container mt-4">
+<div class="container-fluid mt-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
@@ -163,7 +163,7 @@
             <div class="mb-3">
                 <label for="id_data" class="form-label">Additional Parameters (JSON)</label>
                 {{ form.data }}
-                <small class="text-muted">Keys: transformation, processing_type, prod_source_label, vo, n_jobs, events_per_job, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope</small>
+                <small class="text-muted">Keys: workflow_mode, transformation, processing_type, prod_source_label, vo, n_jobs, events_per_job, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope</small>
             </div>
         </fieldset>
 

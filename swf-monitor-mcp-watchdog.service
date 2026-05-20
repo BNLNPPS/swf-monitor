@@ -1,0 +1,10 @@
+[Unit]
+Description=Probe SWF Monitor MCP endpoint and restart on failure
+After=network.target swf-monitor-mcp-asgi.service
+
+[Service]
+Type=oneshot
+# Pulls MCP_BEARER_TOKEN from the same env file as the MCP ASGI service
+# so the initialize/tools-list probes pass the post-cutover bearer guard.
+EnvironmentFile=/opt/swf-monitor/config/env/production.env
+ExecStart=/opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/mcp_watchdog.py --restart

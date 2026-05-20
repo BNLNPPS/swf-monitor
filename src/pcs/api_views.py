@@ -38,6 +38,8 @@ from .serializers import (
     DatasetSerializer, ProdConfigSerializer, ProdTaskSerializer,
 )
 from .schemas import validate_parameters, get_tag_model
+from . import services
+from .services import ServiceError
 
 
 class PhysicsCategoryViewSet(viewsets.ModelViewSet):
@@ -189,6 +191,34 @@ class DatasetViewSet(viewsets.ModelViewSet):
         instance = serializer.save(created_by=request.user.username)
         return Response(self.get_serializer(instance).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['post'], url_path='intake')
+    def intake(self, request):
+        """
+        Idempotent intake of an external (e.g. EVGEN CSV manifest) Dataset.
+
+        Thin wrapper over ``services.dataset_intake``; see that for the
+        full contract.
+        """
+        try:
+            ds, created = services.dataset_intake(
+                source_location=request.data.get('source_location'),
+                source_kind=request.data.get('source_kind', 'csv_manifest'),
+                scope=request.data.get('scope', 'group.EIC.evgen'),
+                stage=request.data.get('stage', 'evgen'),
+                detector_version=request.data.get('detector_version'),
+                detector_config=request.data.get('detector_config'),
+                physics_tag_label=request.data.get('physics_tag'),
+                evgen_tag_label=request.data.get('evgen_tag'),
+                simu_tag_label=request.data.get('simu_tag'),
+                reco_tag_label=request.data.get('reco_tag'),
+                description=request.data.get('description', ''),
+                created_by=request.user.username,
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(self.get_serializer(ds).data, status=http_status)
+
     @action(detail=True, methods=['post'], url_path='add-block')
     def add_block(self, request, pk=None):
         dataset = self.get_object()
@@ -295,13 +325,84 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='set-status')
     def set_status(self, request, pk=None):
         task = self.get_object()
-        new_status = request.data.get('status')
-        valid = [c[0] for c in task._meta.get_field('status').choices]
-        if new_status not in valid:
-            return Response(
-                {'detail': f'Invalid status. Choose from: {", ".join(valid)}'},
-                status=status.HTTP_400_BAD_REQUEST,
+        try:
+            services.prodtask_set_status(
+                task=task, new_status=request.data.get('status'),
             )
-        task.status = new_status
-        task.save(update_fields=['status', 'updated_at'])
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=True, methods=['post'], url_path='link-input')
+    def link_input(self, request, pk=None):
+        """Thin wrapper over ``services.prodtask_link_input``."""
+        task = self.get_object()
+        try:
+            services.prodtask_link_input(
+                task=task,
+                did=request.data.get('did'),
+                dids=request.data.get('dids'),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=False, methods=['post'], url_path='intake')
+    def intake(self, request):
+        """Thin wrapper over ``services.prodtask_intake``."""
+        # Permission: if the existing match is owned by another user,
+        # the service updates it. We mirror the previous behavior by
+        # checking object perms only when an existing row is found.
+        try:
+            task, created = services.prodtask_intake(
+                payload=dict(request.data),
+                created_by=request.user.username,
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        if not created:
+            self.check_object_permissions(request, task)
+        http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        return Response(self.get_serializer(task).data, status=http_status)
+
+    @action(detail=False, methods=['post'], url_path='record-submission')
+    def record_submission(self, request):
+        """
+        Record outcome of a JEDI submission. Sets panda_task_id and status.
+        Called by `pcs-task-cmd --submit` after Client.insertTaskParams()
+        returns the JEDI task ID.
+
+        Gates:
+            - Task must be in status='ready'. No submit from draft;
+              no re-submit from submitted/completed/failed.
+            - Task must not already record a panda_task_id; refuses to
+              overwrite (returns 409). Treats panda_task_id as one-shot.
+
+        Query params:
+            name — ProdTask.name (required)
+
+        Body (JSON):
+            jedi_task_id — int, required
+            status       — str, optional (default 'submitted'); must be a
+                           valid PRODTASK_STATUS_CHOICES value
+        """
+        name = request.query_params.get('name') or request.data.get('name')
+        if not name:
+            return Response({'detail': 'Missing ?name='},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            task = self.get_queryset().get(name=name)
+        except ProdTask.DoesNotExist:
+            return Response({'detail': f"No task named '{name}'"},
+                            status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, task)
+
+        try:
+            services.prodtask_record_submission(
+                task=task,
+                jedi_task_id=request.data.get('jedi_task_id'),
+                new_status=request.data.get('status', 'submitted'),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)

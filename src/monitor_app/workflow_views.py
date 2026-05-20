@@ -249,11 +249,12 @@ def workflow_executions_datatable_ajax(request):
         else:
             namespace_link = ''
 
+        from .cell_fmt import fill_cell
         data.append([
             f'<a href="{reverse("monitor_app:workflow_execution_detail", args=[execution.execution_id])}" class="text-decoration-none">{execution.execution_id}</a>',
             f"{execution.workflow_definition.workflow_name} v{execution.workflow_definition.version}",
             namespace_link,
-            execution.status,
+            fill_cell(execution.status, execution.status),
             str(stf_count),
             execution.executed_by,
             format_datetime(execution.start_time),

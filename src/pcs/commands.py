@@ -18,7 +18,7 @@ def build_condor_command(task):
     Produces the env-var-prefixed command used in the Colab notebook:
         EBEAM=... PBEAM=... scripts/submit_csv.sh osg_csv hepmc3 {csv} {hours}
     """
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.get_effective_config()
     physics = ds.physics_tag.parameters
     data = cfg.get('data') or {}
@@ -48,6 +48,11 @@ def build_condor_command(task):
     if cfg.get('rucio_rse'):
         env['OUT_RSE'] = cfg['rucio_rse']
 
+    # External EVGEN input source (CSV manifest etc.)
+    csv_path = task.input_source_location
+    if csv_path:
+        env['CSV_FILE'] = csv_path
+
     # Background mixing (conditional)
     if cfg.get('bg_mixing'):
         evgen = ds.evgen_tag.parameters
@@ -55,8 +60,6 @@ def build_condor_command(task):
         env['SIGNAL_STATUS'] = str(evgen.get('signal_status', '0'))
         if evgen.get('bg_tag_prefix'):
             env['TAG_PREFIX'] = evgen['bg_tag_prefix']
-        if task.csv_file:
-            env['CSV_FILE'] = task.csv_file
         if evgen.get('bg_files'):
             env['BG_FILES'] = evgen['bg_files']
 
@@ -66,7 +69,7 @@ def build_condor_command(task):
     # Target hours from config (default 2)
     target_hours = cfg.get('target_hours_per_job') or 2
 
-    csv = task.csv_file or '<csv_file>'
+    csv = csv_path or '<csv_file>'
     cmd = f'scripts/submit_csv.sh osg_csv hepmc3 {csv} {target_hours}'
 
     return f'{env_str} \\\n  {cmd}'
@@ -80,7 +83,7 @@ def build_panda_command(task):
     uses PrunScript.main() from pandaclient, but this generates the
     equivalent CLI command for reference/execution.
     """
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.get_effective_config()
     data = cfg.get('data') or {}
 
@@ -144,7 +147,7 @@ def build_panda_command(task):
 
 def _build_env_string(task):
     """Shared env-var string for Condor command and JEDI jobParameters."""
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.get_effective_config()
     physics = ds.physics_tag.parameters
     evgen = ds.evgen_tag.parameters
@@ -159,6 +162,11 @@ def _build_env_string(task):
         'COPYFULL': 'true' if cfg.get('copy_full') else 'false',
         'COPYLOG': 'true' if cfg.get('copy_log') else 'false',
     }
+    # External EVGEN input source — payload-staged (see JEDI_INTEGRATION.md
+    # § External EVGEN Inputs). The payload run.sh reads CSV_FILE and stages
+    # the listed files at runtime.
+    if task.input_source_location:
+        env['CSV_FILE'] = task.input_source_location
     if cfg.get('bg_mixing'):
         if evgen.get('signal_freq') is not None:
             env['SIGNAL_FREQ'] = str(evgen['signal_freq'])
@@ -179,7 +187,7 @@ def build_task_dump(task):
 
     Suitable for human inspection or downstream tooling. Pure read.
     """
-    ds = task.dataset
+    ds = task.output_dataset
     cfg = task.prod_config
 
     def _tag(t):
@@ -223,6 +231,9 @@ def build_task_dump(task):
             'status': task.status,
             'csv_file': task.csv_file,
             'overrides': task.overrides or {},
+            'input_dataset_dids': [d.did for d in task.input_datasets],
+            'output_dataset_dids': [d.did for d in task.output_datasets],
+            'intermediate_dataset_dids': [d.did for d in task.intermediate_datasets],
             'created_by': task.created_by,
             'created_at': task.created_at.isoformat() if task.created_at else None,
             'updated_at': task.updated_at.isoformat() if task.updated_at else None,

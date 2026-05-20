@@ -79,6 +79,11 @@ class DatasetSerializer(serializers.ModelSerializer):
     evgen_tag_label = serializers.CharField(source='evgen_tag.tag_label', read_only=True)
     simu_tag_label = serializers.CharField(source='simu_tag.tag_label', read_only=True)
     reco_tag_label = serializers.CharField(source='reco_tag.tag_label', read_only=True)
+    stage = serializers.CharField(read_only=True)
+    external = serializers.BooleanField(source='is_external', read_only=True)
+    source_kind = serializers.CharField(read_only=True)
+    source_location = serializers.CharField(read_only=True)
+    validation_status = serializers.CharField(read_only=True)
 
     class Meta:
         model = Dataset
@@ -87,6 +92,7 @@ class DatasetSerializer(serializers.ModelSerializer):
             'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
             'physics_tag_label', 'evgen_tag_label', 'simu_tag_label', 'reco_tag_label',
             'block_num', 'blocks', 'did', 'file_count', 'data_size',
+            'stage', 'external', 'source_kind', 'source_location', 'validation_status',
             'description', 'metadata', 'created_by', 'created_at',
         ]
         read_only_fields = [
@@ -94,8 +100,29 @@ class DatasetSerializer(serializers.ModelSerializer):
             'file_count', 'data_size', 'created_by', 'created_at',
         ]
 
+    def validate_metadata(self, value):
+        if value in (None, ''):
+            return None
+        if not isinstance(value, dict):
+            raise serializers.ValidationError('metadata must be a JSON object.')
+        if 'external' in value:
+            raise serializers.ValidationError(
+                'metadata.external is obsolete; external status is derived from metadata.source.kind.'
+            )
+        source = value.get('source')
+        if source is not None:
+            if not isinstance(source, dict):
+                raise serializers.ValidationError('metadata.source must be a JSON object.')
+            if not source.get('kind'):
+                raise serializers.ValidationError('external datasets require metadata.source.kind.')
+            if not source.get('location'):
+                raise serializers.ValidationError('external datasets require metadata.source.location.')
+        return value
+
 
 class ProdConfigSerializer(serializers.ModelSerializer):
+    workflow_mode = serializers.CharField(read_only=True)
+
     class Meta:
         model = ProdConfig
         fields = '__all__'
@@ -106,6 +133,9 @@ class ProdTaskSerializer(serializers.ModelSerializer):
     dataset_name = serializers.CharField(source='dataset.dataset_name', read_only=True)
     dataset_did = serializers.CharField(source='dataset.did', read_only=True)
     prod_config_name = serializers.CharField(source='prod_config.name', read_only=True)
+    input_dataset_dids = serializers.SerializerMethodField(read_only=True)
+    output_dataset_dids = serializers.SerializerMethodField(read_only=True)
+    intermediate_dataset_dids = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = ProdTask
@@ -114,11 +144,22 @@ class ProdTaskSerializer(serializers.ModelSerializer):
             'dataset', 'dataset_name', 'dataset_did',
             'prod_config', 'prod_config_name',
             'csv_file', 'overrides',
+            'input_dataset_dids', 'output_dataset_dids', 'intermediate_dataset_dids',
             'condor_command', 'panda_command',
             'panda_task_id', 'condor_cluster_id',
             'created_by', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'condor_command', 'panda_command',
+            'input_dataset_dids', 'output_dataset_dids', 'intermediate_dataset_dids',
             'created_by', 'created_at', 'updated_at',
         ]
+
+    def get_input_dataset_dids(self, obj):
+        return [d.did for d in obj.input_datasets]
+
+    def get_output_dataset_dids(self, obj):
+        return [d.did for d in obj.output_datasets]
+
+    def get_intermediate_dataset_dids(self, obj):
+        return [d.did for d in obj.intermediate_datasets]

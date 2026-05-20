@@ -133,6 +133,10 @@ log "  .env source: $DEPLOY_ROOT/config/env/production.env (edit this file for c
 # Shared caches — writable by both httpd (WSGI) and service users
 mkdir -p "$DEPLOY_ROOT/shared/hf_cache"
 chmod 777 "$DEPLOY_ROOT/shared/hf_cache"
+# JLab Rucio snapshot files — written by the WSGI process when the
+# operator clicks 'Update from Rucio'.
+mkdir -p "$DEPLOY_ROOT/shared/rucio-snapshots"
+chmod 777 "$DEPLOY_ROOT/shared/rucio-snapshots"
 grep -q '^HF_HOME=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
     echo "HF_HOME=$DEPLOY_ROOT/shared/hf_cache" >> "$DEPLOY_ROOT/config/env/production.env"
 

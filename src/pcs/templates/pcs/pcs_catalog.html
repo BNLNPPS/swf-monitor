@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Production Task Catalog{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+
+<div class="container-fluid mt-3 pcs-catalog">
+  <div class="d-flex align-items-center mb-3">
+    <h2 class="me-3 mb-0">Production Task Catalog</h2>
+    <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline-primary"
+              title="Re-import eic/epic-prod/docs/_data/datasets.csv into the catalog"
+              onclick="return confirm('Re-import the default-datasets CSV into the catalog?');">
+        Update from CSV
+      </button>
+    </form>
+    <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-sm btn-outline-primary"
+              title="Refresh the JLab Rucio output snapshot for the current campaign"
+              onclick="return confirm('Refresh the JLab Rucio output snapshot for the current campaign?');">
+        Update from Rucio
+      </button>
+    </form>
+  </div>
+
+  {% if show_tabs %}
+  <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
+    {% for tab in lifecycle_tabs %}
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
+         href="?lifecycle={{ tab.key }}">
+        {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
+          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% endif %}
+      </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if rucio_detected and rucio_detected.0.version != rucio_current_name and active_lifecycle == 'current' %}
+    {# Current tab and current is stale: selector to switch. #}
+    <div class="border rounded p-2 mb-3 small bg-light">
+      <div class="mb-1 text-muted">
+        Detected newer 26.x release in JLab Rucio
+        (PCS current: <strong>{{ rucio_current_name }}</strong>):
+      </div>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+      {% for r in rucio_detected %}
+        <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
+          {% if r.version != rucio_current_name %}
+            <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
+              {% csrf_token %}
+              <input type="hidden" name="name" value="{{ r.version }}">
+              <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1"
+                      title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
+                      onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
+            </form>
+          {% else %}
+            <span class="badge bg-success">current</span>
+          {% endif %}
+        </span>
+      {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
+
+  {% if rucio_unmatched %}
+  <details class="mb-3 small">
+    <summary class="text-muted">
+      <strong style="color:#dc3545">&#9888; {{ rucio_unmatched|length }} unmatched Rucio output{{ rucio_unmatched|length|pluralize }}</strong>
+      for campaign {{ rucio_unmatched_campaign }} (no request in this table matched these DIDs)
+    </summary>
+    <ul class="mt-2 mb-0" style="font-family:monospace; font-size:0.85em;">
+    {% for u in rucio_unmatched %}
+      <li>{{ u.did }} &middot; {{ u.files }} files &middot; {{ u.bytes|filesizeformat }}{% if u.incomplete %} <span style="color:#dc3545">(incomplete)</span>{% endif %}</li>
+    {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  {% include "pcs/_task_list_filter.html" %}
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+(function() {
+  const data = {{ rucio_timeline_json|safe }};
+  const el = document.getElementById('pcs-rucio-timeline');
+  if (!el) return;
+  if (!data || !data.dates || !data.dates.length) {
+    el.innerHTML = '<div class="text-muted small">No Rucio arrivals timeline available — '
+      + 'click <em>Update from Rucio</em> to populate the snapshot.</div>';
+    return;
+  }
+  const TB = 1e12;
+  const SIMU_COLOR = '#1f77b4';
+  const RECO_COLOR = '#ff7f0e';
+  const tb = bytes => bytes.map(b => b / TB);
+  // Three stacked panes, sharing the time axis at the bottom:
+  //   top    = cumulative datasets
+  //   middle = cumulative files (registered)
+  //   bottom = cumulative output (TB)
+  // One legend entry per stage; toggling hides all three panes for
+  // that stage via legendgroup.
+  const traces = [
+    // Top pane.
+    {x: data.dates, y: data.simu.cum_datasets, name: 'Simu',
+     legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+     xaxis: 'x', yaxis: 'y'},
+    {x: data.dates, y: data.reco.cum_datasets, name: 'Reco',
+     legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+     xaxis: 'x', yaxis: 'y'},
+    // Middle pane.
+    {x: data.dates, y: data.simu.cum_files, legendgroup: 'simu',
+     mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+     xaxis: 'x', yaxis: 'y2', showlegend: false},
+    {x: data.dates, y: data.reco.cum_files, legendgroup: 'reco',
+     mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+     xaxis: 'x', yaxis: 'y2', showlegend: false},
+    // Bottom pane.
+    {x: data.dates, y: tb(data.simu.cum_bytes), legendgroup: 'simu',
+     mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+     xaxis: 'x', yaxis: 'y3', showlegend: false},
+    {x: data.dates, y: tb(data.reco.cum_bytes), legendgroup: 'reco',
+     mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+     xaxis: 'x', yaxis: 'y3', showlegend: false},
+  ];
+  const layout = {
+    title: {text: 'Rucio arrivals — ' + (data.campaign_name || ''),
+            font: {size: 14}},
+    margin: {l: 70, r: 30, t: 40, b: 40},
+    height: 540,
+    // Single shared x axis, anchored to the bottom pane's y3.
+    xaxis:  {anchor: 'y3', type: 'date'},
+    yaxis:  {domain: [0.70, 1.00], title: 'datasets', rangemode: 'tozero'},
+    yaxis2: {domain: [0.36, 0.66], title: 'files (registered)',
+             rangemode: 'tozero'},
+    yaxis3: {domain: [0.00, 0.32], title: 'output (TB)', rangemode: 'tozero'},
+    legend: {orientation: 'h', y: -0.12},
+    showlegend: true,
+  };
+  Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true});
+})();
+</script>
+{% endblock %}

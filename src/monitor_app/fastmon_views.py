@@ -112,12 +112,13 @@ def fastmon_files_datatable_ajax(request):
         run_detail_url = reverse('monitor_app:run_detail', args=[file.stf_file.run.run_number])
         run_link = f'<a href="{run_detail_url}">{file.stf_file.run.run_number}</a>'
 
+        from .cell_fmt import fill_cell
         data.append([
             file.tf_filename,
             stf_link,
             run_link,
             file_size,
-            status_text,
+            fill_cell(status_text, file.status),
             format_datetime(file.created_at)
         ])
 

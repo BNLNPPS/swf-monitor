@@ -74,9 +74,16 @@
             <button class="btn btn-primary btn-sm" id="btn-new-task" style="display:none; margin-bottom:.35rem;">New Task</button>
             {% endif %}
         </div>
-        <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
-        <div class="filter-row" id="browser-filters"></div>
-        <div class="item-list" id="item-list" tabindex="0"></div>
+        {# Datasets / Configs tabs: existing JS-driven list + free-text search. #}
+        <div id="generic-list-host">
+            <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
+            <div class="filter-row" id="browser-filters"></div>
+            <div class="item-list" id="item-list" tabindex="0"></div>
+        </div>
+        {# Tasks tab: server-rendered catalog-style list with collapsed filter bar. #}
+        <div id="tasks-list-host" style="display:none; flex:1; min-height:0; flex-direction:column;">
+            {% include "pcs/_task_workbench_list.html" %}
+        </div>
     </div>
 
     <!-- RIGHT PANE -->
@@ -295,6 +302,9 @@
         updateUrl();
     }
 
+    const genericListHost = document.getElementById('generic-list-host');
+    const tasksListHost   = document.getElementById('tasks-list-host');
+
     // ── Tab switching ──
     function switchTab(tabName) {
         document.querySelectorAll('.browser-tab').forEach(t => t.classList.remove('active'));
@@ -302,8 +312,13 @@
         browseType = tabName;
         selectedItemId = null;
         searchBox.value = '';
+        // Tasks tab uses the server-rendered workbench partial; everything
+        // else uses the JS-driven generic list.
+        const onTasks = (tabName === 'tasks');
+        genericListHost.style.display = onTasks ? 'none' : '';
+        tasksListHost.style.display   = onTasks ? 'flex' : 'none';
         // Show "New Task" in left panel only on tasks tab in browse mode
-        if (btnNewTask) btnNewTask.style.display = (mode === 'browse' && tabName === 'tasks') ? 'block' : 'none';
+        if (btnNewTask) btnNewTask.style.display = (mode === 'browse' && onTasks) ? 'block' : 'none';
         if (mode === 'browse') {
             browseEmpty.style.display = 'block';
             browseContent.style.display = 'none';
@@ -314,6 +329,16 @@
         }
         renderList();
         updateUrl();
+    }
+
+    // ── Workbench partial: route row clicks to the existing detail flow ──
+    const wbRoot = document.getElementById('pcs-wb-root');
+    if (wbRoot) {
+        wbRoot.addEventListener('pcs-wb:select', (e) => {
+            const tid = e.detail && e.detail.taskId;
+            if (!Number.isFinite(tid)) return;
+            onItemClick('task', tid);
+        });
     }
     document.querySelectorAll('.browser-tab').forEach(tab => {
         tab.addEventListener('click', function() { switchTab(this.dataset.browse); });
@@ -329,7 +354,8 @@
             items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
                 d.physics_tag.label.toLowerCase().includes(q) || d.physics_tag.description.toLowerCase().includes(q)
             ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
-                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label} | ${d.created_by}`,
+                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}`
+                    + `${d.external ? ' | external ' + (d.stage || 'dataset') : ''} | ${d.created_by}`,
                 selected: d.id === selectedItemId }));
         } else if (browseType === 'configs') {
             items = allConfigs.filter(c => !q || c.name.toLowerCase().includes(q) ||
@@ -532,6 +558,11 @@
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
                 <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                <tr><td><strong>Stage</strong></td><td>${ds.stage || '-'}</td></tr>
+                <tr><td><strong>External</strong></td><td>${ds.external ? 'yes' : 'no'}</td></tr>
+                ${ds.source_kind ? `<tr><td><strong>Source Kind</strong></td><td>${ds.source_kind}</td></tr>` : ''}
+                ${ds.source_location ? `<tr><td><strong>Source Location</strong></td><td><code>${ds.source_location}</code></td></tr>` : ''}
+                ${ds.validation_status ? `<tr><td><strong>Validation</strong></td><td>${ds.validation_status}</td></tr>` : ''}
                 <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
                 ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
@@ -588,36 +619,69 @@
         if (!t) return;
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
-        panelTitle.textContent = t.name;
+        const ds = allDatasets.find(d => d.id === t.dataset_id);
+        const cfg = allConfigs.find(c => c.id === t.prod_config_id);
+        const csvImp = (t.overrides && t.overrides.csv_import) || null;
+
+        // Title: dataset path (matches the workbench row title), with the
+        // standard ePIC volatile prefix stripped. Full path on hover. The
+        // internal csv_import.<slug> name is only a stable key, not a label.
+        const PFX = '/volatile/eic/EPIC/';
+        const dsPath = (ds && ds.source_location) || t.dataset_name || t.name;
+        panelTitle.textContent = dsPath.startsWith(PFX) ? dsPath.slice(PFX.length) : dsPath;
+        panelTitle.title = dsPath;
+
         const isOwner = currentUser && t.created_by === currentUser;
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
         if (btnEditTask) btnEditTask.style.display = isOwner ? 'inline-block' : 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = isOwner ? 'inline-block' : 'none';
-        const ds = allDatasets.find(d => d.id === t.dataset_id);
-        const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
         if (t.description) html += `<p>${t.description}</p>`;
 
-        // Dataset + detector info
-        html += `<h6>Dataset</h6>
-            <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
-                ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
-            </table>`;
-
-        // Expanded tags with parameters
-        if (ds) {
-            let tagsHtml = '';
-            [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
-                const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-                tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
-            });
-            html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
-                <tbody>${tagsHtml}</tbody></table>`;
+        if (csvImp) {
+            // CSV-imported task: the dataset's physics/evgen/simu/reco tags are
+            // auto-generated placeholders. Show the path-decomposed filter
+            // fields (carried in overrides.csv_import) — these are the real
+            // physics characterization the user cares about.
+            const f = csvImp.filters || {};
+            const nevM = csvImp.nevents ? `${(Number(csvImp.nevents)/1e6).toFixed(1)} M` : '';
+            const rows = [
+                ['Path',        `<code>${dsPath}</code>`],
+                ['Sample',      csvImp.evgen],
+                ['Gen version', csvImp.gen_version],
+                ['Geom',        f.detector],
+                ['Beam',        f.beam],
+                ['Physics',     f.physics],
+                ['Q&sup2;',     f.q2],
+                ['Species',     f.species],
+                ['Energy',      f.energy],
+                ['Nev',         nevM],
+                ['Background',  csvImp.background],
+                ['Detector',    ds ? `${ds.detector_version} / ${ds.detector_config}` : ''],
+            ].filter(([,v]) => v && v !== '-');
+            html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;"><tbody>${
+                rows.map(([k,v]) => `<tr><td style="width:30%"><strong>${k}</strong></td><td>${v}</td></tr>`).join('')
+            }</tbody></table>`;
+        } else {
+            // Non-CSV task: show the dataset's real tag metadata.
+            html += `<h6>Dataset</h6>
+                <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
+                    <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
+                    ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
+                </table>`;
+            if (ds) {
+                let tagsHtml = '';
+                [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
+                    const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
+                    tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+                });
+                html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+                    <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+                    <tbody>${tagsHtml}</tbody></table>`;
+            }
         }
 
         // Config summary
@@ -666,6 +730,7 @@
                 <tr><td style="width:35%"><strong>Name</strong></td><td>${ds.dataset_name}</td></tr>
                 <tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
+                ${ds.external ? `<tr><td><strong>Input Source</strong></td><td>${ds.source_kind || '-'}: <code>${ds.source_location || '-'}</code></td></tr>` : ''}
                 <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label}, ${ds.evgen_tag.label}, ${ds.simu_tag.label}, ${ds.reco_tag.label}</td></tr>
             </table>`;
         const allParams = {};
@@ -821,10 +886,15 @@
     let autoId = null;
     if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
     if (!autoId) {
-        const firstList = browseType === 'tasks' ? allTasks
-                        : browseType === 'datasets' ? allDatasets
-                        : allConfigs;
-        if (firstList.length > 0) autoId = firstList[0].id;
+        if (browseType === 'tasks') {
+            // Mirror the workbench's current-campaign-first ordering so the
+            // initial right-pane detail corresponds to the first visible row.
+            const firstWb = document.querySelector('#pcs-wb-list .pcs-wb-row');
+            if (firstWb) autoId = parseInt(firstWb.dataset.taskId, 10);
+        } else {
+            const firstList = browseType === 'datasets' ? allDatasets : allConfigs;
+            if (firstList.length > 0) autoId = firstList[0].id;
+        }
     }
     if (autoId) {
         selectedItemId = autoId;
@@ -832,6 +902,14 @@
         else if (browseType === 'datasets') showDatasetDetail(autoId);
         else if (browseType === 'configs')  showConfigDetail(autoId);
         renderList();
+        // Mirror selection in the workbench list (server-rendered, so JS-driven
+        // renderList() can't reach it).
+        if (browseType === 'tasks') {
+            document.querySelectorAll('#pcs-wb-list .pcs-wb-row').forEach(r =>
+                r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
+            const sel = document.querySelector(`#pcs-wb-list .pcs-wb-row[data-task-id="${autoId}"]`);
+            if (sel) sel.scrollIntoView({block: 'nearest'});
+        }
         updateUrl();
     }
 })();

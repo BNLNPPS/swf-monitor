@@ -46,9 +46,25 @@ MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
 MCP_URL = os.environ.get(
-    'MCP_URL', 'https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/'
+    'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
+)
+# Bearer token for the FastMCP /swf-monitor/mcp/ endpoint. Empty means
+# unauthenticated, which is fine against a pre-Phase-2 server that does
+# not enforce auth; post-cutover this MUST be set in production.env so
+# the bot's POSTs pass the FastMCP guard.
+MCP_BEARER_TOKEN = os.environ.get('MCP_BEARER_TOKEN', '')
+CORUN_BASE_URL = os.environ.get('CORUN_BASE_URL', 'https://epic-devcloud.org/doc')
+CORUN_CALLBACK_URL = os.environ.get(
+    'CORUN_CALLBACK_URL',
+    'https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/',
+)
+CORUN_SUBSCRIPTION_NAME = os.environ.get(
+    'CORUN_SUBSCRIPTION_NAME', 'pandabot-swf-testbed'
 )
 BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
+NO_QUERY_WARN = ":warning: *This response was not based on a live data query.*"
+NO_CITE_WARN = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
+THREAD_REPLY_MARKER = "[Thread reply]"
 
 # Stdio MCP servers — launched as subprocesses at startup.
 # update_commands: if present, the server can be updated via bot_manage_servers.
@@ -109,6 +125,30 @@ if _zenodo_key:
         ],
     })
 
+_corun_token = os.environ.get('CORUN_API_TOKEN')
+if _corun_token:
+    STDIO_MCP_SERVERS.append({
+        'name': 'corun',
+        'prefix': 'corun_',
+        'source': 'github.com/eic/corun-mcp-server',
+        'command': [
+            os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                         'swf-testbed/.venv/bin/corun-mcp-server'),
+        ],
+        'env': {
+            'CORUN_BASE_URL': CORUN_BASE_URL,
+            'CORUN_API_TOKEN': _corun_token,
+        },
+        'exclude_tools': ['wait_for_job'],
+        'repo_dir': '/data/wenauseic/github/corun-mcp-server',
+        'update_commands': [
+            'cd /data/wenauseic/github/corun-mcp-server && git pull && '
+            + os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
+                           'swf-testbed/.venv/bin/pip')
+            + ' install -e .',
+        ],
+    })
+
 STDIO_MCP_SERVERS.append({
     'name': 'lxr',
     'source': 'github.com/BNLNPPS/lxr-mcp-server',
@@ -144,7 +184,7 @@ STDIO_MCP_SERVERS.append({
 STDIO_MCP_SERVERS.append({
     'name': 'jlab-rucio',
     'prefix': 'jlab_rucio_',
-    'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
+    'source': 'github.com/eic/rucio-eic-mcp-server',
     'command': [
         os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
                      'swf-testbed/.venv/bin/python'),
@@ -171,7 +211,7 @@ STDIO_MCP_SERVERS.append({
 STDIO_MCP_SERVERS.append({
     'name': 'bnl-rucio',
     'prefix': 'bnl_rucio_',
-    'source': 'github.com/BNLNPPS/rucio-eic-mcp-server',
+    'source': 'github.com/eic/rucio-eic-mcp-server',
     'command': [
         os.path.join(os.environ.get('SWF_HOME', '/data/wenauseic/github'),
                      'swf-testbed/.venv/bin/python'),
@@ -398,8 +438,9 @@ def _load_system_preamble():
 class MCPClient:
     """Minimal MCP client using HTTP POST only — no SSE, no GET streams."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, token: str = ""):
         self.url = url
+        self.token = token
         self.session_id = None
         self._request_id = 0
         self._http = httpx.AsyncClient(timeout=60)
@@ -410,6 +451,8 @@ class MCPClient:
         if params:
             body["params"] = params
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         if self.session_id:
             headers["Mcp-Session-Id"] = self.session_id
         resp = await self._http.post(self.url, json=body, headers=headers)
@@ -613,6 +656,7 @@ class PandaBot:
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
         self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
         self.mcp_url = MCP_URL
+        self.mcp_bearer_token = MCP_BEARER_TOKEN
 
         self.claude = anthropic.AsyncAnthropic()
 
@@ -760,7 +804,10 @@ class PandaBot:
                 await client.initialize()
                 tools = await client.list_tools()
                 prefix = cfg.get('prefix', '')
+                exclude_tools = set(cfg.get('exclude_tools', []))
                 for t in tools:
+                    if t["name"] in exclude_tools:
+                        continue
                     at = mcp_tool_to_anthropic(t)
                     original_name = at["name"]
                     if prefix:
@@ -805,7 +852,7 @@ class PandaBot:
         on relevance rather than loaded all at once.
         """
         # 1. HTTP MCP server (Django — PanDA, PCS, memory tools)
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
             tools = await mcp.list_tools()
@@ -835,7 +882,10 @@ class PandaBot:
                 await client.initialize()
                 tools = await client.list_tools()
                 prefix = server_cfg.get('prefix', '')
+                exclude_tools = set(server_cfg.get('exclude_tools', []))
                 for t in tools:
+                    if t["name"] in exclude_tools:
+                        continue
                     at = mcp_tool_to_anthropic(t)
                     original_name = at["name"]
                     if prefix:
@@ -865,12 +915,85 @@ class PandaBot:
         if err:
             logger.warning(f"DocSearch init deferred: {err}")
 
-        # 4. Build semantic index with server-prefixed names for domain separation.
+        # 4. Register corun callback subscription if corun access is configured.
+        await self._ensure_corun_subscription()
+
+        # 5. Build semantic index with server-prefixed names for domain separation.
         # "github:get_job_logs" vs "panda:panda_list_jobs" gives the embedding
         # model semantic context to distinguish CI jobs from PanDA jobs.
         self._tool_selector.build_index(self._tool_registry, self._tool_server_map)
 
         logger.info(f"Total tools in registry: {len(self._tool_registry)}")
+
+    async def _ensure_corun_subscription(self):
+        """Ensure corun posts terminal job notifications to swf-monitor."""
+        token = os.environ.get('CORUN_API_TOKEN')
+        if not token:
+            return
+
+        if not CORUN_CALLBACK_URL.startswith('https://'):
+            logger.warning(
+                "Skipping corun subscription: CORUN_CALLBACK_URL must be https"
+            )
+            return
+
+        base = CORUN_BASE_URL.rstrip('/')
+        url = f"{base}/api/v1/notification-subscriptions/"
+        headers = {
+            'Authorization': f'Token {token}',
+            'Content-Type': 'application/json',
+        }
+        body = {
+            'name': CORUN_SUBSCRIPTION_NAME,
+            'callback_url': CORUN_CALLBACK_URL,
+            'status': 'active',
+            'data': {
+                'client': 'swf-monitor-pandabot',
+                'channel': os.environ.get('MATTERMOST_CHANNEL', 'pandabot'),
+            },
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                subscriptions = resp.json()
+                existing = next(
+                    (
+                        item for item in subscriptions
+                        if item.get('name') == CORUN_SUBSCRIPTION_NAME
+                    ),
+                    None,
+                )
+                if existing:
+                    needs_update = (
+                        existing.get('callback_url') != CORUN_CALLBACK_URL
+                        or existing.get('status') != 'active'
+                    )
+                    if needs_update:
+                        patch_url = f"{url}{existing['id']}/"
+                        patch_resp = await client.patch(
+                            patch_url, headers=headers, json=body
+                        )
+                        patch_resp.raise_for_status()
+                        logger.info(
+                            "Updated corun notification subscription %s",
+                            CORUN_SUBSCRIPTION_NAME,
+                        )
+                    else:
+                        logger.info(
+                            "Corun notification subscription %s already active",
+                            CORUN_SUBSCRIPTION_NAME,
+                        )
+                else:
+                    create_resp = await client.post(url, headers=headers, json=body)
+                    create_resp.raise_for_status()
+                    logger.info(
+                        "Created corun notification subscription %s",
+                        CORUN_SUBSCRIPTION_NAME,
+                    )
+        except Exception:
+            logger.exception("Failed to ensure corun notification subscription")
 
     def _build_tool_catalog(self):
         """One-liner catalog of all tools for the system prompt."""
@@ -902,6 +1025,8 @@ class PandaBot:
                        'pwg', 'jlab', 'jefferson'),
         'bnl-rucio': ('bnl rucio', 'brookhaven rucio', 'nprucio', 'panda rucio',
                       'bnl did', 'bnl dataset', 'bnl replica'),
+        'corun': ('corun', 'codoc', 'documentation page', 'doc page',
+                  'generate page', 'generated page', 'prompt', 'section'),
     }
 
     def _extract_thread_tool_history(self, thread_context: str | None) -> tuple[set[str], set[str]]:
@@ -1000,7 +1125,7 @@ class PandaBot:
 
     async def _load_recent_dialog(self):
         """Load recent dialog from the database — all users, all contexts."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         messages = []
         try:
             await mcp.initialize()
@@ -1029,7 +1154,7 @@ class PandaBot:
 
     async def _record_exchange(self, question, answer, post_id='', root_id=''):
         """Record a Q&A exchange to the unified memory."""
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
             for role, content in [('user', question), ('assistant', answer)]:
@@ -1169,7 +1294,7 @@ class PandaBot:
             logger.debug(f"Skipping system message type={post_type}")
             return
 
-        # Accept: our channel, a DM, an @mention, or a thread we're in
+        # Accept: our bot channel, a DM, an @mention, or a thread we're in.
         is_our_channel = (post_channel == self.channel_id)
         is_dm = (channel_type == 'D')
         mentions_str = data.get('mentions', '')
@@ -1198,33 +1323,94 @@ class PandaBot:
         source = 'DM' if is_dm else ('mention' if is_mention and not is_our_channel else 'channel')
         logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
-        asyncio.create_task(self._respond(tagged_message, post_channel, post_id, root_id))
+        direct_addressed = is_dm or is_mention
+        asyncio.create_task(
+            self._respond(
+                tagged_message, post_channel, post_id, root_id,
+                direct_addressed=direct_addressed,
+            )
+        )
 
-    async def _respond(self, tagged_message, reply_channel, post_id, root_id):
+    async def _respond(
+        self, tagged_message, reply_channel, post_id, root_id,
+        direct_addressed=False,
+    ):
         """Process any message — channel, DM, or mention.
 
         Loads recent dialog from DB, runs Claude, records the exchange.
         Serialized via lock so recordings don't interleave.
         """
         async with self._respond_lock:
-            messages = await self._load_recent_dialog()
-            reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
-            # Strip any tool metadata Haiku echoed from conversation history
-            reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
-            no_query_warn = ":warning: *This response was not based on a live data query.*"
-            no_cite_warn = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
-            reply = reply.replace(no_query_warn, "").replace(no_cite_warn, "").rstrip()
-            if not dpid_verified and not reply.startswith("Sorry,"):
-                reply += "\n\n" + (no_cite_warn if tool_meta['used'] else no_query_warn)
-            # Append tool selection metadata only when tools were used
-            if tool_meta['used']:
-                suggested = ', '.join(tool_meta['suggested']) or 'none'
-                used = ', '.join(tool_meta['used'])
-                reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
-            # Record inside lock so the next load sees this exchange
-            await self._record_exchange(tagged_message, reply, post_id, root_id)
+            try:
+                messages = await self._load_recent_dialog()
+                reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
+                reply = self._clean_reply_boilerplate(reply)
+                reply, force_thread_reply = self._extract_thread_reply_directive(reply)
+                if (
+                    not (direct_addressed and len(reply.strip()) > 20)
+                    and self._is_silent_reply(reply)
+                ):
+                    logger.info(
+                        "PanDA bot chose silence; not posting reply marker: %r",
+                        reply,
+                    )
+                    return
+                if not dpid_verified and not reply.startswith("Sorry,"):
+                    reply += "\n\n" + (NO_CITE_WARN if tool_meta['used'] else NO_QUERY_WARN)
+                # Append tool selection metadata only when tools were used
+                if tool_meta['used']:
+                    suggested = ', '.join(tool_meta['suggested']) or 'none'
+                    used = ', '.join(tool_meta['used'])
+                    reply += f"\n\n*(tools suggested: {suggested})*\n*(tools used: {used})*"
+                # Record inside lock so the next load sees this exchange
+                await self._record_exchange(tagged_message, reply, post_id, root_id)
+            except Exception:
+                logger.exception("PanDA bot response task failed")
+                reply = (
+                    "Sorry, I hit an internal error while processing this "
+                    "message. The exception was logged."
+                )
+                force_thread_reply = False
 
-        await self._post_reply(reply, reply_channel, post_id, root_id)
+        reply_root_id = root_id
+        if force_thread_reply and not root_id and reply_channel == self.channel_id:
+            reply_root_id = post_id
+        await self._post_reply(reply, reply_channel, reply_root_id)
+
+    @staticmethod
+    def _clean_reply_boilerplate(reply: str) -> str:
+        """Remove bot-managed footers Haiku may echo from recent dialog."""
+        reply = reply or ''
+        reply = reply.replace(NO_QUERY_WARN, "").replace(NO_CITE_WARN, "")
+        reply = re.sub(r'\n*\*?\(tools (?:suggested|used):[^)]*\)\*?', '', reply)
+        return reply.rstrip()
+
+    @staticmethod
+    def _is_silent_reply(reply: str) -> bool:
+        """True when the LLM intentionally chose not to post in Mattermost."""
+        raw = reply.strip()
+        if re.fullmatch(r'[\(\[\{<][^)\]\}>]{1,200}[\)\]\}>]', raw):
+            return True
+        text = re.sub(r'[^a-z0-9]+', ' ', raw.lower())
+        words = set(text.split())
+        if len(raw) > 200:
+            return False
+        return (
+            not words
+            or 'silence' in text
+            or 'silent' in words
+            or 'listen' in text
+            or ('not' in words and 'speaking' in words)
+            or 'no response' in text
+        )
+
+    @staticmethod
+    def _extract_thread_reply_directive(reply: str) -> tuple[str, bool]:
+        """Strip the model's marker for optional thread-only commentary."""
+        text = reply.lstrip()
+        if not text.startswith(THREAD_REPLY_MARKER):
+            return reply, False
+        return text[len(THREAD_REPLY_MARKER):].lstrip('\r\n '), True
 
     async def _render_plot(self, code):
         """Execute matplotlib code and return the PNG path, or None on failure."""
@@ -1273,7 +1459,7 @@ class PandaBot:
                 logger.exception("Plot execution failed")
                 return None
 
-    async def _post_reply(self, reply, reply_channel, post_id, root_id):
+    async def _post_reply(self, reply, reply_channel, root_id):
         # Extract and render any plot code blocks (python-plot tag, or python with savefig)
         file_ids = []
         plot_match = re.search(r'```python-plot\s*\n(.*?)```', reply, re.DOTALL)
@@ -1309,23 +1495,26 @@ class PandaBot:
         if len(reply) > MM_POST_LIMIT:
             reply = reply[:MM_POST_LIMIT - 20] + '\n\n... (truncated)'
 
-        thread_root = root_id or post_id
+        # Reply where you were spoken to. Main-channel comments may be routed to
+        # a thread when the model explicitly marks them as commentary.
         try:
             logger.info("Posting reply to Mattermost...")
             post_options = {
                 'channel_id': reply_channel,
                 'message': reply,
-                'root_id': thread_root,
             }
+            if root_id:
+                post_options['root_id'] = root_id
             if file_ids:
                 post_options['file_ids'] = file_ids
             await asyncio.to_thread(
                 self.driver.posts.create_post,
                 options=post_options,
             )
-            # Track this thread so we respond to follow-ups (persisted)
-            if thread_root not in self._active_threads:
-                self._active_threads.add(thread_root)
+            # Track the thread (if any) so follow-ups engage without re-@mention.
+            # Main-channel replies aren't tracked — users re-engage by @mentioning.
+            if root_id and root_id not in self._active_threads:
+                self._active_threads.add(root_id)
                 await asyncio.to_thread(self._save_active_threads)
             logger.info("Reply posted successfully")
         except Exception:
@@ -1352,8 +1541,10 @@ class PandaBot:
 
         reply = "Sorry, I encountered an error processing your question."
         exchange_dpids = []  # DPIDs generated in this exchange
+        suggested_names = []
+        tools_used = []
 
-        mcp = MCPClient(self.mcp_url)
+        mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
             await mcp.initialize()
 
@@ -1371,7 +1562,6 @@ class PandaBot:
             suggested_names = [
                 f"{name}:{score:.2f}" for name, score in scored
             ]
-            tools_used = []
             logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
             system = self._build_system_prompt()

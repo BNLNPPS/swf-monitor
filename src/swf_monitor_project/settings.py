@@ -72,6 +72,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.humanize",  # intcomma / filesizeformat / naturaltime for swf_fmt
     "pcs",  # Physics Configuration System
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "django_dbml",  # For schema diagram generation
@@ -262,10 +263,16 @@ AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
 AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
 AUTH0_ALGORITHMS = ["RS256"]
 
-# Django MCP Server configuration
-DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "name": "swf-testbed",
-    "instructions": """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
+# MCP server identity. These constants are the single source of truth for
+# both the live django-mcp-server config below and the FastMCP candidate
+# being stood up in the migration to swf_monitor_project.mcp_asgi. See
+# docs/MCP_FASTMCP_MIGRATION_PLAN.md.
+#
+# Name MUST remain "swf-testbed": clients hardcode it in .mcp.json and in
+# Claude Code permission strings like mcp__swf-monitor__*.
+MCP_SERVER_NAME = "swf-testbed"
+
+MCP_SERVER_INSTRUCTIONS = """Streaming workflow orchestration testbed for the ePIC experiment at the Electron Ion Collider.
 
 KEY CONCEPTS:
 - Namespaces: Isolation boundaries for different users' workflow runs (e.g., 'torre1', 'wenauseic')
@@ -301,6 +308,20 @@ COMMON QUERIES:
 - Photoproduction tags? → pcs_search_tags(query='photoproduction')
 - DIS tags? → pcs_list_tags(tag_type='p', category='DIS')
 - Tags using pythia8? → pcs_search_tags(query='pythia8')
+- List PCS Datasets? → pcs_dataset_list()
+- External EVGEN datasets? → pcs_dataset_list(stage='evgen', source_kind='csv_manifest')
+- One Dataset by DID? → pcs_dataset_get(did='group.EIC:...b1')
+- Register an external EVGEN CSV manifest? → pcs_dataset_intake(source_location='path/to/input.csv', physics_tag='p1001', evgen_tag='e1', simu_tag='s1', reco_tag='r1', detector_version='26.02.0', detector_config='epic_craterlake')
+- List ProdTasks? → pcs_prodtask_list()
+- Tasks awaiting submission? → pcs_prodtask_list(status='ready')
+- Submitted tasks? → pcs_prodtask_list(status='submitted')
+- One task in detail? → pcs_prodtask_get(name='group.EIC.26.02.0...')
+- Get the JEDI taskParamMap? → pcs_prodtask_artifact(name='...', fmt='jedi')
+- Intake a draft task from a GitHub issue? → pcs_prodtask_intake(public_catalog_issue=42, name='...', dataset='...', prod_config='...')
+- Update a task on re-intake? → pcs_prodtask_intake(public_catalog_issue=42, public_catalog_pr=99) (idempotent on issue)
+- Link an input Dataset? → pcs_prodtask_link_input(task_name='...', did='group.EIC.evgen:...b1')
+- Mark a task ready for submission? → pcs_prodtask_set_status(task_name='...', status='ready')
+- Submission itself is not on MCP: operator runs `pcs-task-cmd <name> --submit` locally with their PanDA auth context.
 
 PCS (Physics Configuration System):
 PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are
@@ -321,11 +342,14 @@ FILTERING:
 - Status filters are case-insensitive
 - Context cascades: run_number → stf_filename → tf_filename
 
-Use swf_list_available_tools() to see all available tools with descriptions.""",
-}
+Use swf_list_available_tools() to see all available tools with descriptions."""
 
-# MCP endpoint path (empty string since we mount at /mcp/ in urls.py)
-DJANGO_MCP_ENDPOINT = ""
+# Bearer token for the FastMCP ASGI service. Read from production.env in
+# deployments. Empty default keeps Phase 1 candidate (no env set) returning
+# 503 "MCP token not configured" rather than letting unauthenticated
+# requests through; the operational token is generated and installed as
+# part of Phase 2 step 11.
+MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
 
 # MCP authentication - start with no auth for development, enable OAuth2 for production
 # DJANGO_MCP_AUTHENTICATION_CLASSES = [
@@ -420,6 +444,20 @@ else:
             'django': {
                 'handlers': ['console'],
                 'level': os.getenv('DJANGO_LOG_LEVEL', 'INFO'),
+                'propagate': False,
+            },
+            # Django's default django.request logger sends uncaught view
+            # exceptions to mail_admins — silently dropped when ADMINS is
+            # empty. Force them onto console+db so 5xx leaves a trail.
+            'django.request': {
+                'handlers': ['console', 'db'],
+                'level': 'ERROR',
+                'propagate': False,
+            },
+            # Same for django.security — Django default also mail_admins only.
+            'django.security': {
+                'handlers': ['console', 'db'],
+                'level': 'ERROR',
                 'propagate': False,
             },
             'monitor_app': {

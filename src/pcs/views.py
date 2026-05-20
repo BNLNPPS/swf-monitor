@@ -6,20 +6,110 @@ Tag list views use server-side DataTables via monitor_app._datatable_base.html.
 Read operations are public; create/edit/lock require login.
 """
 import json
+from functools import wraps
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.http import JsonResponse
 from django.contrib import messages
-from django.db.models import Count
+from django.db.models import Count, Q
+
+
+# ---------------------------------------------------------------------------
+# Auth / method-guard decorators that flash instead of silently redirecting.
+# Project-wide NO-SILENT-FAILURES rule: an action-button click that hits a
+# guard must tell the user what happened, never just refresh the page.
+# ---------------------------------------------------------------------------
+
+def _login_required_flash(view):
+    """Like @login_required but flashes an explicit error before the redirect."""
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            messages.error(request, 'Sign in required for this action.')
+            return redirect(f"{reverse('login')}?next={request.get_full_path()}")
+        return view(request, *args, **kwargs)
+    return wrapped
+
+
+def _post_only_redirect(request, fallback_url, action_label='This action'):
+    """Helper used by POST-only views: flash a warning, redirect to fallback.
+
+    Use at the top of any POST-only handler instead of a bare
+    ``if request.method != 'POST': return redirect(...)`` block.
+    """
+    messages.warning(request, f'{action_label} only responds to POST submissions.')
+    return redirect(fallback_url)
 
 from monitor_app.utils import DataTablesProcessor, get_filter_params, format_datetime
 
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
     Dataset, ProdConfig, ProdTask,
+    Campaign, ProdRequest,
+    PRODTASK_STATUS_CHOICES,
 )
+
+# Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
+# surfaces these plus any distinct values already in the DB.
+REQUESTOR_SEED_OPTIONS = (
+    'DIS', 'SIDIS', 'EXCLUSIVE', 'JET', 'HF', 'EW', 'BSM',
+    'TRACKING-DSC', 'CALORIMETRY-DSC', 'PID-DSC',
+)
+
+
+def _requestor_options():
+    """Distinct existing requestors ∪ seed options, sorted."""
+    from itertools import chain
+    seen = set(chain(
+        ProdRequest.objects.exclude(requestor='').values_list('requestor', flat=True),
+        ProdTask.objects.exclude(requestor='').values_list('requestor', flat=True),
+        REQUESTOR_SEED_OPTIONS,
+    ))
+    return sorted(seen)
+
+
+def _parse_catalog_filters(request):
+    """Parse catalog filter query params into a dict of clean values."""
+    return {
+        'q': (request.GET.get('q') or '').strip(),
+        'status': (request.GET.get('status') or '').strip(),
+        'requestor': (request.GET.get('requestor') or '').strip(),
+        'submission_path': (request.GET.get('submission_path') or '').strip(),
+        'pre_tdr_use': request.GET.get('pre_tdr_use') == '1',
+        'early_science_use': request.GET.get('early_science_use') == '1',
+        'other_use': request.GET.get('other_use') == '1',
+    }
+
+
+def _apply_catalog_filters(qs, filters):
+    """Apply a parsed-filters dict to a ProdTask queryset."""
+    if filters['q']:
+        qs = qs.filter(Q(name__icontains=filters['q'])
+                       | Q(description__icontains=filters['q']))
+    if filters['status']:
+        qs = qs.filter(status=filters['status'])
+    if filters['requestor']:
+        qs = qs.filter(requestor=filters['requestor'])
+    if filters['submission_path']:
+        # submission_path lives in ProdConfig.data JSON; default 'condor'
+        if filters['submission_path'] == 'condor':
+            # Match rows where data is null/missing the key (default) OR key='condor'
+            qs = qs.filter(
+                Q(prod_config__data__submission_path='condor')
+                | Q(prod_config__data__submission_path__isnull=True)
+                | Q(prod_config__data__isnull=True)
+            )
+        else:
+            qs = qs.filter(prod_config__data__submission_path=filters['submission_path'])
+    if filters['pre_tdr_use']:
+        qs = qs.filter(pre_tdr_use=True)
+    if filters['early_science_use']:
+        qs = qs.filter(early_science_use=True)
+    if filters['other_use']:
+        qs = qs.filter(other_use=True)
+    return qs
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
@@ -49,7 +139,7 @@ def physics_categories_list(request):
     return render(request, 'pcs/physics_categories_list.html', {'categories': categories})
 
 
-@login_required
+@_login_required_flash
 def physics_category_create(request):
     if request.method == 'POST':
         form = PhysicsCategoryForm(request.POST)
@@ -187,7 +277,7 @@ def tag_detail(request, tag_type, tag_number):
     return render(request, 'pcs/tag_detail.html', context)
 
 
-@login_required
+@_login_required_flash
 def tag_create(request, tag_type):
     schema = TAG_SCHEMAS[tag_type]
 
@@ -367,10 +457,12 @@ def param_defs_api(request, tag_type):
     return JsonResponse({'error': 'Method not allowed'}, status=405)
 
 
-@login_required
+@_login_required_flash
 def tag_delete(request, tag_type, tag_number):
     if request.method != 'POST':
-        return redirect('pcs:tag_compose', tag_type=tag_type)
+        return _post_only_redirect(
+            request, reverse('pcs:tag_compose', kwargs={'tag_type': tag_type}),
+            action_label='Tag delete')
     model = TAG_MODELS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
     if tag.status == 'locked':
@@ -385,12 +477,12 @@ def tag_delete(request, tag_type, tag_number):
     return redirect('pcs:tag_compose', tag_type=tag_type)
 
 
-@login_required
+@_login_required_flash
 def tag_lock(request, tag_type, tag_number):
     compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
     selected_url = f'{compose_url}?selected={tag_number}'
     if request.method != 'POST':
-        return redirect(selected_url)
+        return _post_only_redirect(request, selected_url, action_label='Tag lock')
     model = TAG_MODELS[tag_type]
     tag = get_object_or_404(model, tag_number=tag_number)
     if tag.created_by != request.user.username:
@@ -404,7 +496,7 @@ def tag_lock(request, tag_type, tag_number):
     return redirect(selected_url)
 
 
-@login_required
+@_login_required_flash
 def tag_edit(request, tag_type, tag_number):
     model = TAG_MODELS[tag_type]
     schema = TAG_SCHEMAS[tag_type]
@@ -472,6 +564,7 @@ def datasets_compose(request):
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
                 description=cd.get('description', ''),
+                metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
             )
             ds.save()
@@ -594,14 +687,34 @@ def dataset_detail(request, pk):
         pk=pk,
     )
     blocks = Dataset.objects.filter(dataset_name=dataset.dataset_name).order_by('block_num')
+
+    # Reverse references — tasks that use this dataset and in what role.
+    # Output: legacy FK or override list contains DID. Input: legacy single
+    # override or list contains DID. Intermediate: list only.
+    did = dataset.did
+    output_tasks = (ProdTask.objects
+                    .filter(Q(dataset=dataset)
+                            | Q(overrides__output_dataset_dids__contains=[did]))
+                    .distinct().order_by('name'))
+    input_tasks = (ProdTask.objects
+                   .filter(Q(overrides__input_dataset_did=did)
+                           | Q(overrides__input_dataset_dids__contains=[did]))
+                   .distinct().order_by('name'))
+    intermediate_tasks = (ProdTask.objects
+                          .filter(overrides__intermediate_dataset_dids__contains=[did])
+                          .order_by('name'))
+
     context = {
         'dataset': dataset,
         'blocks': blocks,
+        'output_tasks': output_tasks,
+        'input_tasks': input_tasks,
+        'intermediate_tasks': intermediate_tasks,
     }
     return render(request, 'pcs/dataset_detail.html', context)
 
 
-@login_required
+@_login_required_flash
 def dataset_create(request):
     if request.method == 'POST':
         form = DatasetForm(request.POST)
@@ -616,6 +729,7 @@ def dataset_create(request):
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
                 description=cd.get('description', ''),
+                metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
             )
             ds.save()
@@ -626,10 +740,12 @@ def dataset_create(request):
     return render(request, 'pcs/dataset_create.html', {'form': form})
 
 
-@login_required
+@_login_required_flash
 def dataset_add_block(request, pk):
     if request.method != 'POST':
-        return redirect('pcs:dataset_detail', pk=pk)
+        return _post_only_redirect(
+            request, reverse('pcs:dataset_detail', kwargs={'pk': pk}),
+            action_label='Add-block')
     dataset = get_object_or_404(Dataset, pk=pk)
     new_block_num = dataset.blocks + 1
     Dataset.objects.filter(dataset_name=dataset.dataset_name).update(blocks=new_block_num)
@@ -761,7 +877,7 @@ def prod_config_detail(request, pk):
     return render(request, 'pcs/prod_config_detail.html', {'config': config})
 
 
-@login_required
+@_login_required_flash
 def prod_config_create(request):
     if request.method == 'POST':
         form = ProdConfigForm(request.POST)
@@ -774,7 +890,7 @@ def prod_config_create(request):
     return render(request, 'pcs/prod_config_form.html', {'form': form})
 
 
-@login_required
+@_login_required_flash
 def prod_config_edit(request, pk):
     config = get_object_or_404(ProdConfig, pk=pk)
     if request.method == 'POST':
@@ -791,6 +907,424 @@ def prod_config_edit(request, pk):
 # ── Production Tasks ─────────────────────────────────────────────
 
 TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
+
+
+LIFECYCLE_KEYS = ('past', 'last', 'current', 'future')
+
+
+@_login_required_flash
+def pcs_catalog_csv_update(request):
+    """POST handler for the 'Update from CSV' button on the catalog.
+
+    Runs the default-datasets CSV import service and redirects back to
+    the catalog with a flash summary. POST-only.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update from CSV')
+    from .services import import_default_datasets_csv, ServiceError
+    try:
+        summary = import_default_datasets_csv(
+            created_by=getattr(request.user, 'username', '') or 'csv_import',
+        )
+    except (ServiceError, FileNotFoundError, OSError) as e:
+        messages.error(request, f'CSV import failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog'))
+    msg = (f'CSV import: {summary["created"]} new, '
+           f'{summary["updated"]} updated, '
+           f'{len(summary["errors"])} errors '
+           f'(of {summary["rows"]} rows)')
+    if summary['errors']:
+        messages.warning(request, msg)
+    else:
+        messages.success(request, msg)
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_set_current(request):
+    """POST handler for the 'Make current' button.
+
+    Renames the existing PCS lifecycle='current' Campaign to whatever
+    target the operator selected on the banner. AI never auto-flips
+    this — humans switch.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Make current')
+    target = (request.POST.get('name') or '').strip()
+    from .services import (rename_pcs_current_campaign,
+                           import_jlab_rucio_current_snapshot, ServiceError)
+    try:
+        result = rename_pcs_current_campaign(
+            target,
+            created_by=getattr(request.user, 'username', '') or 'operator',
+        )
+    except ServiceError as e:
+        messages.error(request, f'Switch failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog'))
+    if not result.get('changed'):
+        messages.info(request, f"PCS current campaign already {target}.")
+        return redirect(reverse('pcs:pcs_catalog'))
+    # Pull the snapshot for the new current as part of the same click —
+    # operator already consented by clicking 'Make current'; no point
+    # making them hunt for 'Update from Rucio' next.
+    try:
+        snap = import_jlab_rucio_current_snapshot(
+            created_by=getattr(request.user, 'username', '') or 'operator',
+        )
+        counts = ', '.join(f'{k}={v}' for k, v in snap['paths'].items())
+        messages.success(
+            request,
+            f"PCS current: {result['old_name']} -> {result['name']}. "
+            f"Snapshot pulled: {counts}. {len(snap['errors'])} errors.")
+    except (ServiceError, OSError) as e:
+        messages.warning(
+            request,
+            f"PCS current renamed to {result['name']} but snapshot pull "
+            f"failed: {e}. Click 'Update from Rucio' to retry.")
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_set_last(request):
+    """POST handler for 'Make last' button (Last tab selector).
+
+    Sets the PCS lifecycle='last' Campaign to the named release and
+    pulls its Rucio snapshot in the same click.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog') + '?lifecycle=last',
+            action_label='Make last')
+    target = (request.POST.get('name') or '').strip()
+    from .services import (set_pcs_campaign_lifecycle,
+                           import_jlab_rucio_current_snapshot, ServiceError)
+    try:
+        result = set_pcs_campaign_lifecycle(
+            target, 'last',
+            created_by=getattr(request.user, 'username', '') or 'operator')
+    except ServiceError as e:
+        messages.error(request, f'Make last failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=last')
+    try:
+        snap = import_jlab_rucio_current_snapshot(
+            campaign_name=target,
+            created_by=getattr(request.user, 'username', '') or 'operator')
+        counts = ', '.join(f'{k}={v}' for k, v in snap['paths'].items())
+        messages.success(
+            request,
+            f"PCS last set to {result['name']}. Snapshot: {counts}.")
+    except (ServiceError, OSError) as e:
+        messages.warning(
+            request,
+            f"PCS last set to {result['name']} but snapshot pull failed: {e}")
+    return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=last')
+
+
+@_login_required_flash
+def pcs_catalog_rucio_update(request):
+    """POST handler for 'Update from Rucio' button on the catalog.
+
+    Pulls the JLab Rucio snapshot for the current PCS campaign
+    (both /RECO/<v>/* and /FULL/<v>/* under scope=epic) and writes
+    a JSON file under the snapshot directory. Redirects back to
+    the catalog with a flash summary. POST-only.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update from Rucio')
+    from .services import import_jlab_rucio_current_snapshot, ServiceError
+    user = getattr(request.user, 'username', '') or 'rucio_snapshot'
+    # Pull snapshots for both the current and (when set) the last
+    # campaign in one click — operator already consented to a refresh.
+    targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
+                   .order_by('lifecycle'))
+    if not targets:
+        messages.error(request, 'No current Campaign defined in PCS.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    summaries, overall_errors = [], []
+    for camp in targets:
+        try:
+            summaries.append(import_jlab_rucio_current_snapshot(
+                campaign_name=camp.name, created_by=user))
+        except (ServiceError, OSError) as e:
+            overall_errors.append(f'{camp.lifecycle} {camp.name}: {e}')
+    parts = [
+        f"{s['campaign']} (" + ', '.join(f'{k}={v}' for k, v in s['paths'].items()) + ')'
+        for s in summaries
+    ]
+    msg = 'JLab Rucio snapshot: ' + ' | '.join(parts) if parts else 'no snapshot pulled'
+    if overall_errors:
+        msg += ' | errors: ' + '; '.join(overall_errors)
+        messages.warning(request, msg)
+    else:
+        messages.success(request, msg)
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_past_update(request):
+    """POST handler for the 'Update from epic-prod' button on the Past tab.
+
+    Runs the past-campaign output ingest (FULL + RECO 2026 versions from
+    the cloned epic-prod docs tree) and redirects back to the catalog
+    Past view with a flash summary. POST-only.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request,
+            reverse('pcs:pcs_catalog') + '?lifecycle=past',
+            action_label='Update from epic-prod')
+    from .services import import_epic_prod_past_campaigns, ServiceError
+    try:
+        summary = import_epic_prod_past_campaigns(
+            created_by=getattr(request.user, 'username', '') or 'past_import',
+        )
+    except (ServiceError, FileNotFoundError, OSError) as e:
+        messages.error(request, f'Past-campaign import failed: {e}')
+        return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=past')
+    msg = (f'epic-prod past import: {summary["created"]} new, '
+           f'{summary["updated"]} updated, '
+           f'across {summary["campaigns"]} campaigns, '
+           f'{len(summary["errors"])} errors '
+           f'(of {summary["rows"]} rows)')
+    if summary['errors']:
+        messages.warning(request, msg)
+    else:
+        messages.success(request, msg)
+    return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=past')
+
+
+@_login_required_flash
+def pcs_catalog(request):
+    """Production Task Catalog — lifecycle-grouped task listing.
+
+    Authenticated-only: the page hosts action buttons (CSV refresh,
+    bulk actions, future per-task actions) whose POST handlers require
+    sign-in. Catching auth at the GET prevents the silent-fail trap
+    where an anonymous user sees buttons that quietly do nothing.
+    """
+    filters = _parse_catalog_filters(request)
+    active_lifecycle = (request.GET.get('lifecycle') or '').strip()
+    if active_lifecycle not in LIFECYCLE_KEYS:
+        active_lifecycle = 'current'
+
+    campaigns_by_lifecycle = {
+        k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
+        for k in LIFECYCLE_KEYS
+    }
+    lifecycle_tabs = [
+        {'key': 'past',    'label': 'Past',    'color': 'secondary',
+         'campaigns': campaigns_by_lifecycle['past']},
+        {'key': 'last',    'label': 'Last',    'color': 'last-green',
+         'campaigns': campaigns_by_lifecycle['last']},
+        {'key': 'current', 'label': 'Current', 'color': 'success',
+         'campaigns': campaigns_by_lifecycle['current']},
+        {'key': 'future',  'label': 'Future',  'color': 'primary',
+         'campaigns': campaigns_by_lifecycle['future']},
+    ]
+
+    # Past lifecycle: per-release view of output datasets. Each release
+    # is one SW version (e.g. 26.04.1) covering up to two stages
+    # (FULL=Simu, RECO=Reco). ?release=<v> picks one release; default is
+    # the most recent. ?release=all spans every past release; release=
+    # all_2025 / all_2026 spans that year. ?stage=FULL|RECO filters
+    # within the chosen release set.
+    #
+    # Last lifecycle reuses the same path with release pinned to the
+    # Last campaign's name (e.g. 26.04.1) and adds the Rucio timeline
+    # plot above the table — a hybrid of Past's row model and Current's
+    # snapshot view.
+    if active_lifecycle in ('past', 'last'):
+        past_campaigns = list(campaigns_by_lifecycle['past'])
+        # Time flows left to right; releases ordered ASC.
+        release_versions = sorted(
+            {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
+        )
+        def _version_year(v):
+            head = v.split('.', 1)[0]
+            return ('20' + head) if head.isdigit() and len(head) == 2 else ''
+        # {'2025': [versions...], '2026': [...]} in ASC release order.
+        releases_by_year = {}
+        for v in release_versions:
+            yr = _version_year(v)
+            if yr:
+                releases_by_year.setdefault(yr, []).append(v)
+        # Year groups listed newest-first (2026 then 2025) per Torre's
+        # preference; releases within each year stay ASC.
+        years_sorted = sorted(releases_by_year.keys(), reverse=True)
+
+        if active_lifecycle == 'last':
+            # Pin release to the Last campaign's version; no nav. The
+            # Last Campaign carries its version directly as its name
+            # (e.g. '26.04.1'); past campaigns for the same version are
+            # named 'FULL/26.04.1' and 'RECO/26.04.1'.
+            last_camps = campaigns_by_lifecycle['last']
+            active_release = last_camps[0].name if last_camps else ''
+        else:
+            requested_release = (request.GET.get('release') or '').strip()
+            if requested_release == 'all':
+                active_release = 'all'
+            elif (requested_release.startswith('all_')
+                  and requested_release[4:] in years_sorted):
+                active_release = requested_release
+            elif requested_release in release_versions:
+                active_release = requested_release
+            else:
+                # Default landing = most recent release (last in ASC).
+                active_release = release_versions[-1] if release_versions else ''
+
+        requested_stage = (request.GET.get('stage') or '').strip().upper()
+        active_stage = requested_stage if requested_stage in ('FULL', 'RECO') else ''
+
+        def in_release(c):
+            if active_release == 'all':
+                return True
+            if active_release.startswith('all_'):
+                year = active_release[4:]
+                versions = releases_by_year.get(year, [])
+                return any(c.name.endswith('/' + v) for v in versions)
+            return c.name.endswith('/' + active_release)
+        release_campaigns = [c for c in past_campaigns if in_release(c)]
+
+        def in_stage(c, s):
+            return c.name.startswith(s + '/')
+        selected_campaigns = [c for c in release_campaigns
+                              if not active_stage or in_stage(c, active_stage)]
+
+        # Stage-facet counts: number of past_output rows under each stage
+        # in the active release.
+        per_campaign_count = dict(
+            ProdTask.objects
+            .filter(campaign__in=release_campaigns, status='past_output')
+            .values_list('campaign__name')
+            .annotate(Count('id'))
+        )
+        def count_for(stage):
+            return sum(n for name, n in per_campaign_count.items()
+                       if name.startswith(stage + '/'))
+        stage_counts = {
+            'all':  sum(per_campaign_count.values()),
+            'FULL': count_for('FULL'),
+            'RECO': count_for('RECO'),
+        }
+
+        past_tasks = list(
+            ProdTask.objects
+            .select_related('campaign', 'dataset')
+            .filter(campaign__in=selected_campaigns, status='past_output')
+            .order_by('campaign__name', 'dataset__dataset_name')
+        )
+        agg_files = sum((c.data or {}).get('past_summary', {}).get('file_count', 0)
+                        for c in selected_campaigns)
+        agg_size = sum((c.data or {}).get('past_summary', {}).get('data_size_bytes', 0)
+                       for c in selected_campaigns)
+
+        # Year groups for the template's per-year nav blocks.
+        release_year_groups = [
+            {'year': yr, 'versions': releases_by_year[yr],
+             'all_key': f'all_{yr}'}
+            for yr in years_sorted
+        ]
+
+        # Last lifecycle add-on: Rucio snapshot/timeline + Make-last
+        # selector + unmatched details, layered on top of the
+        # past-style table.
+        rucio_timeline = None
+        rucio_unmatched = []
+        rucio_unmatched_campaign = ''
+        rucio_detected = []
+        rucio_current_name = ''
+        if active_lifecycle == 'last':
+            last_camps = campaigns_by_lifecycle['last']
+            target = last_camps[0] if last_camps else None
+            if target is not None:
+                from .services import load_rucio_snapshot, summarize_rucio_timeline
+                snap = load_rucio_snapshot(target.name)
+                if snap is not None:
+                    rucio_timeline = summarize_rucio_timeline(snap)
+                    rucio_timeline['campaign_name'] = target.name
+                rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
+                rucio_unmatched_campaign = target.name
+                rucio_detected = (target.data or {}).get('detected_releases', []) or []
+                rucio_current_name = target.name
+            else:
+                # No Last set yet — borrow detected releases from
+                # current so the operator has options to pick from.
+                cur = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
+                rucio_detected = (cur.data or {}).get('detected_releases', []) if cur else []
+                rucio_current_name = cur.name if cur else ''
+
+        return render(request, 'pcs/pcs_catalog_past.html', {
+            'show_tabs': True,
+            'active_lifecycle': active_lifecycle,
+            'lifecycle_tabs': lifecycle_tabs,
+            'release_versions': release_versions,
+            'release_year_groups': release_year_groups,
+            'active_release': active_release,
+            'active_stage': active_stage,
+            'stage_counts': stage_counts,
+            'selected_campaign_count': len(selected_campaigns),
+            'aggregate_file_count': agg_files,
+            'aggregate_data_size': agg_size,
+            'tasks': past_tasks,
+            'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
+            'rucio_unmatched': rucio_unmatched,
+            'rucio_unmatched_campaign': rucio_unmatched_campaign,
+            'rucio_detected': rucio_detected,
+            'rucio_current_name': rucio_current_name,
+        })
+
+    qs = ProdTask.objects.select_related(
+        'campaign', 'dataset', 'prod_config', 'request',
+    ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
+    qs = _apply_catalog_filters(qs, filters)
+
+    # Rucio arrivals timeline for the current campaign (when a snapshot
+    # exists). Surfaced at the top of the page as a Plotly chart.
+    rucio_timeline = None
+    rucio_unmatched = []
+    rucio_unmatched_campaign = ''
+    rucio_detected = []
+    rucio_current_name = ''
+    if active_lifecycle == 'current':
+        camp_list = campaigns_by_lifecycle['current']
+        target = camp_list[0] if camp_list else None
+        if target is not None:
+            from .services import load_rucio_snapshot, summarize_rucio_timeline
+            snap = load_rucio_snapshot(target.name)
+            if snap is not None:
+                rucio_timeline = summarize_rucio_timeline(snap)
+                rucio_timeline['campaign_name'] = target.name
+            rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
+            rucio_unmatched_campaign = target.name
+            rucio_detected = (target.data or {}).get('detected_releases', []) or []
+            rucio_current_name = target.name
+
+    context = {
+        'tasks': list(qs),
+        'show_tabs': True,
+        'columns_mode': 'full',
+        'active_lifecycle': active_lifecycle,
+        'lifecycle_tabs': lifecycle_tabs,
+        'active_campaigns': campaigns_by_lifecycle[active_lifecycle],
+        'focused_campaign': None,
+        'focused_task_id': None,
+        'filters': filters,
+        'requestor_options': _requestor_options(),
+        'status_choices': PRODTASK_STATUS_CHOICES,
+        'form_action': reverse('pcs:pcs_catalog'),
+        'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
+        'rucio_unmatched': rucio_unmatched,
+        'rucio_unmatched_campaign': rucio_unmatched_campaign,
+        'rucio_detected': rucio_detected,
+        'rucio_current_name': rucio_current_name,
+    }
+    return render(request, 'pcs/pcs_catalog.html', context)
 
 
 def prod_tasks_list(request):
@@ -881,6 +1415,12 @@ def prod_task_compose(request):
             'scope': ds.scope,
             'detector_version': ds.detector_version,
             'detector_config': ds.detector_config,
+            'stage': ds.stage,
+            'external': ds.is_external,
+            'source_kind': ds.source_kind,
+            'source_location': ds.source_location,
+            'validation_status': ds.validation_status,
+            'metadata': ds.metadata or {},
             'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description,
                             'parameters': ds.physics_tag.parameters},
             'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description,
@@ -950,20 +1490,48 @@ def prod_task_compose(request):
             'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
 
+    # Workbench left-panel task list: same partial-friendly shape the catalog
+    # uses, but scoped to one campaign. Default = the current campaign; if
+    # ?selected=<name> resolves to a task in a different campaign, scope
+    # follows that task's campaign so the workbench reflects what the user
+    # is focusing on (per EPICPROD_TASK_CATALOG.md §6).
+    selected_name = request.GET.get('selected') or None
+    focused_task = None
+    if selected_name:
+        focused_task = ProdTask.objects.select_related('campaign').filter(name=selected_name).first()
+    workbench_campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
+    if workbench_campaign is None:
+        workbench_campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+    workbench_tasks = []
+    if workbench_campaign is not None:
+        workbench_tasks = list(
+            ProdTask.objects
+            .select_related('campaign', 'dataset', 'prod_config', 'request')
+            .filter(campaign=workbench_campaign)
+            .order_by('dataset__dataset_name')
+        )
+
     context = {
         'datasets_json': json.dumps(datasets_data),
         'configs_json': json.dumps(configs_data),
         'tasks_json': json.dumps(tasks_data),
-        'selected_item_json': json.dumps(request.GET.get('selected') or None),
+        'selected_item_json': json.dumps(selected_name),
         'username': request.user.username if request.user.is_authenticated else '',
+        # Workbench left-panel context (consumed by _task_workbench_list.html):
+        'tasks': workbench_tasks,
+        'focused_task_id': focused_task.id if focused_task else None,
+        'focused_campaign': workbench_campaign,
+        'filters': {},
     }
     return render(request, 'pcs/prod_task_compose.html', context)
 
 
-@login_required
+@_login_required_flash
 def prod_task_delete(request, pk):
     if request.method != 'POST':
-        return redirect('pcs:prod_task_detail', pk=pk)
+        return _post_only_redirect(
+            request, reverse('pcs:prod_task_detail', kwargs={'pk': pk}),
+            action_label='Task delete')
     task = get_object_or_404(ProdTask, pk=pk)
     if task.status != 'draft':
         messages.error(request, "Only draft tasks can be deleted.")

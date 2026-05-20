@@ -187,6 +187,24 @@ All PCS endpoints are under `/pcs/api/`. See **[PCS documentation](PCS.md)** for
 - `GET/POST /pcs/api/prod-configs/` - List/create production configs
 - `GET/PATCH/DELETE /pcs/api/prod-configs/{id}/` - Get/update/delete production config
 
+### PanDA Production Monitoring
+
+Read-only JSON endpoints under `/swf-monitor/api/panda/` for external consumers (alarm engines, cron tools, dashboards) that need structured PanDA data without the MCP session/streaming protocol overhead. Response shape matches the `panda_*` MCP tools for consistency.
+
+- `GET /api/panda/tasks/` - List JEDI tasks with per-task job counts and cursor pagination
+  - Query params: `days` (default 7), `status`, `username` (supports `%`), `taskname` (supports `%`), `reqid`, `workinggroup`, `processingtype` (supports `%`), `limit` (default 50, max 200), `before_id` (cursor)
+  - Response: `{items, total_count, has_more, next_before_id, summary, filters}`
+  - Each task includes native JEDI fields (`failurerate`, `progress`, `status`, `taskname`, `username`, `workinggroup`, …) plus aggregated job counts:
+    - `nactive` — jobs in non-terminal states (`running`, `activated`, `starting`, `holding`, `transferring`, `merging`, etc.)
+    - `nfinished` — jobs with `jobstatus = 'finished'`
+    - `nfailed` — jobs with `jobstatus = 'failed'`
+    - Cancelled and closed jobs are excluded by design — alarms surface what operators don't know; they know when they cancel
+- `GET /api/panda/tasks/<jeditaskid>/` - Single task detail (same per-task schema as above)
+- `GET /api/panda/activity/` - Aggregate counts by task status and job status
+  - Query params: `days` (default 1), `username`, `site`, `workinggroup`
+
+Authentication: `TunnelAuthentication` (X-Remote-User via swf-remote proxy) + `SessionAuthentication` + `TokenAuthentication`. Localhost-direct requests without X-Remote-User auto-authenticate as `swf-remote-proxy`; matches the existing pattern used by PCS and other `/swf-monitor/api/` routes.
+
 ## Server-Sent Events (SSE) Streaming
 
 ### Overview

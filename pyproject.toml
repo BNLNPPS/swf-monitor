@@ -54,6 +54,9 @@ dependencies = [
     "anthropic>=0.40",
     "mattermostdriver>=7.3",
     "rucio-clients",
+    # MCP (official Python SDK) — explicit dep so Phase 3 removal of
+    # django-mcp-server doesn't drop it along with the transitive.
+    "mcp>=1.25.0",
 ]
 
 [project.optional-dependencies]
