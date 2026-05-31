@@ -63,8 +63,6 @@ else:
 INSTALLED_APPS = [
     "daphne",  # Add daphne for ASGI server
     "channels",  # Add channels for WebSocket support
-    # "mcp_app",  # Replaced by mcp_server (proper MCP spec implementation)
-    "mcp_server",  # django-mcp-server for Model Context Protocol
     "oauth2_provider",  # OAuth2 authentication for MCP
     "django.contrib.admin",
     "django.contrib.auth",
@@ -263,10 +261,8 @@ AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
 AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
 AUTH0_ALGORITHMS = ["RS256"]
 
-# MCP server identity. These constants are the single source of truth for
-# both the live django-mcp-server config below and the FastMCP candidate
-# being stood up in the migration to swf_monitor_project.mcp_asgi. See
-# docs/MCP_FASTMCP_MIGRATION_PLAN.md.
+# MCP server identity. Single source of truth for the FastMCP server hosted by
+# swf_monitor_project.mcp_asgi. See docs/MCP.md → Architecture.
 #
 # Name MUST remain "swf-testbed": clients hardcode it in .mcp.json and in
 # Claude Code permission strings like mcp__swf-monitor__*.
@@ -345,16 +341,11 @@ FILTERING:
 Use swf_list_available_tools() to see all available tools with descriptions."""
 
 # Bearer token for the FastMCP ASGI service. Read from production.env in
-# deployments. Empty default keeps Phase 1 candidate (no env set) returning
+# deployments. Empty default makes the server (no env set) return
 # 503 "MCP token not configured" rather than letting unauthenticated
-# requests through; the operational token is generated and installed as
-# part of Phase 2 step 11.
+# requests through; the operational token is generated and installed at
+# deploy time. Enforced by MCPRequestGuard in swf_monitor_project.mcp_asgi.
 MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
-
-# MCP authentication - start with no auth for development, enable OAuth2 for production
-# DJANGO_MCP_AUTHENTICATION_CLASSES = [
-#     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
-# ]
 
 # ActiveMQ Settings
 ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')

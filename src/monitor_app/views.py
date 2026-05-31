@@ -83,9 +83,6 @@ def mcp_health(request):
         "service": "swf-monitor-mcp-asgi",
         "pid": os.getpid(),
         "database": "ok" if db_ok else "error",
-        "mcp_stateless": bool(
-            django_settings.DJANGO_MCP_GLOBAL_SERVER_CONFIG.get("stateless")
-        ),
         "timestamp": timezone.now().isoformat(),
     }
     if error:

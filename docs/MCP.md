@@ -6,7 +6,7 @@ The SWF Monitor implements the [Model Context Protocol](https://modelcontextprot
 
 **Endpoint:** `/swf-monitor/mcp/`
 
-**Package:** [django-mcp-server](https://github.com/omarbenhamid/django-mcp-server)
+**Server:** FastMCP, from the official [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp`), hosted by a standalone Starlette ASGI app. (django-mcp-server was retired; see Architecture.)
 
 ## Design Philosophy
 
@@ -866,12 +866,14 @@ swf-monitor/
 │   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
 │   │   └── views.py                        # OAuth protected resource metadata
 │   └── swf_monitor_project/
+│       ├── mcp_asgi.py                     # Standalone Starlette ASGI app: FastMCP host + MCPRequestGuard
 │       ├── settings.py                     # Server config, Auth0 settings
 │       └── urls.py                         # Route registration (/mcp/, /.well-known/)
 ```
 
 | File | Purpose |
 |------|---------|
+| `src/swf_monitor_project/mcp_asgi.py` | **ASGI entrypoint** - Starlette app hosting the FastMCP server, with `MCPRequestGuard` (bearer token, POST-only, `/health`) |
 | `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, common.py) |
 | `src/monitor_app/panda/bot.py` | **PanDA Mattermost bot** - MCP client using HTTP POST, Claude Haiku for responses |
 | `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
@@ -882,18 +884,19 @@ swf-monitor/
 
 ### Architecture
 
-MCP is integrated directly into Django rather than as a separate service, but the `/mcp/` endpoint is served by a **separate ASGI worker** (uvicorn) fronted by Apache `ProxyPass`. The rest of swf-monitor stays on mod_wsgi. MCP is operated here as stateless POST request/response traffic; isolating it on the ASGI worker keeps MCP failures out of the main app. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
+The MCP server is a **FastMCP** instance (`mcp.server.fastmcp.FastMCP`, bundled in the official `mcp` Python SDK), shared across every `@mcp.tool()` in the `monitor_app.mcp` package. It is served by a standalone Starlette ASGI app (`swf_monitor_project/mcp_asgi.py`) under uvicorn on `127.0.0.1:8001`, separate from the mod_wsgi Django site so MCP failures stay isolated from the main app. Traffic is stateless POST JSON-RPC; Apache `ProxyPass` exposes `/swf-monitor/mcp/` for external callers while local clients use the loopback URL directly. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
 
-- **Django** exposes the MCP endpoint alongside the REST API (same codebase, same URL tree)
-- **ASGI (uvicorn)** serves `/mcp/` on `127.0.0.1:8001`; Apache ProxyPasses to it for external callers, while local bots use the loopback URL directly
-- **django-mcp-server** provides MCP spec compliance and tool registration
-- **Auth0 OAuth 2.1** authentication for Claude.ai remote connections (optional, disabled if AUTH0_DOMAIN not set)
+- **FastMCP from the `mcp` SDK** owns tool registration and the streamable-HTTP app (`mcp.streamable_http_app()`). **django-mcp-server is no longer used** — it was fully retired in the FastMCP migration.
+- **Starlette** is the ASGI host for the FastMCP app. It enters the dependency tree **only** transitively through `mcp` (`pip show starlette` → `Required-by: mcp, sse-starlette`); there is no first-party Starlette feature use beyond `mcp_asgi.py`. Pinned **`starlette>=1.2.1`** to clear CVE-2026-48710 ("BadHost" Host-header auth bypass; fixed in 1.0.1). The auth guard is immune regardless: `MCPRequestGuard` decides on the raw ASGI `scope["path"]` plus a bearer token, never `request.url`, so the Host-header/`request.url` path divergence the CVE exploits cannot reach it.
+- **`mcp_asgi.py` lifespan** owns `mcp.session_manager.run()` for the whole process lifetime — the fix for the per-request session-manager lifecycle the old Django adapter had.
+- **MCPRequestGuard** (in `mcp_asgi.py`) is the auth/transport gate: `/health` is open for the watchdog; every other request requires `POST` + `Authorization: Bearer <MCP_BEARER_TOKEN>` (401/403/503 otherwise) and path normalization for the proxy prefix forms.
+- **Auth0 OAuth 2.1** remains wired for remote Claude.ai connections but is not an operational dependency (disabled when `AUTH0_DOMAIN` is unset); local clients use the bearer-token loopback path.
 
 ### Tool Registration
 
 Tools are defined in `monitor_app/mcp/` using the `@mcp.tool()` decorator on async functions. Each function becomes an MCP tool that LLMs can discover and call.
 
-The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init__.py`.
+All tool modules share the one `FastMCP` instance created in `monitor_app/mcp/__init__.py` (`mcp = FastMCP(...)`) and imported as `from monitor_app.mcp import mcp`. Importing the package registers every decorated tool on that instance.
 
 **Tool docstrings are critical** - they are the only documentation the LLM sees when deciding which tool to use and how to call it.
 
@@ -916,12 +919,14 @@ MCP failures remain isolated from the main Django site.
 ### Settings
 
 ```python
-# Django MCP Server configuration
-DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "name": "swf-monitor",
-    "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
-    "stateless": True,
-}
+# MCP server identity — single source of truth. Name is hardcoded by clients
+# (.mcp.json, mcp__swf-monitor__* permission strings) and must not change.
+MCP_SERVER_NAME = "swf-testbed"
+MCP_SERVER_INSTRUCTIONS = """..."""   # tool-catalog crib shown to the LLM
+
+# Bearer token enforced by MCPRequestGuard in mcp_asgi.py.
+# Empty default → 503 "MCP token not configured" until set at deploy time.
+MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
 
 # Auth0 OAuth 2.1 configuration (optional - leave AUTH0_DOMAIN empty to disable)
 AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
@@ -936,7 +941,7 @@ AUTH0_ALGORITHMS = ["RS256"]
 ```python
 # In monitor_app/mcp/system.py, workflows.py, or new file in the mcp/ package
 
-from mcp_server import mcp_server as mcp
+from monitor_app.mcp import mcp
 
 @mcp.tool()
 async def my_new_tool(param: str, start_time: str = None, end_time: str = None) -> dict:
@@ -971,7 +976,7 @@ async def my_new_tool(param: str, start_time: str = None, end_time: str = None) 
 
 **IMPORTANT:** After adding a new `@mcp.tool()`, you MUST also:
 1. Add the tool to the hardcoded list in `swf_list_available_tools()` in `mcp/common.py`
-2. Update the server instructions in `settings.py` (`DJANGO_MCP_GLOBAL_SERVER_CONFIG`)
+2. Update the server instructions in `settings.py` (`MCP_SERVER_INSTRUCTIONS`)
 3. Update this documentation (`docs/MCP.md`)
 
 The `list_available_tools()` hardcoded list is what LLMs see when discovering available tools - if your tool isn't in that list, LLMs won't know it exists.
@@ -979,5 +984,6 @@ The `list_available_tools()` hardcoded list is what LLMs see when discovering av
 ### References
 
 - [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
-- [django-mcp-server GitHub](https://github.com/omarbenhamid/django-mcp-server)
+- [MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk)
+- [CVE-2026-48710 "BadHost"](https://github.com/advisories/GHSA-86qp-5c8j-p5mr) — Starlette Host-header auth bypass (fixed 1.0.1)
 - [OAuth2 Provider](https://django-oauth-toolkit.readthedocs.io/)

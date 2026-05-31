@@ -51,6 +51,8 @@ pysqlite3-binary
 rank_bm25
 # Rucio client (BNL)
 rucio-clients
-# MCP (official Python SDK) — explicit dep so Phase 3 removal of
-# django-mcp-server doesn't drop it along with the transitive.
+# MCP (official Python SDK) — explicit dep; provides FastMCP and pulls in Starlette.
 mcp>=1.25.0
+# Starlette enters only via mcp. Pin past CVE-2026-48710 ("BadHost" Host-header
+# auth bypass; fixed in 1.0.1). See docs/MCP.md → Architecture.
+starlette>=1.2.1
