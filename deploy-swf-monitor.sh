@@ -91,6 +91,29 @@ git clone --single-branch --branch "$GIT_REF" "$REPO_URL" . || {
 
 log "Checked out: $(git rev-parse --short HEAD) - $(git log -1 --pretty=format:'%s')"
 
+# Pre-deploy guard: this script SHIPS the shared swf-testbed venv verbatim (the
+# cp below) — it does NOT pip install from requirements.txt. So refuse to ship a
+# dev venv that has drifted from the declared requirements; otherwise an edited
+# pin changes documentation but not what runs. Fix drift by running the
+# dev-update (swf-testbed/install.sh) before deploying.
+# See ../swf-testbed/docs/installation.md (reqmts => dev-update => prod).
+SRC_VENV="/eic/u/wenauseic/github/swf-testbed/.venv"
+log "Verifying dev venv is in sync with declared requirements..."
+VENV_DRIFT=$("$SRC_VENV/bin/pip" install -r requirements.txt --dry-run 2>&1 | grep -iE 'Would install|Would upgrade' || true)
+if [ -n "$VENV_DRIFT" ]; then
+    echo "ERROR: dev venv out of sync with requirements.txt — run swf-testbed/install.sh first, then redeploy:"
+    echo "$VENV_DRIFT"
+    rm -rf "$RELEASE_DIR"
+    exit 1
+fi
+if ! "$SRC_VENV/bin/pip" check >/dev/null 2>&1; then
+    echo "ERROR: dev venv has inconsistent dependencies (pip check failed) — fix before deploying:"
+    "$SRC_VENV/bin/pip" check || true
+    rm -rf "$RELEASE_DIR"
+    exit 1
+fi
+log "Dev venv in sync with declared requirements"
+
 # Copy development virtual environment
 log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
