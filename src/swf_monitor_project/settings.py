@@ -358,6 +358,10 @@ ACTIVEMQ_SSL_CERT_FILE = config('ACTIVEMQ_SSL_CERT_FILE', default='')
 ACTIVEMQ_SSL_KEY_FILE = config('ACTIVEMQ_SSL_KEY_FILE', default='')
 ACTIVEMQ_SSL_CA_CERTS = config('ACTIVEMQ_SSL_CA_CERTS', default='')
 
+# Managed scratch/cache root (see docs/EPICPROD_OPS.md). The payload-log view
+# serves extracted job logs from $SWF_TMP_DIR/panda-logs/<jeditaskid>/<pandaid>/.
+SWF_TMP_DIR = config('SWF_TMP_DIR', default='/data/swf-tmp')
+
 # Channel layer settings
 # Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
 REDIS_URL = config('REDIS_URL', default='')

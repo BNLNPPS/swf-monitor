@@ -9,7 +9,11 @@ from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
+from django.conf import settings
 
+import json
+import logging
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -26,6 +30,9 @@ from ..panda.constants import (
     TASK_STATE_COLORS, JOB_STATE_COLORS,
 )
 from ..cell_fmt import fill_cell
+from ..activemq_connection import ActiveMQConnectionManager
+
+logger = logging.getLogger(__name__)
 
 
 # ── Column definitions ───────────────────────────────────────────────────────
@@ -451,6 +458,71 @@ def panda_view_text(request):
             # Not a zip, just serve as text
             parts.append(data.decode('utf-8', errors='replace'))
     return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
+
+
+# ── Payload log (clean, from the Rucio log tarball via the prod-ops agent) ────
+
+@login_required
+def panda_payload_log(request, pandaid):
+    """Serve a job's clean payload log from the prod-ops cache.
+
+    On a cache hit, return the extracted log members as text. On a miss, publish
+    a fetch request to the production-operations agent (/queue/epicprod.ops) —
+    which holds the Rucio proxy and does the xrootd pull — and ask the user to
+    refresh. The web tier never touches the proxy or xrootd; it only reads the
+    world-readable cache. See docs/EPICPROD_OPS.md.
+    """
+    data = study_job(int(pandaid))
+    if 'error' in data:
+        return HttpResponse(f"job {pandaid}: {data['error']}\n",
+                            status=404, content_type='text/plain; charset=utf-8')
+    job = data.get('job') or {}
+    log_file = data.get('log_file') or {}
+    jeditaskid = job.get('jeditaskid')
+    scope = log_file.get('scope')
+    lfn = log_file.get('lfn')
+    if not (jeditaskid and scope and lfn):
+        return HttpResponse(
+            f"job {pandaid}: no Rucio log dataset registered (job may not be complete yet).\n",
+            status=404, content_type='text/plain; charset=utf-8')
+
+    cache_root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
+    jobdir = os.path.join(cache_root, 'panda-logs', str(jeditaskid), str(pandaid))
+
+    if os.path.isfile(os.path.join(jobdir, 'payload.stdout')):
+        parts = []
+        for name in ('payload.stdout', 'payload.stderr', 'pilotlog.txt', 'pandatracerlog.txt'):
+            path = os.path.join(jobdir, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, 'r', errors='replace') as f:
+                    body = f.read()
+            except OSError as e:
+                body = f'(could not read {name}: {e})'
+            parts.append(f"===== {name} =====\n{body}\n")
+        return HttpResponse(''.join(parts) or '(log cached but empty)\n',
+                            content_type='text/plain; charset=utf-8')
+
+    # Cache miss — ask the prod-ops agent to fetch it (it holds the proxy).
+    msg = {'msg_type': 'fetch_payload_log', 'scope': scope, 'lfn': lfn,
+           'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid)}
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error(f"payload-log fetch trigger failed for job {pandaid}: {e}")
+        triggered = False
+
+    if triggered:
+        return HttpResponse(
+            f"Payload log for job {pandaid} is not cached yet.\n"
+            f"Requested retrieval from Rucio — refresh in a few seconds.\n",
+            status=202, content_type='text/plain; charset=utf-8')
+    return HttpResponse(
+        f"Payload log for job {pandaid} is not cached, and the ops-agent queue "
+        f"could not be reached to request it (see monitor logs).\n",
+        status=502, content_type='text/plain; charset=utf-8')
 
 
 # ── Task detail ──────────────────────────────────────────────────────────────
