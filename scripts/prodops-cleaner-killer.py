@@ -43,6 +43,8 @@ OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
 PING_TIMEOUT = int(os.environ.get("EPICPROD_PING_TIMEOUT", "10"))
 # Monitor registry — the authoritative source of each agent's saved pid+hostname.
+# SWF_MONITOR_URL comes from production.env (the truth), already carrying the
+# /swf-monitor app path — used as-is, no appending.
 MONITOR_URL = os.environ.get("SWF_MONITOR_URL", "").rstrip("/")
 API_TOKEN = os.environ.get("SWF_API_TOKEN", "")
 CA_BUNDLE = os.environ.get("REQUESTS_CA_BUNDLE") or True
