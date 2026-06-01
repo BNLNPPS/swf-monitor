@@ -209,7 +209,11 @@ exiting is sick whatever its exit code, so the burst cap lets it land in `failed
 (visible) instead of flapping forever. It runs from the deploy tree
 (`/opt/swf-monitor/current`) off `production.env`, which supplies everything it
 needs — `REQUESTS_CA_BUNDLE` (the combined BNL+public bundle, for the doer's Rucio
-REST), `X509_USER_PROXY`, and the `ACTIVEMQ_*` / `SWF_*` vars. The proxy
+REST), `X509_USER_PROXY`, and the `ACTIVEMQ_*` / `SWF_*` vars. `SWF_MONITOR_URL`
+must carry the `/swf-monitor` app path: the cleaner-killer reads the agent
+registry at `{SWF_MONITOR_URL}/api/systemagents/`, and under cron `production.env`
+is the only environment (no `~/.env` overlay), so a bare host would reach the
+server root behind CILogon, not the API. The proxy
 (`/etc/swf-monitor/longproxy-for-rucio`) is `apache:eic`, group-readable, so the
 web tier (owner) and the agent (group `eic`) share one copy; the directory is
 setgid with a default ACL so a re-created proxy stays `eic`-readable.
@@ -226,8 +230,10 @@ code 100 — `SuccessExitStatus=100` / `RestartPreventExitStatus=100` tell syste
 to leave it stopped. Any other exit is a crash and is restarted (burst-capped).
 
 A single cron job, the **cleaner-killer** (`scripts/prodops-cleaner-killer.py`,
-run via the `.sh` wrapper that sources `production.env`), keeps the singleton
-honest — order matters:
+run via the `.sh` wrapper that loads `production.env` — parsed as literal
+`KEY=VALUE`, not bash-`source`d, because a Django/decouple env file carries
+unquoted `$ & ( )` in values such as `SECRET_KEY`), keeps the singleton honest —
+order matters:
 - **Reap** duplicates: keep only the systemd-managed instance — host-gated
   `SIGKILL` of any other live PRODOPS agent, identified by its registry-saved
   pid (the source `swf_kill_agent` uses), never a process-name match. On an
@@ -252,13 +258,14 @@ Install (root):
 The liveness restart uses `sudo systemctl restart`, so the cron account needs
 passwordless sudo for that unit.
 
-**Status:** doer, agent (`fetch_payload_log` + `health_ping` + `shutdown`, under
-the `prodops` namespace), view, job-page link, the systemd unit (burst-capped,
-deliberate-stop sentinel), and the cleaner-killer (reap + liveness + prune) are
-implemented; the doer/view round trip is verified live against jediTaskID 36439.
-Remaining: install the unit and crons on `pandaserver02`, and the activity
-health chip. External access requires the matching `swf-remote` proxy entry —
-see [External Access](EXTERNAL_ACCESS.md).
+**Status:** deployed and live on `pandaserver02` (2026-06-01). The agent runs
+under the `prodops` namespace; the systemd unit (burst-capped, deliberate-stop
+sentinel) is installed and `enable`d; the cleaner-killer crons (reap + liveness
+`*/2`, prune daily) are in root's crontab. The doer/view round trip is verified
+against jediTaskID 36439, and reap + `health_ping`→`pong` are verified from the
+deployed path. Remaining: the activity health chip, and the matching
+`swf-remote` proxy entry for external access — see
+[External Access](EXTERNAL_ACCESS.md).
 
 ### Future
 
