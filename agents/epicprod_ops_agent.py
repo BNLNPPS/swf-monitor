@@ -14,20 +14,25 @@ adding a handler. The actual work is delegated to standalone scripts (the
 "doers"), keeping each capability usable on its own and the agent a thin,
 testbed-native event front end.
 
-This is a system-level singleton (not a per-user testbed agent), so it runs
-namespace-less and is managed by systemd like the swf-*-bot units. The
-cleaner-killer cron reaps stale/duplicate instances and keeps one alive.
+This is a system-level singleton (not a per-user testbed agent). It runs under a
+fixed 'prodops' namespace (from prodops.toml) so it is identifiable in the
+monitor and every caller addresses it explicitly, and is managed by systemd like
+the swf-*-bot units. The cleaner-killer cron reaps stale/duplicate instances and
+keeps one alive.
 
 Capabilities:
   fetch_payload_log  — retrieve + cache one PanDA job's payload log
                        (delegates to scripts/cache-payload-log.py).
   health_ping        — liveness probe; replies 'pong' to reply_to.
+  shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
+                       the singleton down instead of restarting it.
 
 See docs/EPICPROD_OPS.md.
 """
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
 from contextlib import nullcontext
@@ -53,18 +58,29 @@ ERROR_MARKER = ".error"
 # The standalone doer, shipped alongside this agent.
 FETCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "cache-payload-log.py"
 
+# Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
+# makes the singleton identifiable in the monitor and lets callers address it
+# explicitly — every message to this agent carries namespace=prodops.
+PRODOPS_CONFIG = Path(__file__).resolve().parent / "prodops.toml"
+
+# Deliberate-shutdown sentinel: main() exits with this so systemd's
+# RestartPreventExitStatus knows the stop was on purpose and must not restart.
+# Distinct from 0 — a persistent agent exiting 0 unbidden is still a failure.
+EXIT_DELIBERATE = 100
+
 
 class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
-    KNOWN_TYPES = {"fetch_payload_log", "health_ping"}
+    KNOWN_TYPES = {"fetch_payload_log", "health_ping", "shutdown"}
 
     def __init__(self):
-        super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE)
-        # System-level singleton, not a per-user testbed agent: run namespace-less
-        # so it never inherits (or "lands in") a developer namespace, and so it
-        # processes ops requests from any caller. See docs/EPICPROD_OPS.md.
-        self.namespace = None
+        # System-level singleton (not a per-user testbed agent): its namespace is
+        # the fixed 'prodops' from PRODOPS_CONFIG, so it is identifiable in the
+        # monitor and callers address it explicitly. See docs/EPICPROD_OPS.md.
+        super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE,
+                         config_path=str(PRODOPS_CONFIG))
+        self._deliberate = False
 
     def on_message(self, frame):
         message_data, msg_type = self.log_received_message(frame, known_types=self.KNOWN_TYPES)
@@ -74,8 +90,8 @@ class EpicProdOpsAgent(BaseAgent):
         if handler is None:
             self.logger.warning(f"PRODOPS: no handler for msg_type '{msg_type}'")
             return
-        # health_ping is a liveness probe, not work — don't flip operational state.
-        ctx = nullcontext() if msg_type == "health_ping" else self.processing()
+        # health_ping and shutdown are control messages, not work — don't flip state.
+        ctx = nullcontext() if msg_type in ("health_ping", "shutdown") else self.processing()
         with ctx:
             try:
                 handler(message_data)
@@ -98,6 +114,17 @@ class EpicProdOpsAgent(BaseAgent):
         pong = {"msg_type": "pong", "agent": self.agent_name, "pid": self.pid}
         self.conn.send(destination=reply_to, body=json.dumps(pong))
         self.logger.info(f"PRODOPS health_ping -> pong to {reply_to}")
+
+    def _handle_shutdown(self, m):
+        """Deliberate-shutdown back door. An operator (or controller) can ask the
+        singleton to step down over the bus; we unwind through BaseAgent's normal
+        SIGTERM path and main() then exits EXIT_DELIBERATE so systemd
+        (RestartPreventExitStatus) leaves it stopped instead of restarting it.
+        Distinct from `systemctl stop`, the host-level back door."""
+        self.logger.warning(
+            f"PRODOPS: deliberate shutdown requested by {m.get('sender', '?')}")
+        self._deliberate = True
+        os.kill(self.pid, signal.SIGTERM)   # reuse BaseAgent's graceful unwind
 
     def _handle_fetch_payload_log(self, m):
         """Fetch + cache one job's payload log via the standalone helper."""
@@ -157,7 +184,11 @@ class EpicProdOpsAgent(BaseAgent):
 
 
 def main():
-    EpicProdOpsAgent().run()
+    agent = EpicProdOpsAgent()
+    agent.run()
+    # A deliberate bus 'shutdown' exits with the sentinel so systemd does not
+    # restart it; any other exit is a failure and is restarted (burst-capped).
+    sys.exit(EXIT_DELIBERATE if agent._deliberate else 0)
 
 
 if __name__ == "__main__":

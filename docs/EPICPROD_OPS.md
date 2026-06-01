@@ -179,12 +179,14 @@ A complete, clean payload log is one click from the job page, served from the
   the agent.
 - **Agent** — `agents/epicprod_ops_agent.py`: an always-on `BaseAgent`
   (`agent_type=PRODOPS`) on the anycast queue `/queue/epicprod.ops`. It runs as
-  `wenauseic`, so it alone holds the Rucio proxy and runs xrootd, and
-  namespace-less — a system singleton that serves any caller rather than a
-  per-user testbed agent. It dispatches by `msg_type`; `fetch_payload_log`
-  invokes the doer under a timeout and, on failure or timeout, records an
-  `.error` marker (attempt count + reason) in the cache dir; `health_ping`
-  replies `pong`. A new capability is a new handler.
+  `wenauseic`, so it alone holds the Rucio proxy and runs xrootd, under a fixed
+  `prodops` namespace (from `agents/prodops.toml`) — a system singleton,
+  identifiable as `prodops` in the monitor, that every caller addresses
+  explicitly (`namespace: prodops` in the message; foreign-namespace messages are
+  filtered out). It dispatches by `msg_type`; `fetch_payload_log` invokes the doer
+  under a timeout and, on failure or timeout, records an `.error` marker (attempt
+  count + reason) in the cache dir; `health_ping` replies `pong`; `shutdown` is
+  the deliberate-stop back door (below). A new capability is a new handler.
 - **View** — `panda_payload_log` (`panda/jobs/<pandaid>/payload-log/`, linked
   from a "Payload Log" card on the job page): a hit (`.done`) serves the
   extracted log as text; a miss publishes `fetch_payload_log` to the agent via
@@ -201,18 +203,27 @@ extract → cache → refresh serves it. No polling.
 
 The agent is a systemd service like the `swf-*-bot` units — reference unit
 `epicprod-ops-agent.service` in the repo root: `User=wenauseic`,
-`Restart=always`, `RestartSec=15`, `StartLimitIntervalSec=0`, `enable`d for
-boot. It runs from the deploy tree (`/opt/swf-monitor/current`) off
-`production.env`, which supplies everything it needs — `REQUESTS_CA_BUNDLE` (the
-combined BNL+public bundle, for the doer's Rucio REST), `X509_USER_PROXY`, and
-the `ACTIVEMQ_*` / `SWF_*` vars. The proxy (`/etc/swf-monitor/longproxy-for-rucio`)
-is `apache:eic`, group-readable, so the web tier (owner) and the agent (group
-`eic`) share one copy; the directory is setgid with a default ACL so a re-created
-proxy stays `eic`-readable. `SWF_TMP_DIR` is left to its default (`/data/swf-tmp`),
-which the agent and the web view share. Bring it back manually with `sudo
-systemctl restart epicprod-ops-agent`. Being a `BaseAgent` it registers and
-heartbeats to the monitor and logs to the monitor DB, so it appears in the agent
-list.
+`Restart=always`, `RestartSec=15`, burst-capped (`StartLimitBurst=5` per
+`StartLimitIntervalSec=120`), `enable`d for boot. A persistent agent that keeps
+exiting is sick whatever its exit code, so the burst cap lets it land in `failed`
+(visible) instead of flapping forever. It runs from the deploy tree
+(`/opt/swf-monitor/current`) off `production.env`, which supplies everything it
+needs — `REQUESTS_CA_BUNDLE` (the combined BNL+public bundle, for the doer's Rucio
+REST), `X509_USER_PROXY`, and the `ACTIVEMQ_*` / `SWF_*` vars. The proxy
+(`/etc/swf-monitor/longproxy-for-rucio`) is `apache:eic`, group-readable, so the
+web tier (owner) and the agent (group `eic`) share one copy; the directory is
+setgid with a default ACL so a re-created proxy stays `eic`-readable.
+`SWF_TMP_DIR` is left to its default (`/data/swf-tmp`), which the agent and the
+web view share. Bring it back manually with `sudo systemctl restart
+epicprod-ops-agent`. Being a `BaseAgent` it registers and heartbeats to the
+monitor and logs to the monitor DB, so it appears in the agent list.
+
+**Deliberate stop** — two back doors, neither counted as a failure: `sudo
+systemctl stop epicprod-ops-agent` (host-level; SIGTERM unwinds BaseAgent's
+graceful path, and systemd does not restart an admin stop), and a `shutdown`
+message on the bus (`namespace: prodops`), which exits the agent with sentinel
+code 100 — `SuccessExitStatus=100` / `RestartPreventExitStatus=100` tell systemd
+to leave it stopped. Any other exit is a crash and is restarted (burst-capped).
 
 A single cron job, the **cleaner-killer** (`scripts/prodops-cleaner-killer.py`,
 run via the `.sh` wrapper that sources `production.env`), keeps the singleton
@@ -223,9 +234,11 @@ honest — order matters:
   anycast queue a second subscriber would *steal* requests; this is the
   autonomous, system-singleton counterpart to the interactive MCP `swf_kill_agent`.
 - **Liveness** (~2 min): with duplicates gone, an MQ `health_ping`→`pong` round
-  trip; no answer restarts the unit. The check is over the bus deliberately —
-  for a messaging service the message path *is* the health. A failed restart is
-  an alarm matter.
+  trip (carrying `namespace: prodops`); no answer triggers `reset-failed` +
+  `restart` — the `reset-failed` is needed to revive a unit that hit the burst
+  cap. The check is over the bus deliberately — for a messaging service the
+  message path *is* the health. A unit that exited deliberately (sentinel 100) is
+  left stopped, not fought; a failed restart is an alarm matter.
 - **Prune** (daily, `--prune-days 30`): remove `panda-logs` entries older than
   30 days; the cache is reclaimable, a miss just re-fetches.
 
@@ -239,8 +252,9 @@ Install (root):
 The liveness restart uses `sudo systemctl restart`, so the cron account needs
 passwordless sudo for that unit.
 
-**Status:** doer, agent (`fetch_payload_log` + `health_ping`), view, job-page
-link, the systemd unit, and the cleaner-killer (reap + liveness + prune) are
+**Status:** doer, agent (`fetch_payload_log` + `health_ping` + `shutdown`, under
+the `prodops` namespace), view, job-page link, the systemd unit (burst-capped,
+deliberate-stop sentinel), and the cleaner-killer (reap + liveness + prune) are
 implemented; the doer/view round trip is verified live against jediTaskID 36439.
 Remaining: install the unit and crons on `pandaserver02`, and the activity
 health chip. External access requires the matching `swf-remote` proxy entry —

@@ -526,7 +526,10 @@ def panda_payload_log(request, pandaid):
             status=502, content_type='text/plain; charset=utf-8')
 
     # Miss (or forced / under-cap retry): ask the prod-ops agent to fetch it.
-    msg = {'msg_type': 'fetch_payload_log', 'scope': scope, 'lfn': lfn,
+    # The agent runs under the 'prodops' namespace and filters on it, so every
+    # caller must address it explicitly.
+    msg = {'msg_type': 'fetch_payload_log', 'namespace': 'prodops',
+           'scope': scope, 'lfn': lfn,
            'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid)}
     if force:
         msg['force'] = True

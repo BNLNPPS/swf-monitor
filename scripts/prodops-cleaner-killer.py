@@ -47,6 +47,10 @@ MONITOR_URL = os.environ.get("SWF_MONITOR_URL", "").rstrip("/")
 API_TOKEN = os.environ.get("SWF_API_TOKEN", "")
 CA_BUNDLE = os.environ.get("REQUESTS_CA_BUNDLE") or True
 HEARTBEAT_FRESH_SEC = int(os.environ.get("EPICPROD_HEARTBEAT_FRESH_SEC", "120"))
+# Sentinel the agent exits with on a deliberate bus 'shutdown' (must match
+# EXIT_DELIBERATE in epicprod_ops_agent.py and RestartPreventExitStatus in the
+# unit). A unit whose last main exit was this is down on purpose — don't restart.
+EXIT_DELIBERATE = int(os.environ.get("EPICPROD_EXIT_DELIBERATE", "100"))
 
 log = logging.getLogger("prodops-cleaner-killer")
 
@@ -180,7 +184,8 @@ def liveness():
         conn.connect(user, password, wait=True)
         conn.subscribe(destination=reply_q, id="pong", ack="auto")
         conn.send(destination=OPS_QUEUE,
-                  body=json.dumps({"msg_type": "health_ping", "reply_to": reply_q}))
+                  body=json.dumps({"msg_type": "health_ping",
+                                   "namespace": "prodops", "reply_to": reply_q}))
     except Exception as e:
         log.error(f"liveness: MQ connect/send failed: {e}")
         return
@@ -196,7 +201,17 @@ def liveness():
     if got["pong"]:
         log.info("liveness: pong received — agent healthy")
         return
+    # No pong — but a deliberate shutdown (sentinel EXIT_DELIBERATE) means the
+    # singleton is *meant* to be down; don't fight it.
+    st = _run(["systemctl", "show", "-p", "ExecMainStatus", "--value", UNIT])
+    if st.stdout.strip() == str(EXIT_DELIBERATE):
+        log.info(f"liveness: no pong, but '{UNIT}' exited deliberately "
+                 f"(code {EXIT_DELIBERATE}) — leaving it stopped")
+        return
     log.warning(f"liveness: no pong in {PING_TIMEOUT}s — restarting unit '{UNIT}'")
+    # reset-failed first: a unit that tripped the start-limit burst sits in
+    # 'failed' and a bare restart is refused until the rate-limit state is cleared.
+    _run(["sudo", "systemctl", "reset-failed", UNIT])
     r = _run(["sudo", "systemctl", "restart", UNIT])
     if r.returncode != 0:
         log.error(f"ALARM: restart of '{UNIT}' FAILED rc={r.returncode}: {r.stderr.strip()}")
