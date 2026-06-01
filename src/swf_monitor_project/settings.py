@@ -362,6 +362,10 @@ ACTIVEMQ_SSL_CA_CERTS = config('ACTIVEMQ_SSL_CA_CERTS', default='')
 # serves extracted job logs from $SWF_TMP_DIR/panda-logs/<jeditaskid>/<pandaid>/.
 SWF_TMP_DIR = config('SWF_TMP_DIR', default='/data/swf-tmp')
 
+# Payload-log retrieval: cap auto-retries of a failed fetch before the view stops
+# re-triggering and surfaces the error (operator can override with ?force=1).
+EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, cast=int)
+
 # Channel layer settings
 # Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
 REDIS_URL = config('REDIS_URL', default='')

@@ -1,0 +1,22 @@
+[Unit]
+Description=ePIC Production Operations Agent (epicprod-ops)
+After=network.target
+# System singleton on the anycast queue /queue/epicprod.ops: always keep one
+# consumer up. The cleaner-killer cron reaps duplicates and restarts a wedged one.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=wenauseic
+Group=eic
+WorkingDirectory=/opt/swf-monitor/current
+# All env (REQUESTS_CA_BUNDLE, X509_USER_PROXY, ACTIVEMQ_*, SWF_*) comes from the
+# deploy EnvironmentFile — the single source the web tier and crons also read.
+# SWF_TMP_DIR is omitted: the agent and the web view both default to /data/swf-tmp.
+EnvironmentFile=/opt/swf-monitor/config/env/production.env
+ExecStart=/opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/agents/epicprod_ops_agent.py
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

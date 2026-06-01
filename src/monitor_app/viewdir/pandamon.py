@@ -488,8 +488,12 @@ def panda_payload_log(request, pandaid):
 
     cache_root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
     jobdir = os.path.join(cache_root, 'panda-logs', str(jeditaskid), str(pandaid))
+    force = bool(request.GET.get('force'))
+    max_attempts = getattr(settings, 'EPICPROD_MAX_FETCH_ATTEMPTS', 3)
 
-    if os.path.isfile(os.path.join(jobdir, 'payload.stdout')):
+    # Cache hit: the doer writes '.done' last, so this is only true once the dir
+    # is fully populated — never keyed on a single member (a log may lack stdout).
+    if not force and os.path.isfile(os.path.join(jobdir, '.done')):
         parts = []
         for name in ('payload.stdout', 'payload.stderr', 'pilotlog.txt', 'pandatracerlog.txt'):
             path = os.path.join(jobdir, name)
@@ -504,9 +508,28 @@ def panda_payload_log(request, pandaid):
         return HttpResponse(''.join(parts) or '(log cached but empty)\n',
                             content_type='text/plain; charset=utf-8')
 
-    # Cache miss — ask the prod-ops agent to fetch it (it holds the proxy).
+    # Prior-failure marker the agent wrote, if any.
+    err = None
+    try:
+        with open(os.path.join(jobdir, '.error')) as f:
+            err = json.load(f)
+    except (OSError, ValueError):
+        err = None
+
+    # Past the retry cap: surface the failure and stop auto-retrying. ?force=1 overrides.
+    if err and not force and err.get('attempts', 0) >= max_attempts:
+        return HttpResponse(
+            f"Payload log retrieval for job {pandaid} failed {err.get('attempts')} times "
+            f"(cap {max_attempts}).\n"
+            f"Last error: {err.get('last_error', 'unknown')}\n"
+            f"Append ?force=1 to retry, or check the agent / monitor logs.\n",
+            status=502, content_type='text/plain; charset=utf-8')
+
+    # Miss (or forced / under-cap retry): ask the prod-ops agent to fetch it.
     msg = {'msg_type': 'fetch_payload_log', 'scope': scope, 'lfn': lfn,
            'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid)}
+    if force:
+        msg['force'] = True
     try:
         triggered = ActiveMQConnectionManager().send_message(
             '/queue/epicprod.ops', json.dumps(msg))
@@ -514,15 +537,23 @@ def panda_payload_log(request, pandaid):
         logger.error(f"payload-log fetch trigger failed for job {pandaid}: {e}")
         triggered = False
 
-    if triggered:
+    if not triggered:
         return HttpResponse(
-            f"Payload log for job {pandaid} is not cached yet.\n"
-            f"Requested retrieval from Rucio — refresh in a few seconds.\n",
+            f"Payload log for job {pandaid} is not cached, and the ops-agent queue "
+            f"could not be reached to request it (see monitor logs).\n",
+            status=502, content_type='text/plain; charset=utf-8')
+
+    if err:
+        return HttpResponse(
+            f"Payload log for job {pandaid}: previous attempt failed "
+            f"({err.get('last_error', 'unknown')}).\n"
+            f"Retrying (attempt {err.get('attempts', 0) + 1} of {max_attempts}) — "
+            f"refresh in a few seconds.\n",
             status=202, content_type='text/plain; charset=utf-8')
     return HttpResponse(
-        f"Payload log for job {pandaid} is not cached, and the ops-agent queue "
-        f"could not be reached to request it (see monitor logs).\n",
-        status=502, content_type='text/plain; charset=utf-8')
+        f"Payload log for job {pandaid} is not cached yet.\n"
+        f"Requested retrieval from Rucio — refresh in a few seconds.\n",
+        status=202, content_type='text/plain; charset=utf-8')
 
 
 # ── Task detail ──────────────────────────────────────────────────────────────

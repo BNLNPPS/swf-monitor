@@ -172,48 +172,79 @@ A complete, clean payload log is one click from the job page, served from the
 `$SWF_TMP_DIR/panda-logs/<jeditaskid>/<pandaid>/` cache. Three pieces:
 
 - **Doer** — `scripts/cache-payload-log.py`: resolves the log DID's replica
-  (Rucio REST, x509, account `panda`), `xrdcp`s the tarball, extracts the
-  members into the cache. Idempotent; usable standalone, by cron, or by the
-  agent.
+  (Rucio REST, x509, account `panda`), `xrdcp`s the tarball (bounded by
+  `XRDCP_TIMEOUT`), extracts the members into the cache, and writes a `.done`
+  sentinel last. Hit and skip are keyed on `.done`, never on a single member — a
+  log may legitimately lack `payload.stdout`. Usable standalone, by cron, or by
+  the agent.
 - **Agent** — `agents/epicprod_ops_agent.py`: an always-on `BaseAgent`
   (`agent_type=PRODOPS`) on the anycast queue `/queue/epicprod.ops`. It runs as
-  `wenauseic`, so it alone holds the Rucio proxy and runs xrootd. It dispatches
-  by `msg_type`; `fetch_payload_log` invokes the doer. A new capability is a new
-  handler.
+  `wenauseic`, so it alone holds the Rucio proxy and runs xrootd, and
+  namespace-less — a system singleton that serves any caller rather than a
+  per-user testbed agent. It dispatches by `msg_type`; `fetch_payload_log`
+  invokes the doer under a timeout and, on failure or timeout, records an
+  `.error` marker (attempt count + reason) in the cache dir; `health_ping`
+  replies `pong`. A new capability is a new handler.
 - **View** — `panda_payload_log` (`panda/jobs/<pandaid>/payload-log/`, linked
-  from a "Payload Log" card on the job page): a cache hit serves the extracted
-  log as text; a miss publishes `fetch_payload_log` to the agent via the
-  existing `ActiveMQConnectionManager` and returns `202` "refresh shortly". The
-  web tier never touches the proxy or xrootd — it reads the world-readable cache
-  and drops a message on the bus.
+  from a "Payload Log" card on the job page): a hit (`.done`) serves the
+  extracted log as text; a miss publishes `fetch_payload_log` to the agent via
+  the existing `ActiveMQConnectionManager` and returns `202`. A prior failure is
+  surfaced with its reason; after `EPICPROD_MAX_FETCH_ATTEMPTS` (default 3) the
+  view stops re-triggering and reports the error (operator override: `?force=1`).
+  The web tier never touches the proxy or xrootd — it reads the world-readable
+  cache and drops a message on the bus.
 
 Flow on a miss: job view → publish → agent (real time) → resolve + `xrdcp` +
 extract → cache → refresh serves it. No polling.
 
 ### Running it
 
-The agent is a systemd service like the `swf-*-bot` units: `User=wenauseic`,
+The agent is a systemd service like the `swf-*-bot` units — reference unit
+`epicprod-ops-agent.service` in the repo root: `User=wenauseic`,
 `Restart=always`, `RestartSec=15`, `StartLimitIntervalSec=0`, `enable`d for
-boot. Its environment needs `REQUESTS_CA_BUNDLE` (the combined bundle) as well
-as `X509_USER_PROXY`. Bring it back manually with `sudo systemctl restart
-epicprod-ops-agent`. Being a `BaseAgent` it registers and heartbeats to the
-monitor, so it appears in the agent list; a health chip on the activity
-dashboard surfaces its state.
+boot. It runs from the deploy tree (`/opt/swf-monitor/current`) off
+`production.env`, which supplies everything it needs — `REQUESTS_CA_BUNDLE` (the
+combined BNL+public bundle, for the doer's Rucio REST), `X509_USER_PROXY`, and
+the `ACTIVEMQ_*` / `SWF_*` vars. The proxy (`/etc/swf-monitor/longproxy-for-rucio`)
+is `apache:eic`, group-readable, so the web tier (owner) and the agent (group
+`eic`) share one copy; the directory is setgid with a default ACL so a re-created
+proxy stays `eic`-readable. `SWF_TMP_DIR` is left to its default (`/data/swf-tmp`),
+which the agent and the web view share. Bring it back manually with `sudo
+systemctl restart epicprod-ops-agent`. Being a `BaseAgent` it registers and
+heartbeats to the monitor and logs to the monitor DB, so it appears in the agent
+list.
 
-Two crons keep it honest:
-- **Liveness** (~2 min): an MQ `health_ping`→`pong` round trip to the agent,
-  restarting via `systemctl` if it does not answer. The check is over the bus
-  deliberately — for a messaging service the message path *is* the health. A
-  failed restart is an alarm matter.
-- **Prune** (daily): remove `panda-logs` entries older than 30 days; the cache
-  is reclaimable, a miss just re-fetches.
+A single cron job, the **cleaner-killer** (`scripts/prodops-cleaner-killer.py`,
+run via the `.sh` wrapper that sources `production.env`), keeps the singleton
+honest — order matters:
+- **Reap** duplicates: keep only the systemd-managed instance — host-gated
+  `SIGKILL` of any other live PRODOPS agent, identified by its registry-saved
+  pid (the source `swf_kill_agent` uses), never a process-name match. On an
+  anycast queue a second subscriber would *steal* requests; this is the
+  autonomous, system-singleton counterpart to the interactive MCP `swf_kill_agent`.
+- **Liveness** (~2 min): with duplicates gone, an MQ `health_ping`→`pong` round
+  trip; no answer restarts the unit. The check is over the bus deliberately —
+  for a messaging service the message path *is* the health. A failed restart is
+  an alarm matter.
+- **Prune** (daily, `--prune-days 30`): remove `panda-logs` entries older than
+  30 days; the cache is reclaimable, a miss just re-fetches.
 
-**Status:** doer, agent (`fetch_payload_log`), view, and job-page link are
-implemented and tested (first exercised against jediTaskID 36439). The systemd
-unit, the `health_ping` handler + liveness cron, the prune cron, and the
-activity health chip are the remaining deployment wiring. External access
-requires the matching `swf-remote` proxy entry — see
-[External Access](EXTERNAL_ACCESS.md).
+Install (root):
+
+```
+*/2 * * * *  /opt/swf-monitor/current/scripts/prodops-cleaner-killer.sh
+30 3 * * *   /opt/swf-monitor/current/scripts/prodops-cleaner-killer.sh --no-liveness --prune-days 30
+```
+
+The liveness restart uses `sudo systemctl restart`, so the cron account needs
+passwordless sudo for that unit.
+
+**Status:** doer, agent (`fetch_payload_log` + `health_ping`), view, job-page
+link, the systemd unit, and the cleaner-killer (reap + liveness + prune) are
+implemented; the doer/view round trip is verified live against jediTaskID 36439.
+Remaining: install the unit and crons on `pandaserver02`, and the activity
+health chip. External access requires the matching `swf-remote` proxy entry —
+see [External Access](EXTERNAL_ACCESS.md).
 
 ### Future
 

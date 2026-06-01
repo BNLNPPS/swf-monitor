@@ -31,9 +31,14 @@ RUCIO_VO = os.environ.get("RUCIO_VO", "eic")
 X509_PROXY = os.environ.get("X509_USER_PROXY", "/data/wenauseic/longproxy-for-rucio")
 CA_BUNDLE = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE") or True
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
+XRDCP_TIMEOUT = int(os.environ.get("XRDCP_TIMEOUT", "120"))
 
 # Log members worth caching for the operator-facing view.
 KEEP = {"payload.stdout", "payload.stderr", "pilotlog.txt", "pandatracerlog.txt"}
+
+# Success sentinel written last, inside the cache dir. Hit/skip checks key on
+# this — NOT on any single member (a log may legitimately lack payload.stdout).
+DONE_MARKER = ".done"
 
 
 def log(msg):
@@ -94,8 +99,12 @@ def resolve_pfn(scope, name):
 def xrdcp(pfn, dest):
     env = dict(os.environ, X509_USER_PROXY=X509_PROXY)
     log(f"xrdcp -> {dest}")
-    p = subprocess.run(["xrdcp", "-f", "--nopbar", pfn, dest],
-                       env=env, capture_output=True, text=True)
+    try:
+        p = subprocess.run(["xrdcp", "-f", "--nopbar", pfn, dest],
+                           env=env, capture_output=True, text=True,
+                           timeout=XRDCP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        fail(f"xrdcp timed out after {XRDCP_TIMEOUT}s")
     if p.returncode != 0:
         fail(f"xrdcp failed (rc={p.returncode}): {p.stderr.strip()}")
 
@@ -125,6 +134,10 @@ def extract(tgz, jobdir):
     if not kept:
         shutil.rmtree(tmp, ignore_errors=True)
         fail("tarball contained none of the expected log members")
+    # Write the success sentinel last, before the atomic rename, so a cache dir
+    # is only ever "hit" once fully populated. Records the kept members.
+    with open(os.path.join(tmp, DONE_MARKER), "w") as f:
+        f.write(",".join(sorted(kept)) + "\n")
     os.chmod(tmp, 0o2775)
     shutil.rmtree(jobdir, ignore_errors=True)
     os.rename(tmp, jobdir)
@@ -141,7 +154,7 @@ def main():
     a = ap.parse_args()
 
     jobdir = os.path.join(SWF_TMP_DIR, "panda-logs", str(a.jeditaskid), str(a.pandaid))
-    if os.path.exists(os.path.join(jobdir, "payload.stdout")) and not a.force:
+    if os.path.exists(os.path.join(jobdir, DONE_MARKER)) and not a.force:
         log(f"already cached: {jobdir}")
         return
     if not os.path.exists(X509_PROXY):
