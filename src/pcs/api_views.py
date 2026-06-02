@@ -333,6 +333,20 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
 
+    @action(detail=True, methods=['post'])
+    def lock(self, request, pk=None):
+        """Lock a draft task → 'ready'. PCS-consistent with the tag lock: a
+        dedicated, one-way lifecycle action — the UI offers no unlock, so a
+        locked task is frozen for reproducibility. 'ready' is the task's
+        locked state. Owner-gated via get_object(); the transition map
+        (draft → ready only) is enforced by the service."""
+        task = self.get_object()
+        try:
+            services.prodtask_set_status(task=task, new_status='ready')
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
     @action(detail=True, methods=['post'], url_path='link-input')
     def link_input(self, request, pk=None):
         """Thin wrapper over ``services.prodtask_link_input``."""

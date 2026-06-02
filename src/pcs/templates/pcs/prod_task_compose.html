@@ -95,6 +95,7 @@
                 <button class="btn btn-dark-green btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
                 <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 <button class="btn btn-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
+                <button class="btn btn-success btn-sm" id="btn-lock-task" style="display:none;">Lock</button>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -212,6 +213,7 @@
     const btnEditTask = document.getElementById('btn-edit-task');
     const btnCopyTask = document.getElementById('btn-copy-task');
     const btnDeleteTask = document.getElementById('btn-delete-task');
+    const btnLockTask = document.getElementById('btn-lock-task');
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -243,6 +245,7 @@
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
+        if (btnLockTask) btnLockTask.style.display = 'none';
         composeTaskId = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -256,6 +259,7 @@
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
+        if (btnLockTask) btnLockTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -326,6 +330,7 @@
             if (btnDeleteTask) btnDeleteTask.style.display = 'none';
             if (btnEditTask) btnEditTask.style.display = 'none';
             if (btnCopyTask) btnCopyTask.style.display = 'none';
+            if (btnLockTask) btnLockTask.style.display = 'none';
         }
         renderList();
         updateUrl();
@@ -632,9 +637,14 @@
         panelTitle.title = dsPath;
 
         const isOwner = currentUser && t.created_by === currentUser;
+        // A locked (ready) or already-submitted task is frozen — only a draft
+        // shows Edit/Delete/Lock, mirroring the tag lifecycle. Copy is always
+        // available to any signed-in user.
+        const ownerDraft = isOwner && t.status === 'draft';
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
-        if (btnEditTask) btnEditTask.style.display = isOwner ? 'inline-block' : 'none';
-        if (btnDeleteTask) btnDeleteTask.style.display = isOwner ? 'inline-block' : 'none';
+        if (btnEditTask) btnEditTask.style.display = ownerDraft ? 'inline-block' : 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = ownerDraft ? 'inline-block' : 'none';
+        if (btnLockTask) btnLockTask.style.display = ownerDraft ? 'inline-block' : 'none';
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
@@ -862,6 +872,21 @@
             window.location.href = window.location.pathname;
         } else {
             let msg = `Delete failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
+    });
+    if (btnLockTask) btnLockTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Lock "${t.name}"? It becomes ready for submission and can no longer be edited. This cannot be undone.`)) return;
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/lock/`,
+            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
+        if (resp.ok) {
+            // Land on the detail page, where the now-ready task offers Submit.
+            window.location.href = `/swf-monitor/pcs/tasks/${t.id}/`;
+        } else {
+            let msg = `Lock failed (HTTP ${resp.status})`;
             try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
             alert(msg);
         }

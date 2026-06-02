@@ -22,8 +22,13 @@
             </p>
         </div>
         <div>
+            {% if task.status == 'draft' %}
             <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}" class="btn btn-dark-green btn-sm">Edit in Compose</a>
             <button class="btn btn-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
+            {% if is_owner %}
+            <button class="btn btn-success btn-sm" id="btn-lock">Lock</button>
+            {% endif %}
+            {% endif %}
             {% if task.panda_task_id %}
             <a href="{% url 'monitor_app:panda_task_detail' task.panda_task_id %}" class="btn btn-info btn-sm">PanDA Task {{ task.panda_task_id }}</a>
             {% elif task.status == 'ready' %}
@@ -32,6 +37,14 @@
                 {% csrf_token %}
                 <button type="submit" class="btn btn-success btn-sm">Submit to PanDA</button>
             </form>
+            {% else %}
+            {# Always show Submit; grey it until the task is locked (ready). The
+               wrapping span carries the hover hint — a disabled button alone
+               swallows the tooltip, so pointer-events:none lets the span get it. #}
+            <span class="d-inline-block" tabindex="0"
+                  title="Submittable only once locked. Lock a draft task to make it ready.">
+                <button type="button" class="btn btn-success btn-sm" disabled style="pointer-events:none;">Submit to PanDA</button>
+            </span>
             {% endif %}
         </div>
     </div>
@@ -257,10 +270,20 @@ document.querySelectorAll('.btn-copy').forEach(btn => {
         });
     });
 });
-document.getElementById('btn-regen').addEventListener('click', function() {
+const btnRegen = document.getElementById('btn-regen');
+if (btnRegen) btnRegen.addEventListener('click', function() {
     fetch('{% url "pcs:prod_task_generate_commands" pk=task.pk %}')
         .then(r => r.json())
         .then(data => { location.reload(); });
+});
+const btnLock = document.getElementById('btn-lock');
+if (btnLock) btnLock.addEventListener('click', function() {
+    if (!confirm('Lock "{{ task.name|escapejs }}"? It becomes ready for submission and can no longer be edited. This cannot be undone.')) return;
+    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.pk }}/lock/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    }).then(r => r.json().then(d => ({ok: r.ok, d})))
+      .then(({ok, d}) => { if (ok) location.reload(); else alert(d.detail || 'Lock failed'); });
 });
 </script>
 {% endblock %}

@@ -1396,6 +1396,7 @@ def prod_task_detail(request, pk):
         'task': task,
         'task_params_json': task_params_json,
         'task_params_error': task_params_error,
+        'is_owner': request.user.is_authenticated and request.user.username == task.created_by,
     })
 
 
