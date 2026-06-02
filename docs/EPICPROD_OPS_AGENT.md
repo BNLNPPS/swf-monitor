@@ -1,0 +1,206 @@
+# ePIC Production Operations Agent
+
+`epicprod_ops_agent` is the always-on, credentialed executor for ePIC
+production. It performs the privileged production actions — submit to PanDA,
+stage logs from Rucio over xrootd, and the credentialed work to come — that the
+public web tier structurally cannot. Building out epicprod functionality is, in
+large part, adding capabilities to this agent: it is the intended instrument for
+programmatic work against the privileged production services.
+
+This is a design/planning doc, peer to [PCS.md](PCS.md),
+[JEDI_INTEGRATION.md](JEDI_INTEGRATION.md),
+[EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md), and
+[PCS_DATASET_REQUEST_WORKFLOW.md](PCS_DATASET_REQUEST_WORKFLOW.md). Its
+operations counterpart — how to run, restart, and monitor the agent, and the
+concrete payload-log retrieval mechanics — is [EPICPROD_OPS.md](EPICPROD_OPS.md).
+The agent is built on the testbed's `swf_common_lib.base_agent.BaseAgent`, so it
+inherits testbed agent management and monitor visibility like the other agents.
+
+## Role — surfaces vs. executor
+
+The system separates *presentation* and *API surface* from *privileged
+execution*:
+
+- **Web tier (Apache/Django)** presents pages and holds **no credential**. It
+  reads world-readable caches and the database, and it drops messages on the
+  bus. It never runs a privileged client.
+- **REST and MCP** are thin peer API surfaces over the credential-free PCS
+  service layer (`pcs.services`). REST serves the web UI and scripts; MCP is the
+  LLM-facing API for bots and assistants. Both turn wire-format input into a
+  service call — they are *surfaces*, not executors. **MCP is an LLM API, not an
+  execution engine**: no PanDA, Rucio, or xrootd credential is ever wired into
+  the MCP server or the web tier.
+- **The agent** is the **credentialed executor**. It runs as the production-ops
+  user (currently `wenauseic`), so it alone holds the keys — the Rucio x509
+  proxy, the PanDA OIDC token, xrootd — and it is the single chokepoint through
+  which every privileged action passes, whatever surface triggered it.
+
+A trigger may arrive from the web tier, from REST, from an MCP tool driven by a
+bot or assistant, or from cron. All of them resolve to one message on the
+agent's queue, and the agent does the credentialed work. Human-driven decisions
+drive deterministic execution; the agent is where that execution lives.
+
+Concretely, this is what unblocks server-side submission. `JEDI_INTEGRATION.md`
+records that submission from swf-monitor was blocked because the web service has
+no PanDA identity. The agent removes the block without waiting for a robot
+account: running as the operator, it reuses the operator's cached production
+token and submits non-interactively. An OIDC service account remains the
+long-term path (it would let the agent submit as a robot rather than as the
+operator), but it is no longer a prerequisite for automated submission.
+
+## Credential boundary
+
+The agent runs under the production-ops user, not the web service, putting
+ownership with production and keeping every credential out of the public-facing
+tier:
+
+| Credential | Used for | Held by |
+|---|---|---|
+| PanDA OIDC token (cached, `EIC.production`) | `prun` submission to JEDI | agent |
+| Rucio x509 proxy (`longproxy-for-rucio`) | replica resolution, DID queries | agent |
+| xrootd (`xrdcp`/`xrdfs`) | fetching log/output bytes | agent |
+
+The web tier's only interaction with privileged results is to **read a
+world-readable cache** the agent populates, or to **read the database record**
+the agent updates. It holds nothing and runs nothing privileged. The
+payload-log flow is the reference instance: the job page drops a
+`fetch_payload_log` message and later serves the extracted log from the cache;
+it never touches the proxy or xrootd.
+
+## Capability model
+
+The agent is **event-driven, not polled** — the same low-latency model the
+testbed agents use, which matters as much for prod entities as for testbed
+ones.
+
+- **Queue and identity.** It subscribes to the anycast control queue
+  `/queue/epicprod.ops`; a single consumer handles each request exactly once. It
+  runs under a fixed `prodops` namespace (from `agents/prodops.toml`) so it is
+  identifiable as the system singleton in the monitor and every caller addresses
+  it explicitly (`namespace: prodops`). Foreign-namespace messages are filtered
+  out.
+- **Dispatch.** Each action is a `msg_type` routed to a `_handle_<msg_type>`
+  method. **Growing the agent is adding a handler** — a new capability is a new
+  `_handle_*`, registered in `KNOWN_TYPES`.
+- **The doer pattern.** A handler is a thin event front end; the actual work is
+  delegated to a standalone **doer script** (`scripts/cache-payload-log.py`,
+  `scripts/submit-prod-task.py`) run as a subprocess under a timeout. Each doer
+  is usable on its own, by cron, or by the agent — the agent does not embed the
+  logic. **PCS stays the single source of truth**: the submit doer *fetches* the
+  `prun` command from the PCS artifact endpoint rather than rebuilding it.
+- **Robustness doctrine.** Every handler is **bounded** (a subprocess timeout)
+  and **self-erroring** (it records its own failure where the triggering surface
+  will see it — e.g. the `.error` marker in the payload-log cache). Handler
+  exceptions are caught and logged; one sick capability never crashes the
+  singleton. Control messages (`health_ping`, `shutdown`) do not flip the
+  agent's processing state; work messages do, so the monitor shows the agent
+  busy.
+- **Outcome conventions, no polling.** A result lands where the trigger's
+  surface already reads it: the cache (payload log) or the `ProdTask` record via
+  `record-submission` (submit). Liveness replies on the bus (`health_ping` →
+  `pong`). Nothing polls.
+
+### Async execution — a BaseAgent capability
+
+`BaseAgent` delivers messages on a single STOMP receiver thread, sequentially
+(`ack='auto'`), so a handler that blocks stalls every later message — including
+`health_ping`. A healthy `submit_task` returns in seconds, but the credentialed
+work coming next is not all fast: the campaign-provenance sweep is a genuinely
+long Rucio scan, and any privileged call can hang (this is distributed
+computing). While the receiver thread is blocked, the cleaner-killer's liveness
+ping (every ~2 min) goes unanswered and the watchdog restarts the unit —
+killing the in-flight work it was meant to protect.
+
+The fix is **threads, not asyncio**. The work is blocking subprocess/socket I/O
+(`prun`, `xrdcp`, Rucio REST) and the stack is thread-based (stomp.py,
+subprocess); an asyncio agent would buy nothing here and would force every agent
+off the shared base. So the capability is added to `BaseAgent` itself — a
+bounded worker pool, reusable by all agents — exposed as
+`run_in_background(fn, *args, dedup_key=…, label=…)`. A handler enqueues its
+doer and returns, freeing the receiver thread at once.
+
+It is **opt-in**, which is what protects the other agents: one that never calls
+`run_in_background` behaves exactly as before. The wrapper drives reentrant
+PROCESSING state (PROCESSING while any background work is in flight), catches and
+logs every exception (no silent worker death), and skips a call whose
+`dedup_key` is already running (the duplicate-work race that concurrency
+introduces). A send lock makes worker-thread bus sends safe; shutdown drains the
+pool.
+
+In this agent, `fetch_payload_log` and `submit_task` enqueue via
+`run_in_background`; `health_ping` and `shutdown` stay inline. Because
+`BaseAgent` lives in `swf-common-lib` and ships to every agent through the venv
+chain, landing this verifies the other agents still heartbeat. The shared API is
+documented in the `swf-common-lib` README.
+
+## Current capabilities
+
+Verified against `agents/epicprod_ops_agent.py` and its doers, 2026-06-02:
+
+| `msg_type` | Doer | Credential | Outcome | Timeout |
+|---|---|---|---|---|
+| `fetch_payload_log` | `cache-payload-log.py` | Rucio proxy + xrootd | extracted log members in `$SWF_TMP_DIR/panda-logs/<jeditaskid>/<pandaid>/`, `.done` on success / `.error` on failure | 180s |
+| `submit_task` | `submit-prod-task.py` | PanDA OIDC token (operator) | `jediTaskID` recorded on the `ProdTask` (`panda_task_id` + `status='submitted'`) via `record-submission` | 300s |
+| `health_ping` | — | — | `pong` to `reply_to` | — |
+| `shutdown` | — | — | deliberate stop; exits `EXIT_DELIBERATE=100` so systemd leaves it down | — |
+
+**`fetch_payload_log`** resolves the log DID's replica (Rucio REST, x509,
+account `panda`), `xrdcp`s the tarball, extracts the members into the cache, and
+writes a `.done` sentinel. A miss publishes the message; a hit serves from
+cache. On failure or timeout it writes an `.error` marker carrying the attempt
+count and reason, which the web view surfaces and uses to bound retries.
+
+**`submit_task`** runs the same `prun` an operator runs, non-interactively: it
+GETs the `prun` command for the task from
+`/pcs/api/prod-tasks/command/?name=<name>&fmt=panda`, runs it in a clean sandbox
+under the panda-client environment with the cached token (never deleting
+`$PANDA_CONFIG_ROOT/.token`, which would force an interactive device flow),
+parses `jediTaskID=<N>`, and POSTs the outcome to
+`/pcs/api/prod-tasks/record-submission/` as the task owner (`X-Remote-User`,
+trusted on-host by the localhost tunnel). The task IS submitted even if the
+final bookkeeping POST fails; that case is surfaced loudly with the task ID so
+the operator can re-record.
+
+Two trigger paths publish the identical `submit_task` message, both gated to
+`status='ready'` with no existing `panda_task_id`: the
+`prod_task_submit_panda` view (predates) and `services.prodtask_submit_request`
+(the REST `submit` action added for the two-pane compose view). They mirror the
+`record-submission` gates so a submission whose outcome would be refused is
+never fired.
+
+## Roadmap — capabilities as handlers
+
+Each item below is, by design, a new handler + doer on this agent.
+
+- **Async execution** (above) — the near-term structural requirement; precedes
+  piling more long-running capabilities onto the singleton.
+- **Campaign-provenance sweep** — the join Sakib's catalogue and the
+  `eic/snippets` `check_campaign.py` / `check_storage.py` do by hand, run live
+  and credentialed: for each requested EVGEN path
+  `/volatile/eic/EPIC/EVGEN/<suffix>`, resolve the produced
+  `epic:/RECO/<campaign>/<detector_config>/<suffix>` DID(s), their RSE replicas
+  (BNL-XRD / EIC-XRD), and file counts, into a provenance cache the catalog
+  renders. This supersedes the temporary hand-curated dataset catalogue and the
+  monthly completion-status email.
+- **Proactive completion notification** — auto-notify the operator the moment a
+  fetch or submit finishes, removing the manual refresh; the corun-ai Mattermost
+  callback is the working model.
+- **Credentialed MCP provider** — a future `pcs_prodtask_submit` MCP tool routes
+  through the agent: the bot triggers, the agent (the credential holder)
+  executes. The MCP server stays credential-free.
+- **OIDC service account** — submit as a robot rather than reusing the
+  operator's token; and **EVGEN-in-Rucio registration** once that workflow is
+  defined.
+
+## Operation
+
+Running, restarting, monitoring, the systemd unit, the cleaner-killer cron
+(reap duplicates / liveness / prune), the deliberate-stop back doors, and the
+payload-log retrieval mechanics are in [EPICPROD_OPS.md](EPICPROD_OPS.md). This
+doc does not duplicate them.
+
+**Status (2026-06-02):** deployed and live on `pandaserver02`. Handlers
+`fetch_payload_log`, `submit_task`, `health_ping`, `shutdown` are implemented
+and the `submit_task` path reuses the operator's cached production token. Async
+handler execution is designed (a `BaseAgent` worker pool, opt-in
+`run_in_background`) and is the next change to land.

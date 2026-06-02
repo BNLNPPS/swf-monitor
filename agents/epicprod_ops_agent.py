@@ -12,7 +12,9 @@ control queue (handled once by the single consumer). Each action is a
 `msg_type` dispatched to a `_handle_<msg_type>` method, so growing the agent =
 adding a handler. The actual work is delegated to standalone scripts (the
 "doers"), keeping each capability usable on its own and the agent a thin,
-testbed-native event front end.
+testbed-native event front end. Long-running doers (fetch, submit) run on
+BaseAgent's worker pool via ``run_in_background`` so the single receiver thread
+is never blocked; control messages (health_ping, shutdown) act inline.
 
 This is a system-level singleton (not a per-user testbed agent). It runs under a
 fixed 'prodops' namespace (from prodops.toml) so it is identifiable in the
@@ -38,7 +40,6 @@ import os
 import signal
 import subprocess
 import sys
-from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,13 +98,14 @@ class EpicProdOpsAgent(BaseAgent):
         if handler is None:
             self.logger.warning(f"PRODOPS: no handler for msg_type '{msg_type}'")
             return
-        # health_ping and shutdown are control messages, not work — don't flip state.
-        ctx = nullcontext() if msg_type in ("health_ping", "shutdown") else self.processing()
-        with ctx:
-            try:
-                handler(message_data)
-            except Exception as e:
-                self.logger.error(f"PRODOPS: handler '{msg_type}' raised: {e}")
+        # Handlers return immediately: control messages (health_ping/shutdown) act
+        # inline; work messages (fetch_payload_log/submit_task) validate here and
+        # enqueue their doer via run_in_background, so the receiver thread is never
+        # blocked. The worker pool drives PROCESSING state — no processing() wrap.
+        try:
+            handler(message_data)
+        except Exception as e:
+            self.logger.error(f"PRODOPS: handler '{msg_type}' raised: {e}")
 
     # -- handlers ------------------------------------------------------------
 
@@ -134,11 +136,20 @@ class EpicProdOpsAgent(BaseAgent):
         os.kill(self.pid, signal.SIGTERM)   # reuse BaseAgent's graceful unwind
 
     def _handle_fetch_payload_log(self, m):
-        """Fetch + cache one job's payload log via the standalone helper."""
+        """Validate, then run the fetch on the worker pool — it blocks on Rucio
+        + xrootd. Deduped per job so two requests for the same job don't extract
+        into one cache dir at once."""
         missing = [k for k in ("scope", "lfn", "jeditaskid", "pandaid") if not m.get(k)]
         if missing:
             self.logger.error(f"PRODOPS fetch_payload_log: missing fields {missing}")
             return
+        self.run_in_background(
+            self._do_fetch_payload_log, m,
+            dedup_key=f"fetch:{m['jeditaskid']}:{m['pandaid']}",
+            label=f"fetch_payload_log pandaid={m['pandaid']}")
+
+    def _do_fetch_payload_log(self, m):
+        """Fetch + cache one job's payload log via the standalone helper."""
         jobdir = os.path.join(SWF_TMP_DIR, "panda-logs", str(m["jeditaskid"]), str(m["pandaid"]))
         cmd = [
             sys.executable, str(FETCH_SCRIPT),
@@ -169,6 +180,19 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
 
     def _handle_submit_task(self, m):
+        """Validate, then run the submission on the worker pool. Deduped per
+        task so two near-simultaneous triggers can't fire two submissions —
+        the status / panda_task_id gates close that window later; this closes
+        the in-flight window at the agent."""
+        task_name = m.get("task_name")
+        if not task_name:
+            self.logger.error("PRODOPS submit_task: missing task_name")
+            return
+        self.run_in_background(
+            self._do_submit_task, m,
+            dedup_key=f"submit:{task_name}", label=f"submit_task {task_name}")
+
+    def _do_submit_task(self, m):
         """Submit one PCS ProdTask to PanDA via the standalone doer.
 
         The web tier ('Submit to PanDA') publishes {task_name}; the doer
@@ -177,10 +201,7 @@ class EpicProdOpsAgent(BaseAgent):
         We hold the token; the web tier structurally cannot. The outcome lands
         on the ProdTask (panda_task_id + status) via record-submission, which
         the UI reads — so, like fetch_payload_log, there is no bus reply."""
-        task_name = m.get("task_name")
-        if not task_name:
-            self.logger.error("PRODOPS submit_task: missing task_name")
-            return
+        task_name = m["task_name"]
         cmd = [sys.executable, str(SUBMIT_SCRIPT), "--task-name", str(task_name)]
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
