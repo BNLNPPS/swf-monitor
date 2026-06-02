@@ -347,6 +347,20 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
 
+    @action(detail=True, methods=['post'])
+    def submit(self, request, pk=None):
+        """Request automated PanDA submission of a locked (ready) task — the
+        REST counterpart to the prod_task_submit_panda view, used by the
+        compose panel so the user can submit without leaving the two-pane view.
+        Owner-gated via get_object(); the web tier holds no PanDA credential,
+        so this only publishes a request to the prod-ops agent."""
+        task = self.get_object()
+        try:
+            services.prodtask_submit_request(task=task)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
     @action(detail=True, methods=['post'], url_path='link-input')
     def link_input(self, request, pk=None):
         """Thin wrapper over ``services.prodtask_link_input``."""

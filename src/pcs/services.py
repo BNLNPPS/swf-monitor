@@ -1662,3 +1662,33 @@ def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     task.status = new_status
     task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
     return task
+
+
+def prodtask_submit_request(*, task):
+    """Publish a submit_task request for a locked (ready) task to the prod-ops
+    agent. The web tier holds no PanDA credential — it only asks the agent to
+    run the submission, which records the jediTaskID back. Gates mirror
+    prodtask_record_submission so we never fire a submission whose outcome
+    would then be refused. Raises ServiceError on a bad state or an
+    unreachable queue.
+
+    The prod_task_submit_panda view predates this and still publishes inline;
+    both paths drop the same message on /queue/epicprod.ops."""
+    import json as _json
+    if task.panda_task_id is not None:
+        raise ServiceError(
+            f'Already submitted as jediTaskID {task.panda_task_id}.', status=409)
+    if task.status != 'ready':
+        raise ServiceError('Only a locked (ready) task can be submitted to PanDA.')
+    msg = {'msg_type': 'submit_task', 'namespace': 'prodops',
+           'task_name': task.name, 'owner': task.created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Submission could not be queued (ops-agent queue unreachable).', status=503)
+    return task

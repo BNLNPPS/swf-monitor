@@ -96,6 +96,10 @@
                 <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 <button class="btn btn-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
                 <button class="btn btn-success btn-sm" id="btn-lock-task" style="display:none;">Lock</button>
+                <span id="submit-task-wrap" class="d-inline-block" tabindex="0" style="display:none;">
+                    <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
+                </span>
+                <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -214,6 +218,9 @@
     const btnCopyTask = document.getElementById('btn-copy-task');
     const btnDeleteTask = document.getElementById('btn-delete-task');
     const btnLockTask = document.getElementById('btn-lock-task');
+    const submitTaskWrap = document.getElementById('submit-task-wrap');
+    const btnSubmitTask = document.getElementById('btn-submit-task');
+    const linkPandaTask = document.getElementById('link-panda-task');
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -246,6 +253,8 @@
         if (btnCopyTask) btnCopyTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
+        if (submitTaskWrap) submitTaskWrap.style.display = 'none';
+        if (linkPandaTask) linkPandaTask.style.display = 'none';
         composeTaskId = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -260,6 +269,8 @@
         if (btnCopyTask) btnCopyTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
+        if (submitTaskWrap) submitTaskWrap.style.display = 'none';
+        if (linkPandaTask) linkPandaTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -331,6 +342,8 @@
             if (btnEditTask) btnEditTask.style.display = 'none';
             if (btnCopyTask) btnCopyTask.style.display = 'none';
             if (btnLockTask) btnLockTask.style.display = 'none';
+            if (submitTaskWrap) submitTaskWrap.style.display = 'none';
+            if (linkPandaTask) linkPandaTask.style.display = 'none';
         }
         renderList();
         updateUrl();
@@ -641,10 +654,36 @@
         // shows Edit/Delete/Lock, mirroring the tag lifecycle. Copy is always
         // available to any signed-in user.
         const ownerDraft = isOwner && t.status === 'draft';
+        const submitted = !!t.panda_task_id;
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
         if (btnEditTask) btnEditTask.style.display = ownerDraft ? 'inline-block' : 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = ownerDraft ? 'inline-block' : 'none';
         if (btnLockTask) btnLockTask.style.display = ownerDraft ? 'inline-block' : 'none';
+        // Submit: shown to signed-in users until submitted — green when ready
+        // (locked), greyed with a hover hint otherwise. The wrapping span
+        // carries the hint (a disabled button swallows its own tooltip).
+        if (submitTaskWrap) {
+            if (currentUser && !submitted) {
+                submitTaskWrap.style.display = 'inline-block';
+                const ready = t.status === 'ready';
+                btnSubmitTask.disabled = !ready;
+                btnSubmitTask.style.pointerEvents = ready ? '' : 'none';
+                btnSubmitTask.textContent = 'Submit to PanDA';
+                submitTaskWrap.title = ready ? '' : 'Submittable only once locked. Lock a draft task to make it ready.';
+            } else {
+                submitTaskWrap.style.display = 'none';
+            }
+        }
+        // PanDA task link once the agent has recorded the jediTaskID.
+        if (linkPandaTask) {
+            if (submitted) {
+                linkPandaTask.style.display = 'inline-block';
+                linkPandaTask.href = `/swf-monitor/panda/tasks/${t.panda_task_id}/`;
+                linkPandaTask.textContent = `PanDA Task ${t.panda_task_id}`;
+            } else {
+                linkPandaTask.style.display = 'none';
+            }
+        }
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
@@ -883,12 +922,59 @@
         const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/lock/`,
             {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
         if (resp.ok) {
-            // Land on the detail page, where the now-ready task offers Submit.
-            window.location.href = `/swf-monitor/pcs/tasks/${t.id}/`;
+            const updated = await resp.json();
+            const idx = allTasks.findIndex(x => x.id === t.id);
+            if (idx >= 0) allTasks[idx].status = updated.status || 'ready';
+            renderList();
+            showTaskDetail(t.id);   // stay in the panel; Submit goes green, Lock/Edit/Delete vanish
         } else {
             let msg = `Lock failed (HTTP ${resp.status})`;
             try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
             alert(msg);
+        }
+    });
+
+    // After submit, the agent records the jediTaskID asynchronously (usually
+    // seconds). Poll the task until panda_task_id appears so the PanDA link
+    // shows on its own — no manual refresh. Bounded so it can't poll forever.
+    let submitPollTimer = null;
+    function pollForPandaTask(taskId, attemptsLeft) {
+        submitPollTimer = setTimeout(async () => {
+            try {
+                const r = await fetch(`/swf-monitor/pcs/api/prod-tasks/${taskId}/`);
+                if (r.ok) {
+                    const data = await r.json();
+                    const idx = allTasks.findIndex(x => x.id === taskId);
+                    if (idx >= 0) { allTasks[idx].panda_task_id = data.panda_task_id; allTasks[idx].status = data.status; }
+                    if (data.panda_task_id) {
+                        if (selectedItemId === taskId) showTaskDetail(taskId);
+                        renderList();
+                        return;   // done
+                    }
+                }
+            } catch (e) { /* transient; keep trying */ }
+            if (attemptsLeft > 1) pollForPandaTask(taskId, attemptsLeft - 1);
+        }, 10000);   // every 10s
+    }
+
+    if (btnSubmitTask) btnSubmitTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Submit "${t.name}" to PanDA?`)) return;
+        btnSubmitTask.disabled = true;
+        btnSubmitTask.textContent = 'Submitting…';
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/submit/`,
+            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
+        if (resp.ok) {
+            btnSubmitTask.textContent = 'Submitted — awaiting PanDA ID…';
+            if (submitPollTimer) clearTimeout(submitPollTimer);
+            pollForPandaTask(t.id, 30);   // ~5 min at 10s
+        } else {
+            let msg = `Submit failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+            btnSubmitTask.disabled = false;
+            btnSubmitTask.textContent = 'Submit to PanDA';
         }
     });
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
