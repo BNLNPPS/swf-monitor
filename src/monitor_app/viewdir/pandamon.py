@@ -463,6 +463,53 @@ def panda_view_text(request):
 # ── Payload log (clean, from the Rucio log tarball via the prod-ops agent) ────
 
 @login_required
+def _payload_log_pending_page(message, pandaid, script_name):
+    """202 page for a payload log still being fetched by the prod-ops agent.
+
+    Holds an EventSource on the SSE relay (payload_log_ready) and, when the agent
+    signals this job's log is ready, fetches and shows it in place — no manual
+    refresh and no reload loop. An immediate check catches an event that fired
+    before the stream connected; one slow check is the backstop. The stream URL
+    carries the app's SCRIPT_NAME so swf-remote's body rewrite re-points it to
+    /prod/ for the external face. See docs/SSE_PUSH.md.
+    """
+    from django.utils.html import escape
+    stream = f"{script_name}/api/messages/stream/?msg_types=payload_log_ready"
+    html = f"""<!doctype html><html><head><meta charset="utf-8">
+<title>Retrieving payload log…</title>
+<style>body{{font-family:system-ui;font-size:15px;background:#1e1e1e;color:#ddd;padding:1.5rem}}
+pre{{white-space:pre-wrap;font-size:15px}} .note{{color:#8ab4f8}}</style></head>
+<body>
+<pre id="plog-msg">{escape(message)}</pre>
+<p class="note" id="plog-status">Retrieving from Rucio — the log will appear here automatically.</p>
+<script>
+const PANDAID="{escape(str(pandaid))}";
+const STREAM="{escape(stream)}";
+const SELF=window.location.href;
+let done=false, es=null;
+async function check(){{
+  if(done) return;
+  try{{
+    const r=await fetch(SELF, {{headers:{{'Accept':'text/plain'}}}});
+    if(r.status!==202){{                         // 200 log, or a terminal error page
+      done=true;
+      document.getElementById('plog-msg').textContent=await r.text();
+      document.getElementById('plog-status').textContent='';
+      if(es) es.close();
+    }}
+  }}catch(e){{}}
+}}
+es=new EventSource(STREAM);
+es.addEventListener('payload_log_ready', (ev)=>{{
+  try{{ const d=JSON.parse(ev.data); if(String(d.pandaid)===PANDAID) check(); }}catch(e){{}}
+}});
+check();                      // immediate: catch an event that fired before connect
+setTimeout(check, 25000);     // backstop: one slow check if the event is missed
+</script>
+</body></html>"""
+    return HttpResponse(html, status=202, content_type='text/html; charset=utf-8')
+
+
 def panda_payload_log(request, pandaid):
     """Serve a job's clean payload log from the prod-ops cache.
 
@@ -546,17 +593,17 @@ def panda_payload_log(request, pandaid):
             f"could not be reached to request it (see monitor logs).\n",
             status=502, content_type='text/plain; charset=utf-8')
 
+    script_name = getattr(settings, 'FORCE_SCRIPT_NAME', '') or request.META.get('SCRIPT_NAME', '')
     if err:
-        return HttpResponse(
+        return _payload_log_pending_page(
             f"Payload log for job {pandaid}: previous attempt failed "
-            f"({err.get('last_error', 'unknown')}).\n"
-            f"Retrying (attempt {err.get('attempts', 0) + 1} of {max_attempts}) — "
-            f"refresh in a few seconds.\n",
-            status=202, content_type='text/plain; charset=utf-8')
-    return HttpResponse(
-        f"Payload log for job {pandaid} is not cached yet.\n"
-        f"Requested retrieval from Rucio — refresh in a few seconds.\n",
-        status=202, content_type='text/plain; charset=utf-8')
+            f"({err.get('last_error', 'unknown')}). "
+            f"Retrying (attempt {err.get('attempts', 0) + 1} of {max_attempts})…",
+            pandaid, script_name)
+    return _payload_log_pending_page(
+        f"Payload log for job {pandaid} is not cached yet. "
+        f"Requested retrieval from Rucio.",
+        pandaid, script_name)
 
 
 # ── Task detail ──────────────────────────────────────────────────────────────
