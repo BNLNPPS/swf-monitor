@@ -10,6 +10,8 @@ Reference repos:
 - eic/simulation_campaign_datasets — CSV input files
 """
 
+import shlex
+
 
 def build_condor_command(task):
     """
@@ -89,13 +91,17 @@ def build_panda_command(task):
 
     parts = ['prun']
 
-    # Exec command (the payload)
+    # Exec command (the payload) — shlex.quote so inner quotes survive
     exec_cmd = data.get('exec_command', '')
     if exec_cmd:
-        parts.append(f'--exec "{exec_cmd}"')
+        parts.append(f'--exec {shlex.quote(exec_cmd)}')
 
-    # Output dataset
-    parts.append(f'--outDS {ds.did}')
+    # Output dataset — task_name (no scope prefix, no .bN block suffix),
+    # matching how PanDA records the production taskName.
+    parts.append(f'--outDS {ds.task_name}')
+    # Official group production (group.EIC scope, EIC.production privilege)
+    if data.get('official'):
+        parts.append('--official')
 
     # Container image
     container = cfg.get('container_image') or ''
@@ -141,6 +147,11 @@ def build_panda_command(task):
         parts.append('--noBuild')
     if data.get('skip_scout'):
         parts.append('--expertOnly_skipScout')
+
+    # JEDI-managed outputs (simple payloads). Real production payloads that
+    # self-register in Rucio use noOutput instead — then set neither.
+    if data.get('outputs'):
+        parts.append(f'--outputs {data["outputs"]}')
 
     return ' \\\n  '.join(parts)
 

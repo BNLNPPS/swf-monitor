@@ -23,6 +23,9 @@ keeps one alive.
 Capabilities:
   fetch_payload_log  — retrieve + cache one PanDA job's payload log
                        (delegates to scripts/cache-payload-log.py).
+  submit_task        — submit one PCS ProdTask to PanDA via prun, reusing the
+                       cached production token (delegates to
+                       scripts/submit-prod-task.py).
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -55,8 +58,12 @@ FETCH_TIMEOUT = int(os.environ.get("EPICPROD_FETCH_TIMEOUT", "180"))
 # error and bound retries. A later success replaces the whole dir, clearing it.
 ERROR_MARKER = ".error"
 
-# The standalone doer, shipped alongside this agent.
+# The standalone doers, shipped alongside this agent.
 FETCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "cache-payload-log.py"
+SUBMIT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-prod-task.py"
+
+# Backstop on the prun submission subprocess (sandbox upload + JEDI insert).
+SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
@@ -72,7 +79,7 @@ EXIT_DELIBERATE = 100
 class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
-    KNOWN_TYPES = {"fetch_payload_log", "health_ping", "shutdown"}
+    KNOWN_TYPES = {"fetch_payload_log", "submit_task", "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -160,6 +167,36 @@ class EpicProdOpsAgent(BaseAgent):
             self._mark_error(jobdir, reason)
         else:
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
+
+    def _handle_submit_task(self, m):
+        """Submit one PCS ProdTask to PanDA via the standalone doer.
+
+        The web tier ('Submit to PanDA') publishes {task_name}; the doer
+        fetches the prun command from PCS, runs it non-interactively with the
+        cached long-lived production token, and records the jediTaskID back.
+        We hold the token; the web tier structurally cannot. The outcome lands
+        on the ProdTask (panda_task_id + status) via record-submission, which
+        the UI reads — so, like fetch_payload_log, there is no bus reply."""
+        task_name = m.get("task_name")
+        if not task_name:
+            self.logger.error("PRODOPS submit_task: missing task_name")
+            return
+        cmd = [sys.executable, str(SUBMIT_SCRIPT), "--task-name", str(task_name)]
+        if m.get("owner"):          # X-Remote-User for the owner-gated record write
+            cmd += ["--owner", str(m["owner"])]
+        self.logger.info(f"PRODOPS submit_task: {task_name}")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS submit_task TIMEOUT after {SUBMIT_TIMEOUT}s: {task_name}")
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  submit-prod-task: {line}")
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
+        else:
+            self.logger.info(
+                f"PRODOPS submit_task done: {task_name} -> jediTaskID={(p.stdout or '').strip()}")
 
     # -- helpers -------------------------------------------------------------
 

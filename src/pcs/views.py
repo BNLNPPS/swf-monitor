@@ -1541,6 +1541,44 @@ def prod_task_delete(request, pk):
     return redirect('pcs:prod_tasks_list')
 
 
+def prod_task_submit_panda(request, pk):
+    """Request automated PanDA submission of a ProdTask.
+
+    The web tier holds no PanDA credential, so it only *publishes* a
+    submit_task message to the prod-ops agent (namespace 'prodops'), which
+    runs the prun and records the jediTaskID back. Gated to status='ready'
+    so we never fire a submission whose outcome record-submission would then
+    refuse. See docs/EPICPROD_OPS.md.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:prod_task_detail', kwargs={'pk': pk}),
+            action_label='Submit to PanDA')
+    task = get_object_or_404(ProdTask, pk=pk)
+    if task.panda_task_id:
+        messages.warning(request, f"Already submitted as jediTaskID {task.panda_task_id}.")
+        return redirect('pcs:prod_task_detail', pk=pk)
+    if task.status != 'ready':
+        messages.error(request, "Only tasks in status 'ready' can be submitted to PanDA.")
+        return redirect('pcs:prod_task_detail', pk=pk)
+    msg = {'msg_type': 'submit_task', 'namespace': 'prodops',
+           'task_name': task.name, 'owner': task.created_by}
+    try:
+        from monitor_app.activemq_connection import ActiveMQConnectionManager
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        messages.error(request, f"Could not reach the prod-ops agent queue: {e}")
+        return redirect('pcs:prod_task_detail', pk=pk)
+    if not triggered:
+        messages.error(request, "Submission could not be queued (ops-agent queue unreachable).")
+    else:
+        messages.success(
+            request,
+            f"Submission of '{task.name}' requested. Refresh shortly for the PanDA task ID.")
+    return redirect('pcs:prod_task_detail', pk=pk)
+
+
 def prod_task_generate_commands(request, pk):
     """JSON endpoint: regenerate and return commands for a ProdTask."""
     task = get_object_or_404(
