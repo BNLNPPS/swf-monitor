@@ -133,6 +133,31 @@ In this agent, `fetch_payload_log` and `submit_task` enqueue via
 chain, landing this verifies the other agents still heartbeat. The shared API is
 documented in the `swf-common-lib` README.
 
+## Building a new capability — the pattern
+
+The testbed is becoming a live, automated, responsive production system, and this
+agent is the standard instrument for it. A new credentialed, slow, or hang-prone
+operation is not a new service — it is the same four-step recipe:
+
+1. **Handler + doer.** Add `_handle_<msg_type>` (validate, then enqueue) and a
+   standalone `_do_<msg_type>` / `scripts/<doer>.py` that does the privileged
+   work; register the type in `KNOWN_TYPES`.
+2. **Run it in the background.** Long work goes through `run_in_background`
+   (bounded pool, dedup, reentrant PROCESSING) so the receiver thread never
+   blocks — see *Async execution* above.
+3. **Emit a completion event.** On success, publish a small event to
+   `/topic/epictopic`; the existing SSE relay broadcasts it.
+4. **Push it to the browser.** The triggering page holds an `EventSource` and
+   updates the moment the event arrives — no polling, no manual refresh. See
+   [SSE_PUSH.md](SSE_PUSH.md).
+
+The result is a button that fires a privileged action server-side under the
+agent's credentials and reports back live — internally, and (through the
+swf-remote streaming proxy) to remote collaborators. `fetch_payload_log` and
+`submit_task` are the worked examples; the campaign-provenance sweep is the next.
+Reach for this pattern before building a poller, a blocking handler, or anything
+that places a credential in the web tier.
+
 ## Current capabilities
 
 Verified against `agents/epicprod_ops_agent.py` and its doers, 2026-06-02:
