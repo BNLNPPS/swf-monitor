@@ -184,7 +184,8 @@ Each item below is, by design, a new handler + doer on this agent.
   monthly completion-status email.
 - **Proactive completion notification** — auto-notify the operator the moment a
   fetch or submit finishes, removing the manual refresh; the corun-ai Mattermost
-  callback is the working model.
+  callback is the working model. Browser-push design: [SSE_PUSH.md](SSE_PUSH.md)
+  (the agent emits `payload_log_ready` / `prodtask_submitted` over the SSE relay).
 - **Credentialed MCP provider** — a future `pcs_prodtask_submit` MCP tool routes
   through the agent: the bot triggers, the agent (the credential holder)
   executes. The MCP server stays credential-free.
