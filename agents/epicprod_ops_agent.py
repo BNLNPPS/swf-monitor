@@ -178,6 +178,13 @@ class EpicProdOpsAgent(BaseAgent):
             self._mark_error(jobdir, reason)
         else:
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
+            # Push completion to the browser via the SSE relay (rides the topic
+            # the monitor consumes; the page matches on pandaid). See docs/SSE_PUSH.md.
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'payload_log_ready',
+                'pandaid': str(m['pandaid']),
+                'jeditaskid': str(m['jeditaskid']),
+            })
 
     def _handle_submit_task(self, m):
         """Validate, then run the submission on the worker pool. Deduped per
@@ -216,8 +223,16 @@ class EpicProdOpsAgent(BaseAgent):
         if p.returncode != 0:
             self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
         else:
+            jedi_task_id = (p.stdout or '').strip()
             self.logger.info(
-                f"PRODOPS submit_task done: {task_name} -> jediTaskID={(p.stdout or '').strip()}")
+                f"PRODOPS submit_task done: {task_name} -> jediTaskID={jedi_task_id}")
+            # Push completion to the browser via the SSE relay. See docs/SSE_PUSH.md.
+            if jedi_task_id:
+                self.send_message('/topic/epictopic', {
+                    'msg_type': 'prodtask_submitted',
+                    'task_name': task_name,
+                    'jedi_task_id': jedi_task_id,
+                })
 
     # -- helpers -------------------------------------------------------------
 
