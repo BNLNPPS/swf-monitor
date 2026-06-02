@@ -462,7 +462,6 @@ def panda_view_text(request):
 
 # ── Payload log (clean, from the Rucio log tarball via the prod-ops agent) ────
 
-@login_required
 def _payload_log_pending_page(message, pandaid, script_name):
     """202 page for a payload log still being fetched by the prod-ops agent.
 
@@ -510,6 +509,7 @@ setTimeout(check, 25000);     // backstop: one slow check if the event is missed
     return HttpResponse(html, status=202, content_type='text/html; charset=utf-8')
 
 
+@login_required
 def panda_payload_log(request, pandaid):
     """Serve a job's clean payload log from the prod-ops cache.
 
