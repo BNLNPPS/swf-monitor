@@ -361,6 +361,22 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
 
+    @action(detail=False, methods=['post'], url_path='rucio-snapshot-update')
+    def rucio_snapshot_update(self, request):
+        """Request a JLab Rucio snapshot refresh for the current campaign — the
+        external-safe trigger for the catalog 'Update from Rucio' button (a
+        /pcs/api/ POST returning JSON, so it survives the swf-remote proxy; see
+        docs/EPICPROD_OPS_AGENT.md). The web tier holds no credential; this only
+        publishes a rucio_snapshot_update to the prod-ops agent, which refreshes
+        the snapshot and rematches produced datasets onto each task's outputs in
+        the background, then pushes rucio_snapshot_ready over the SSE relay."""
+        user = getattr(request.user, 'username', '') or 'rucio_snapshot'
+        try:
+            services.rucio_snapshot_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
     @action(detail=True, methods=['post'], url_path='link-input')
     def link_input(self, request, pk=None):
         """Thin wrapper over ``services.prodtask_link_input``."""

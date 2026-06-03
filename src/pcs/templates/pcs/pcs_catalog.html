@@ -42,13 +42,13 @@
       busy(true);
       const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
       try {
-        const r = await fetch(form.action, {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/rucio-snapshot-update/', {
           method: 'POST',
-          headers: { 'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest' },
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
         });
         if (r.status !== 202) {
           let m = 'queue failed';
-          try { m = (await r.json()).message || m; } catch (_) {}
+          try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
           throw new Error(m);
         }
         // queued — the SSE listener below resets the button / reloads on completion.

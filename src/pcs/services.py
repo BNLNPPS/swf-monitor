@@ -1814,3 +1814,31 @@ def prodtask_submit_request(*, task):
         raise ServiceError(
             'Submission could not be queued (ops-agent queue unreachable).', status=503)
     return task
+
+
+def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):
+    """Publish a rucio_snapshot_update request to the prod-ops agent, which
+    refreshes the JLab Rucio snapshot for the current (+last) campaign and
+    rematches produced datasets onto each task's overrides['outputs'] in the
+    background, then pushes rucio_snapshot_ready over the SSE relay. The live
+    JLab fetch + per-task match is far too slow to run inline in a web request,
+    so the web tier only drops the message. Requires a current or last Campaign.
+    Raises ServiceError on a bad state or an unreachable queue. See
+    docs/EPICPROD_DATA_LINEAGE.md, docs/EPICPROD_OPS_AGENT.md."""
+    import json as _json
+    from .models import Campaign
+    if not Campaign.objects.filter(lifecycle__in=['current', 'last']).exists():
+        raise ServiceError('No current Campaign defined in PCS.', status=400)
+    msg = {'msg_type': 'rucio_snapshot_update', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Rucio update could not be queued (ops-agent queue unreachable).',
+            status=503)
