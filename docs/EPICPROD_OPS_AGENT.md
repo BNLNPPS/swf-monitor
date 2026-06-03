@@ -166,6 +166,7 @@ Verified against `agents/epicprod_ops_agent.py` and its doers, 2026-06-02:
 |---|---|---|---|---|
 | `fetch_payload_log` | `cache-payload-log.py` | Rucio proxy + xrootd | extracted log members in `$SWF_TMP_DIR/panda-logs/<jeditaskid>/<pandaid>/`, `.done` on success / `.error` on failure | 180s |
 | `submit_task` | `submit-prod-task.py` | PanDA OIDC token (operator) | `jediTaskID` recorded on the `ProdTask` (`panda_task_id` + `status='submitted'`) via `record-submission` | 300s |
+| `rucio_snapshot_update` | `rucio-snapshot-update.py` | JLab Rucio userpass (public `eicread`) | current+last snapshot refreshed, produced datasets matched onto each task's `overrides['outputs']`; `rucio_snapshot_ready` pushed (ok true/false) | 900s |
 | `health_ping` | — | — | `pong` to `reply_to` | — |
 | `shutdown` | — | — | deliberate stop; exits `EXIT_DELIBERATE=100` so systemd leaves it down | — |
 

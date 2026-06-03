@@ -28,6 +28,10 @@ Capabilities:
   submit_task        — submit one PCS ProdTask to PanDA via prun, reusing the
                        cached production token (delegates to
                        scripts/submit-prod-task.py).
+  rucio_snapshot_update — refresh the JLab Rucio output snapshot for the current
+                       (+last) campaign and rematch produced datasets onto each
+                       task's overrides['outputs'] (delegates to
+                       scripts/rucio-snapshot-update.py).
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -66,6 +70,11 @@ SUBMIT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-pro
 # Backstop on the prun submission subprocess (sandbox upload + JEDI insert).
 SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 
+# Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
+# the per-task rematch — slow and network-bound, so generously bounded.
+RUCIO_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-snapshot-update.py"
+RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "900"))
+
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
 # explicitly — every message to this agent carries namespace=prodops.
@@ -80,7 +89,8 @@ EXIT_DELIBERATE = 100
 class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
-    KNOWN_TYPES = {"fetch_payload_log", "submit_task", "health_ping", "shutdown"}
+    KNOWN_TYPES = {"fetch_payload_log", "submit_task", "rucio_snapshot_update",
+                   "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -233,6 +243,45 @@ class EpicProdOpsAgent(BaseAgent):
                     'task_name': task_name,
                     'jedi_task_id': jedi_task_id,
                 })
+
+    def _handle_rucio_snapshot_update(self, m):
+        """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
+        thread — the doer makes a live JLab fetch and matches every task, far
+        too slow for the web request (which is why it moved here). Deduped to one
+        refresh at a time; it scans the whole current/last campaign."""
+        self.run_in_background(
+            self._do_rucio_snapshot_update, m,
+            dedup_key="rucio_snapshot_update", label="rucio_snapshot_update")
+
+    def _do_rucio_snapshot_update(self, m):
+        """Run the snapshot-refresh doer; push completion on success AND failure
+        so the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
+        cmd = [sys.executable, str(RUCIO_SNAPSHOT_SCRIPT)]
+        self.logger.info("PRODOPS rucio_snapshot_update: refreshing current/last snapshot")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RUCIO_SNAPSHOT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS rucio_snapshot_update TIMEOUT after {RUCIO_SNAPSHOT_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'rucio_snapshot_ready', 'ok': False,
+                'error': f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s'})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  rucio-snapshot-update: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  rucio-snapshot-update: {line}")
+        if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(f"PRODOPS rucio_snapshot_update FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'rucio_snapshot_ready', 'ok': False, 'error': reason})
+        else:
+            self.logger.info("PRODOPS rucio_snapshot_update done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'rucio_snapshot_ready', 'ok': True})
 
     # -- helpers -------------------------------------------------------------
 

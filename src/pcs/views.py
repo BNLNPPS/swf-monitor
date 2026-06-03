@@ -1026,43 +1026,44 @@ def pcs_catalog_set_last(request):
 
 @_login_required_flash
 def pcs_catalog_rucio_update(request):
-    """POST handler for 'Update from Rucio' button on the catalog.
+    """POST handler for the catalog 'Update from Rucio' button.
 
-    Pulls the JLab Rucio snapshot for the current PCS campaign
-    (both /RECO/<v>/* and /FULL/<v>/* under scope=epic) and writes
-    a JSON file under the snapshot directory. Redirects back to
-    the catalog with a flash summary. POST-only.
+    Publishes a ``rucio_snapshot_update`` message to the prod-ops agent, which
+    refreshes the JLab Rucio snapshot for the current (+last) campaign and
+    rematches produced datasets onto each task's ``overrides['outputs']`` in the
+    background, then pushes ``rucio_snapshot_ready`` to the browser over the SSE
+    relay. The live JLab fetch + per-task match is far too slow to run inline in
+    the web request (it times out the WSGI worker) — it must go to the agent.
+    Returns 202/JSON to the button's fetch; flash + redirect for a no-JS POST.
+    POST-only. See docs/EPICPROD_DATA_LINEAGE.md, docs/EPICPROD_OPS_AGENT.md.
     """
+    is_xhr = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if request.method != 'POST':
         return _post_only_redirect(
             request, reverse('pcs:pcs_catalog'),
             action_label='Update from Rucio')
-    from .services import import_jlab_rucio_current_snapshot, ServiceError
-    user = getattr(request.user, 'username', '') or 'rucio_snapshot'
-    # Pull snapshots for both the current and (when set) the last
-    # campaign in one click — operator already consented to a refresh.
-    targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
-                   .order_by('lifecycle'))
-    if not targets:
-        messages.error(request, 'No current Campaign defined in PCS.')
+    if not Campaign.objects.filter(lifecycle__in=['current', 'last']).exists():
+        err = 'No current Campaign defined in PCS.'
+        if is_xhr:
+            return JsonResponse({'status': 'error', 'message': err}, status=400)
+        messages.error(request, err)
         return redirect(reverse('pcs:pcs_catalog'))
-    summaries, overall_errors = [], []
-    for camp in targets:
-        try:
-            summaries.append(import_jlab_rucio_current_snapshot(
-                campaign_name=camp.name, created_by=user))
-        except (ServiceError, OSError) as e:
-            overall_errors.append(f'{camp.lifecycle} {camp.name}: {e}')
-    parts = [
-        f"{s['campaign']} (" + ', '.join(f'{k}={v}' for k, v in s['paths'].items()) + ')'
-        for s in summaries
-    ]
-    msg = 'JLab Rucio snapshot: ' + ' | '.join(parts) if parts else 'no snapshot pulled'
-    if overall_errors:
-        msg += ' | errors: ' + '; '.join(overall_errors)
-        messages.warning(request, msg)
-    else:
-        messages.success(request, msg)
+    user = getattr(request.user, 'username', '') or 'rucio_snapshot'
+    payload = {'msg_type': 'rucio_snapshot_update', 'namespace': 'prodops',
+               'created_by': user}
+    try:
+        from monitor_app.activemq_connection import ActiveMQConnectionManager
+        ActiveMQConnectionManager().send_message('/queue/epicprod.ops',
+                                                 json.dumps(payload))
+    except Exception as e:                                    # noqa: BLE001
+        err = f'Could not reach the prod-ops agent: {e}'
+        if is_xhr:
+            return JsonResponse({'status': 'error', 'message': err}, status=502)
+        messages.error(request, err)
+        return redirect(reverse('pcs:pcs_catalog'))
+    if is_xhr:
+        return JsonResponse({'status': 'queued'}, status=202)
+    messages.success(request, 'Rucio update queued — refreshing in the background.')
     return redirect(reverse('pcs:pcs_catalog'))
 
 

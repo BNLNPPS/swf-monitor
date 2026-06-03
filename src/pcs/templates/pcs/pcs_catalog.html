@@ -16,15 +16,56 @@
         Update from CSV
       </button>
     </form>
-    <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
+    <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline" id="rucio-update-form">
       {% csrf_token %}
-      <button type="submit" class="btn btn-sm btn-outline-primary"
-              title="Refresh the JLab Rucio output snapshot for the current campaign"
-              onclick="return confirm('Refresh the JLab Rucio output snapshot for the current campaign?');">
+      <button type="submit" id="rucio-update-btn" class="btn btn-sm btn-outline-primary"
+              title="Refresh the JLab Rucio output snapshot (runs in the prod-ops agent; updates live when done)">
         Update from Rucio
       </button>
     </form>
   </div>
+
+  <script>
+  // Update from Rucio — fire-and-notify via the prod-ops agent + SSE push.
+  // The JLab fetch + per-task match is too slow for the web request, so the
+  // button publishes to the agent and the page updates the instant
+  // rucio_snapshot_ready arrives — no polling. See docs/EPICPROD_DATA_LINEAGE.md.
+  (function () {
+    const form = document.getElementById('rucio-update-form');
+    const btn  = document.getElementById('rucio-update-btn');
+    if (!form || !btn) return;
+    const label = btn.textContent.trim();
+    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Updating…' : label; }
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Refresh the JLab Rucio output snapshot for the current campaign?')) return;
+      busy(true);
+      const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch(form.action, {
+          method: 'POST',
+          headers: { 'X-CSRFToken': token, 'X-Requested-With': 'XMLHttpRequest' },
+        });
+        if (r.status !== 202) {
+          let m = 'queue failed';
+          try { m = (await r.json()).message || m; } catch (_) {}
+          throw new Error(m);
+        }
+        // queued — the SSE listener below resets the button / reloads on completion.
+      } catch (err) {
+        busy(false);
+        alert('Could not queue the Rucio update: ' + err.message);
+      }
+    });
+    const stream = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=rucio_snapshot_ready";
+    const es = new EventSource(stream);
+    es.addEventListener('rucio_snapshot_ready', function (ev) {
+      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+      if (d.ok === false) { busy(false); alert('Rucio update failed: ' + (d.error || 'unknown error')); }
+      else { window.location.reload(); }
+    });
+  })();
+  </script>
 
   {% if show_tabs %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">

@@ -1678,6 +1678,31 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
     return summary
 
 
+def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
+    """Pull the JLab Rucio snapshot for the current (+last) PCS campaign(s) and
+    rematch produced datasets onto each task's ``overrides['outputs']``.
+
+    The work behind the catalog's "Update from Rucio" button. Slow and
+    network-bound (a live JLab Rucio fetch of /RECO + /FULL plus the match over
+    every task), so it runs off the web request — in the prod-ops agent's
+    ``rucio_snapshot_update`` doer. Returns ``{'summaries': [...], 'errors':
+    [...]}``; errors are collected per campaign, never swallowed.
+    """
+    targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
+                   .order_by('lifecycle'))
+    out = {'summaries': [], 'errors': []}
+    if not targets:
+        out['errors'].append('No current Campaign defined in PCS')
+        return out
+    for camp in targets:
+        try:
+            out['summaries'].append(import_jlab_rucio_current_snapshot(
+                campaign_name=camp.name, created_by=created_by))
+        except Exception as e:                                # noqa: BLE001
+            out['errors'].append(f'{camp.lifecycle} {camp.name}: {e}')
+    return out
+
+
 def set_pcs_campaign_lifecycle(new_name, target_lifecycle, *, created_by='operator'):
     """Set the PCS Campaign with lifecycle=`target_lifecycle` to `new_name`.
 
