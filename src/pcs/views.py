@@ -1051,6 +1051,40 @@ def pcs_catalog_rucio_update(request):
 
 
 @_login_required_flash
+def rucio_did_detail(request, scope, name):
+    """Self-hosted Rucio DID detail — a live, read-only browser for any DID,
+    since ePIC has no public Rucio webui. GET page-view → external-safe through
+    the swf-remote proxy (no write, no redirect, no agent credential; reads use
+    the public eicread userpass). Generic over DID type — input EVGEN and output
+    RECO render identically; only the links into it differ. The file list loads
+    on demand (rucio_did_files). A back-link to associated ProdTasks is a planned
+    phase-1.5 add (reverse lookup over overrides['outputs'] / input DIDs).
+    See docs/EPICPROD_DATA_LINEAGE.md."""
+    from .services import fetch_jlab_rucio_did, ServiceError
+    norm = '/' + name.lstrip('/')
+    ctx = {'scope': scope, 'name': norm, 'name_url': norm.lstrip('/'),
+           'did': f'{scope}:{norm}'}
+    try:
+        ctx['r'] = fetch_jlab_rucio_did(scope, norm)
+    except ServiceError as e:
+        ctx['error'] = e.detail
+        return render(request, 'pcs/rucio_did_detail.html', ctx, status=e.status)
+    return render(request, 'pcs/rucio_did_detail.html', ctx)
+
+
+def rucio_did_files(request, scope, name):
+    """On-demand JSON file list for the DID detail page (can be thousands)."""
+    from .services import fetch_jlab_rucio_did_files, ServiceError
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Login required'}, status=403)
+    try:
+        files = fetch_jlab_rucio_did_files(scope, name)
+    except ServiceError as e:
+        return JsonResponse({'error': e.detail}, status=e.status)
+    return JsonResponse({'files': files, 'count': len(files)})
+
+
+@_login_required_flash
 def pcs_catalog_past_update(request):
     """POST handler for the 'Update from epic-prod' button on the Past tab.
 

@@ -15,6 +15,11 @@ urlpatterns = [
     path('catalog/set-current/', views.pcs_catalog_set_current, name='pcs_catalog_set_current'),
     path('catalog/set-last/', views.pcs_catalog_set_last, name='pcs_catalog_set_last'),
 
+    # Rucio DID detail — self-hosted live browser (no public Rucio webui).
+    # files route first: <path:name> is greedy, so the /files/ suffix must match before the page route.
+    path('rucio/<str:scope>/<path:name>/files/', views.rucio_did_files, name='rucio_did_files'),
+    path('rucio/<str:scope>/<path:name>/', views.rucio_did_detail, name='rucio_did_detail'),
+
     # Physics Categories
     path('categories/', views.physics_categories_list, name='physics_categories_list'),
     path('categories/create/', views.physics_category_create, name='physics_category_create'),

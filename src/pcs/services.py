@@ -1080,6 +1080,79 @@ def fetch_jlab_rucio_campaign(campaign_path, *, scope='epic', token=None,
     return {'count': len(datasets), 'datasets': datasets}
 
 
+def fetch_jlab_rucio_did(scope, name):
+    """Live read of a single JLab Rucio DID for the self-hosted detail page.
+
+    Pure read over the public eicread userpass — no agent credential, no cache;
+    what it returns is true *now*. Generic over DID type: an input EVGEN dataset
+    and an output RECO dataset render through this same path. Returns Rucio's
+    full ``/meta`` (system + user attributes), the per-RSE dataset replicas, and
+    a derived summary (type, total bytes, file count). The file list is fetched
+    separately (``fetch_jlab_rucio_did_files``) — a populated RECO dataset has
+    thousands of files. Raises ServiceError(404) for an unknown DID, (502) if
+    JLab Rucio is unreachable. See docs/EPICPROD_DATA_LINEAGE.md."""
+    import json as _json
+    import urllib.error as _ue
+    name = '/' + name.lstrip('/')   # Rucio names are leading-slashed; a proxy may collapse '//'
+    try:
+        token = _jlab_rucio_auth()
+        meta = _json.loads(_jlab_rucio_get(f'/dids/{scope}/{name}/meta', token))
+        replicas = [r for r in _ndjson(
+            _jlab_rucio_get(f'/replicas/{scope}/{name}/datasets', token))
+            if isinstance(r, dict)]
+    except _ue.HTTPError as e:
+        if e.code == 404:
+            raise ServiceError(
+                f'DID not found in JLab Rucio: {scope}:{name}', status=404)
+        raise ServiceError(
+            f'JLab Rucio error {e.code} for {scope}:{name}', status=502)
+    except (_ue.URLError, OSError) as e:
+        raise ServiceError(f'Could not reach JLab Rucio: {e}', status=502)
+    # The DID record's length/bytes are often null; the replica rows carry the
+    # real totals. Take the max across RSEs as the dataset total.
+    def _from_replicas(key):
+        vals = [r.get(key) for r in replicas if isinstance(r.get(key), int)]
+        return max(vals) if vals else meta.get(key)
+    return {
+        'scope': scope, 'name': name, 'did': f'{scope}:{name}',
+        'type': meta.get('did_type') or meta.get('type'),
+        'account': meta.get('account'),
+        'is_open': meta.get('is_open'),
+        'availability': meta.get('availability'),
+        'bytes': _from_replicas('bytes'),
+        'file_count': _from_replicas('length'),
+        'created_at': meta.get('created_at'),
+        'updated_at': meta.get('updated_at'),
+        'meta': meta,
+        'replicas': replicas,
+    }
+
+
+def fetch_jlab_rucio_did_files(scope, name):
+    """Live file list for a JLab Rucio DID (on-demand; can be thousands).
+
+    Pure read; returns ``[{name, bytes, adler32, guid, events}, ...]``. Per-file
+    PFN resolution is intentionally omitted here — the bulk ``/replicas`` call is
+    too slow for a large dataset (it times out); the RSE-level replicas from
+    ``fetch_jlab_rucio_did`` already answer 'where does it live'."""
+    import urllib.error as _ue
+    name = '/' + name.lstrip('/')
+    try:
+        token = _jlab_rucio_auth()
+        files = [f for f in _ndjson(
+            _jlab_rucio_get(f'/dids/{scope}/{name}/files', token, timeout=120))
+            if isinstance(f, dict)]
+    except _ue.HTTPError as e:
+        if e.code == 404:
+            raise ServiceError(
+                f'DID not found in JLab Rucio: {scope}:{name}', status=404)
+        raise ServiceError(
+            f'JLab Rucio error {e.code} for {scope}:{name}', status=502)
+    except (_ue.URLError, OSError) as e:
+        raise ServiceError(f'Could not reach JLab Rucio: {e}', status=502)
+    return files
+
+
 def _request_input_tail(ds_path):
     """Return the comparable tail of a CSV input dataset path.
 

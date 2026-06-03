@@ -244,8 +244,15 @@ Context expected:
             <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
           {% endif %}
           {% if t.outputs %}
-            <div class="text-muted"><strong>Output:</strong>
-              {% for o in t.outputs %}{% if not forloop.first %}<br>{% endif %}{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}: {{ o.did }} &middot; {{ o.file_count }} files{% if o.rses %} &middot; {% for r in o.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}{% endfor %}
+            <div><strong class="text-muted">Output{{ t.outputs|length|pluralize }}:</strong>
+              <ul class="mb-0 ps-3">
+                {% for o in t.outputs %}
+                <li>{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}:
+                  <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a>
+                  <span class="text-muted">&middot; {{ o.file_count }} files{% if o.rses %} &middot; {% for r in o.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}</span>
+                </li>
+                {% endfor %}
+              </ul>
             </div>
           {% endif %}
         </td>
