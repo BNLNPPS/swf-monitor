@@ -150,6 +150,13 @@ operation is not a new service — it is the same four-step recipe:
 4. **Push it to the browser.** The triggering page holds an `EventSource` and
    updates the moment the event arrives — no polling, no manual refresh. See
    [SSE_PUSH.md](SSE_PUSH.md).
+5. **Make the trigger external-safe.** The button reaches the agent through a
+   web endpoint, and for the swf-remote face (`epic-devcloud.org` — where most
+   collaborators are) that endpoint **must be a `/pcs/api/` JSON call
+   authenticated by `X-Remote-User`, never a page-view POST that redirects**: a
+   page POST passes internally and fails through the proxy (no session/CSRF, no
+   redirect relay). See [EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md) → *Write actions
+   and triggers*, and verify on `epic-devcloud.org`, not the internal face.
 
 The result is a button that fires a privileged action server-side under the
 agent's credentials and reports back live — internally, and (through the
