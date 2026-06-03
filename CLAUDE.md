@@ -31,6 +31,7 @@ pattern) and **`docs/SSE_PUSH.md`** (the browser push).
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
+- `EPICPROD_DATA_LINEAGE.md` — gather produced-dataset Rucio refs onto the catalog; reference + xrootd access.
 - `JEDI_INTEGRATION.md` — PCS → JEDI/PanDA submission design.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `API_REFERENCE.md`, `MCP.md` — REST and MCP surfaces.
