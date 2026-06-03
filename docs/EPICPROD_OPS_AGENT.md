@@ -67,6 +67,18 @@ payload-log flow is the reference instance: the job page drops a
 `fetch_payload_log` message and later serves the extracted log from the cache;
 it never touches the proxy or xrootd.
 
+**Where the agent writes — `$SWF_TMP_DIR`, never the deploy tree.** The agent
+runs as the production-ops user (`wenauseic`, group `eic`); the web tier runs as
+`apache`. Any artifact the agent produces for the web tier to read must live in
+the agent-writable, world-readable shared cache `$SWF_TMP_DIR` (`/data/swf-tmp`)
+— the tree the payload-log cache and the Rucio snapshots both use, with paths
+derived from the `SWF_TMP_DIR` setting. It must **not** live under the deploy
+tree (`/opt/swf-monitor/shared/...`), which is owned by `apache`: a doer that
+writes there passes when the web tier writes the file and fails the instant the
+agent takes over the write (`[Errno 13] Permission denied`). Like the
+external-safe trigger, this is a boundary the internal/dev path hides until the
+agent — not the web tier — performs the write.
+
 ## Capability model
 
 The agent is **event-driven, not polled** — the same low-latency model the
@@ -157,7 +169,8 @@ first because it is the step most often gotten wrong:
    constraint.
 2. **Handler + doer.** Add `_handle_<msg_type>` (validate, then enqueue) and a
    standalone `_do_<msg_type>` / `scripts/<doer>.py` that does the privileged
-   work; register the type in `KNOWN_TYPES`.
+   work; register the type in `KNOWN_TYPES`. Any output the web tier will read
+   goes under `$SWF_TMP_DIR`, not the deploy tree — see *Credential boundary*.
 3. **Run it in the background.** Long work goes through `run_in_background`
    (bounded pool, dedup, reentrant PROCESSING) so the receiver thread never
    blocks — see *Async execution* above.

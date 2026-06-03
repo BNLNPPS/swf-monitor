@@ -10,8 +10,10 @@ to its native shape (DRF Response, MCP error dict).
 import csv as _csv
 import hashlib as _hashlib
 import logging as _logging
+import os as _os
 import re as _re
 
+from django.conf import settings as _settings
 from django.db import transaction
 
 _log = _logging.getLogger(__name__)
@@ -975,7 +977,7 @@ JLAB_RUCIO_URL      = '/'.join(['https://rucio-server.jlab.org:443'])
 JLAB_RUCIO_ACCOUNT  = 'eicread'
 JLAB_RUCIO_USERNAME = 'eicread'
 JLAB_RUCIO_PASSWORD = 'eicread'
-RUCIO_SNAPSHOT_DIR  = '/opt/swf-monitor/shared/rucio-snapshots'
+RUCIO_SNAPSHOT_DIR  = _os.path.join(_settings.SWF_TMP_DIR, 'rucio-snapshots')
 
 
 def _jlab_rucio_auth(timeout=30):
