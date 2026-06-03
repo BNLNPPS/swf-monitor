@@ -608,6 +608,14 @@
         updateUrl();
     }
 
+    // Dataset/config detail panels are read-only here — hide every task-only
+    // action (Submit/Lock/Edit/Copy/Delete/PanDA link/New) that a prior task
+    // view may have left visible. Submit-to-PanDA is task business, not dataset.
+    function hideTaskActions() {
+        [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
+         linkPandaTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
+    }
+
     // ── BROWSE: Show details ──
     function showDatasetDetail(id) {
         const ds = allDatasets.find(d => d.id === id);
@@ -615,8 +623,7 @@
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
         panelTitle.textContent = ds.dataset_name;
-        if (btnEditTask) btnEditTask.style.display = 'none';
-        if (btnNewTask) btnNewTask.style.display = 'none';
+        hideTaskActions();
         let tagsHtml = '';
         [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
             const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
@@ -648,8 +655,7 @@
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
         panelTitle.textContent = c.name;
-        if (btnEditTask) btnEditTask.style.display = 'none';
-        if (btnNewTask) btnNewTask.style.display = 'none';
+        hideTaskActions();
         function row(l,v) { return `<tr><td style="width:40%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
         let dataRows = '';
         if (c.data && Object.keys(c.data).length) {
