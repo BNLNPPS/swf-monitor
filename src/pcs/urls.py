@@ -43,6 +43,8 @@ urlpatterns = [
     path('datasets/create/', views.dataset_create, name='dataset_create'),
     path('datasets/<int:pk>/', views.dataset_detail, name='dataset_detail'),
     path('datasets/<int:pk>/add-block/', views.dataset_add_block, name='dataset_add_block'),
+    # On-demand compose hydration (tag parameters) — light payload, fetched on open
+    path('datasets/<int:pk>/compose-detail/', views.prod_task_compose_dataset_detail, name='compose_dataset_detail'),
 
     # Production Configs
     path('configs/compose/', views.prod_configs_compose, name='prod_configs_compose'),
@@ -60,6 +62,8 @@ urlpatterns = [
     path('tasks/<int:pk>/delete/', views.prod_task_delete, name='prod_task_delete'),
     path('tasks/<int:pk>/submit-panda/', views.prod_task_submit_panda, name='prod_task_submit_panda'),
     path('tasks/<int:pk>/commands/', views.prod_task_generate_commands, name='prod_task_generate_commands'),
+    # On-demand compose hydration (taskParamMap + commands) — light payload, fetched on open
+    path('tasks/<int:pk>/compose-detail/', views.prod_task_compose_task_detail, name='compose_task_detail'),
 
     # REST API
     path('api/', include('pcs.api_urls')),

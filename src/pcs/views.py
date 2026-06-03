@@ -1420,8 +1420,11 @@ def prod_task_detail(request, pk):
 
 def prod_task_compose(request):
     """Two-pane compose UI for building production tasks."""
-    from .commands import build_task_params
-    # Preload all component data as JSON for client-side browsing
+    # Preload component data as JSON for client-side browsing. Heavy per-item
+    # detail — dataset tag parameters, and each task's taskParamMap + cached
+    # commands — is omitted here and hydrated on demand when an item is opened
+    # (prod_task_compose_dataset_detail / prod_task_compose_task_detail), so the
+    # page stays fast on a large catalog.
     datasets_qs = Dataset.objects.filter(block_num=1).select_related(
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
     ).order_by('-created_at')
@@ -1439,15 +1442,13 @@ def prod_task_compose(request):
             'source_kind': ds.source_kind,
             'source_location': ds.source_location,
             'validation_status': ds.validation_status,
-            'metadata': ds.metadata or {},
-            'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description,
-                            'parameters': ds.physics_tag.parameters},
-            'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description,
-                          'parameters': ds.evgen_tag.parameters},
-            'simu_tag': {'label': ds.simu_tag.tag_label, 'description': ds.simu_tag.description,
-                         'parameters': ds.simu_tag.parameters},
-            'reco_tag': {'label': ds.reco_tag.tag_label, 'description': ds.reco_tag.description,
-                         'parameters': ds.reco_tag.parameters},
+            # tag .parameters and .metadata omitted from the light payload;
+            # hydrated on open (prod_task_compose_dataset_detail). Labels +
+            # descriptions stay for the list, search, and the diff.
+            'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description},
+            'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description},
+            'simu_tag': {'label': ds.simu_tag.tag_label, 'description': ds.simu_tag.description},
+            'reco_tag': {'label': ds.reco_tag.tag_label, 'description': ds.reco_tag.description},
             'created_by': ds.created_by,
             'created_at': ds.created_at.strftime('%Y-%m-%d %H:%M'),
         })
@@ -1484,13 +1485,12 @@ def prod_task_compose(request):
         'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
         'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
     ).order_by('-updated_at')
+    # Light task entries: the taskParamMap (build_task_params) and the cached
+    # condor/panda commands are omitted and hydrated on open
+    # (prod_task_compose_task_detail). Building taskParamMap for every task was
+    # the bulk of this view's load cost.
     tasks_data = []
     for t in tasks_qs:
-        try:
-            task_params = build_task_params(t)
-            task_params_json = json.dumps(task_params, indent=2, default=str)
-        except Exception as e:
-            task_params_json = f'// Error building taskParamMap: {e}'
         tasks_data.append({
             'id': t.id,
             'name': t.name,
@@ -1502,9 +1502,6 @@ def prod_task_compose(request):
             'csv_file': t.csv_file,
             'overrides': t.overrides or {},
             'description': t.description,
-            'condor_command': t.condor_command,
-            'panda_command': t.panda_command,
-            'task_params_json': task_params_json,
             'created_by': t.created_by,
             'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
@@ -1610,6 +1607,42 @@ def prod_task_generate_commands(request, pk):
     task.generate_commands()
     task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
     return JsonResponse({
+        'condor_command': task.condor_command,
+        'panda_command': task.panda_command,
+    })
+
+
+def prod_task_compose_dataset_detail(request, pk):
+    """On-demand hydration for the compose view: a dataset's tag parameters and
+    metadata, which the light initial payload omits. The compose JS merges this
+    into the dataset entry the first time it is opened (never clobbering). GET
+    JSON; read-only."""
+    ds = get_object_or_404(Dataset.objects.select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'), pk=pk)
+    return JsonResponse({
+        'physics_tag': {'parameters': ds.physics_tag.parameters},
+        'evgen_tag': {'parameters': ds.evgen_tag.parameters},
+        'simu_tag': {'parameters': ds.simu_tag.parameters},
+        'reco_tag': {'parameters': ds.reco_tag.parameters},
+        'metadata': ds.metadata or {},
+    })
+
+
+def prod_task_compose_task_detail(request, pk):
+    """On-demand hydration for the compose view: a task's generated taskParamMap
+    and cached condor/panda commands, which the light initial payload omits. The
+    compose JS merges this into the task entry the first time it is opened (never
+    clobbering). GET JSON; read-only — does not regenerate/save commands."""
+    from .commands import build_task_params
+    task = get_object_or_404(ProdTask.objects.select_related(
+        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+        'dataset__simu_tag', 'dataset__reco_tag', 'prod_config'), pk=pk)
+    try:
+        task_params_json = json.dumps(build_task_params(task), indent=2, default=str)
+    except Exception as e:                                       # noqa: BLE001
+        task_params_json = f'// Error building taskParamMap: {e}'
+    return JsonResponse({
+        'task_params_json': task_params_json,
         'condor_command': task.condor_command,
         'panda_command': task.panda_command,
     })

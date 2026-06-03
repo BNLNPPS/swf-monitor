@@ -197,6 +197,44 @@
         return null;
     }
 
+    // ── On-demand detail hydration ──
+    // The initial payload is light. The first time an item is opened we fetch
+    // the omitted heavy fields and MERGE them into the array entry, marking it
+    // hydrated so we never refetch and never clobber. Every item the detail /
+    // diff / apply / command machinery touches has first been opened, so the
+    // data is always present when those run.
+    async function hydrateDataset(id) {
+        const ds = allDatasets.find(d => d.id === id);
+        if (!ds || ds._hydrated) return ds;
+        try {
+            const r = await fetch(`/swf-monitor/pcs/datasets/${id}/compose-detail/`);
+            if (r.ok) {
+                const d = await r.json();
+                ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'].forEach(k => {
+                    if (d[k]) ds[k] = Object.assign({}, ds[k], d[k]);
+                });
+                if (d.metadata !== undefined) ds.metadata = d.metadata;
+                ds._hydrated = true;
+            }
+        } catch (e) { /* leave light; detail falls back to labels */ }
+        return ds;
+    }
+    async function hydrateTask(id) {
+        const t = allTasks.find(x => x.id === id);
+        if (!t || t._hydrated) return t;
+        try {
+            const r = await fetch(`/swf-monitor/pcs/tasks/${id}/compose-detail/`);
+            if (r.ok) {
+                const d = await r.json();
+                if (d.task_params_json !== undefined) t.task_params_json = d.task_params_json;
+                if (d.condor_command !== undefined) t.condor_command = d.condor_command;
+                if (d.panda_command !== undefined) t.panda_command = d.panda_command;
+                t._hydrated = true;
+            }
+        } catch (e) { /* leave light */ }
+        return t;
+    }
+
     // ── State ──
     let browseType = initialTab;
     let mode = 'browse';  // 'browse' or 'compose'
@@ -529,8 +567,17 @@
     }
 
     // ── Item click ──
-    function onItemClick(type, id) {
+    async function onItemClick(type, id) {
         selectedItemId = id;
+        // Opening an item hydrates it (and, for a task, its dataset) so the
+        // detail / diff / apply machinery below always finds the heavy fields.
+        if (type === 'dataset') {
+            await hydrateDataset(id);
+        } else if (type === 'task') {
+            await hydrateTask(id);
+            const ht = allTasks.find(x => x.id === id);
+            if (ht) await hydrateDataset(ht.dataset_id);
+        }
         if (mode === 'compose') {
             // Clear previous diffs before showing new ones
             document.querySelectorAll('.field-diff-container').forEach(el => el.remove());
@@ -1009,19 +1056,31 @@
     }
     if (autoId) {
         selectedItemId = autoId;
-        if (browseType === 'tasks')    showTaskDetail(autoId);
-        else if (browseType === 'datasets') showDatasetDetail(autoId);
-        else if (browseType === 'configs')  showConfigDetail(autoId);
-        renderList();
-        // Mirror selection in the workbench list (server-rendered, so JS-driven
-        // renderList() can't reach it).
-        if (browseType === 'tasks') {
-            document.querySelectorAll('#pcs-wb-list .pcs-wb-row').forEach(r =>
-                r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
-            const sel = document.querySelector(`#pcs-wb-list .pcs-wb-row[data-task-id="${autoId}"]`);
-            if (sel) sel.scrollIntoView({block: 'nearest'});
-        }
-        updateUrl();
+        (async () => {
+            // Hydrate the auto-selected item before its detail renders (same
+            // contract as a click).
+            if (browseType === 'tasks') {
+                await hydrateTask(autoId);
+                const it = allTasks.find(x => x.id === autoId);
+                if (it) await hydrateDataset(it.dataset_id);
+                showTaskDetail(autoId);
+            } else if (browseType === 'datasets') {
+                await hydrateDataset(autoId);
+                showDatasetDetail(autoId);
+            } else if (browseType === 'configs') {
+                showConfigDetail(autoId);
+            }
+            renderList();
+            // Mirror selection in the workbench list (server-rendered, so JS-driven
+            // renderList() can't reach it).
+            if (browseType === 'tasks') {
+                document.querySelectorAll('#pcs-wb-list .pcs-wb-row').forEach(r =>
+                    r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
+                const sel = document.querySelector(`#pcs-wb-list .pcs-wb-row[data-task-id="${autoId}"]`);
+                if (sel) sel.scrollIntoView({block: 'nearest'});
+            }
+            updateUrl();
+        })();
     }
 })();
 
