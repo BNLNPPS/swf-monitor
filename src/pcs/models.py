@@ -596,6 +596,33 @@ class ProdTask(models.Model):
         return outputs[0] if outputs else None
 
     @property
+    def outputs(self):
+        """Produced Rucio datasets — one entry per dataset, never aggregated,
+        lifecycle-neutral. The single home for the produced-output ↔ task
+        association, stored in ``overrides['outputs']``; each entry is
+        ``{did, stage, version, filters, rses:[{rse,files,total,complete}],
+        file_count, bytes, complete, checked_at}``. Supersedes the old
+        ``csv_import.output`` rollup and the ``past_output`` block — see
+        EPICPROD_DATA_LINEAGE.md."""
+        out = (self.overrides or {}).get('outputs')
+        return out if isinstance(out, list) else []
+
+    @property
+    def has_output(self):
+        """True if any produced Rucio dataset is recorded."""
+        return bool(self.outputs)
+
+    @property
+    def output_stages(self):
+        """Distinct production stages present in outputs, e.g. ['FULL', 'RECO']."""
+        return sorted({o.get('stage') for o in self.outputs if o.get('stage')})
+
+    @property
+    def output_incomplete(self):
+        """True if any produced dataset is not fully replicated at every RSE."""
+        return any(not o.get('complete', True) for o in self.outputs)
+
+    @property
     def input_source_kind(self):
         """Source kind of the external input. Linked Dataset wins; csv_file fallback."""
         ds = self.input_dataset

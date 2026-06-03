@@ -1142,6 +1142,57 @@ def _aggregate_rucio_match(matches):
     return by_stage
 
 
+def _did_version(did):
+    """Release version segment of a produced DID.
+
+    ``epic:/RECO/26.04.1/epic_craterlake/...`` -> ``26.04.1`` (segment after
+    the stage). Empty string if it can't be parsed.
+    """
+    name = (did or '').split(':', 1)[-1]
+    parts = [p for p in name.split('/') if p]   # [stage, version, ...]
+    return parts[1] if len(parts) > 1 else ''
+
+
+def _rucio_match_to_output(m, checked_at=None):
+    """Convert one produced Rucio dataset record into a unified ``outputs``
+    entry (one per dataset, lifecycle-neutral) — see EPICPROD_DATA_LINEAGE.md.
+
+    File count / byte size are taken as the max across RSE replicas (Rucio
+    reports them per replica, identical across RSEs), matching
+    ``_aggregate_rucio_match``.
+    """
+    did = m.get('did', '')
+    files = m.get('length') or 0
+    bytes_ = m.get('bytes') or 0
+    rses = []
+    complete = True
+    for r in m.get('rse_replicas', []) or []:
+        rse = r.get('rse')
+        if not rse:
+            continue
+        total = r.get('length') or 0
+        avail = r.get('available_length') or 0
+        files = max(files, total)
+        bytes_ = max(bytes_, r.get('bytes') or 0)
+        rse_complete = bool(total) and avail == total
+        complete = complete and rse_complete
+        rses.append({'rse': rse, 'files': avail, 'total': total,
+                     'complete': rse_complete})
+    entry = {
+        'did':        did,
+        'stage':      m.get('stage', ''),
+        'version':    _did_version(did),
+        'filters':    _extract_past_filters(did),
+        'rses':       rses,
+        'file_count': files,
+        'bytes':      bytes_,
+        'complete':   complete if rses else False,
+    }
+    if checked_at:
+        entry['checked_at'] = checked_at
+    return entry
+
+
 def _index_snapshot_by_tail(snapshot):
     """Pre-index a snapshot for fast tail-prefix lookup.
 
@@ -1260,6 +1311,7 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     """
     # Precompute (rec, did_filters) so the matcher loop is O(req * did).
     idx = _index_snapshot_by_tail(snapshot)
+    checked_at = snapshot.get('fetched_at')
     idx_filtered = [(rec, _extract_past_filters(rec['did']))
                     for _tail, rec in idx]
     qs = ProdTask.objects.filter(campaign=campaign).select_related('dataset')
@@ -1283,28 +1335,14 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
                     matches.append(rec)
         for m in matches:
             matched_dids.add(m['did'])
-        by_stage = _aggregate_rucio_match(matches)
-        any_incomplete = any(s.get('incomplete', 0) for s in by_stage.values())
-        has_output = len(matches) > 0
-        if not has_output:
-            output_status = 'no_output'
-        elif any_incomplete:
-            output_status = 'incomplete'
-        else:
-            output_status = 'complete'
         overrides = dict(t.overrides or {})
-        cv = dict(overrides.get('csv_import', {}) or {})
-        cv['output'] = {
-            'by_stage':      by_stage,
-            'matched_count': len(matches),
-            'campaign_name': campaign.name,
-            'status':        output_status,   # 'no_output' | 'complete' | 'incomplete'
-            'has_output':    has_output,
-            'has_incomplete': any_incomplete,
-            'has_simu':      'FULL' in by_stage,
-            'has_reco':      'RECO' in by_stage,
-        }
-        overrides['csv_import'] = cv
+        overrides['outputs'] = [_rucio_match_to_output(m, checked_at) for m in matches]
+        # Drop the superseded aggregate if present — outputs is now the home.
+        cv = overrides.get('csv_import')
+        if isinstance(cv, dict) and 'output' in cv:
+            cv = dict(cv)
+            cv.pop('output', None)
+            overrides['csv_import'] = cv
         t.overrides = overrides
         t.save(update_fields=['overrides', 'updated_at'])
         if matches:
@@ -1341,6 +1379,65 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     campaign.data = {**(campaign.data or {}), 'rucio_unmatched': unmatched}
     campaign.save(update_fields=['data', 'updated_at'])
     summary['rucio_unmatched'] = len(unmatched)
+    return summary
+
+
+def migrate_outputs_schema(*, apply=False):
+    """One-time migration onto the unified ``ProdTask.overrides['outputs']``
+    schema — one entry per produced Rucio dataset, lifecycle-neutral
+    (EPICPROD_DATA_LINEAGE.md).
+
+    - ``past_output`` tasks: reshape ``overrides['past_output']`` + the
+      Dataset's Rucio DID/counts into one ``outputs`` entry; drop the
+      ``past_output`` key.
+    - tasks carrying the old ``csv_import.output`` rollup: drop that aggregate
+      (explicit DIDs are re-populated by the next Rucio match).
+
+    ``apply=False`` (default) is a dry run — counts only, no writes. Per-task
+    errors are collected, never swallowed.
+    """
+    summary = {'seen': 0, 'past_migrated': 0, 'aggregate_dropped': 0,
+               'errors': []}
+    for t in ProdTask.objects.select_related('dataset').iterator():
+        try:
+            ov = dict(t.overrides or {})
+            changed = False
+            po = ov.get('past_output')
+            if po and not ov.get('outputs'):
+                md = (t.dataset.metadata or {}) if t.dataset else {}
+                did = (md.get('source') or {}).get('location', '') if md else ''
+                rses = [{'rse': r.get('name'), 'files': r.get('files'),
+                         'total': r.get('total'),
+                         'complete': r.get('status') == 'complete'}
+                        for r in (po.get('rses') or [])]
+                ov['outputs'] = [{
+                    'did':        did,
+                    'stage':      po.get('stage', ''),
+                    'version':    po.get('version', ''),
+                    'filters':    po.get('filters', {}),
+                    'rses':       rses,
+                    'file_count': t.dataset.file_count if t.dataset else 0,
+                    'bytes':      t.dataset.data_size if t.dataset else 0,
+                    'complete':   po.get('complete', True),
+                }]
+                summary['past_migrated'] += 1
+                changed = True
+            if 'past_output' in ov:
+                ov.pop('past_output', None)
+                changed = True
+            cv = ov.get('csv_import')
+            if isinstance(cv, dict) and 'output' in cv:
+                cv = dict(cv)
+                cv.pop('output', None)
+                ov['csv_import'] = cv
+                summary['aggregate_dropped'] += 1
+                changed = True
+            summary['seen'] += 1
+            if changed and apply:
+                t.overrides = ov
+                t.save(update_fields=['overrides', 'updated_at'])
+        except Exception as e:                                # noqa: BLE001
+            summary['errors'].append(f'{t.name}: {e}')
     return summary
 
 

@@ -95,21 +95,32 @@ same interim convention that already holds `input_dataset_dids` and the
   `nevents` for the expected-vs-actual check.
 - `overrides` — the interim JSON the links are written to.
 
-`overrides` shape — one `rucio_output` object per produced DID, suffixed
-`rucio_output_2`, `_3`, … when a task resolves to more than one; file count
-recorded per dataset:
+`overrides.outputs` — a list, one entry per produced Rucio dataset
+(lifecycle-neutral, never aggregated); the single home for the produced-output
+↔ task association, read via the `ProdTask.outputs` accessor:
 
 ```json
 {
-  "rucio_output": {
-    "did": "epic:/RECO/26.04.1/epic_craterlake/<suffix>",
-    "rses": ["BNL-XRD", "EIC-XRD"],
-    "file_count": 1234,
-    "expected_files": 1280,
-    "checked_at": "<iso8601>"
-  }
+  "outputs": [
+    {
+      "did": "epic:/RECO/26.04.1/epic_craterlake/<suffix>",
+      "stage": "RECO",
+      "version": "26.04.1",
+      "filters": {"detector": "epic_craterlake", "beam": "10x100", "physics": "DIS", "q2": "", "species": "", "energy": ""},
+      "rses": [{"rse": "BNL-XRD", "files": 1234, "total": 1234, "complete": true}],
+      "file_count": 1234,
+      "bytes": 1234567890,
+      "complete": true,
+      "checked_at": "<iso8601>"
+    }
+  ]
 }
 ```
+
+The same schema serves current and past campaigns — today's current is
+tomorrow's past, with no reshape on transition. `migrate_outputs_schema()`
+(standalone `scripts/migrate_outputs_schema.py`) folded the legacy `past_output`
+block and the old `csv_import.output` rollup onto it.
 
 ## Architecture
 
@@ -126,7 +137,7 @@ tier holds no credential.
   Rucio checks across the worker pool; the receiver thread never blocks.
 
 **Reference** — a catalog read over the stored links, no credential: the existing
-filter set (`EPICPROD_TASK_CATALOG.md` §7) collects the tasks' `rucio_output`
+filter set (`EPICPROD_TASK_CATALOG.md` §7) collects the tasks' `outputs`
 DIDs across the filtered set. Dataset-level reference is a pure read of the cached
 links; file/PFN expansion is resolved **live against Rucio on demand** — file
 lists are not cached, Rucio is their authority. Surfaced in the catalog's "Rucio
@@ -146,7 +157,7 @@ payload-log model. Each is an individual handler.
 
 **Phase 1 — gather.** Iterate a campaign's `ProdTask` rows; derive the RECO DID
 glob from the requested path + `campaign` + `detector_config`; resolve DID(s),
-RSEs, file counts, and expected-vs-actual; write `overrides.rucio_output`. Render
+RSEs, file counts, and expected-vs-actual; write `overrides.outputs`. Render
 in the catalog; push on completion. Validate by spot-checking a sample against an
 independent manual Rucio query.
 

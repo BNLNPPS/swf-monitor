@@ -207,27 +207,27 @@
       </thead>
       <tbody>
       {% for t in tasks %}
-        {% with output=t.overrides.past_output ds_did=t.dataset.metadata.source.location %}
+        {% with o=t.outputs.0 %}
         <tr class="pcs-pdl-row"
-            data-detector="{{ output.filters.detector|default:'' }}"
-            data-beam="{{ output.filters.beam|default:'' }}"
-            data-physics="{{ output.filters.physics|default:'' }}"
-            data-q2="{{ output.filters.q2|default:'' }}"
-            data-species="{{ output.filters.species|default:'' }}"
-            data-energy="{{ output.filters.energy|default:'' }}"
-            data-incomplete="{% if not output.complete %}1{% else %}0{% endif %}"
-            data-search="{{ ds_did|lower }}">
+            data-detector="{{ o.filters.detector|default:'' }}"
+            data-beam="{{ o.filters.beam|default:'' }}"
+            data-physics="{{ o.filters.physics|default:'' }}"
+            data-q2="{{ o.filters.q2|default:'' }}"
+            data-species="{{ o.filters.species|default:'' }}"
+            data-energy="{{ o.filters.energy|default:'' }}"
+            data-incomplete="{% if not o.complete %}1{% else %}0{% endif %}"
+            data-search="{{ o.did|lower }}">
           <td><input type="checkbox" class="pcs-pdl-cb" name="task" value="{{ t.pk }}"></td>
           <td class="small text-muted">{{ forloop.counter }}</td>
-          <td class="small">{% if output.stage == 'FULL' %}SIMU{% else %}{{ output.stage }}{% endif %}</td>
-          <td class="small">{{ output.version }}</td>
+          <td class="small">{% if o.stage == 'FULL' %}SIMU{% else %}{{ o.stage }}{% endif %}</td>
+          <td class="small">{{ o.version }}</td>
           <td class="small">
-            <div><strong class="text-muted">Output:</strong> {{ ds_did }}</div>
+            <div><strong class="text-muted">Output:</strong> {{ o.did }}</div>
             <div class="text-muted">
-              {{ t.dataset.file_count }} files
-              &middot; {{ t.dataset.data_size|filesizeformat }}
-              {% if output.rses %}&middot;
-                {% for r in output.rses %}{% if not forloop.first %}, {% endif %}{{ r.name }}{% if r.status != 'complete' %} <span class="pcs-pdl-rse-bad">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}
+              {{ o.file_count }} files
+              &middot; {{ o.bytes|filesizeformat }}
+              {% if o.rses %}&middot;
+                {% for r in o.rses %}{% if not forloop.first %}, {% endif %}{{ r.rse }}{% if not r.complete %} <span class="pcs-pdl-rse-bad">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}
               {% endif %}
             </div>
           </td>

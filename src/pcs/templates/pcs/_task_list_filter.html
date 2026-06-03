@@ -215,11 +215,11 @@ Context expected:
           data-q2="{{ path_filters.q2|default:'' }}"
           data-species="{{ path_filters.species|default:'' }}"
           data-energy="{{ path_filters.energy|default:'' }}"
-          data-has-output="{% if t.overrides.csv_import.output.has_output %}1{% else %}0{% endif %}"
-          data-no-output="{% if t.overrides.csv_import.output and not t.overrides.csv_import.output.has_output %}1{% else %}0{% endif %}"
-          data-incomplete-output="{% if t.overrides.csv_import.output.has_incomplete %}1{% else %}0{% endif %}"
-          data-has-simu="{% if t.overrides.csv_import.output.has_simu %}1{% else %}0{% endif %}"
-          data-has-reco="{% if t.overrides.csv_import.output.has_reco %}1{% else %}0{% endif %}"
+          data-has-output="{% if t.has_output %}1{% else %}0{% endif %}"
+          data-no-output="{% if t.has_output %}0{% else %}1{% endif %}"
+          data-incomplete-output="{% if t.output_incomplete %}1{% else %}0{% endif %}"
+          data-has-simu="{% if 'FULL' in t.output_stages %}1{% else %}0{% endif %}"
+          data-has-reco="{% if 'RECO' in t.output_stages %}1{% else %}0{% endif %}"
           data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
         <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
@@ -243,12 +243,10 @@ Context expected:
           {% if other_text|informative_text %}
             <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
           {% endif %}
-          {% if t.overrides.csv_import.output.matched_count %}
-            {% with output=t.overrides.csv_import.output %}
-              <div class="text-muted"><strong>Output:</strong>
-                {% for stage, st in output.by_stage.items %}{% if not forloop.first %} &middot; {% endif %}{% if stage == 'FULL' %}Simu{% else %}Reco{% endif %}: {{ st.count }} ds, {{ st.files }} files, {{ st.bytes|filesizeformat }}{% if st.rses %}, {% for rse, c in st.rses.items %}{% if not forloop.first %} {% endif %}{{ rse }}{% if c.incomplete %} <span style="color:#dc3545">({{ c.complete }}/{{ c.complete|add:c.incomplete }})</span>{% endif %}{% endfor %}{% endif %}{% endfor %}
-              </div>
-            {% endwith %}
+          {% if t.outputs %}
+            <div class="text-muted"><strong>Output:</strong>
+              {% for o in t.outputs %}{% if not forloop.first %}<br>{% endif %}{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}: {{ o.did }} &middot; {{ o.file_count }} files{% if o.rses %} &middot; {% for r in o.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}{% endfor %}
+            </div>
           {% endif %}
         </td>
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>

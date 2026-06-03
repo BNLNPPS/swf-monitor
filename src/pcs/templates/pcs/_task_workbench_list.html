@@ -142,7 +142,7 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 
   <div class="pcs-wb-list" id="pcs-wb-list" tabindex="0">
     {% for t in tasks %}
-    {% with ds_path_full=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters output=t.overrides.csv_import.output %}
+    {% with ds_path_full=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters %}
     <div class="pcs-wb-row{% if focused_task_id == t.pk %} selected{% endif %}"
          data-task-id="{{ t.pk }}"
          data-status="{{ t.status|default:'' }}"
@@ -162,11 +162,11 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
          data-q2="{{ path_filters.q2|default:'' }}"
          data-species="{{ path_filters.species|default:'' }}"
          data-energy="{{ path_filters.energy|default:'' }}"
-         data-has-output="{% if output.has_output %}1{% else %}0{% endif %}"
-         data-no-output="{% if output and not output.has_output %}1{% else %}0{% endif %}"
-         data-incomplete-output="{% if output.has_incomplete %}1{% else %}0{% endif %}"
-         data-has-simu="{% if output.has_simu %}1{% else %}0{% endif %}"
-         data-has-reco="{% if output.has_reco %}1{% else %}0{% endif %}"
+         data-has-output="{% if t.has_output %}1{% else %}0{% endif %}"
+         data-no-output="{% if t.has_output %}0{% else %}1{% endif %}"
+         data-incomplete-output="{% if t.output_incomplete %}1{% else %}0{% endif %}"
+         data-has-simu="{% if 'FULL' in t.output_stages %}1{% else %}0{% endif %}"
+         data-has-reco="{% if 'RECO' in t.output_stages %}1{% else %}0{% endif %}"
          data-search="{{ ds_path_full|lower }} {{ t.description|default:''|lower }}">
 
       <div class="r1">
@@ -186,16 +186,16 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
         {% if t.other_use %}<span class="flag-pill pill-other" title="Other use">Other</span>{% endif %}
       </div>
 
-      {% if output.matched_count or t.campaign %}
+      {% if t.has_output or t.campaign %}
       <div class="r3">
-        {% if output.matched_count %}
-          {% for stage, st in output.by_stage.items %}
-            <span class="{% if stage == 'FULL' %}out-simu{% else %}out-reco{% endif %}">
-              {% if stage == 'FULL' %}Simu{% else %}Reco{% endif %}
-              {{ st.count }}/{{ st.files }}f/{{ st.bytes|filesizeformat }}{% if st.has_incomplete %} <span class="out-incomplete">!</span>{% endif %}
+        {% if t.has_output %}
+          {% for o in t.outputs %}
+            <span class="{% if o.stage == 'FULL' %}out-simu{% else %}out-reco{% endif %}">
+              {% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}
+              {{ o.file_count }}f/{{ o.bytes|filesizeformat }}{% if not o.complete %} <span class="out-incomplete">!</span>{% endif %}
             </span>
           {% endfor %}
-        {% elif output %}
+        {% else %}
           <span class="flag-pill pill-noout">no output</span>
         {% endif %}
         {% if t.campaign %}<span style="margin-left:auto;">{{ t.campaign.name }}</span>{% endif %}
