@@ -57,7 +57,7 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 .pcs-wb-values .v-toggle.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
 
 /* Card rows. */
-.pcs-wb-list { flex: 1; overflow-y: auto; border: 1px solid #dee2e6;
+.pcs-wb-list { flex: 1; overflow-y: auto; min-height: 0; border: 1px solid #dee2e6;
                 border-radius: .375rem; background: #fff; }
 .pcs-wb-row { display: block; padding: .45rem .55rem .5rem;
                border-bottom: 1px solid #f0f0f0; cursor: pointer;
@@ -118,9 +118,9 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
     </div>
 
     <div class="pcs-wb-bar-titles" id="pcs-wb-titles">
-      {# Facet titles. Each opens a values panel below; (n) = count under the
+      {% comment %}Facet titles. Each opens a values panel below; (n) = count under the
          current filter state. data-active = currently chosen value (string
-         facets) or '1' (boolean facets). #}
+         facets) or '1' (boolean facets).{% endcomment %}
       <span class="pcs-wb-facet" data-facet="status"          ><span class="facet-label">Status</span>          <span class="facet-chosen"></span><span class="facet-count"></span></span>
       <span class="pcs-wb-facet" data-facet="requestor"       ><span class="facet-label">Requestor</span>       <span class="facet-chosen"></span><span class="facet-count"></span></span>
       <span class="pcs-wb-facet" data-facet="evgen"           ><span class="facet-label">Sample</span>          <span class="facet-chosen"></span><span class="facet-count"></span></span>

@@ -5,11 +5,14 @@
 
 {% block content %}
 <style>
-.compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); }
-.component-browser { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; }
-.spec-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); overflow: hidden; }
+.component-browser { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.spec-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
-.panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; }
+.panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; min-height: 0; }
+/* Datasets/Configs left pane: a flex column so its item-list scrolls inside the
+   pane instead of growing the page. min-height:0 lets the overflow child shrink. */
+#generic-list-host { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 .browser-tabs { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: .75rem; }
 .browser-tab { padding: .4rem .75rem; cursor: pointer; border-bottom: 2px solid transparent;
@@ -21,7 +24,7 @@
                    border-radius: .375rem; font-size: .85rem; margin-bottom: .5rem; }
 .filter-row { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
 
-.item-list { flex: 1; overflow-y: auto; border: 1px solid #dee2e6; border-radius: .375rem; }
+.item-list { flex: 1; overflow-y: auto; min-height: 0; border: 1px solid #dee2e6; border-radius: .375rem; }
 .item-entry { padding: .5rem .75rem; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: .82rem; }
 .item-entry:hover { background: #f8f9fa; }
 .item-entry.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
