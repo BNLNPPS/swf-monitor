@@ -137,33 +137,43 @@ documented in the `swf-common-lib` README.
 
 The testbed is becoming a live, automated, responsive production system, and this
 agent is the standard instrument for it. A new credentialed, slow, or hang-prone
-operation is not a new service — it is the same four-step recipe:
+operation is not a new service — it is the same recipe, and the trigger comes
+first because it is the step most often gotten wrong:
 
-1. **Handler + doer.** Add `_handle_<msg_type>` (validate, then enqueue) and a
+1. **Choose an external-safe trigger.** Most collaborators reach the agent
+   through the swf-remote face (`epic-devcloud.org`), where the proxy carries no
+   session or CSRF and cannot relay a redirect (3xx → 502). Only two trigger
+   shapes survive that hop:
+   - a **GET** page-view that drops the message as a side-effect and returns a
+     body (200/202), never a redirect — `fetch_payload_log` via the job page; or
+   - a **POST to `/pcs/api/`**, authenticated by `X-Remote-User`
+     (`TunnelAuthentication`, csrf-exempt) and returning **JSON**, never a
+     redirect — `submit_task` via the REST `submit` action.
+
+   A page-view POST that relies on session+CSRF or ends in `redirect()` passes on
+   the internal face and **fails through the proxy** — do not use it. See
+   [EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md) → *Write actions and triggers*, and
+   verify on `epic-devcloud.org`, not the internal face, which hides the
+   constraint.
+2. **Handler + doer.** Add `_handle_<msg_type>` (validate, then enqueue) and a
    standalone `_do_<msg_type>` / `scripts/<doer>.py` that does the privileged
    work; register the type in `KNOWN_TYPES`.
-2. **Run it in the background.** Long work goes through `run_in_background`
+3. **Run it in the background.** Long work goes through `run_in_background`
    (bounded pool, dedup, reentrant PROCESSING) so the receiver thread never
    blocks — see *Async execution* above.
-3. **Emit a completion event.** On success, publish a small event to
+4. **Emit a completion event.** On success, publish a small event to
    `/topic/epictopic`; the existing SSE relay broadcasts it.
-4. **Push it to the browser.** The triggering page holds an `EventSource` and
+5. **Push it to the browser.** The triggering page holds an `EventSource` and
    updates the moment the event arrives — no polling, no manual refresh. See
    [SSE_PUSH.md](SSE_PUSH.md).
-5. **Make the trigger external-safe.** The button reaches the agent through a
-   web endpoint, and for the swf-remote face (`epic-devcloud.org` — where most
-   collaborators are) that endpoint **must be a `/pcs/api/` JSON call
-   authenticated by `X-Remote-User`, never a page-view POST that redirects**: a
-   page POST passes internally and fails through the proxy (no session/CSRF, no
-   redirect relay). See [EXTERNAL_ACCESS.md](EXTERNAL_ACCESS.md) → *Write actions
-   and triggers*, and verify on `epic-devcloud.org`, not the internal face.
 
 The result is a button that fires a privileged action server-side under the
 agent's credentials and reports back live — internally, and (through the
-swf-remote streaming proxy) to remote collaborators. `fetch_payload_log` and
-`submit_task` are the worked examples; the campaign-provenance sweep is the next.
-Reach for this pattern before building a poller, a blocking handler, or anything
-that places a credential in the web tier.
+swf-remote streaming proxy) to remote collaborators. `fetch_payload_log` (GET
+side-effect) and `submit_task` (`/pcs/api/` POST) are the worked examples for the
+two trigger shapes; the campaign-provenance sweep is the next. Reach for this
+pattern before building a poller, a blocking handler, or anything that places a
+credential in the web tier.
 
 ## Current capabilities
 
@@ -195,11 +205,13 @@ final bookkeeping POST fails; that case is surfaced loudly with the task ID so
 the operator can re-record.
 
 Two trigger paths publish the identical `submit_task` message, both gated to
-`status='ready'` with no existing `panda_task_id`: the
-`prod_task_submit_panda` view (predates) and `services.prodtask_submit_request`
-(the REST `submit` action added for the two-pane compose view). They mirror the
-`record-submission` gates so a submission whose outcome would be refused is
-never fired.
+`status='ready'` with no existing `panda_task_id`. `services.prodtask_submit_request`
+(the REST `submit` action behind the two-pane compose view) is the
+**external-safe** trigger — a `/pcs/api/` POST returning JSON; the older
+`prod_task_submit_panda` view is a page-view POST that redirects, so it works only
+on the internal face and is **not** the shape to copy. Both mirror the
+`record-submission` gates so a submission whose outcome would be refused is never
+fired.
 
 ## Roadmap — capabilities as handlers
 
