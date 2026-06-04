@@ -8,7 +8,9 @@
 .compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); overflow: hidden; }
 .component-browser { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .spec-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
+.panel-header { display: flex; flex-direction: column; align-items: stretch; gap: .4rem; margin-bottom: .75rem; }
+.panel-header #panel-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#panel-buttons { display: flex; flex-wrap: wrap; gap: .25rem; }
 .panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; min-height: 0; }
 /* Datasets/Configs left pane: a flex column so its item-list scrolls inside the
    pane instead of growing the page. min-height:0 lets the overflow child shrink. */
