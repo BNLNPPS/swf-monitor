@@ -106,7 +106,8 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 <div class="pcs-wb-wrap" id="pcs-wb-root">
   {% if focused_campaign %}
   <div class="pcs-wb-caption">
-    Campaign: <strong>{{ focused_campaign.name }}</strong>
+    Scoped to campaign <strong>{{ focused_campaign.name }}</strong>
+    — <a href="{% url 'pcs:pcs_catalog' %}?lifecycle={{ focused_campaign.lifecycle }}">full catalog&nbsp;&rsaquo;</a>
   </div>
   {% endif %}
 

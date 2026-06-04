@@ -1419,13 +1419,60 @@ def prod_task_detail(request, pk):
 
 
 def prod_task_compose(request):
-    """Two-pane compose UI for building production tasks."""
-    # Preload component data as JSON for client-side browsing. Heavy per-item
-    # detail — dataset tag parameters, and each task's taskParamMap + cached
-    # commands — is omitted here and hydrated on demand when an item is opened
-    # (prod_task_compose_dataset_detail / prod_task_compose_task_detail), so the
-    # page stays fast on a large catalog.
-    datasets_qs = Dataset.objects.filter(block_num=1).select_related(
+    """Two-pane compose UI for building production tasks.
+
+    The page is scoped to ONE campaign — the current campaign by default, or the
+    campaign of the ?selected=<name> task. Only that campaign's tasks, and the
+    datasets they use, are shipped inline; cross-campaign and historical browsing
+    is the full catalog's job (linked from the page caption). Per-item heavy
+    detail (tag parameters, taskParamMap, cached commands) is still omitted and
+    hydrated on open (prod_task_compose_dataset_detail / _task_detail).
+    """
+    # Resolve the campaign first — it scopes the whole page. Default = the
+    # current campaign; a ?selected=<name> task in another campaign follows that
+    # task's campaign.
+    selected_name = request.GET.get('selected') or None
+    focused_task = None
+    if selected_name:
+        focused_task = ProdTask.objects.select_related('campaign').filter(name=selected_name).first()
+    campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
+    if campaign is None:
+        campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+
+    # Campaign-scoped task set — the single inline JSON source. Shipping every
+    # campaign's tasks (and the ~4900 past_output archive rows) was what made
+    # this page multi-MB and prone to proxy read timeouts.
+    tasks_list = []
+    if campaign is not None:
+        tasks_list = list(
+            ProdTask.objects.select_related(
+                'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+                'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+            ).filter(campaign=campaign).order_by('-updated_at')
+        )
+    # Light task entries: taskParamMap + cached commands omitted, hydrated on
+    # open (prod_task_compose_task_detail).
+    tasks_data = []
+    for t in tasks_list:
+        tasks_data.append({
+            'id': t.id,
+            'name': t.name,
+            'status': t.status,
+            'dataset_id': t.dataset_id,
+            'dataset_name': t.dataset.dataset_name,
+            'prod_config_id': t.prod_config_id,
+            'prod_config_name': t.prod_config.name,
+            'csv_file': t.csv_file,
+            'overrides': t.overrides or {},
+            'description': t.description,
+            'created_by': t.created_by,
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
+        })
+
+    # Datasets: only those used by the in-scope tasks — campaign-coherent, and
+    # keeps the past_output archive datasets off the page.
+    dataset_ids = {t.dataset_id for t in tasks_list}
+    datasets_qs = Dataset.objects.filter(id__in=dataset_ids).select_related(
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
     ).order_by('-created_at')
     datasets_data = []
@@ -1481,49 +1528,14 @@ def prod_task_compose(request):
             'updated_at': pc.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
 
-    tasks_qs = ProdTask.objects.select_related(
-        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-        'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-    ).order_by('-updated_at')
-    # Light task entries: the taskParamMap (build_task_params) and the cached
-    # condor/panda commands are omitted and hydrated on open
-    # (prod_task_compose_task_detail). Building taskParamMap for every task was
-    # the bulk of this view's load cost.
-    tasks_data = []
-    for t in tasks_qs:
-        tasks_data.append({
-            'id': t.id,
-            'name': t.name,
-            'status': t.status,
-            'dataset_id': t.dataset_id,
-            'dataset_name': t.dataset.dataset_name,
-            'prod_config_id': t.prod_config_id,
-            'prod_config_name': t.prod_config.name,
-            'csv_file': t.csv_file,
-            'overrides': t.overrides or {},
-            'description': t.description,
-            'created_by': t.created_by,
-            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
-        })
-
-    # Workbench left-panel task list: same partial-friendly shape the catalog
-    # uses, but scoped to one campaign. Default = the current campaign; if
-    # ?selected=<name> resolves to a task in a different campaign, scope
-    # follows that task's campaign so the workbench reflects what the user
-    # is focusing on (per EPICPROD_TASK_CATALOG.md §6).
-    selected_name = request.GET.get('selected') or None
-    focused_task = None
-    if selected_name:
-        focused_task = ProdTask.objects.select_related('campaign').filter(name=selected_name).first()
-    workbench_campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
-    if workbench_campaign is None:
-        workbench_campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
-    workbench_tasks = []
-    if workbench_campaign is not None:
-        workbench_tasks = list(
+    # Left-panel task list: same campaign scope, dataset-name order, the
+    # partial-friendly shape the catalog uses.
+    campaign_tasks = []
+    if campaign is not None:
+        campaign_tasks = list(
             ProdTask.objects
             .select_related('campaign', 'dataset', 'prod_config', 'request')
-            .filter(campaign=workbench_campaign)
+            .filter(campaign=campaign)
             .order_by('dataset__dataset_name')
         )
 
@@ -1533,10 +1545,10 @@ def prod_task_compose(request):
         'tasks_json': json.dumps(tasks_data),
         'selected_item_json': json.dumps(selected_name),
         'username': request.user.username if request.user.is_authenticated else '',
-        # Workbench left-panel context (consumed by _task_workbench_list.html):
-        'tasks': workbench_tasks,
+        # Left-panel task-list context (consumed by the list partial):
+        'tasks': campaign_tasks,
         'focused_task_id': focused_task.id if focused_task else None,
-        'focused_campaign': workbench_campaign,
+        'focused_campaign': campaign,
         'filters': {},
     }
     return render(request, 'pcs/prod_task_compose.html', context)
