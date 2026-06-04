@@ -469,6 +469,23 @@ def _csvimport_slug(dataset_path, gen_version):
     return _hashlib.sha1(key).hexdigest()[:12]
 
 
+# Common prefix on every catalog source path; carries no distinguishing
+# information, so it is stripped from the human-readable task name (and the
+# compose title strips it the same way).
+EPIC_VOLATILE_PREFIX = '/volatile/eic/EPIC/'
+
+
+def _task_name_from_path(path):
+    """Human-readable ProdTask.name from a catalog source path: the path with
+    the common ``/volatile/eic/EPIC/`` prefix stripped (matching the compose
+    title). Paths are unique per catalog row. Returns '' for an empty path so
+    the caller can fall back to the slug name."""
+    p = (path or '').strip()
+    if p.startswith(EPIC_VOLATILE_PREFIX):
+        p = p[len(EPIC_VOLATILE_PREFIX):]
+    return p
+
+
 def _ensure_csvimport_anchors():
     """Resolve the placeholder Dataset-FK targets used by CSV-imported rows.
 
@@ -537,7 +554,12 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             slug = _csvimport_slug(ds_path, gen_ver)
             dataset_name = f'csv_import.{slug}'
-            task_name = f'csv_import.{slug}'
+            # Human-readable task name = the source path (the row's title), not
+            # an opaque hash, so URLs read clearly and the name can't be mistaken
+            # for the importer firing. Falls back to the slug name for a path-less
+            # (gen_version-only) row. The Rucio DID stays slug-based on
+            # dataset_name — its charset rules are a separate concern.
+            task_name = _task_name_from_path(ds_path) or dataset_name
 
             raw_priority = (row.get('Priority') or '').strip()
             try:
