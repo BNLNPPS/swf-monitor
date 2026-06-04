@@ -37,11 +37,10 @@ class ServiceError(Exception):
 # state changes are recorded via prodtask_record_submission and
 # automation, not direct human transitions.
 #
-# The two bulk-import statuses are deliberately NOT keys here, so the generic
-# set-status path can never move them: a ``csv_import`` catalog row enters the
-# buildable flow only through ``prodtask_adopt`` (csv_import → draft, claiming
-# ownership), and a ``past_output`` row is a frozen historical archive
-# (terminal — clone it, via Copy, to base new production on it). See
+# Imported catalog rows enter as ``draft`` and follow the normal flow. The one
+# import status that is NOT a key here is ``past_output``: a frozen historical
+# archive (terminal — clone it, via Copy, to base new production on it), so the
+# generic set-status path can never move it. See
 # PCS_DATASET_REQUEST_WORKFLOW.md §Lifecycle and EPICPROD_TASK_CATALOG.md §6.
 PRODTASK_TRANSITIONS = {
     'draft':     {'ready'},
@@ -289,35 +288,6 @@ def prodtask_set_status(*, task, new_status):
     return task
 
 
-def prodtask_adopt(*, task, adopted_by):
-    """Adopt an imported catalog row into the buildable lifecycle.
-
-    ``csv_import`` rows are the catalog projection of Sakib's
-    ``default_datasets.csv`` — incomplete drafts built on placeholder anchor
-    tags (see ``import_default_datasets_csv``). Adopt moves such a row to
-    ``draft`` and claims ownership for ``adopted_by``, so the owner-gated
-    edit / lock / delete actions become available and the operator can finish
-    composing the task and submit it.
-
-    Only ``csv_import`` rows are adoptable. A ``past_output`` row is a frozen
-    archive of already-produced historical output
-    (EPICPROD_TASK_CATALOG.md §6); to base new production on one, clone it
-    (Copy → new draft) rather than mutating the archive in place. Any other
-    status is already inside the lifecycle and has its own transitions.
-    """
-    if task.status != 'csv_import':
-        raise ServiceError(
-            f'Only csv_import catalog rows can be adopted into the buildable '
-            f'flow; this task is {task.status!r}. To base new production on a '
-            f'past_output archive, clone it (Copy).',
-            status=409,
-        )
-    task.status = 'draft'
-    task.created_by = adopted_by
-    task.save(update_fields=['status', 'created_by', 'updated_at'])
-    return task
-
-
 def prodtask_apply_request(task, request, *, save=True):
     """Copy seed fields from ``request`` onto ``task`` (request → task).
 
@@ -538,8 +508,9 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     Each CSV row becomes (idempotently):
       - one Dataset (placeholder tags + ``26.02.0`` campaign labels,
         full row preserved in ``metadata['csv_import']``),
-      - one ProdTask (status='csv_import', linked to the Dataset, the
-        anchor ProdConfig, and the current Campaign).
+      - one ProdTask (status='draft', linked to the Dataset, the
+        anchor ProdConfig, and the current Campaign) — imported rows enter
+        the editable production lifecycle directly.
 
     Idempotency key per row: ``(Dataset Path, Generator/Dataset Version)``.
     Re-running updates the existing rows in place.
@@ -607,7 +578,12 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             task_defaults = dict(
                 description=(row.get('Description') or '').strip(),
-                status='csv_import',
+                # Imported catalog rows enter the editable production lifecycle
+                # directly — turning Sakib's static default_datasets.csv list
+                # into the living, actionable current-campaign catalog is the
+                # whole point of the import. (The legacy 'csv_import' holding
+                # status + per-row Adopt step were retired; see migration 0008.)
+                status='draft',
                 dataset=ds,
                 prod_config=cfg,
                 campaign=campaign,
@@ -633,11 +609,11 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             existing = ProdTask.objects.filter(name=task_name).first()
             if existing:
-                # Preserve status once an operator has moved the task off
-                # csv_import — re-imports must not roll back lifecycle.
-                preserve_status = existing.status != 'csv_import'
+                # A re-import refreshes the catalog data but never moves the
+                # task in its lifecycle — whatever state an operator has
+                # reached (draft/ready/submitted/…) is left untouched.
                 for k, v in task_defaults.items():
-                    if k == 'status' and preserve_status:
+                    if k == 'status':
                         continue
                     if k == 'overrides':
                         # Merge so non-csv_import override keys (added by

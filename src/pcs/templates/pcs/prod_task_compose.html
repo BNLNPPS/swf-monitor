@@ -96,8 +96,6 @@
             <div id="panel-buttons">
                 {% if username %}
                 <button class="btn btn-dark-green btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
-                <button class="btn btn-warning btn-sm" id="btn-adopt-task" style="display:none;"
-                        title="Bring this imported catalog row into the buildable flow (becomes your editable draft).">Adopt</button>
                 <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 <button class="btn btn-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
                 <button class="btn btn-success btn-sm" id="btn-lock-task" style="display:none;">Lock</button>
@@ -259,7 +257,6 @@
     const btnNewTask = document.getElementById('btn-new-task');
     const btnEditTask = document.getElementById('btn-edit-task');
     const btnCopyTask = document.getElementById('btn-copy-task');
-    const btnAdoptTask = document.getElementById('btn-adopt-task');
     const btnDeleteTask = document.getElementById('btn-delete-task');
     const btnLockTask = document.getElementById('btn-lock-task');
     const submitTaskWrap = document.getElementById('submit-task-wrap');
@@ -295,7 +292,6 @@
         if (btnNewTask) btnNewTask.style.display = browseType === 'tasks' ? 'block' : 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
-        if (btnAdoptTask) btnAdoptTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
         if (submitTaskWrap) submitTaskWrap.style.display = 'none';
@@ -312,7 +308,6 @@
         if (btnNewTask) btnNewTask.style.display = 'none';
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
-        if (btnAdoptTask) btnAdoptTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
         if (submitTaskWrap) submitTaskWrap.style.display = 'none';
@@ -387,7 +382,6 @@
             if (btnDeleteTask) btnDeleteTask.style.display = 'none';
             if (btnEditTask) btnEditTask.style.display = 'none';
             if (btnCopyTask) btnCopyTask.style.display = 'none';
-            if (btnAdoptTask) btnAdoptTask.style.display = 'none';
             if (btnLockTask) btnLockTask.style.display = 'none';
             if (submitTaskWrap) submitTaskWrap.style.display = 'none';
             if (linkPandaTask) linkPandaTask.style.display = 'none';
@@ -618,7 +612,7 @@
     // action (Submit/Lock/Edit/Copy/Delete/PanDA link/New) that a prior task
     // view may have left visible. Submit-to-PanDA is task business, not dataset.
     function hideTaskActions() {
-        [btnCopyTask, btnAdoptTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
+        [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
          linkPandaTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
     }
 
@@ -717,20 +711,14 @@
         // available to any signed-in user.
         const ownerDraft = isOwner && t.status === 'draft';
         const submitted = !!t.panda_task_id;
-        // An imported csv_import catalog row is adoptable into the buildable
-        // flow (→ draft, claiming ownership). past_output rows are frozen
-        // archives — not adoptable; Copy is their reuse path.
-        const adoptable = currentUser && t.status === 'csv_import';
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
-        if (btnAdoptTask) btnAdoptTask.style.display = adoptable ? 'inline-block' : 'none';
         if (btnEditTask) btnEditTask.style.display = ownerDraft ? 'inline-block' : 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = ownerDraft ? 'inline-block' : 'none';
         if (btnLockTask) btnLockTask.style.display = ownerDraft ? 'inline-block' : 'none';
         // Submit: only meaningful inside the lifecycle (draft → lock → ready →
         // submit). Shown to signed-in users for draft (greyed, "lock first")
-        // and ready (green). Not shown for csv_import/past_output — those are
-        // not yet (or never) in the buildable flow, so a greyed "Submit" there
-        // was misleading.
+        // and ready (green). Not shown for a past_output archive — it's never
+        // in the buildable flow, so a greyed "Submit" there was misleading.
         if (submitTaskWrap) {
             const inLifecycle = t.status === 'draft' || t.status === 'ready';
             if (currentUser && !submitted && inLifecycle) {
@@ -754,7 +742,7 @@
                 linkPandaTask.style.display = 'none';
             }
         }
-        const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', csv_import:'warning', past_output:'dark'};
+        const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
@@ -969,27 +957,6 @@
             document.getElementById('task-csv').value = t.csv_file || '';
             panelTitle.textContent = 'New Task (copy)';
             updateSaveButton();
-        }
-    });
-    if (btnAdoptTask) btnAdoptTask.addEventListener('click', async () => {
-        const t = allTasks.find(x => x.id === selectedItemId);
-        if (!t) return;
-        if (!confirm(`Adopt "${t.name}" into the buildable flow? It becomes your editable draft so you can complete and submit it.`)) return;
-        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/adopt/`,
-            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
-        if (resp.ok) {
-            const updated = await resp.json();
-            const idx = allTasks.findIndex(x => x.id === t.id);
-            if (idx >= 0) {
-                allTasks[idx].status = updated.status || 'draft';
-                allTasks[idx].created_by = updated.created_by || currentUser;
-            }
-            renderList();
-            showTaskDetail(t.id);   // stay in the panel; Adopt vanishes, Edit/Lock/Submit appear
-        } else {
-            let msg = `Adopt failed (HTTP ${resp.status})`;
-            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
-            alert(msg);
         }
     });
     if (btnDeleteTask) btnDeleteTask.addEventListener('click', async () => {
