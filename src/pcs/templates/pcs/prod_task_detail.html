@@ -16,7 +16,7 @@
         <div>
             <h2>{{ task.name }}</h2>
             <p class="text-muted">
-                <span class="badge bg-{% if task.status == 'draft' %}secondary{% elif task.status == 'ready' %}primary{% elif task.status == 'submitted' %}info{% elif task.status == 'completed' %}success{% else %}danger{% endif %}">{{ task.status }}</span>
+                <span class="badge bg-{% if task.status == 'draft' %}secondary{% elif task.status == 'ready' %}primary{% elif task.status == 'submitted' %}info{% elif task.status == 'completed' %}success{% elif task.status == 'csv_import' %}warning{% elif task.status == 'past_output' %}dark{% elif task.status == 'failed' %}danger{% else %}secondary{% endif %}">{{ task.status }}</span>
                 Created by {{ task.created_by }} on {{ task.created_at|date:"Y-m-d H:i" }}
                 {% if task.updated_at != task.created_at %} | Updated {{ task.updated_at|date:"Y-m-d H:i" }}{% endif %}
             </p>
@@ -28,6 +28,13 @@
             {% if is_owner %}
             <button class="btn btn-success btn-sm" id="btn-lock">Lock</button>
             {% endif %}
+            {% elif task.status == 'csv_import' and user.is_authenticated %}
+            {# Imported catalog row — adopt it into the buildable flow (→ draft,
+               claiming ownership) so Edit/Lock/Submit become available. An ops
+               action, not owner-gated (the row has no real owner). past_output
+               archives are not adoptable; clone one via Copy in Compose. #}
+            <button class="btn btn-warning btn-sm" id="btn-adopt"
+                    title="Bring this imported catalog row into the buildable flow (becomes your editable draft).">Adopt</button>
             {% endif %}
             {% if task.panda_task_id %}
             <a href="{% url 'monitor_app:panda_task_detail' task.panda_task_id %}" class="btn btn-info btn-sm">PanDA Task {{ task.panda_task_id }}</a>
@@ -36,8 +43,11 @@
                the legacy page-view submit was retired (it 502'd via the proxy). #}
             <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}"
                class="btn btn-success btn-sm">Submit in Compose</a>
-            {% else %}
-            {# Submit always shown, greyed until locked; hint sits on the wrapping span (a disabled button swallows its own tooltip). #}
+            {% elif task.status == 'draft' %}
+            {# Greyed Submit for a draft, with the accurate "lock it first" hint (the
+               hint sits on the wrapping span — a disabled button swallows its own
+               tooltip). Hidden for csv_import/past_output, where a greyed Submit was
+               misleading: those aren't yet (or never) in the buildable flow. #}
             <span class="d-inline-block" tabindex="0"
                   title="Submittable only once locked. Lock a draft task to make it ready.">
                 <button type="button" class="btn btn-success btn-sm" disabled style="pointer-events:none;">Submit to PanDA</button>
@@ -281,6 +291,15 @@ if (btnLock) btnLock.addEventListener('click', function() {
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
     }).then(r => r.json().then(d => ({ok: r.ok, d})))
       .then(({ok, d}) => { if (ok) location.reload(); else alert(d.detail || 'Lock failed'); });
+});
+const btnAdopt = document.getElementById('btn-adopt');
+if (btnAdopt) btnAdopt.addEventListener('click', function() {
+    if (!confirm('Adopt "{{ task.name|escapejs }}" into the buildable flow? It becomes your editable draft so you can complete and submit it.')) return;
+    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.pk }}/adopt/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+    }).then(r => r.json().then(d => ({ok: r.ok, d})))
+      .then(({ok, d}) => { if (ok) location.reload(); else alert(d.detail || 'Adopt failed'); });
 });
 </script>
 {% endblock %}

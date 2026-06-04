@@ -348,6 +348,30 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(task).data)
 
     @action(detail=True, methods=['post'])
+    def adopt(self, request, pk=None):
+        """Adopt an imported ``csv_import`` catalog row into the buildable
+        flow: csv_import → draft, claiming ownership for the adopting user so
+        the owner-gated edit / lock / delete actions become available. This is
+        an ops action, NOT owner-gated — csv_import rows have no real owner
+        (created_by='csv_import'), so it is fetched without the per-object
+        owner check (the same pattern record_submission uses); the service
+        gate (status must be csv_import) is the real guard. past_output rows
+        are frozen archives and are not adoptable — clone them to reuse."""
+        try:
+            task = self.get_queryset().get(pk=pk)
+        except ProdTask.DoesNotExist:
+            return Response({'detail': 'Not found'},
+                            status=status.HTTP_404_NOT_FOUND)
+        try:
+            services.prodtask_adopt(
+                task=task,
+                adopted_by=getattr(request.user, 'username', '') or 'unknown',
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
         """Request automated PanDA submission of a locked (ready) task — the
         submit trigger used by the compose panel (and the task-detail "Submit in

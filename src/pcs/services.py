@@ -36,6 +36,13 @@ class ServiceError(Exception):
 # Allowed ProdTask lifecycle transitions. Submission and post-submission
 # state changes are recorded via prodtask_record_submission and
 # automation, not direct human transitions.
+#
+# The two bulk-import statuses are deliberately NOT keys here, so the generic
+# set-status path can never move them: a ``csv_import`` catalog row enters the
+# buildable flow only through ``prodtask_adopt`` (csv_import → draft, claiming
+# ownership), and a ``past_output`` row is a frozen historical archive
+# (terminal — clone it, via Copy, to base new production on it). See
+# PCS_DATASET_REQUEST_WORKFLOW.md §Lifecycle and EPICPROD_TASK_CATALOG.md §6.
 PRODTASK_TRANSITIONS = {
     'draft':     {'ready'},
     'ready':     {'draft', 'submitted'},
@@ -279,6 +286,35 @@ def prodtask_set_status(*, task, new_status):
         )
     task.status = new_status
     task.save(update_fields=['status', 'updated_at'])
+    return task
+
+
+def prodtask_adopt(*, task, adopted_by):
+    """Adopt an imported catalog row into the buildable lifecycle.
+
+    ``csv_import`` rows are the catalog projection of Sakib's
+    ``default_datasets.csv`` — incomplete drafts built on placeholder anchor
+    tags (see ``import_default_datasets_csv``). Adopt moves such a row to
+    ``draft`` and claims ownership for ``adopted_by``, so the owner-gated
+    edit / lock / delete actions become available and the operator can finish
+    composing the task and submit it.
+
+    Only ``csv_import`` rows are adoptable. A ``past_output`` row is a frozen
+    archive of already-produced historical output
+    (EPICPROD_TASK_CATALOG.md §6); to base new production on one, clone it
+    (Copy → new draft) rather than mutating the archive in place. Any other
+    status is already inside the lifecycle and has its own transitions.
+    """
+    if task.status != 'csv_import':
+        raise ServiceError(
+            f'Only csv_import catalog rows can be adopted into the buildable '
+            f'flow; this task is {task.status!r}. To base new production on a '
+            f'past_output archive, clone it (Copy).',
+            status=409,
+        )
+    task.status = 'draft'
+    task.created_by = adopted_by
+    task.save(update_fields=['status', 'created_by', 'updated_at'])
     return task
 
 
