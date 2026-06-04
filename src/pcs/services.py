@@ -269,6 +269,42 @@ def _known_prodtask_statuses():
     return known
 
 
+def prodtask_readiness_problems(task):
+    """Reasons a task is NOT ready to lock/submit; empty list = ready.
+
+    Checks what a valid PanDA submission needs, independent of how the task was
+    built (composed tags or imported catalog metadata):
+
+    - **Output.** The task must produce a physics output — at least one of
+      ``copy_reco`` / ``copy_full``. A task that copies neither (logs only)
+      produces nothing worth submitting.
+    - **Physics is really bound.** An imported catalog row carries its real beam
+      in its metadata (``overrides['csv_import']['filters']['beam']``, e.g.
+      ``18x275``). The import pins every such row to one placeholder anchor
+      physics tag, so if the bound tag's beam disagrees with the catalog beam,
+      the physics is a placeholder and the submission artifact would carry the
+      wrong beam. (Resolved when the metadata/tag-matching phase binds the right
+      tag — the mismatch then clears on its own.)
+    """
+    problems = []
+    cfg = task.get_effective_config()
+    if not (cfg.get('copy_reco') or cfg.get('copy_full')):
+        problems.append('No physics output configured (enable copy of reco or full).')
+
+    catalog_beam = (((task.overrides or {}).get('csv_import') or {})
+                    .get('filters') or {}).get('beam') or ''
+    if catalog_beam and task.dataset_id and task.dataset.physics_tag_id:
+        p = task.dataset.physics_tag.parameters or {}
+        e = str(p.get('beam_energy_electron', '')).strip()
+        h = str(p.get('beam_energy_hadron', '')).strip()
+        tag_beam = f'{e}x{h}' if e and h else ''
+        if tag_beam and tag_beam != catalog_beam:
+            problems.append(
+                f'Physics is a placeholder: bound tag beam {tag_beam} does not '
+                f'match the catalog beam {catalog_beam}.')
+    return problems
+
+
 def prodtask_set_status(*, task, new_status):
     """Lifecycle transition with rule enforcement."""
     valid = _known_prodtask_statuses()
@@ -283,6 +319,14 @@ def prodtask_set_status(*, task, new_status):
             f'Allowed from {task.status!r}: '
             f'{sorted(allowed) or "(terminal)"}'
         )
+    # Readiness gate: locking (→ ready) requires a submittable task. One
+    # chokepoint for the lock action, the detail-page lock, and REST/MCP
+    # set-status. See prodtask_readiness_problems.
+    if new_status == 'ready' and task.status != 'ready':
+        problems = prodtask_readiness_problems(task)
+        if problems:
+            raise ServiceError('Cannot lock — task is not ready: ' + ' '.join(problems))
+
     task.status = new_status
     task.save(update_fields=['status', 'updated_at'])
     return task

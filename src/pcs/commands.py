@@ -19,6 +19,11 @@ def build_condor_command(task):
 
     Produces the env-var-prefixed command used in the Colab notebook:
         EBEAM=... PBEAM=... scripts/submit_csv.sh osg_csv hepmc3 {csv} {hours}
+
+    MOTHBALLED: the Condor submission path is no longer the production route —
+    PanDA (the prun command and the taskParamMap) is. Kept for reference and the
+    ``?fmt=condor`` artifact, but not maintained or used by the readiness/submit
+    flow. Do not build new capability on it.
     """
     ds = task.output_dataset
     cfg = task.get_effective_config()

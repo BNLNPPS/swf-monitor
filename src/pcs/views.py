@@ -1451,7 +1451,9 @@ def prod_task_compose(request):
             ).filter(campaign=campaign).order_by('-updated_at')
         )
     # Light task entries: taskParamMap + cached commands omitted, hydrated on
-    # open (prod_task_compose_task_detail).
+    # open (prod_task_compose_task_detail). Readiness (cheap) is included so the
+    # detail panel can show submit-readiness without a round trip.
+    from .services import prodtask_readiness_problems
     tasks_data = []
     for t in tasks_list:
         tasks_data.append({
@@ -1466,6 +1468,7 @@ def prod_task_compose(request):
             'overrides': t.overrides or {},
             'description': t.description,
             'created_by': t.created_by,
+            'readiness': prodtask_readiness_problems(t),
             'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
 

@@ -748,6 +748,13 @@
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
+        // Submit-readiness — shown while the task is still a draft (the state where
+        // it matters for the next step, Lock). Empty list = ready.
+        if (t.status === 'draft' && Array.isArray(t.readiness)) {
+            html += t.readiness.length
+                ? `<div class="alert alert-warning py-2 px-3 mb-2"><strong>Not submit-ready</strong><ul class="mb-0 mt-1">${t.readiness.map(p => `<li>${p}</li>`).join('')}</ul></div>`
+                : `<div class="alert alert-success py-2 px-3 mb-2 mb-0"><strong>Submit-ready</strong></div>`;
+        }
         if (t.description) html += `<p>${t.description}</p>`;
 
         if (csvImp) {
