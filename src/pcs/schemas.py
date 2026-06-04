@@ -16,6 +16,7 @@ TAG_SCHEMAS = {
         'optional': [
             'beam_species', 'q2_range',
             'decay_mode', 'hadron_charge', 'coherence', 'model', 'polarization',
+            'particle', 'gun_energy',
             'notes',
         ],
         'label': 'Physics',
@@ -23,10 +24,11 @@ TAG_SCHEMAS = {
         'model': 'PhysicsTag',
         'choices': {
             'process': [
-                'DIS_NC', 'DIS_CC', 'DDIS',
+                'SINGLE',
+                'DIS', 'DIS_NC', 'DIS_CC', 'DDIS',
                 'DVCS', 'DDVCS',
-                'SIDIS_D0',
-                'DEMP', 'DVMP',
+                'SIDIS', 'SIDIS_D0', 'SIDIS_DIJET', 'SIDIS_Lc',
+                'DEMP', 'DVMP', 'MESON_SF',
                 'DIFFRACTIVE_JPSI', 'DIFFRACTIVE_PHI', 'DIFFRACTIVE_RHO',
                 'PHOTOPRODUCTION_JPSI', 'UPSILON',
             ],

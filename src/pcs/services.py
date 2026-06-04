@@ -21,8 +21,9 @@ _log = _logging.getLogger(__name__)
 from .models import (
     Dataset, ProdConfig, ProdTask,
     Campaign, ProdRequest,
-    PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
 )
+from .physics_match import derive_physics, single_particle_angle
 
 
 class ServiceError(Exception):
@@ -283,25 +284,31 @@ def prodtask_readiness_problems(task):
       ``18x275``). The import pins every such row to one placeholder anchor
       physics tag, so if the bound tag's beam disagrees with the catalog beam,
       the physics is a placeholder and the submission artifact would carry the
-      wrong beam. (Resolved when the metadata/tag-matching phase binds the right
-      tag — the mismatch then clears on its own.)
+      wrong beam. The physics automatch (``find_or_create_physics_tag`` wired
+      into the importer) binds the right tag, so this clears on reload. Background
+      rows are exempt: they stay parked on the anchor pending the ``k`` background
+      tag type, so their beam mismatch is expected, not an error.
     """
     problems = []
     cfg = task.get_effective_config()
     if not (cfg.get('copy_reco') or cfg.get('copy_full')):
         problems.append('No physics output configured (enable copy of reco or full).')
 
-    catalog_beam = (((task.overrides or {}).get('csv_import') or {})
-                    .get('filters') or {}).get('beam') or ''
-    if catalog_beam and task.dataset_id and task.dataset.physics_tag_id:
-        p = task.dataset.physics_tag.parameters or {}
+    csv_filters = (((task.overrides or {}).get('csv_import') or {})
+                   .get('filters') or {})
+    catalog_beam = csv_filters.get('beam') or ''
+    is_background = csv_filters.get('physics') == 'BACKGROUNDS'
+    if catalog_beam and not is_background and task.dataset_id and task.dataset.physics_tag_id:
+        pt = task.dataset.physics_tag
+        p = pt.parameters or {}
         e = str(p.get('beam_energy_electron', '')).strip()
         h = str(p.get('beam_energy_hadron', '')).strip()
         tag_beam = f'{e}x{h}' if e and h else ''
         if tag_beam and tag_beam != catalog_beam:
             problems.append(
-                f'Physics is a placeholder: bound tag beam {tag_beam} does not '
-                f'match the catalog beam {catalog_beam}.')
+                f'Wrong physics tag: this sample is {catalog_beam} but it is '
+                f'tagged {pt.tag_label} ({tag_beam}). Assign the matching '
+                f'physics tag.')
     return problems
 
 
@@ -563,6 +570,81 @@ def _ensure_csvimport_anchors():
     return physics, evgen, simu, reco, cfg, campaign
 
 
+# Process -> physics category digit, for numbering NEWLY created tags
+# (number = digit*1000 + global suffix). Existing tags are reused by their
+# physics parameters and keep their historically-assigned numbers/categories;
+# the seeded set predates this map and is internally inconsistent — renumbering
+# it is a separate cleanup, deliberately out of scope here.
+_PROCESS_CATEGORY = {
+    'SINGLE': 1,
+    'DIS': 2, 'DIS_NC': 2, 'DIS_CC': 2, 'DDIS': 2,
+    'DVCS': 3, 'DDVCS': 3,
+    'SIDIS': 4, 'SIDIS_D0': 4, 'SIDIS_DIJET': 4, 'SIDIS_Lc': 4,
+    'DEMP': 5, 'DVMP': 5, 'MESON_SF': 5,
+    'DIFFRACTIVE_JPSI': 5, 'DIFFRACTIVE_PHI': 5, 'DIFFRACTIVE_RHO': 5,
+    'PHOTOPRODUCTION_JPSI': 5, 'UPSILON': 5,
+}
+
+
+def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=False):
+    """Resolve the locked physics tag for a set of derived physics parameters.
+
+    Matching is by physics parameters, not tag label: ``(process, particle,
+    gun_energy)`` for single-particle, ``(process, beam)`` otherwise. Among
+    matches, a locked tag is preferred, then the lowest number — so a duplicated
+    param-set (e.g. DVCS 10x100 exists as both a locked and a draft tag) resolves
+    deterministically to the locked one. A matched *draft* tag is locked in place:
+    datasets require locked physics tags (``Dataset.clean``), and binding a seeded
+    config into production is exactly what locking it means. A miss creates a new
+    locked tag, numbered via ``PhysicsTag.allocate_next`` and the category map.
+
+    Returns ``(tag, action)`` with action ``'reuse-locked'`` | ``'lock-in-place'``
+    | ``'create'``. In ``dry_run`` nothing is written and a ``'create'`` returns
+    ``(None, 'create')``.
+    """
+    process = derived.get('process')
+    if process == 'SINGLE':
+        match = {
+            'parameters__process': 'SINGLE',
+            'parameters__particle': derived.get('particle', ''),
+            'parameters__gun_energy': derived.get('gun_energy', ''),
+        }
+    else:
+        match = {
+            'parameters__process': process,
+            'parameters__beam_energy_electron': derived.get('beam_energy_electron'),
+            'parameters__beam_energy_hadron': derived.get('beam_energy_hadron'),
+        }
+    matches = sorted(
+        PhysicsTag.objects.filter(**match),
+        key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
+    )
+    if matches:
+        tag = matches[0]
+        if tag.status == 'locked':
+            return tag, 'reuse-locked'
+        if not dry_run:
+            tag.status = 'locked'
+            tag.save(update_fields=['status', 'updated_at'])
+        return tag, 'lock-in-place'
+
+    digit = _PROCESS_CATEGORY.get(process)
+    if digit is None:
+        raise ServiceError(f'No physics category mapping for process {process!r}')
+    if dry_run:
+        return None, 'create'
+    category = PhysicsCategory.objects.get(digit=digit)
+    tag = PhysicsTag(
+        tag_number=PhysicsTag.allocate_next(category),
+        category=category,
+        status='locked',
+        parameters=derived,
+        created_by=created_by,
+    )
+    tag.save()
+    return tag, 'create'
+
+
 def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     """Import Sakib's epic-prod datasets.csv into the catalog.
 
@@ -586,7 +668,8 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     with open(path, newline='') as f:
         rows = list(_csv.DictReader(f))
 
-    summary = {'rows': len(rows), 'created': 0, 'updated': 0, 'errors': []}
+    summary = {'rows': len(rows), 'created': 0, 'updated': 0,
+               'tag_actions': {}, 'errors': []}
 
     with transaction.atomic():
         for i, row in enumerate(rows, 1):
@@ -604,6 +687,25 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             # (gen_version-only) row. The Rucio DID stays slug-based on
             # dataset_name — its charset rules are a separate concern.
             task_name = _task_name_from_path(ds_path) or dataset_name
+
+            # Derive the real physics from the path and resolve its locked tag,
+            # replacing the placeholder anchor. Backgrounds are parked on the
+            # anchor (their home is the future 'k' background tag type, not a
+            # physics tag); an unrecognizable path also keeps the anchor and is
+            # surfaced in errors rather than silently mis-tagged.
+            filters = _extract_csv_filters(ds_path, 'epic_craterlake')
+            derived = derive_physics(task_name, beam=filters.get('beam', ''))
+            is_background = bool(derived) and derived.get('process') in ('BEAMGAS', 'SYNRAD')
+            angular_range = single_particle_angle(task_name)
+            row_physics_tag = physics
+            if derived is None:
+                summary['errors'].append(
+                    f'row {i}: path {task_name!r} is not a recognizable EVGEN '
+                    f'entry; left on placeholder tag {physics.tag_label}')
+            elif not is_background:
+                row_physics_tag, action = find_or_create_physics_tag(
+                    derived, created_by=created_by)
+                summary['tag_actions'][action] = summary['tag_actions'].get(action, 0) + 1
 
             raw_priority = (row.get('Priority') or '').strip()
             try:
@@ -625,6 +727,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             if ds:
                 ds.description = (row.get('Description') or '').strip()
                 ds.metadata = metadata
+                ds.physics_tag = row_physics_tag
                 ds.save()
                 ds_created = False
             else:
@@ -633,7 +736,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     scope='group.EIC',
                     detector_version='26.02.0',
                     detector_config='epic_craterlake',
-                    physics_tag=physics, evgen_tag=evgen,
+                    physics_tag=row_physics_tag, evgen_tag=evgen,
                     simu_tag=simu, reco_tag=reco,
                     description=(row.get('Description') or '').strip(),
                     metadata=metadata,
@@ -667,7 +770,8 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                         'gen_version': gen_ver,
                         'evgen': _extract_evgen(gen_ver),
                         'other_use_text': (row.get('Other Use') or '').strip(),
-                        'filters': _extract_csv_filters(ds_path, ds.detector_config),
+                        'filters': filters,
+                        'angular_range': angular_range,
                     },
                 },
                 created_by=created_by,
