@@ -277,6 +277,22 @@ When JEDI processes this task, `GenTaskRefiner` (61 lines, `panda-server/pandaje
 
 The `GenJobBroker` then handles site selection using the simplified non-ATLAS brokerage logic: filter by queue status, disk space, walltime constraints, then select.
 
+## Implementation status (2026-06-03)
+
+The **live** submission path is **prun via the prod-ops agent**, not the direct
+`Client.insertTaskParams` of Phase 2. `build_panda_command` (`commands.py`) emits
+the `prun` command; the agent's `submit_task` doer (`scripts/submit-prod-task.py`)
+fetches it from `/pcs/api/prod-tasks/command/?fmt=panda` and runs it
+non-interactively under the operator's cached OIDC token, then records the
+jediTaskID via `/pcs/api/prod-tasks/record-submission/`. This matches the
+validated manual recipe (jediTaskID 36439, see [EPICPROD_OPS.md](EPICPROD_OPS.md)).
+
+`build_task_params` (the `taskParamMap`, `?fmt=jedi`) is **preview-only** today —
+rendered in the compose UI but not submitted. Phase 2 (`pcs/submission.py`,
+direct `insertTaskParams`) is not built; if adopted it must reconcile with the
+prun path's defaults (e.g. `vo`: `eic` in `build_task_params` vs `wlcg` in
+`build_panda_command`). Phases 3-4 (status polling) remain design.
+
 ## Implementation Plan
 
 ### Phase 1: build_task_params() (commands.py)

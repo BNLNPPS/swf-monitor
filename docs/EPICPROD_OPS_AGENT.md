@@ -217,14 +217,14 @@ trusted on-host by the localhost tunnel). The task IS submitted even if the
 final bookkeeping POST fails; that case is surfaced loudly with the task ID so
 the operator can re-record.
 
-Two trigger paths publish the identical `submit_task` message, both gated to
-`status='ready'` with no existing `panda_task_id`. `services.prodtask_submit_request`
-(the REST `submit` action behind the two-pane compose view) is the
-**external-safe** trigger — a `/pcs/api/` POST returning JSON; the older
-`prod_task_submit_panda` view is a page-view POST that redirects, so it works only
-on the internal face and is **not** the shape to copy. Both mirror the
-`record-submission` gates so a submission whose outcome would be refused is never
-fired.
+The `submit_task` message is published by `services.prodtask_submit_request`,
+behind the REST `submit` action (the two-pane compose view, and the task-detail
+page's "Submit in Compose" link) — the **external-safe** trigger: a `/pcs/api/`
+POST returning JSON. It is gated to `status='ready'` with no existing
+`panda_task_id`, mirroring the `record-submission` gates so a submission whose
+outcome would be refused is never fired. (The legacy `prod_task_submit_panda`
+page-view submit — a page-POST+redirect that 502'd through the swf-remote proxy —
+was retired.)
 
 ## Roadmap — capabilities as handlers
 

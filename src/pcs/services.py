@@ -1867,10 +1867,9 @@ def prodtask_submit_request(*, task):
     run the submission, which records the jediTaskID back. Gates mirror
     prodtask_record_submission so we never fire a submission whose outcome
     would then be refused. Raises ServiceError on a bad state or an
-    unreachable queue.
-
-    The prod_task_submit_panda view predates this and still publishes inline;
-    both paths drop the same message on /queue/epicprod.ops."""
+    unreachable queue. This is the single submit trigger, behind the REST
+    `submit` action (compose view + the task detail page's "Submit in Compose"
+    link); the legacy page-view submit was retired."""
     import json as _json
     if task.panda_task_id is not None:
         raise ServiceError(

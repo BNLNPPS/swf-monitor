@@ -60,7 +60,6 @@ urlpatterns = [
     path('tasks/compose/', views.prod_task_compose, name='prod_task_compose'),
     path('tasks/<int:pk>/', views.prod_task_detail, name='prod_task_detail'),
     path('tasks/<int:pk>/delete/', views.prod_task_delete, name='prod_task_delete'),
-    path('tasks/<int:pk>/submit-panda/', views.prod_task_submit_panda, name='prod_task_submit_panda'),
     path('tasks/<int:pk>/commands/', views.prod_task_generate_commands, name='prod_task_generate_commands'),
     # On-demand compose hydration (taskParamMap + commands) — light payload, fetched on open
     path('tasks/<int:pk>/compose-detail/', views.prod_task_compose_task_detail, name='compose_task_detail'),

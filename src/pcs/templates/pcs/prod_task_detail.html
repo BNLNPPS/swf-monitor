@@ -32,11 +32,10 @@
             {% if task.panda_task_id %}
             <a href="{% url 'monitor_app:panda_task_detail' task.panda_task_id %}" class="btn btn-info btn-sm">PanDA Task {{ task.panda_task_id }}</a>
             {% elif task.status == 'ready' %}
-            <form method="post" action="{% url 'pcs:prod_task_submit_panda' pk=task.pk %}" class="d-inline"
-                  onsubmit="return confirm('Submit {{ task.name }} to PanDA?');">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-success btn-sm">Submit to PanDA</button>
-            </form>
+            {# Submission runs through the external-safe /pcs/api/ submit in Compose;
+               the legacy page-view submit was retired (it 502'd via the proxy). #}
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}"
+               class="btn btn-success btn-sm">Submit in Compose</a>
             {% else %}
             {# Submit always shown, greyed until locked; hint sits on the wrapping span (a disabled button swallows its own tooltip). #}
             <span class="d-inline-block" tabindex="0"
