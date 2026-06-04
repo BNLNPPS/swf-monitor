@@ -227,22 +227,39 @@ class EpicProdOpsAgent(BaseAgent):
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_TIMEOUT)
         except subprocess.TimeoutExpired:
             self.logger.error(f"PRODOPS submit_task TIMEOUT after {SUBMIT_TIMEOUT}s: {task_name}")
+            # NO silent failure: tell the waiting page the submission timed out.
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
+                'reason': f'submission timed out after {SUBMIT_TIMEOUT}s'})
             return
-        for line in (p.stderr or "").splitlines():
+        stderr = p.stderr or ""
+        for line in stderr.splitlines():
             self.logger.info(f"  submit-prod-task: {line}")
-        if p.returncode != 0:
-            self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
-        else:
-            jedi_task_id = (p.stdout or '').strip()
+        jedi_task_id = (p.stdout or '').strip()
+        reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+        # Every outcome emits an event over the SSE relay (docs/SSE_PUSH.md) so the
+        # compose page is never left polling a submission that already resolved.
+        if p.returncode == 0 and jedi_task_id:
             self.logger.info(
                 f"PRODOPS submit_task done: {task_name} -> jediTaskID={jedi_task_id}")
-            # Push completion to the browser via the SSE relay. See docs/SSE_PUSH.md.
-            if jedi_task_id:
-                self.send_message('/topic/epictopic', {
-                    'msg_type': 'prodtask_submitted',
-                    'task_name': task_name,
-                    'jedi_task_id': jedi_task_id,
-                })
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submitted',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id})
+        elif p.returncode == 7 and jedi_task_id:
+            # Submitted to PanDA, but the record-back POST failed after retries —
+            # an orphan. Surface the id; the task stays ready/unrecorded and
+            # record-submission is idempotent, so it can be re-recorded.
+            self.logger.error(
+                f"PRODOPS submit_task UNRECORDED: {task_name} submitted as "
+                f"jediTaskID={jedi_task_id} but record-back failed")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
+                'jedi_task_id': jedi_task_id, 'reason': reason})
+        else:
+            self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submit_failed',
+                'task_name': task_name, 'reason': reason})
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver

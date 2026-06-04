@@ -1863,33 +1863,40 @@ def rename_pcs_current_campaign(new_name, *, created_by='operator'):
 
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     """
-    Record outcome of a JEDI submission. Two gates:
+    Record outcome of a JEDI submission.
 
-    - ``task.status`` must be 'ready' (no submit from draft, no re-submit).
-    - ``task.panda_task_id`` must be unset; refuses to overwrite (409).
+    - **Idempotent on the jediTaskID.** Re-recording the SAME id is a no-op
+      success — a doer retry, or a manual re-record after an orphaned
+      submission whose record-back POST failed. A DIFFERENT id on an
+      already-recorded task is refused (409).
+    - Otherwise the task must be in status 'ready' (no record from draft).
     """
+    try:
+        incoming = int(jedi_task_id)
+    except (TypeError, ValueError):
+        raise ServiceError('jedi_task_id must be an integer')
+
+    if task.panda_task_id is not None:
+        if task.panda_task_id == incoming:
+            return task          # already recorded this submission — idempotent
+        raise ServiceError(
+            f'Task already records panda_task_id={task.panda_task_id}, '
+            f'cannot overwrite with {incoming}.',
+            status=409,
+        )
+
     if task.status != 'ready':
         raise ServiceError(
             f'Task must be in status=ready before submission '
-            f'(current: {task.status!r}). Mark it ready via '
-            f'set-status first.'
+            f'(current: {task.status!r}). Mark it ready via set-status first.'
         )
-    if task.panda_task_id is not None:
-        raise ServiceError(
-            f'Task already records panda_task_id={task.panda_task_id}. '
-            f'Refusing to overwrite.',
-            status=409,
-        )
-    try:
-        task.panda_task_id = int(jedi_task_id)
-    except (TypeError, ValueError):
-        raise ServiceError('jedi_task_id must be an integer')
 
     valid = _known_prodtask_statuses()
     if new_status not in valid:
         raise ServiceError(
             f'Invalid status. Choose from: {", ".join(sorted(valid))}'
         )
+    task.panda_task_id = incoming
     task.status = new_status
     task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
     return task

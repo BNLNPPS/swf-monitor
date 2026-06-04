@@ -30,8 +30,14 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
+
+# record-submission is idempotent on the jediTaskID, so retrying a failed POST
+# is safe (a partial success won't double-record). Closes transient orphans.
+RECORD_ATTEMPTS = 3
+RECORD_BACKOFF = 2          # seconds, multiplied by attempt number
 
 # Where the cached OIDC token and pclient live; the agent runs as the same
 # user, so these resolve identically under systemd.
@@ -143,20 +149,31 @@ def main():
     jedi_task_id = int(m.group(1))
     _log(f"SUBMITTED {args.task_name} -> jediTaskID={jedi_task_id}")
 
-    # 4. Record the outcome back to PCS.
-    try:
-        _api_post_json(args.swf_monitor_url, "/pcs/api/prod-tasks/record-submission/",
-                       {"name": args.task_name}, {"jedi_task_id": jedi_task_id},
-                       args.token, owner=args.owner)
-    except Exception as e:
-        # The task IS submitted; only the bookkeeping POST failed. Surface it
-        # loudly (operator can re-record) but report the task ID we got.
-        _log(f"WARNING: submitted (jediTaskID={jedi_task_id}) but record-submission "
-             f"POST failed: {e}")
-        return 7
-    _log(f"recorded jediTaskID={jedi_task_id} on ProdTask {args.task_name}")
+    # 4. Record the outcome back to PCS. Retry a few times — record-submission
+    #    is idempotent on the jediTaskID, so a retry after a partial success is
+    #    safe, and it closes a transient POST failure that would otherwise
+    #    orphan the submission.
+    last_err = None
+    for attempt in range(1, RECORD_ATTEMPTS + 1):
+        try:
+            _api_post_json(args.swf_monitor_url, "/pcs/api/prod-tasks/record-submission/",
+                           {"name": args.task_name}, {"jedi_task_id": jedi_task_id},
+                           args.token, owner=args.owner)
+            _log(f"recorded jediTaskID={jedi_task_id} on ProdTask {args.task_name}")
+            print(jedi_task_id)
+            return 0
+        except Exception as e:
+            last_err = e
+            _log(f"record-submission POST attempt {attempt}/{RECORD_ATTEMPTS} failed: {e}")
+            if attempt < RECORD_ATTEMPTS:
+                time.sleep(RECORD_BACKOFF * attempt)
+    # The task IS submitted; only the bookkeeping POST failed after retries — an
+    # orphan. Surface it loudly AND print the id (even on this failure path) so
+    # the agent/operator can re-record it (record-submission is idempotent).
+    _log(f"WARNING: submitted (jediTaskID={jedi_task_id}) but record-submission "
+         f"POST failed after {RECORD_ATTEMPTS} attempts: {last_err}")
     print(jedi_task_id)
-    return 0
+    return 7
 
 
 if __name__ == "__main__":

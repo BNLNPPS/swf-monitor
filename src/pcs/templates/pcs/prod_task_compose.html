@@ -998,6 +998,7 @@
     // seconds). Poll the task until panda_task_id appears so the PanDA link
     // shows on its own — no manual refresh. Bounded so it can't poll forever.
     let submitPollTimer = null;
+    let pendingSubmitName = null;   // task awaiting a submit outcome; set on submit, cleared by the SSE handlers below
     function pollForPandaTask(taskId, attemptsLeft) {
         submitPollTimer = setTimeout(async () => {
             try {
@@ -1014,6 +1015,7 @@
                 }
             } catch (e) { /* transient; keep trying */ }
             if (attemptsLeft > 1) pollForPandaTask(taskId, attemptsLeft - 1);
+            else if (pendingSubmitName) resetSubmitButton();   // no confirmation arrived in the window
         }, 10000);   // every 10s
     }
 
@@ -1026,9 +1028,10 @@
         const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/submit/`,
             {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
         if (resp.ok) {
+            pendingSubmitName = t.name;   // the SSE outcome handlers match on this
             btnSubmitTask.textContent = 'Submitted — awaiting PanDA ID…';
             if (submitPollTimer) clearTimeout(submitPollTimer);
-            pollForPandaTask(t.id, 30);   // ~5 min at 10s
+            pollForPandaTask(t.id, 30);   // ~5 min at 10s; SSE is the live path, this is the backstop
         } else {
             let msg = `Submit failed (HTTP ${resp.status})`;
             try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
@@ -1037,6 +1040,52 @@
             btnSubmitTask.textContent = 'Submit to PanDA';
         }
     });
+
+    // Live submit outcomes via the SSE relay (docs/SSE_PUSH.md). The prod-ops
+    // agent emits exactly one event per submission outcome on /topic/epictopic;
+    // the stream is filtered by msg_type server-side, so we match our task_name
+    // here. The 10s poll above stays as the success backstop if an event is missed.
+    function resetSubmitButton() {
+        if (btnSubmitTask) { btnSubmitTask.disabled = false; btnSubmitTask.textContent = 'Submit to PanDA'; }
+    }
+    function applySubmitted(taskName, jediId) {
+        const idx = allTasks.findIndex(x => x.name === taskName);
+        if (idx >= 0) { allTasks[idx].panda_task_id = jediId; allTasks[idx].status = 'submitted'; }
+        if (submitPollTimer) clearTimeout(submitPollTimer);
+        if (pendingSubmitName === taskName) pendingSubmitName = null;
+        if (idx >= 0 && allTasks[idx].id === selectedItemId) showTaskDetail(allTasks[idx].id);
+        renderList();
+    }
+    (function subscribeSubmitOutcomes() {
+        const types = 'prodtask_submitted,prodtask_submit_failed,prodtask_submit_unrecorded';
+        const es = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=${types}`);
+        es.addEventListener('prodtask_submitted', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (d.task_name) applySubmitted(d.task_name, d.jedi_task_id);
+        });
+        es.addEventListener('prodtask_submit_failed', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (d.task_name && d.task_name === pendingSubmitName) {
+                if (submitPollTimer) clearTimeout(submitPollTimer);
+                pendingSubmitName = null;
+                resetSubmitButton();
+                alert('Submission failed: ' + (d.reason || 'unknown error'));
+            }
+        });
+        es.addEventListener('prodtask_submit_unrecorded', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (d.task_name && d.task_name === pendingSubmitName) {
+                if (submitPollTimer) clearTimeout(submitPollTimer);
+                pendingSubmitName = null;
+                if (btnSubmitTask) {
+                    btnSubmitTask.disabled = true;
+                    btnSubmitTask.textContent = `Submitted (jediTaskID ${d.jedi_task_id}) — recording failed`;
+                }
+                alert(`Submitted to PanDA as jediTaskID ${d.jedi_task_id}, but recording it on the task `
+                    + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this jediTaskID needs re-recording.`);
+            }
+        });
+    })();
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 
