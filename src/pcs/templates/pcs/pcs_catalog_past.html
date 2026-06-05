@@ -30,6 +30,11 @@
   <div class="d-flex align-items-center mb-3">
     <h2 class="me-3 mb-0">Production Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    {# Catalog loads are operator actions: shown only on the direct (pandaserver02)
+       interface, hidden on the proxied/external face (is_tunnel). They POST and
+       redirect, which the swf-remote proxy cannot relay across hosts. See
+       EXTERNAL_ACCESS.md. #}
+    {% if not is_tunnel %}
     {% if active_lifecycle == 'last' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
@@ -48,6 +53,7 @@
         Update from epic-prod
       </button>
     </form>
+    {% endif %}
     {% endif %}
   </div>
 
