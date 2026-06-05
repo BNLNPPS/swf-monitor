@@ -4,7 +4,6 @@ Workflow-specific views for the SWF monitor application.
 
 from django.shortcuts import render, get_object_or_404
 from django.http import JsonResponse
-from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.db.models import Count
 from django.utils import timezone
@@ -13,13 +12,11 @@ from .models import StfFile
 from .workflow_models import WorkflowDefinition, WorkflowExecution
 
 
-@login_required
 def workflows_home(request):
     """Workflows landing page with links to different workflow views."""
     return render(request, 'monitor_app/workflows_home.html')
 
 
-@login_required
 def workflow_definitions_list(request):
     """
     Professional workflow definitions list view using server-side DataTables.
@@ -127,7 +124,6 @@ def workflow_definitions_filter_counts(request):
     })
 
 
-@login_required
 def workflow_executions_list(request):
     """
     Professional workflow executions list view using server-side DataTables.
@@ -276,7 +272,6 @@ def workflow_executions_filter_counts(request):
     })
 
 
-@login_required
 def namespaces_list(request):
     """
     Namespace list view using server-side DataTables.
@@ -368,7 +363,6 @@ def namespaces_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def workflow_definition_detail(request, workflow_name, version):
     """Detail view for a specific workflow definition."""
     definition = get_object_or_404(WorkflowDefinition, workflow_name=workflow_name, version=version)
@@ -383,7 +377,6 @@ def workflow_definition_detail(request, workflow_name, version):
     return render(request, 'monitor_app/workflow_definition_detail.html', context)
 
 
-@login_required
 def workflow_execution_detail(request, execution_id):
     """Detail view for a specific workflow execution."""
     execution = get_object_or_404(WorkflowExecution, execution_id=execution_id)

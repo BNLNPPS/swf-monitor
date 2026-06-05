@@ -35,6 +35,7 @@
        redirect, which the swf-remote proxy cannot relay across hosts. See
        EXTERNAL_ACCESS.md. #}
     {% if not is_tunnel %}
+    {% if user.is_authenticated %}
     {% if active_lifecycle == 'last' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
@@ -53,6 +54,7 @@
         Update from epic-prod
       </button>
     </form>
+    {% endif %}
     {% endif %}
     {% endif %}
   </div>
@@ -80,6 +82,7 @@
       {% for r in rucio_detected %}
         {% if r.version != rucio_current_name %}
         <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
+          {% if user.is_authenticated %}
           <form method="post" action="{% url 'pcs:pcs_catalog_set_last' %}" class="d-inline">
             {% csrf_token %}
             <input type="hidden" name="name" value="{{ r.version }}">
@@ -87,6 +90,7 @@
                     title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot"
                     onclick="return confirm('Set PCS last to {{ r.version }} and pull snapshot?');">Make last</button>
           </form>
+          {% endif %}
         </span>
         {% endif %}
       {% endfor %}

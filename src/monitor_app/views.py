@@ -7,7 +7,7 @@ from rest_framework import viewsets, generics
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
@@ -105,7 +105,6 @@ def authenticated_home(request):
 def about(request):
     return render(request, 'monitor_app/about.html')
 
-@login_required
 def index(request):
     """A simple landing page for authenticated users."""
     return render(request, 'monitor_app/index.html')
@@ -151,7 +150,6 @@ def system_agent_delete(request, pk):
         return redirect('monitor_app:index')
     return render(request, 'monitor_app/system_agent_confirm_delete.html', {'agent': agent})
 
-@login_required
 def get_system_agents_data(request):
     agents = SystemAgent.objects.all()
     data = {
@@ -182,7 +180,7 @@ class SystemAgentViewSet(viewsets.ModelViewSet):
     queryset = SystemAgent.objects.all()
     serializer_class = SystemAgentSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     @action(detail=False, methods=['post'], url_path='heartbeat')
     def heartbeat(self, request):
@@ -230,21 +228,21 @@ class STFWorkflowViewSet(viewsets.ModelViewSet):
     queryset = STFWorkflow.objects.all()
     serializer_class = STFWorkflowSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 class AgentWorkflowStageViewSet(viewsets.ModelViewSet):
     """API endpoint for Agent Workflow Stages."""
     queryset = AgentWorkflowStage.objects.all()
     serializer_class = AgentWorkflowStageSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 class WorkflowMessageViewSet(viewsets.ModelViewSet):
     """API endpoint for Workflow Messages."""
     queryset = WorkflowMessage.objects.all()
     serializer_class = WorkflowMessageSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class AppLogViewSet(viewsets.ModelViewSet):
@@ -261,7 +259,7 @@ class RunViewSet(viewsets.ModelViewSet):
     queryset = Run.objects.all()
     serializer_class = RunSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class StfFileViewSet(viewsets.ModelViewSet):
@@ -269,7 +267,7 @@ class StfFileViewSet(viewsets.ModelViewSet):
     queryset = StfFile.objects.all()
     serializer_class = StfFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class SubscriberViewSet(viewsets.ModelViewSet):
@@ -277,7 +275,7 @@ class SubscriberViewSet(viewsets.ModelViewSet):
     queryset = Subscriber.objects.all()
     serializer_class = SubscriberSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 
@@ -286,7 +284,7 @@ class FastMonFileViewSet(viewsets.ModelViewSet):
     queryset = FastMonFile.objects.all()
     serializer_class = FastMonFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
@@ -294,7 +292,7 @@ class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
     queryset = WorkflowDefinition.objects.all()
     serializer_class = WorkflowDefinitionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -312,7 +310,7 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
     queryset = WorkflowExecution.objects.all()
     serializer_class = WorkflowExecutionSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_fields = ['status', 'namespace', 'executed_by']
 
 
@@ -323,7 +321,7 @@ class TFSliceViewSet(viewsets.ModelViewSet):
     queryset = TFSlice.objects.all()
     serializer_class = TFSliceSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_fields = ['run_number', 'status', 'stf_filename', 'assigned_worker', 'tf_filename', 'slice_id']
 
 
@@ -332,7 +330,7 @@ class WorkerViewSet(viewsets.ModelViewSet):
     queryset = Worker.objects.all()
     serializer_class = WorkerSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_fields = ['run_number', 'status', 'location']
 
 
@@ -341,7 +339,7 @@ class RunStateViewSet(viewsets.ModelViewSet):
     queryset = RunState.objects.all()
     serializer_class = RunStateSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class SystemStateEventViewSet(viewsets.ModelViewSet):
@@ -349,11 +347,10 @@ class SystemStateEventViewSet(viewsets.ModelViewSet):
     queryset = SystemStateEvent.objects.all()
     serializer_class = SystemStateEventSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_fields = ['run_number', 'event_type', 'state']
 
 
-@login_required
 def log_summary(request):
     """
     Professional log summary view using server-side DataTables for optimal performance.
@@ -510,7 +507,6 @@ def log_summary_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def log_list(request):
     """
     Professional log list view using server-side DataTables.
@@ -555,7 +551,6 @@ def log_list(request):
     return render(request, 'monitor_app/log_list_dynamic.html', context)
 
 
-@login_required
 def log_detail(request, log_id):
     """Display details for a specific log entry."""
     log = get_object_or_404(AppLog, id=log_id)
@@ -698,7 +693,7 @@ class LogSummaryView(generics.ListAPIView):
     """
     serializer_class = LogSummarySerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     queryset = AppLog.objects.all()  # Provide a queryset for DRF permissions
 
     def get(self, request, format=None):
@@ -944,7 +939,6 @@ def database_table_datatable_ajax(request, table_name):
 
 # Views for SWF Data Models
 
-@login_required
 def runs_list(request):
     """
     Professional runs list view using server-side DataTables.
@@ -1035,7 +1029,6 @@ def runs_datatable_ajax(request):
     
     return dt.create_response(data, records_total, records_filtered)
 
-@login_required
 def run_detail(request, run_number):
     """Display detailed view of a specific run"""
     run = get_object_or_404(Run, run_number=run_number)
@@ -1058,7 +1051,6 @@ def run_detail(request, run_number):
     }
     return render(request, 'monitor_app/run_detail.html', context)
 
-@login_required
 def stf_files_list(request):
     """
     Professional STF files list view using server-side DataTables.
@@ -1168,7 +1160,6 @@ def stf_files_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def stf_file_detail(request, file_id):
     """Display detailed view of a specific STF file"""
     stf_file = get_object_or_404(StfFile, file_id=file_id)
@@ -1178,7 +1169,6 @@ def stf_file_detail(request, file_id):
     }
     return render(request, 'monitor_app/stf_file_detail.html', context)
 
-@login_required
 def subscribers_list(request):
     """Professional subscribers list view using server-side DataTables."""
     from django.urls import reverse
@@ -1280,7 +1270,6 @@ def get_subscribers_filter_counts(request):
     })
 
 
-@login_required
 def subscriber_detail(request, subscriber_id):
     """Display details for a specific subscriber."""
     subscriber = get_object_or_404(Subscriber, subscriber_id=subscriber_id)
@@ -1294,7 +1283,6 @@ def subscriber_detail(request, subscriber_id):
 
 # ==================== WORKFLOW VIEWS ====================
 
-@login_required
 def workflow_dashboard(request):
     """Main workflow dashboard showing pipeline status and statistics."""
     
@@ -1340,7 +1328,6 @@ def workflow_dashboard(request):
     return render(request, 'monitor_app/workflow_dashboard.html', context)
 
 
-@login_required
 def workflow_list(request):
     """Professional workflow list view using server-side DataTables with dynamic filtering."""
     from django.urls import reverse
@@ -1426,7 +1413,6 @@ def workflow_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def workflow_detail(request, workflow_id):
     """Detailed view of a specific workflow including all stages and messages."""
     
@@ -1459,7 +1445,6 @@ def workflow_detail(request, workflow_id):
     return render(request, 'monitor_app/workflow_detail.html', context)
 
 
-@login_required
 def workflow_agents_list(request):
     """View showing the status of all workflow agents using server-side DataTables."""
     from django.urls import reverse
@@ -1511,7 +1496,6 @@ def workflow_agents_list(request):
     return render(request, 'monitor_app/workflow_agents_list_dynamic.html', context)
 
 
-@login_required
 def workflow_agents_datatable_ajax(request):
     """AJAX endpoint for workflow agents DataTable server-side processing."""
     from datetime import timedelta
@@ -1612,14 +1596,12 @@ def workflow_agents_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def agent_detail(request, instance_name):
     """Display details for a specific agent."""
     agent = get_object_or_404(SystemAgent, instance_name=instance_name)
     return render(request, 'monitor_app/agent_detail.html', {'agent': agent})
 
 
-@login_required
 def namespace_detail(request, namespace):
     """Display details for a namespace."""
     from .workflow_models import WorkflowMessage, WorkflowExecution, Namespace
@@ -1644,7 +1626,6 @@ def namespace_detail(request, namespace):
     })
 
 
-@login_required
 def message_detail(request, message_id):
     """Display details for a specific workflow message."""
     from .workflow_models import WorkflowMessage
@@ -1670,7 +1651,6 @@ def message_detail(request, message_id):
     return render(request, 'monitor_app/message_detail.html', context)
 
 
-@login_required
 def workflow_messages(request):
     """View showing all workflow messages with dynamic filtering."""
     from django.urls import reverse
@@ -1709,7 +1689,6 @@ def workflow_messages(request):
     return render(request, 'monitor_app/workflow_messages_dynamic.html', context)
 
 
-@login_required
 def workflow_messages_datatable_ajax(request):
     """AJAX endpoint for workflow messages DataTable server-side processing."""
     from .utils import DataTablesProcessor, get_filter_params, apply_filters, format_datetime
@@ -1815,7 +1794,6 @@ def workflow_messages_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def get_workflow_messages_filter_counts(request):
     """Get filter counts for workflow messages filters."""
     from .utils import get_filter_params, apply_filters, get_filter_counts
@@ -1854,7 +1832,6 @@ def get_workflow_messages_filter_counts(request):
     return JsonResponse({'filter_counts': filter_counts})
 
 
-@login_required
 def workflow_performance(request):
     """View showing workflow performance metrics and analytics."""
     
@@ -1917,7 +1894,6 @@ def workflow_performance(request):
     return render(request, 'monitor_app/workflow_performance.html', context)
 
 
-@login_required
 def workflow_realtime_dashboard(request):
     """Real-time workflow dashboard with live updates."""
     
@@ -1946,7 +1922,6 @@ def workflow_realtime_dashboard(request):
     return render(request, 'monitor_app/workflow_realtime_dashboard.html', context)
 
 
-@login_required
 def workflow_realtime_data_api(request):
     """API endpoint providing real-time data for dashboard updates."""
     
@@ -2641,7 +2616,6 @@ def _slash_help():
 
 # ==================== PANDA QUEUES AND RUCIO ENDPOINTS VIEWS ====================
 
-@login_required
 def panda_queues_list(request):
     """
     Professional PanDA queues list view using server-side DataTables.
@@ -2713,7 +2687,6 @@ def panda_queues_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def panda_queue_detail(request, queue_name):
     """Display detailed view of a specific PanDA queue configuration."""
     queue = get_object_or_404(PandaQueue, queue_name=queue_name)
@@ -2733,7 +2706,6 @@ def panda_queue_detail(request, queue_name):
     return render(request, 'monitor_app/panda_queue_detail.html', context)
 
 
-@login_required
 def panda_queue_json(request, queue_name):
     """Display JSON view of a PanDA queue configuration using renderjson."""
     queue = get_object_or_404(PandaQueue, queue_name=queue_name)
@@ -2747,7 +2719,6 @@ def panda_queue_json(request, queue_name):
     return render(request, 'monitor_app/json_viewer.html', context)
 
 
-@login_required
 def rucio_endpoints_list(request):
     """
     Professional Rucio endpoints list view using server-side DataTables.
@@ -2824,7 +2795,6 @@ def rucio_endpoints_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-@login_required
 def rucio_endpoint_detail(request, endpoint_name):
     """Display detailed view of a specific Rucio endpoint configuration."""
     endpoint = get_object_or_404(RucioEndpoint, endpoint_name=endpoint_name)
@@ -2849,7 +2819,6 @@ def rucio_endpoint_detail(request, endpoint_name):
     return render(request, 'monitor_app/rucio_endpoint_detail.html', context)
 
 
-@login_required
 def rucio_endpoint_json(request, endpoint_name):
     """Display JSON view of a Rucio endpoint configuration using renderjson."""
     endpoint = get_object_or_404(RucioEndpoint, endpoint_name=endpoint_name)
@@ -2863,7 +2832,6 @@ def rucio_endpoint_json(request, endpoint_name):
     return render(request, 'monitor_app/json_viewer.html', context)
 
 
-@login_required
 def panda_queues_all_json(request):
     """Display JSON view of all PanDA queue configurations."""
     queues_data = {}
@@ -2878,7 +2846,6 @@ def panda_queues_all_json(request):
     return render(request, 'monitor_app/json_viewer.html', context)
 
 
-@login_required
 def rucio_endpoints_all_json(request):
     """Display JSON view of all Rucio endpoint configurations."""
     endpoints_data = {}
@@ -3018,7 +2985,6 @@ def update_rucio_endpoints_from_github(request):
     return redirect('monitor_app:rucio_endpoints_list')
 
 
-@login_required
 def panda_hub(request):
     """PanDA & Rucio hub page — testbed-oriented, full BNL access."""
     return render(request, 'monitor_app/panda_hub.html')

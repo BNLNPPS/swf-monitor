@@ -6,7 +6,6 @@ activity overview, and detail pages with rich cross-linking.
 """
 
 from django.shortcuts import render
-from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
 from django.conf import settings
@@ -188,7 +187,6 @@ def _days_context(days):
 
 # ── Activity overview ────────────────────────────────────────────────────────
 
-@login_required
 def panda_activity(request):
     days = _get_days(request)
     data = get_activity(days=days)
@@ -202,7 +200,6 @@ def panda_activity(request):
 
 # ── Job list ─────────────────────────────────────────────────────────────────
 
-@login_required
 def panda_jobs_list(request):
     days = _get_days(request)
     selected_site = request.GET.get('site', '')
@@ -231,7 +228,6 @@ def panda_jobs_list(request):
     return render(request, 'monitor_app/panda_jobs_list.html', context)
 
 
-@login_required
 def panda_jobs_datatable_ajax(request):
     dt = DataTablesProcessor(request, JOB_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
@@ -276,7 +272,6 @@ def panda_jobs_datatable_ajax(request):
     return dt.create_response(data, total, filtered)
 
 
-@login_required
 def panda_jobs_filter_counts(request):
     days = _get_days(request)
     status = request.GET.get('status', '') or None
@@ -292,7 +287,6 @@ def panda_jobs_filter_counts(request):
 
 # ── Task list ────────────────────────────────────────────────────────────────
 
-@login_required
 def panda_tasks_list(request):
     days = _get_days(request)
     context = {
@@ -312,7 +306,6 @@ def panda_tasks_list(request):
     return render(request, 'monitor_app/panda_tasks_list.html', context)
 
 
-@login_required
 def panda_tasks_datatable_ajax(request):
     dt = DataTablesProcessor(request, TASK_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
@@ -378,7 +371,6 @@ def panda_tasks_datatable_ajax(request):
     return dt.create_response(data, total, filtered)
 
 
-@login_required
 def panda_tasks_filter_counts(request):
     days = _get_days(request)
     status = request.GET.get('status', '') or None
@@ -392,7 +384,6 @@ def panda_tasks_filter_counts(request):
 
 # ── Job detail ───────────────────────────────────────────────────────────────
 
-@login_required
 def panda_job_detail(request, pandaid):
     data = study_job(int(pandaid))
     if 'error' in data:
@@ -509,7 +500,6 @@ setTimeout(check, 25000);     // backstop: one slow check if the event is missed
     return HttpResponse(html, status=202, content_type='text/html; charset=utf-8')
 
 
-@login_required
 def panda_payload_log(request, pandaid):
     """Serve a job's clean payload log from the prod-ops cache.
 
@@ -608,7 +598,6 @@ def panda_payload_log(request, pandaid):
 
 # ── Task detail ──────────────────────────────────────────────────────────────
 
-@login_required
 def panda_task_detail(request, jeditaskid):
     task = get_task(int(jeditaskid))
     if isinstance(task, dict) and 'error' in task:
@@ -631,7 +620,6 @@ def panda_task_detail(request, jeditaskid):
 
 # ── Error summary ────────────────────────────────────────────────────────────
 
-@login_required
 def panda_errors_list(request):
     days = _get_days(request)
     context = {
@@ -644,7 +632,6 @@ def panda_errors_list(request):
     return render(request, 'monitor_app/panda_errors.html', context)
 
 
-@login_required
 def panda_errors_datatable_ajax(request):
     dt = DataTablesProcessor(request, [c['name'] for c in ERROR_COLUMNS],
                              default_order_column=3, default_order_direction='desc')
@@ -691,7 +678,6 @@ def panda_errors_datatable_ajax(request):
 
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
-@login_required
 def panda_diagnostics_list(request):
     days = _get_days(request)
     context = {
@@ -704,7 +690,6 @@ def panda_diagnostics_list(request):
     return render(request, 'monitor_app/panda_diagnostics.html', context)
 
 
-@login_required
 def panda_diagnostics_datatable_ajax(request):
     dt = DataTablesProcessor(request, [c['name'] for c in DIAG_COLUMNS],
                              default_order_column=0, default_order_direction='desc')
@@ -754,7 +739,6 @@ def panda_diagnostics_datatable_ajax(request):
 
 # ── ePIC Queue views ────────────────────────────────────────────────────────
 
-@login_required
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -764,7 +748,6 @@ def epic_queues_list(request):
     })
 
 
-@login_required
 def epic_queue_detail(request, queue_name):
     """Full schedconfig for a single ePIC queue."""
     import json as json_mod

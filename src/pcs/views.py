@@ -1050,7 +1050,6 @@ def pcs_catalog_rucio_update(request):
     return redirect(reverse('pcs:pcs_catalog'))
 
 
-@_login_required_flash
 def rucio_did_detail(request, scope, name):
     """Self-hosted Rucio DID detail — a live, read-only browser for any DID,
     since ePIC has no public Rucio webui. GET page-view → external-safe through
@@ -1117,7 +1116,6 @@ def pcs_catalog_past_update(request):
     return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=past')
 
 
-@_login_required_flash
 def pcs_catalog(request):
     """Production Task Catalog — lifecycle-grouped task listing.
 

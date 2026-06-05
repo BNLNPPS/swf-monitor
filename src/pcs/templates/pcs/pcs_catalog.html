@@ -13,6 +13,7 @@
        redirect, which the swf-remote proxy cannot relay across hosts. See
        EXTERNAL_ACCESS.md. #}
     {% if not is_tunnel %}
+    {% if user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
       <button type="submit" class="btn btn-sm btn-outline-primary"
@@ -28,6 +29,7 @@
         Update from Rucio
       </button>
     </form>
+    {% endif %}
     {% endif %}
   </div>
 
@@ -97,6 +99,7 @@
       {% for r in rucio_detected %}
         <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
           {% if r.version != rucio_current_name %}
+            {% if user.is_authenticated %}
             <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
               {% csrf_token %}
               <input type="hidden" name="name" value="{{ r.version }}">
@@ -104,6 +107,7 @@
                       title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
                       onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
             </form>
+            {% endif %}
           {% else %}
             <span class="badge bg-success">current</span>
           {% endif %}
