@@ -72,6 +72,10 @@ control. The assessment itself — its inputs, execution, and history and benchm
 comparison — is described in
 [argus-ai.md](https://github.com/BNLNPPS/corun-ai/blob/master/docs/argus-ai.md).
 
+An assessment can also be triggered by user request via PanDAbot, which passes the
+request to argus-ai through corun-ai's MCP service and returns a natural-language
+assessment of the validation.
+
 One assessment can cover a single task/dataset or a group of them — a request or a
 benchmark — independent of the per-unit availability signal.
 
