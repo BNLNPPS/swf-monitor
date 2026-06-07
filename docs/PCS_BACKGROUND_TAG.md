@@ -10,7 +10,9 @@ dataset name alongside `p`, `e`, `s`, `r`.
 Background is generated independently of any physics signal and mixed into many.
 It is not a physics process tied to a particular signal — that
 independence is why it is a tag type of its own rather than a field on the
-physics or evgen tag. One background definition is reused across every signal it
+physics or evgen tag. Folding background into the physics tag would multiply the
+physics tags by every background; a separate overlay keeps the count additive,
+not combinatorial. One background definition is reused across every signal it
 overlays.
 
 Its configuration is currently spread across `EvgenTag` (`signal_freq`,
