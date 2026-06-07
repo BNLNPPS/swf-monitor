@@ -19,6 +19,8 @@ Physics tags are grouped by **category** (DIS, DVCS, SIDIS, EXCLUSIVE), reflecte
 
 The system is seeded with configurations from the [26.02.0 production campaign](https://eic.github.io/epic-prod/FULL/26.02.0/) — 47 physics tags, 15 evgen tags, 1 simu tag, and 1 reco tag.
 
+A fifth tag type, **background** (`k`), is designed but not yet implemented — see [Background Tag](PCS_BACKGROUND_TAG.md).
+
 ## Tag Lifecycle
 
 ```
