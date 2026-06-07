@@ -38,15 +38,15 @@ PanDA completes a task/dataset
 
 ## Availability (epicprod → Hydra)
 
-Completion is determined by PanDA, which records a task/dataset's produced output
-in Rucio at submission ([EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md)). On
-that completion epicprod signals availability.
+Completion is determined by PanDA, which monitors task processing and is aware
+of completion. On that completion epicprod signals availability.
 
 The same availability information is offered two ways:
 
 - **Campaign-catalog JSON** — a comprehensive view of the current campaign: for
   each task/dataset, its configuration tags, campaign, request, status, and the
-  produced Rucio references with file counts and completeness. A consumer reads it
+  produced Rucio references ([EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md))
+  with file counts and completeness. A consumer reads it
   and compares against its previous read to find what is new and ready to validate.
   The catalog is described in [PCS.md](PCS.md).
 - **Live event** — a per-unit notification, the moment a unit becomes available,
