@@ -101,9 +101,10 @@ def build_panda_command(task):
     if exec_cmd:
         parts.append(f'--exec {shlex.quote(exec_cmd)}')
 
-    # Output dataset — task_name (no scope prefix, no .bN block suffix),
-    # matching how PanDA records the production taskName.
-    parts.append(f'--outDS {ds.task_name}')
+    # Output dataset — the produced dataset's true Rucio DID name (present
+    # path-based convention; scope applied at submission). See
+    # _output_dataset_name.
+    parts.append(f'--outDS {_output_dataset_name(task)}')
     # Official group production (group.EIC scope, EIC.production privilege)
     if data.get('official'):
         parts.append('--official')
@@ -277,6 +278,37 @@ def build_task_dump(task):
     }
 
 
+def _output_dataset_name(task):
+    """Output dataset name in the present (path-based) Rucio convention — the
+    produced dataset's true DID name, scopeless::
+
+        /RECO/<campaign>/<detector_config>/<suffix>
+
+    Grounded in the catalog data, not assumed:
+
+    - Stage RECO: the current campaign's recorded outputs are 100% RECO.
+    - ``<campaign>`` is the task's production campaign (``Campaign.name``); the
+      recorded produced version matches it (e.g. ``26.05.0``), not the input
+      ``detector_version`` (``26.02.0``).
+    - ``<suffix>`` is the requested EVGEN path with the ``/volatile/eic/EPIC/
+      EVGEN/`` prefix stripped (case preserved). The path is the dataset's
+      identity, so the RECO DID mirrors it per row — carrying the per-task
+      angle/beam detail the tag composition collapses.
+
+    Reconstructed from the task's own source path: deterministic, free of the
+    lineage gather's over-matched siblings, and verified identical to the
+    recorded true DID. The group.EIC scope is applied where the DID is formed
+    (``out_dataset``/``log_dataset`` prepend ``ds.scope``). Falls back to the
+    flat ``task_name`` when no EVGEN path or campaign is available.
+    """
+    ds = task.output_dataset
+    parts = (ds.source_location or '').strip('/').split('/')
+    if task.campaign_id and parts[:4] == ['volatile', 'eic', 'EPIC', 'EVGEN'] and len(parts) > 4:
+        suffix = '/'.join(parts[4:])
+        return f'/RECO/{task.campaign.name}/{ds.detector_config}/{suffix}'
+    return ds.task_name
+
+
 def build_task_params(task):
     """
     Build a JEDI ``taskParamMap`` dict from a ProdTask.
@@ -291,12 +323,24 @@ def build_task_params(task):
     cfg = task.get_effective_config()
     data = cfg.get('data') or {}
 
-    task_name = ds.task_name
+    out_ds_name = _output_dataset_name(task)  # true Rucio DID name (dataset level)
+    # LFN base built from the tag system — short, manageable filename control,
+    # which is what tags are for. The dataset DID keeps the Rucio path-name and
+    # LFNs are always resolved via Rucio, so a tag-based LFN preserves full
+    # discoverability while staying short. Underscores per ePIC practice.
+    # $PANDAID is substituted server-side per job (always — job_complex_module
+    # line 3056) and is globally unique, so it makes each file LFN unique even
+    # when datasets share the same tags (e.g. single-particle angle variants).
+    tag_lfn = '_'.join(filter(None, [
+        ds.physics_tag.tag_label, ds.evgen_tag.tag_label,
+        ds.simu_tag.tag_label, ds.reco_tag.tag_label,
+        ds.background_tag.tag_label if ds.background_tag_id else '',
+    ]))
     working_group = cfg.get('panda_working_group') or 'EIC'
 
     params = {
         # Identity
-        'taskName': task_name,
+        'taskName': out_ds_name,
         'userName': task.created_by,
         'vo': data.get('vo', 'eic'),
         'workingGroup': working_group,
@@ -351,10 +395,11 @@ def build_task_params(task):
     if cfg.get('use_rucio'):
         params['useRucio'] = True
 
-    # Log/output dataset templates — use task_name (no .bN suffix)
-    log_dataset = f'{ds.scope}:{task_name}.log'
-    out_dataset = f'{ds.scope}:{task_name}'
-    log_filename = f'{task_name}.log.${{SN}}.log.tgz'
+    # Output/log datasets carry the true Rucio DID name (scoped via ds.scope);
+    # the LFN filename bases stay flat — slashes are not valid in an LFN.
+    log_dataset = f'{ds.scope}:{out_ds_name}.log'
+    out_dataset = f'{ds.scope}:{out_ds_name}'
+    log_filename = f'{tag_lfn}.$PANDAID.log.${{SN}}.log.tgz'
     params['log'] = {
         'dataset': log_dataset,
         'type': 'template',
@@ -368,7 +413,7 @@ def build_task_params(task):
     env_str = _build_env_string(task)
     exec_cmd = data.get('exec_command') or './run.sh'
     constant_value = f'{env_str} {exec_cmd}' if env_str else exec_cmd
-    output_filename = f'{task_name}.${{SN}}.root'
+    output_filename = f'{tag_lfn}.$PANDAID.${{SN}}.edm4eic.root'
     params['jobParameters'] = [
         {
             'type': 'constant',
