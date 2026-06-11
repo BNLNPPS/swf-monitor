@@ -2142,11 +2142,9 @@ def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
             status=409,
         )
 
-    if task.status != 'ready':
-        raise ServiceError(
-            f'Task must be in status=ready before submission '
-            f'(current: {task.status!r}). Mark it ready via set-status first.'
-        )
+    # Commissioning relaxation: recording a submission from a draft task is
+    # allowed — the 'ready' freeze is not required. See
+    # docs/COMMISSIONING_RELAXATIONS.md.
 
     valid = _known_prodtask_statuses()
     if new_status not in valid:
@@ -2172,8 +2170,9 @@ def prodtask_submit_request(*, task):
     if task.panda_task_id is not None:
         raise ServiceError(
             f'Already submitted as jediTaskID {task.panda_task_id}.', status=409)
-    if task.status != 'ready':
-        raise ServiceError('Only a locked (ready) task can be submitted to PanDA.')
+    # Commissioning relaxation: a draft task may be submitted directly — the
+    # 'ready' freeze is not required. Readiness is surfaced as a non-blocking
+    # warning by the caller, not gated here. See docs/COMMISSIONING_RELAXATIONS.md.
     msg = {'msg_type': 'submit_task', 'namespace': 'prodops',
            'task_name': task.name, 'owner': task.created_by}
     from monitor_app.activemq_connection import ActiveMQConnectionManager

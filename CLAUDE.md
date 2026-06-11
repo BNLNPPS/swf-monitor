@@ -35,6 +35,7 @@ pattern) and **`docs/SSE_PUSH.md`** (the browser push).
 - `EPICPROD_DATA_LINEAGE.md` — gather produced-dataset Rucio refs onto the catalog; reference + xrootd access.
 - `JEDI_INTEGRATION.md` — PCS → JEDI/PanDA submission design.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
+- `COMMISSIONING_RELAXATIONS.md` — alpha tag-lock/submission loosenings and exactly how to re-tighten each.
 - `API_REFERENCE.md`, `MCP.md` — REST and MCP surfaces.
 
 ## Deploy

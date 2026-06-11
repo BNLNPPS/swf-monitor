@@ -359,7 +359,13 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             services.prodtask_submit_request(task=task)
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
-        return Response(self.get_serializer(task).data)
+        data = dict(self.get_serializer(task).data)
+        # Commissioning: submit is allowed from draft; readiness problems are
+        # surfaced as a non-blocking warning rather than gating the submission.
+        warnings = services.prodtask_readiness_problems(task)
+        if warnings:
+            data['warnings'] = warnings
+        return Response(data)
 
     @action(detail=False, methods=['post'], url_path='rucio-snapshot-update')
     def rucio_snapshot_update(self, request):
