@@ -10,6 +10,8 @@ existing tag, or have the right tag created. See EPICPROD_TASK_CATALOG.md.
 The single source of truth is the path. ``derive_physics(path)`` returns the
 canonical params; the caller matches/creates the PhysicsTag and rebinds.
 """
+import re
+
 
 #: EXCLUSIVE / SIDIS sub-process folders carry this afterburner-conversion suffix.
 _ABCONV = '_ABCONV'
@@ -84,6 +86,66 @@ def derive_physics(path, beam=''):
         return {**base, 'process': 'DDIS'}
 
     return {**base, 'process': cat}              # unknown category — surfaced as-is
+
+
+#: BEAMGAS 4th path segment is a physical mechanism when it is one of these;
+#: otherwise it names the generator.
+_BG_MECHANISMS = ('brems', 'coulomb', 'touschek')
+_BG_BEAM_NXM = re.compile(r'^(\d+)x(\d+)$')
+_BG_BEAM_SINGLE = re.compile(r'^(\d+)GeV$')
+
+
+def _bg_beam(segs, source):
+    """Beam energies from a backgrounds path. 'NxM' -> (N, M). A bare 'NGeV' is
+    assigned by source: a proton source to the hadron beam, otherwise electron."""
+    for s in segs:
+        m = _BG_BEAM_NXM.match(s)
+        if m:
+            return m.group(1), m.group(2)
+        m = _BG_BEAM_SINGLE.match(s)
+        if m:
+            return ('N/A', m.group(1)) if source == 'proton' else (m.group(1), 'N/A')
+    return 'N/A', 'N/A'
+
+
+def derive_background(path):
+    """Canonical background (k) tag params from a stripped EVGEN/BACKGROUNDS path,
+    or None if the path is not a backgrounds entry.
+
+    BEAMGAS: ``EVGEN/BACKGROUNDS/BEAMGAS/<source>/<mechanism-or-generator>/…/<beam>/…``.
+    The 4th segment is a physical mechanism (brems/coulomb/touschek) when it is
+    one, otherwise it is the generator. SYNRAD has no source or mechanism. All
+    values are open strings — the parser passes through whatever the path names.
+    Always returns the full set of match fields (blank where not present) so the
+    tag-dedup lookup is consistent.
+    """
+    segs = (path or '').split('/')
+    if len(segs) < 3 or segs[0] != 'EVGEN' or segs[1] != 'BACKGROUNDS':
+        return None
+    sub = segs[2]
+    params = {
+        'background_type': sub,
+        'bg_source': '', 'bg_mechanism': '', 'bg_generator': '',
+        'beam_energy_electron': 'N/A', 'beam_energy_hadron': 'N/A',
+    }
+    if sub == 'SYNRAD':
+        if len(segs) > 3:
+            params['bg_generator'] = segs[3]
+    else:
+        source = segs[3] if len(segs) > 3 else ''
+        params['bg_source'] = source
+        seg4 = segs[4] if len(segs) > 4 else ''
+        if seg4 in _BG_MECHANISMS:
+            params['bg_mechanism'] = seg4
+            gen_parts = [s for s in segs[5:7]
+                         if s and not _BG_BEAM_NXM.match(s) and not _BG_BEAM_SINGLE.match(s)]
+            params['bg_generator'] = '/'.join(gen_parts)
+        else:
+            params['bg_generator'] = seg4
+    e, h = _bg_beam(segs, params['bg_source'])
+    params['beam_energy_electron'] = e
+    params['beam_energy_hadron'] = h
+    return params
 
 
 def single_particle_angle(path):

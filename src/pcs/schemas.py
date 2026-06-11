@@ -107,16 +107,20 @@ TAG_SCHEMAS = {
     'k': {
         'required': ['background_type'],
         'optional': [
-            'source_sample', 'cross_section', 'signal_freq', 'evtgen_file',
-            'bg_tag_prefix',
+            'bg_source', 'bg_mechanism', 'bg_generator',
             'beam_energy_electron', 'beam_energy_hadron', 'beam_species',
+            'cross_section', 'signal_freq', 'bg_tag_prefix', 'evtgen_file',
             'notes',
         ],
         'label': 'Background',
         'prefix': 'k',
         'model': 'BackgroundTag',
+        # Choices are form suggestions only; every field is an open string
+        # (allow_other), so the path parser can pass through any future value.
         'choices': {
             'background_type': ['BEAMGAS', 'SYNRAD'],
+            'bg_source': ['electron', 'proton'],
+            'bg_mechanism': ['brems', 'coulomb', 'touschek'],
             'beam_energy_electron': ['5', '10', '18', 'N/A'],
             'beam_energy_hadron': ['41', '100', '110', '130', '250', '275', 'N/A'],
             'beam_species': ['ep', 'eHe3', 'eAu'],

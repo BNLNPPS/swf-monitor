@@ -23,7 +23,7 @@ from .models import (
     Campaign, ProdRequest,
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
 )
-from .physics_match import derive_physics, single_particle_angle
+from .physics_match import derive_physics, derive_background, single_particle_angle
 
 
 class ServiceError(Exception):
@@ -654,6 +654,54 @@ def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=Fals
     return tag, 'create'
 
 
+def _no_signal_physics_tag():
+    """The locked, signal-free physics tag (``p6001``) that standalone background
+    datasets name in the physics slot. Seeded by migration 0010."""
+    tag = PhysicsTag.objects.filter(tag_label='p6001').first()
+    if not tag:
+        raise ServiceError('No-signal physics tag p6001 is missing; run migrations.')
+    return tag
+
+
+#: Background-tag dedup key — the sample-defining params.
+_BG_MATCH_FIELDS = ('background_type', 'bg_source', 'bg_mechanism', 'bg_generator',
+                    'beam_energy_electron', 'beam_energy_hadron')
+
+
+def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=False):
+    """Resolve the locked background (k) tag for derived background params.
+
+    Mirrors ``find_or_create_physics_tag``: match by the sample-defining
+    parameters, prefer a locked tag then the lowest number, lock a matched draft
+    in place, or create a new locked tag (datasets require locked tags). Returns
+    ``(tag, action)`` with action ``'reuse-locked'`` | ``'lock-in-place'`` |
+    ``'create'``.
+    """
+    match = {f'parameters__{k}': params.get(k, '') for k in _BG_MATCH_FIELDS}
+    matches = sorted(
+        BackgroundTag.objects.filter(**match),
+        key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
+    )
+    if matches:
+        tag = matches[0]
+        if tag.status == 'locked':
+            return tag, 'reuse-locked'
+        if not dry_run:
+            tag.status = 'locked'
+            tag.save(update_fields=['status', 'updated_at'])
+        return tag, 'lock-in-place'
+    if dry_run:
+        return None, 'create'
+    tag = BackgroundTag(
+        tag_number=BackgroundTag.allocate_next(),
+        status='locked',
+        parameters=params,
+        created_by=created_by,
+    )
+    tag.save()
+    return tag, 'create'
+
+
 def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     """Import Sakib's epic-prod datasets.csv into the catalog.
 
@@ -698,20 +746,31 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             task_name = _task_name_from_path(ds_path) or dataset_name
 
             # Derive the real physics from the path and resolve its locked tag,
-            # replacing the placeholder anchor. Backgrounds are parked on the
-            # anchor (their home is the future 'k' background tag type, not a
-            # physics tag); an unrecognizable path also keeps the anchor and is
-            # surfaced in errors rather than silently mis-tagged.
+            # replacing the placeholder anchor. Backgrounds resolve to the
+            # signal-free p6001 physics tag plus a derived k background tag; an
+            # unrecognizable path keeps the anchor and is surfaced in errors
+            # rather than silently mis-tagged.
             filters = _extract_csv_filters(ds_path, 'epic_craterlake')
             derived = derive_physics(task_name, beam=filters.get('beam', ''))
             is_background = bool(derived) and derived.get('process') in ('BEAMGAS', 'SYNRAD')
             angular_range = single_particle_angle(task_name)
             row_physics_tag = physics
+            row_background_tag = None
             if derived is None:
                 summary['errors'].append(
                     f'row {i}: path {task_name!r} is not a recognizable EVGEN '
                     f'entry; left on placeholder tag {physics.tag_label}')
-            elif not is_background:
+            elif is_background:
+                # Standalone background: physics slot is the signal-free p6001
+                # sentinel; the background config itself becomes a k tag.
+                row_physics_tag = _no_signal_physics_tag()
+                bg_params = derive_background(task_name)
+                if bg_params:
+                    row_background_tag, bg_action = find_or_create_background_tag(
+                        bg_params, created_by=created_by)
+                    bg_key = f'bg-{bg_action}'
+                    summary['tag_actions'][bg_key] = summary['tag_actions'].get(bg_key, 0) + 1
+            else:
                 row_physics_tag, action = find_or_create_physics_tag(
                     derived, created_by=created_by)
                 summary['tag_actions'][action] = summary['tag_actions'].get(action, 0) + 1
@@ -737,6 +796,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 ds.description = (row.get('Description') or '').strip()
                 ds.metadata = metadata
                 ds.physics_tag = row_physics_tag
+                ds.background_tag = row_background_tag
                 ds.save()
                 ds_created = False
             else:
@@ -747,6 +807,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     detector_config='epic_craterlake',
                     physics_tag=row_physics_tag, evgen_tag=evgen,
                     simu_tag=simu, reco_tag=reco,
+                    background_tag=row_background_tag,
                     description=(row.get('Description') or '').strip(),
                     metadata=metadata,
                     created_by=created_by,

@@ -29,15 +29,29 @@ digit into `p` and forcing rethinking numbering (e.g. hex). `b` is already the b
 
 ## Schema
 
-In `pcs/schemas.py`:
+In `pcs/schemas.py`. Field values are open strings; the listed values are form
+suggestions, not a closed set, so the path parser passes through whatever a
+future sample names.
 
-- Required: `background_type` (`BEAMGAS`, `SYNRAD`).
-- Optional: `source_sample`, `cross_section`, `signal_freq`, `evtgen_file`,
-  `bg_tag_prefix`, `beam_energy_electron`, `beam_energy_hadron`, `beam_species`,
-  `notes`.
+- Required: `background_type` (e.g. `BEAMGAS`, `SYNRAD`).
+- Sample-defining, populated by the campaign import: `bg_source` (e.g.
+  `electron`, `proton`), `bg_mechanism` (e.g. `brems`, `coulomb`, `touschek`;
+  blank when the path names a generator instead), `bg_generator` (generator/tool
+  and version/release), `beam_energy_electron`, `beam_energy_hadron`.
+- Overlay/mixing, for a background mixed into a signal: `cross_section`,
+  `signal_freq`, `bg_tag_prefix`, `evtgen_file`. Also `beam_species`, `notes`.
 
-The beam energies and species the background was generated for live here, on the
-background tag; background is beam-dependent.
+The beam energies the background was generated for live here, on the background
+tag; for a standalone background sample the physics slot is the signal-free
+`p6001` tag, which carries no beam.
+
+## Import
+
+The campaign importer parses each EVGEN backgrounds path into these parameters,
+resolves or creates the locked `k` tag (`find_or_create_background_tag`, matching
+the sample-defining fields), and binds the dataset to `p6001` plus that `k` tag.
+A single 4th segment that is not a known mechanism is taken as the generator; a
+bare `NGeV` beam is assigned to the electron or hadron beam by source.
 
 ## Behavior
 
