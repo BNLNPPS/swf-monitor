@@ -3,7 +3,7 @@ PCS (Physics Configuration System) data models.
 
 Tag lifecycle: draft (editable) → locked (immutable, usable in datasets).
 Tag numbering: physics tags = category.digit * 1000 + N; e/s/r tags increment from 1 via PersistentState.
-Datasets: composed from four locked tags, auto-named, with block management for Rucio's 100k file limit.
+Datasets: composed from four tags (plus optional background), auto-named, with block management for Rucio's 100k file limit.
 """
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -181,11 +181,12 @@ class BackgroundTag(models.Model):
 
 class Dataset(models.Model):
     """
-    Production dataset composed from four locked tags.
+    Production dataset composed from four tags plus an optional background.
 
     Each row is one block. Block 1 always exists. The dataset_name ties
     blocks together. The DID format is '{scope}:{dataset_name}.b{N}'.
-    All tags must be locked before a dataset can be created.
+    Tags may be draft during alpha; reproducibility locking is enforced at
+    submission prep, not at composition.
     """
     dataset_name = models.CharField(max_length=255)
     scope = models.CharField(max_length=100, default='group.EIC')
@@ -267,12 +268,10 @@ class Dataset(models.Model):
         }
 
     def clean(self):
-        for tag_field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag']:
-            tag = getattr(self, tag_field, None)
-            if tag and tag.status != 'locked':
-                raise ValidationError(
-                    {tag_field: f"Tag {tag.tag_label} must be locked before use in a dataset."}
-                )
+        # Draft tags are allowed on datasets during alpha — composition stays
+        # editable so ops can fix tag meaning. Reproducibility locking is
+        # enforced at submission prep, not here; tightened as we commission.
+        pass
 
     def save(self, *args, **kwargs):
         if not self.dataset_name:

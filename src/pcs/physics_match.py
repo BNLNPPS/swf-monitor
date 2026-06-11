@@ -148,6 +148,51 @@ def derive_background(path):
     return params
 
 
+#: Generator family names whose version follows the name in a token. pythia is
+#: handled separately because its family carries the major-version digit
+#: (pythia8 / pythia6).
+_EVGEN_NAMES = ('EpIC', 'BeAGLE', 'sartre', 'eSTARlight', 'lAger', 'rapgap',
+                'DEMPgen', 'DJANGOH', 'GETaLM')
+_PYTHIA_RE = re.compile(r'^[Pp]ythia[ _]?(\d)(.*)$')
+
+
+def _split_gen_token(tok):
+    """Split a '<Generator><Version>' token into (generator, generator_version),
+    or (None, None) if no known generator is recognised. pythiaN keeps its
+    major-version digit in the family name and the version."""
+    t = (tok or '').strip()
+    if not t:
+        return None, None
+    m = _PYTHIA_RE.match(t)
+    if m:
+        return f'pythia{m.group(1)}', f'{m.group(1)}{m.group(2)}'.lstrip('._- ')
+    for g in _EVGEN_NAMES:
+        if t.lower().startswith(g.lower()):
+            return g, t[len(g):].lstrip('._-vV ')
+    return None, None
+
+
+def derive_evgen(path, gen_version=''):
+    """Best-effort (generator, generator_version) for a catalog row.
+
+    Looks at the gen_version cell's release tag (URL last segment) or plain
+    value, then the path's segments, taking the first that names a known
+    generator. Returns a dict of evgen-tag params, or None when no known
+    generator is recognisable — a fuzzy case left for manual resolution.
+    """
+    candidates = []
+    gv = (gen_version or '').strip()
+    if gv:
+        candidates.append(gv.rstrip('/').split('/')[-1])
+        candidates.append(gv)
+    candidates.extend((path or '').split('/'))
+    for tok in candidates:
+        g, v = _split_gen_token(tok)
+        if g:
+            return {'generator': g, 'generator_version': v}
+    return None
+
+
 def single_particle_angle(path):
     """Angular-range tail of a single-particle path, or '' if none.
 

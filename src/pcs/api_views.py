@@ -186,14 +186,6 @@ class DatasetViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        # Validate all tags are locked
-        for field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag']:
-            tag = serializer.validated_data.get(field)
-            if tag and tag.status != 'locked':
-                return Response(
-                    {field: [f'Tag {tag.tag_label} must be locked before use in a dataset.']},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
         instance = serializer.save(created_by=request.user.username)
         return Response(self.get_serializer(instance).data, status=status.HTTP_201_CREATED)
 

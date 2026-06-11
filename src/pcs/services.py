@@ -23,7 +23,7 @@ from .models import (
     Campaign, ProdRequest,
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
 )
-from .physics_match import derive_physics, derive_background, single_particle_angle
+from .physics_match import derive_physics, derive_background, derive_evgen, single_particle_angle
 
 
 class ServiceError(Exception):
@@ -122,16 +122,12 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
         tag = model.objects.filter(tag_label=label).first()
         if not tag:
             raise ServiceError(f'{field} not found: {label}')
-        if tag.status != 'locked':
-            raise ServiceError(f'{field} {label} must be locked before use')
         tags[field] = tag
 
     if background_tag_label:
         bg = BackgroundTag.objects.filter(tag_label=background_tag_label).first()
         if not bg:
             raise ServiceError(f'background_tag not found: {background_tag_label}')
-        if bg.status != 'locked':
-            raise ServiceError(f'background_tag {background_tag_label} must be locked before use')
         tags['background_tag'] = bg
 
     ds = Dataset(
@@ -557,9 +553,9 @@ def _ensure_csvimport_anchors():
     when they bind a real Dataset/Config to a CSV-imported task.
     """
     def first_locked(model, label):
-        t = model.objects.filter(status='locked').order_by('tag_number').first()
+        t = model.objects.order_by('tag_number').first()
         if not t:
-            raise ServiceError(f'No locked {label} tag available for CSV import')
+            raise ServiceError(f'No {label} tag available for CSV import')
         return t
 
     physics = first_locked(PhysicsTag, 'physics')
@@ -600,16 +596,14 @@ def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=Fals
 
     Matching is by physics parameters, not tag label: ``(process, particle,
     gun_energy)`` for single-particle, ``(process, beam)`` otherwise. Among
-    matches, a locked tag is preferred, then the lowest number — so a duplicated
-    param-set (e.g. DVCS 10x100 exists as both a locked and a draft tag) resolves
-    deterministically to the locked one. A matched *draft* tag is locked in place:
-    datasets require locked physics tags (``Dataset.clean``), and binding a seeded
-    config into production is exactly what locking it means. A miss creates a new
-    locked tag, numbered via ``PhysicsTag.allocate_next`` and the category map.
+    matches, a locked tag is preferred, then the lowest number, so a duplicated
+    param-set resolves deterministically. A miss creates a new *draft* tag,
+    numbered via ``PhysicsTag.allocate_next`` and the category map. Tags are left
+    draft so ops can edit them; reproducibility locking is a deliberate later step
+    at submission prep, not here.
 
-    Returns ``(tag, action)`` with action ``'reuse-locked'`` | ``'lock-in-place'``
-    | ``'create'``. In ``dry_run`` nothing is written and a ``'create'`` returns
-    ``(None, 'create')``.
+    Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``. In
+    ``dry_run`` nothing is written and a ``'create'`` returns ``(None, 'create')``.
     """
     process = derived.get('process')
     if process == 'SINGLE':
@@ -629,13 +623,7 @@ def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=Fals
         key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
     )
     if matches:
-        tag = matches[0]
-        if tag.status == 'locked':
-            return tag, 'reuse-locked'
-        if not dry_run:
-            tag.status = 'locked'
-            tag.save(update_fields=['status', 'updated_at'])
-        return tag, 'lock-in-place'
+        return matches[0], 'reuse'
 
     digit = _PROCESS_CATEGORY.get(process)
     if digit is None:
@@ -646,7 +634,7 @@ def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=Fals
     tag = PhysicsTag(
         tag_number=PhysicsTag.allocate_next(category),
         category=category,
-        status='locked',
+        status='draft',
         parameters=derived,
         created_by=created_by,
     )
@@ -693,13 +681,11 @@ def _background_description(p):
 
 
 def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=False):
-    """Resolve the locked background (k) tag for derived background params.
+    """Resolve the background (k) tag for derived background params.
 
     Mirrors ``find_or_create_physics_tag``: match by the sample-defining
-    parameters, prefer a locked tag then the lowest number, lock a matched draft
-    in place, or create a new locked tag (datasets require locked tags). Returns
-    ``(tag, action)`` with action ``'reuse-locked'`` | ``'lock-in-place'`` |
-    ``'create'``.
+    parameters, prefer a locked tag then the lowest number, or create a new
+    *draft* tag. Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``.
     """
     match = {f'parameters__{k}': params.get(k, '') for k in _BG_MATCH_FIELDS}
     matches = sorted(
@@ -713,18 +699,41 @@ def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=Fa
         if not tag.description and not dry_run:
             tag.description = _background_description(params)
             tag.save(update_fields=['description', 'updated_at'])
-        if tag.status == 'locked':
-            return tag, 'reuse-locked'
-        if not dry_run:
-            tag.status = 'locked'
-            tag.save(update_fields=['status', 'updated_at'])
-        return tag, 'lock-in-place'
+        return tag, 'reuse'
     if dry_run:
         return None, 'create'
     tag = BackgroundTag(
         tag_number=BackgroundTag.allocate_next(),
-        status='locked',
+        status='draft',
         description=_background_description(params),
+        parameters=params,
+        created_by=created_by,
+    )
+    tag.save()
+    return tag, 'create'
+
+
+def find_or_create_evgen_tag(params, *, created_by='csv_import', dry_run=False):
+    """Resolve the evgen (e) tag for derived ``{generator, generator_version}``
+    params. Mirrors ``find_or_create_physics_tag``: match by (generator,
+    generator_version), prefer locked then lowest number, or create a new *draft*
+    tag. Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``."""
+    match = {
+        'parameters__generator': params.get('generator', ''),
+        'parameters__generator_version': params.get('generator_version', ''),
+    }
+    matches = sorted(
+        EvgenTag.objects.filter(**match),
+        key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
+    )
+    if matches:
+        return matches[0], 'reuse'
+    if dry_run:
+        return None, 'create'
+    tag = EvgenTag(
+        tag_number=EvgenTag.allocate_next(),
+        status='draft',
+        description=f"{params.get('generator', '')} {params.get('generator_version', '')}".strip(),
         parameters=params,
         created_by=created_by,
     )
