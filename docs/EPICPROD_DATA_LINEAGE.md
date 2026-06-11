@@ -42,41 +42,52 @@ records that connection in flight, so PanDA-produced data carries it from the
 start. The sweep therefore backfills pre-PanDA campaigns only; reference and
 access over the recorded links are permanent.
 
-## Derivation (requested path → DID → replicas)
+## Derivation (request filters → produced DID → replicas)
 
-The procedure that recovers a produced dataset's Rucio reference from its
-requested path.
+*(Implemented — `match_requests_to_rucio_snapshot`, `_filter_match`,
+`import_jlab_rucio_current_snapshot`, `refresh_rucio_snapshots`, and
+`_rucio_match_to_output` in `pcs/services.py`.)*
 
-**Lineage — requested path → DID:**
+The implemented mechanism is a **filter-based match over a fetched Rucio
+snapshot**, not a path-string glob. A campaign's full Rucio listing is fetched
+once into a snapshot, then each `ProdTask` is matched to the produced datasets
+in it by comparing semantic filter fields. Matching on path strings does not
+work: a produced RECO DID carries extra segments (generator, radiation, charge)
+and a different Q² spelling than the requested EVGEN path.
 
-- Requested path: read from the catalog at `ProdTask.input_source_location`
-  (the `Dataset.source_location` property, i.e.
-  `Dataset.metadata['source']['location']`; `csv_file` is the fallback), e.g.
-  `/volatile/eic/EPIC/EVGEN/DDIS/rapgap3.310-1.0/noRad/ep/10x100`. Seeded from the
-  `default_datasets` `Dataset Path` column.
-- Strip the `/volatile/eic/EPIC/EVGEN/` prefix to a `suffix`, then glob Rucio for
-  `epic:/RECO*<campaign>*/<suffix>`. The `*` absorbs
-  `/<campaign>/<detector_config>` (e.g. `/26.04.1/epic_craterlake`). Any hit
-  beginning `epic:/RECO/` ⇒ available, plus the matched DID(s).
-- DID grammar: `epic:/RECO/<campaign>/<detector_config>/<suffix>`.
-- Special case: `EXCLUSIVE/UPSILON_ABCONV` matched at *file* level — container
-  glob → `rucio list-content` → basename match on `*.eicrecon.edm4eic.root`.
+**Snapshot fetch — Rucio → JSON:**
 
-**Completeness — DID → replicas, counts:**
+- `import_jlab_rucio_current_snapshot` authenticates to JLab Rucio and calls
+  `fetch_jlab_rucio_campaign` for both `/RECO/<campaign>` and `/FULL/<campaign>`.
+  Each fetch does a `/dids/<scope>/dids/search` for `<campaign_path>/*`, then a
+  per-dataset metadata + `/replicas/.../datasets` read (run in a thread pool to
+  stay under the request timeout), yielding for each produced dataset its `did`,
+  `length`, `bytes`, and per-RSE `rse_replicas`.
+- The snapshot is written to one JSON file per campaign under the snapshot
+  directory (`current-<campaign>.json`) and reused for the match.
 
-- `rucio list-rules <did>` → keep RSEs in **{BNL-XRD, EIC-XRD}** (drop
-  JLAB-TAPE-SE).
-- `rucio list-content <did>` → **file count**; per-RSE XRootD prefixes
-  `root://epicxrd1.sdcc.bnl.gov:1095//eic/EPIC/` (BNL-XRD) and
-  `root://dtn-eic.jlab.org//volatile/eic/EPIC` (EIC-XRD).
-- **Expected vs. actual** — compare the file count against the files expected
-  from the request's `nevents` to flag partial campaigns.
+**Match — request filters → produced DID(s):**
 
-The doer invokes these through the **Rucio CLI** (which the Rucio team implement
-over their REST API) under the agent's long-proxy rather than hand-rolling REST —
-the standardize-on-CLIs choice we also apply to the panda CLI and to our own
-prod-navigation CLI. Prerequisite: confirm which `rucio` binary the agent can
-call under its proxy (the CVMFS distribution).
+- `match_requests_to_rucio_snapshot` indexes the snapshot's datasets and extracts
+  the filter axes of each produced DID. For every `ProdTask` in the campaign it
+  reads the request filter block (the persisted `csv_import.filters`, or a fresh
+  extract from the CSV input path) and compares the two via `_filter_match` on the
+  shared semantic axes — detector, beam, physics, Q² overlap, and (for
+  single-particle paths) species/energy — never on path strings.
+- Each matching produced dataset is converted by `_rucio_match_to_output` into an
+  `overrides.outputs` entry carrying `did`, `stage`, `version`, derived
+  `filters`, per-RSE `rses` (`files`/`total`/`complete`), aggregate `file_count`,
+  `bytes`, `complete`, and `checked_at`. Datasets in the snapshot that no request
+  matched are stashed on `campaign.data['rucio_unmatched']` for the catalog to
+  surface.
+
+**Completeness — replicas, counts:**
+
+- Per-RSE completeness comes from each replica's available-vs-total file count in
+  the snapshot record; a dataset is `complete` only when every RSE replica is
+  fully available.
+- File count and byte size are taken as the max across RSE replicas (Rucio
+  reports them per replica, identical across RSEs).
 
 ## PCS data model (write target)
 
@@ -86,13 +97,16 @@ same interim convention that already holds `input_dataset_dids` and the
 
 - `input_source_location` (property; `Dataset.source_location`, i.e.
   `Dataset.metadata['source']['location']`, `csv_file` fallback) — the requested
-  `/volatile/eic/EPIC/EVGEN/<suffix>` path the glob derives from.
-- `campaign` → `Campaign` (FK) — supplies the `<campaign>` glob segment.
+  `/volatile/eic/EPIC/EVGEN/<suffix>` path the request filter fields are extracted
+  from for the match.
+- `campaign` → `Campaign` (FK) — selects the Rucio snapshot to match against.
 - `dataset` → `Dataset` (FK) — the PCS *output* dataset. Its `did` is the
   PCS-composed `group.EIC:….b{N}` identifier and `detector_config` the detector;
   a **different namespace** from the produced `epic:/RECO/…` Rucio DID.
-- `request` → `ProdRequest` (FK) — originating PWG/DSC request; supplies
-  `nevents` for the expected-vs-actual check.
+- `request` → `ProdRequest` (FK) — originating PWG/DSC request; carries
+  `nevents` (the requested event count), intended for a future
+  expected-vs-actual completeness check. The implemented completeness is per-RSE
+  replica availability only.
 - `overrides` — the interim JSON the links are written to.
 
 `overrides.outputs` — a list, one entry per produced Rucio dataset
@@ -124,19 +138,25 @@ block and the old `csv_import.output` rollup onto it.
 
 ## Architecture
 
-**Gather** — standard credentialed-async pattern, no new substrate:
-`_handle_campaign_provenance_sweep` (validate inline) → `run_in_background` doer
-(holds the proxy; derives the glob, invokes the Rucio CLI, writes each task's
-`overrides`) → completion event on `/topic/epictopic` → the catalog updates live
-via `EventSource`, internally and through the swf-remote streaming proxy. The web
-tier holds no credential.
+**Gather** *(implemented)* — standard credentialed-async pattern, no new
+substrate: the catalog's **Update from Rucio** button POSTs to
+`prod-tasks/rucio-snapshot-update/`, which publishes a `rucio_snapshot_update`
+message to the prod-ops agent. The agent's `_handle_rucio_snapshot_update`
+dispatches a `run_in_background` doer (`_do_rucio_snapshot_update`, holds the
+proxy) that runs `refresh_rucio_snapshots` — fetch the JLab Rucio snapshot for the
+current (and last) campaign(s) and rematch produced datasets onto each task's
+`overrides.outputs`. On completion it publishes `rucio_snapshot_ready`, which the
+catalog page receives over the SSE relay (`EventSource`) and refreshes live,
+internally and through the swf-remote streaming proxy. The web tier holds no
+credential.
 
-- Trigger: a per-campaign **Sweep** button (on demand) and a **nightly** cron
-  firing the same handler (replaces the monthly email).
-- Unit of work: one campaign — iterate its `ProdTask` rows, fan the per-task
-  Rucio checks across the worker pool; the receiver thread never blocks.
+- Trigger: the **Update from Rucio** button (on demand). No nightly cron and no
+  per-campaign Sweep button are wired today.
+- Unit of work: the current and last campaigns — for each, fetch the snapshot
+  once and match the campaign's `ProdTask` rows against it; the receiver thread
+  never blocks.
 
-**Reference** — a catalog read over the stored links, no credential: the existing
+**Reference** *(future, building on the gathered links)* — a catalog read over the stored links, no credential: the existing
 filter set (`EPICPROD_TASK_CATALOG.md` §7) collects the tasks' `outputs`
 DIDs across the filtered set. Dataset-level reference is a pure read of the cached
 links; file/PFN expansion is resolved **live against Rucio on demand** — file
@@ -146,7 +166,7 @@ Monitor" feed (DID link, RSE badges, file count) per `EPICPROD_TASK_CATALOG.md`
 **prod-navigation CLI** is a second front-end on this same filter→resolve REST,
 covered by its own design doc (downstream of these links existing).
 
-**Access** — fetch the produced data over XRootD, the same credentialed substrate
+**Access** *(future)* — fetch the produced data over XRootD, the same credentialed substrate
 as payload-log: a `run_in_background` doer constructs the per-RSE XRootD PFN
 (replace the `epic:` DID prefix with the RSE prefix), `xrdcp`s a sample or a small
 whole file under the proxy, caches it, and pushes the result to the browser on
@@ -155,19 +175,20 @@ payload-log model. Each is an individual handler.
 
 ## Proto-plan
 
-**Phase 1 — gather.** Iterate a campaign's `ProdTask` rows; derive the RECO DID
-glob from the requested path + `campaign` + `detector_config`; resolve DID(s),
-RSEs, file counts, and expected-vs-actual; write `overrides.outputs`. Render
-in the catalog; push on completion. Validate by spot-checking a sample against an
-independent manual Rucio query.
+**Phase 1 — gather.** *(Implemented.)* Fetch the campaign's Rucio snapshot once;
+match each `ProdTask` to the produced datasets in it on the shared filter axes
+(`_filter_match`); write `overrides.outputs`. Render in the catalog; push
+`rucio_snapshot_ready` on completion. Validate by spot-checking a sample against
+an independent manual Rucio query.
 
-**Phase 2 — reference.** Catalog filter → the produced Rucio datasets, with
-on-demand file/PFN expansion (live, uncached) — the system surfacing the data it
-produced from its provenance record. The prod-navigation CLI is a second
-front-end on this REST.
+**Phase 2 — reference.** *(Future, building on the gathered links.)* Catalog
+filter → the produced Rucio datasets, with on-demand file/PFN expansion (live,
+uncached) — the system surfacing the data it produced from its provenance record.
+The prod-navigation CLI is a second front-end on this REST.
 
-**Phase 3 — access.** Fetch produced data over XRootD from the stored links —
-sample, small-whole-file pull, examine — reusing the payload-log xrootd doer.
+**Phase 3 — access.** *(Future.)* Fetch produced data over XRootD from the stored
+links — sample, small-whole-file pull, examine — reusing the payload-log xrootd
+doer.
 
 **Phase 4 — capture at source (PanDA data).** PanDA makes the production→Rucio
 connection in flight, so for PanDA-produced tasks the output DID is recorded at

@@ -126,7 +126,7 @@ killing the in-flight work it was meant to protect.
 The fix is **threads, not asyncio**. The work is blocking subprocess/socket I/O
 (`prun`, `xrdcp`, Rucio REST) and the stack is thread-based (stomp.py,
 subprocess); an asyncio agent would buy nothing here and would force every agent
-off the shared base. So the capability is added to `BaseAgent` itself — a
+off the shared base. So the capability lives in `BaseAgent` itself — a
 bounded worker pool, reusable by all agents — exposed as
 `run_in_background(fn, *args, dedup_key=…, label=…)`. A handler enqueues its
 doer and returns, freeing the receiver thread at once.
@@ -139,10 +139,10 @@ logs every exception (no silent worker death), and skips a call whose
 introduces). A send lock makes worker-thread bus sends safe; shutdown drains the
 pool.
 
-In this agent, `fetch_payload_log` and `submit_task` enqueue via
-`run_in_background`; `health_ping` and `shutdown` stay inline. Because
+In this agent, `fetch_payload_log`, `submit_task`, and `rucio_snapshot_update`
+enqueue via `run_in_background`; `health_ping` and `shutdown` stay inline. Because
 `BaseAgent` lives in `swf-common-lib` and ships to every agent through the venv
-chain, landing this verifies the other agents still heartbeat. The shared API is
+chain, the other agents continue to heartbeat unchanged. The shared API is
 documented in the `swf-common-lib` README.
 
 ## Building a new capability — the pattern
@@ -230,7 +230,7 @@ was retired.)
 
 Each item below is, by design, a new handler + doer on this agent.
 
-- **Async execution** (above) — the near-term structural requirement; precedes
+- **Async execution** (above) — implemented; the structural prerequisite for
   piling more long-running capabilities onto the singleton.
 - **Campaign-provenance sweep** — the join Sakib's catalogue and the
   `eic/snippets` `check_campaign.py` / `check_storage.py` do by hand, run live
@@ -259,7 +259,8 @@ payload-log retrieval mechanics are in [EPICPROD_OPS.md](EPICPROD_OPS.md). This
 doc does not duplicate them.
 
 **Status (2026-06-02):** deployed and live on `pandaserver02`. Handlers
-`fetch_payload_log`, `submit_task`, `health_ping`, `shutdown` are implemented
-and the `submit_task` path reuses the operator's cached production token. Async
-handler execution is designed (a `BaseAgent` worker pool, opt-in
-`run_in_background`) and is the next change to land.
+`fetch_payload_log`, `submit_task`, `rucio_snapshot_update`, `health_ping`, and
+`shutdown` are implemented and the `submit_task` path reuses the operator's
+cached production token. Async handler execution is implemented (a `BaseAgent`
+worker pool, opt-in `run_in_background`); the three work handlers enqueue their
+doers through it.

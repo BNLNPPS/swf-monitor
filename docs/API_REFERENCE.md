@@ -22,7 +22,6 @@ The system uses Django models to track agents, runs, data files, and messaging:
 - **Run**: Experimental runs containing multiple STF files
 - **StfFile**: Super Time Frame files with processing status
 - **FastMonFile**: Fast monitoring time frame sample files metadata
-- **MessageQueueDispatch**: Message queue operations and delivery tracking
 - **Subscriber**: Message queue subscribers and their configurations
 - **PersistentState**: System state persistence for workflow tracking
 - **PandaQueue**: PanDA queue configuration for job submission
@@ -37,8 +36,12 @@ Production task configuration for Monte Carlo simulation campaigns:
 - **EvgenTag**: Event generation configurations (e1, e2...)
 - **SimuTag**: Simulation configurations (s1, s2...)
 - **RecoTag**: Reconstruction configurations (r1, r2...)
+- **BackgroundTag**: Background configurations (k1, k2...)
 - **Dataset**: Production datasets composed from locked tags with automatic block management
 - **ProdConfig**: Production configuration templates (background mixing, output control, software stack, PanDA/Rucio overrides)
+- **Campaign**: Time-ordered grouping of production tasks with a past/current/future lifecycle
+- **ProdRequest**: PWG/DSC production request, upstream of ProdTask
+- **ProdTask**: Production task composed from a Dataset and ProdConfig with submission command generation
 
 See **[PCS documentation](PCS.md)** for full details.
 
@@ -136,10 +139,6 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 - `GET /api/stf-files/{id}/` - Get specific file
 - `PATCH /api/stf-files/{id}/` - Update file status
 
-### Message Queue Dispatches
-- `GET /api/message-dispatches/` - List dispatches
-- `POST /api/message-dispatches/` - Create dispatch record
-
 ### Subscribers
 - `GET /api/subscribers/` - List subscribers
 - `POST /api/subscribers/` - Create subscriber
@@ -182,10 +181,13 @@ All PCS endpoints are under `/pcs/api/`. See **[PCS documentation](PCS.md)** for
 - `GET/POST /pcs/api/evgen-tags/` - List/create evgen tags
 - `GET/POST /pcs/api/simu-tags/` - List/create simu tags
 - `GET/POST /pcs/api/reco-tags/` - List/create reco tags
+- `GET/POST /pcs/api/background-tags/` - List/create background tags
 - `GET/POST /pcs/api/datasets/` - List/create datasets (all tags must be locked)
 - `POST /pcs/api/datasets/{id}/add-block/` - Add next block to dataset
 - `GET/POST /pcs/api/prod-configs/` - List/create production configs
 - `GET/PATCH/DELETE /pcs/api/prod-configs/{id}/` - Get/update/delete production config
+- `GET/POST /pcs/api/prod-tasks/` - List/create production tasks
+- `GET/PATCH/DELETE /pcs/api/prod-tasks/{id}/` - Get/update/delete production task
 
 ### PanDA Production Monitoring
 
@@ -261,43 +263,9 @@ data: {"client_id": "uuid", "status": "connected"}
 - **Scalability**: Redis-backed channel layer supports multiple Django processes
 - **Reliability**: Automatic client cleanup and connection management
 
-## Model Control Protocol (MCP)
+## Model Context Protocol (MCP)
 
-
-### REST Endpoints
-
-- `POST /api/mcp/heartbeat/` - Process agent heartbeat
-- `POST /api/mcp/discover-capabilities/` - Get available commands
-- `POST /api/mcp/agent-liveness/` - Get agent liveness status
-
-### Message Format
-
-```json
-{
-  "mcp_version": "1.0",
-  "message_id": "unique-uuid",
-  "command": "command_name",
-  "payload": {
-    "key": "value"
-  }
-}
-```
-
-### Available Commands
-
-#### discover_capabilities
-Returns available MCP commands and descriptions.
-- **Request payload**: `{}`
-- **Response**: Dictionary of command names and descriptions
-
-#### get_agent_liveness
-Reports agent liveness based on recent heartbeats.
-- **Request payload**: `{}`
-- **Response**: Dictionary mapping agent names to 'alive'/'dead' status
-
-#### heartbeat (Notification)
-Agent sends to signal it's active (no response expected).
-- **Payload**: `{"name": "agent-name", "timestamp": "iso-8601-timestamp", "status": "OK"}`
+The MCP server is a standalone FastMCP service, documented in **[MCP.md](MCP.md)**.
 
 ## Agent Integration
 
@@ -359,12 +327,5 @@ Example log entry:
 - `403` - Forbidden
 - `404` - Not Found
 - `500` - Internal Server Error
-
-### MCP Error Codes
-- `4000` - Invalid request format
-- `4001` - Missing mcp_version field
-- `4002` - Unsupported MCP version
-- `4004` - Unknown command
-- `5000` - Internal server error
 
 For detailed API schemas and examples, see the interactive documentation at `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/`.

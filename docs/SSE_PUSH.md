@@ -123,4 +123,9 @@ appear shortly" instead of asking the user to refresh.
 
 The substrate is shared; the devcloud delta is just the streaming proxy.
 
-**Status:** design only — not yet built.
+**Status:** implemented. The prod-ops agent publishes the completion events
+(`agents/epicprod_ops_agent.py`: `payload_log_ready`, `prodtask_submitted`); the
+internal browser pages hold the `EventSource` consumers
+(`src/monitor_app/viewdir/pandamon.py`, `src/pcs/templates/pcs/prod_task_compose.html`);
+and the swf-remote streaming proxy relays the stream on the external face
+(`../swf-remote/src/remote_app/monitor_client.py`, `StreamingHttpResponse`).

@@ -543,10 +543,10 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 500 tasks). Cursor-based pagination via before_id. |
 | `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
-| `panda_list_queues` | `cloud`, `site`, `resource_type`, `status`, `limit` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
+| `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
 | `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
-| `panda_resource_usage` | `days`, `username`, `site`, `workinggroup` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
-| `panda_harvester_workers` | `status`, `site`, `resourcetype`, `days` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
+| `panda_resource_usage` | `days`, `site`, `username`, `taskid` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
+| `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -677,7 +677,7 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 
 | Category | Tools | Count |
 |----------|-------|-------|
-| Tool Discovery | `swf_list_available_tools` | 1 |
+| Tool Discovery | `swf_list_available_tools`, `get_server_instructions` | 2 |
 | System State | `swf_get_system_state` | 1 |
 | Agents | `swf_list_agents`, `swf_get_agent` | 2 |
 | Namespaces | `swf_list_namespaces`, `swf_get_namespace` | 2 |
@@ -694,8 +694,9 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
+| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **44** |
+| **Total** | | **54** |
 
 ---
 

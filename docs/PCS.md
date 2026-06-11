@@ -10,16 +10,16 @@ Production configuration is organized as **tags** — named parameter sets that 
 
 | Tag Type | Prefix | What It Captures | Example |
 |----------|--------|-----------------|---------|
-| **Physics** | p | Process, beam energies, species, Q2 range | p1001 — DIS NC 10x100 ep minQ2=1 |
+| **Physics** | p | Process, beam energies, species, Q2 range | p2004 — DIS 5x41 |
 | **EvGen** | e | Generator name and version, backgrounds | e1 — pythia8 8.310 |
 | **Simulation** | s | Detector sim version, background config | s1 — npsim 26.02.0 |
 | **Reconstruction** | r | Reco version, calibration, alignment | r1 — eicrecon 26.02.0 |
 
-Physics tags are grouped by **category** (DIS, DVCS, SIDIS, EXCLUSIVE), reflected in their numbering: DIS tags are p1xxx, DVCS are p2xxx, etc.
+Physics tags are grouped by **category**, reflected in their numbering: Single Particle tags are p1xxx, DIS are p2xxx, DVCS are p3xxx, SIDIS are p4xxx, Exclusive are p5xxx, and Background are p6xxx.
 
-The system is seeded with configurations from the [26.02.0 production campaign](https://eic.github.io/epic-prod/FULL/26.02.0/) — 47 physics tags, 15 evgen tags, 1 simu tag, and 1 reco tag.
+The system is seeded with configurations from the [26.02.0 production campaign](https://eic.github.io/epic-prod/FULL/26.02.0/): physics, evgen, simu, and reco tags derived from that campaign's datasets. The live tag counts grow as new configurations are added.
 
-A fifth tag type, **background** (`k`), is designed but not yet implemented — see [Background Tag](PCS_BACKGROUND_TAG.md).
+A fifth tag type, **background** (`k`), captures a named, versioned background configuration (beam-gas, synchrotron radiation, or overlay samples) independent of any physics signal. It is implemented and optionally composed into a dataset — see [Background Tag](PCS_BACKGROUND_TAG.md).
 
 ## Tag Lifecycle
 
@@ -31,6 +31,8 @@ draft  ──►  locked
 - **Locked** — immutable. One-way transition. Ensures reproducibility: once a tag is used in production, its meaning never changes.
 
 Only the tag creator can edit, lock, or delete their own drafts. Anyone can copy any tag to create their own variant.
+
+During alpha commissioning all tags remain draft and the lock requirement for datasets and submission is lifted; see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md) for the current relaxation and how it is re-tightened.
 
 ## Using the Tag Panel
 
@@ -170,7 +172,7 @@ eval "$(pcs-task-cmd <name> --format condor)"
 
 ## Datasets
 
-A dataset composes four locked tags with detector version information into a standardized name:
+A dataset composes the four tags (and an optional background tag) with detector version information into a standardized name. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
 
 ```
 {scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}
@@ -225,7 +227,7 @@ A production config is a reusable template capturing everything needed to build 
 | Key | Example | Purpose |
 |-----|---------|---------|
 | `workflow_mode` | `external_evgen` | Production workflow mode: `external_evgen` (default; payload consumes a CSV-manifest input) or `internal_evgen` (payload runs evgen + sim + reco internally). Surfaced as `ProdConfig.workflow_mode`. |
-| `submission_path` | `condor` | Submission path for tasks built on this config: `condor` (default; `submit_csv.sh` via `condor_submit`), `panda` (JEDI `taskParamMap` via `Client.insertTaskParams`), or `internal_evgen` (PanDA-orchestrated multi-stage workflow). Surfaced as `ProdConfig.submission_path`. See `EPICPROD_TASK_CATALOG.md` §2. |
+| `submission_path` | `condor` | Submission path for tasks built on this config: `condor` (default; `submit_csv.sh` via `condor_submit`) or `panda` (JEDI `taskParamMap` via `Client.insertTaskParams`). Surfaced as `ProdConfig.submission_path`. Independent of `workflow_mode` (whether evgen runs in-house or is read from input files). See `EPICPROD_TASK_CATALOG.md` §2. |
 | `transformation` | `runGen-00-00-02` | PanDA TRF script name/version |
 | `processing_type` | `epicproduction` | PanDA classification |
 | `prod_source_label` | `managed` | PanDA authorization (managed/test) |
