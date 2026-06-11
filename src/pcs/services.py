@@ -814,6 +814,18 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     derived, created_by=created_by)
                 summary['tag_actions'][action] = summary['tag_actions'].get(action, 0) + 1
 
+            # Resolve the generator (evgen) from path/gen_version. Unresolved
+            # (ambiguous/underspecified) rows keep the placeholder anchor and are
+            # left for manual association — never guessed. See the curated
+            # derive_evgen and docs (campaign->tag mapping).
+            row_evgen_tag = evgen
+            ev_params = derive_evgen(task_name, gen_ver)
+            if ev_params:
+                row_evgen_tag, ev_action = find_or_create_evgen_tag(
+                    ev_params, created_by=created_by)
+                ev_key = f'evgen-{ev_action}'
+                summary['tag_actions'][ev_key] = summary['tag_actions'].get(ev_key, 0) + 1
+
             raw_priority = (row.get('Priority') or '').strip()
             try:
                 priority = int(raw_priority) if raw_priority else None
@@ -835,6 +847,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 ds.description = (row.get('Description') or '').strip()
                 ds.metadata = metadata
                 ds.physics_tag = row_physics_tag
+                ds.evgen_tag = row_evgen_tag
                 ds.background_tag = row_background_tag
                 ds.save()
                 ds_created = False
@@ -844,7 +857,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     scope='group.EIC',
                     detector_version='26.02.0',
                     detector_config='epic_craterlake',
-                    physics_tag=row_physics_tag, evgen_tag=evgen,
+                    physics_tag=row_physics_tag, evgen_tag=row_evgen_tag,
                     simu_tag=simu, reco_tag=reco,
                     background_tag=row_background_tag,
                     description=(row.get('Description') or '').strip(),

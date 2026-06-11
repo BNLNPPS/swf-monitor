@@ -151,42 +151,59 @@ def derive_background(path):
 #: Generator family names whose version follows the name in a token. pythia is
 #: handled separately because its family carries the major-version digit
 #: (pythia8 / pythia6).
-_EVGEN_NAMES = ('EpIC', 'BeAGLE', 'sartre', 'eSTARlight', 'lAger', 'rapgap',
-                'DEMPgen', 'DJANGOH', 'GETaLM')
+_EVGEN_NAMES = ('EpIC', 'BeAGLE', 'sartre', 'eSTARlight', 'eicMesonSFGen',
+                'lAger', 'rapgap', 'DEMPgen', 'DJANGOH', 'GETaLM')
 _PYTHIA_RE = re.compile(r'^[Pp]ythia[ _]?(\d)(.*)$')
 
 
 def _split_gen_token(tok):
     """Split a '<Generator><Version>' token into (generator, generator_version),
-    or (None, None) if no known generator is recognised. pythiaN keeps its
-    major-version digit in the family name and the version."""
+    or (None, None) when there is no known generator *with a non-empty version*.
+
+    A bare generator name (e.g. 'pythia8', 'eSTARlight') has no version in the
+    source and resolves to (None, None) — left for manual association, not
+    guessed. The leading 'v' of a version is preserved (EpIC 'v1.1.6-1.2');
+    pythiaN keeps its major-version digit in both the family and the version.
+    """
     t = (tok or '').strip()
     if not t:
         return None, None
     m = _PYTHIA_RE.match(t)
     if m:
+        if not m.group(2).strip(' ._-'):     # bare 'pythia8' / 'Pythia 8'
+            return None, None
         return f'pythia{m.group(1)}', f'{m.group(1)}{m.group(2)}'.lstrip('._- ')
     for g in _EVGEN_NAMES:
         if t.lower().startswith(g.lower()):
-            return g, t[len(g):].lstrip('._-vV ')
+            ver = t[len(g):].lstrip('._- ')   # keep a leading 'v'
+            return (g, ver) if ver else (None, None)
     return None, None
 
 
 def derive_evgen(path, gen_version=''):
-    """Best-effort (generator, generator_version) for a catalog row.
+    """Curated (generator, generator_version) for a catalog row, or None when no
+    confident resolution exists — left for manual association, never guessed.
 
-    Looks at the gen_version cell's release tag (URL last segment) or plain
-    value, then the path's segments, taking the first that names a known
-    generator. Returns a dict of evgen-tag params, or None when no known
-    generator is recognisable — a fuzzy case left for manual resolution.
+    - ``EVGEN/SINGLE/...`` samples are the particle gun.
+    - A background ``dataprod_rel`` release names no generator; the generator is
+      the repository (e.g. EIC_ESR_Xsuite, EIC_SR_Geant4).
+    - Otherwise a '<Generator><Version>' token from the gen_version release tag
+      or the path is split; a bare generator with no version resolves to None.
     """
-    candidates = []
+    segs = (path or '').split('/')
+    if len(segs) > 1 and segs[0] == 'EVGEN' and segs[1] == 'SINGLE':
+        return {'generator': 'particle_gun', 'generator_version': ''}
     gv = (gen_version or '').strip()
-    if gv:
-        candidates.append(gv.rstrip('/').split('/')[-1])
-        candidates.append(gv)
-    candidates.extend((path or '').split('/'))
-    for tok in candidates:
+    # PYTHIA-RAD-CORR releases are bare versions and the path's pythia6 segment
+    # is not a clean generator+version — ambiguous, left for manual association.
+    if 'pythia-rad-corr' in gv.lower():
+        return None
+    release = gv.rstrip('/').split('/')[-1] if gv else ''
+    if release.startswith('dataprod_rel') and 'github.com/' in gv:
+        repo = gv.split('github.com/', 1)[1].split('/releases', 1)[0].split('/')[-1]
+        if repo:
+            return {'generator': repo, 'generator_version': release}
+    for tok in [release, gv, *segs]:
         g, v = _split_gen_token(tok)
         if g:
             return {'generator': g, 'generator_version': v}
