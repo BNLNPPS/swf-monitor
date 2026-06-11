@@ -668,6 +668,30 @@ _BG_MATCH_FIELDS = ('background_type', 'bg_source', 'bg_mechanism', 'bg_generato
                     'beam_energy_electron', 'beam_energy_hadron')
 
 
+def _background_description(p):
+    """Comma-joined description synthesised from background-tag parameters:
+    generator, type, beam energy, source, mechanism — each included only when
+    present. Single-beam samples show just the present energy."""
+    e = p.get('beam_energy_electron', 'N/A')
+    h = p.get('beam_energy_hadron', 'N/A')
+    if e != 'N/A' and h != 'N/A':
+        beam = f'{e}x{h} GeV'
+    elif e != 'N/A':
+        beam = f'{e} GeV'
+    elif h != 'N/A':
+        beam = f'{h} GeV'
+    else:
+        beam = ''
+    parts = [
+        p.get('bg_generator', ''),
+        p.get('background_type', ''),
+        beam,
+        p.get('bg_source', ''),
+        p.get('bg_mechanism', ''),
+    ]
+    return ', '.join(x for x in parts if x)
+
+
 def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=False):
     """Resolve the locked background (k) tag for derived background params.
 
@@ -684,6 +708,11 @@ def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=Fa
     )
     if matches:
         tag = matches[0]
+        # Backfill a synthesised description if missing (annotation, not a
+        # reproducibility field) — never overwrite an existing one.
+        if not tag.description and not dry_run:
+            tag.description = _background_description(params)
+            tag.save(update_fields=['description', 'updated_at'])
         if tag.status == 'locked':
             return tag, 'reuse-locked'
         if not dry_run:
@@ -695,6 +724,7 @@ def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=Fa
     tag = BackgroundTag(
         tag_number=BackgroundTag.allocate_next(),
         status='locked',
+        description=_background_description(params),
         parameters=params,
         created_by=created_by,
     )
