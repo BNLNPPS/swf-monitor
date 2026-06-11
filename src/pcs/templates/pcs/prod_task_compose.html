@@ -183,6 +183,42 @@
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
+
+    // ── Tag-based naming: the new system's names enter the world here ──
+    // The dataset's human-facing identity is its tag-composed name
+    // (build_dataset_name); the internal csv_import.<hash> dataset_name and its
+    // synthetic DID are plumbing and are never shown.
+    const TAG_COMPOSE_URLS = {
+        p: "{% url 'pcs:tag_compose' tag_type='p' %}", e: "{% url 'pcs:tag_compose' tag_type='e' %}",
+        s: "{% url 'pcs:tag_compose' tag_type='s' %}", r: "{% url 'pcs:tag_compose' tag_type='r' %}",
+        k: "{% url 'pcs:tag_compose' tag_type='k' %}",
+    };
+    function tagLink(type, tag) {
+        if (!tag || !tag.label) return '<span class="text-muted">-</span>';
+        const t = (tag.description || '').replace(/"/g, '&quot;');
+        return `<a href="${TAG_COMPOSE_URLS[type]}?selected=${encodeURIComponent(tag.label)}" title="${t}">${tag.label}</a>`;
+    }
+    function dsComposedName(ds) { return (ds && (ds.composed_name || ds.dataset_name)) || ''; }
+    // Legacy import rows carry an opaque csv_import.<hash> / past.<…> key and a
+    // synthetic DID (not a Rucio DID) — both plumbing, hidden from the panels.
+    function isLegacyKey(ds) { return ds && /^(csv_import|past)\./.test(ds.dataset_name || ''); }
+    // The p/e/s/r/k mapping as a linked table — the dataset's tag composition.
+    // Background (k) is shown only when present. Parameters appear once the
+    // dataset is hydrated (the light list payload omits them).
+    function tagTableHtml(ds) {
+        if (!ds) return '';
+        let rows = '';
+        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'],
+         ['Reco', ds.reco_tag, 'r'], ['Background', ds.background_tag, 'k']].forEach(([label, tag, type]) => {
+            if (type === 'k' && !tag) return;
+            const params = Object.entries((tag && tag.parameters) || {}).filter(([,v]) => v)
+                .map(([k,v]) => `<code>${k}</code>=${v}`).join(', ');
+            rows += `<tr><td>${label}</td><td>${tagLink(type, tag)}</td><td>${(tag && tag.description) || ''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+        });
+        return `<h6>Tags</h6><table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+            <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+    }
     const initialSelected = {{ selected_item_json|safe }};  // string key (name) or null
     const urlParams = new URLSearchParams(window.location.search);
     const initialTab = urlParams.get('tab') || 'datasets';
@@ -215,7 +251,7 @@
             const r = await fetch(`/swf-monitor/pcs/datasets/${id}/compose-detail/`);
             if (r.ok) {
                 const d = await r.json();
-                ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'].forEach(k => {
+                ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'].forEach(k => {
                     if (d[k]) ds[k] = Object.assign({}, ds[k], d[k]);
                 });
                 if (d.metadata !== undefined) ds.metadata = d.metadata;
@@ -412,10 +448,12 @@
         const q = searchBox.value.toLowerCase();
         let items = [];
         if (browseType === 'datasets') {
-            items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
+            items = allDatasets.filter(d => !q || dsComposedName(d).toLowerCase().includes(q) ||
+                (d.source_location || '').toLowerCase().includes(q) ||
                 d.physics_tag.label.toLowerCase().includes(q) || d.physics_tag.description.toLowerCase().includes(q)
-            ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
+            ).map(d => ({ id: d.id, type: 'dataset', label: dsComposedName(d),
                 meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}`
+                    + (d.background_tag ? ' ' + d.background_tag.label : '')
                     + `${d.external ? ' | external ' + (d.stage || 'dataset') : ''} | ${d.created_by}`,
                 selected: d.id === selectedItemId }));
         } else if (browseType === 'configs') {
@@ -425,11 +463,17 @@
                 meta: `JUG_XL: ${c.jug_xl_tag || '-'} | ${c.created_by}`,
                 selected: c.id === selectedItemId }));
         } else if (browseType === 'tasks') {
-            items = allTasks.filter(t => !q || t.name.toLowerCase().includes(q) ||
-                t.dataset_name.toLowerCase().includes(q) || t.prod_config_name.toLowerCase().includes(q)
-            ).map(t => ({ id: t.id, type: 'task', label: t.name,
-                meta: `${t.status} | ${t.dataset_name} | ${t.prod_config_name}`,
-                selected: t.id === selectedItemId }));
+            items = allTasks.filter(t => {
+                if (!q) return true;
+                const ds = allDatasets.find(d => d.id === t.dataset_id);
+                return t.name.toLowerCase().includes(q) || t.prod_config_name.toLowerCase().includes(q)
+                    || dsComposedName(ds).toLowerCase().includes(q);
+            }).map(t => {
+                const ds = allDatasets.find(d => d.id === t.dataset_id);
+                return { id: t.id, type: 'task', label: t.name,
+                    meta: `${t.status} | ${dsComposedName(ds)} | ${t.prod_config_name}`,
+                    selected: t.id === selectedItemId };
+            });
         }
         filterRow.innerHTML = '';
         itemList.innerHTML = items.map(it =>
@@ -532,7 +576,7 @@
 
         // Top-level suggestion
         datasetSuggestion.innerHTML = `<span class="sg-source">Replace with:</span>
-            <span class="sg-value">${browsedDs.dataset_name}</span>
+            <span class="sg-value">${dsComposedName(browsedDs)}</span>
             <button type="button" class="btn btn-warning btn-sm btn-apply" id="ds-apply-all">Apply</button>`;
         datasetSuggestion.classList.add('visible');
         document.getElementById('ds-apply-all').addEventListener('click', () => {
@@ -553,13 +597,15 @@
                     <span class="fd-new">${browsedDs[key]||'-'}</span></div>`;
             }
         });
-        // Tag diffs
-        [['physics_tag','Physics'], ['evgen_tag','EvGen'], ['simu_tag','Simu'], ['reco_tag','Reco']].forEach(([key, label]) => {
-            if (cur[key].label !== browsedDs[key].label) {
+        // Tag diffs (background included; either side may lack a k tag)
+        [['physics_tag','Physics'], ['evgen_tag','EvGen'], ['simu_tag','Simu'], ['reco_tag','Reco'], ['background_tag','Background']].forEach(([key, label]) => {
+            const curLabel = (cur[key] && cur[key].label) || '-';
+            const newLabel = (browsedDs[key] && browsedDs[key].label) || '-';
+            if (curLabel !== newLabel) {
                 diffHtml += `<div class="field-diff">
                     <span class="fd-label">${label}:</span>
-                    <span class="fd-current">${cur[key].label}</span> <span class="fd-arrow">&rarr;</span>
-                    <span class="fd-new">${browsedDs[key].label}</span></div>`;
+                    <span class="fd-current">${curLabel}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${newLabel}</span></div>`;
             }
         });
         if (diffHtml) {
@@ -624,31 +670,22 @@
         if (!ds) return;
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
-        panelTitle.textContent = ds.dataset_name;
+        panelTitle.textContent = dsComposedName(ds);
         hideTaskActions();
-        let tagsHtml = '';
-        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
-            const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-            tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
-        });
         browseContent.innerHTML = `
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td><code>${dsComposedName(ds)}</code></td></tr>
+                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>` : ''}
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
                 <tr><td><strong>Stage</strong></td><td>${ds.stage || '-'}</td></tr>
                 <tr><td><strong>External</strong></td><td>${ds.external ? 'yes' : 'no'}</td></tr>
                 ${ds.source_kind ? `<tr><td><strong>Source Kind</strong></td><td>${ds.source_kind}</td></tr>` : ''}
-                ${ds.source_location ? `<tr><td><strong>Source Location</strong></td><td><code>${ds.source_location}</code></td></tr>` : ''}
+                ${ds.source_location ? `<tr><td><strong>Source path</strong></td><td><code>${ds.source_location}</code></td></tr>` : ''}
                 ${ds.validation_status ? `<tr><td><strong>Validation</strong></td><td>${ds.validation_status}</td></tr>` : ''}
-                <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
                 ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
             </table>
-            <h6>Tags</h6>
-            <table class="table table-sm table-bordered" style="font-size:.82rem;">
-                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
-                <tbody>${tagsHtml}</tbody>
-            </table>`;
+            ${tagTableHtml(ds)}`;
     }
 
     function showConfigDetail(id) {
@@ -700,10 +737,10 @@
         const csvImp = (t.overrides && t.overrides.csv_import) || null;
 
         // Title: dataset path (matches the workbench row title), with the
-        // standard ePIC volatile prefix stripped. Full path on hover. The
-        // internal csv_import.<slug> name is only a stable key, not a label.
+        // standard ePIC volatile prefix stripped. Full path on hover. Never the
+        // internal csv_import.<hash> key — fall back to the tag-based name.
         const PFX = '/volatile/eic/EPIC/';
-        const dsPath = (ds && ds.source_location) || t.dataset_name || t.name;
+        const dsPath = (ds && ds.source_location) || t.name || dsComposedName(ds);
         panelTitle.textContent = dsPath.startsWith(PFX) ? dsPath.slice(PFX.length) : dsPath;
         panelTitle.title = dsPath;
 
@@ -758,14 +795,15 @@
         if (t.description) html += `<p>${t.description}</p>`;
 
         if (csvImp) {
-            // CSV-imported task: the dataset's physics/evgen/simu/reco tags are
-            // auto-generated placeholders. Show the path-decomposed filter
-            // fields (carried in overrides.csv_import) — these are the real
-            // physics characterization the user cares about.
+            // CSV-imported task. The path-decomposed filter fields (carried in
+            // overrides.csv_import) describe the source sample; the tag mapping
+            // below — resolved from the path during import — is the dataset's
+            // identity in the tag-based system, shown headed by its composed name.
             const f = csvImp.filters || {};
             const nevM = csvImp.nevents ? `${(Number(csvImp.nevents)/1e6).toFixed(1)} M` : '';
             const rows = [
-                ['Path',        `<code>${dsPath}</code>`],
+                ['Name (tag-based)', ds ? `<code>${dsComposedName(ds)}</code>` : ''],
+                ['Source path', `<code>${dsPath}</code>`],
                 ['Sample',      csvImp.evgen],
                 ['Gen version', csvImp.gen_version],
                 ['Geom',        f.detector],
@@ -781,23 +819,15 @@
             html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;"><tbody>${
                 rows.map(([k,v]) => `<tr><td style="width:30%"><strong>${k}</strong></td><td>${v}</td></tr>`).join('')
             }</tbody></table>`;
+            html += tagTableHtml(ds);
         } else {
-            // Non-CSV task: show the dataset's real tag metadata.
+            // Non-CSV task: the dataset's tag-based name plus its tag mapping.
             html += `<h6>Dataset</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                    <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
+                    <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td><code>${ds ? dsComposedName(ds) : t.dataset_name}</code></td></tr>
                     ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
                 </table>`;
-            if (ds) {
-                let tagsHtml = '';
-                [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
-                    const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-                    tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
-                });
-                html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                    <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
-                    <tbody>${tagsHtml}</tbody></table>`;
-            }
+            html += tagTableHtml(ds);
         }
 
         // Config summary
@@ -839,15 +869,14 @@
         if (!ds) return;
         clearAllSuggestions();
         composeDatasetId = id; composeDataset = ds;
-        document.getElementById('dataset-badge').textContent = ds.dataset_name;
+        document.getElementById('dataset-badge').textContent = dsComposedName(ds);
         document.getElementById('dataset-badge').className = 'badge bg-success';
         document.getElementById('dataset-display').innerHTML = `
             <table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">
-                <tr><td style="width:35%"><strong>Name</strong></td><td>${ds.dataset_name}</td></tr>
-                <tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td style="width:35%"><strong>Name (tag-based)</strong></td><td><code>${dsComposedName(ds)}</code></td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
-                ${ds.external ? `<tr><td><strong>Input Source</strong></td><td>${ds.source_kind || '-'}: <code>${ds.source_location || '-'}</code></td></tr>` : ''}
-                <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label}, ${ds.evgen_tag.label}, ${ds.simu_tag.label}, ${ds.reco_tag.label}</td></tr>
+                ${ds.external ? `<tr><td><strong>Source path</strong></td><td><code>${ds.source_location || '-'}</code></td></tr>` : ''}
+                <tr><td><strong>Tags</strong></td><td>${[ds.physics_tag.label, ds.evgen_tag.label, ds.simu_tag.label, ds.reco_tag.label].join(', ')}${ds.background_tag ? ', ' + ds.background_tag.label : ''}</td></tr>
             </table>`;
         const allParams = {};
         [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
@@ -858,7 +887,7 @@
         document.getElementById('physics-badge').textContent = `${Object.keys(allParams).length} params`;
         document.getElementById('physics-badge').className = 'badge bg-success';
         document.querySelector('[data-section="physics"]').classList.remove('collapsed');
-        if (!document.getElementById('task-name').value) document.getElementById('task-name').value = ds.dataset_name;
+        if (!document.getElementById('task-name').value) document.getElementById('task-name').value = dsComposedName(ds);
         updateSaveButton();
     }
 

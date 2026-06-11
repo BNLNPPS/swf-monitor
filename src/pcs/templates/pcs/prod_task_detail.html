@@ -53,8 +53,9 @@
                 <div class="card-body">
                     <h5 class="card-title">Dataset</h5>
                     <table class="table table-sm table-bordered mb-0">
-                        <tr><td style="width:40%"><strong>Name</strong></td><td><a href="{% url 'pcs:dataset_detail' pk=task.dataset.pk %}">{{ task.dataset.dataset_name }}</a></td></tr>
-                        <tr><td><strong>DID</strong></td><td><code>{{ task.dataset.did }}</code></td></tr>
+                        <tr><td style="width:40%"><strong>Name (tag-based)</strong></td><td><a href="{% url 'pcs:dataset_detail' pk=task.dataset.pk %}">{{ task.dataset.composed_name }}</a></td></tr>
+                        {% if not task.dataset.has_internal_name %}<tr><td><strong>DID</strong></td><td><code>{{ task.dataset.did }}</code></td></tr>{% endif %}
+                        {% if task.dataset.source_location %}<tr><td><strong>Source path</strong></td><td><code>{{ task.dataset.source_location }}</code></td></tr>{% endif %}
                         <tr><td><strong>Detector Version</strong></td><td>{{ task.dataset.detector_version }}</td></tr>
                         <tr><td><strong>Detector Config</strong></td><td>{{ task.dataset.detector_config }}</td></tr>
                     </table>
@@ -126,8 +127,8 @@
                 <tbody>
                     {% for ds in task.output_datasets %}
                     <tr>
-                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.dataset_name }}</a></td>
-                        <td><code>{{ ds.did }}</code></td>
+                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.composed_name }}</a></td>
+                        <td>{% if ds.has_internal_name %}<span class="text-muted">&mdash;</span>{% else %}<code>{{ ds.did }}</code>{% endif %}</td>
                         <td>{% if ds.source_kind %}<code>{{ ds.source_kind }}</code> {{ ds.source_location }}{% else %}-{% endif %}</td>
                     </tr>
                     {% endfor %}
@@ -141,8 +142,8 @@
                 <tbody>
                     {% for ds in task.input_datasets %}
                     <tr>
-                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.dataset_name }}</a></td>
-                        <td><code>{{ ds.did }}</code></td>
+                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.composed_name }}</a></td>
+                        <td>{% if ds.has_internal_name %}<span class="text-muted">&mdash;</span>{% else %}<code>{{ ds.did }}</code>{% endif %}</td>
                         <td>{% if ds.source_kind %}<code>{{ ds.source_kind }}</code> {{ ds.source_location }}{% else %}-{% endif %}</td>
                     </tr>
                     {% endfor %}
@@ -156,8 +157,8 @@
                 <tbody>
                     {% for ds in task.intermediate_datasets %}
                     <tr>
-                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.dataset_name }}</a></td>
-                        <td><code>{{ ds.did }}</code></td>
+                        <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.composed_name }}</a></td>
+                        <td>{% if ds.has_internal_name %}<span class="text-muted">&mdash;</span>{% else %}<code>{{ ds.did }}</code>{% endif %}</td>
                         <td>{% if ds.source_kind %}<code>{{ ds.source_kind }}</code> {{ ds.source_location }}{% else %}-{% endif %}</td>
                     </tr>
                     {% endfor %}

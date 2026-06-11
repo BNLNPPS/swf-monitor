@@ -303,6 +303,25 @@ class Dataset(models.Model):
         """Task name = dataset_name (without .bN block suffix)."""
         return self.dataset_name
 
+    @property
+    def composed_name(self):
+        """The dataset's name in the tag-based system (see build_dataset_name).
+
+        The human-facing identity used across the PCS UI. The stored
+        dataset_name and DID may be an internal csv_import.<hash> key (see
+        has_internal_name); this is always the tag composition.
+        """
+        return self.build_dataset_name()
+
+    @property
+    def has_internal_name(self):
+        """True when dataset_name/DID are legacy-import plumbing — an opaque
+        csv_import.<hash> or past.<…> key and a synthetic (non-Rucio) DID —
+        rather than a real Rucio identity. Used to keep those strings off the
+        UI; the source path is the real-world locator for such rows.
+        """
+        return self.dataset_name.startswith(('csv_import.', 'past.'))
+
 
 class ProdConfig(models.Model):
     """

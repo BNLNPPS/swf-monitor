@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ dataset.dataset_name }} - PCS{% endblock %}
+{% block title %}{{ dataset.composed_name }} - PCS{% endblock %}
 
 {% block content %}
 {% csrf_token %}
@@ -9,11 +9,11 @@
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
             <li class="breadcrumb-item"><a href="{% url 'pcs:datasets_compose' %}">Datasets</a></li>
-            <li class="breadcrumb-item active">{{ dataset.dataset_name }}</li>
+            <li class="breadcrumb-item active">{{ dataset.composed_name }}</li>
         </ol>
     </nav>
 
-    <h2>{{ dataset.dataset_name }}</h2>
+    <h2>{{ dataset.composed_name }}</h2>
     <p class="text-muted">Created by {{ dataset.created_by }} on {{ dataset.created_at|date:"Y-m-d H:i" }}</p>
 
     {% if dataset.description %}
@@ -135,7 +135,7 @@
                     {% for block in blocks %}
                     <tr>
                         <td>b{{ block.block_num }}</td>
-                        <td><code>{{ block.did }}</code></td>
+                        <td>{% if block.has_internal_name %}<span class="text-muted">&mdash;</span>{% else %}<code>{{ block.did }}</code>{% endif %}</td>
                         <td>{{ block.file_count }}</td>
                         <td>{% if block.data_size %}{{ block.data_size|filesizeformat }}{% else %}0{% endif %}</td>
                     </tr>

@@ -1483,7 +1483,7 @@ def prod_task_compose(request):
     # keeps the past_output archive datasets off the page.
     dataset_ids = {t.dataset_id for t in tasks_list}
     datasets_qs = Dataset.objects.filter(id__in=dataset_ids).select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
     ).order_by('-created_at')
     datasets_data = []
     for ds in datasets_qs:
@@ -1506,6 +1506,15 @@ def prod_task_compose(request):
             'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description},
             'simu_tag': {'label': ds.simu_tag.tag_label, 'description': ds.simu_tag.description},
             'reco_tag': {'label': ds.reco_tag.tag_label, 'description': ds.reco_tag.description},
+            # Background (k) is optional; null when the dataset carries no
+            # standalone-background tag.
+            'background_tag': ({'label': ds.background_tag.tag_label,
+                                'description': ds.background_tag.description}
+                               if ds.background_tag_id else None),
+            # The dataset's name in the tag-based system. The human-facing
+            # identity on the page — the internal csv_import.<hash> dataset_name
+            # and its synthetic DID are plumbing and are not shown.
+            'composed_name': ds.build_dataset_name(),
             'created_by': ds.created_by,
             'created_at': ds.created_at.strftime('%Y-%m-%d %H:%M'),
         })
@@ -1602,14 +1611,17 @@ def prod_task_compose_dataset_detail(request, pk):
     into the dataset entry the first time it is opened (never clobbering). GET
     JSON; read-only."""
     ds = get_object_or_404(Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'), pk=pk)
-    return JsonResponse({
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'), pk=pk)
+    payload = {
         'physics_tag': {'parameters': ds.physics_tag.parameters},
         'evgen_tag': {'parameters': ds.evgen_tag.parameters},
         'simu_tag': {'parameters': ds.simu_tag.parameters},
         'reco_tag': {'parameters': ds.reco_tag.parameters},
         'metadata': ds.metadata or {},
-    })
+    }
+    if ds.background_tag_id:
+        payload['background_tag'] = {'parameters': ds.background_tag.parameters}
+    return JsonResponse(payload)
 
 
 def prod_task_compose_task_detail(request, pk):
