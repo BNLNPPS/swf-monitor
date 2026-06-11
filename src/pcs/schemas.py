@@ -104,6 +104,28 @@ TAG_SCHEMAS = {
             'reco_config': ['standard'],
         },
     },
+    'k': {
+        'required': ['background_type'],
+        'optional': [
+            'source_sample', 'cross_section', 'signal_freq', 'evtgen_file',
+            'bg_tag_prefix',
+            'beam_energy_electron', 'beam_energy_hadron', 'beam_species',
+            'notes',
+        ],
+        'label': 'Background',
+        'prefix': 'k',
+        'model': 'BackgroundTag',
+        'choices': {
+            'background_type': ['BEAMGAS', 'SYNRAD'],
+            'beam_energy_electron': ['5', '10', '18', 'N/A'],
+            'beam_energy_hadron': ['41', '100', '110', '130', '250', '275', 'N/A'],
+            'beam_species': ['ep', 'eHe3', 'eAu'],
+            'bg_tag_prefix': [
+                'Bkg_Exact1S_2us/GoldCt/5um',
+                'Bkg_Exact1S_2us/GoldCt/10um',
+            ],
+        },
+    },
 }
 
 

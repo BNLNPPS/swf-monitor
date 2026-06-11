@@ -14,7 +14,7 @@ def _list_tags_sync(tag_type, category=None, status=None, creator=None,
     from pcs.schemas import TAG_SCHEMAS, get_tag_model
 
     if tag_type not in TAG_SCHEMAS:
-        return {"error": f"Invalid tag_type '{tag_type}'. Use: p, e, s, r"}
+        return {"error": f"Invalid tag_type '{tag_type}'. Use: p, e, s, r, k"}
 
     model = get_tag_model(tag_type)
     qs = model.objects.order_by('-tag_number')
@@ -59,8 +59,8 @@ def _list_tags_sync(tag_type, category=None, status=None, creator=None,
 def _get_tag_sync(tag_label):
     """Get a single tag by label (e.g. 'p1001', 'e3', 'r1')."""
     label = tag_label.strip().lower()
-    if not label or label[0] not in ('p', 'e', 's', 'r'):
-        return {"error": f"Invalid tag label '{tag_label}'. Format: p1001, e3, s1, r1"}
+    if not label or label[0] not in ('p', 'e', 's', 'r', 'k'):
+        return {"error": f"Invalid tag label '{tag_label}'. Format: p1001, e3, s1, r1, k1"}
 
     prefix = label[0]
     try:
@@ -97,7 +97,7 @@ def _search_tags_sync(query, tag_type=None):
     """Search across tag descriptions and parameters."""
     from pcs.schemas import TAG_SCHEMAS, get_tag_model
 
-    types = [tag_type] if tag_type else ['p', 'e', 's', 'r']
+    types = [tag_type] if tag_type else ['p', 'e', 's', 'r', 'k']
     results = []
 
     for tt in types:
@@ -193,7 +193,7 @@ async def pcs_search_tags(
     Args:
         query: Search text (case-insensitive). Matches against tag label,
                description, and all parameter values.
-        tag_type: Optional — restrict to one type: 'p', 'e', 's', 'r'.
+        tag_type: Optional — restrict to one type: 'p', 'e', 's', 'r', 'k'.
                   If omitted, searches all tag types.
 
     Returns:
@@ -230,6 +230,7 @@ def _dataset_to_dict(ds, full=True):
             'evgen_tag': ds.evgen_tag.tag_label,
             'simu_tag': ds.simu_tag.tag_label,
             'reco_tag': ds.reco_tag.tag_label,
+            'background_tag': ds.background_tag.tag_label if ds.background_tag_id else None,
             'block_num': ds.block_num,
             'blocks': ds.blocks,
             'description': ds.description,

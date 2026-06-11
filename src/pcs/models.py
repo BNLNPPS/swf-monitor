@@ -150,6 +150,35 @@ class RecoTag(models.Model):
         return _allocate_simple_tag('pcs_next_reco')
 
 
+class BackgroundTag(models.Model):
+    """Background tag (k1, k2...). A named, versioned background configuration
+    (beam-gas, synchrotron radiation, or overlay samples), independent of any
+    physics signal. Number auto-incremented via PersistentState."""
+    tag_number = models.IntegerField(unique=True)
+    tag_label = models.CharField(max_length=10, unique=True)
+    status = models.CharField(max_length=10, choices=TAG_STATUS_CHOICES, default='draft')
+    description = models.TextField(blank=True, default='')
+    parameters = models.JSONField(default=dict)
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_background_tag'
+        ordering = ['tag_number']
+
+    def __str__(self):
+        return self.tag_label
+
+    def save(self, *args, **kwargs):
+        self.tag_label = f"k{self.tag_number}"
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def allocate_next(cls):
+        return _allocate_simple_tag('pcs_next_background')
+
+
 class Dataset(models.Model):
     """
     Production dataset composed from four locked tags.
@@ -166,6 +195,10 @@ class Dataset(models.Model):
     evgen_tag = models.ForeignKey(EvgenTag, on_delete=models.PROTECT, related_name='datasets')
     simu_tag = models.ForeignKey(SimuTag, on_delete=models.PROTECT, related_name='datasets')
     reco_tag = models.ForeignKey(RecoTag, on_delete=models.PROTECT, related_name='datasets')
+    background_tag = models.ForeignKey(
+        BackgroundTag, on_delete=models.PROTECT, related_name='datasets',
+        null=True, blank=True,
+    )
     block_num = models.PositiveIntegerField(default=1)
     blocks = models.PositiveIntegerField(default=1)
     did = models.CharField(max_length=300, unique=True)
@@ -234,7 +267,7 @@ class Dataset(models.Model):
         }
 
     def clean(self):
-        for tag_field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']:
+        for tag_field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag']:
             tag = getattr(self, tag_field, None)
             if tag and tag.status != 'locked':
                 raise ValidationError(
@@ -252,12 +285,19 @@ class Dataset(models.Model):
         super().save(*args, **kwargs)
 
     def build_dataset_name(self):
-        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}"""
-        return (
+        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}[.{k}]
+
+        The background segment is appended only when the dataset carries a
+        background tag.
+        """
+        name = (
             f"{self.scope}.{self.detector_version}.{self.detector_config}"
             f".{self.physics_tag.tag_label}.{self.evgen_tag.tag_label}"
             f".{self.simu_tag.tag_label}.{self.reco_tag.tag_label}"
         )
+        if self.background_tag_id:
+            name = f"{name}.{self.background_tag.tag_label}"
+        return name
 
     @property
     def task_name(self):

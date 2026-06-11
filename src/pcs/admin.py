@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
                      Dataset, ProdConfig, ProdTask,
                      Campaign, ProdRequest)
 
@@ -36,6 +36,14 @@ class SimuTagAdmin(admin.ModelAdmin):
 
 @admin.register(RecoTag)
 class RecoTagAdmin(admin.ModelAdmin):
+    list_display = ('tag_label', 'status', 'description', 'created_by', 'created_at')
+    list_filter = ('status',)
+    search_fields = ('tag_label', 'description')
+    readonly_fields = ('tag_number', 'tag_label', 'created_at', 'updated_at')
+
+
+@admin.register(BackgroundTag)
+class BackgroundTagAdmin(admin.ModelAdmin):
     list_display = ('tag_label', 'status', 'description', 'created_by', 'created_at')
     list_filter = ('status',)
     search_fields = ('tag_label', 'description')

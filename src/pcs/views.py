@@ -45,7 +45,7 @@ def _post_only_redirect(request, fallback_url, action_label='This action'):
 from monitor_app.utils import DataTablesProcessor, get_filter_params, format_datetime
 
 from .models import (
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
     Dataset, ProdConfig, ProdTask,
     Campaign, ProdRequest,
     PRODTASK_STATUS_CHOICES,
@@ -122,6 +122,7 @@ def pcs_hub_counts():
         'evgen_tags_count': EvgenTag.objects.count(),
         'simu_tags_count': SimuTag.objects.count(),
         'reco_tags_count': RecoTag.objects.count(),
+        'background_tags_count': BackgroundTag.objects.count(),
         'datasets_count': Dataset.objects.values('dataset_name').distinct().count(),
         'prod_configs_count': ProdConfig.objects.count(),
         'prod_tasks_count': ProdTask.objects.count(),
@@ -159,6 +160,7 @@ TAG_MODELS = {
     'e': EvgenTag,
     's': SimuTag,
     'r': RecoTag,
+    'k': BackgroundTag,
 }
 
 
@@ -262,7 +264,7 @@ def tag_detail(request, tag_type, tag_number):
     if tag.status == 'locked':
         filter_kwarg = {f'{schema["prefix"]}__tag_number' if schema["prefix"] == 'p' else f'{"physics" if schema["prefix"] == "p" else {"e": "evgen", "s": "simu", "r": "reco"}[schema["prefix"]]}_tag': tag}
         # Build the correct filter field name
-        field_map = {'p': 'physics_tag', 'e': 'evgen_tag', 's': 'simu_tag', 'r': 'reco_tag'}
+        field_map = {'p': 'physics_tag', 'e': 'evgen_tag', 's': 'simu_tag', 'r': 'reco_tag', 'k': 'background_tag'}
         datasets = Dataset.objects.filter(**{field_map[tag_type]: tag}).order_by('-created_at')
 
     defs = get_param_defs(tag_type)
@@ -401,7 +403,8 @@ def tag_compose(request, tag_type):
     # Peek at next tag suffix from PersistentState (read-only, no increment)
     from monitor_app.models import PersistentState
     state_keys = {'p': 'pcs_next_physics', 'e': 'pcs_next_evgen',
-                  's': 'pcs_next_simu', 'r': 'pcs_next_reco'}
+                  's': 'pcs_next_simu', 'r': 'pcs_next_reco',
+                  'k': 'pcs_next_background'}
     try:
         ps = PersistentState.objects.get(id=1)
         next_suffix = ps.state_data.get(state_keys[tag_type], 1)
@@ -906,7 +909,7 @@ def prod_config_edit(request, pk):
 
 # ── Production Tasks ─────────────────────────────────────────────
 
-TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
+TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag, 'k': BackgroundTag}
 
 
 LIFECYCLE_KEYS = ('past', 'last', 'current', 'future')

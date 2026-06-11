@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
                      Dataset, ProdConfig, ProdTask)
 from .schemas import validate_parameters
 
@@ -74,11 +74,23 @@ class RecoTagSerializer(_SimpleTagSerializer):
         return value
 
 
+class BackgroundTagSerializer(_SimpleTagSerializer):
+    class Meta(_SimpleTagSerializer.Meta):
+        model = BackgroundTag
+
+    def validate_parameters(self, value):
+        ok, msg = validate_parameters('k', value)
+        if not ok:
+            raise serializers.ValidationError(msg)
+        return value
+
+
 class DatasetSerializer(serializers.ModelSerializer):
     physics_tag_label = serializers.CharField(source='physics_tag.tag_label', read_only=True)
     evgen_tag_label = serializers.CharField(source='evgen_tag.tag_label', read_only=True)
     simu_tag_label = serializers.CharField(source='simu_tag.tag_label', read_only=True)
     reco_tag_label = serializers.CharField(source='reco_tag.tag_label', read_only=True)
+    background_tag_label = serializers.CharField(source='background_tag.tag_label', read_only=True, allow_null=True)
     stage = serializers.CharField(read_only=True)
     external = serializers.BooleanField(source='is_external', read_only=True)
     source_kind = serializers.CharField(read_only=True)
@@ -89,8 +101,9 @@ class DatasetSerializer(serializers.ModelSerializer):
         model = Dataset
         fields = [
             'id', 'dataset_name', 'scope', 'detector_version', 'detector_config',
-            'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+            'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
             'physics_tag_label', 'evgen_tag_label', 'simu_tag_label', 'reco_tag_label',
+            'background_tag_label',
             'block_num', 'blocks', 'did', 'file_count', 'data_size',
             'stage', 'external', 'source_kind', 'source_location', 'validation_status',
             'description', 'metadata', 'created_by', 'created_at',

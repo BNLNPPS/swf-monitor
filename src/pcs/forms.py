@@ -1,5 +1,5 @@
 from django import forms
-from .models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, Dataset, ProdConfig
+from .models import PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag, Dataset, ProdConfig
 from .schemas import TAG_SCHEMAS, get_param_defs
 
 
@@ -75,6 +75,11 @@ class DatasetForm(forms.Form):
     reco_tag = forms.ModelChoiceField(
         queryset=RecoTag.objects.filter(status='locked'),
         empty_label="Select reco tag",
+    )
+    background_tag = forms.ModelChoiceField(
+        queryset=BackgroundTag.objects.filter(status='locked'),
+        empty_label="Select background tag (optional)",
+        required=False,
     )
     description = forms.CharField(widget=forms.Textarea(attrs={'rows': 3}), required=False)
     metadata = forms.JSONField(required=False)

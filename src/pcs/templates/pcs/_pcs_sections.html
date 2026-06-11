@@ -60,6 +60,15 @@
             </div>
         </div>
     </div>
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+                <p class="mb-1"><strong><a href="{% url 'pcs:tag_compose' tag_type='k' %}" class="text-decoration-none">Background</a></strong>
+                <span class="badge bg-info">{{ background_tags_count }}</span></p>
+                <p class="card-text small">Beam-gas, synchrotron radiation, overlay samples.</p>
+            </div>
+        </div>
+    </div>
 </div>
 
 <h3 class="mb-3">Production Task Creation</h3>

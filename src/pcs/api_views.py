@@ -29,12 +29,12 @@ from rest_framework.response import Response
 from django.db.models import Count
 
 from .models import (
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
     Dataset, ProdConfig, ProdTask,
 )
 from .serializers import (
     PhysicsCategorySerializer, PhysicsTagSerializer,
-    EvgenTagSerializer, SimuTagSerializer, RecoTagSerializer,
+    EvgenTagSerializer, SimuTagSerializer, RecoTagSerializer, BackgroundTagSerializer,
     DatasetSerializer, ProdConfigSerializer, ProdTaskSerializer,
 )
 from .schemas import validate_parameters, get_tag_model
@@ -167,10 +167,16 @@ class RecoTagViewSet(_SimpleTagViewSet):
     tag_type = 'r'
 
 
+class BackgroundTagViewSet(_SimpleTagViewSet):
+    queryset = BackgroundTag.objects.all()
+    serializer_class = BackgroundTagSerializer
+    tag_type = 'k'
+
+
 class DatasetViewSet(viewsets.ModelViewSet):
     """Dataset CRUD. POST validates all tags are locked and creates block 1. No DELETE."""
     queryset = Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
     serializer_class = DatasetSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
@@ -181,9 +187,9 @@ class DatasetViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         # Validate all tags are locked
-        for field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']:
-            tag = serializer.validated_data[field]
-            if tag.status != 'locked':
+        for field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag']:
+            tag = serializer.validated_data.get(field)
+            if tag and tag.status != 'locked':
                 return Response(
                     {field: [f'Tag {tag.tag_label} must be locked before use in a dataset.']},
                     status=status.HTTP_400_BAD_REQUEST,
