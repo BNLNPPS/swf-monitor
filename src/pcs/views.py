@@ -566,6 +566,7 @@ def datasets_compose(request):
                 evgen_tag=cd['evgen_tag'],
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
+                background_tag=cd.get('background_tag'),
                 description=cd.get('description', ''),
                 metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
@@ -575,7 +576,7 @@ def datasets_compose(request):
             return redirect(f"{reverse('pcs:datasets_compose')}?selected={urlquote(ds.dataset_name)}")
 
     qs = Dataset.objects.filter(block_num=1).select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
     ).order_by('-created_at')
     datasets_data = []
     for ds in qs:
@@ -598,6 +599,9 @@ def datasets_compose(request):
                          'description': ds.simu_tag.description, 'parameters': ds.simu_tag.parameters},
             'reco_tag': {'id': ds.reco_tag_id, 'label': ds.reco_tag.tag_label,
                          'description': ds.reco_tag.description, 'parameters': ds.reco_tag.parameters},
+            'background_tag': ({'id': ds.background_tag_id, 'label': ds.background_tag.tag_label,
+                                'description': ds.background_tag.description, 'parameters': ds.background_tag.parameters}
+                               if ds.background_tag_id else None),
         })
 
     # Full tag data for browsing and diffs
@@ -731,6 +735,7 @@ def dataset_create(request):
                 evgen_tag=cd['evgen_tag'],
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
+                background_tag=cd.get('background_tag'),
                 description=cd.get('description', ''),
                 metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
@@ -761,6 +766,7 @@ def dataset_add_block(request, pk):
         evgen_tag=dataset.evgen_tag,
         simu_tag=dataset.simu_tag,
         reco_tag=dataset.reco_tag,
+        background_tag=dataset.background_tag,
         block_num=new_block_num,
         blocks=new_block_num,
         did=f"{dataset.scope}:{dataset.dataset_name}.b{new_block_num}",

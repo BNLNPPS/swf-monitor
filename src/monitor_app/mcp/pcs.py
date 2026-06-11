@@ -354,6 +354,7 @@ async def pcs_dataset_get(did: str = None, dataset_name: str = None) -> dict:
 def _dataset_intake_sync(*, source_location, source_kind, scope, stage,
                          detector_version, detector_config,
                          physics_tag, evgen_tag, simu_tag, reco_tag,
+                         background_tag,
                          description, created_by):
     from pcs import services
     try:
@@ -363,6 +364,7 @@ def _dataset_intake_sync(*, source_location, source_kind, scope, stage,
             detector_version=detector_version, detector_config=detector_config,
             physics_tag_label=physics_tag, evgen_tag_label=evgen_tag,
             simu_tag_label=simu_tag,       reco_tag_label=reco_tag,
+            background_tag_label=background_tag,
             description=description, created_by=created_by,
         )
     except services.ServiceError as e:
@@ -378,6 +380,7 @@ async def pcs_dataset_intake(
     evgen_tag: str = None,
     simu_tag: str = None,
     reco_tag: str = None,
+    background_tag: str = None,
     detector_version: str = None,
     detector_config: str = None,
     scope: str = 'group.EIC.evgen',
@@ -401,6 +404,7 @@ async def pcs_dataset_intake(
         detector_version=detector_version, detector_config=detector_config,
         physics_tag=physics_tag, evgen_tag=evgen_tag,
         simu_tag=simu_tag, reco_tag=reco_tag,
+        background_tag=background_tag,
         description=description, created_by=created_by,
     )
 

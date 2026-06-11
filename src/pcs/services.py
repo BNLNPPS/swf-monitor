@@ -21,7 +21,7 @@ _log = _logging.getLogger(__name__)
 from .models import (
     Dataset, ProdConfig, ProdTask,
     Campaign, ProdRequest,
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
 )
 from .physics_match import derive_physics, single_particle_angle
 
@@ -77,6 +77,7 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
                    detector_version=None, detector_config=None,
                    physics_tag_label=None, evgen_tag_label=None,
                    simu_tag_label=None, reco_tag_label=None,
+                   background_tag_label=None,
                    description='', created_by):
     """
     Idempotent intake of an external (e.g. EVGEN CSV manifest) Dataset.
@@ -124,6 +125,14 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
         if tag.status != 'locked':
             raise ServiceError(f'{field} {label} must be locked before use')
         tags[field] = tag
+
+    if background_tag_label:
+        bg = BackgroundTag.objects.filter(tag_label=background_tag_label).first()
+        if not bg:
+            raise ServiceError(f'background_tag not found: {background_tag_label}')
+        if bg.status != 'locked':
+            raise ServiceError(f'background_tag {background_tag_label} must be locked before use')
+        tags['background_tag'] = bg
 
     ds = Dataset(
         scope=scope,

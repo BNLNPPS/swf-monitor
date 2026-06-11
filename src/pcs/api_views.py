@@ -217,6 +217,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
                 evgen_tag_label=request.data.get('evgen_tag'),
                 simu_tag_label=request.data.get('simu_tag'),
                 reco_tag_label=request.data.get('reco_tag'),
+                background_tag_label=request.data.get('background_tag'),
                 description=request.data.get('description', ''),
                 created_by=request.user.username,
             )
@@ -241,6 +242,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
             evgen_tag=dataset.evgen_tag,
             simu_tag=dataset.simu_tag,
             reco_tag=dataset.reco_tag,
+            background_tag=dataset.background_tag,
             block_num=new_block_num,
             blocks=new_block_num,
             did=f"{dataset.scope}:{dataset.dataset_name}.b{new_block_num}",
