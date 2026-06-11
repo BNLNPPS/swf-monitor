@@ -2,7 +2,7 @@
 
 The fifth PCS tag type, prefix `k`. It names a background configuration —
 beam-gas, synchrotron radiation, or other pre-generated overlay samples — as a
-locked, reusable tag, independent of any physics signal, taking its place in the
+named, reusable tag, independent of any physics signal, taking its place in the
 dataset name alongside `p`, `e`, `s`, `r`.
 
 ## Purpose
@@ -48,8 +48,8 @@ tag; for a standalone background sample the physics slot is the signal-free
 ## Import
 
 The campaign importer parses each EVGEN backgrounds path into these parameters,
-resolves or creates the locked `k` tag (`find_or_create_background_tag`, matching
-the sample-defining fields), and binds the dataset to `p6001` plus that `k` tag.
+resolves or creates the `k` tag (`find_or_create_background_tag`, matching the
+sample-defining fields), and binds the dataset to `p6001` plus that `k` tag.
 A single 4th segment that is not a known mechanism is taken as the generator; a
 bare `NGeV` beam is assigned to the electron or hadron beam by source.
 
@@ -62,10 +62,15 @@ background tag, set independently of its physics tag.
 ## The no-signal physics tag
 
 Every dataset names a physics tag. A standalone background sample has no signal,
-so it names `p6001` — a single physics tag in a new category 6, created once and
-locked, all parameters blank. It means "no physics signal; see the background
+so it names `p6001` — a single physics tag in a new category 6, created once,
+all parameters blank. It means "no physics signal; see the background
 tag." A dataset that mixes background into a real signal keeps that signal's
 physics tag and adds a `k`.
+
+During alpha commissioning, `k` tags and `p6001` are created `draft`, not
+`locked` — like every other PCS tag — so ops can shape the campaign-to-tag
+mapping freely; reproducibility locking moves to submission prep. See
+[Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md).
 
 ## Dataset name
 

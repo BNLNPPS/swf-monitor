@@ -262,8 +262,6 @@ def tag_detail(request, tag_type, tag_number):
 
     datasets = []
     if tag.status == 'locked':
-        filter_kwarg = {f'{schema["prefix"]}__tag_number' if schema["prefix"] == 'p' else f'{"physics" if schema["prefix"] == "p" else {"e": "evgen", "s": "simu", "r": "reco"}[schema["prefix"]]}_tag': tag}
-        # Build the correct filter field name
         field_map = {'p': 'physics_tag', 'e': 'evgen_tag', 's': 'simu_tag', 'r': 'reco_tag', 'k': 'background_tag'}
         datasets = Dataset.objects.filter(**{field_map[tag_type]: tag}).order_by('-created_at')
 

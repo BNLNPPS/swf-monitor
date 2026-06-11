@@ -174,7 +174,10 @@ class BackgroundTagViewSet(_SimpleTagViewSet):
 
 
 class DatasetViewSet(viewsets.ModelViewSet):
-    """Dataset CRUD. POST validates all tags are locked and creates block 1. No DELETE."""
+    """Dataset CRUD. POST composes tags and creates block 1. No DELETE.
+
+    Tags may be draft during alpha — reproducibility locking is enforced at
+    submission prep, not composition. See docs/COMMISSIONING_RELAXATIONS.md."""
     queryset = Dataset.objects.select_related(
         'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
