@@ -101,7 +101,7 @@
                 <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 <button class="btn btn-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
                 <button class="btn btn-success btn-sm" id="btn-lock-task" style="display:none;">Lock</button>
-                <span id="submit-task-wrap" class="d-inline-block" tabindex="0" style="display:none;">
+                <span id="submit-task-wrap" tabindex="0" style="display:none;">
                     <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
                 </span>
                 <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
@@ -754,19 +754,19 @@
         if (btnEditTask) btnEditTask.style.display = ownerDraft ? 'inline-block' : 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = ownerDraft ? 'inline-block' : 'none';
         if (btnLockTask) btnLockTask.style.display = ownerDraft ? 'inline-block' : 'none';
-        // Submit: only meaningful inside the lifecycle (draft → lock → ready →
-        // submit). Shown to signed-in users for draft (greyed, "lock first")
-        // and ready (green). Not shown for a past_output archive — it's never
-        // in the buildable flow, so a greyed "Submit" there was misleading.
+        // Submit: meaningful inside the buildable lifecycle (draft or ready).
+        // Per commissioning relaxation #4 a draft task is directly submittable —
+        // the status='ready' lock freeze is lifted and readiness is advisory
+        // (shown above) — so the button is enabled for both. Not shown for a
+        // past_output archive, which is never in the buildable flow.
         if (submitTaskWrap) {
             const inLifecycle = t.status === 'draft' || t.status === 'ready';
             if (currentUser && !submitted && inLifecycle) {
                 submitTaskWrap.style.display = 'inline-block';
-                const ready = t.status === 'ready';
-                btnSubmitTask.disabled = !ready;
-                btnSubmitTask.style.pointerEvents = ready ? '' : 'none';
+                btnSubmitTask.disabled = false;
+                btnSubmitTask.style.pointerEvents = '';
                 btnSubmitTask.textContent = 'Submit to PanDA';
-                submitTaskWrap.title = ready ? '' : 'Submittable only once locked. Lock a draft task to make it ready.';
+                submitTaskWrap.title = '';
             } else {
                 submitTaskWrap.style.display = 'none';
             }
