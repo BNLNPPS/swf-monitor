@@ -49,6 +49,11 @@
         align-items: center;
         gap: 1em;
       }
+      .sticky-header {
+        position: sticky;
+        top: 0;
+        z-index: 1030;
+      }
       .nav-spacer {
         flex: 1 1 auto;
       }
@@ -187,6 +192,7 @@
         }
     });
     </script>
+    <div class="sticky-header">
     <nav>
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label" style="font-weight:700;"></button>
@@ -287,6 +293,7 @@
         <span>Built at {% now "Ymd H:i:s" %}</span>
     </div>
     {% endtimezone %}
+    </div>
     <main>
         {% if messages %}
             {% for message in messages %}
