@@ -386,6 +386,21 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
+    @action(detail=False, methods=['post'], url_path='catalog-import')
+    def catalog_import(self, request):
+        """Request a background catalog import — the external-safe trigger for the
+        'Update from CSV' and 'Update from epic-prod' buttons. The web tier only
+        publishes a catalog_import to the prod-ops agent, which runs the import
+        off the WSGI request (the epic-prod walk times the gateway out) and pushes
+        catalog_import_ready over the SSE relay. ``source``: 'csv' | 'epic-prod'.
+        See docs/EPICPROD_OPS_AGENT.md, docs/SSE_PUSH.md."""
+        user = getattr(request.user, 'username', '') or 'catalog_import'
+        try:
+            services.catalog_import_request(request.data.get('source'), created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
     @action(detail=True, methods=['post'], url_path='link-input')
     def link_input(self, request, pk=None):
         """Thin wrapper over ``services.prodtask_link_input``."""

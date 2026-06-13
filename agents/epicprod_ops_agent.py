@@ -74,6 +74,8 @@ SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 # the per-task rematch — slow and network-bound, so generously bounded.
 RUCIO_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-snapshot-update.py"
 RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "900"))
+CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
+CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
@@ -90,7 +92,7 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "rucio_snapshot_update",
-                   "health_ping", "shutdown"}
+                   "catalog_import", "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -299,6 +301,49 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info("PRODOPS rucio_snapshot_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
+
+    def _handle_catalog_import(self, m):
+        """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
+        the epic-prod walk of ~4900 datasets is far too slow for the web request
+        (which is why it moved here). Deduped per source."""
+        source = m.get('source', '')
+        self.run_in_background(
+            self._do_catalog_import, m,
+            dedup_key=f"catalog_import:{source}", label=f"catalog_import:{source}")
+
+    def _do_catalog_import(self, m):
+        """Run the catalog-import doer; push completion on success AND failure so
+        the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
+        source = m.get('source', '')
+        cmd = [sys.executable, str(CATALOG_IMPORT_SCRIPT), source]
+        self.logger.info(f"PRODOPS catalog_import: importing {source}")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=CATALOG_IMPORT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS catalog_import {source} TIMEOUT after {CATALOG_IMPORT_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
+                'error': f'timed out after {CATALOG_IMPORT_TIMEOUT}s'})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  pcs-catalog-import: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  pcs-catalog-import: {line}")
+        if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(f"PRODOPS catalog_import {source} FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
+                'error': reason})
+        else:
+            summary = (p.stdout or "").strip().splitlines()
+            self.logger.info(f"PRODOPS catalog_import {source} done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'catalog_import_ready', 'source': source, 'ok': True,
+                'summary': summary[-1] if summary else ''})
 
     # -- helpers -------------------------------------------------------------
 

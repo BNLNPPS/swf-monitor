@@ -2269,3 +2269,29 @@ def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):
         raise ServiceError(
             'Rucio update could not be queued (ops-agent queue unreachable).',
             status=503)
+
+
+def catalog_import_request(source, *, created_by='catalog_import'):
+    """Publish a catalog import request to the prod-ops agent, which runs the
+    import in the background and pushes catalog_import_ready over the SSE relay.
+    The epic-prod past import walks ~4900 datasets — too slow to run inline in a
+    web request (it times the gateway out), so the web tier only drops the
+    message. ``source`` is 'csv' (the current default_datasets.csv) or
+    'epic-prod' (the past/future FULL+RECO output). Raises ServiceError on a bad
+    source or an unreachable queue. See docs/EPICPROD_OPS_AGENT.md, SSE_PUSH.md."""
+    import json as _json
+    if source not in ('csv', 'epic-prod'):
+        raise ServiceError(f'Unknown catalog import source {source!r}.', status=400)
+    msg = {'msg_type': 'catalog_import', 'source': source,
+           'namespace': 'prodops', 'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Catalog import could not be queued (ops-agent queue unreachable).',
+            status=503)

@@ -42,11 +42,10 @@
       </button>
     </form>
     {% else %}
-    <form method="post" action="{% url 'pcs:pcs_catalog_past_update' %}" class="ms-2 d-inline">
+    <form method="post" action="{% url 'pcs:pcs_catalog_past_update' %}" class="ms-2 d-inline" id="epicprod-update-form">
       {% csrf_token %}
-      <button type="submit" class="btn btn-sm btn-outline-primary"
-              title="Re-import 2026 FULL/RECO campaign output from epic-prod"
-              onclick="return confirm('Re-import 2026 past-campaign output datasets from epic-prod?');">
+      <button type="submit" id="epicprod-update-btn" class="btn btn-sm btn-outline-primary"
+              title="Re-import 2026 FULL/RECO campaign output from epic-prod (runs in the prod-ops agent; updates live when done)">
         Update from epic-prod
       </button>
     </form>
@@ -54,6 +53,47 @@
     {% endif %}
     {% endif %}
   </div>
+
+  <script>
+  // Update from epic-prod — fire-and-notify via the prod-ops agent + SSE push;
+  // the ~4900-dataset walk runs off the request (it times the gateway out) and
+  // the page updates when catalog_import_ready arrives. See docs/SSE_PUSH.md.
+  (function () {
+    const form = document.getElementById('epicprod-update-form');
+    const btn  = document.getElementById('epicprod-update-btn');
+    if (!form || !btn) return;
+    const label = btn.textContent.trim();
+    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Updating…' : label; }
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Re-import 2026 past-campaign output datasets from epic-prod?')) return;
+      busy(true);
+      const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/catalog-import/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ source: 'epic-prod' }),
+        });
+        if (r.status !== 202) {
+          let m = 'queue failed';
+          try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
+          throw new Error(m);
+        }
+      } catch (err) {
+        busy(false);
+        alert('Could not queue the epic-prod import: ' + err.message);
+      }
+    });
+    const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=catalog_import_ready");
+    es.addEventListener('catalog_import_ready', function (ev) {
+      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+      if (d.source !== 'epic-prod') return;
+      if (d.ok === false) { busy(false); alert('epic-prod import failed: ' + (d.error || 'unknown error')); }
+      else { window.location.reload(); }
+    });
+  })();
+  </script>
 
   {% if show_tabs %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
