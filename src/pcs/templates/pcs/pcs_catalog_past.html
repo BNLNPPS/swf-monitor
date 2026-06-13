@@ -266,8 +266,8 @@
           <td class="small">{% if o.stage == 'FULL' %}SIMU{% else %}{{ o.stage }}{% endif %}</td>
           <td class="small">{{ o.version }}</td>
           <td class="small">
-            <div><strong class="text-muted">Output:</strong> <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a></div>
             <div><strong class="text-muted">Tags:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}" title="Tag breakdown for this dataset">{{ t.dataset.composed_name }}</a></div>
+            <div><strong class="text-muted">Output:</strong> <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a></div>
             <div class="text-muted">
               {{ o.file_count }} files
               &middot; {{ o.bytes|filesizeformat }}
