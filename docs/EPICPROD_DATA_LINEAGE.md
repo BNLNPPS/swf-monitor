@@ -101,8 +101,11 @@ same interim convention that already holds `input_dataset_dids` and the
   from for the match.
 - `campaign` → `Campaign` (FK) — selects the Rucio snapshot to match against.
 - `dataset` → `Dataset` (FK) — the PCS *output* dataset. Its `did` is the
-  PCS-composed `group.EIC:….b{N}` identifier and `detector_config` the detector;
-  a **different namespace** from the produced `epic:/RECO/…` Rucio DID.
+  PCS-composed `group.EIC:….b{N}` identifier and `detector_config` the detector.
+  For **pre-PanDA Condor production** this is a different namespace from the
+  produced `epic:/RECO/…` Rucio DID (hence the filter-based match below). PanDA
+  production instead carries the composed identity *as* its Rucio DID (see
+  Phase 4), so there the two coincide.
 - `request` → `ProdRequest` (FK) — originating PWG/DSC request; carries
   `nevents` (the requested event count), intended for a future
   expected-vs-actual completeness check. The implemented completeness is per-RSE
@@ -193,5 +196,8 @@ doer.
 **Phase 4 — capture at source (PanDA data).** PanDA makes the production→Rucio
 connection in flight, so for PanDA-produced tasks the output DID is recorded at
 submission time (extending `record-submission`, which already writes
-`panda_task_id`) rather than reconstructed by a sweep. The sweep stays a backfill
-tool for pre-PanDA campaigns.
+`panda_task_id`) rather than reconstructed by a sweep. That DID is the PCS
+composed identity name itself (`group.EIC:…`) — PanDA production uses our
+composed names throughout, so there is no separate `epic:/RECO/…` reference and
+no cross-namespace match. The sweep stays a backfill tool for pre-PanDA
+campaigns, whose legacy DIDs PCS records and presents as found.

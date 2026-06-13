@@ -58,7 +58,7 @@ This document describes the integration design: how PCS task parameters map to J
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `taskName` | `_output_dataset_name(task)` | Output dataset DID — see [Output dataset and file naming](#output-dataset-and-file-naming) |
+| `taskName` | dataset composed identity name (`Dataset.build_dataset_name`, minus the `.bN` block suffix) | see [Output dataset and file naming](#output-dataset-and-file-naming) |
 | `userName` | `task.created_by` | PCS user who created the task |
 | `vo` | `'eic'` | Virtual organization |
 | `workingGroup` | `config.panda_working_group` | e.g. `'EIC'` |
@@ -119,44 +119,49 @@ The output carries two naming conventions, applied at different levels.
 
 ### Output dataset (Rucio DID)
 
-The `--outDS` of the prun command (`build_panda_command`), the `taskName` of the
-taskParamMap (`build_task_params`), and the output and log dataset templates use
-the produced dataset's name in the present ePIC convention — the path-based RECO
-DID:
+The `taskName` of the taskParamMap (`build_task_params`), the `--outDS` of the
+prun command (`build_panda_command`), and the output and log dataset templates
+all use the dataset's **composed identity name** — the classification tags plus
+any sample-variant discriminator, defined in [PCS.md](PCS.md#datasets):
 
-    /RECO/<campaign>/<detector_config>/<suffix>
+    {scope}.{campaign}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
 
-`<campaign>` is the production campaign (`Campaign.name`, e.g. `26.05.0`); the
-recorded produced version follows it rather than the input `detector_version`.
-`<suffix>` is the requested generator path with the `/volatile/eic/EPIC/EVGEN/`
-prefix removed and case preserved — the grammar the data-lineage sweep uses to
-resolve a request to its produced datasets (see
-[EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md)). `_output_dataset_name`
-(`commands.py`) reconstructs the name from the task's own requested path. A task
-with no requested generator path (generation-only) uses the dataset's
-tag-composed name instead. The `group.EIC` scope is added where the dataset DID
-is formed: `out_dataset` and `log_dataset` prepend `Dataset.scope`.
+`{campaign}` is the producing campaign (`Campaign.name`, e.g. `26.05.0`); the
+detector version and configuration are recorded as campaign metadata. The task
+name is this name without the trailing `.bN` block suffix; the Rucio DID is the
+same name with the `{scope}:` prefix and the block suffix
+(`group.EIC:….r1.45to135deg.b1`).
 
-Several requested paths can share one tag composition — single-particle samples
-differ by polar-angle range, which is a per-task attribute and not a tag — so
-the path-based DID, not the tag composition, is the dataset identity. Produced
-data stays discoverable through Rucio under the established path names.
+This composed name **is** the dataset identity. It supersedes the path-based RECO
+DID (`/RECO/<campaign>/<detector_config>/<suffix>`) built by `_output_dataset_name`
+(commit 6ea0d8e); that builder and the "path is the identity" convention are
+retired on the PanDA side. ePIC's slash paths remain in use only as Rucio
+references for external EVGEN inputs and for the data-lineage sweep (see
+[EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md)) — never to name PanDA
+outputs. Samples that share a tag composition — single-particle datasets
+differing only by polar-angle range — are told apart by the `{sample_name}`
+segment (`3to50deg`, `45to135deg`), so they no longer collide and need no
+path-based name.
 
 ### Output files (LFN)
 
-Logical file names are built from the tag labels:
+Logical file names carry the composed identity name — the dataset name with the
+`{scope}.` prefix and `.bN` block suffix removed:
 
-    <p>_<e>_<s>_<r>[_<k>].$PANDAID.${SN}.edm4eic.root
-    <p>_<e>_<s>_<r>[_<k>].$PANDAID.log.${SN}.log.tgz   (log)
+    {campaign}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.${SN}.edm4eic.root
+    {campaign}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.log.${SN}.log.tgz   (log)
 
-The tag composition gives a short file name under tag control. `$PANDAID` and
-`${SN}` are PanDA template variables substituted server-side when jobs are
-generated: `${SN}` is a per-task serial number (`task_complex_module.py`), and
-`$PANDAID` is the globally unique PanDA job id, substituted unconditionally
-(`job_complex_module.py`, line 3056). `$PANDAID` keeps each file name unique
-across tasks whose datasets share tags, and needs no identifier known at build
-time. File names are resolved through Rucio, so a tag-based LFN does not affect
-dataset-level discoverability.
+The LFN base is thus literally our composed name, using the same dot separator as
+the DID — decoupled from ePIC's `/RECO/...` slash convention, which PCS uses only
+for input/lineage references, never to name PanDA outputs. The `{sample_name}`
+segment distinguishes the variant datasets of one composition at the file-base
+level. `$PANDAID` and `${SN}` are PanDA template variables substituted
+server-side when jobs are generated: `${SN}` is a per-task serial number
+(`task_complex_module.py`), and `$PANDAID` is the globally unique PanDA job id,
+substituted unconditionally (`job_complex_module.py`, line 3056) — it keeps each
+file name unique even across variant datasets, and needs no identifier known at
+build time. File names are resolved through Rucio by dataset, so the LFN form
+does not affect dataset-level discoverability.
 
 `$JEDITASKID`, the task-level identifier, is also available but is substituted
 only for non-`managed` jobs (`job_complex_module.py`, line 3058); `$PANDAID`
@@ -212,7 +217,7 @@ taskParamMap = {
         'param_type': 'log',
         'token': 'local',
         'destination': 'local',
-        'value': 'p3001_e1_s1_r1.$PANDAID.log.${SN}.log.tgz',
+        'value': '26.02.0.epic_craterlake.p3001.e1.s1.r1.$PANDAID.log.${SN}.log.tgz',
     },
 
     # Job parameters: execution command + output file spec
@@ -233,19 +238,20 @@ taskParamMap = {
             'token': 'local',
             'destination': 'local',
             'dataset': 'group.EIC:group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1',
-            'value': 'p3001_e1_s1_r1.$PANDAID.${SN}.edm4eic.root',
+            'value': '26.02.0.epic_craterlake.p3001.e1.s1.r1.$PANDAID.${SN}.edm4eic.root',
             'offset': 1000,
         },
     ],
 }
 ```
 
-This is the generation-only case: with no requested generator path, `taskName`
-and the output dataset fall back to the dataset's tag-composed name. For an
-external-EVGEN task (a `csv_manifest` input), they are instead the requested-path
-RECO DID, for example
-`/RECO/26.05.0/epic_craterlake/SINGLE/proton/200MeV/130to177deg`, with the same
-tag-based LFNs.
+In both modes `taskName` and the output dataset are the composed identity name;
+the modes differ only in how the sample is produced, not in how it is named. The
+example above is the generation-only case (`noInput=True`, no input path). A
+single-particle external-EVGEN task (a `csv_manifest` input) would instead be,
+for example, `group.EIC.26.05.0.epic_craterlake.p1141.e37.s1.r1.130to177deg`,
+with LFN base `26.05.0.epic_craterlake.p1141.e37.s1.r1.130to177deg` and the input
+staged as described below.
 
 ## External EVGEN Inputs
 
@@ -305,6 +311,16 @@ constant string. Example:
 This is **not** a JEDI parameter. It is an env var the payload reads. JEDI
 sees an opaque constant string and stages it into each job's command line as
 written.
+
+### Sample-variant submit_params
+
+A sample variant's `submit_params` (e.g. the gun angle bounds for an angular
+range; see [PCS.md](PCS.md#sample-variants)) reach the job mode-dependently. In
+generation mode they are injected into the payload command string
+(`jobParameters[0]`) as gun parameters — the same mechanism as `CSV_FILE` above.
+In external-EVGEN mode the discriminator is already carried by the input
+path/manifest, so `submit_params` is empty. The exact parameter spelling is
+fixed in implementation planning.
 
 ### What this does *not* require
 
