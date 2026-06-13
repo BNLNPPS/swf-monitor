@@ -129,6 +129,7 @@
                 {% if tag_type != 'e' %}<a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen</a>{% else %}<span class="current">EvGen</span>{% endif %}
                 {% if tag_type != 's' %}<a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu</a>{% else %}<span class="current">Simu</span>{% endif %}
                 {% if tag_type != 'r' %}<a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco</a>{% else %}<span class="current">Reco</span>{% endif %}
+                {% if tag_type != 'k' %}<a href="{% url 'pcs:tag_compose' tag_type='k' %}">Background</a>{% else %}<span class="current">Background</span>{% endif %}
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
                 <h5 style="margin:0">{{ schema.label }} Tags</h5>
@@ -137,6 +138,10 @@
                 {% endif %}
             </div>
             <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
+            <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
+                <option value="recent">Sort: Recent</option>
+                <option value="alpha">Sort: A&ndash;Z</option>
+            </select>
             <div class="filter-row" id="status-filters">
                 <span class="filter-pill active" data-status="all">All</span>
                 <span class="filter-pill" data-status="draft">Draft</span>
@@ -560,6 +565,14 @@
     });
 
     // ── Tag list rendering ──
+    function sortItems(arr) {
+        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const cp = arr.slice();
+        if (m === 'alpha') cp.sort((a, b) => (a.tag_label || '').localeCompare(b.tag_label || '', undefined, {numeric: true}));
+        else cp.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+        return cp;
+    }
+
     function renderTagList() {
         const q = searchInput.value.toLowerCase();
         const filtered = allTags.filter(t => {
@@ -580,7 +593,7 @@
             tagList.innerHTML = '<div class="tag-list-empty">No tags found</div>';
             return;
         }
-        tagList.innerHTML = filtered.map(t => {
+        tagList.innerHTML = sortItems(filtered).map(t => {
             const sel = t.tag_number === selectedTagNumber ? ' selected' : '';
             const statusCls = t.status === 'locked' ? 'bg-success text-white' : 'bg-secondary text-white';
             const cat = t.category_name ? `<span class="tag-item-cat">${t.category_name}</span>` : '';
@@ -714,6 +727,7 @@
 
     // ── Filters ──
     searchInput.addEventListener('input', renderTagList);
+    document.getElementById('list-sort').addEventListener('change', renderTagList);
     document.querySelectorAll('#status-filters .filter-pill').forEach(pill => {
         pill.addEventListener('click', () => {
             document.querySelectorAll('#status-filters .filter-pill').forEach(p => p.classList.remove('active'));

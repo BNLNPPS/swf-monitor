@@ -39,6 +39,10 @@
             </div>
         </div>
         <input type="text" class="browser-search" id="search" placeholder="Search configs...">
+        <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
+            <option value="recent">Sort: Recent</option>
+            <option value="alpha">Sort: A&ndash;Z</option>
+        </select>
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
@@ -179,6 +183,14 @@
     const itemList = document.getElementById('item-list');
     const searchBox = document.getElementById('search');
 
+    function sortItems(arr) {
+        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const cp = arr.slice();
+        if (m === 'alpha') cp.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, {numeric: true}));
+        else cp.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+        return cp;
+    }
+
     function renderList() {
         const q = searchBox.value.toLowerCase();
         const filtered = allConfigs.filter(c => {
@@ -187,7 +199,7 @@
                    (c.jug_xl_tag||'').toLowerCase().includes(q) || c.created_by.toLowerCase().includes(q);
         });
         document.getElementById('count-badge').textContent = filtered.length;
-        itemList.innerHTML = filtered.map(c => {
+        itemList.innerHTML = sortItems(filtered).map(c => {
             let badges = '';
             if (c.bg_mixing) badges += '<span class="badge bg-warning text-dark me-1">BG</span>';
             if (c.use_rucio) badges += '<span class="badge bg-info me-1">Rucio</span>';
@@ -202,6 +214,7 @@
         });
     }
     searchBox.addEventListener('input', renderList);
+    document.getElementById('list-sort').addEventListener('change', renderList);
 
     function selectConfig(id) {
         selectedId = id;

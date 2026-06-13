@@ -72,6 +72,10 @@
             {% endif %}
         </div>
         <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
+        <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
+            <option value="recent">Sort: Recent</option>
+            <option value="alpha">Sort: A&ndash;Z</option>
+        </select>
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
@@ -395,8 +399,17 @@
     });
 
     searchBox.addEventListener('input', renderList);
+    document.getElementById('list-sort').addEventListener('change', renderList);
 
     // ── Render list ──
+    function sortItems(arr) {
+        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const cp = arr.slice();
+        if (m === 'alpha') cp.sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, {numeric: true}));
+        else cp.sort((a, b) => (b.mod || '').localeCompare(a.mod || ''));
+        return cp;
+    }
+
     function renderList() {
         const q = searchBox.value.toLowerCase();
         let items = [];
@@ -407,6 +420,7 @@
                 (d.background_tag && d.background_tag.label.toLowerCase().includes(q))
             ).map(d => ({ id: d.id, type: 'dataset', label: dsComposedName(d),
                 meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}${d.background_tag ? ' ' + d.background_tag.label : ''} | ${d.created_by}`,
+                mod: d.updated_at || d.created_at || '',
                 selected: d.id === selectedItemId }));
         } else {
             // Tag type
@@ -418,10 +432,11 @@
             ).map(t => ({
                 id: t.id, type: tt, label: t.label,
                 meta: `${t.status}${t.category_name ? ' | '+t.category_name : ''} | ${t.description.substring(0,50)}`,
+                mod: t.updated_at || t.created_at || '',
                 selected: t.id === selectedItemId,
             }));
         }
-        itemList.innerHTML = items.map(it =>
+        itemList.innerHTML = sortItems(items).map(it =>
             `<div class="item-entry${it.selected ? ' selected' : ''}" data-type="${it.type}" data-id="${it.id}">
                 <div class="item-label">${it.label}</div>
                 <div class="item-meta">${it.meta}</div>

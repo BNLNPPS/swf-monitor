@@ -387,6 +387,7 @@ def tag_compose(request, tag_type):
             'parameters': t.parameters,
             'created_by': t.created_by,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         }
         if tag_type == 'p':
             entry['category_digit'] = t.category.digit
@@ -613,7 +614,8 @@ def datasets_compose(request):
         for t in qs_tags:
             entry = {'id': t.id, 'tag_number': t.tag_number, 'label': t.tag_label,
                      'description': t.description, 'status': t.status,
-                     'parameters': t.parameters, 'created_by': t.created_by}
+                     'parameters': t.parameters, 'created_by': t.created_by,
+                     'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M')}
             if ttype == 'p':
                 entry['category_name'] = t.category.name
             tag_list.append(entry)

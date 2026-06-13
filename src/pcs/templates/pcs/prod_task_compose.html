@@ -82,6 +82,10 @@
         {# Datasets / Configs tabs: existing JS-driven list + free-text search. #}
         <div id="generic-list-host">
             <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
+            <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
+                <option value="recent">Sort: Recent</option>
+                <option value="alpha">Sort: A&ndash;Z</option>
+            </select>
             <div class="filter-row" id="browser-filters"></div>
             <div class="item-list" id="item-list" tabindex="0"></div>
         </div>
@@ -442,8 +446,17 @@
     });
 
     searchBox.addEventListener('input', renderList);
+    document.getElementById('list-sort').addEventListener('change', renderList);
 
     // ── Render list ──
+    function sortItems(arr) {
+        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const cp = arr.slice();
+        if (m === 'alpha') cp.sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, {numeric: true}));
+        else cp.sort((a, b) => (b.mod || '').localeCompare(a.mod || ''));
+        return cp;
+    }
+
     function renderList() {
         const q = searchBox.value.toLowerCase();
         let items = [];
@@ -455,12 +468,14 @@
                 meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}`
                     + (d.background_tag ? ' ' + d.background_tag.label : '')
                     + `${d.external ? ' | external ' + (d.stage || 'dataset') : ''} | ${d.created_by}`,
+                mod: d.updated_at || d.created_at || '',
                 selected: d.id === selectedItemId }));
         } else if (browseType === 'configs') {
             items = allConfigs.filter(c => !q || c.name.toLowerCase().includes(q) ||
                 (c.jug_xl_tag||'').toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
             ).map(c => ({ id: c.id, type: 'config', label: c.name,
                 meta: `JUG_XL: ${c.jug_xl_tag || '-'} | ${c.created_by}`,
+                mod: c.updated_at || c.created_at || '',
                 selected: c.id === selectedItemId }));
         } else if (browseType === 'tasks') {
             items = allTasks.filter(t => {
@@ -472,11 +487,12 @@
                 const ds = allDatasets.find(d => d.id === t.dataset_id);
                 return { id: t.id, type: 'task', label: t.name,
                     meta: `${t.status} | ${dsComposedName(ds)} | ${t.prod_config_name}`,
+                    mod: t.updated_at || t.created_at || '',
                     selected: t.id === selectedItemId };
             });
         }
         filterRow.innerHTML = '';
-        itemList.innerHTML = items.map(it =>
+        itemList.innerHTML = sortItems(items).map(it =>
             `<div class="item-entry${it.selected ? ' selected' : ''}" data-type="${it.type}" data-id="${it.id}">
                 <div class="item-label">${it.label}</div>
                 <div class="item-meta">${it.meta}</div>
