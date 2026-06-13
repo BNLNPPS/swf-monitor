@@ -172,19 +172,38 @@ eval "$(pcs-task-cmd <name> --format condor)"
 
 ## Datasets
 
-A dataset composes the four tags (and an optional background tag) with detector version information into a standardized name. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
+A dataset is the concrete production unit: one sample, produced by a single task and registered as a single Rucio dataset. Its identity composes the classification tags with any sample-variant discriminators into one name, which serves as both the produced Rucio dataset name and the PanDA task name (`outDS`).
 
 ```
-{scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}
+{scope}.{campaign}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
 ```
 
-Example: `group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1`
+Examples:
 
-The Rucio DID includes scope prefix and block suffix: `group.EIC:...p3001.e1.s1.r1.b1`
+```
+group.EIC.26.05.0.epic_craterlake.p3001.e1.s1.r1
+group.EIC.26.05.0.epic_craterlake.p1141.e37.s1.r1.45to135deg
+```
 
-Block `.b1` is always present. Rucio limits datasets to 100k files; PCS manages automatic subdivision into blocks (`.b1`, `.b2`, etc.) as needed.
+The version segment names the producing campaign; detector version and detector configuration are recorded as campaign metadata. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
 
-The **task name** is the dataset name (without the `.bN` block suffix). This is what appears in PanDA as the task identifier.
+The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The task name is the dataset name without the `.bN` suffix.
+
+The campaign-keyed identity and the sample variants below are extensions to the dataset model, defined here.
+
+### Sample Variants
+
+The tags carry the physics. They do not distinguish samples that share a physics configuration but are produced as separate datasets. Single-particle production illustrates this: a particle and energy define the physics tag (`particle`, `gun_energy`), while each angular range (`3to50deg`, `45to135deg`, `130to177deg`) is generated as its own dataset and task. The angular range is a production discriminator, not a physics parameter, so it is not a tag.
+
+A sample variant attaches such a discriminator to a tag composition at the dataset level. A variant is a `(name, submit_params)` pair: a short name that becomes the trailing component of the dataset name, and the submission parameters that produce that sample (for an angular range, the gun angle bounds). Each variant materializes as a distinct dataset and task; the variant name is the only segment distinguishing them. The name is the literal discriminator value, `45to135deg`. On catalog import it is taken from the source path; in the panel a user enters it.
+
+A tag composition that defines a variant list materializes as its variants, and the bare-tag dataset is then a template rather than a produced unit. A composition with no variants is itself the produced dataset; most compositions have none.
+
+Generality is bounded: a variant is a single named sample with its parameters, not a set of independent dimensions the system multiplies out. Two production axes are expressed by naming each resulting sample, not by a composable key-and-value syntax in the name.
+
+**Parsing.** The name is read positionally, not by splitting on `.`. The tag run `.p<n>.e<n>.s<n>.r<n>` occurs once and anchors the name; a `.k<n>` segment follows when present; the remainder is the sample name, taken verbatim and permitted to contain periods (`ma_0.1`). In a Rucio DID the trailing `.b<n>` block suffix is stripped first. Two reserved-token rules keep the parse unambiguous: a sample name's first segment must not match `k<n>` (the background tag) and its last segment must not match `b<n>` (the block suffix). Discriminator values satisfy both.
+
+Within one tag composition a sample name is unique. Identity, the duplicate check, and the completion unit all key on the tags together with the sample name; that unit is what completes and triggers validation (see [Validation](EPICPROD_VALIDATION.md)).
 
 ### External EVGEN Inputs
 
