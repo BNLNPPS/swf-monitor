@@ -581,6 +581,7 @@ def datasets_compose(request):
         datasets_data.append({
             'id': ds.id,
             'dataset_name': ds.dataset_name,
+            'composed_name': ds.build_dataset_name(),
             'did': ds.did,
             'scope': ds.scope,
             'detector_version': ds.detector_version,

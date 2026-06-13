@@ -157,7 +157,7 @@
                             <div class="col-md-9"><label class="form-label" style="font-size:.82rem;"><strong>CSV File</strong></label>
                                 <input type="text" id="task-csv" class="form-control form-control-sm" placeholder="e.g. DIS/NC/10x100/minQ2=1/DIS_NC_10x100_minQ2=1.csv"></div>
                             <div class="col-md-3"><label class="form-label" style="font-size:.82rem;">&nbsp;</label>
-                                <button class="btn btn-primary btn-sm d-block w-100" id="btn-generate">Generate Commands</button></div>
+                                <button class="btn btn-primary btn-sm d-block w-100" id="btn-generate">Save Draft &amp; Generate Commands</button></div>
                         </div>
                         <div id="commands-area" style="display:none;">
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
@@ -913,42 +913,41 @@
         updateSaveButton();
     }
 
-    // ── Generate commands ──
-    document.getElementById('btn-generate').addEventListener('click', function() {
-        if (!composeDataset || !composeConfig) { alert('Select both a dataset and a config first.'); return; }
-        const ds = composeDataset, cfg = composeConfig;
-        const csv = document.getElementById('task-csv').value || '<csv_file>';
-        const physics = ds.physics_tag.parameters || {};
-        const env = {};
-        env.EBEAM = physics.beam_energy_electron||''; env.PBEAM = physics.beam_energy_hadron||'';
-        env.DETECTOR_VERSION = ds.detector_version; env.DETECTOR_CONFIG = ds.detector_config;
-        env.JUG_XL_TAG = cfg.jug_xl_tag||'';
-        env.COPYRECO = cfg.copy_reco?'true':'false'; env.COPYFULL = cfg.copy_full?'true':'false'; env.COPYLOG = cfg.copy_log?'true':'false';
-        if (cfg.use_rucio) { env.USERUCIO = 'true'; env.X509_USER_PROXY = 'secrets/x509_user_proxy'; }
-        if (cfg.rucio_rse) env.OUT_RSE = cfg.rucio_rse;
-        if (cfg.bg_mixing) {
-            const evgen = ds.evgen_tag.parameters||{};
-            env.SIGNAL_FREQ = evgen.signal_freq||'0'; env.SIGNAL_STATUS = evgen.signal_status||'0';
-            if (evgen.bg_tag_prefix) env.TAG_PREFIX = evgen.bg_tag_prefix;
-            env.CSV_FILE = csv; if (evgen.bg_files) env.BG_FILES = evgen.bg_files;
+    // ── Generate commands (server-authoritative) ──
+    // The submitted outDS and LFNs depend on the task's campaign binding, which
+    // is resolved server-side (commands.py _output_dataset_name) — so the only
+    // faithful preview is the server's own. Persist the task as a draft, have
+    // the server build the commands, then show exactly those. The saved id is
+    // retained so a later Save updates the same task, not a duplicate.
+    document.getElementById('btn-generate').addEventListener('click', async function() {
+        if (!composeDatasetId || !composeConfigId) { alert('Select both a dataset and a config first.'); return; }
+        const name = document.getElementById('task-name').value.trim();
+        if (!name) { alert('Enter a task name first.'); return; }
+        const payload = { name, description: document.getElementById('task-description').value,
+            dataset: composeDatasetId, prod_config: composeConfigId,
+            csv_file: document.getElementById('task-csv').value, created_by: currentUser };
+        const saveUrl = composeTaskId ? `/swf-monitor/pcs/api/prod-tasks/${composeTaskId}/` : '/swf-monitor/pcs/api/prod-tasks/';
+        const resp = await fetch(saveUrl, { method: composeTaskId ? 'PATCH' : 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}, body: JSON.stringify(payload) });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert('Could not save the task to generate commands: ' + (Object.values(err).flat().join(', ') || ('HTTP ' + resp.status)));
+            return;
         }
-        const condorCmd = Object.entries(env).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(' \\\n  ')
-            + ` \\\n  scripts/submit_csv.sh osg_csv hepmc3 ${csv} ${cfg.target_hours_per_job||'2'}`;
-        const data = cfg.data||{}, pParts = ['prun'];
-        if (data.exec_command) pParts.push(`--exec "${data.exec_command}"`);
-        pParts.push(`--outDS ${ds.did}`);
-        if (cfg.container_image) pParts.push(`--containerImage ${cfg.container_image}`);
-        if (cfg.panda_site) pParts.push(`--site ${cfg.panda_site}`);
-        if (cfg.panda_working_group) pParts.push(`--workingGroup ${cfg.panda_working_group}`);
-        pParts.push(`--prodSourceLabel ${data.prod_source_label||'test'}`); pParts.push(`--vo ${data.vo||'wlcg'}`);
-        if (data.processing_type) pParts.push(`--processingType ${data.processing_type}`);
-        if (data.n_jobs) pParts.push(`--nJobs ${data.n_jobs}`);
-        if (data.events_per_job) pParts.push(`--nEventsPerJob ${data.events_per_job}`);
-        if (data.corecount) pParts.push(`--nCore ${data.corecount}`);
-        if (data.no_build) pParts.push('--noBuild'); if (data.skip_scout) pParts.push('--expertOnly_skipScout');
-        document.getElementById('condor-preview').textContent = condorCmd;
-        document.getElementById('panda-preview').textContent = pParts.join(' \\\n  ');
+        const saved = await resp.json();
+        composeTaskId = saved.id;
+        const gen = await fetch(`/swf-monitor/pcs/api/prod-tasks/${saved.id}/generate-commands/`, {
+            method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken} });
+        if (!gen.ok) { alert('Command generation failed (HTTP ' + gen.status + ').'); return; }
+        const t = await (await fetch(`/swf-monitor/pcs/api/prod-tasks/${saved.id}/`)).json();
+        document.getElementById('condor-preview').textContent = t.condor_command || '';
+        document.getElementById('panda-preview').textContent = t.panda_command || '';
         document.getElementById('commands-area').style.display = 'block';
+        const badge = document.getElementById('identity-badge');
+        badge.textContent = `saved #${saved.id} (draft)`;
+        badge.className = 'badge bg-warning';
+        badge.style.display = '';
+        updateSaveButton();
     });
 
     // ── Save ──

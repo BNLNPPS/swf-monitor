@@ -166,6 +166,11 @@
         if (['p','e','s','r','k'].includes(type)) return ((allTags[type]||[]).find(x => x.label === key) || {}).id;
         return null;
     }
+    // The dataset's human-facing identity is its tag-composed name
+    // (build_dataset_name); the internal csv_import.<hash> dataset_name is
+    // plumbing and is never shown. dataset_name stays the stable URL/lookup key.
+    function dsComposedName(d) { return (d && (d.composed_name || d.dataset_name)) || ''; }
+    function isLegacyKey(d) { return d && /^(csv_import|past)\./.test(d.dataset_name || ''); }
     // Compose state: selected tag per type
     const compose = { p: null, e: null, s: null, r: null, k: null };
     let editingDatasetId = null;
@@ -396,10 +401,11 @@
         const q = searchBox.value.toLowerCase();
         let items = [];
         if (browseType === 'datasets') {
-            items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
+            items = allDatasets.filter(d => !q || dsComposedName(d).toLowerCase().includes(q) ||
+                d.dataset_name.toLowerCase().includes(q) ||
                 d.physics_tag.label.toLowerCase().includes(q) || d.description.toLowerCase().includes(q) ||
                 (d.background_tag && d.background_tag.label.toLowerCase().includes(q))
-            ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
+            ).map(d => ({ id: d.id, type: 'dataset', label: dsComposedName(d),
                 meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}${d.background_tag ? ' ' + d.background_tag.label : ''} | ${d.created_by}`,
                 selected: d.id === selectedItemId }));
         } else {
@@ -459,7 +465,7 @@
         if (!ds) return;
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
-        panelTitle.textContent = ds.dataset_name;
+        panelTitle.textContent = dsComposedName(ds);
         if (btnEdit) btnEdit.style.display = currentUser ? 'inline-block' : 'none';
         if (btnCopy) btnCopy.style.display = currentUser ? 'inline-block' : 'none';
         let tagsHtml = '';
@@ -471,7 +477,8 @@
         });
         browseContent.innerHTML = `
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td><code>${dsComposedName(ds)}</code></td></tr>
+                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>` : ''}
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
                 <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
@@ -548,7 +555,7 @@
 
         // Duplicate check: same name means same tag+detector combo already exists
         const previewName = `${scope}.${ver}.${cfg}.${compose.p.label}.${compose.e.label}.${compose.s.label}.${compose.r.label}${compose.k ? '.'+compose.k.label : ''}`;
-        const existing = allDatasets.find(d => d.dataset_name === previewName && d.id !== editingDatasetId);
+        const existing = allDatasets.find(d => dsComposedName(d) === previewName && d.id !== editingDatasetId);
         if (existing) {
             alert(`Dataset already exists: ${previewName}`);
             return;

@@ -143,7 +143,7 @@ Row click is exposed via a 'pcs-wb:select' CustomEvent on the list root
 
   <div class="pcs-wb-list" id="pcs-wb-list" tabindex="0">
     {% for t in tasks %}
-    {% with ds_path_full=t.dataset.source_location|default:t.dataset.dataset_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters %}
+    {% with ds_path_full=t.dataset.source_location|default:t.dataset.composed_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters %}
     <div class="pcs-wb-row{% if focused_task_id == t.pk %} selected{% endif %}"
          data-task-id="{{ t.pk }}"
          data-status="{{ t.status|default:'' }}"
