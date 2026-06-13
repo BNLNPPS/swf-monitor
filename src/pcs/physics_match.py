@@ -29,63 +29,139 @@ def _beam_pair(beam):
     return ('N/A', 'N/A')
 
 
+# ── physics-tag token vocabulary (scanned at ANY path position) ───────────────
+# The catalog paths are not positional: a physics token (q2, species, decay,
+# beam-config, ...) can sit at any depth, be compounded (coherent_ep), or live
+# in a filename (UPSILON). Derivation recognises tokens by pattern, not slot.
+_KNOWN_AREAS = {'SINGLE', 'DIS', 'DDIS', 'SIDIS', 'EXCLUSIVE', 'EW_BSM', 'BACKGROUNDS'}
+_BEAM_RE    = re.compile(r'^\d+x\d+$')
+_Q2_RE      = re.compile(r'^(minQ2=\d+|q2_\S+)$')
+_ION_RE     = re.compile(r'^e(H[0-9]+|He[0-9]+|Li[0-9]*|Ca|Cu|Ru|Pb|Au|C|O)$')
+_NUCLEON    = {'ep', 'en'}
+_MASS_RE    = re.compile(r'^ma_[0-9]')
+_CHANNEL_RE = re.compile(r'^aem')
+_UPSILON_RE = re.compile(r'^upsilon(1s|2s|3s)(photo|_threshold)_ab_(hiAcc|hiDiv)_(\d+x\d+)')
+_BEAMCONFIG = {'hiAcc', 'hiDiv'}
+_DECAY      = {'edecay', 'mudecay'}
+_CHARGE     = {'hplus', 'hminus'}
+_HELICITY   = {'hel_plus', 'hel_minus'}
+_COHERENCE  = {'coherent', 'Coherent'}
+_MODEL      = {'bsat'}
+_POLAR      = {'unpolarised', 'polarised'}
+_FINAL_STATE = {'pi+', 'pi-', 'pi0', 'K+', 'K-', 'K0', 'K+Lambda'}
+#: radiation (Rad/noRad) and generator tokens are EVGEN-tag axes — not physics.
+
+
+def _split_compounds(tok):
+    """Yield a segment and its '_'-split parts so embedded physics tokens are
+    seen: 'coherent_ep' -> coherent, ep; 'ep_noradcor' -> ep (noradcor ignored)."""
+    yield tok
+    if '_' in tok:
+        yield from tok.split('_')
+
+
+def _physics_area_segments(path):
+    """Return path segments from the first recognised physics area onward,
+    dropping any leading prefix — the ``EVGEN`` root, or a past Rucio-DID
+    background-overlay chain (``Bkg_*/Synrad_*/GoldC*/<um>/…``). ``[]`` if no
+    physics area is present."""
+    segs = [s for s in (path or '').split('/') if s]
+    for i, s in enumerate(segs):
+        if s in _KNOWN_AREAS:
+            return segs[i:]
+    return []
+
+
+def _beam_split(tok):
+    e, h = tok.split('x', 1)
+    return (e or 'N/A', h or 'N/A')
+
+
 def derive_physics(path, beam=''):
-    """Canonical physics-tag params from a stripped EVGEN path (the task name).
+    """Full physics-tag parameter set from an EVGEN path or a past Rucio-DID
+    path remainder. Token-scanning, not positional. Returns the schema-named
+    param dict, or ``None`` when no physics area is present. Excludes the angle
+    range (a sample variant), radiation, and generator (EVGEN-tag axes).
 
-    ``path`` is the ``/volatile/eic/EPIC/`` -stripped path, i.e. ``EVGEN/<cat>/…``.
-    ``beam`` is the parsed beam (``overrides['csv_import']['filters']['beam']``),
-    used because it is already extracted; the path is otherwise authoritative.
-
-    Returns a dict of physics-tag parameters, or ``None`` for a path that is not
-    a recognizable EVGEN catalog entry. Angular range (single-particle) is NOT
-    included — it is a per-task override, not part of the reusable tag.
+    BACKGROUNDS resolve to process BEAMGAS/SYNRAD so the caller can route them to
+    the signal-free p6001 physics tag plus a k background tag.
     """
-    segs = (path or '').split('/')
-    if len(segs) < 2 or segs[0] != 'EVGEN':
+    segs = _physics_area_segments(path)
+    if not segs:
         return None
-    cat = segs[1]
-    e, h = _beam_pair(beam)
-    base = {'beam_energy_electron': e, 'beam_energy_hadron': h}
+    area, rest = segs[0], segs[1:]
 
-    if cat == 'SINGLE':
-        # EVGEN/SINGLE/<particle>/<energy>/<angle...>
-        return {
-            'process': 'SINGLE',
-            'beam_energy_electron': 'N/A', 'beam_energy_hadron': 'N/A',
-            'particle': segs[2] if len(segs) > 2 else '',
-            'gun_energy': segs[3] if len(segs) > 3 else '',
-        }
+    if area == 'SINGLE':
+        return {'process': 'SINGLE',
+                'beam_energy_electron': 'N/A', 'beam_energy_hadron': 'N/A',
+                'particle': rest[0] if rest else '',
+                'gun_energy': rest[1] if len(rest) > 1 else ''}
 
-    if cat == 'BACKGROUNDS':
-        sub = segs[2] if len(segs) > 2 else ''
+    if area == 'BACKGROUNDS':
+        e, h = _beam_pair(beam)
+        sub = rest[0] if rest else ''
         if sub == 'SYNRAD':
-            return {**base, 'process': 'SYNRAD'}
-        # BEAMGAS: EVGEN/BACKGROUNDS/BEAMGAS/<source>/<mechanism-or-generator>/...
-        return {
-            **base, 'process': 'BEAMGAS',
-            'bg_source': segs[3] if len(segs) > 3 else '',
-            'bg_mechanism': segs[4] if len(segs) > 4 else '',
-        }
+            return {'process': 'SYNRAD', 'beam_energy_electron': e, 'beam_energy_hadron': h}
+        return {'process': 'BEAMGAS', 'beam_energy_electron': e, 'beam_energy_hadron': h,
+                'bg_source': rest[1] if len(rest) > 1 else '',
+                'bg_mechanism': rest[2] if len(rest) > 2 else ''}
 
-    if cat == 'EXCLUSIVE':
-        return {**base, 'process': _strip_abconv(segs[2]) if len(segs) > 2 else 'EXCLUSIVE'}
+    sig = {}
+    if area in ('DIS', 'DDIS'):
+        proc = 'DDIS' if area == 'DDIS' else 'DIS'
+        if 'NC' in rest:
+            proc = 'DIS_NC'
+        elif 'CC' in rest:
+            proc = 'DIS_CC'
+        sig['process'] = proc
+    elif area == 'SIDIS':
+        sub = _strip_abconv(rest[0]) if rest else ''
+        sig['process'] = 'SIDIS_' + sub if sub in ('D0', 'DIJET', 'Lc') else 'SIDIS'
+    elif area == 'EXCLUSIVE':
+        sig['process'] = _strip_abconv(rest[0]) if rest else 'EXCLUSIVE'
+    elif area == 'EW_BSM':
+        sig['process'] = rest[0] if rest else 'EW_BSM'       # ALP
+    else:
+        sig['process'] = area
 
-    if cat == 'SIDIS':
-        sub = segs[2] if len(segs) > 2 else ''
-        if sub.endswith(_ABCONV):
-            return {**base, 'process': 'SIDIS_' + _strip_abconv(sub)}
-        return {**base, 'process': 'SIDIS'}     # sub is a generator folder
+    ions, nucleons = [], []
+    for raw in rest:
+        m = _UPSILON_RE.match(raw)
+        if m:
+            sig['state'] = m.group(1)
+            sig['mechanism'] = m.group(2).lstrip('_')
+            sig['beam_config'] = m.group(3)
+            sig['beam_energy_electron'], sig['beam_energy_hadron'] = _beam_split(m.group(4))
+            continue
+        for tok in _split_compounds(raw):
+            if _BEAM_RE.match(tok):
+                sig['beam_energy_electron'], sig['beam_energy_hadron'] = _beam_split(tok)
+            elif _Q2_RE.match(tok):       sig['q2_range'] = tok
+            elif _ION_RE.match(tok):      ions.append(tok)
+            elif tok in _NUCLEON:         nucleons.append(tok)
+            elif tok in _BEAMCONFIG:      sig['beam_config'] = tok
+            elif tok in _DECAY:           sig['decay_mode'] = tok
+            elif tok in _CHARGE:          sig['hadron_charge'] = tok
+            elif tok in _HELICITY:        sig['helicity'] = tok
+            elif tok in _COHERENCE:       sig['coherence'] = 'coherent'
+            elif tok in _MODEL:           sig['model'] = tok
+            elif tok in _POLAR:           sig['polarization'] = tok
+            elif tok in _FINAL_STATE:     sig['final_state'] = tok
+            elif _MASS_RE.match(tok):     sig['mass'] = tok
+            elif _CHANNEL_RE.match(tok):  sig['channel'] = tok
 
-    if cat == 'DIS':
-        sub = segs[2] if len(segs) > 2 else ''
-        if sub in ('NC', 'CC'):
-            return {**base, 'process': 'DIS_' + sub}
-        return {**base, 'process': 'DIS'}        # sub is a generator folder
-
-    if cat == 'DDIS':
-        return {**base, 'process': 'DDIS'}
-
-    return {**base, 'process': cat}              # unknown category — surfaced as-is
+    if ions:
+        sig['beam_species'] = ions[0]
+        if nucleons:
+            sig['nucleon'] = nucleons[0]
+    elif nucleons:
+        sig['beam_species'] = nucleons[0]        # bare 'ep' = electron-proton beam
+    if 'beam_energy_electron' not in sig:
+        if beam and 'x' in beam:
+            sig['beam_energy_electron'], sig['beam_energy_hadron'] = _beam_split(beam)
+        else:
+            sig['beam_energy_electron'] = sig['beam_energy_hadron'] = 'N/A'
+    return sig
 
 
 #: BEAMGAS 4th path segment is a physical mechanism when it is one of these;

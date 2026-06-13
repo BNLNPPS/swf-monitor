@@ -583,43 +583,53 @@ def _ensure_csvimport_anchors():
 _PROCESS_CATEGORY = {
     'SINGLE': 1,
     'DIS': 2, 'DIS_NC': 2, 'DIS_CC': 2, 'DDIS': 2,
-    'DVCS': 3, 'DDVCS': 3,
+    'DVCS': 3, 'DDVCS': 3, 'TCS': 3,
     'SIDIS': 4, 'SIDIS_D0': 4, 'SIDIS_DIJET': 4, 'SIDIS_Lc': 4,
     'DEMP': 5, 'DVMP': 5, 'MESON_SF': 5,
     'DIFFRACTIVE_JPSI': 5, 'DIFFRACTIVE_PHI': 5, 'DIFFRACTIVE_RHO': 5,
     'PHOTOPRODUCTION_JPSI': 5, 'UPSILON': 5,
+    'UCHANNEL_PI0': 5, 'UCHANNEL_RHO': 5, 'ALP': 5,
 }
 
 
-def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=False):
-    """Resolve the locked physics tag for a set of derived physics parameters.
+#: Every physics axis that defines a tag's identity. Matching compares the full
+#: set (a missing axis counts as ''), so a tag is reused only when every physics
+#: axis agrees — the old coarse (process, beam) key is what collapsed Q2 range,
+#: decay/charge, beam config, and the rest onto the first-created tag.
+_PHYSICS_MATCH_FIELDS = (
+    'process', 'beam_energy_electron', 'beam_energy_hadron',
+    'beam_species', 'nucleon', 'q2_range', 'decay_mode', 'hadron_charge',
+    'helicity', 'polarization', 'coherence', 'model', 'beam_config',
+    'state', 'mechanism', 'final_state', 'channel', 'mass',
+    'particle', 'gun_energy',
+)
 
-    Matching is by physics parameters, not tag label: ``(process, particle,
-    gun_energy)`` for single-particle, ``(process, beam)`` otherwise. Among
-    matches, a locked tag is preferred, then the lowest number, so a duplicated
-    param-set resolves deterministically. A miss creates a new *draft* tag,
-    numbered via ``PhysicsTag.allocate_next`` and the category map. Tags are left
-    draft so ops can edit them; reproducibility locking is a deliberate later step
-    at submission prep, not here.
+
+def _physics_key(params):
+    """Identity tuple over the full physics axis set (a missing axis == '')."""
+    return tuple((params or {}).get(f, '') for f in _PHYSICS_MATCH_FIELDS)
+
+
+def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=False):
+    """Resolve the physics tag whose full parameter set equals ``derived``.
+
+    Matching keys on the complete physics axis set, not the ``(process, beam)``
+    subset: two compositions differing in any axis (Q2 range, species, decay,
+    beam config, ...) are different tags. A coarse DB filter on ``process``
+    narrows candidates; the full set is compared in Python so a tag stored with
+    only the axes it carries still matches (a missing axis counts as ''). Among
+    matches a locked tag is preferred, then the lowest number. A miss creates a
+    new *draft* tag, numbered via ``PhysicsTag.allocate_next`` and the category
+    map; locking is a deliberate later step at submission prep, not here.
 
     Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``. In
     ``dry_run`` nothing is written and a ``'create'`` returns ``(None, 'create')``.
     """
     process = derived.get('process')
-    if process == 'SINGLE':
-        match = {
-            'parameters__process': 'SINGLE',
-            'parameters__particle': derived.get('particle', ''),
-            'parameters__gun_energy': derived.get('gun_energy', ''),
-        }
-    else:
-        match = {
-            'parameters__process': process,
-            'parameters__beam_energy_electron': derived.get('beam_energy_electron'),
-            'parameters__beam_energy_hadron': derived.get('beam_energy_hadron'),
-        }
+    want = _physics_key(derived)
     matches = sorted(
-        PhysicsTag.objects.filter(**match),
+        (t for t in PhysicsTag.objects.filter(parameters__process=process)
+         if _physics_key(t.parameters) == want),
         key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
     )
     if matches:
@@ -1197,6 +1207,26 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         },
                     }
 
+                    # Derive the real physics from the DID path remainder and bind
+                    # the matching tag, replacing the placeholder anchor (the p1006
+                    # dump). Standalone backgrounds take the signal-free p6001 tag;
+                    # an unparseable remainder keeps the anchor and is surfaced.
+                    # Evgen and background k tags for past rows stay a separate
+                    # (manual) association.
+                    remainder = decomposed.get('path_remainder', '')
+                    derived = derive_physics(
+                        remainder, beam=metadata['past_output']['filters'].get('beam', ''))
+                    row_physics_tag = physics
+                    if derived is None:
+                        summary['errors'].append(
+                            f'{campaign_name}: DID {epic_did!r} physics unresolved; '
+                            f'left on placeholder {physics.tag_label}')
+                    elif derived.get('process') in ('BEAMGAS', 'SYNRAD'):
+                        row_physics_tag = _no_signal_physics_tag()
+                    else:
+                        row_physics_tag, _ = find_or_create_physics_tag(
+                            derived, created_by=created_by)
+
                     pcs_did = f'group.EIC:{pcs_name}.b1'
                     ds, ds_created = Dataset.objects.get_or_create(
                         dataset_name=pcs_name, block_num=1,
@@ -1204,7 +1234,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                             scope='group.EIC', did=pcs_did,
                             detector_version=version,
                             detector_config=decomposed.get('detector_config', ''),
-                            physics_tag=physics, evgen_tag=evgen,
+                            physics_tag=row_physics_tag, evgen_tag=evgen,
                             simu_tag=simu, reco_tag=reco,
                             file_count=block['file_count'],
                             data_size=block['data_size_bytes'],
@@ -1219,6 +1249,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         ds.metadata = metadata
                         ds.detector_version = version
                         ds.detector_config = decomposed.get('detector_config', '')
+                        ds.physics_tag = row_physics_tag
                         ds.save()
 
                     task_defaults = dict(
