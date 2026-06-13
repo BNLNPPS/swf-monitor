@@ -136,7 +136,7 @@ def pcs_hub(request):
 # ── Physics Categories ────────────────────────────────────────────
 
 def physics_categories_list(request):
-    categories = PhysicsCategory.objects.annotate(tag_count=Count('tags'))
+    categories = PhysicsCategory.objects.annotate(tag_count=Count('tags')).order_by('digit')
     return render(request, 'pcs/physics_categories_list.html', {'categories': categories})
 
 
