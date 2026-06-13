@@ -138,10 +138,10 @@
                 {% endif %}
             </div>
             <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
-            <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
-                <option value="recent">Sort: Recent</option>
-                <option value="alpha">Sort: A&ndash;Z</option>
-            </select>
+            <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem;">
+                <button type="button" class="btn btn-outline-secondary active" data-sort="recent" style="font-size:.72rem; padding:.08rem .5rem;">Recent</button>
+                <button type="button" class="btn btn-outline-secondary" data-sort="alpha" style="font-size:.72rem; padding:.08rem .5rem;">A&ndash;Z</button>
+            </div>
             <div class="filter-row" id="status-filters">
                 <span class="filter-pill active" data-status="all">All</span>
                 <span class="filter-pill" data-status="draft">Draft</span>
@@ -566,7 +566,7 @@
 
     // ── Tag list rendering ──
     function sortItems(arr) {
-        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const m = (document.querySelector('#list-sort .active') || {dataset: {}}).dataset.sort || 'recent';
         const cp = arr.slice();
         if (m === 'alpha') cp.sort((a, b) => (a.tag_label || '').localeCompare(b.tag_label || '', undefined, {numeric: true}));
         else cp.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
@@ -727,7 +727,10 @@
 
     // ── Filters ──
     searchInput.addEventListener('input', renderTagList);
-    document.getElementById('list-sort').addEventListener('change', renderTagList);
+    document.querySelectorAll('#list-sort button').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('#list-sort button').forEach(x => x.classList.toggle('active', x === b));
+        renderTagList();
+    }));
     document.querySelectorAll('#status-filters .filter-pill').forEach(pill => {
         pill.addEventListener('click', () => {
             document.querySelectorAll('#status-filters .filter-pill').forEach(p => p.classList.remove('active'));

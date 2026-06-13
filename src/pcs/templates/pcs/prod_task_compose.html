@@ -82,16 +82,16 @@
         {# Datasets / Configs tabs: existing JS-driven list + free-text search. #}
         <div id="generic-list-host">
             <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
-            <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
-                <option value="recent">Sort: Recent</option>
-                <option value="alpha">Sort: A&ndash;Z</option>
-            </select>
+            <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem;">
+                <button type="button" class="btn btn-outline-secondary active" data-sort="recent" style="font-size:.72rem; padding:.08rem .5rem;">Recent</button>
+                <button type="button" class="btn btn-outline-secondary" data-sort="alpha" style="font-size:.72rem; padding:.08rem .5rem;">A&ndash;Z</button>
+            </div>
             <div class="filter-row" id="browser-filters"></div>
             <div class="item-list" id="item-list" tabindex="0"></div>
         </div>
         {# Tasks tab: server-rendered catalog-style list with collapsed filter bar. #}
         <div id="tasks-list-host" style="display:none; flex:1; min-height:0; flex-direction:column;">
-            {% include "pcs/_task_workbench_list.html" %}
+            {% include "pcs/_task_compose_list.html" %}
         </div>
     </div>
 
@@ -410,7 +410,7 @@
         browseType = tabName;
         selectedItemId = null;
         searchBox.value = '';
-        // Tasks tab uses the server-rendered workbench partial; everything
+        // Tasks tab uses the server-rendered compose view partial; everything
         // else uses the JS-driven generic list.
         const onTasks = (tabName === 'tasks');
         genericListHost.style.display = onTasks ? 'none' : '';
@@ -432,10 +432,10 @@
         updateUrl();
     }
 
-    // ── Workbench partial: route row clicks to the existing detail flow ──
-    const wbRoot = document.getElementById('pcs-wb-root');
-    if (wbRoot) {
-        wbRoot.addEventListener('pcs-wb:select', (e) => {
+    // ── Compose view partial: route row clicks to the existing detail flow ──
+    const clRoot = document.getElementById('pcs-cl-root');
+    if (clRoot) {
+        clRoot.addEventListener('pcs-cl:select', (e) => {
             const tid = e.detail && e.detail.taskId;
             if (!Number.isFinite(tid)) return;
             onItemClick('task', tid);
@@ -446,11 +446,14 @@
     });
 
     searchBox.addEventListener('input', renderList);
-    document.getElementById('list-sort').addEventListener('change', renderList);
+    document.querySelectorAll('#list-sort button').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('#list-sort button').forEach(x => x.classList.toggle('active', x === b));
+        renderList();
+    }));
 
     // ── Render list ──
     function sortItems(arr) {
-        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const m = (document.querySelector('#list-sort .active') || {dataset: {}}).dataset.sort || 'recent';
         const cp = arr.slice();
         if (m === 'alpha') cp.sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, {numeric: true}));
         else cp.sort((a, b) => (b.mod || '').localeCompare(a.mod || ''));
@@ -752,7 +755,7 @@
         const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const csvImp = (t.overrides && t.overrides.csv_import) || null;
 
-        // Title: dataset path (matches the workbench row title), with the
+        // Title: dataset path (matches the compose view row title), with the
         // standard ePIC volatile prefix stripped. Full path on hover. Never the
         // internal csv_import.<hash> key — fall back to the tag-based name.
         const PFX = '/volatile/eic/EPIC/';
@@ -1160,10 +1163,10 @@
     if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
     if (!autoId) {
         if (browseType === 'tasks') {
-            // Mirror the workbench's current-campaign-first ordering so the
+            // Mirror the compose view's current-campaign-first ordering so the
             // initial right-pane detail corresponds to the first visible row.
-            const firstWb = document.querySelector('#pcs-wb-list .pcs-wb-row');
-            if (firstWb) autoId = parseInt(firstWb.dataset.taskId, 10);
+            const firstRow = document.querySelector('#pcs-cl-list .pcs-cl-row');
+            if (firstRow) autoId = parseInt(firstRow.dataset.taskId, 10);
         } else {
             const firstList = browseType === 'datasets' ? allDatasets : allConfigs;
             if (firstList.length > 0) autoId = firstList[0].id;
@@ -1186,12 +1189,12 @@
                 showConfigDetail(autoId);
             }
             renderList();
-            // Mirror selection in the workbench list (server-rendered, so JS-driven
+            // Mirror selection in the compose view list (server-rendered, so JS-driven
             // renderList() can't reach it).
             if (browseType === 'tasks') {
-                document.querySelectorAll('#pcs-wb-list .pcs-wb-row').forEach(r =>
+                document.querySelectorAll('#pcs-cl-list .pcs-cl-row').forEach(r =>
                     r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
-                const sel = document.querySelector(`#pcs-wb-list .pcs-wb-row[data-task-id="${autoId}"]`);
+                const sel = document.querySelector(`#pcs-cl-list .pcs-cl-row[data-task-id="${autoId}"]`);
                 if (sel) sel.scrollIntoView({block: 'nearest'});
             }
             updateUrl();

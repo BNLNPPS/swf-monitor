@@ -53,17 +53,17 @@
 {% comment %}
 Shared task-list + filter partial used by:
   - full-page Catalog (show_tabs=True, columns_mode='full')
-  - Workbench left panel (show_tabs=False, columns_mode='workbench')
+  - Compose-view left panel (show_tabs=False, columns_mode='compose-view')
 
 Context expected:
   tasks                 : iterable of ProdTask, select_related as appropriate
   show_tabs             : bool — render lifecycle tab bar
-  columns_mode          : 'full' | 'workbench' — drives column visibility
+  columns_mode          : 'full' | 'compose-view' — drives column visibility
   active_lifecycle      : 'past'|'present'|'future' — active tab
   lifecycle_tabs        : list of {key,label,color,campaigns} — three lifecycle slots
   active_campaigns      : list of Campaign in the active lifecycle slot
-  focused_campaign      : Campaign | None — workbench: campaign of focused task
-  focused_task_id       : int | None — workbench: highlight this row
+  focused_campaign      : Campaign | None — compose-view: campaign of focused task
+  focused_task_id       : int | None — compose-view: highlight this row
   filters               : dict — current filter values for echo
   requestor_options     : iterable of str — pulldown choices
   status_choices        : iterable of (key, label) tuples

@@ -39,10 +39,10 @@
             </div>
         </div>
         <input type="text" class="browser-search" id="search" placeholder="Search configs...">
-        <select id="list-sort" title="Sort the list" style="margin-bottom:.5rem; font-size:.8rem; padding:.2rem .4rem; border:1px solid #dee2e6; border-radius:.375rem; cursor:pointer">
-            <option value="recent">Sort: Recent</option>
-            <option value="alpha">Sort: A&ndash;Z</option>
-        </select>
+        <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem;">
+            <button type="button" class="btn btn-outline-secondary active" data-sort="recent" style="font-size:.72rem; padding:.08rem .5rem;">Recent</button>
+            <button type="button" class="btn btn-outline-secondary" data-sort="alpha" style="font-size:.72rem; padding:.08rem .5rem;">A&ndash;Z</button>
+        </div>
         <div class="item-list" id="item-list" tabindex="0"></div>
     </div>
 
@@ -184,7 +184,7 @@
     const searchBox = document.getElementById('search');
 
     function sortItems(arr) {
-        const m = (document.getElementById('list-sort') || {}).value || 'recent';
+        const m = (document.querySelector('#list-sort .active') || {dataset: {}}).dataset.sort || 'recent';
         const cp = arr.slice();
         if (m === 'alpha') cp.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, {numeric: true}));
         else cp.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
@@ -214,7 +214,10 @@
         });
     }
     searchBox.addEventListener('input', renderList);
-    document.getElementById('list-sort').addEventListener('change', renderList);
+    document.querySelectorAll('#list-sort button').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('#list-sort button').forEach(x => x.classList.toggle('active', x === b));
+        renderList();
+    }));
 
     function selectConfig(id) {
         selectedId = id;
