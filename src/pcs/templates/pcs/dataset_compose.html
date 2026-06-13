@@ -397,9 +397,10 @@
         let items = [];
         if (browseType === 'datasets') {
             items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
-                d.physics_tag.label.toLowerCase().includes(q) || d.description.toLowerCase().includes(q)
+                d.physics_tag.label.toLowerCase().includes(q) || d.description.toLowerCase().includes(q) ||
+                (d.background_tag && d.background_tag.label.toLowerCase().includes(q))
             ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
-                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label} | ${d.created_by}`,
+                meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}${d.background_tag ? ' ' + d.background_tag.label : ''} | ${d.created_by}`,
                 selected: d.id === selectedItemId }));
         } else {
             // Tag type

@@ -879,7 +879,9 @@
                 <tr><td><strong>Tags</strong></td><td>${[ds.physics_tag.label, ds.evgen_tag.label, ds.simu_tag.label, ds.reco_tag.label].join(', ')}${ds.background_tag ? ', ' + ds.background_tag.label : ''}</td></tr>
             </table>`;
         const allParams = {};
-        [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
+        const paramTags = [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]];
+        if (ds.background_tag) paramTags.push(['Background', ds.background_tag]);
+        paramTags.forEach(([label, tag]) => {
             Object.entries(tag.parameters || {}).forEach(([k, v]) => { if (v) allParams[`${label}: ${k}`] = v; });
         });
         document.getElementById('physics-display').innerHTML = Object.entries(allParams).map(([k,v]) =>

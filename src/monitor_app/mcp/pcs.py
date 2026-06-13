@@ -273,7 +273,7 @@ def _dataset_list_sync(stage=None, source_kind=None, source_location=None,
                        scope=None, name_contains=None, limit=20, offset=0):
     from pcs.models import Dataset
     qs = Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     ).order_by('-created_at')
     if scope:
         qs = qs.filter(scope=scope)
@@ -296,7 +296,7 @@ def _dataset_get_sync(did=None, dataset_name=None):
     if not (did or dataset_name):
         return {'error': 'Provide did or dataset_name'}
     qs = Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
     ds = (qs.filter(did=did).first() if did
           else qs.filter(dataset_name=dataset_name).first())
