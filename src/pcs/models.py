@@ -314,6 +314,25 @@ class Dataset(models.Model):
         return self.build_dataset_name()
 
     @property
+    def tag_facets(self):
+        """Catalog filter facets from the bound physics tag (process, beams, Q2,
+        species, energy) plus detector_config — the accurate replacement for
+        path/DID-string-derived facets now that every dataset carries its real
+        physics tag."""
+        p = (self.physics_tag.parameters if self.physics_tag_id else {}) or {}
+        e = p.get('beam_energy_electron', '')
+        h = p.get('beam_energy_hadron', '')
+        beam = f'{e}x{h}' if e and h and e != 'N/A' and h != 'N/A' else ''
+        return {
+            'detector': self.detector_config or '',
+            'beam': beam,
+            'physics': p.get('process', ''),
+            'q2': p.get('q2_range', ''),
+            'species': p.get('beam_species', ''),
+            'energy': p.get('gun_energy', ''),
+        }
+
+    @property
     def has_internal_name(self):
         """True when dataset_name/DID are legacy-import plumbing — an opaque
         csv_import.<hash> or past.<…> key and a synthetic (non-Rucio) DID —

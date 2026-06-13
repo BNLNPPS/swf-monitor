@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load swf_fmt %}
-{% block title %}Production Task Catalog — {% if active_lifecycle == 'last' %}Last{% else %}Past{% endif %}{% endblock %}
+{% block title %}Production Task Catalog — {% if active_lifecycle == 'last' %}Last{% elif active_lifecycle == 'future' %}Future{% else %}Past{% endif %}{% endblock %}
 
 {% block content %}
 <style>
@@ -60,9 +60,7 @@
     {% for tab in lifecycle_tabs %}
       <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
          href="?lifecycle={{ tab.key }}">
-        {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
-          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-        {% endif %}
+        {{ tab.label }}{% if tab.detail %} <span class="text-muted">·</span> {{ tab.detail }}{% endif %}
       </a>
     {% endfor %}
   </div>
@@ -115,16 +113,16 @@
   {% if active_lifecycle != 'last' %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Release:</span>
-    <a href="?lifecycle=past&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
        class="{% if active_release == 'all' %}active{% endif %}"
        style="font-weight:600">All</a>
     {% for grp in release_year_groups %}
       <span class="text-muted mx-1">|</span>
-      <a href="?lifecycle=past&amp;release={{ grp.all_key }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+      <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ grp.all_key }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
          class="{% if active_release == grp.all_key %}active{% endif %}"
          style="font-weight:600">All {{ grp.year }}</a>
       {% for v in grp.versions %}
-        <a href="?lifecycle=past&amp;release={{ v|urlencode }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+        <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ v|urlencode }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
            class="{% if active_release == v %}active{% endif %}">{{ v }}</a>
       {% endfor %}
     {% endfor %}
@@ -133,14 +131,14 @@
 
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Stage:</span>
-    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}"
        class="{% if not active_stage %}active{% endif %}">All ({{ stage_counts.all }})</a>
     {% if stage_counts.FULL %}
-    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}&amp;stage=FULL"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}&amp;stage=FULL"
        class="{% if active_stage == 'FULL' %}active{% endif %}">Simu ({{ stage_counts.FULL }})</a>
     {% endif %}
     {% if stage_counts.RECO %}
-    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}&amp;stage=RECO"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}&amp;stage=RECO"
        class="{% if active_stage == 'RECO' %}active{% endif %}">Reco ({{ stage_counts.RECO }})</a>
     {% endif %}
   </div>
@@ -213,22 +211,23 @@
       </thead>
       <tbody>
       {% for t in tasks %}
-        {% with o=t.outputs.0 %}
+        {% with o=t.outputs.0 tf=t.dataset.tag_facets %}
         <tr class="pcs-pdl-row"
-            data-detector="{{ o.filters.detector|default:'' }}"
-            data-beam="{{ o.filters.beam|default:'' }}"
-            data-physics="{{ o.filters.physics|default:'' }}"
-            data-q2="{{ o.filters.q2|default:'' }}"
-            data-species="{{ o.filters.species|default:'' }}"
-            data-energy="{{ o.filters.energy|default:'' }}"
+            data-detector="{{ tf.detector }}"
+            data-beam="{{ tf.beam }}"
+            data-physics="{{ tf.physics }}"
+            data-q2="{{ tf.q2 }}"
+            data-species="{{ tf.species }}"
+            data-energy="{{ tf.energy }}"
             data-incomplete="{% if not o.complete %}1{% else %}0{% endif %}"
-            data-search="{{ o.did|lower }}">
+            data-search="{{ o.did|lower }} {{ t.dataset.composed_name|lower }}">
           <td><input type="checkbox" class="pcs-pdl-cb" name="task" value="{{ t.pk }}"></td>
           <td class="small text-muted">{{ forloop.counter }}</td>
           <td class="small">{% if o.stage == 'FULL' %}SIMU{% else %}{{ o.stage }}{% endif %}</td>
           <td class="small">{{ o.version }}</td>
           <td class="small">
             <div><strong class="text-muted">Output:</strong> <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a></div>
+            <div><strong class="text-muted">Tags:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}" title="Tag breakdown for this dataset">{{ t.dataset.composed_name }}</a></div>
             <div class="text-muted">
               {{ o.file_count }} files
               &middot; {{ o.bytes|filesizeformat }}

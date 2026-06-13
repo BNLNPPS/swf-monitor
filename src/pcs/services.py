@@ -1115,6 +1115,11 @@ def _decompose_past_did(did):
     return out
 
 
+def _version_tuple(v):
+    """'26.06.0' -> (26, 6, 0) for release comparison; non-numeric parts sort low."""
+    return tuple(int(p) if p.isdigit() else -1 for p in str(v or '').split('.'))
+
+
 def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                                     created_by='past_import'):
     """Import 2026 past-campaign output datasets from a cloned epic-prod.
@@ -1139,6 +1144,8 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     import os as _os
     import yaml as _yaml
     physics, evgen, simu, reco, cfg, _ = _ensure_csvimport_anchors()
+    current_camp = Campaign.objects.filter(lifecycle='current').first()
+    current_v = _version_tuple(current_camp.name) if current_camp else None
 
     summary = {'campaigns': 0, 'rows': 0, 'created': 0, 'updated': 0, 'errors': []}
 
@@ -1171,15 +1178,20 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                     summary['errors'].append(f'{campaign_name}: {e}')
                     continue
 
+                # A produced release newer than the current campaign is a
+                # FUTURE release, not past — classify by version so the lifecycle
+                # self-corrects on every import and as current advances.
+                lc = 'future' if (current_v is not None
+                                  and _version_tuple(version) > current_v) else 'past'
                 campaign, _ = Campaign.objects.get_or_create(
                     name=campaign_name,
-                    defaults={'lifecycle': 'past',
+                    defaults={'lifecycle': lc,
                               'description': f'{stage} campaign {version} '
                                              f'(epic-prod {index_path})',
                               'created_by': created_by},
                 )
-                if campaign.lifecycle != 'past':
-                    campaign.lifecycle = 'past'
+                if campaign.lifecycle != lc:
+                    campaign.lifecycle = lc
                     campaign.save(update_fields=['lifecycle'])
                 summary['campaigns'] += 1
 

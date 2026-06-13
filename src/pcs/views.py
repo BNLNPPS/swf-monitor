@@ -1151,15 +1151,28 @@ def pcs_catalog(request):
         k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
         for k in LIFECYCLE_KEYS
     }
+    def _tab_detail(key, camps):
+        # Future campaigns are stage-prefixed (RECO/26.06.0); show the bare
+        # version so the tab reads "Future · 26.06.0", mirroring Current.
+        if key == 'past':
+            return ''
+        if key == 'future':
+            return ', '.join(sorted(
+                {c.name.split('/', 1)[1] for c in camps if '/' in c.name}))
+        return ', '.join(c.name for c in camps)
     lifecycle_tabs = [
         {'key': 'past',    'label': 'Past',    'color': 'secondary',
-         'campaigns': campaigns_by_lifecycle['past']},
+         'campaigns': campaigns_by_lifecycle['past'],
+         'detail': _tab_detail('past', campaigns_by_lifecycle['past'])},
         {'key': 'last',    'label': 'Last',    'color': 'last-green',
-         'campaigns': campaigns_by_lifecycle['last']},
+         'campaigns': campaigns_by_lifecycle['last'],
+         'detail': _tab_detail('last', campaigns_by_lifecycle['last'])},
         {'key': 'current', 'label': 'Current', 'color': 'success',
-         'campaigns': campaigns_by_lifecycle['current']},
+         'campaigns': campaigns_by_lifecycle['current'],
+         'detail': _tab_detail('current', campaigns_by_lifecycle['current'])},
         {'key': 'future',  'label': 'Future',  'color': 'primary',
-         'campaigns': campaigns_by_lifecycle['future']},
+         'campaigns': campaigns_by_lifecycle['future'],
+         'detail': _tab_detail('future', campaigns_by_lifecycle['future'])},
     ]
 
     # Past lifecycle: per-release view of output datasets. Each release
@@ -1173,8 +1186,11 @@ def pcs_catalog(request):
     # Last campaign's name (e.g. 26.04.1) and adds the Rucio timeline
     # plot above the table — a hybrid of Past's row model and Current's
     # snapshot view.
-    if active_lifecycle in ('past', 'last'):
-        past_campaigns = list(campaigns_by_lifecycle['past'])
+    if active_lifecycle in ('past', 'last', 'future'):
+        # Future and Past share the release-table view; each lists its own
+        # lifecycle's produced releases (Last pins to a past version, below).
+        past_campaigns = list(
+            campaigns_by_lifecycle['future' if active_lifecycle == 'future' else 'past'])
         # Time flows left to right; releases ordered ASC.
         release_versions = sorted(
             {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
@@ -1249,7 +1265,7 @@ def pcs_catalog(request):
 
         past_tasks = list(
             ProdTask.objects
-            .select_related('campaign', 'dataset')
+            .select_related('campaign', 'dataset', 'dataset__physics_tag')
             .filter(campaign__in=selected_campaigns, status='past_output')
             .order_by('campaign__name', 'dataset__dataset_name')
         )
