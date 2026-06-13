@@ -634,6 +634,7 @@ def datasets_list(request):
         {'name': 'evgen_tag__tag_label', 'title': 'EvGen', 'orderable': True},
         {'name': 'simu_tag__tag_label', 'title': 'Simu', 'orderable': True},
         {'name': 'reco_tag__tag_label', 'title': 'Reco', 'orderable': True},
+        {'name': 'background_tag__tag_label', 'title': 'Background', 'orderable': True},
         {'name': 'blocks', 'title': 'Blocks', 'orderable': True},
         {'name': 'created_at', 'title': 'Created', 'orderable': True},
     ]
@@ -649,18 +650,19 @@ def datasets_list(request):
 def datasets_datatable_ajax(request):
     col_names = [
         'dataset_name', 'physics_tag__tag_label', 'evgen_tag__tag_label',
-        'simu_tag__tag_label', 'reco_tag__tag_label', 'blocks', 'created_at',
+        'simu_tag__tag_label', 'reco_tag__tag_label', 'background_tag__tag_label',
+        'blocks', 'created_at',
     ]
-    dt = DataTablesProcessor(request, col_names, default_order_column=6, default_order_direction='desc')
+    dt = DataTablesProcessor(request, col_names, default_order_column=7, default_order_direction='desc')
 
     # Only show block 1 rows (one row per logical dataset)
     qs = Dataset.objects.filter(block_num=1).select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
 
     records_total = Dataset.objects.filter(block_num=1).count()
     search_fields = ['dataset_name', 'physics_tag__tag_label', 'evgen_tag__tag_label',
-                     'simu_tag__tag_label', 'reco_tag__tag_label']
+                     'simu_tag__tag_label', 'reco_tag__tag_label', 'background_tag__tag_label']
     qs = dt.apply_search(qs, search_fields)
     records_filtered = qs.count()
     qs = qs.order_by(dt.get_order_by())
@@ -673,12 +675,20 @@ def datasets_datatable_ajax(request):
         e_url = f"{reverse('pcs:tag_compose', args=['e'])}?selected={ds.evgen_tag.tag_number}"
         s_url = f"{reverse('pcs:tag_compose', args=['s'])}?selected={ds.simu_tag.tag_number}"
         r_url = f"{reverse('pcs:tag_compose', args=['r'])}?selected={ds.reco_tag.tag_number}"
+        # Name: the tag-composed name (build_dataset_name); the internal
+        # csv_import.<hash> dataset_name is plumbing and is never shown.
+        if ds.background_tag_id:
+            k_url = f"{reverse('pcs:tag_compose', args=['k'])}?selected={ds.background_tag.tag_number}"
+            k_cell = f'<a href="{k_url}" title="{ds.background_tag.description}">{ds.background_tag.tag_label}</a>'
+        else:
+            k_cell = '-'
         data.append([
-            f'<a href="{detail_url}">{ds.dataset_name}</a>',
+            f'<a href="{detail_url}">{ds.composed_name}</a>',
             f'<a href="{p_url}" title="{ds.physics_tag.description}">{ds.physics_tag.tag_label}</a>',
             f'<a href="{e_url}" title="{ds.evgen_tag.description}">{ds.evgen_tag.tag_label}</a>',
             f'<a href="{s_url}" title="{ds.simu_tag.description}">{ds.simu_tag.tag_label}</a>',
             f'<a href="{r_url}" title="{ds.reco_tag.description}">{ds.reco_tag.tag_label}</a>',
+            k_cell,
             str(ds.blocks),
             format_datetime(ds.created_at),
         ])
