@@ -1645,7 +1645,15 @@ def prod_task_compose(request):
     if campaign is not None:
         campaign_tasks = list(
             ProdTask.objects
-            .select_related('campaign', 'dataset', 'prod_config', 'request')
+            .select_related(
+                'campaign', 'dataset', 'prod_config', 'request',
+                # The compose list falls back to dataset.composed_name (5 tag
+                # FKs) when a row has no source path; prefetch so native-dataset
+                # campaigns don't hit the same 1 + 5N as the catalog (a9a93ae).
+                'dataset__physics_tag', 'dataset__evgen_tag',
+                'dataset__simu_tag', 'dataset__reco_tag',
+                'dataset__background_tag',
+            )
             .filter(campaign=campaign)
             .order_by('dataset__dataset_name')
         )
