@@ -61,18 +61,18 @@
           try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
           throw new Error(m);
         }
-        // queued — the SSE listener below resets the button / reloads on completion.
+        // Open the push stream ONLY now that the action is queued — never on
+        // page load — so viewing the catalog pins no streaming worker.
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=rucio_snapshot_ready");
+        es.addEventListener('rucio_snapshot_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.ok === false) { es.close(); busy(false); alert('Rucio update failed: ' + (d.error || 'unknown error')); }
+          else { window.location.reload(); }
+        });
       } catch (err) {
         busy(false);
         alert('Could not queue the Rucio update: ' + err.message);
       }
-    });
-    const stream = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=rucio_snapshot_ready";
-    const es = new EventSource(stream);
-    es.addEventListener('rucio_snapshot_ready', function (ev) {
-      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
-      if (d.ok === false) { busy(false); alert('Rucio update failed: ' + (d.error || 'unknown error')); }
-      else { window.location.reload(); }
     });
   })();
 
@@ -101,17 +101,18 @@
           try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
           throw new Error(m);
         }
+        // Open the push stream ONLY now that the action is queued — never on
+        // page load — so viewing the catalog pins no streaming worker.
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=evgen_rucio_ready");
+        es.addEventListener('evgen_rucio_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.ok === false) { es.close(); busy(false); alert('EVGEN update failed: ' + (d.error || 'unknown error')); }
+          else { window.location.reload(); }
+        });
       } catch (err) {
         busy(false);
         alert('Could not queue the EVGEN update: ' + err.message);
       }
-    });
-    const stream = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=evgen_rucio_ready";
-    const es = new EventSource(stream);
-    es.addEventListener('evgen_rucio_ready', function (ev) {
-      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
-      if (d.ok === false) { busy(false); alert('EVGEN update failed: ' + (d.error || 'unknown error')); }
-      else { window.location.reload(); }
     });
   })();
 
@@ -140,17 +141,19 @@
           try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
           throw new Error(m);
         }
+        // Open the push stream ONLY now that the import is queued — never on
+        // page load — so viewing the catalog pins no streaming worker.
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=catalog_import_ready");
+        es.addEventListener('catalog_import_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.source !== 'csv') return;
+          if (d.ok === false) { es.close(); busy(false); alert('CSV import failed: ' + (d.error || 'unknown error')); }
+          else { window.location.reload(); }
+        });
       } catch (err) {
         busy(false);
         alert('Could not queue the CSV import: ' + err.message);
       }
-    });
-    const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=catalog_import_ready");
-    es.addEventListener('catalog_import_ready', function (ev) {
-      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
-      if (d.source !== 'csv') return;
-      if (d.ok === false) { busy(false); alert('CSV import failed: ' + (d.error || 'unknown error')); }
-      else { window.location.reload(); }
     });
   })();
   </script>

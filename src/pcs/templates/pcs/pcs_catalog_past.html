@@ -80,17 +80,19 @@
           try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
           throw new Error(m);
         }
+        // Open the push stream ONLY now that the import is queued — never on
+        // page load — so viewing the past catalog pins no streaming worker.
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=catalog_import_ready");
+        es.addEventListener('catalog_import_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.source !== 'epic-prod') return;
+          if (d.ok === false) { es.close(); busy(false); alert('epic-prod import failed: ' + (d.error || 'unknown error')); }
+          else { window.location.reload(); }
+        });
       } catch (err) {
         busy(false);
         alert('Could not queue the epic-prod import: ' + err.message);
       }
-    });
-    const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=catalog_import_ready");
-    es.addEventListener('catalog_import_ready', function (ev) {
-      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
-      if (d.source !== 'epic-prod') return;
-      if (d.ok === false) { busy(false); alert('epic-prod import failed: ' + (d.error || 'unknown error')); }
-      else { window.location.reload(); }
     });
   })();
   </script>
