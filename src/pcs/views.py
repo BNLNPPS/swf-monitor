@@ -1317,7 +1317,11 @@ def pcs_catalog(request):
 
         past_tasks = list(
             ProdTask.objects
-            .select_related('campaign', 'dataset', 'dataset__physics_tag')
+            .select_related(
+                'campaign', 'dataset', 'dataset__physics_tag',
+                'dataset__evgen_tag', 'dataset__simu_tag',
+                'dataset__reco_tag', 'dataset__background_tag',
+            )
             .filter(campaign__in=selected_campaigns, status='past_output')
             .order_by('campaign__name', 'dataset__dataset_name')
         )
@@ -1383,6 +1387,11 @@ def pcs_catalog(request):
 
     qs = ProdTask.objects.select_related(
         'campaign', 'dataset', 'prod_config', 'request',
+        # Each row's composed name (models.py composed_name) reads the dataset's
+        # five tag FKs; prefetch them so the unpaginated list is one query, not
+        # 1 + 5N.
+        'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
+        'dataset__reco_tag', 'dataset__background_tag',
     ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
     qs = _apply_catalog_filters(qs, filters)
 
