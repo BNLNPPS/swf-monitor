@@ -33,6 +33,7 @@ pattern) and **`docs/SSE_PUSH.md`** (the browser push).
 - `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
 - `EPICPROD_QUESTIONNAIRE.md` — ingest the PWG/DSC production-request Google Form into a PCS Questionnaire entity; public browser, request linkage.
 - `EPICPROD_DATA_LINEAGE.md` — gather produced-dataset Rucio refs onto the catalog; reference + xrootd access.
+- `EPICPROD_EVGEN_INPUTS.md` — assimilate JLab Rucio EVGEN inputs onto the catalog; the request↔Rucio input matcher and its (un)match gaps.
 - `JEDI_INTEGRATION.md` — PCS → JEDI/PanDA submission design.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `COMMISSIONING_RELAXATIONS.md` — alpha tag-lock/submission loosenings and exactly how to re-tighten each.

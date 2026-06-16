@@ -2125,6 +2125,263 @@ def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
     return out
 
 
+# ---------------------------------------------------------------------------
+# EVGEN input assimilation (JLab Rucio epic:/EVGEN/* -> PCS evgen Datasets)
+# ---------------------------------------------------------------------------
+
+EVGEN_RUCIO_SNAPSHOT_NAME = 'evgen-rucio.json'
+
+
+def _extract_evgen_did_filters(did):
+    """Filter axes of a JLab Rucio EVGEN DID.
+
+    EVGEN DIDs are detector-independent and shaped
+    ``epic:/EVGEN/<physics>/<generator>/<current>/<radiation>/<charge>/<beam>/<q2>``
+    — no version or detector segment (unlike RECO/FULL). Strip the leading
+    EVGEN and read the shared {beam, physics, q2, species, energy} from the
+    rest; detector is left empty (the same EVGEN feeds any detector config).
+    """
+    parts = did.split(':', 1)
+    rest = (parts[1] if len(parts) == 2 else did).lstrip('/')
+    segs = [s for s in rest.split('/') if s]
+    if segs and segs[0] == 'EVGEN':
+        segs = segs[1:]
+    out = _extract_path_filters(segs)
+    out['detector'] = ''
+    return out
+
+
+def _evgen_did_tail(did):
+    """Lower-cased path tail of an EVGEN DID, after scope and leading EVGEN.
+
+    ``epic:/EVGEN/DIS/pythia8.316-1.0/NC/noRad/ep/10x100/q2_1to10``
+    -> ``dis/pythia8.316-1.0/nc/norad/ep/10x100/q2_1to10``
+    """
+    name = did.split(':', 1)[-1].lstrip('/')
+    segs = [s for s in name.split('/') if s]
+    if segs and segs[0].upper() == 'EVGEN':
+        segs = segs[1:]
+    return '/'.join(segs).lower()
+
+
+_EVGEN_Q2_MIN_RE   = _re.compile(r'^minq2=([\d.]+)$')
+_EVGEN_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)(?:to|_)([\d.]+)$')
+_EVGEN_Q2_POINT_RE = _re.compile(r'^q2_([\d.]+)$')
+
+
+def _looks_evgen_q2(tok):
+    return tok.startswith('q2_') or tok.startswith('minq2=')
+
+
+def _evgen_q2_bounds(tok):
+    """Parse a lower-cased Q² token into (lo, hi, kind).
+
+    'minq2=1'  -> (1, inf, 'min'); 'q2_1to10' -> (1, 10, 'range')  (Rucio/SIDIS);
+    'q2_10_20' -> (10, 20, 'range') (EXCLUSIVE); 'q2_20' -> (20, 20, 'range').
+    """
+    m = _EVGEN_Q2_MIN_RE.match(tok)
+    if m:
+        return (float(m.group(1)), float('inf'), 'min')
+    m = _EVGEN_Q2_RANGE_RE.match(tok)
+    if m:
+        return (float(m.group(1)), float(m.group(2)), 'range')
+    m = _EVGEN_Q2_POINT_RE.match(tok)
+    if m:
+        v = float(m.group(1))
+        return (v, v, 'range')
+    return None
+
+
+def _evgen_q2_match(req_tok, did_tok):
+    """Q² compatibility for input resolution — distinct from the output
+    sweep's ``_q2_overlap``: an explicit request range must equal the Rucio
+    range exactly; a ``minQ2=N`` request matches any Rucio range lying entirely
+    at or above the floor (lo >= N). No boundary-touching overlap.
+    """
+    rb = _evgen_q2_bounds(req_tok)
+    db = _evgen_q2_bounds(did_tok)
+    if rb is None or db is None:
+        return req_tok == did_tok
+    if rb[2] == 'min':
+        return db[0] >= rb[0]
+    return rb[0] == db[0] and rb[1] == db[1]
+
+
+def _evgen_input_match(req_tail, did_tail):
+    """True if a request EVGEN path tail resolves to a Rucio EVGEN DID tail.
+
+    Input-side matcher — deliberately separate from the output sweep's
+    ``_filter_match`` so input and output match policies evolve independently
+    (a change here cannot affect the produced-output match). Both tails live in
+    the same EVGEN namespace, so the request tokens must appear, in order, as a
+    subsequence of the DID tokens, compared exactly EXCEPT the Q² token (range
+    semantics via ``_evgen_q2_match``). Exact comparison makes the match safe by
+    construction: a request that carries charge / generator / version (e.g.
+    ``ep_noradcor``, ``pythia6-eic``, ``1.2.0``) only matches a DID carrying the
+    same — never ep->en or a different version. A request that omits an axis
+    (abstract DIS: no generator/charge) fans out to the specific Rucio datasets
+    that carry it.
+    """
+    req = [t for t in req_tail.split('/') if t]
+    did = [t for t in did_tail.split('/') if t]
+    if not req:
+        return False
+    di = 0
+    for rt in req:
+        matched = False
+        while di < len(did):
+            dt = did[di]
+            di += 1
+            if _looks_evgen_q2(rt) and _looks_evgen_q2(dt):
+                if _evgen_q2_match(rt, dt):
+                    matched = True
+                    break
+            elif rt == dt:
+                matched = True
+                break
+        if not matched:
+            return False
+    return True
+
+
+def _rucio_evgen_entry(m, checked_at=None):
+    """One resolved Rucio EVGEN dataset -> a metadata['rucio'] match entry.
+
+    Input-side analog of ``_rucio_match_to_output``: same shape (did, rses,
+    file_count, bytes, complete), but the filter axes come from the EVGEN DID
+    extractor (detector-independent, no version segment). File count / byte
+    size are the max across RSE replicas (Rucio reports them per replica).
+    """
+    did = m.get('did', '')
+    files = m.get('length') or 0
+    bytes_ = m.get('bytes') or 0
+    rses = []
+    complete = True
+    for r in m.get('rse_replicas', []) or []:
+        rse = r.get('rse')
+        if not rse:
+            continue
+        total = r.get('length') or 0
+        avail = r.get('available_length') or 0
+        files = max(files, total)
+        bytes_ = max(bytes_, r.get('bytes') or 0)
+        rse_complete = bool(total) and avail == total
+        complete = complete and rse_complete
+        rses.append({'rse': rse, 'files': avail, 'total': total,
+                     'complete': rse_complete})
+    entry = {
+        'did':        did,
+        'stage':      'EVGEN',
+        'filters':    _extract_evgen_did_filters(did),
+        'rses':       rses,
+        'file_count': files,
+        'bytes':      bytes_,
+        'complete':   complete if rses else False,
+    }
+    if checked_at:
+        entry['checked_at'] = checked_at
+    return entry
+
+
+def fetch_jlab_rucio_evgen(*, scope='epic', token=None):
+    """JLab Rucio EVGEN dataset inventory (``epic:/EVGEN/*``).
+
+    Generator-level inputs are detector-independent and not campaign-
+    versioned, so the whole /EVGEN tree is one inventory. Same record shape
+    as ``fetch_jlab_rucio_campaign``.
+    """
+    return fetch_jlab_rucio_campaign('/EVGEN', scope=scope, token=token)
+
+
+def refresh_evgen_rucio(*, apply=False, snapshot_dir=RUCIO_SNAPSHOT_DIR,
+                        created_by='evgen_rucio'):
+    """Assimilate the JLab Rucio EVGEN inventory and resolve PCS evgen
+    Datasets to it. Re-sweepable: re-running picks up a grown listing.
+
+    Fetches ``epic:/EVGEN/*`` once, saves the snapshot, and for each PCS
+    Dataset with stage=evgen resolves the Rucio EVGEN dataset(s) that realize
+    it — matching on the shared filter axes (beam, physics, Q² overlap), never
+    on path strings: request paths carry ``minQ2=N`` and no
+    generator/radiation/charge, Rucio DIDs carry the full form and a
+    ``q2_<lo>to<hi>`` range, so one abstract request can resolve to several
+    Q²-range datasets. The resolved refs are written to each Dataset's
+    ``metadata['rucio']``; re-running overwrites them.
+
+    ``apply=False`` (default) is a dry run — fetch + match + summary, no DB
+    writes. NO-SILENT-FAILURES: network / parse / per-dataset errors are
+    collected into ``summary['errors']``.
+    """
+    import json as _json
+    import os as _os
+    import time as _time
+
+    summary = {'rucio_evgen': 0, 'datasets_seen': 0, 'datasets_matched': 0,
+               'datasets_unmatched': 0, 'rucio_unmatched': 0,
+               'applied': apply, 'snapshot_path': '', 'errors': [],
+               'samples': []}
+    try:
+        token = _jlab_rucio_auth()
+    except Exception as e:                                     # noqa: BLE001
+        raise ServiceError(f'JLab Rucio auth failed: {e}')
+    try:
+        inv = fetch_jlab_rucio_evgen(token=token)
+    except Exception as e:                                     # noqa: BLE001
+        raise ServiceError(f'JLab Rucio EVGEN fetch failed: {e}')
+
+    checked_at = _time.strftime('%Y-%m-%dT%H:%M:%S%z')
+    # Drop obvious throwaway DIDs (a stray '.../q2_1to10/test').
+    records = [d for d in inv.get('datasets', [])
+               if d.get('did') and not d['did'].rstrip('/').endswith('/test')]
+    summary['rucio_evgen'] = len(records)
+    indexed = [(d, _evgen_did_tail(d['did'])) for d in records]
+
+    snapshot = {'fetched_at': checked_at, 'scope': 'epic',
+                'count': len(records), 'datasets': records}
+    _os.makedirs(snapshot_dir, exist_ok=True)
+    out_path = _os.path.join(snapshot_dir, EVGEN_RUCIO_SNAPSHOT_NAME)
+    summary['snapshot_path'] = out_path
+    try:
+        with open(out_path, 'w') as f:
+            _json.dump(snapshot, f, indent=2)
+    except OSError as e:
+        summary['errors'].append(f'snapshot write {out_path}: {e}')
+
+    matched_dids = set()
+    qs = Dataset.objects.filter(metadata__stage='evgen')
+    for ds in qs.iterator():
+        summary['datasets_seen'] += 1
+        req_tail = _request_input_tail(ds.source_location)
+        if not req_tail:
+            summary['datasets_unmatched'] += 1
+            continue
+        matches = [d for d, dtail in indexed if _evgen_input_match(req_tail, dtail)]
+        if not matches:
+            summary['datasets_unmatched'] += 1
+            continue
+        summary['datasets_matched'] += 1
+        for d in matches:
+            matched_dids.add(d['did'])
+        entries = [_rucio_evgen_entry(d, checked_at) for d in matches]
+        if len(summary['samples']) < 12:
+            summary['samples'].append({
+                'dataset': ds.did,
+                'request': ds.source_location,
+                'matched': [e['did'] for e in entries],
+            })
+        if apply:
+            md = dict(ds.metadata or {})
+            md['rucio'] = {'matched': entries, 'checked_at': checked_at}
+            ds.metadata = md
+            try:
+                ds.save(update_fields=['metadata'])
+            except Exception as e:                            # noqa: BLE001
+                summary['errors'].append(f'{ds.did}: save: {e}')
+
+    summary['rucio_unmatched'] = len([d for d in records
+                                      if d['did'] not in matched_dids])
+    return summary
+
+
 def set_pcs_campaign_lifecycle(new_name, target_lifecycle, *, created_by='operator'):
     """Set the PCS Campaign with lifecycle=`target_lifecycle` to `new_name`.
 

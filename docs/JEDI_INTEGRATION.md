@@ -264,16 +264,29 @@ PCS-side dataset model.
 
 ### Mode summary
 
-| Mode | When | `noInput` | How payload sees the input |
+| Mode | When | `noInput` | How the payload sees the input |
 |------|------|-----------|----------------------------|
 | Generation-only | No external EVGEN; payload generates events | `True` | n/a |
-| External EVGEN — payload-staged | External CSV manifest names the input files | `True` | `CSV_FILE=<location>` env var; payload script downloads and stages the listed files at runtime |
-| External EVGEN — Rucio input | (Future) input is a registered Rucio dataset | `False` | JEDI drives input via standard `pfnList`/dataset reference |
+| External EVGEN — payload-staged (filesystem) | A CSV manifest names input files on a filesystem path | `True` | `CSV_FILE=<location>` env var; the payload downloads and stages the listed files at runtime |
+| External EVGEN — payload-staged (Rucio-resident) | Input is a dataset registered in JLab Rucio | `True` | input DID passed via env; the payload pulls the registered dataset from JLab Rucio at runtime |
+| External EVGEN — JEDI-driven | Input is a Rucio dataset resolved by JEDI | `False` | `--inDS`/`pfnList`; does not apply — see the single-Rucio constraint below |
 
-Only the first two modes are in scope for the current PCS implementation.
-Rucio-managed input is the natural follow-on once externally supplied EVGEN
-files are registered as Rucio datasets, but it is deferred — moving from
-payload-staged to Rucio-driven input is a localized later change.
+### Data handling and the single-Rucio constraint
+
+A PanDA server is configured against one Rucio instance. The BNL PanDA server
+used for ePIC production uses BNL Rucio, where PanDA registers job logs. ePIC
+production data — EVGEN inputs and RECO/FULL outputs — is held in JLab Rucio, a
+separate instance. The production payload performs all science-data movement
+directly against JLab Rucio, so PanDA does not resolve, transfer, or register
+the science data on either the input or the output side.
+
+JEDI-driven input (`--inDS`/`pfnList`, `noInput=False`) would require JEDI to
+resolve the input DID and its replicas through PanDA's Rucio, which is BNL Rucio,
+where the EVGEN is absent; it therefore does not apply. Rucio-resident EVGEN
+input is staged by the payload from JLab Rucio instead: the registered input DID
+is passed to the payload through the environment, by the same mechanism as the
+filesystem `CSV_FILE` path, and `noInput` remains `True`. This keeps the input
+side consistent with the output side, with PanDA out of the science-data path.
 
 ### Payload-staged external EVGEN
 
