@@ -5,6 +5,8 @@ Tag lifecycle: draft (editable) → locked (immutable, usable in datasets).
 Tag numbering: physics tags = category.digit * 1000 + N; e/s/r tags increment from 1 via PersistentState.
 Datasets: composed from four tags (plus optional background), auto-named, with block management for Rucio's 100k file limit.
 """
+import re
+
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
@@ -200,6 +202,12 @@ class Dataset(models.Model):
         BackgroundTag, on_delete=models.PROTECT, related_name='datasets',
         null=True, blank=True,
     )
+    # Sample-variant discriminator: the trailing identity segment that tells
+    # apart datasets sharing one tag composition (e.g. the single-particle
+    # angular range '130to177deg'). It is a production discriminator, not a
+    # physics parameter, so it is not a tag; it composes into the dataset name
+    # after the tag run. Empty when the tags alone are a unique identity.
+    sample_name = models.CharField(max_length=120, blank=True, default='')
     block_num = models.PositiveIntegerField(default=1)
     blocks = models.PositiveIntegerField(default=1)
     did = models.CharField(max_length=300, unique=True)
@@ -271,7 +279,15 @@ class Dataset(models.Model):
         # Draft tags are allowed on datasets during alpha — composition stays
         # editable so ops can fix tag meaning. Reproducibility locking is
         # enforced at submission prep, not here; tightened as we commission.
-        pass
+        # Reserved-token rule (PCS.md §Sample Variants): the sample segment must
+        # not collide with the k-tag or block-suffix tokens that anchor the
+        # positional name parse — first segment != k<n>, last segment != b<n>.
+        if self.sample_name:
+            segs = self.sample_name.split('.')
+            if re.fullmatch(r'k\d+', segs[0]) or re.fullmatch(r'b\d+', segs[-1]):
+                raise ValidationError(
+                    f"sample_name {self.sample_name!r} collides with a reserved "
+                    f"token (first segment k<n> or last segment b<n>).")
 
     def save(self, *args, **kwargs):
         if not self.dataset_name:
@@ -284,10 +300,12 @@ class Dataset(models.Model):
         super().save(*args, **kwargs)
 
     def build_dataset_name(self):
-        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}[.{k}]
+        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}[.{k}][.{sample_name}]
 
         The background segment is appended only when the dataset carries a
-        background tag.
+        background tag; the sample-variant segment only when the dataset carries
+        a sample_name. The sample segment is taken verbatim and may contain
+        periods (positional parse, see PCS.md §Sample Variants).
         """
         name = (
             f"{self.scope}.{self.detector_version}.{self.detector_config}"
@@ -296,6 +314,8 @@ class Dataset(models.Model):
         )
         if self.background_tag_id:
             name = f"{name}.{self.background_tag.tag_label}"
+        if self.sample_name:
+            name = f"{name}.{self.sample_name}"
         return name
 
     @property

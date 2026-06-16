@@ -73,7 +73,7 @@ TAG_SCHEMAS = {
     'e': {
         'required': ['generator', 'generator_version'],
         'optional': [
-            'signal_freq', 'signal_status',
+            'signal_freq', 'signal_status', 'radiative',
             'bg_tag_prefix', 'bg_files',
             'notes',
         ],
@@ -81,6 +81,7 @@ TAG_SCHEMAS = {
         'prefix': 'e',
         'model': 'EvgenTag',
         'choices': {
+            'radiative': ['on', 'off'],
             'generator': [
                 'pythia8', 'EpIC', 'BeAGLE', 'eSTARlight', 'sartre',
                 'DEMPgen', 'lAger', 'rapgap', 'particle_gun',

@@ -77,7 +77,7 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
                    detector_version=None, detector_config=None,
                    physics_tag_label=None, evgen_tag_label=None,
                    simu_tag_label=None, reco_tag_label=None,
-                   background_tag_label=None,
+                   background_tag_label=None, sample_name='',
                    description='', created_by):
     """
     Idempotent intake of an external (e.g. EVGEN CSV manifest) Dataset.
@@ -134,6 +134,7 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
         scope=scope,
         detector_version=detector_version,
         detector_config=detector_config,
+        sample_name=sample_name,
         description=description,
         metadata={
             'stage': stage,
@@ -732,6 +733,11 @@ def find_or_create_evgen_tag(params, *, created_by='csv_import', dry_run=False):
         'parameters__generator': params.get('generator', ''),
         'parameters__generator_version': params.get('generator_version', ''),
     }
+    # Radiative corrections split an otherwise-identical generator into distinct
+    # tags; match on it only when the derivation set it, so non-radiative
+    # generators keep matching by (generator, generator_version) alone.
+    if params.get('radiative'):
+        match['parameters__radiative'] = params['radiative']
     matches = sorted(
         EvgenTag.objects.filter(**match),
         key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
@@ -852,6 +858,12 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             if gen_ver:
                 metadata['source']['gen_version'] = gen_ver
 
+            # Single-particle samples share a (particle, energy) tag and differ
+            # only by polar-angle range — the sample-variant discriminator that
+            # composes into the dataset name. Empty for everything else (the
+            # tags are a unique identity there). Same value as the per-task
+            # angular_range above.
+            ds_sample_name = angular_range
             ds = Dataset.objects.filter(dataset_name=dataset_name, block_num=1).first()
             if ds:
                 ds.description = (row.get('Description') or '').strip()
@@ -859,6 +871,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 ds.physics_tag = row_physics_tag
                 ds.evgen_tag = row_evgen_tag
                 ds.background_tag = row_background_tag
+                ds.sample_name = ds_sample_name
                 ds.save()
                 ds_created = False
             else:
@@ -870,6 +883,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     physics_tag=row_physics_tag, evgen_tag=row_evgen_tag,
                     simu_tag=simu, reco_tag=reco,
                     background_tag=row_background_tag,
+                    sample_name=ds_sample_name,
                     description=(row.get('Description') or '').strip(),
                     metadata=metadata,
                     created_by=created_by,

@@ -269,6 +269,21 @@ def derive_evgen(path, gen_version=''):
     segs = (path or '').split('/')
     if len(segs) > 1 and segs[0] == 'EVGEN' and segs[1] == 'SINGLE':
         return {'generator': 'particle_gun', 'generator_version': ''}
+    # Radiative corrections are a generator run-mode that genuinely changes the
+    # physics, so they belong in the evgen tag (not a sample discriminator): a
+    # 'Rad' / 'noRad' path segment splits an otherwise-identical generator into
+    # distinct tags. Only set when the path names it; absent elsewhere.
+    radiative = ''
+    if 'noRad' in segs:
+        radiative = 'off'
+    elif 'Rad' in segs:
+        radiative = 'on'
+
+    def _with_rad(params):
+        if radiative:
+            params['radiative'] = radiative
+        return params
+
     gv = (gen_version or '').strip()
     # PYTHIA-RAD-CORR releases are bare versions and the path's pythia6 segment
     # is not a clean generator+version — ambiguous, left for manual association.
@@ -278,11 +293,11 @@ def derive_evgen(path, gen_version=''):
     if release.startswith('dataprod_rel') and 'github.com/' in gv:
         repo = gv.split('github.com/', 1)[1].split('/releases', 1)[0].split('/')[-1]
         if repo:
-            return {'generator': repo, 'generator_version': release}
+            return _with_rad({'generator': repo, 'generator_version': release})
     for tok in [release, gv, *segs]:
         g, v = _split_gen_token(tok)
         if g:
-            return {'generator': g, 'generator_version': v}
+            return _with_rad({'generator': g, 'generator_version': v})
     return None
 
 
