@@ -119,13 +119,15 @@ the missing data.
 
 ## Current state
 
-Implemented: assimilation and the input matcher, dry-run verified. On the
-inventory as assimilated, the matcher resolves the DIS NC pythia8 samples (with
-the Q² fan-out above) and one beam-gas background; SIDIS and other classes fall
-to unmatched where the registered version, charge, or class differs from the
-request, as designed. Not yet implemented: the catalog update button and the UI
-surfacing of the matched/unmatched populations, and consuming a matched EVGEN
-dataset as a payload-staged submission input.
+Implemented: the assimilation sweep, the input matcher, and the catalog
+"Update EVGEN from Rucio" button (the production operations agent runs the sweep
+with apply and the page refreshes on completion). On the assimilated inventory
+the matcher resolves the DIS NC pythia8 samples (with the Q² fan-out above) and
+one beam-gas background; SIDIS and other classes fall to unmatched where the
+registered version, charge, or class differs from the request, as designed. Not
+yet implemented: the catalog UI surfacing of the matched and unmatched
+populations, and consuming a matched EVGEN dataset as a payload-staged
+submission input.
 
 ## Related
 

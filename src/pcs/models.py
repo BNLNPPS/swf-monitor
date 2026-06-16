@@ -700,6 +700,27 @@ class ProdTask(models.Model):
         return any(not o.get('complete', True) for o in self.outputs)
 
     @property
+    def inputs(self):
+        """Resolved Rucio EVGEN input datasets — the matched entries written by
+        the EVGEN assimilation onto the bound Dataset's
+        ``metadata['rucio']['matched']`` (each ``{did, stage, filters, rses,
+        file_count, bytes, complete, checked_at}``). The input-side analog of
+        ``outputs``; see EPICPROD_EVGEN_INPUTS.md."""
+        md = (self.dataset.metadata or {}) if self.dataset_id else {}
+        matched = (md.get('rucio') or {}).get('matched')
+        return matched if isinstance(matched, list) else []
+
+    @property
+    def has_input(self):
+        """True if the EVGEN input request resolved to one or more Rucio datasets."""
+        return bool(self.inputs)
+
+    @property
+    def input_incomplete(self):
+        """True if any resolved Rucio input is not fully replicated at every RSE."""
+        return any(not i.get('complete', True) for i in self.inputs)
+
+    @property
     def input_source_kind(self):
         """Source kind of the external input. Linked Dataset wins; csv_file fallback."""
         ds = self.input_dataset

@@ -1368,6 +1368,8 @@ def pcs_catalog(request):
     rucio_unmatched_campaign = ''
     rucio_detected = []
     rucio_current_name = ''
+    evgen_rucio_unmatched = []
+    evgen_rucio_checked_at = ''
     if active_lifecycle == 'current':
         camp_list = campaigns_by_lifecycle['current']
         target = camp_list[0] if camp_list else None
@@ -1381,6 +1383,8 @@ def pcs_catalog(request):
             rucio_unmatched_campaign = target.name
             rucio_detected = (target.data or {}).get('detected_releases', []) or []
             rucio_current_name = target.name
+            evgen_rucio_unmatched = (target.data or {}).get('evgen_rucio_unmatched', []) or []
+            evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
 
     context = {
         'tasks': list(qs),
@@ -1400,6 +1404,8 @@ def pcs_catalog(request):
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
         'rucio_detected': rucio_detected,
         'rucio_current_name': rucio_current_name,
+        'evgen_rucio_unmatched': evgen_rucio_unmatched,
+        'evgen_rucio_checked_at': evgen_rucio_checked_at,
     }
     return render(request, 'pcs/pcs_catalog.html', context)
 

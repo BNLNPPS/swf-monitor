@@ -211,6 +211,20 @@
   </details>
   {% endif %}
 
+  {% if evgen_rucio_unmatched %}
+  <details class="mb-3 small">
+    <summary class="text-muted">
+      <strong style="color:#dc3545">&#9888; {{ evgen_rucio_unmatched|length }} EVGEN dataset{{ evgen_rucio_unmatched|length|pluralize }} in Rucio unclaimed by any request</strong>
+      {% if evgen_rucio_checked_at %}<span class="text-muted">(as of {{ evgen_rucio_checked_at }})</span>{% endif %}
+    </summary>
+    <ul class="mt-2 mb-0" style="font-family:monospace; font-size:0.85em;">
+    {% for u in evgen_rucio_unmatched %}
+      <li>{{ u.did }} &middot; {{ u.files }} files &middot; {{ u.bytes|filesizeformat }}</li>
+    {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
   {% include "pcs/_task_list_filter.html" %}
 </div>
 

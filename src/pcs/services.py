@@ -2329,9 +2329,9 @@ def refresh_evgen_rucio(*, apply=False, snapshot_dir=RUCIO_SNAPSHOT_DIR,
         raise ServiceError(f'JLab Rucio EVGEN fetch failed: {e}')
 
     checked_at = _time.strftime('%Y-%m-%dT%H:%M:%S%z')
-    # Drop obvious throwaway DIDs (a stray '.../q2_1to10/test').
+    # Drop obvious throwaway DIDs (a stray '.../q2_1to10/test', any case).
     records = [d for d in inv.get('datasets', [])
-               if d.get('did') and not d['did'].rstrip('/').endswith('/test')]
+               if d.get('did') and not d['did'].rstrip('/').lower().endswith('/test')]
     summary['rucio_evgen'] = len(records)
     indexed = [(d, _evgen_did_tail(d['did'])) for d in records]
 
@@ -2377,8 +2377,28 @@ def refresh_evgen_rucio(*, apply=False, snapshot_dir=RUCIO_SNAPSHOT_DIR,
             except Exception as e:                            # noqa: BLE001
                 summary['errors'].append(f'{ds.did}: save: {e}')
 
-    summary['rucio_unmatched'] = len([d for d in records
-                                      if d['did'] not in matched_dids])
+    unmatched_records = [d for d in records if d['did'] not in matched_dids]
+    summary['rucio_unmatched'] = len(unmatched_records)
+    if apply:
+        # Persist the unmatched-Rucio list (EVGEN registered but claimed by no
+        # request) onto the current Campaign, the same home the produced-output
+        # sweep uses for its rucio_unmatched, so the catalog can surface it.
+        unmatched_list = []
+        for d in unmatched_records:
+            reps = d.get('rse_replicas') or []
+            files = max([r.get('length') or 0 for r in reps] or [d.get('length') or 0])
+            bytes_ = max([r.get('bytes') or 0 for r in reps] or [d.get('bytes') or 0])
+            unmatched_list.append({
+                'did': d['did'], 'files': files, 'bytes': bytes_,
+                'rses': sorted({r.get('rse', '') for r in reps if r.get('rse')}),
+            })
+        camp = Campaign.objects.filter(lifecycle='current').first()
+        if camp is not None:
+            camp.data = {**(camp.data or {}),
+                         'evgen_rucio_unmatched': unmatched_list,
+                         'evgen_rucio_checked_at': checked_at}
+            camp.save(update_fields=['data', 'updated_at'])
+            summary['unmatched_persisted'] = len(unmatched_list)
     return summary
 
 

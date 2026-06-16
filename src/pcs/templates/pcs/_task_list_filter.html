@@ -155,6 +155,12 @@ Context expected:
     <a href="#" data-toggle="has_reco" class="filter-link">Reco (<span data-count="has_reco">0</span>)</a>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">EVGEN input:</span>
+    <a href="#" data-toggle="has_input" class="filter-link">matched (<span data-count="has_input">0</span>)</a>
+    <a href="#" data-toggle="no_input" class="filter-link">unmatched (<span data-count="no_input">0</span>)</a>
+    <a href="#" data-toggle="incomplete_input" class="filter-link">incomplete (<span data-count="incomplete_input">0</span>)</a>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Flags:</span>
     <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
     <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
@@ -217,6 +223,9 @@ Context expected:
           data-incomplete-output="{% if t.output_incomplete %}1{% else %}0{% endif %}"
           data-has-simu="{% if 'FULL' in t.output_stages %}1{% else %}0{% endif %}"
           data-has-reco="{% if 'RECO' in t.output_stages %}1{% else %}0{% endif %}"
+          data-has-input="{% if t.has_input %}1{% else %}0{% endif %}"
+          data-no-input="{% if t.dataset.stage == 'evgen' and not t.has_input %}1{% else %}0{% endif %}"
+          data-incomplete-input="{% if t.input_incomplete %}1{% else %}0{% endif %}"
           data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
         <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.pk }}"></td>
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
@@ -247,6 +256,17 @@ Context expected:
                 <li>{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}:
                   <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a>
                   <span class="text-muted">&middot; {{ o.file_count }} files{% if o.rses %} &middot; {% for r in o.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}</span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+          {% if t.inputs %}
+            <div><strong class="text-muted">Rucio EVGEN:</strong>
+              <ul class="mb-0 ps-3">
+                {% for i in t.inputs %}
+                <li><a href="{{ i.did|rucio_did_url }}" title="Rucio dataset detail">{{ i.did }}</a>
+                  <span class="text-muted">&middot; {{ i.file_count }} files{% if i.rses %} &middot; {% for r in i.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}</span>
                 </li>
                 {% endfor %}
               </ul>
@@ -294,7 +314,8 @@ Context expected:
   const STR = ['status','requestor','evgen','submission_path','priority','nevents',
                'detector','beam','physics','q2','species','energy'];
   const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background',
-                'has_output','no_output','incomplete_output','has_simu','has_reco'];
+                'has_output','no_output','incomplete_output','has_simu','has_reco',
+                'has_input','no_input','incomplete_input'];
   const DS = { status:'status', requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
                priority:'priority', nevents:'nevents',
@@ -305,7 +326,9 @@ Context expected:
                background:'background',
                has_output:'hasOutput', no_output:'noOutput',
                incomplete_output:'incompleteOutput',
-               has_simu:'hasSimu', has_reco:'hasReco' };
+               has_simu:'hasSimu', has_reco:'hasReco',
+               has_input:'hasInput', no_input:'noInput',
+               incomplete_input:'incompleteInput' };
 
   // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
   function energyMeV(s) {
@@ -346,6 +369,9 @@ Context expected:
     incomplete_output: initial.get('incomplete_output') === '1',
     has_simu: initial.get('has_simu') === '1',
     has_reco: initial.get('has_reco') === '1',
+    has_input: initial.get('has_input') === '1',
+    no_input: initial.get('no_input') === '1',
+    incomplete_input: initial.get('incomplete_input') === '1',
   };
 
   function rowMatches(tr, skip) {
@@ -376,7 +402,8 @@ Context expected:
                         priority:{}, nevents:{},
                         detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
     const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0,
-                         has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0 };
+                         has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0,
+                         has_input:0, no_input:0, incomplete_input:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
         if (rowMatches(tr, k)) {
@@ -425,7 +452,8 @@ Context expected:
     ['q','status','requestor','evgen','submission_path','priority','nevents',
      'detector','beam','physics','q2','species','energy',
      'new_request','pre_tdr_use','early_science_use','other_use','background',
-     'has_output','no_output','incomplete_output','has_simu','has_reco'].forEach(k => p.delete(k));
+     'has_output','no_output','incomplete_output','has_simu','has_reco',
+     'has_input','no_input','incomplete_input'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
     for (const k of BOOL) if (state[k]) p.set(k, '1');
