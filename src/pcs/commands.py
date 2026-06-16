@@ -441,13 +441,15 @@ _EVGEN_EXTS = ('hepmc3.tree.root', 'hepmc.gz', 'hepmc3.gz', 'hepmc3', 'hepmc')
 
 
 def _split_evgen_ext(basename):
-    """Split an EVGEN filename into (stem, ext), stripping a known multi-dot
-    suffix. Falls back to the last dot for an unrecognized extension."""
+    """Split an EVGEN filename into (stem, ext) by a known multi-dot suffix.
+    Raises ValueError on an unrecognized extension — no silent last-dot guess,
+    which would mangle a version-dotted name (lAger3.6.1-1.0_…)."""
     for ext in _EVGEN_EXTS:
         if basename.endswith('.' + ext):
             return basename[:-(len(ext) + 1)], ext
-    stem, _, ext = basename.rpartition('.')
-    return (stem or basename), ext
+    raise ValueError(
+        f'unrecognized EVGEN file extension: {basename!r} '
+        f'(known: {", ".join(_EVGEN_EXTS)})')
 
 
 def _evgen_manifest_from_inputs(task, events_per_job):
@@ -578,6 +580,9 @@ def build_evgen_task_params(task):
     container = cfg.get('container_image') or ''
     if not container and cfg.get('jug_xl_tag'):
         container = f"/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:{cfg['jug_xl_tag']}"
+    if not container:
+        raise ValueError(
+            'no container image (set container_image or jug_xl_tag on the config)')
 
     # csv_base: a filesystem-safe stem for the per-task manifest in the sandbox.
     csv_base = re.sub(r'[^A-Za-z0-9._-]', '_', dataset_identifier) or 'evgen_input'

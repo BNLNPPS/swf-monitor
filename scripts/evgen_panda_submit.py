@@ -189,6 +189,13 @@ def main():
         return 3
 
     params = build_task_params(spec, archive_name)
+    if not params.get('sourceURL'):
+        _log("ERROR: could not derive sourceURL from Client.baseURLSSL "
+             "(no ${SURL} for the payload) — refusing to submit")
+        return 3
+    if not params.get('container_name'):
+        _log("ERROR: no container image in spec — refusing to submit")
+        return 3
     client = panda_api.get_api()
     result = client.submit_task(params)
     _log(f"submit_task result: {result}")

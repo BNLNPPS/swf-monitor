@@ -410,11 +410,19 @@ per manifest row.
 
 ### Output authentication
 
-The payload registers RECO to JLab Rucio as `eicprod`. The doer ships the JLab
-x509 proxy in the sandbox — the proven method — defaulting to the agent's
-`X509_USER_PROXY` (`production.env`) and overridable with `EVGEN_X509_PROXY`; the
-payload reads it back through `environment*.sh`. The proxy is the operator's to
-provide; the web tier and the MCP server hold no credential.
+The payload registers RECO to JLab Rucio as `eicprod`. The doer ships the
+`eicprod` x509 proxy in the sandbox — the proven condor-template method
+(`submit_csv.sh` copies the proxy in; the payload's `run.sh` reads it back through
+`environment*.sh` → `rucio.cfg`). This is settled and needs no verification: the
+working condor jobs register their output with this same `eicprod` credential, so
+its success there is the proof it authenticates as `eicprod@JLab`.
+
+The proxy is named by `EVGEN_X509_PROXY` and shipped verbatim — **there is no
+fallback** (no silent default). It is **not** `X509_USER_PROXY`
+(`longproxy-for-rucio`), the agent's BNL Rucio metadata and log-fetch credential
+(account `panda`), which does not write JLab output; shipping it would break the
+pattern. The operator points `EVGEN_X509_PROXY` at the `eicprod` proxy; the web
+tier and the MCP server hold no credential.
 
 ### Commissioning defaults
 

@@ -132,8 +132,11 @@ def main():
     ap.add_argument("--owner", default=os.environ.get("SWF_TASK_OWNER", ""),
                     help="ProdTask.created_by; sent as X-Remote-User for the owner-gated record write")
     ap.add_argument("--proxy",
-                    default=os.environ.get("EVGEN_X509_PROXY") or os.environ.get("X509_USER_PROXY", ""),
-                    help="JLab x509 proxy shipped in the sandbox for output registration")
+                    default=os.environ.get("EVGEN_X509_PROXY", ""),
+                    help="JLab eicprod x509 proxy shipped in the sandbox for output "
+                         "registration (EVGEN_X509_PROXY) — the same credential the condor "
+                         "template ships. NOT X509_USER_PROXY/longproxy-for-rucio, which is "
+                         "the BNL Rucio metadata credential and would not write to JLab.")
     ap.add_argument("--auth-vo", default=DEFAULT_AUTH_VO,
                     help="PANDA_AUTH_VO for the submission (default EIC.production)")
     ap.add_argument("--pclient-setup", default=DEFAULT_PCLIENT_SETUP,
