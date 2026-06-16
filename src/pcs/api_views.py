@@ -300,16 +300,16 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         from django.http import HttpResponse, JsonResponse
         from .commands import (
             build_condor_command, build_panda_command,
-            build_task_params, build_task_dump,
+            build_task_params, build_task_dump, build_evgen_task_params,
         )
 
         name = request.query_params.get('name')
         fmt = request.query_params.get('fmt', '').lower()
         if not name:
             return Response({'detail': 'Missing ?name='}, status=status.HTTP_400_BAD_REQUEST)
-        if fmt not in ('condor', 'panda', 'jedi', 'dump'):
+        if fmt not in ('condor', 'panda', 'jedi', 'evgen', 'dump'):
             return Response(
-                {'detail': "fmt must be one of: condor, panda, jedi, dump"},
+                {'detail': "fmt must be one of: condor, panda, jedi, evgen, dump"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
@@ -323,6 +323,19 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return HttpResponse(build_panda_command(task), content_type='text/plain')
         if fmt == 'jedi':
             return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
+        if fmt == 'evgen':
+            # Client-API EVGEN production spec for the submit-evgen-task doer.
+            # Builds the manifest by resolving the matched DID(s) against JLab
+            # Rucio. A misconfigured task raises ValueError (400); a Rucio
+            # failure raises ServiceError (its status) — never a silent empty
+            # spec.
+            try:
+                return JsonResponse(build_evgen_task_params(task),
+                                    json_dumps_params={'indent': 2})
+            except ValueError as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except ServiceError as e:
+                return Response({'detail': e.detail}, status=e.status)
         return JsonResponse(build_task_dump(task), json_dumps_params={'indent': 2})
 
     @action(detail=True, methods=['post'], url_path='set-status')

@@ -362,21 +362,79 @@ When JEDI processes this task, `GenTaskRefiner` (61 lines, `panda-server/pandaje
 
 The `GenJobBroker` then handles site selection using the simplified non-ATLAS brokerage logic: filter by queue status, disk space, walltime constraints, then select.
 
-## Implementation status (2026-06-03)
+## Client-API EVGEN submission
 
-The **live** submission path is **prun via the prod-ops agent**, not the direct
-`Client.insertTaskParams` of Phase 2. `build_panda_command` (`commands.py`) emits
-the `prun` command; the agent's `submit_task` doer (`scripts/submit-prod-task.py`)
-fetches it from `/pcs/api/prod-tasks/command/?fmt=panda` and runs it
-non-interactively under the operator's cached OIDC token, then records the
-jediTaskID via `/pcs/api/prod-tasks/record-submission/`. This matches the
-validated manual recipe (jediTaskID 36439, see [EPICPROD_OPS.md](EPICPROD_OPS.md)).
+The live Submit path is the client-API EVGEN submission, which reproduces the
+proven condor-side recipe (`eic/job_submission_condor`, `submit_panda_api.py`) as
+code owned by this repo and runs it inside the prod-ops agent. It supersedes the
+prun path for the Submit button; prun (`build_panda_command`,
+`scripts/submit-prod-task.py`) is retained but unwired.
 
-`build_task_params` (the `taskParamMap`, `?fmt=jedi`) is **preview-only** today —
-rendered in the compose UI but not submitted. Phase 2 (`pcs/submission.py`,
-direct `insertTaskParams`) is not built; if adopted it must reconcile with the
-prun path's defaults (e.g. `vo`: `eic` in `build_task_params` vs `wlcg` in
-`build_panda_command`). Phases 3-4 (status polling) remain design.
+A production EVGEN task is `noInput=True`+`noOutput=True`: the containerized
+payload streams its EVGEN input from JLab over xrootd and self-registers RECO to
+JLab Rucio, so PanDA handles no science data (the single-Rucio constraint above).
+The `taskParamMap` wraps the generic `runGen` TRF through `multiStepExec`, carries
+a `sourceURL`, and turns `%RNDM=0` into a per-job `${SEQNUMBER}`, so one job runs
+per manifest row.
+
+### Components
+
+- **`commands.build_evgen_task_params(task)`** (`?fmt=evgen`) — the
+  credential-free spec. It resolves the task's matched JLab Rucio EVGEN DID(s)
+  (`Dataset.metadata['rucio']['matched']`, written by the EVGEN assimilation) to
+  their files over the public `eicread` read, and emits one manifest row
+  (`file,ext,nevents,ichunk`) per file. A Rucio file's name is the xrootd path
+  below `EVGEN/` — the payload prepends `root://…/volatile/eic/EPIC/` to
+  `EVGEN/<file>`. Rucio carries no per-file event count, so `nevents` is the
+  configured per-job count (`events_per_job`) and there is one job per file.
+  `outDS` follows the proven path-derived form
+  (`{scope}.{detector_version}.{detector_config}.{dir}`); under `noOutput` it is
+  the task name only.
+- **`scripts/evgen_panda_submit.py`** — the submission kernel, this repo's owned
+  port of `submit_panda_api.py`: it builds the `taskParamMap`, uploads the
+  sandbox to the PanDA cache, and submits via `pandaclient` under the operator's
+  OIDC token.
+- **`scripts/submit-evgen-task.py`** — the credentialed doer, the EVGEN
+  counterpart of `submit-prod-task.py`. It fetches the spec, assembles the
+  sandbox (the manifest, the `environment-*.sh` the payload sources, the in-job
+  dispatcher, and the JLab x509 proxy), runs the kernel under the panda-client
+  environment, and records the jediTaskID back via `record-submission`.
+- **`scripts/evgen_job_dispatcher.py`** — shipped in the sandbox. In-job it reads
+  the manifest row for its `${SEQNUMBER}` and invokes the payload
+  (`/opt/campaigns/hepmc3/scripts/run.sh`), which sources `environment*.sh` from
+  the unpacked sandbox.
+- **`agents/epicprod_ops_agent.py`** — the `submit_evgen_task` handler and doer,
+  deduped per task, emitting the same `prodtask_submitted` /
+  `prodtask_submit_failed` / `prodtask_submit_unrecorded` SSE events as the prun
+  path, so the compose page needs no change.
+
+### Output authentication
+
+The payload registers RECO to JLab Rucio as `eicprod`. The doer ships the JLab
+x509 proxy in the sandbox — the proven method — defaulting to the agent's
+`X509_USER_PROXY` (`production.env`) and overridable with `EVGEN_X509_PROXY`; the
+payload reads it back through `environment*.sh`. The proxy is the operator's to
+provide; the web tier and the MCP server hold no credential.
+
+### Commissioning defaults
+
+Scouts are off on this path by default (`skipScout`), so the walltime is used
+directly and the `noInput` pseudo-input HS06 brokerage pitfall is avoided; a
+config can re-enable them.
+
+## Implementation status (2026-06-16)
+
+The **live** Submit path is the **client-API EVGEN doer** (`submit_evgen_task`),
+described under [Client-API EVGEN submission](#client-api-evgen-submission). The
+prun path of 2026-06-03 — `build_panda_command` + `scripts/submit-prod-task.py`,
+which produced the first managed submission (jediTaskID 36439, see
+[EPICPROD_OPS.md](EPICPROD_OPS.md)) — is retained but unwired from the button.
+
+`build_task_params` (the generation-only `taskParamMap`, `?fmt=jedi`) remains a
+preview: `noInput` with JEDI-managed outputs, without the `noOutput`, sandbox, and
+`multiStepExec` the production payload needs. The client-API path (`?fmt=evgen`)
+is the production form. Phase 2 (`pcs/submission.py`, in-process
+`insertTaskParams`) is not built. Phases 3-4 (status polling) remain design.
 
 ## Implementation Plan
 

@@ -73,6 +73,11 @@ SUBMIT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-pro
 # Backstop on the prun submission subprocess (sandbox upload + JEDI insert).
 SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 
+# Client-API EVGEN submission doer (sidelines prun): assembles the sandbox
+# (manifest + env + dispatcher + JLab proxy) and submits noInput+noOutput.
+SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-evgen-task.py"
+SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
+
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
 # the per-task rematch — slow and network-bound, so generously bounded.
 RUCIO_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-snapshot-update.py"
@@ -99,8 +104,9 @@ EXIT_DELIBERATE = 100
 class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
-    KNOWN_TYPES = {"fetch_payload_log", "submit_task", "rucio_snapshot_update",
-                   "evgen_rucio_update", "catalog_import", "health_ping", "shutdown"}
+    KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
+                   "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
+                   "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -267,6 +273,68 @@ class EpicProdOpsAgent(BaseAgent):
                 'jedi_task_id': jedi_task_id, 'reason': reason})
         else:
             self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submit_failed',
+                'task_name': task_name, 'reason': reason})
+
+    def _handle_submit_evgen_task(self, m):
+        """Validate, then run the client-API EVGEN submission on the worker
+        pool. This is the live Submit-button path (prun is sidelined). Deduped
+        per task so two near-simultaneous triggers can't fire two submissions."""
+        task_name = m.get("task_name")
+        if not task_name:
+            self.logger.error("PRODOPS submit_evgen_task: missing task_name")
+            return
+        self.run_in_background(
+            self._do_submit_evgen_task, m,
+            dedup_key=f"submit:{task_name}", label=f"submit_evgen_task {task_name}")
+
+    def _do_submit_evgen_task(self, m):
+        """Submit one PCS ProdTask to PanDA via the client-API EVGEN doer.
+
+        The doer fetches the EVGEN spec from PCS, assembles the sandbox
+        (manifest + env + dispatcher + JLab proxy), and submits noInput+noOutput
+        with the cached production token; the payload stages its EVGEN input and
+        self-registers RECO to JLab Rucio. Outcome lands on the ProdTask
+        (panda_task_id + status) via record-submission, and every outcome emits
+        the same SSE events as the prun path, so the compose page is unchanged
+        and never left polling. The JLab proxy + monitor URL/token travel in the
+        agent's environment (SWF_MONITOR_URL, SWFMON_TOKEN, EVGEN_X509_PROXY)."""
+        task_name = m["task_name"]
+        cmd = [sys.executable, str(SUBMIT_EVGEN_SCRIPT), "--task-name", str(task_name)]
+        if m.get("owner"):          # X-Remote-User for the owner-gated record write
+            cmd += ["--owner", str(m["owner"])]
+        self.logger.info(f"PRODOPS submit_evgen_task: {task_name}")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_EVGEN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(f"PRODOPS submit_evgen_task TIMEOUT after {SUBMIT_EVGEN_TIMEOUT}s: {task_name}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
+                'reason': f'submission timed out after {SUBMIT_EVGEN_TIMEOUT}s'})
+            return
+        stderr = p.stderr or ""
+        for line in stderr.splitlines():
+            self.logger.info(f"  submit-evgen-task: {line}")
+        jedi_task_id = (p.stdout or '').strip()
+        reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+        if p.returncode == 0 and jedi_task_id:
+            self.logger.info(
+                f"PRODOPS submit_evgen_task done: {task_name} -> jediTaskID={jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submitted',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id})
+        elif p.returncode == 7 and jedi_task_id:
+            # Submitted, but the record-back POST failed after retries — an
+            # orphan; surface the id (record-submission is idempotent).
+            self.logger.error(
+                f"PRODOPS submit_evgen_task UNRECORDED: {task_name} submitted as "
+                f"jediTaskID={jedi_task_id} but record-back failed")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
+                'jedi_task_id': jedi_task_id, 'reason': reason})
+        else:
+            self.logger.error(f"PRODOPS submit_evgen_task FAILED rc={p.returncode}: {task_name}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})

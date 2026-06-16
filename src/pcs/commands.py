@@ -10,6 +10,7 @@ Reference repos:
 - eic/simulation_campaign_datasets — CSV input files
 """
 
+import re
 import shlex
 
 
@@ -431,3 +432,180 @@ def build_task_params(task):
     ]
 
     return params
+
+
+# Known ePIC EVGEN file extensions, longest-match first. EVGEN filenames carry
+# version dots (e.g. lAger3.6.1-1.0_jpsi_..._run1.hepmc3.tree.root), so the
+# extension is a known multi-dot suffix, NOT everything after the first dot.
+_EVGEN_EXTS = ('hepmc3.tree.root', 'hepmc.gz', 'hepmc3.gz', 'hepmc3', 'hepmc')
+
+
+def _split_evgen_ext(basename):
+    """Split an EVGEN filename into (stem, ext), stripping a known multi-dot
+    suffix. Falls back to the last dot for an unrecognized extension."""
+    for ext in _EVGEN_EXTS:
+        if basename.endswith('.' + ext):
+            return basename[:-(len(ext) + 1)], ext
+    stem, _, ext = basename.rpartition('.')
+    return (stem or basename), ext
+
+
+def _evgen_manifest_from_inputs(task, events_per_job):
+    """Resolve the task's matched JLab Rucio EVGEN DID(s) to per-job manifest
+    rows ``file,ext,nevents,ichunk``.
+
+    The matched DIDs live on the bound dataset's ``metadata['rucio']['matched']``
+    (``task.inputs``), written by the EVGEN assimilation. A Rucio file's name IS
+    the xrootd path below ``EVGEN/`` — the payload prepends
+    ``root://…/volatile/eic/EPIC/`` to ``EVGEN/<file>`` and streams it; nothing
+    is read from local disk. Rucio carries no per-file event count, so
+    ``nevents`` is the configured per-job count and there is one job (row) per
+    file (``ichunk`` 0). Resolution is a public ``eicread`` read of JLab Rucio.
+
+    Raises ValueError if the task has no matched input or it resolves to no
+    files — a task with no real input must fail loudly, never submit empty.
+    """
+    from .services import fetch_jlab_rucio_did_files  # late import: avoid cycle
+    matched = task.inputs
+    if not matched:
+        raise ValueError(
+            'task has no matched Rucio EVGEN input (run the EVGEN matcher first)')
+    rows = []
+    for inp in matched:
+        did = inp.get('did') or ''
+        scope, sep, name = did.partition(':')
+        if not sep:
+            scope, name = 'epic', did
+        for f in fetch_jlab_rucio_did_files(scope, name):
+            fname = f.get('name') or ''
+            rel = fname[len('/EVGEN/'):] if fname.startswith('/EVGEN/') else fname.lstrip('/')
+            head, _, base = rel.rpartition('/')
+            stem, ext = _split_evgen_ext(base)
+            file_col = f'{head}/{stem}' if head else stem
+            rows.append(f'{file_col},{ext},{events_per_job},0000')
+    if not rows:
+        raise ValueError(
+            'matched Rucio EVGEN DID(s) resolved to no files: '
+            f'{[i.get("did") for i in matched]}')
+    return rows
+
+
+def _evgen_env(task):
+    """The payload environment for the client-API path, as a dict.
+
+    These are the ``osg_csv.sh.in`` keys (minus ``CSV_FILE``, which is the
+    Condor convention — the client-API path carries inputs in the manifest,
+    not this env — and minus ``X509_USER_PROXY``, injected by the doer when it
+    copies the proxy into the sandbox, so no credential reference reaches the
+    web tier). The payload's run.sh sources ``environment*.sh`` itself.
+    """
+    ds = task.output_dataset
+    cfg = task.get_effective_config()
+    physics = ds.physics_tag.parameters
+    evgen = ds.evgen_tag.parameters
+    env = {
+        'COPYRECO': 'true' if cfg.get('copy_reco') else 'false',
+        'COPYFULL': 'true' if cfg.get('copy_full') else 'false',
+        'COPYLOG': 'true' if cfg.get('copy_log') else 'false',
+        'USERUCIO': 'true' if cfg.get('use_rucio') else 'false',
+        'OUT_RSE': cfg.get('rucio_rse') or '',
+        'DETECTOR_VERSION': ds.detector_version,
+        'DETECTOR_CONFIG': ds.detector_config,
+        'EBEAM': str(physics.get('beam_energy_electron', '')),
+        'PBEAM': str(physics.get('beam_energy_hadron', '')),
+    }
+    if cfg.get('bg_mixing'):
+        if evgen.get('signal_freq') is not None:
+            env['SIGNAL_FREQ'] = str(evgen['signal_freq'])
+        if evgen.get('signal_status') is not None:
+            env['SIGNAL_STATUS'] = str(evgen['signal_status'])
+        if evgen.get('bg_tag_prefix'):
+            env['TAG_PREFIX'] = evgen['bg_tag_prefix']
+        if evgen.get('bg_files'):
+            env['BG_FILES'] = evgen['bg_files']
+    return {k: v for k, v in env.items() if v != ''}
+
+
+def build_evgen_task_params(task):
+    """Build the client-API EVGEN production submission spec from a ProdTask.
+
+    This is the production reproduction of the proven condor-side recipe
+    (eic/job_submission_condor submit_csv.sh + submit_panda_api.py, spec only):
+    a noInput+noOutput PanDA task whose containerized payload xrootd-streams the
+    EVGEN input from JLab and self-registers RECO to JLab Rucio. PCS is the
+    single source of truth for the task definition; this returns the high-level
+    spec the submit-evgen-task doer turns into the taskParamMap + sandbox under
+    the prod-ops agent's credentials. The doer owns the submission kernel; the
+    web tier holds no credential and builds no taskParamMap. See
+    docs/JEDI_INTEGRATION.md § External EVGEN Inputs.
+
+    Pure mapping — no DB writes, no network. Raises ValueError if the task has
+    no EVGEN input bound (a misconfigured task must fail loudly).
+    """
+    ds = task.output_dataset
+    cfg = task.get_effective_config()
+    data = cfg.get('data') or {}
+
+    # Per-job manifest (file,ext,nevents,ichunk), one row per matched Rucio EVGEN
+    # file; PanDA's %RNDM→${SEQNUMBER} selects the row in-job. nevents is the
+    # configured per-job count (Rucio has none).
+    n_events = int(data.get('events_per_job') or 0)
+    if n_events <= 0:
+        raise ValueError(
+            'set events_per_job on the config (per-job event count; Rucio '
+            'carries no per-file event count)')
+    csv_rows = _evgen_manifest_from_inputs(task, n_events)
+
+    # outDS the way the proven recipe derives it from the input path
+    # (submit_csv.sh): <detector_version>/<detector_config>[/<tag_prefix>]/<dir>,
+    # slashes→dots, '='→'-'. noOutput means nothing registers under it — it is
+    # the taskName only. The composed-identity naming is a separate, deferred
+    # PCS concern; reproduce the working name here.
+    head = csv_rows[0].split(',')[0].rpartition('/')[0]
+    env = _evgen_env(task)
+    tag_prefix = env.get('TAG_PREFIX', '')
+    scope = data.get('scope') or 'group.EIC'
+    path_parts = [ds.detector_version, ds.detector_config]
+    if tag_prefix:
+        path_parts.append(tag_prefix)
+    if head:
+        path_parts.append(head)
+    dataset_identifier = '/'.join(path_parts).replace('/', '.').replace('=', '-')
+    out_ds = f'{scope}.{dataset_identifier}'
+
+    # Container: an explicit image wins; else build the cvmfs eic_xl ref from the
+    # jug_xl tag, as submit_csv.sh does.
+    container = cfg.get('container_image') or ''
+    if not container and cfg.get('jug_xl_tag'):
+        container = f"/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:{cfg['jug_xl_tag']}"
+
+    # csv_base: a filesystem-safe stem for the per-task manifest in the sandbox.
+    csv_base = re.sub(r'[^A-Za-z0-9._-]', '_', dataset_identifier) or 'evgen_input'
+
+    hours = cfg.get('target_hours_per_job')
+    walltime_hours = float(hours) if hours is not None else float(data.get('walltime_hours', 2.0))
+
+    return {
+        'outDS': out_ds,
+        'vo': data.get('vo', 'epic'),
+        'workingGroup': cfg.get('panda_working_group') or 'EIC',
+        'site': cfg.get('panda_site') or 'BNL_OSG_PanDA_1',
+        'prodSourceLabel': data.get('prod_source_label', 'test'),
+        'taskType': data.get('task_type', 'prod'),
+        'processingType': data.get('processing_type', 'epicproduction'),
+        'containerImage': container,
+        'nCore': int(data.get('corecount', 1)),
+        'memory': int(data.get('ram_count', 4096)),
+        'disk': int(data.get('disk_count', 4096)),
+        'walltimeHours': walltime_hours,
+        # Scouts default OFF on this path during commissioning (Torre: "this is a
+        # test") — skipScout uses walltime directly and avoids the noInput
+        # pseudo-input HS06 brokerage pitfall. A config can flip it on later.
+        'skipScout': bool(data.get('skip_scout', True)),
+        'nJobs': len(csv_rows),
+        'nEventsPerJob': 1,
+        'exec': f'python3 evgen_job_dispatcher.py %RNDM=0 {csv_base}',
+        'csvBase': csv_base,
+        'csvRows': csv_rows,
+        'env': env,
+    }

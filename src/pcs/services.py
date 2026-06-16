@@ -2506,7 +2506,11 @@ def prodtask_submit_request(*, task):
     # Commissioning relaxation: a draft task may be submitted directly — the
     # 'ready' freeze is not required. Readiness is surfaced as a non-blocking
     # warning by the caller, not gated here. See docs/COMMISSIONING_RELAXATIONS.md.
-    msg = {'msg_type': 'submit_task', 'namespace': 'prodops',
+    # The Submit button drives the client-API EVGEN doer (submit_evgen_task):
+    # noInput+noOutput, payload-staged EVGEN, self-registered RECO. The prun
+    # doer ('submit_task', build_panda_command, submit-prod-task.py) is kept but
+    # sidelined — not wired to the button. See docs/JEDI_INTEGRATION.md.
+    msg = {'msg_type': 'submit_evgen_task', 'namespace': 'prodops',
            'task_name': task.name, 'owner': task.created_by}
     from monitor_app.activemq_connection import ActiveMQConnectionManager
     try:
