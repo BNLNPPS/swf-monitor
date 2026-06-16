@@ -225,19 +225,26 @@
     }
     const initialSelected = {{ selected_item_json|safe }};  // string key (name) or null
     const urlParams = new URLSearchParams(window.location.search);
-    const initialTab = urlParams.get('tab') || 'datasets';
+    // This is the Prod Tasks page — default the browser to the Tasks tab, not
+    // Datasets. A ?selected=<name> resolves to its own entity type below.
+    const initialTab = urlParams.get('tab') || 'tasks';
 
     // Selection-key helpers: the URL carries the stable name, but internal
     // lookups use integer ids. Accept singular or plural type.
     function itemKeyOf(type, id) {
         if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.id === id)    || {}).name;
-        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        // Datasets key on the composed (tag-based) name — the human-facing
+        // identity shown on the page, now unique — never the internal
+        // csv_import.<hash> dataset_name (which appears nowhere on the page).
+        if (type === 'dataset' || type === 'datasets') return dsComposedName(allDatasets.find(x => x.id === id));
         if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.id === id)  || {}).name;
         return null;
     }
     function itemIdOf(type, key) {
         if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.name === key)            || {}).id;
-        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        // Accept the composed name; fall back to the legacy internal name so
+        // old bookmarks still resolve.
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => dsComposedName(x) === key || x.dataset_name === key) || {}).id;
         if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.name === key)          || {}).id;
         return null;
     }
@@ -684,6 +691,25 @@
     }
 
     // ── BROWSE: Show details ──
+    // Jump to a task in the Tasks tab and open its detail — the navigation a
+    // 'used by' link performs. Mirrors a left-list click.
+    function gotoTask(taskId) {
+        if (browseType !== 'tasks') switchTab('tasks');
+        onItemClick('task', taskId);
+    }
+
+    // 'Used by' list: the tasks that consume this dataset. Empty for a dataset
+    // no task references yet. Rendered as links into the Tasks tab.
+    function tasksUsingDatasetHtml(ds) {
+        const users = allTasks.filter(t => t.dataset_id === ds.id);
+        if (!users.length) return `<h6>Used by</h6><div class="empty-state" style="padding:.25rem 0;">No tasks use this dataset yet.</div>`;
+        const rows = users.map(t =>
+            `<li><a href="#" class="goto-task" data-task-id="${t.id}">${t.name}</a>
+                 <span class="item-meta">— ${t.status} | ${t.prod_config_name}</span></li>`).join('');
+        return `<h6>Used by <span class="text-muted" style="font-weight:normal;">(${users.length} task${users.length > 1 ? 's' : ''})</span></h6>
+            <ul class="mb-3" style="font-size:.82rem;">${rows}</ul>`;
+    }
+
     function showDatasetDetail(id) {
         const ds = allDatasets.find(d => d.id === id);
         if (!ds) return;
@@ -704,7 +730,10 @@
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
                 ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
             </table>
-            ${tagTableHtml(ds)}`;
+            ${tagTableHtml(ds)}
+            ${tasksUsingDatasetHtml(ds)}`;
+        browseContent.querySelectorAll('.goto-task').forEach(a =>
+            a.addEventListener('click', e => { e.preventDefault(); gotoTask(parseInt(a.dataset.taskId, 10)); }));
     }
 
     function showConfigDetail(id) {

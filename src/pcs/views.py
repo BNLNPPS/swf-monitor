@@ -425,6 +425,31 @@ def tag_compose(request, tag_type):
     return render(request, 'pcs/tag_compose.html', context)
 
 
+def tag_datasets(request, tag_type, tag_number):
+    """On-demand 'used by' for a tag: the datasets composed with it, each with a
+    representative task so the tag detail can link into the compose page (the
+    task anchors the campaign). GET JSON, read-only."""
+    if tag_type not in TAG_SCHEMAS:
+        return JsonResponse({'error': 'Invalid tag type'}, status=400)
+    model = get_tag_model(tag_type)
+    tag = get_object_or_404(model, tag_number=tag_number)
+    datasets = tag.datasets.select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
+    ).prefetch_related('prod_tasks').order_by('-created_at')
+    out = []
+    for ds in datasets:
+        tasks = list(ds.prod_tasks.all())
+        # A live (non-archive) task is the better link target; fall back to any.
+        rep = [t for t in tasks if t.status != 'past_output'] or tasks
+        out.append({
+            'composed_name': ds.build_dataset_name(),
+            'dataset_id': ds.id,
+            'task_name': rep[0].name if rep else '',
+            'task_count': len(tasks),
+        })
+    return JsonResponse({'datasets': out})
+
+
 def param_defs_api(request, tag_type):
     if tag_type not in TAG_SCHEMAS:
         return JsonResponse({'error': 'Invalid tag type'}, status=400)
