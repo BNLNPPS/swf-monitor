@@ -1070,6 +1070,31 @@ def pcs_catalog_rucio_update(request):
     return redirect(reverse('pcs:pcs_catalog'))
 
 
+@_login_required_flash
+def pcs_catalog_evgen_update(request):
+    """No-JS POST fallback for the catalog 'Update EVGEN from Rucio' button.
+
+    The button's JavaScript posts to the /pcs/api/ endpoint (the external-safe
+    trigger); this page-view handles the no-JavaScript case on the internal
+    face. Both publish the same evgen_rucio_update via
+    services.evgen_rucio_update_request. POST-only.
+    See docs/EPICPROD_EVGEN_INPUTS.md, docs/EPICPROD_OPS_AGENT.md.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update EVGEN from Rucio')
+    from .services import evgen_rucio_update_request, ServiceError
+    user = getattr(request.user, 'username', '') or 'evgen_rucio'
+    try:
+        evgen_rucio_update_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(reverse('pcs:pcs_catalog'))
+    messages.success(request, 'EVGEN update queued — refreshing in the background.')
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
 def rucio_did_detail(request, scope, name):
     """Self-hosted Rucio DID detail — a live, read-only browser for any DID,
     since ePIC has no public Rucio webui. GET page-view → external-safe through

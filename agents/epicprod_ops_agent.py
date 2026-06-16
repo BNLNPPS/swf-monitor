@@ -32,6 +32,9 @@ Capabilities:
                        (+last) campaign and rematch produced datasets onto each
                        task's overrides['outputs'] (delegates to
                        scripts/rucio-snapshot-update.py).
+  evgen_rucio_update — assimilate the JLab Rucio EVGEN inventory (epic:/EVGEN/*)
+                       and resolve each PCS evgen Dataset onto metadata['rucio']
+                       (delegates to scripts/import_evgen_rucio.py --apply).
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -77,6 +80,11 @@ RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 
+# EVGEN-input assimilation doer: a live JLab Rucio fetch of epic:/EVGEN/* plus
+# the per-dataset match — slow and network-bound, so generously bounded.
+EVGEN_RUCIO_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "import_evgen_rucio.py"
+EVGEN_RUCIO_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_RUCIO_TIMEOUT", "900"))
+
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
 # explicitly — every message to this agent carries namespace=prodops.
@@ -92,7 +100,7 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "rucio_snapshot_update",
-                   "catalog_import", "health_ping", "shutdown"}
+                   "evgen_rucio_update", "catalog_import", "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -301,6 +309,44 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info("PRODOPS rucio_snapshot_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
+
+    def _handle_evgen_rucio_update(self, m):
+        """Assimilate the JLab Rucio EVGEN inventory off the receiver thread — a
+        live JLab fetch + per-dataset match, too slow for the web request.
+        Deduped to one assimilation at a time."""
+        self.run_in_background(
+            self._do_evgen_rucio_update, m,
+            dedup_key="evgen_rucio_update", label="evgen_rucio_update")
+
+    def _do_evgen_rucio_update(self, m):
+        """Run the EVGEN assimilation doer (--apply); push completion on success
+        AND failure so the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
+        cmd = [sys.executable, str(EVGEN_RUCIO_SCRIPT), "--apply"]
+        self.logger.info("PRODOPS evgen_rucio_update: assimilating JLab Rucio EVGEN")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=EVGEN_RUCIO_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS evgen_rucio_update TIMEOUT after {EVGEN_RUCIO_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_rucio_ready', 'ok': False,
+                'error': f'timed out after {EVGEN_RUCIO_TIMEOUT}s'})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  import-evgen-rucio: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  import-evgen-rucio: {line}")
+        if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(f"PRODOPS evgen_rucio_update FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_rucio_ready', 'ok': False, 'error': reason})
+        else:
+            self.logger.info("PRODOPS evgen_rucio_update done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_rucio_ready', 'ok': True})
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —

@@ -24,6 +24,13 @@
         Update from Rucio
       </button>
     </form>
+    <form method="post" action="{% url 'pcs:pcs_catalog_evgen_update' %}" class="ms-2 d-inline" id="evgen-update-form">
+      {% csrf_token %}
+      <button type="submit" id="evgen-update-btn" class="btn btn-sm btn-outline-primary"
+              title="Assimilate the JLab Rucio EVGEN inventory and resolve it onto the catalog (runs in the prod-ops agent; updates live when done)">
+        Update EVGEN from Rucio
+      </button>
+    </form>
     {% endif %}
     {% endif %}
   </div>
@@ -65,6 +72,45 @@
     es.addEventListener('rucio_snapshot_ready', function (ev) {
       let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
       if (d.ok === false) { busy(false); alert('Rucio update failed: ' + (d.error || 'unknown error')); }
+      else { window.location.reload(); }
+    });
+  })();
+
+  // Update EVGEN from Rucio — fire-and-notify via the prod-ops agent + SSE push.
+  // The JLab fetch + per-dataset match is too slow for the web request, so the
+  // button publishes to the agent and the page updates when evgen_rucio_ready
+  // arrives. See docs/EPICPROD_EVGEN_INPUTS.md.
+  (function () {
+    const form = document.getElementById('evgen-update-form');
+    const btn  = document.getElementById('evgen-update-btn');
+    if (!form || !btn) return;
+    const label = btn.textContent.trim();
+    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Updating…' : label; }
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Assimilate the JLab Rucio EVGEN inventory into the catalog?')) return;
+      busy(true);
+      const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/evgen-rucio-update/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        });
+        if (r.status !== 202) {
+          let m = 'queue failed';
+          try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
+          throw new Error(m);
+        }
+      } catch (err) {
+        busy(false);
+        alert('Could not queue the EVGEN update: ' + err.message);
+      }
+    });
+    const stream = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=evgen_rucio_ready";
+    const es = new EventSource(stream);
+    es.addEventListener('evgen_rucio_ready', function (ev) {
+      let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+      if (d.ok === false) { busy(false); alert('EVGEN update failed: ' + (d.error || 'unknown error')); }
       else { window.location.reload(); }
     });
   })();

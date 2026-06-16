@@ -386,6 +386,22 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
+    @action(detail=False, methods=['post'], url_path='evgen-rucio-update')
+    def evgen_rucio_update(self, request):
+        """Request a JLab Rucio EVGEN-input assimilation — the external-safe
+        trigger for the catalog 'Update EVGEN from Rucio' button (a /pcs/api/
+        POST returning JSON, so it survives the swf-remote proxy). The web tier
+        holds no credential; this only publishes an evgen_rucio_update to the
+        prod-ops agent, which fetches epic:/EVGEN/*, resolves each PCS evgen
+        Dataset onto metadata['rucio'] in the background, then pushes
+        evgen_rucio_ready over the SSE relay. See docs/EPICPROD_EVGEN_INPUTS.md."""
+        user = getattr(request.user, 'username', '') or 'evgen_rucio'
+        try:
+            services.evgen_rucio_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
     @action(detail=False, methods=['post'], url_path='catalog-import')
     def catalog_import(self, request):
         """Request a background catalog import — the external-safe trigger for the

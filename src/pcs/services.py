@@ -2528,6 +2528,31 @@ def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):
             status=503)
 
 
+def evgen_rucio_update_request(*, created_by='evgen_rucio'):
+    """Publish an evgen_rucio_update request to the prod-ops agent, which
+    assimilates the JLab Rucio EVGEN inventory (epic:/EVGEN/*) and resolves each
+    PCS evgen Dataset onto metadata['rucio'] in the background, then pushes
+    evgen_rucio_ready over the SSE relay. The live JLab fetch + per-dataset match
+    is too slow to run inline in a web request, so the web tier only drops the
+    message. EVGEN is not campaign-bound, so there is no Campaign precondition.
+    Raises ServiceError if the queue is unreachable. See
+    docs/EPICPROD_EVGEN_INPUTS.md, docs/EPICPROD_OPS_AGENT.md."""
+    import json as _json
+    msg = {'msg_type': 'evgen_rucio_update', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'EVGEN update could not be queued (ops-agent queue unreachable).',
+            status=503)
+
+
 def catalog_import_request(source, *, created_by='catalog_import'):
     """Publish a catalog import request to the prod-ops agent, which runs the
     import in the background and pushes catalog_import_ready over the SSE relay.
