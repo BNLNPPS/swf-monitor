@@ -155,7 +155,7 @@ Context expected:
     <a href="#" data-toggle="has_reco" class="filter-link">Reco (<span data-count="has_reco">0</span>)</a>
   </div>
   <div class="pcs-tlf-bar-row">
-    <span class="pcs-tlf-label">EVGEN input:</span>
+    <span class="pcs-tlf-label">Rucio evgen input:</span>
     <a href="#" data-toggle="has_input" class="filter-link">matched (<span data-count="has_input">0</span>)</a>
     <a href="#" data-toggle="no_input" class="filter-link">unmatched (<span data-count="no_input">0</span>)</a>
     <a href="#" data-toggle="incomplete_input" class="filter-link">incomplete (<span data-count="incomplete_input">0</span>)</a>
@@ -249,6 +249,17 @@ Context expected:
           {% if other_text|informative_text %}
             <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
           {% endif %}
+          {% if t.inputs %}
+            <div><strong class="text-muted">Rucio evgen input:</strong>
+              <ul class="mb-0 ps-3">
+                {% for i in t.inputs %}
+                <li><a href="{{ i.did|rucio_did_url }}" title="Rucio dataset detail">{{ i.did }}</a>
+                  <span class="text-muted">&middot; {{ i.file_count }} files{% if i.rses %} &middot; {% for r in i.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}</span>
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
           {% if t.outputs %}
             <div><strong class="text-muted">Output{{ t.outputs|length|pluralize }}:</strong>
               <ul class="mb-0 ps-3">
@@ -256,17 +267,6 @@ Context expected:
                 <li>{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}:
                   <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a>
                   <span class="text-muted">&middot; {{ o.file_count }} files{% if o.rses %} &middot; {% for r in o.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}</span>
-                </li>
-                {% endfor %}
-              </ul>
-            </div>
-          {% endif %}
-          {% if t.inputs %}
-            <div><strong class="text-muted">Rucio EVGEN:</strong>
-              <ul class="mb-0 ps-3">
-                {% for i in t.inputs %}
-                <li><a href="{{ i.did|rucio_did_url }}" title="Rucio dataset detail">{{ i.did }}</a>
-                  <span class="text-muted">&middot; {{ i.file_count }} files{% if i.rses %} &middot; {% for r in i.rses %}{% if not forloop.first %} {% endif %}{{ r.rse }}{% if not r.complete %} <span style="color:#dc3545">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}{% endif %}</span>
                 </li>
                 {% endfor %}
               </ul>
