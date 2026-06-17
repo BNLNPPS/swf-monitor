@@ -2538,6 +2538,25 @@ def prodtask_submit_request(*, task):
     return task
 
 
+def prodtask_reset_submission(*, task):
+    """Clear a recorded submission so a task can be re-submitted: panda_task_id
+    → None and status → 'draft'. This is the recovery path when a submission
+    breaks or is aborted PanDA-side and the task is left pinned to a dead
+    jediTaskID — the submit gate (prodtask_submit_request) refuses while
+    panda_task_id is set, and PCS has no other way back to the buildable
+    lifecycle. Owner-gated at the view via get_object(). Does NOT touch the
+    PanDA task itself (none of our credentials live in the web tier); it only
+    detaches the dead reference so the next submission can fire. Raises
+    ServiceError if there is nothing to reset. See docs/EPICPROD_OPS.md."""
+    if task.panda_task_id is None:
+        raise ServiceError(
+            'Nothing to reset — task has no recorded submission.', status=409)
+    task.panda_task_id = None
+    task.status = 'draft'
+    task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+    return task
+
+
 def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):
     """Publish a rucio_snapshot_update request to the prod-ops agent, which
     refreshes the JLab Rucio snapshot for the current (+last) campaign and

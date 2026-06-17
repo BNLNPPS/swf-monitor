@@ -109,6 +109,7 @@
                     <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
                 </span>
                 <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
+                <button class="btn btn-outline-warning btn-sm" id="btn-reset-task" style="display:none;">Reset submission</button>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -311,6 +312,7 @@
     const submitTaskWrap = document.getElementById('submit-task-wrap');
     const btnSubmitTask = document.getElementById('btn-submit-task');
     const linkPandaTask = document.getElementById('link-panda-task');
+    const btnResetTask = document.getElementById('btn-reset-task');
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -687,7 +689,7 @@
     // view may have left visible. Submit-to-PanDA is task business, not dataset.
     function hideTaskActions() {
         [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
-         linkPandaTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
+         linkPandaTask, btnResetTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
     }
 
     // ── BROWSE: Show details ──
@@ -829,6 +831,9 @@
                 linkPandaTask.style.display = 'none';
             }
         }
+        // Reset submission — owner-only recovery for a task pinned to a dead
+        // jediTaskID; detaches the PanDA reference and returns it to draft.
+        if (btnResetTask) btnResetTask.style.display = (submitted && isOwner) ? 'inline-block' : 'none';
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
@@ -1074,6 +1079,24 @@
             showTaskDetail(t.id);   // stay in the panel; Submit goes green, Lock/Edit/Delete vanish
         } else {
             let msg = `Lock failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
+    });
+    if (btnResetTask) btnResetTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Reset submission on "${t.name}"? This detaches PanDA Task ${t.panda_task_id} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.`)) return;
+        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/reset-submission/`,
+            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
+        if (resp.ok) {
+            const updated = await resp.json();
+            const idx = allTasks.findIndex(x => x.id === t.id);
+            if (idx >= 0) { allTasks[idx].status = updated.status || 'draft'; allTasks[idx].panda_task_id = null; }
+            renderList();
+            showTaskDetail(t.id);   // stay in the panel; Submit returns, PanDA link + Reset vanish
+        } else {
+            let msg = `Reset failed (HTTP ${resp.status})`;
             try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
             alert(msg);
         }

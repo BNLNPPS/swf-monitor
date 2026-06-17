@@ -31,6 +31,9 @@
             {% endif %}
             {% if task.panda_task_id %}
             <a href="{% url 'monitor_app:panda_task_detail' task.panda_task_id %}" class="btn btn-info btn-sm">PanDA Task {{ task.panda_task_id }}</a>
+            {% if is_owner %}
+            <button class="btn btn-outline-warning btn-sm" id="btn-reset-submission">Reset submission</button>
+            {% endif %}
             {% elif task.status == 'ready' %}
             <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}"
                class="btn btn-success btn-sm">Submit in Compose</a>
@@ -271,6 +274,15 @@ if (btnRegen) btnRegen.addEventListener('click', function() {
         .then(r => r.json())
         .then(data => { location.reload(); });
 });
+const btnResetSubmission = document.getElementById('btn-reset-submission');
+if (btnResetSubmission) btnResetSubmission.addEventListener('click', function() {
+    if (!confirm('Reset submission on "{{ task.name|escapejs }}"? This detaches PanDA Task {{ task.panda_task_id }} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.')) return;
+    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.pk }}/reset-submission/', {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'}
+    }).then(r => r.json().then(d => ({ok: r.ok, d})))
+      .then(({ok, d}) => { if (ok) location.reload(); else alert(d.detail || 'Reset failed'); });
+});
+
 const btnLock = document.getElementById('btn-lock');
 if (btnLock) btnLock.addEventListener('click', function() {
     if (!confirm('Lock "{{ task.name|escapejs }}"? It becomes ready for submission and can no longer be edited. This cannot be undone.')) return;

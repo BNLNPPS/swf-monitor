@@ -29,14 +29,14 @@ This document implements the Dynamic Public Catalog described in
 
 For submission, operators filter, review, select, and submit tasks from the
 catalog. Submission details are covered by `JEDI_INTEGRATION.md`.
-Inspection, cloning, and editing use the task workbench reached from the
+Inspection, cloning, and editing use the task compose view reached from the
 catalog.
 
 ## Scope
 
 - Full-page catalog views for campaigns with task inventory, filtering, sorting,
   and bulk selection.
-- Task Composition views as the workbench for inspection, cloning, and editing.
+- Task Composition views as the compose view for inspection, cloning, and editing.
 - Catalog fields: PWG, priority, Use flags, submission path, input source,
   and BG-mixing state.
 - Third-party EVGEN input tracking and Rucio sourcing.
@@ -179,19 +179,19 @@ Each task row shows the fields needed for comparison and action: campaign,
 requestor, physics tags, priority, Use flags, input source, submission path,
 BG-mixing state, status, output dataset, and linked request when present.
 
-Rows link to the task workbench for detailed inspection, editing, copying,
-and review. The workbench is a 2-panel view: the left panel is a task list
+Rows link to the task compose view for detailed inspection, editing, copying,
+and review. The compose view is a 2-panel view: the left panel is a task list
 for comparative inspection, selecting related tasks, and copying parameters
 from existing tasks; the right panel is the focused task detail, with
 editable fields, controls, validation and status, cloning/copying, and
 submission-readiness actions.
 
-The workbench left panel reuses the catalog task-list and filter component.
-In the workbench it omits the campaign tabs, indicates the campaign of the
+The compose view left panel reuses the catalog task-list and filter component.
+In the compose view it omits the campaign tabs, indicates the campaign of the
 focused task, and uses a reduced column/control set appropriate for
 comparative inspection and parameter copying.
 
-The current workbench URL is:
+The current compose view URL is:
 
     https://pandaserver02.sdcc.bnl.gov/swf-monitor/pcs/tasks/compose/?tab=tasks
 
@@ -232,8 +232,8 @@ submission path, input source, BG-mixing state, output state, and linked
 request.
 
 Filters are displayed in a shared layout that works in both the full-page
-catalog and the workbench. In the full-page catalog, filters sit above the
-campaign task list. In the 2-panel workbench, the same filters sit at the
+catalog and the compose view. In the full-page catalog, filters sit above the
+campaign task list. In the 2-panel compose view, the same filters sit at the
 top of the left panel above the task list.
 
 The active tab, filters, sort order, selected rows, and focused task are

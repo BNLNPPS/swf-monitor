@@ -73,6 +73,22 @@ is then cached under `$PANDA_CONFIG_ROOT` and reused by subsequent commands.
 `workinggroup` as `EIC` even though `--workingGroup EIC.production` was passed —
 the production dimension is the IAM role, not the working-group field.
 
+## Re-submitting after a broken submission
+
+Once a PCS task records a `jediTaskID`, the submit path refuses a second
+submission (`prodtask_submit_request` raises while `panda_task_id` is set), and
+the task page shows the PanDA link in place of the Submit control. A submission
+that broke or aborted PanDA-side therefore leaves the task pinned to a dead task
+ID with no way forward. The **Reset submission** button (owner-only, shown beside
+the PanDA link on both the task page and the compose panel) clears that:
+`panda_task_id → None`, `status → draft`. The task returns to the buildable
+lifecycle and Submit goes live again. Reset only detaches the reference — it does
+not stop or delete the PanDA task, since the web tier holds no PanDA credential;
+abort the dead task in PanDA separately if needed.
+
+This is a commissioning-era recovery affordance. Gate or remove it once
+submissions are reliable, so a submitted task is not casually detached.
+
 ## TLS / CA — pip and Rucio from this host
 
 BNL internal services (`*.sdcc.bnl.gov`: PanDA, swf-monitor, Rucio) use a

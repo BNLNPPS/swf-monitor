@@ -383,6 +383,20 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             data['warnings'] = warnings
         return Response(data)
 
+    @action(detail=True, methods=['post'], url_path='reset-submission')
+    def reset_submission(self, request, pk=None):
+        """Detach a broken/aborted submission so a task can be re-submitted:
+        panda_task_id → None, status → draft. Owner-gated via get_object(); the
+        recovery path for a task pinned to a dead jediTaskID (the submit gate
+        refuses while panda_task_id is set). Does not touch PanDA — the web tier
+        holds no credential. See docs/EPICPROD_OPS.md."""
+        task = self.get_object()
+        try:
+            services.prodtask_reset_submission(task=task)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
     @action(detail=False, methods=['post'], url_path='rucio-snapshot-update')
     def rucio_snapshot_update(self, request):
         """Request a JLab Rucio snapshot refresh for the current campaign — the
