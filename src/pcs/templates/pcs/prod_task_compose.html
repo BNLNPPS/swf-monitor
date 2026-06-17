@@ -802,16 +802,16 @@
         panelTitle.textContent = dsPath.startsWith(PFX) ? dsPath.slice(PFX.length) : dsPath;
         panelTitle.title = dsPath;
 
-        const isOwner = currentUser && t.created_by === currentUser;
+        const canOperate = !!currentUser;
         // A locked (ready) or already-submitted task is frozen — only a draft
         // shows Edit/Delete/Lock, mirroring the tag lifecycle. Copy is always
         // available to any signed-in user.
-        const ownerDraft = isOwner && t.status === 'draft';
+        const operatorDraft = canOperate && t.status === 'draft';
         const submitted = !!t.panda_task_id;
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
-        if (btnEditTask) btnEditTask.style.display = ownerDraft ? 'inline-block' : 'none';
-        if (btnDeleteTask) btnDeleteTask.style.display = ownerDraft ? 'inline-block' : 'none';
-        if (btnLockTask) btnLockTask.style.display = ownerDraft ? 'inline-block' : 'none';
+        if (btnEditTask) btnEditTask.style.display = operatorDraft ? 'inline-block' : 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = operatorDraft ? 'inline-block' : 'none';
+        if (btnLockTask) btnLockTask.style.display = operatorDraft ? 'inline-block' : 'none';
         // Submit: meaningful inside the buildable lifecycle (draft or ready).
         // Per commissioning relaxation #4 a draft task is directly submittable —
         // the status='ready' lock freeze is lifted and readiness is advisory
@@ -819,7 +819,7 @@
         // past_output archive, which is never in the buildable flow.
         if (submitTaskWrap) {
             const inLifecycle = t.status === 'draft' || t.status === 'ready';
-            if (currentUser && !submitted && inLifecycle) {
+            if (canOperate && !submitted && inLifecycle) {
                 submitTaskWrap.style.display = 'inline-block';
                 btnSubmitTask.disabled = false;
                 btnSubmitTask.style.pointerEvents = '';
@@ -839,9 +839,9 @@
                 linkPandaTask.style.display = 'none';
             }
         }
-        // Reset submission — owner-only recovery for a task pinned to a dead
+        // Reset submission — operator recovery for a task pinned to a dead
         // jediTaskID; detaches the PanDA reference and returns it to draft.
-        if (btnResetTask) btnResetTask.style.display = (submitted && isOwner) ? 'inline-block' : 'none';
+        if (btnResetTask) btnResetTask.style.display = (submitted && canOperate) ? 'inline-block' : 'none';
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
@@ -917,7 +917,7 @@
         if (t.task_params_json) {
             const escaped = t.task_params_json
                 .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">JEDI taskParamMap</strong>
+            html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA EVGEN Submission Spec</strong>
                 <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
                 <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
         }

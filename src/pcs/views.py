@@ -1494,7 +1494,7 @@ def prod_tasks_datatable_ajax(request):
 
 
 def prod_task_detail(request, name):
-    from .commands import build_task_params
+    from .commands import build_evgen_task_params
     from .services import resolve_prodtask
     try:
         task = resolve_prodtask(name, ProdTask.objects.select_related(
@@ -1508,17 +1508,20 @@ def prod_task_detail(request, name):
     if name != task.composed_name:
         return redirect('pcs:prod_task_detail', name=task.composed_name, permanent=True)
     try:
-        task_params = build_task_params(task)
+        task_params = build_evgen_task_params(task)
         task_params_json = json.dumps(task_params, indent=2, sort_keys=False, default=str)
         task_params_error = None
     except Exception as e:
         task_params_json = None
         task_params_error = str(e)
+    can_operate = request.user.is_authenticated
     return render(request, 'pcs/prod_task_detail.html', {
         'task': task,
         'task_params_json': task_params_json,
         'task_params_error': task_params_error,
-        'is_owner': request.user.is_authenticated and request.user.username == task.created_by,
+        'can_operate': can_operate,
+        'can_submit': can_operate and task.panda_task_id is None and task.status in ('draft', 'ready'),
+        'can_reset_submission': can_operate and task.panda_task_id is not None,
     })
 
 
@@ -1529,7 +1532,7 @@ def prod_task_compose(request):
     campaign of the ?selected=<name> task. Only that campaign's tasks, and the
     datasets they use, are shipped inline; cross-campaign and historical browsing
     is the full catalog's job (linked from the page caption). Per-item heavy
-    detail (tag parameters, taskParamMap, cached commands) is still omitted and
+    detail (tag parameters, EVGEN submission spec, cached commands) is still omitted and
     hydrated on open (prod_task_compose_dataset_detail / _task_detail).
     """
     # Resolve the campaign first — it scopes the whole page. Default = the
@@ -1563,7 +1566,7 @@ def prod_task_compose(request):
                 'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
             ).filter(campaign=campaign).order_by('-updated_at')
         )
-    # Light task entries: taskParamMap + cached commands omitted, hydrated on
+    # Light task entries: EVGEN submission spec + cached commands omitted, hydrated on
     # open (prod_task_compose_task_detail). Readiness (cheap) is included so the
     # detail panel can show submit-readiness without a round trip.
     from .services import prodtask_readiness_problems
@@ -1577,7 +1580,7 @@ def prod_task_compose(request):
             'composed_name': t.composed_name,
             'status': t.status,
             # The recorded submission — the JS reads `submitted = !!t.panda_task_id`
-            # to show the PanDA-task link + the owner Reset control. Omitting it
+            # to show the PanDA-task link + the operator Reset control. Omitting it
             # left every submitted task with only the Copy button on page load.
             'panda_task_id': t.panda_task_id,
             'dataset_id': t.dataset_id,
@@ -1751,11 +1754,11 @@ def prod_task_compose_dataset_detail(request, pk):
 
 
 def prod_task_compose_task_detail(request, name):
-    """On-demand hydration for the compose view: a task's generated taskParamMap
-    and cached condor/panda commands, which the light initial payload omits. The
-    compose JS merges this into the task entry the first time it is opened (never
-    clobbering). GET JSON; read-only — does not regenerate/save commands."""
-    from .commands import build_task_params
+    """On-demand hydration for the compose view: a task's live EVGEN submission
+    spec and cached condor/panda commands, which the light initial payload omits.
+    The compose JS merges this into the task entry the first time it is opened
+    (never clobbering). GET JSON; read-only — does not regenerate/save commands."""
+    from .commands import build_evgen_task_params
     from .services import resolve_prodtask
     try:
         task = resolve_prodtask(name, ProdTask.objects.select_related(
@@ -1764,9 +1767,9 @@ def prod_task_compose_task_detail(request, name):
     except ProdTask.DoesNotExist:
         raise Http404(f"No task {name!r}")
     try:
-        task_params_json = json.dumps(build_task_params(task), indent=2, default=str)
+        task_params_json = json.dumps(build_evgen_task_params(task), indent=2, default=str)
     except Exception as e:                                       # noqa: BLE001
-        task_params_json = f'// Error building taskParamMap: {e}'
+        task_params_json = f'// Error building EVGEN submission spec: {e}'
     return JsonResponse({
         'task_params_json': task_params_json,
         'condor_command': task.condor_command,

@@ -267,7 +267,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     )
     serializer_class = ProdTaskSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
     # Detail routes are keyed by the composed tag name. Composed names contain
     # dots, so the default lookup regex ([^/.]+) is widened to allow them.
@@ -372,9 +372,9 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     def lock(self, request, name=None):
         """Lock a draft task → 'ready'. PCS-consistent with the tag lock: a
         dedicated, one-way lifecycle action — the UI offers no unlock, so a
-        locked task is frozen for reproducibility. 'ready' is the task's
-        locked state. Owner-gated via get_object(); the transition map
-        (draft → ready only) is enforced by the service."""
+        locked task is frozen for reproducibility. 'ready' is the task's locked
+        state. Authenticated users may operate production tasks; the transition
+        map (draft → ready only) is enforced by the service."""
         task = self.get_object()
         try:
             services.prodtask_set_status(task=task, new_status='ready')
@@ -387,8 +387,9 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         """Request automated PanDA submission of a locked (ready) task — the
         submit trigger used by the compose panel (and the task-detail "Submit in
         Compose" link), so the user can submit without leaving the view.
-        Owner-gated via get_object(); the web tier holds no PanDA credential,
-        so this only publishes a request to the prod-ops agent."""
+        Authenticated users may operate production tasks; the web tier holds no
+        PanDA credential, so this only publishes a request to the prod-ops
+        agent."""
         task = self.get_object()
         try:
             services.prodtask_submit_request(task=task)
@@ -405,10 +406,11 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='reset-submission')
     def reset_submission(self, request, name=None):
         """Detach a broken/aborted submission so a task can be re-submitted:
-        panda_task_id → None, status → draft. Owner-gated via get_object(); the
-        recovery path for a task pinned to a dead jediTaskID (the submit gate
-        refuses while panda_task_id is set). Does not touch PanDA — the web tier
-        holds no credential. See docs/EPICPROD_OPS.md."""
+        panda_task_id → None, status → draft. Authenticated users may operate
+        production tasks; this is the recovery path for a task pinned to a dead
+        jediTaskID (the submit gate refuses while panda_task_id is set). Does
+        not touch PanDA — the web tier holds no credential. See
+        docs/EPICPROD_OPS.md."""
         task = self.get_object()
         try:
             services.prodtask_reset_submission(task=task)

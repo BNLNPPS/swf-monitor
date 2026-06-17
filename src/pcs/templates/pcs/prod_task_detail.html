@@ -23,25 +23,19 @@
         </div>
         <div>
             {% if task.status == 'draft' %}
+            {% if can_operate %}
             <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.composed_name|urlencode }}" class="btn btn-dark-green btn-sm">Edit in Compose</a>
             <button class="btn btn-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
-            {% if is_owner %}
             <button class="btn btn-success btn-sm" id="btn-lock">Lock</button>
             {% endif %}
             {% endif %}
             {% if task.panda_task_id %}
             <a href="{% url 'monitor_app:panda_task_detail' task.panda_task_id %}" class="btn btn-info btn-sm">PanDA Task {{ task.panda_task_id }}</a>
-            {% if is_owner %}
+            {% if can_reset_submission %}
             <button class="btn btn-outline-warning btn-sm" id="btn-reset-submission">Reset submission</button>
             {% endif %}
-            {% elif task.status == 'ready' %}
-            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.composed_name|urlencode }}"
-               class="btn btn-success btn-sm">Submit in Compose</a>
-            {% elif task.status == 'draft' %}
-            <span class="d-inline-block" tabindex="0"
-                  title="Submittable only once locked. Lock a draft task to make it ready.">
-                <button type="button" class="btn btn-success btn-sm" disabled style="pointer-events:none;">Submit to PanDA</button>
-            </span>
+            {% elif can_submit %}
+            <button type="button" class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
             {% endif %}
         </div>
     </div>
@@ -230,18 +224,19 @@
     <div class="card mb-3">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-2">
-                <h5 class="card-title mb-0">JEDI taskParamMap</h5>
+                <h5 class="card-title mb-0">PanDA EVGEN Submission Spec</h5>
                 <button class="btn btn-secondary btn-sm btn-copy" data-target="task-params">Copy</button>
             </div>
             <div class="text-muted mb-2" style="font-size: 0.85em;">
-                Computed from current PCS state. Passed to <code>Client.insertTaskParams()</code> for JEDI submission.
+                Computed from current PCS state. This is the <code>fmt=evgen</code> JSON fetched by
+                <code>submit-evgen-task.py</code> and turned into the PanDA client-API task plus sandbox.
             </div>
             <pre id="task-params" class="bg-dark text-light p-3 mb-0" style="font-size: 0.8em; white-space: pre-wrap;">{{ task_params_json }}</pre>
         </div>
     </div>
     {% elif task_params_error %}
     <div class="alert alert-warning mb-3">
-        <strong>JEDI taskParamMap unavailable:</strong> {{ task_params_error }}
+        <strong>PanDA EVGEN submission spec unavailable:</strong> {{ task_params_error }}
     </div>
     {% endif %}
 
@@ -281,6 +276,52 @@ if (btnResetSubmission) btnResetSubmission.addEventListener('click', function() 
         method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'}
     }).then(r => r.json().then(d => ({ok: r.ok, d})))
       .then(({ok, d}) => { if (ok) location.reload(); else alert(d.detail || 'Reset failed'); });
+});
+
+const btnSubmitTask = document.getElementById('btn-submit-task');
+let submitPollTimer = null;
+function pollForSubmittedTask(attemptsLeft) {
+    submitPollTimer = setTimeout(function() {
+        fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.composed_name|urlencode }}/')
+            .then(r => r.json().then(d => ({ok: r.ok, d})))
+            .then(({ok, d}) => {
+                if (ok && d.panda_task_id) {
+                    location.reload();
+                    return;
+                }
+                if (attemptsLeft > 1) pollForSubmittedTask(attemptsLeft - 1);
+                else if (btnSubmitTask) {
+                    btnSubmitTask.disabled = false;
+                    btnSubmitTask.textContent = 'Submit to PanDA';
+                }
+            })
+            .catch(() => {
+                if (attemptsLeft > 1) pollForSubmittedTask(attemptsLeft - 1);
+                else if (btnSubmitTask) {
+                    btnSubmitTask.disabled = false;
+                    btnSubmitTask.textContent = 'Submit to PanDA';
+                }
+            });
+    }, 10000);
+}
+if (btnSubmitTask) btnSubmitTask.addEventListener('click', function() {
+    if (!confirm('Submit "{{ task.composed_name|escapejs }}" to PanDA?')) return;
+    btnSubmitTask.disabled = true;
+    btnSubmitTask.textContent = 'Submitting...';
+    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.composed_name|urlencode }}/submit/', {
+        method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'}
+    }).then(r => r.json().then(d => ({ok: r.ok, d})))
+      .then(({ok, d}) => {
+          if (ok) {
+              btnSubmitTask.textContent = 'Submitted - awaiting PanDA ID...';
+              if (submitPollTimer) clearTimeout(submitPollTimer);
+              pollForSubmittedTask(30);
+          } else {
+              alert(d.detail || 'Submit failed');
+              btnSubmitTask.disabled = false;
+              btnSubmitTask.textContent = 'Submit to PanDA';
+          }
+      });
 });
 
 const btnLock = document.getElementById('btn-lock');
