@@ -1,19 +1,19 @@
 {% extends 'base.html' %}
 
-{% block title %}Questionnaires - PCS{% endblock %}
+{% block title %}Request Questionnaire - PCS{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
   <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
     <div>
-      <h1 class="mb-1">Questionnaires</h1>
+      <h1 class="mb-1">Request Questionnaire</h1>
       <div class="text-muted">
         {{ shown_count }} shown{% if total_count != shown_count %} of {{ total_count }}{% endif %}
       </div>
     </div>
     <form method="get" class="d-flex gap-2" style="min-width: min(34rem, 100%);">
       <input type="search" name="q" class="form-control" value="{{ query }}"
-             placeholder="Search questionnaires">
+             placeholder="Search request questionnaire">
       <button class="btn btn-outline-primary" type="submit">Search</button>
       {% if query %}
         <a class="btn btn-outline-secondary" href="{% url 'pcs:questionnaires_list' %}">Clear</a>
@@ -23,7 +23,7 @@
 
   {% if user.is_authenticated %}
   <div class="mb-4 p-3 border rounded bg-light" style="max-width: 58rem;">
-    <h2 class="h5 mb-3">Import CSV Export</h2>
+    <h2 class="h5 mb-3">Import Request Questionnaire CSV Export</h2>
     <form method="post" action="{% url 'pcs:questionnaire_import' %}">
       {% csrf_token %}
       <div class="mb-3">

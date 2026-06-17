@@ -88,22 +88,27 @@ QUESTIONNAIRE_FIELD_MAP = {
     ),
     'repository': (
         'Location of the repository with version control enforced per the input-processing guidelines (e.g. a tagged generator or steering-file repository)',
+        'Provide the location of the repository with proper version control enforced according to the input processing guidelines. See https://github.com/eic/LambdaGen/tags (only steering files+metadata) or https://github.com/eic/DEMPgen/tags (generator+steering files+metadata) for example.',
         'repository',
     ),
     'contact': (
         'Who is the contact person for the dataset generation',
+        'Who is the contact person for the dataset generation?',
         'contact',
     ),
     'nevents': (
         'How many events are requested',
+        'How many events are you requesting?',
         'nevents',
     ),
     'benchmark': (
         'Time to simulate the first 100 events and disk space the output file occupies',
+        'How much time does it take to simulate the first 100 events of the dataset and how much diskspace does the output file occupy?',
         'benchmark',
     ),
     'estimate': (
         'Total compute or storage required for the dataset, with justification for requests above 1% of the campaign budget (~120 core-years and ~35 TB per month)',
+        'Use the answers to the last two questions to estimate how much total compute or storage will be required for the entire dataset. Overall campaign compute budget per month is ~120 Core Years and ~35 TB. For requests that are bigger than 1% of these values, provide justification.',
         'estimate',
     ),
 }

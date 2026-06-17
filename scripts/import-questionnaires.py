@@ -55,7 +55,7 @@ def main(argv=None):
         return 1
 
     print(
-        f"questionnaires: {summary['created']} new, "
+        f"request questionnaire: {summary['created']} new, "
         f"{summary['updated']} updated, {summary['unchanged']} unchanged"
     )
     return 0
