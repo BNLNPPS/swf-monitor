@@ -4,6 +4,7 @@ import json
 import logging
 
 from django.contrib import messages
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
@@ -17,6 +18,23 @@ def system_status_page(request):
     return render(request, 'monitor_app/system_status.html', {
         'groups': grouped_current_status(),
         'summary': status_summary(),
+    })
+
+
+def system_status_json(request):
+    summary = status_summary()
+    latest = summary.get('latest_checked_at')
+    return JsonResponse({
+        'overall_status': summary.get('overall_status', 'unknown'),
+        'overall_reason': summary.get('overall_reason', ''),
+        'latest_checked_at': latest.isoformat() if latest else None,
+        'counts': {
+            'ok': summary.get('ok', 0),
+            'warning': summary.get('warning', 0),
+            'error': summary.get('error', 0),
+            'unknown': summary.get('unknown', 0),
+            'total': summary.get('total', 0),
+        },
     })
 
 

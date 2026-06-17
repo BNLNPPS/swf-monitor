@@ -14,6 +14,7 @@ from .models import SystemAgent, SystemStatus, SystemStatusHistory
 
 
 HISTORY_MIN_INTERVAL = timedelta(hours=6)
+STATUS_STALE_AFTER = timedelta(minutes=15)
 
 
 def _status(name, category, status, summary, data=None, checked_at=None):
@@ -256,14 +257,47 @@ def grouped_current_status():
 
 
 def status_summary():
+    now = timezone.now()
     try:
         rows = list(SystemStatus.objects.all())
     except (OperationalError, ProgrammingError):
-        return {'ok': 0, 'warning': 0, 'error': 0, 'unknown': 0, 'total': 0}
+        return {
+            'ok': 0,
+            'warning': 0,
+            'error': 0,
+            'unknown': 0,
+            'total': 0,
+            'latest_checked_at': None,
+            'oldest_checked_at': None,
+            'overall_status': 'unknown',
+            'overall_reason': 'System status tables are not available yet.',
+        }
     counts = {'ok': 0, 'warning': 0, 'error': 0, 'unknown': 0}
+    checked = []
     for row in rows:
         counts[row.status if row.status in counts else 'unknown'] += 1
+        if row.checked_at:
+            checked.append(row.checked_at)
     counts['total'] = len(rows)
+    counts['latest_checked_at'] = max(checked) if checked else None
+    counts['oldest_checked_at'] = min(checked) if checked else None
+    if not rows:
+        counts['overall_status'] = 'unknown'
+        counts['overall_reason'] = 'No system status has been collected yet.'
+    elif counts['error']:
+        counts['overall_status'] = 'error'
+        counts['overall_reason'] = f"{counts['error']} check(s) are red."
+    elif counts['latest_checked_at'] and now - counts['latest_checked_at'] > STATUS_STALE_AFTER:
+        counts['overall_status'] = 'error'
+        counts['overall_reason'] = (
+            f"System status is stale by more than {int(STATUS_STALE_AFTER.total_seconds() // 60)} minutes."
+        )
+    elif counts['warning'] or counts['unknown']:
+        counts['overall_status'] = 'warning'
+        counts['overall_reason'] = 'One or more checks are warning or unknown.'
+    else:
+        counts['overall_status'] = 'ok'
+        counts['overall_reason'] = 'All current checks are OK.'
     return counts
 
 

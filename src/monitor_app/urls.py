@@ -90,6 +90,7 @@ from .viewdir.pandamon import (
 )
 
 from .viewdir.system_status import (
+    system_status_json,
     system_status_page,
     system_status_refresh,
 )
@@ -200,8 +201,10 @@ urlpatterns = [
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
     path('panda/system/', system_status_page, name='system_status'),
+    path('panda/system/status.json', system_status_json, name='system_status_json'),
     path('panda/system/refresh/', system_status_refresh, name='system_status_refresh'),
     path('system/', system_status_page, name='system_status_root'),
+    path('system/status.json', system_status_json, name='system_status_json_root'),
     path('system/refresh/', system_status_refresh, name='system_status_refresh_root'),
     
     # PanDA Queues

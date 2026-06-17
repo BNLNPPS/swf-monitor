@@ -108,6 +108,7 @@
       .nav-mode { display: none; }
       .nav-mode.active { display: contents; }
       #mode-label { border-right: 1px solid rgba(255,255,255,.2); padding-right: 12px; margin-right: 4px; }
+      .nav-system-error { color: #ff8174 !important; font-weight: 700; }
       /* One-click copy icon for IDs — see swf_fmt.copy_btn template tag */
       .copy-btn {
         background: none; border: none; color: #6c757d; cursor: pointer;
@@ -272,7 +273,13 @@
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
             </div>
         </div>
-        <a href="{% url 'monitor_app:system_status' %}">System</a>
+        <a href="{% url 'monitor_app:system_status' %}"
+           id="system-status-nav-link"
+           class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}"
+           data-system-status="{{ system_status_overall|default:'unknown' }}"
+           data-system-status-url="{% url 'monitor_app:system_status_json' %}"
+           {% if system_status_latest_checked_at %}data-system-checked-at="{{ system_status_latest_checked_at|date:'c' }}"{% endif %}
+           title="{{ system_status_reason|default:'' }}">System</a>
         </span>
         <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
@@ -330,6 +337,51 @@ function applyNavMode(mode) {
 (function() {
     var mode = localStorage.getItem('navMode') || 'production';
     applyNavMode(mode);
+})();
+(function() {
+    const staleAfterSeconds = 15 * 60;
+    const link = document.getElementById('system-status-nav-link');
+    if (!link) return;
+    const statusUrl = link.getAttribute('data-system-status-url');
+    function refreshSystemNav() {
+        const status = link.getAttribute('data-system-status') || 'unknown';
+        const checkedAt = link.getAttribute('data-system-checked-at');
+        let stale = false;
+        if (checkedAt) {
+            const ts = Date.parse(checkedAt);
+            if (!Number.isNaN(ts)) {
+                stale = (Date.now() - ts) / 1000 > staleAfterSeconds;
+            }
+        }
+        link.classList.toggle('nav-system-error', status === 'error' || stale);
+        if (stale) {
+            link.title = 'System status is stale by more than 15 minutes.';
+        }
+    }
+    function pollSystemStatus() {
+        if (!statusUrl || !window.fetch) return;
+        fetch(statusUrl, {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: {'Accept': 'application/json'}
+        }).then(function(resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.json();
+        }).then(function(data) {
+            link.setAttribute('data-system-status', data.overall_status || 'unknown');
+            if (data.latest_checked_at) {
+                link.setAttribute('data-system-checked-at', data.latest_checked_at);
+            }
+            link.title = data.overall_reason || '';
+            refreshSystemNav();
+        }).catch(function() {
+            refreshSystemNav();
+        });
+    }
+    refreshSystemNav();
+    pollSystemStatus();
+    setInterval(refreshSystemNav, 10000);
+    setInterval(pollSystemStatus, 60000);
 })();
 </script>
 </body>
