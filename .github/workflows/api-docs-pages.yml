@@ -1,0 +1,130 @@
+name: Generate API Docs (Widdershins + Reslate) & Deploy to GitHub Pages
+
+on:
+  # Run on a schedule (weekly, Monday at 06:00 UTC)
+  schedule:
+    - cron: '0 6 * * 1'
+  # Allow manual trigger
+  workflow_dispatch:
+  # Run when API-related source files change
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/monitor_app/views.py'
+      - 'src/monitor_app/api_urls.py'
+      - 'src/monitor_app/serializers.py'
+      - 'src/pcs/api_views.py'
+      - 'src/pcs/api_urls.py'
+      - 'src/pcs/serializers.py'
+      - 'src/pcs/schemas.py'
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch OpenAPI schema
+        run: |
+          curl -sSf -o openapi-schema.json \
+            "https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/?format=json"
+
+          # Validate JSON and print schema info
+          python3 << 'PYEOF'
+          import json
+          with open("openapi-schema.json") as f:
+              schema = json.load(f)
+          info = schema.get("info", {})
+          paths = schema.get("paths", {})
+          print(f"Schema fetched successfully")
+          print(f"Title: {info.get('title', 'N/A')}")
+          print(f"Version: {info.get('version', 'N/A')}")
+          print(f"Paths: {len(paths)}")
+          PYEOF
+
+      - name: Install Widdershins
+        run: npm install -g widdershins
+
+      - name: Convert schema to Slate-compatible Markdown
+        run: |
+          widdershins \
+            --language_tabs 'python:Python' 'shell:cURL' \
+            --summary \
+            --omitHeader \
+            openapi-schema.json \
+            -o api-docs-raw.md
+
+          echo "Generated Widdershins markdown ($(wc -l < api-docs-raw.md) lines)"
+
+      - name: Set up reslate project
+        run: |
+          # Create a working directory for the docs site
+          mkdir -p docs-build
+          cd docs-build
+
+          # Initialize a Node project and install reslate from GitHub
+          npm init -y
+          npm install https://github.com/Mermade/reslate.git
+
+          # Scaffold the reslate source structure into docs-build/
+          npx reslate init
+
+          echo "Reslate initialized. Directory contents:"
+          ls -la
+
+      - name: Inject Widdershins output into reslate source
+        run: |
+          # Combine checked-in front-matter + Widdershins output → reslate source
+          # reslate init scaffolds into docs-build/ directly (SLATEDIR=.)
+          cat docs/api-frontmatter.md api-docs-raw.md > docs-build/index.md
+          echo "Final index.md: $(wc -c < docs-build/index.md) bytes, $(wc -l < docs-build/index.md) lines"
+
+      - name: Build static site with reslate
+        run: |
+          cd docs-build
+          npx reslate build
+
+          echo "Build complete. Output:"
+          ls -la _site/ || echo "_site/ not found" && find . -name '_site' -type d
+
+      - name: Prepare Pages artifact
+        run: |
+          # Also include the raw schema for download
+          cp openapi-schema.json docs-build/_site/openapi-schema.json
+
+          echo "Site files:"
+          find docs-build/_site -type f | head -40
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs-build/_site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
