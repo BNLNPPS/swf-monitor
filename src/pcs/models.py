@@ -202,10 +202,9 @@ class Dataset(models.Model):
     scope = models.CharField(max_length=100, default='group.EIC')
     detector_version = models.CharField(max_length=50)
     detector_config = models.CharField(max_length=100)
-    # Producing campaign. Its name is the version segment of the composed dataset
-    # name (build_dataset_name); detector_version/detector_config are campaign
-    # metadata. Nullable legacy rows fall back to detector_version, which equals
-    # the campaign name for current data.
+    # Optional bookkeeping link to the production campaign that imported or owns
+    # this row. It is not part of the dataset identity; detector_version is the
+    # version segment because it describes the conditions of the produced data.
     campaign = models.ForeignKey('Campaign', on_delete=models.PROTECT,
                                  related_name='datasets', null=True, blank=True)
     physics_tag = models.ForeignKey(PhysicsTag, on_delete=models.PROTECT, related_name='datasets')
@@ -317,18 +316,17 @@ class Dataset(models.Model):
         super().save(*args, **kwargs)
 
     def build_dataset_name(self):
-        """Auto-name: {scope}.{campaign}.{detector_config}.{p}.{e}.{s}.{r}[.{k}][.{sample_name}]
+        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}[.{k}][.{sample_name}]
 
-        The version segment is the producing campaign's name (detector_version is
-        campaign metadata); legacy rows with no campaign fall back to
-        detector_version. The background segment is appended only when the dataset
-        carries a background tag; the sample-variant segment only when the dataset
-        carries a sample_name. The sample segment is taken verbatim and may contain
-        periods (positional parse, see PCS.md §Sample Variants).
+        The version segment is the detector version because it describes the data
+        production conditions. Campaign is bookkeeping and must not move the
+        dataset identity. The background segment is appended only when the
+        dataset carries a background tag; the sample-variant segment only when
+        the dataset carries a sample_name. The sample segment is taken verbatim
+        and may contain periods (positional parse, see PCS.md §Sample Variants).
         """
-        version = self.campaign.name if self.campaign_id else self.detector_version
         name = (
-            f"{self.scope}.{version}.{self.detector_config}"
+            f"{self.scope}.{self.detector_version}.{self.detector_config}"
             f".{self.physics_tag.tag_label}.{self.evgen_tag.tag_label}"
             f".{self.simu_tag.tag_label}.{self.reco_tag.tag_label}"
         )
@@ -643,13 +641,12 @@ class ProdTask(models.Model):
     @cached_property
     def composed_name(self):
         """The task's canonical identity: its dataset's composed tag name
-        (group.EIC.<campaign>.<detector>.p.e.s.r[.k][.sample]) — the same name
-        that is the Rucio DID and the PanDA taskName/outDS (see PCS.md,
-        JEDI_INTEGRATION.md). This is what every task URL and API lookup keys
-        on; the stored ``name`` may be a legacy csv_import slash path, kept
-        resolvable but never the identity. ``build_dataset_name`` is the single
-        authority, so this can never drift from the rendered name. Falls back to
-        ``name`` only for the schema-impossible datasetless task."""
+        (group.EIC.<detector_version>.<detector>.p.e.s.r[.k][.sample]). This is
+        what every task URL and API lookup keys on; the stored ``name`` may be a
+        legacy csv_import slash path, kept resolvable but never the identity.
+        ``build_dataset_name`` is the single authority, so this can never drift
+        from the rendered name. Falls back to ``name`` only for the
+        schema-impossible datasetless task."""
         return self.dataset.composed_name if self.dataset_id else self.name
 
     def _dids_from_overrides(self, list_key, single_key=None):

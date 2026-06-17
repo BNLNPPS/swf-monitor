@@ -77,7 +77,7 @@ mapping freely; reproducibility locking moves to submission prep. See
 `k` appends after reco, before the Rucio block:
 
 ```
-{scope}.{campaign}.{detector_config}.{p}.{e}.{s}.{r}.{k}   →   DID …{k}.b{N}
+{scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}.{k}   →   DID …{k}.b{N}
 ```
 
 The segment is present only when the dataset carries a background.

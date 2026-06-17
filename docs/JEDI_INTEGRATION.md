@@ -134,12 +134,13 @@ prun command (`build_panda_command`), and the output and log dataset templates
 all use the dataset's **composed identity name** — the classification tags plus
 any sample-variant discriminator, defined in [PCS.md](PCS.md#datasets):
 
-    {scope}.{campaign}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
+    {scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
 
-`{campaign}` is the producing campaign (`Campaign.name`, e.g. `26.05.0`); the
-detector version and configuration are recorded as campaign metadata. The task
-name is this name without the trailing `.bN` block suffix; the Rucio DID is the
-same name with the `{scope}:` prefix and the block suffix
+`{detector_version}` is the version of the detector/software conditions for the
+produced data. Campaign membership is production bookkeeping and does not rename
+the dataset identity. The task name is this name without the trailing `.bN`
+block suffix; the Rucio DID is the same name with the `{scope}:` prefix and the
+block suffix
 (`group.EIC:….r1.45to135deg.b1`).
 
 This composed name **is** the dataset identity. It supersedes the path-based RECO
@@ -158,8 +159,8 @@ path-based name.
 Logical file names carry the composed identity name — the dataset name with the
 `{scope}.` prefix and `.bN` block suffix removed:
 
-    {campaign}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.${SN}.edm4eic.root
-    {campaign}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.log.${SN}.log.tgz   (log)
+    {detector_version}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.${SN}.edm4eic.root
+    {detector_version}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.log.${SN}.log.tgz   (log)
 
 The LFN base is thus literally our composed name, using the same dot separator as
 the DID — decoupled from ePIC's `/RECO/...` slash convention, which PCS uses only
@@ -259,8 +260,8 @@ In both modes `taskName` and the output dataset are the composed identity name;
 the modes differ only in how the sample is produced, not in how it is named. The
 example above is the generation-only case (`noInput=True`, no input path). A
 single-particle external-EVGEN task (a `csv_manifest` input) would instead be,
-for example, `group.EIC.26.05.0.epic_craterlake.p1141.e37.s1.r1.130to177deg`,
-with LFN base `26.05.0.epic_craterlake.p1141.e37.s1.r1.130to177deg` and the input
+for example, `group.EIC.26.02.0.epic_craterlake.p1141.e37.s1.r1.130to177deg`,
+with LFN base `26.02.0.epic_craterlake.p1141.e37.s1.r1.130to177deg` and the input
 staged as described below.
 
 ## External EVGEN Inputs

@@ -175,21 +175,21 @@ eval "$(pcs-task-cmd <name> --format condor)"
 A dataset is the concrete production unit: one sample, produced by a single task and registered as a single Rucio dataset. Its identity composes the classification tags with any sample-variant discriminators into one name, which serves as both the produced Rucio dataset name and the PanDA task name (`outDS`).
 
 ```
-{scope}.{campaign}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
+{scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
 ```
 
 Examples:
 
 ```
-group.EIC.26.05.0.epic_craterlake.p3001.e1.s1.r1
-group.EIC.26.05.0.epic_craterlake.p1141.e37.s1.r1.45to135deg
+group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1
+group.EIC.26.02.0.epic_craterlake.p1141.e37.s1.r1.45to135deg
 ```
 
-The version segment names the producing campaign; detector version and detector configuration are recorded as campaign metadata. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
+The version segment is the detector version: it describes the conditions of the produced data. Campaign membership is bookkeeping for production operations and does not rename the dataset identity. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
 
 The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The task name is the dataset name without the `.bN` suffix.
 
-The campaign-keyed identity and the sample variants below are extensions to the dataset model, defined here.
+The detector-version identity and the sample variants below are extensions to the dataset model, defined here.
 
 ### Sample Variants
 
