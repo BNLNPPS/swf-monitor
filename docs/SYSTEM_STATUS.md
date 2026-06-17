@@ -94,6 +94,11 @@ the Apache request.
 The stale rule is important: if the ops agent stops refreshing, the System menu
 must eventually turn red even if the last individual checks were green.
 
+The stale threshold is the `STATUS_STALE_AFTER` constant in
+`monitor_app/system_status.py`, currently 15 minutes. That is three missed
+cycles at the default 5-minute ops-agent refresh interval. Tune this constant if
+the nav produces false stale alarms or reacts too slowly to a dead refresher.
+
 ## Navigation indicator
 
 The production nav `System` item is red when the aggregate status is red.
