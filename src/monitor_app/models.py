@@ -758,6 +758,66 @@ class EpicProdFile(models.Model):
         return self.did_name or self.lfn or f"EpicProd file {self.pk}"
 
 
+class SystemStatus(models.Model):
+    """Current cached system status for operator-facing monitor pages."""
+
+    STATUS_CHOICES = [
+        ('ok', 'OK'),
+        ('warning', 'Warning'),
+        ('error', 'Error'),
+        ('unknown', 'Unknown'),
+    ]
+
+    name = models.CharField(max_length=120, unique=True)
+    category = models.CharField(max_length=80, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='unknown',
+        db_index=True,
+    )
+    summary = models.TextField(blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_system_status'
+        ordering = ['category', 'name']
+        indexes = [
+            models.Index(fields=['category', 'status']),
+            models.Index(fields=['status', 'checked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.name}: {self.status}"
+
+
+class SystemStatusHistory(models.Model):
+    """Append-only status observations for later incident/lifecycle review."""
+
+    name = models.CharField(max_length=120, db_index=True)
+    category = models.CharField(max_length=80, db_index=True)
+    status = models.CharField(max_length=20, db_index=True)
+    summary = models.TextField(blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    checked_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'swf_system_status_history'
+        ordering = ['-checked_at', 'name']
+        indexes = [
+            models.Index(fields=['name', '-checked_at']),
+            models.Index(fields=['category', '-checked_at']),
+            models.Index(fields=['status', '-checked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.checked_at} {self.name}: {self.status}"
+
+
 class AIMemory(models.Model):
     """
     AI dialogue history for cross-session context.

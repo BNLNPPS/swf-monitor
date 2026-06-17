@@ -37,6 +37,8 @@ Capabilities:
                        (delegates to scripts/import_evgen_rucio.py --apply).
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
+  refresh_system_status — refresh cached System status rows for services,
+                       agents, and external monitor endpoints.
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -49,6 +51,8 @@ import os
 import signal
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,6 +101,13 @@ EVGEN_RUCIO_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_RUCIO_TIMEOUT", "900"))
 MANAGE_PY = Path(__file__).resolve().parent.parent / "src" / "manage.py"
 INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_INVENTORY_TIMEOUT", "180"))
 
+# System status refresh doer: cached monitor/system rows, intentionally a
+# standalone script rather than a Django management command.
+SYSTEM_STATUS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-system-status.py"
+SYSTEM_STATUS_TIMEOUT = int(os.environ.get("EPICPROD_SYSTEM_STATUS_TIMEOUT", "60"))
+SYSTEM_STATUS_INTERVAL = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INTERVAL", "300"))
+SYSTEM_STATUS_INITIAL_DELAY = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INITIAL_DELAY", "30"))
+
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
 # explicitly — every message to this agent carries namespace=prodops.
@@ -113,7 +124,8 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
-                   "sync_epicprod_inventory", "health_ping", "shutdown"}
+                   "sync_epicprod_inventory", "refresh_system_status",
+                   "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -122,6 +134,12 @@ class EpicProdOpsAgent(BaseAgent):
         super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE,
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
+        self._system_status_thread = threading.Thread(
+            target=self._system_status_periodic_loop,
+            name="system-status-refresh",
+            daemon=True,
+        )
+        self._system_status_thread.start()
 
     def on_message(self, frame):
         message_data, msg_type = self.log_received_message(frame, known_types=self.KNOWN_TYPES)
@@ -402,6 +420,62 @@ class EpicProdOpsAgent(BaseAgent):
             'msg_type': 'epicprod_inventory_ready', 'ok': ok,
             'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
             'task_name': m.get('task_name'), 'error': reason})
+
+    def _handle_refresh_system_status(self, m):
+        """Refresh cached system status rows through the shared doer."""
+        self.run_in_background(
+            self._do_refresh_system_status, m,
+            dedup_key="refresh_system_status",
+            label="refresh_system_status")
+
+    def _do_refresh_system_status(self, m):
+        cmd = [
+            sys.executable, str(SYSTEM_STATUS_SCRIPT),
+            "--source", str(m.get("source") or "ops_agent"),
+        ]
+        selected = m.get("selected") or m.get("only") or []
+        if isinstance(selected, str):
+            selected = [selected]
+        for name in selected:
+            cmd += ["--only", str(name)]
+        self.logger.info(f"PRODOPS refresh_system_status: {' '.join(cmd)}")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SYSTEM_STATUS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f"timed out after {SYSTEM_STATUS_TIMEOUT}s"
+            self.logger.error(f"PRODOPS refresh_system_status TIMEOUT: {reason}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'system_status_ready', 'ok': False, 'error': reason})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  refresh-system-status: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  refresh-system-status: {line}")
+        ok = p.returncode == 0
+        reason = ''
+        if not ok:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(f"PRODOPS refresh_system_status FAILED rc={p.returncode}")
+        else:
+            self.logger.info("PRODOPS refresh_system_status done")
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
+
+    def _system_status_periodic_loop(self):
+        """Keep cached system knowledge fresh without page-load probes."""
+        if SYSTEM_STATUS_INTERVAL <= 0:
+            self.logger.info("PRODOPS periodic system status refresh disabled")
+            return
+        time.sleep(max(SYSTEM_STATUS_INITIAL_DELAY, 0))
+        while True:
+            self.run_in_background(
+                self._do_refresh_system_status,
+                {'source': 'ops_agent_periodic'},
+                dedup_key="refresh_system_status",
+                label="refresh_system_status periodic")
+            time.sleep(SYSTEM_STATUS_INTERVAL)
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver

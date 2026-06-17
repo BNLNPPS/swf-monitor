@@ -89,6 +89,11 @@ from .viewdir.pandamon import (
     epic_queue_detail,
 )
 
+from .viewdir.system_status import (
+    system_status_page,
+    system_status_refresh,
+)
+
 # Import iDDS database views from new dedicated module
 from .viewdir.idds_database import (
     idds_database_tables_list,
@@ -194,6 +199,8 @@ urlpatterns = [
 
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
+    path('system/', system_status_page, name='system_status'),
+    path('system/refresh/', system_status_refresh, name='system_status_refresh'),
     
     # PanDA Queues
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),

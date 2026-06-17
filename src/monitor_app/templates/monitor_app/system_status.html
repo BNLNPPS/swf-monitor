@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+
+{% block title %}System Status - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="d-flex align-items-start justify-content-between gap-3 mb-4">
+        <div>
+            <h1 class="mb-2">System Status</h1>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge text-bg-success">OK {{ summary.ok }}</span>
+                <span class="badge text-bg-warning">Warning {{ summary.warning }}</span>
+                <span class="badge text-bg-danger">Error {{ summary.error }}</span>
+                <span class="badge text-bg-secondary">Unknown {{ summary.unknown }}</span>
+                <span class="badge text-bg-light text-dark border">Total {{ summary.total }}</span>
+            </div>
+        </div>
+        <form method="post" action="{% url 'monitor_app:system_status_refresh' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">Refresh</button>
+        </form>
+    </div>
+
+    {% if not groups %}
+        <div class="alert alert-warning">
+            No system status rows have been collected yet.
+        </div>
+    {% endif %}
+
+    {% for group in groups %}
+        <section class="mb-4">
+            <h2 class="h4 mb-3 text-capitalize">{{ group.category }}</h2>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width: 18rem;">Name</th>
+                            <th style="width: 8rem;">Status</th>
+                            <th>Summary</th>
+                            <th style="width: 13rem;">Checked</th>
+                            <th style="width: 7rem;">Data</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for item in group.items %}
+                        <tr>
+                            <td class="fw-semibold">{{ item.name }}</td>
+                            <td>
+                                {% if item.status == 'ok' %}
+                                    <span class="badge text-bg-success">OK</span>
+                                {% elif item.status == 'warning' %}
+                                    <span class="badge text-bg-warning">Warning</span>
+                                {% elif item.status == 'error' %}
+                                    <span class="badge text-bg-danger">Error</span>
+                                {% else %}
+                                    <span class="badge text-bg-secondary">Unknown</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ item.summary }}</td>
+                            <td>{{ item.checked_at|date:"Y-m-d H:i:s T"|default:"-" }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#status-data-{{ item.pk }}"
+                                        aria-expanded="false"
+                                        aria-controls="status-data-{{ item.pk }}">
+                                    JSON
+                                </button>
+                            </td>
+                        </tr>
+                        <tr class="collapse" id="status-data-{{ item.pk }}">
+                            <td colspan="5">
+                                <pre class="mb-0 small bg-light border rounded p-3">{{ item.data|pprint }}</pre>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endfor %}
+</div>
+{% endblock %}
