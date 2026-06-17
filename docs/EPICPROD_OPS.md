@@ -222,6 +222,21 @@ web view share. Bring it back manually with `sudo systemctl restart
 epicprod-ops-agent`. Being a `BaseAgent` it registers and heartbeats to the
 monitor and logs to the monitor DB, so it appears in the agent list.
 
+**Deploys and restarts** — the deploy script does *not* restart this unit (it
+reloads Apache and the ASGI/bot workers only). What the deploy changed decides
+whether that matters. The agent dispatches its doer scripts (`submit-evgen-task.py`
+→ `evgen_panda_submit.py`, `cache-payload-log.py`, `rucio-snapshot-update.py`,
+`pcs-catalog-import.py`, …) as fresh subprocesses by absolute path into the deploy
+tree, and a branch deploy replaces that constant `branch-<branch>` release path in
+place — so a change to a **doer script** is live on the next dispatch with **no
+restart**. A change to the **agent module itself** (`agents/epicprod_ops_agent.py` —
+handlers, routing, the script-path constants, timeouts) or to its startup inputs
+(`prodops.toml`, `production.env`) is read into memory at startup and is **not**
+picked up until `sudo systemctl restart epicprod-ops-agent`. The running process
+also pins its cwd to the release inode it started from (deploys delete+recreate that
+dir, so `cwd` reads `(deleted)`); absolute-path dispatch is unaffected, but a
+periodic clean restart avoids any relative-path surprise.
+
 **Deliberate stop** — two back doors, neither counted as a failure: `sudo
 systemctl stop epicprod-ops-agent` (host-level; SIGTERM unwinds BaseAgent's
 graceful path, and systemd does not restart an admin stop), and a `shutdown`
