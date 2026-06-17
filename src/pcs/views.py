@@ -1576,6 +1576,10 @@ def prod_task_compose(request):
             # links tasks on this, never on the pk or the legacy slash name.
             'composed_name': t.composed_name,
             'status': t.status,
+            # The recorded submission — the JS reads `submitted = !!t.panda_task_id`
+            # to show the PanDA-task link + the owner Reset control. Omitting it
+            # left every submitted task with only the Copy button on page load.
+            'panda_task_id': t.panda_task_id,
             'dataset_id': t.dataset_id,
             'dataset_name': t.dataset.dataset_name,
             'prod_config_id': t.prod_config_id,
