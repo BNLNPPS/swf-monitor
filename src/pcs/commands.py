@@ -244,6 +244,7 @@ def build_task_dump(task):
     return {
         'task': {
             'id': task.id,
+            'composed_name': task.composed_name,
             'name': task.name,
             'description': task.description,
             'status': task.status,
@@ -258,6 +259,7 @@ def build_task_dump(task):
         },
         'dataset': {
             'id': ds.id,
+            'composed_name': ds.composed_name,
             'dataset_name': ds.dataset_name,
             'did': ds.did,
             'scope': ds.scope,

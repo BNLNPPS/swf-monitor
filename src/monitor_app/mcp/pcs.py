@@ -461,10 +461,10 @@ def _prodtask_artifact_sync(name, fmt):
     from pcs import services
     from pcs.commands import (
         build_condor_command, build_panda_command,
-        build_task_params, build_task_dump,
+        build_task_params, build_task_dump, build_evgen_task_params,
     )
-    if fmt not in ('condor', 'panda', 'jedi', 'dump'):
-        return {'error': "fmt must be one of: condor, panda, jedi, dump"}
+    if fmt not in ('condor', 'panda', 'jedi', 'evgen', 'dump'):
+        return {'error': "fmt must be one of: condor, panda, jedi, evgen, dump"}
     qs = ProdTask.objects.select_related('dataset', 'prod_config')
     try:
         t = services.resolve_prodtask(name, queryset=qs)
@@ -477,6 +477,12 @@ def _prodtask_artifact_sync(name, fmt):
         return {'name': cname, 'fmt': 'panda', 'value': build_panda_command(t)}
     if fmt == 'jedi':
         return {'name': cname, 'fmt': 'jedi', 'taskParamMap': build_task_params(t)}
+    if fmt == 'evgen':
+        try:
+            return {'name': cname, 'fmt': 'evgen',
+                    'submissionSpec': build_evgen_task_params(t)}
+        except ValueError as e:
+            return {'error': str(e)}
     return {'name': cname, 'fmt': 'dump', 'dump': build_task_dump(t)}
 
 
@@ -534,11 +540,12 @@ async def pcs_prodtask_artifact(name: str, fmt: str = 'dump') -> dict:
     Args:
         name: Task identity — composed tag-based name (preferred), legacy
               stored name, or bare pk.
-        fmt:  'condor' | 'panda' | 'jedi' | 'dump' (default 'dump').
+        fmt:  'condor' | 'panda' | 'jedi' | 'evgen' | 'dump' (default 'dump').
 
     Returns: a dict with the requested artifact.
         - condor / panda: {value: <command string>}
         - jedi:           {taskParamMap: {...}}  (passable to insertTaskParams)
+        - evgen:          {submissionSpec: {...}} (live prod-ops doer input)
         - dump:           {dump: {task, dataset, tags, prod_config, effective_config}}
     """
     return await sync_to_async(_prodtask_artifact_sync)(name=name, fmt=fmt)
@@ -611,8 +618,8 @@ async def pcs_prodtask_intake(
     OR (public_catalog_csv_path, public_catalog_row_key). On match, the
     existing task's catalogue mapping is merged into overrides and
     description / input_dataset_did are optionally updated. On no match,
-    creates a draft requiring `name`, `dataset` (DID or name), and
-    `prod_config` (name).
+    creates a draft requiring `name`, `dataset` (composed tag name preferred,
+    DID and legacy dataset_name accepted), and `prod_config` (name).
 
     Returns: {created: bool, task: {...}}.
     """

@@ -218,9 +218,12 @@ def prodtask_intake(*, payload, created_by):
         raise ServiceError(
             f'Creating a new task requires: {", ".join(missing)}'
         )
-    output_ds = (Dataset.objects.filter(did=dataset_handle).first()
-                 or Dataset.objects.filter(dataset_name=dataset_handle).first())
-    if not output_ds:
+    try:
+        output_ds = resolve_dataset(
+            dataset_handle,
+            queryset=Dataset.objects.order_by('block_num', 'id'),
+        )
+    except Dataset.DoesNotExist:
         raise ServiceError(f'Output dataset not found: {dataset_handle}')
     config = ProdConfig.objects.filter(name=config_handle).first()
     if not config:
