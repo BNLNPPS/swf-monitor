@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
                      Dataset, ProdConfig, ProdTask,
-                     Campaign, ProdRequest)
+                     Campaign, Questionnaire, ProdRequest)
 
 
 @admin.register(PhysicsCategory)
@@ -97,4 +97,14 @@ class ProdRequestAdmin(admin.ModelAdmin):
                    'other_use', 'new_request')
     search_fields = ('requestor', 'description', 'simu_path', 'source_url',
                      'source_row', 'rucio_source')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(Questionnaire)
+class QuestionnaireAdmin(admin.ModelAdmin):
+    list_display = ('id', 'submitted_at', 'status', 'nevents', 'created_by',
+                    'updated_at')
+    list_filter = ('status',)
+    search_fields = ('description', 'repository', 'contact', 'nevents',
+                     'benchmark', 'estimate')
     readonly_fields = ('created_at', 'updated_at')

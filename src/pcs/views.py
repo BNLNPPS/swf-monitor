@@ -7,6 +7,7 @@ Read operations are public; create/edit/lock require login.
 """
 import json
 from functools import wraps
+from urllib.request import urlopen
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
@@ -47,9 +48,10 @@ from monitor_app.utils import DataTablesProcessor, get_filter_params, format_dat
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
     Dataset, ProdConfig, ProdTask,
-    Campaign, ProdRequest,
+    Campaign, Questionnaire, ProdRequest,
     PRODTASK_STATUS_CHOICES,
 )
+from .serializers import _redact_contact
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
@@ -124,6 +126,7 @@ def pcs_hub_counts():
         'reco_tags_count': RecoTag.objects.count(),
         'background_tags_count': BackgroundTag.objects.count(),
         'datasets_count': Dataset.objects.values('dataset_name').distinct().count(),
+        'questionnaires_count': Questionnaire.objects.count(),
         'prod_configs_count': ProdConfig.objects.count(),
         'prod_tasks_count': ProdTask.objects.count(),
     }
@@ -131,6 +134,69 @@ def pcs_hub_counts():
 
 def pcs_hub(request):
     return render(request, 'pcs/pcs_hub.html', pcs_hub_counts())
+
+
+# ── Questionnaire intake ───────────────────────────────────────────
+
+def questionnaires_list(request):
+    q = (request.GET.get('q') or '').strip()
+    qs = Questionnaire.objects.all()
+    if q:
+        qs = qs.filter(
+            Q(description__icontains=q)
+            | Q(repository__icontains=q)
+            | Q(contact__icontains=q)
+            | Q(nevents__icontains=q)
+            | Q(benchmark__icontains=q)
+            | Q(estimate__icontains=q)
+        )
+    rows = list(qs[:200])
+    if not request.user.is_authenticated:
+        for row in rows:
+            row.contact = _redact_contact(row.contact)
+    return render(request, 'pcs/questionnaires_list.html', {
+        'questionnaires': rows,
+        'query': q,
+        'total_count': Questionnaire.objects.count(),
+        'shown_count': len(rows),
+    })
+
+
+@_login_required_flash
+def questionnaire_import(request):
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:questionnaires_list'),
+            action_label='Questionnaire import')
+    from .services import questionnaire_intake_csv, ServiceError
+    csv_url = (request.POST.get('csv_url') or '').strip()
+    csv_text = request.POST.get('csv_text') or ''
+    source_url = csv_url or (request.POST.get('source_url') or '').strip()
+    if csv_url:
+        try:
+            with urlopen(csv_url, timeout=30) as response:
+                csv_text = response.read().decode('utf-8-sig')
+        except Exception as e:
+            messages.error(request, f'Questionnaire CSV fetch failed: {e}')
+            return redirect(reverse('pcs:questionnaires_list'))
+    if not csv_text.strip():
+        messages.error(request, 'Provide a questionnaire CSV export URL or pasted CSV text.')
+        return redirect(reverse('pcs:questionnaires_list'))
+    try:
+        summary = questionnaire_intake_csv(
+            csv_text,
+            source_url=source_url,
+            created_by=getattr(request.user, 'username', '') or 'questionnaire_import',
+        )
+    except ServiceError as e:
+        messages.error(request, f'Questionnaire import failed: {e.detail}')
+        return redirect(reverse('pcs:questionnaires_list'))
+    messages.success(
+        request,
+        f'Questionnaire import: {summary["created"]} new, '
+        f'{summary["updated"]} updated, {summary["unchanged"]} unchanged.'
+    )
+    return redirect(reverse('pcs:questionnaires_list'))
 
 
 # ── Physics Categories ────────────────────────────────────────────

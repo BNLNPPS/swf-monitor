@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block title %}Questionnaires - PCS{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+  <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+    <div>
+      <h1 class="mb-1">Questionnaires</h1>
+      <div class="text-muted">
+        {{ shown_count }} shown{% if total_count != shown_count %} of {{ total_count }}{% endif %}
+      </div>
+    </div>
+    <form method="get" class="d-flex gap-2" style="min-width: min(34rem, 100%);">
+      <input type="search" name="q" class="form-control" value="{{ query }}"
+             placeholder="Search questionnaires">
+      <button class="btn btn-outline-primary" type="submit">Search</button>
+      {% if query %}
+        <a class="btn btn-outline-secondary" href="{% url 'pcs:questionnaires_list' %}">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+
+  {% if user.is_authenticated %}
+  <div class="mb-4 p-3 border rounded bg-light" style="max-width: 58rem;">
+    <h2 class="h5 mb-3">Import CSV Export</h2>
+    <form method="post" action="{% url 'pcs:questionnaire_import' %}">
+      {% csrf_token %}
+      <div class="mb-3">
+        <label class="form-label" for="csv-url">CSV export URL</label>
+        <input id="csv-url" name="csv_url" type="url" class="form-control"
+               placeholder="https://docs.google.com/spreadsheets/.../export?format=csv">
+      </div>
+      <div class="mb-3">
+        <label class="form-label" for="csv-text">Or pasted CSV text</label>
+        <textarea id="csv-text" name="csv_text" rows="5" class="form-control"></textarea>
+      </div>
+      <button class="btn btn-primary" type="submit">Import</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="table-responsive">
+    <table class="table table-sm table-striped align-middle" style="width:auto; min-width: 72rem;">
+      <thead>
+        <tr>
+          <th>Submitted</th>
+          <th>Status</th>
+          <th>Description</th>
+          <th>Repository</th>
+          <th>Contact</th>
+          <th>Events</th>
+          <th>Benchmark</th>
+          <th>Estimate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in questionnaires %}
+        <tr>
+          <td class="text-nowrap">{{ q.submitted_at|date:"Y-m-d H:i" }}</td>
+          <td>{{ q.status }}</td>
+          <td style="max-width: 28rem;">{{ q.description|linebreaksbr }}</td>
+          <td style="max-width: 22rem; overflow-wrap:anywhere;">
+            {% if q.repository|slice:":4" == "http" %}
+              <a href="{{ q.repository }}" rel="noopener noreferrer">{{ q.repository }}</a>
+            {% else %}
+              {{ q.repository|linebreaksbr }}
+            {% endif %}
+          </td>
+          <td>{{ q.contact }}</td>
+          <td>{{ q.nevents }}</td>
+          <td style="max-width: 18rem;">{{ q.benchmark|linebreaksbr }}</td>
+          <td style="max-width: 22rem;">{{ q.estimate|linebreaksbr }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8" class="text-muted">No questionnaire responses imported.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
