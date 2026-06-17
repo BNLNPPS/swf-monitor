@@ -202,6 +202,12 @@ class Dataset(models.Model):
     scope = models.CharField(max_length=100, default='group.EIC')
     detector_version = models.CharField(max_length=50)
     detector_config = models.CharField(max_length=100)
+    # Producing campaign. Its name is the version segment of the composed dataset
+    # name (build_dataset_name); detector_version/detector_config are campaign
+    # metadata. Nullable legacy rows fall back to detector_version, which equals
+    # the campaign name for current data.
+    campaign = models.ForeignKey('Campaign', on_delete=models.PROTECT,
+                                 related_name='datasets', null=True, blank=True)
     physics_tag = models.ForeignKey(PhysicsTag, on_delete=models.PROTECT, related_name='datasets')
     evgen_tag = models.ForeignKey(EvgenTag, on_delete=models.PROTECT, related_name='datasets')
     simu_tag = models.ForeignKey(SimuTag, on_delete=models.PROTECT, related_name='datasets')
@@ -311,15 +317,18 @@ class Dataset(models.Model):
         super().save(*args, **kwargs)
 
     def build_dataset_name(self):
-        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}[.{k}][.{sample_name}]
+        """Auto-name: {scope}.{campaign}.{detector_config}.{p}.{e}.{s}.{r}[.{k}][.{sample_name}]
 
-        The background segment is appended only when the dataset carries a
-        background tag; the sample-variant segment only when the dataset carries
-        a sample_name. The sample segment is taken verbatim and may contain
+        The version segment is the producing campaign's name (detector_version is
+        campaign metadata); legacy rows with no campaign fall back to
+        detector_version. The background segment is appended only when the dataset
+        carries a background tag; the sample-variant segment only when the dataset
+        carries a sample_name. The sample segment is taken verbatim and may contain
         periods (positional parse, see PCS.md §Sample Variants).
         """
+        version = self.campaign.name if self.campaign_id else self.detector_version
         name = (
-            f"{self.scope}.{self.detector_version}.{self.detector_config}"
+            f"{self.scope}.{version}.{self.detector_config}"
             f".{self.physics_tag.tag_label}.{self.evgen_tag.tag_label}"
             f".{self.simu_tag.tag_label}.{self.reco_tag.tag_label}"
         )

@@ -291,3 +291,5 @@ MCP tools for AI-assisted tag browsing and lookup:
 | `pcs_search_tags(query, tag_type)` | Full-text search across tag labels, descriptions, and parameter values |
 
 Tag creation, lock/delete, and dataset/prod-config management go through the REST API and the web UI — see the sections above. The submission-artifact endpoint (`/prod-tasks/command/`) plus the `pcs-task-cmd` CLI are the programmatic path for production operators.
+
+The dataset and production-task MCP tools (`pcs_dataset_*`, `pcs_prodtask_*`) identify a dataset or task by its composed tag name — the same canonical identity used in URLs and REST (see [Datasets](#datasets)) — return it as `composed_name`, and accept it as the lookup key; legacy names remain resolvable.

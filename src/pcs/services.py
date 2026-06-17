@@ -130,10 +130,12 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
             raise ServiceError(f'background_tag not found: {background_tag_label}')
         tags['background_tag'] = bg
 
+    campaign = Campaign.objects.filter(name=detector_version).first()
     ds = Dataset(
         scope=scope,
         detector_version=detector_version,
         detector_config=detector_config,
+        campaign=campaign,
         sample_name=sample_name,
         description=description,
         metadata={
@@ -303,6 +305,27 @@ def resolve_prodtask(name, queryset=None):
         if t is not None:
             return t
     raise ProdTask.DoesNotExist(f"No ProdTask matches {name!r}")
+
+
+def resolve_dataset(name, queryset=None):
+    """Resolve a Dataset by its identity, the peer of ``resolve_prodtask``.
+    First match wins:
+
+      1. the composed tag name (``composed_name``) — the canonical identity,
+         an indexed lookup on the stored column;
+      2. the Rucio ``did`` (``scope:name.bN``);
+      3. the stored ``dataset_name`` — a legacy csv_import hash or native name.
+
+    Raises ``Dataset.DoesNotExist`` if nothing matches, so it is a drop-in for
+    ``queryset.get(...)``.
+    """
+    qs = Dataset.objects.all() if queryset is None else queryset
+    key = str(name)
+    for lookup in ('composed_name', 'did', 'dataset_name'):
+        d = qs.filter(**{lookup: key}).first()
+        if d is not None:
+            return d
+    raise Dataset.DoesNotExist(f"No Dataset matches {name!r}")
 
 
 def prodtask_readiness_problems(task):
@@ -897,6 +920,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             if ds:
                 ds.description = (row.get('Description') or '').strip()
                 ds.metadata = metadata
+                ds.campaign = campaign
                 ds.physics_tag = row_physics_tag
                 ds.evgen_tag = row_evgen_tag
                 ds.background_tag = row_background_tag
@@ -909,6 +933,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     scope='group.EIC',
                     detector_version='26.02.0',
                     detector_config='epic_craterlake',
+                    campaign=campaign,
                     physics_tag=row_physics_tag, evgen_tag=row_evgen_tag,
                     simu_tag=simu, reco_tag=reco,
                     background_tag=row_background_tag,
@@ -1289,6 +1314,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                             scope='group.EIC', did=pcs_did,
                             detector_version=version,
                             detector_config=decomposed.get('detector_config', ''),
+                            campaign=campaign,
                             physics_tag=row_physics_tag, evgen_tag=evgen,
                             simu_tag=simu, reco_tag=reco,
                             file_count=block['file_count'],
@@ -1302,6 +1328,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         ds.file_count = block['file_count']
                         ds.data_size = block['data_size_bytes']
                         ds.metadata = metadata
+                        ds.campaign = campaign
                         ds.detector_version = version
                         ds.detector_config = decomposed.get('detector_config', '')
                         ds.physics_tag = row_physics_tag
@@ -2573,10 +2600,11 @@ def prodtask_reset_submission(*, task):
     breaks or is aborted PanDA-side and the task is left pinned to a dead
     jediTaskID — the submit gate (prodtask_submit_request) refuses while
     panda_task_id is set, and PCS has no other way back to the buildable
-    lifecycle. Owner-gated at the view via get_object(). Does NOT touch the
-    PanDA task itself (none of our credentials live in the web tier); it only
-    detaches the dead reference so the next submission can fire. Raises
-    ServiceError if there is nothing to reset. See docs/EPICPROD_OPS.md."""
+    lifecycle. Does NOT touch the PanDA task itself (none of our credentials
+    live in the web tier); it only detaches the dead reference so the next
+    submission can fire. The API gates
+    this to authenticated operators. Raises ServiceError if there is nothing to
+    reset. See docs/EPICPROD_OPS.md."""
     if task.panda_task_id is None:
         raise ServiceError(
             'Nothing to reset — task has no recorded submission.', status=409)
