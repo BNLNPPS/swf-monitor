@@ -21,7 +21,11 @@
     </form>
   </div>
 
-  {% if user.is_authenticated %}
+  {% if is_tunnel %}
+  <div class="alert alert-info mb-4" style="max-width: 58rem;">
+    To import Request Questionnaire CSV data, use pandaserver02.
+  </div>
+  {% elif user.is_authenticated %}
   <div class="mb-4 p-3 border rounded bg-light" style="max-width: 58rem;">
     <h2 class="h5 mb-3">Import Request Questionnaire CSV Export</h2>
     <form method="post" action="{% url 'pcs:questionnaire_import' %}">
