@@ -500,6 +500,53 @@ class Campaign(models.Model):
         return self.name
 
 
+QUESTIONNAIRE_STATUS_CHOICES = [
+    ('active', 'Active'),
+    ('review', 'Review'),
+    ('linked', 'Linked'),
+    ('closed', 'Closed'),
+]
+
+
+class Questionnaire(models.Model):
+    """
+    Read-only mirror of one ePIC production-request Google Form response.
+
+    Requesters still submit through the Google Form; PCS mirrors the backend
+    export so production records can link to the submitted request provenance.
+    """
+    submitted_at = models.DateTimeField(
+        unique=True,
+        help_text="Google Form response timestamp; the intake idempotency key",
+    )
+    description = models.TextField(
+        blank=True, default='',
+        help_text="Dataset, generator, and purpose as submitted",
+    )
+    repository = models.TextField(blank=True, default='')
+    contact = models.TextField(blank=True, default='')
+    nevents = models.CharField(max_length=100, blank=True, default='')
+    benchmark = models.TextField(blank=True, default='')
+    estimate = models.TextField(blank=True, default='')
+
+    status = models.CharField(
+        max_length=20, choices=QUESTIONNAIRE_STATUS_CHOICES, default='active')
+    source_url = models.CharField(max_length=500, blank=True, default='')
+    source_row = models.CharField(max_length=100, blank=True, default='')
+    content_hash = models.CharField(max_length=64, db_index=True)
+    data = models.JSONField(default=dict, blank=True)
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_questionnaire'
+        ordering = ['-submitted_at']
+
+    def __str__(self):
+        return f"questionnaire#{self.pk} {self.submitted_at:%Y-%m-%d %H:%M}"
+
+
 PRODREQUEST_STATUS_CHOICES = [
     ('new', 'New'),
     ('review', 'Review'),
@@ -519,6 +566,12 @@ class ProdRequest(models.Model):
     Use flags and requestor are duplicated onto ProdTask at task
     creation; both rows are mutable independently after that.
     """
+    questionnaire = models.ForeignKey(
+        Questionnaire, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='prod_requests',
+        help_text="Originating Google Form response mirror, if linked",
+    )
+
     # Requester-facing fields (request spreadsheet)
     requestor = models.CharField(max_length=100, blank=True, default='',
                                  help_text="PWG or DSC making the request")

@@ -9,18 +9,23 @@ to its native shape (DRF Response, MCP error dict).
 """
 import csv as _csv
 import hashlib as _hashlib
+import io as _io
+import json as _json
 import logging as _logging
 import os as _os
 import re as _re
+from datetime import datetime as _datetime
 
 from django.conf import settings as _settings
 from django.db import transaction
+from django.utils import timezone as _timezone
+from django.utils.dateparse import parse_datetime as _parse_datetime
 
 _log = _logging.getLogger(__name__)
 
 from .models import (
     Dataset, ProdConfig, ProdTask,
-    Campaign, ProdRequest,
+    Campaign, Questionnaire, ProdRequest,
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
 )
 from .physics_match import derive_physics, derive_background, derive_evgen, single_particle_angle
@@ -66,6 +71,155 @@ REQUEST_TO_TASK_COPY_FIELDS = (
     'requestor', 'priority',
     'pre_tdr_use', 'early_science_use', 'other_use', 'new_request',
 )
+
+
+# ---------------------------------------------------------------------------
+# Questionnaire
+# ---------------------------------------------------------------------------
+
+QUESTIONNAIRE_FIELD_MAP = {
+    'submitted_at': (
+        'Timestamp',
+        'submitted_at',
+    ),
+    'description': (
+        'Name the dataset, generator, and purpose',
+        'description',
+    ),
+    'repository': (
+        'Location of the repository with version control enforced per the input-processing guidelines (e.g. a tagged generator or steering-file repository)',
+        'repository',
+    ),
+    'contact': (
+        'Who is the contact person for the dataset generation',
+        'contact',
+    ),
+    'nevents': (
+        'How many events are requested',
+        'nevents',
+    ),
+    'benchmark': (
+        'Time to simulate the first 100 events and disk space the output file occupies',
+        'benchmark',
+    ),
+    'estimate': (
+        'Total compute or storage required for the dataset, with justification for requests above 1% of the campaign budget (~120 core-years and ~35 TB per month)',
+        'estimate',
+    ),
+}
+
+
+def _row_value(row, aliases):
+    lower = {str(k).strip().lower(): v for k, v in row.items()}
+    for alias in aliases:
+        key = alias.strip().lower()
+        if key in lower:
+            return '' if lower[key] is None else str(lower[key]).strip()
+    return ''
+
+
+def _parse_questionnaire_timestamp(value):
+    if not value:
+        raise ServiceError('Questionnaire row is missing Timestamp/submitted_at.')
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        for fmt in (
+            '%m/%d/%Y %H:%M:%S',
+            '%m/%d/%Y %H:%M',
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d %H:%M',
+        ):
+            try:
+                parsed = _datetime.strptime(value, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        raise ServiceError(f'Could not parse questionnaire timestamp {value!r}.')
+    if _timezone.is_naive(parsed):
+        parsed = _timezone.make_aware(parsed, _timezone.get_current_timezone())
+    return parsed
+
+
+def _questionnaire_payload_from_row(row):
+    payload = {
+        field: _row_value(row, aliases)
+        for field, aliases in QUESTIONNAIRE_FIELD_MAP.items()
+    }
+    payload['submitted_at'] = _parse_questionnaire_timestamp(payload['submitted_at'])
+    return payload
+
+
+def _questionnaire_content_hash(payload):
+    content = {
+        k: (payload[k].isoformat() if k == 'submitted_at' else payload[k])
+        for k in (
+            'submitted_at', 'description', 'repository', 'contact',
+            'nevents', 'benchmark', 'estimate',
+        )
+    }
+    raw = _json.dumps(content, sort_keys=True, separators=(',', ':'))
+    return _hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+@transaction.atomic
+def questionnaire_intake(rows, *, source_url='', created_by='questionnaire_import'):
+    """Idempotently mirror Google Form response rows into Questionnaire.
+
+    The Google Form remains the user-facing authority. PCS keys on the form
+    timestamp and updates the mirror only when the mirrored response content
+    hash changes.
+    """
+    summary = {'created': 0, 'updated': 0, 'unchanged': 0, 'items': []}
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            raise ServiceError(f'Questionnaire row {idx} is not an object.')
+        payload = _questionnaire_payload_from_row(row)
+        content_hash = _questionnaire_content_hash(payload)
+        source_row = str(idx)
+        defaults = {
+            **payload,
+            'source_url': source_url or '',
+            'source_row': source_row,
+            'content_hash': content_hash,
+            'created_by': created_by,
+        }
+        questionnaire, created = Questionnaire.objects.get_or_create(
+            submitted_at=payload['submitted_at'],
+            defaults=defaults,
+        )
+        if created:
+            action = 'created'
+            summary['created'] += 1
+        elif questionnaire.content_hash != content_hash:
+            for field in (
+                'description', 'repository', 'contact', 'nevents',
+                'benchmark', 'estimate',
+            ):
+                setattr(questionnaire, field, payload[field])
+            questionnaire.source_url = source_url or questionnaire.source_url
+            questionnaire.source_row = source_row
+            questionnaire.content_hash = content_hash
+            questionnaire.save(update_fields=[
+                'description', 'repository', 'contact', 'nevents',
+                'benchmark', 'estimate', 'source_url', 'source_row',
+                'content_hash', 'updated_at',
+            ])
+            action = 'updated'
+            summary['updated'] += 1
+        else:
+            action = 'unchanged'
+            summary['unchanged'] += 1
+        summary['items'].append({'id': questionnaire.pk, 'action': action})
+    return summary
+
+
+def questionnaire_intake_csv(csv_text, *, source_url='', created_by='questionnaire_import'):
+    if not csv_text:
+        raise ServiceError('csv_text is required.')
+    rows = _csv.DictReader(_io.StringIO(csv_text))
+    return questionnaire_intake(
+        list(rows), source_url=source_url, created_by=created_by)
 
 
 # ---------------------------------------------------------------------------

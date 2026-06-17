@@ -1,6 +1,8 @@
+import re
+
 from rest_framework import serializers
 from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
-                     Dataset, ProdConfig, ProdTask)
+                     Dataset, ProdConfig, ProdTask, Questionnaire)
 from .schemas import validate_parameters
 
 
@@ -140,6 +142,47 @@ class ProdConfigSerializer(serializers.ModelSerializer):
         model = ProdConfig
         fields = '__all__'
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+
+
+def _redact_contact(value):
+    value = (value or '').strip()
+    if not value:
+        return ''
+    email_pattern = r'([A-Za-z0-9._%+-]+)@[A-Za-z0-9.-]+'
+    email = re.fullmatch(email_pattern, value)
+    if email:
+        return email.group(1)
+    value = re.sub(email_pattern, '', value).replace('<', ' ').replace('>', ' ')
+    parts = [p for p in value.replace(',', ' ').split() if p]
+    initials = ''.join(p[0].upper() for p in parts if p[0].isalpha())
+    return initials or ''
+
+
+class QuestionnaireSerializer(serializers.ModelSerializer):
+    contact = serializers.SerializerMethodField()
+    contact_redacted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Questionnaire
+        fields = [
+            'id', 'submitted_at', 'description', 'repository', 'contact',
+            'contact_redacted', 'nevents', 'benchmark', 'estimate',
+            'status', 'source_url', 'source_row', 'data',
+            'created_by', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def _authenticated(self):
+        request = self.context.get('request')
+        return bool(request and request.user and request.user.is_authenticated)
+
+    def get_contact(self, obj):
+        if self._authenticated():
+            return obj.contact
+        return _redact_contact(obj.contact)
+
+    def get_contact_redacted(self, obj):
+        return not self._authenticated()
 
 
 class ProdTaskSerializer(serializers.ModelSerializer):

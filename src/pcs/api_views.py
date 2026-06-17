@@ -30,12 +30,13 @@ from django.db.models import Count
 
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
-    Dataset, ProdConfig, ProdTask,
+    Dataset, ProdConfig, ProdTask, Questionnaire,
 )
 from .serializers import (
     PhysicsCategorySerializer, PhysicsTagSerializer,
     EvgenTagSerializer, SimuTagSerializer, RecoTagSerializer, BackgroundTagSerializer,
     DatasetSerializer, ProdConfigSerializer, ProdTaskSerializer,
+    QuestionnaireSerializer,
 )
 from .schemas import validate_parameters, get_tag_model
 from . import services
@@ -257,6 +258,39 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
+
+
+class QuestionnaireViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only Google Form response mirror plus authenticated intake."""
+    queryset = Questionnaire.objects.all()
+    serializer_class = QuestionnaireSerializer
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @action(detail=False, methods=['post'], url_path='intake')
+    def intake(self, request):
+        try:
+            if 'csv_text' in request.data:
+                summary = services.questionnaire_intake_csv(
+                    request.data.get('csv_text'),
+                    source_url=request.data.get('source_url', ''),
+                    created_by=request.user.username,
+                )
+            else:
+                rows = request.data.get('rows')
+                if rows is None:
+                    return Response(
+                        {'detail': 'Provide either csv_text or rows.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                summary = services.questionnaire_intake(
+                    rows,
+                    source_url=request.data.get('source_url', ''),
+                    created_by=request.user.username,
+                )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(summary)
 
 
 class ProdTaskViewSet(viewsets.ModelViewSet):
