@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ task.name }} - Prod Task - PCS{% endblock %}
+{% block title %}{{ task.composed_name }} - Prod Task - PCS{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
@@ -8,13 +8,13 @@
         <ol class="breadcrumb">
             <li class="breadcrumb-item"><a href="{% url 'pcs:pcs_hub' %}">PCS</a></li>
             <li class="breadcrumb-item"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a></li>
-            <li class="breadcrumb-item active">{{ task.name }}</li>
+            <li class="breadcrumb-item active">{{ task.composed_name }}</li>
         </ol>
     </nav>
 
     <div class="d-flex justify-content-between align-items-start mb-3">
         <div>
-            <h2>{{ task.name }}</h2>
+            <h2>{{ task.composed_name }}</h2>
             <p class="text-muted">
                 <span class="badge bg-{% if task.status == 'draft' %}secondary{% elif task.status == 'ready' %}primary{% elif task.status == 'submitted' %}info{% elif task.status == 'completed' %}success{% elif task.status == 'past_output' %}dark{% elif task.status == 'failed' %}danger{% else %}secondary{% endif %}">{{ task.status }}</span>
                 Created by {{ task.created_by }} on {{ task.created_at|date:"Y-m-d H:i" }}
@@ -23,7 +23,7 @@
         </div>
         <div>
             {% if task.status == 'draft' %}
-            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}" class="btn btn-dark-green btn-sm">Edit in Compose</a>
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.composed_name|urlencode }}" class="btn btn-dark-green btn-sm">Edit in Compose</a>
             <button class="btn btn-secondary btn-sm" id="btn-regen">Regenerate Commands</button>
             {% if is_owner %}
             <button class="btn btn-success btn-sm" id="btn-lock">Lock</button>
@@ -35,7 +35,7 @@
             <button class="btn btn-outline-warning btn-sm" id="btn-reset-submission">Reset submission</button>
             {% endif %}
             {% elif task.status == 'ready' %}
-            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.name|urlencode }}"
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&selected={{ task.composed_name|urlencode }}"
                class="btn btn-success btn-sm">Submit in Compose</a>
             {% elif task.status == 'draft' %}
             <span class="d-inline-block" tabindex="0"
@@ -270,14 +270,14 @@ document.querySelectorAll('.btn-copy').forEach(btn => {
 });
 const btnRegen = document.getElementById('btn-regen');
 if (btnRegen) btnRegen.addEventListener('click', function() {
-    fetch('{% url "pcs:prod_task_generate_commands" pk=task.pk %}')
+    fetch('{% url "pcs:prod_task_generate_commands" name=task.composed_name %}')
         .then(r => r.json())
         .then(data => { location.reload(); });
 });
 const btnResetSubmission = document.getElementById('btn-reset-submission');
 if (btnResetSubmission) btnResetSubmission.addEventListener('click', function() {
-    if (!confirm('Reset submission on "{{ task.name|escapejs }}"? This detaches PanDA Task {{ task.panda_task_id }} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.')) return;
-    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.pk }}/reset-submission/', {
+    if (!confirm('Reset submission on "{{ task.composed_name|escapejs }}"? This detaches PanDA Task {{ task.panda_task_id }} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.')) return;
+    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.composed_name|urlencode }}/reset-submission/', {
         method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'}
     }).then(r => r.json().then(d => ({ok: r.ok, d})))
       .then(({ok, d}) => { if (ok) location.reload(); else alert(d.detail || 'Reset failed'); });
@@ -285,8 +285,8 @@ if (btnResetSubmission) btnResetSubmission.addEventListener('click', function() 
 
 const btnLock = document.getElementById('btn-lock');
 if (btnLock) btnLock.addEventListener('click', function() {
-    if (!confirm('Lock "{{ task.name|escapejs }}"? It becomes ready for submission and can no longer be edited. This cannot be undone.')) return;
-    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.pk }}/lock/', {
+    if (!confirm('Lock "{{ task.composed_name|escapejs }}"? It becomes ready for submission and can no longer be edited. This cannot be undone.')) return;
+    fetch('/swf-monitor/pcs/api/prod-tasks/{{ task.composed_name|urlencode }}/lock/', {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
     }).then(r => r.json().then(d => ({ok: r.ok, d})))

@@ -10,6 +10,7 @@ import re
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
+from django.utils.functional import cached_property
 
 
 TAG_STATUS_CHOICES = [
@@ -191,6 +192,13 @@ class Dataset(models.Model):
     submission prep, not at composition.
     """
     dataset_name = models.CharField(max_length=255)
+    # The composed (tag-based) identity, stored and kept current on every save
+    # (see save() / build_dataset_name). This is the canonical name used in URLs,
+    # the API, and the PanDA taskName / Rucio DID; it is read directly and
+    # indexed for resolution, never rebuilt from the tag FKs at read time. The
+    # legacy ``dataset_name`` above (a csv_import.<hash> for imported rows) is
+    # left untouched. Not unique: block rows (b1, b2, …) share a composed name.
+    composed_name = models.CharField(max_length=255, db_index=True, blank=True, default='')
     scope = models.CharField(max_length=100, default='group.EIC')
     detector_version = models.CharField(max_length=50)
     detector_config = models.CharField(max_length=100)
@@ -294,6 +302,9 @@ class Dataset(models.Model):
             self.dataset_name = self.build_dataset_name()
         if not self.did:
             self.did = f"{self.scope}:{self.dataset_name}.b{self.block_num}"
+        # Recompute the stored composed identity on every save so it can never
+        # drift from the tag composition, and is read directly at query time.
+        self.composed_name = self.build_dataset_name()
         if len(self.dataset_name) > 255:
             raise ValidationError("Dataset name exceeds 255 characters.")
         self.full_clean()
@@ -323,15 +334,9 @@ class Dataset(models.Model):
         """Task name = dataset_name (without .bN block suffix)."""
         return self.dataset_name
 
-    @property
-    def composed_name(self):
-        """The dataset's name in the tag-based system (see build_dataset_name).
-
-        The human-facing identity used across the PCS UI. The stored
-        dataset_name and DID may be an internal csv_import.<hash> key (see
-        has_internal_name); this is always the tag composition.
-        """
-        return self.build_dataset_name()
+    # composed_name is a stored, indexed column (see the field definition and
+    # save()), not a derived property — it is read directly. build_dataset_name()
+    # remains the single authority that populates it.
 
     @property
     def tag_facets(self):
@@ -625,6 +630,18 @@ class ProdTask(models.Model):
 
     def __str__(self):
         return self.name
+
+    @cached_property
+    def composed_name(self):
+        """The task's canonical identity: its dataset's composed tag name
+        (group.EIC.<campaign>.<detector>.p.e.s.r[.k][.sample]) — the same name
+        that is the Rucio DID and the PanDA taskName/outDS (see PCS.md,
+        JEDI_INTEGRATION.md). This is what every task URL and API lookup keys
+        on; the stored ``name`` may be a legacy csv_import slash path, kept
+        resolvable but never the identity. ``build_dataset_name`` is the single
+        authority, so this can never drift from the rendered name. Falls back to
+        ``name`` only for the schema-impossible datasetless task."""
+        return self.dataset.composed_name if self.dataset_id else self.name
 
     def _dids_from_overrides(self, list_key, single_key=None):
         """Resolve a list of DIDs from overrides JSON.

@@ -60,11 +60,15 @@ urlpatterns = [
     path('tasks/', views.prod_tasks_list, name='prod_tasks_list'),
     path('tasks/datatable/', views.prod_tasks_datatable_ajax, name='prod_tasks_datatable_ajax'),
     path('tasks/compose/', views.prod_task_compose, name='prod_task_compose'),
-    path('tasks/<int:pk>/', views.prod_task_detail, name='prod_task_detail'),
-    path('tasks/<int:pk>/delete/', views.prod_task_delete, name='prod_task_delete'),
-    path('tasks/<int:pk>/commands/', views.prod_task_generate_commands, name='prod_task_generate_commands'),
+    # Task routes are keyed by the composed tag name (str, no slashes); the
+    # literal routes above are matched first. A stale /tasks/<pk>/ link still
+    # resolves (resolve_prodtask tolerates a bare pk) and the detail view 301s
+    # it to the composed-name URL. No task URL ever emits a pk.
+    path('tasks/<str:name>/', views.prod_task_detail, name='prod_task_detail'),
+    path('tasks/<str:name>/delete/', views.prod_task_delete, name='prod_task_delete'),
+    path('tasks/<str:name>/commands/', views.prod_task_generate_commands, name='prod_task_generate_commands'),
     # On-demand compose hydration (taskParamMap + commands) — light payload, fetched on open
-    path('tasks/<int:pk>/compose-detail/', views.prod_task_compose_task_detail, name='compose_task_detail'),
+    path('tasks/<str:name>/compose-detail/', views.prod_task_compose_task_detail, name='compose_task_detail'),
 
     # REST API
     path('api/', include('pcs.api_urls')),

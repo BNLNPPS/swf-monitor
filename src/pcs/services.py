@@ -276,6 +276,35 @@ def _known_prodtask_statuses():
     return known
 
 
+def resolve_prodtask(name, queryset=None):
+    """Resolve a ProdTask by its identity, the way every task URL and the
+    ``?name=`` API endpoints key on it. First match wins:
+
+      1. the composed tag name (``dataset.composed_name``) — the canonical
+         identity, an indexed lookup on the stored column;
+      2. the stored ``name`` — a legacy csv_import slash path or a native name
+         (also indexed; ``name`` is unique);
+      3. a bare integer pk — tolerated for a stale ``/tasks/<pk>/`` link inbound
+         only. It is never emitted; a detail view 301s it to the composed name.
+
+    Raises ``ProdTask.DoesNotExist`` if nothing matches, so it is a drop-in for
+    ``queryset.get(name=...)``.
+    """
+    qs = ProdTask.objects.all() if queryset is None else queryset
+    key = str(name)
+    t = qs.filter(dataset__composed_name=key).first()
+    if t is not None:
+        return t
+    t = qs.filter(name=key).first()
+    if t is not None:
+        return t
+    if key.isdigit():
+        t = qs.filter(pk=int(key)).first()
+        if t is not None:
+            return t
+    raise ProdTask.DoesNotExist(f"No ProdTask matches {name!r}")
+
+
 def prodtask_readiness_problems(task):
     """Reasons a task is NOT ready to lock/submit; empty list = ready.
 

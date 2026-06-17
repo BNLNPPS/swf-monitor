@@ -11,7 +11,7 @@ from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
-from django.http import JsonResponse
+from django.http import JsonResponse, Http404
 from django.contrib import messages
 from django.db.models import Count, Q
 
@@ -1469,7 +1469,7 @@ def prod_tasks_datatable_ajax(request):
 
     qs = ProdTask.objects.select_related('dataset', 'prod_config')
     records_total = qs.count()
-    search_fields = ['name', 'description', 'dataset__dataset_name', 'prod_config__name', 'created_by']
+    search_fields = ['name', 'description', 'dataset__composed_name', 'dataset__dataset_name', 'prod_config__name', 'created_by']
     qs = dt.apply_search(qs, search_fields)
     records_filtered = qs.count()
     qs = qs.order_by(dt.get_order_by())
@@ -1479,10 +1479,10 @@ def prod_tasks_datatable_ajax(request):
                      'completed': 'success', 'failed': 'danger'}
     data = []
     for t in page:
-        detail_url = reverse('pcs:prod_task_detail', args=[t.pk])
+        detail_url = reverse('pcs:prod_task_detail', args=[t.composed_name])
         color = status_colors.get(t.status, 'secondary')
         data.append([
-            f'<a href="{detail_url}">{t.name}</a>',
+            f'<a href="{detail_url}">{t.composed_name}</a>',
             f'<span class="badge bg-{color}">{t.status}</span>',
             t.dataset.dataset_name,
             t.prod_config.name,
@@ -1493,15 +1493,20 @@ def prod_tasks_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-def prod_task_detail(request, pk):
+def prod_task_detail(request, name):
     from .commands import build_task_params
-    task = get_object_or_404(
-        ProdTask.objects.select_related(
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
             'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-        ),
-        pk=pk,
-    )
+        ))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
+    # Canonical task URL is the composed name; 301 a legacy/raw-name or stale
+    # /tasks/<pk>/ inbound to it so a pk is never a resting URL.
+    if name != task.composed_name:
+        return redirect('pcs:prod_task_detail', name=task.composed_name, permanent=True)
     try:
         task_params = build_task_params(task)
         task_params_json = json.dumps(task_params, indent=2, sort_keys=False, default=str)
@@ -1533,7 +1538,16 @@ def prod_task_compose(request):
     selected_name = request.GET.get('selected') or None
     focused_task = None
     if selected_name:
-        focused_task = ProdTask.objects.select_related('campaign').filter(name=selected_name).first()
+        from .services import resolve_prodtask
+        try:
+            focused_task = resolve_prodtask(
+                selected_name, ProdTask.objects.select_related('campaign', 'dataset'))
+        except ProdTask.DoesNotExist:
+            focused_task = None
+    # Hand the JS the canonical composed name as the selection key (it resolves
+    # composed-name-or-legacy), so a legacy-name or pk ?selected still focuses.
+    if focused_task is not None:
+        selected_name = focused_task.composed_name
     campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
     if campaign is None:
         campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
@@ -1558,6 +1572,9 @@ def prod_task_compose(request):
         tasks_data.append({
             'id': t.id,
             'name': t.name,
+            # Canonical identity (stored dataset.composed_name); the JS keys and
+            # links tasks on this, never on the pk or the legacy slash name.
+            'composed_name': t.composed_name,
             'status': t.status,
             'dataset_id': t.dataset_id,
             'dataset_name': t.dataset.dataset_name,
@@ -1674,29 +1691,34 @@ def prod_task_compose(request):
 
 
 @_login_required_flash
-def prod_task_delete(request, pk):
+def prod_task_delete(request, name):
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related('dataset'))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
     if request.method != 'POST':
         return _post_only_redirect(
-            request, reverse('pcs:prod_task_detail', kwargs={'pk': pk}),
+            request, reverse('pcs:prod_task_detail', kwargs={'name': task.composed_name}),
             action_label='Task delete')
-    task = get_object_or_404(ProdTask, pk=pk)
     if task.status != 'draft':
         messages.error(request, "Only draft tasks can be deleted.")
-        return redirect('pcs:prod_task_detail', pk=pk)
+        return redirect('pcs:prod_task_detail', name=task.composed_name)
     task.delete()
-    messages.success(request, f"Task '{task.name}' deleted.")
+    messages.success(request, f"Task '{task.composed_name}' deleted.")
     return redirect('pcs:prod_tasks_list')
 
 
-def prod_task_generate_commands(request, pk):
+def prod_task_generate_commands(request, name):
     """JSON endpoint: regenerate and return commands for a ProdTask."""
-    task = get_object_or_404(
-        ProdTask.objects.select_related(
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
             'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-        ),
-        pk=pk,
-    )
+        ))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
     task.generate_commands()
     task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
     return JsonResponse({
@@ -1724,15 +1746,19 @@ def prod_task_compose_dataset_detail(request, pk):
     return JsonResponse(payload)
 
 
-def prod_task_compose_task_detail(request, pk):
+def prod_task_compose_task_detail(request, name):
     """On-demand hydration for the compose view: a task's generated taskParamMap
     and cached condor/panda commands, which the light initial payload omits. The
     compose JS merges this into the task entry the first time it is opened (never
     clobbering). GET JSON; read-only — does not regenerate/save commands."""
     from .commands import build_task_params
-    task = get_object_or_404(ProdTask.objects.select_related(
-        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-        'dataset__simu_tag', 'dataset__reco_tag', 'prod_config'), pk=pk)
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related(
+            'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config'))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
     try:
         task_params_json = json.dumps(build_task_params(task), indent=2, default=str)
     except Exception as e:                                       # noqa: BLE001

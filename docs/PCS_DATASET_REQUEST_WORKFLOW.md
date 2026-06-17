@@ -238,8 +238,8 @@ idempotency, lifecycle rules) is identical on both surfaces.
 | POST   | `/pcs/api/datasets/intake/`                   | Idempotent: given a CSV-manifest location (+ optional tag handles), find-or-create the external EVGEN Dataset, return its DID. |
 | POST   | `/pcs/api/prod-tasks/`                        | Generic create. |
 | POST   | `/pcs/api/prod-tasks/intake/`                 | Idempotent on a request key (e.g. `epic-prod#<issue>` or `csv_path+row_key`): create a draft ProdTask, ensure linked input Dataset(s), persist `public_catalog_*` mapping fields in `overrides`, return the task. |
-| POST   | `/pcs/api/prod-tasks/<pk>/link-input/`        | Link an existing Dataset as input by DID (writes `overrides.input_dataset_did(s)`). Sugar over PATCH. |
-| POST   | `/pcs/api/prod-tasks/<pk>/set-status/`        | Lifecycle transition with rule enforcement (e.g. only `ready → submitted`). |
+| POST   | `/pcs/api/prod-tasks/<name>/link-input/`      | Link an existing Dataset as input by DID (writes `overrides.input_dataset_did(s)`). Sugar over PATCH. |
+| POST   | `/pcs/api/prod-tasks/<name>/set-status/`      | Lifecycle transition with rule enforcement (e.g. only `ready → submitted`). |
 | POST   | `/pcs/api/prod-tasks/record-submission/?name=`| Record JEDI submission outcome (`panda_task_id`, `status='submitted'`). Rejects if `panda_task_id` already set, or `status != 'ready'`. |
 | GET    | `/pcs/api/prod-tasks/command/?name=&fmt=`     | Submission artifact — `condor`/`panda`/`jedi`/`dump`. |
 | GET    | `/pcs/api/{datasets,prod-tasks}/`             | List with filters (`stage`, `source_kind`, `status`, `public_catalog_issue`, …). |

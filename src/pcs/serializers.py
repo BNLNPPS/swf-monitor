@@ -143,6 +143,7 @@ class ProdConfigSerializer(serializers.ModelSerializer):
 
 
 class ProdTaskSerializer(serializers.ModelSerializer):
+    composed_name = serializers.CharField(read_only=True)
     dataset_name = serializers.CharField(source='dataset.dataset_name', read_only=True)
     dataset_did = serializers.CharField(source='dataset.did', read_only=True)
     prod_config_name = serializers.CharField(source='prod_config.name', read_only=True)
@@ -153,7 +154,7 @@ class ProdTaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProdTask
         fields = [
-            'id', 'name', 'description', 'status',
+            'id', 'name', 'composed_name', 'description', 'status',
             'dataset', 'dataset_name', 'dataset_did',
             'prod_config', 'prod_config_name',
             'csv_file', 'overrides',

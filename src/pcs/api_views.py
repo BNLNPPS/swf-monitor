@@ -269,11 +269,30 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsOwnerOrReadOnly]
 
+    # Detail routes are keyed by the composed tag name. Composed names contain
+    # dots, so the default lookup regex ([^/.]+) is widened to allow them.
+    # get_object() resolves the composed name (and, inbound-only, the legacy
+    # stored name or a bare pk) via the shared resolver, so /pcs/api/prod-tasks/
+    # never emits a pk. The detail=False actions (command, record-submission, …)
+    # are registered before this detail route, so they are matched first.
+    lookup_field = 'name'
+    lookup_value_regex = '[^/]+'
+
+    def get_object(self):
+        try:
+            task = services.resolve_prodtask(
+                self.kwargs[self.lookup_field], self.get_queryset())
+        except ProdTask.DoesNotExist:
+            from django.http import Http404
+            raise Http404(f"No task {self.kwargs.get(self.lookup_field)!r}")
+        self.check_object_permissions(self.request, task)
+        return task
+
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
 
     @action(detail=True, methods=['post'], url_path='generate-commands')
-    def generate_commands(self, request, pk=None):
+    def generate_commands(self, request, name=None):
         task = self.get_object()
         task.generate_commands()
         task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
@@ -313,7 +332,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            task = self.get_queryset().get(name=name)
+            task = services.resolve_prodtask(name, self.get_queryset())
         except ProdTask.DoesNotExist:
             return Response({'detail': f"No task named '{name}'"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -339,7 +358,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         return JsonResponse(build_task_dump(task), json_dumps_params={'indent': 2})
 
     @action(detail=True, methods=['post'], url_path='set-status')
-    def set_status(self, request, pk=None):
+    def set_status(self, request, name=None):
         task = self.get_object()
         try:
             services.prodtask_set_status(
@@ -350,7 +369,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(task).data)
 
     @action(detail=True, methods=['post'])
-    def lock(self, request, pk=None):
+    def lock(self, request, name=None):
         """Lock a draft task → 'ready'. PCS-consistent with the tag lock: a
         dedicated, one-way lifecycle action — the UI offers no unlock, so a
         locked task is frozen for reproducibility. 'ready' is the task's
@@ -364,7 +383,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(task).data)
 
     @action(detail=True, methods=['post'])
-    def submit(self, request, pk=None):
+    def submit(self, request, name=None):
         """Request automated PanDA submission of a locked (ready) task — the
         submit trigger used by the compose panel (and the task-detail "Submit in
         Compose" link), so the user can submit without leaving the view.
@@ -384,7 +403,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         return Response(data)
 
     @action(detail=True, methods=['post'], url_path='reset-submission')
-    def reset_submission(self, request, pk=None):
+    def reset_submission(self, request, name=None):
         """Detach a broken/aborted submission so a task can be re-submitted:
         panda_task_id → None, status → draft. Owner-gated via get_object(); the
         recovery path for a task pinned to a dead jediTaskID (the submit gate
@@ -445,7 +464,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=['post'], url_path='link-input')
-    def link_input(self, request, pk=None):
+    def link_input(self, request, name=None):
         """Thin wrapper over ``services.prodtask_link_input``."""
         task = self.get_object()
         try:
@@ -502,7 +521,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Missing ?name='},
                             status=status.HTTP_400_BAD_REQUEST)
         try:
-            task = self.get_queryset().get(name=name)
+            task = services.resolve_prodtask(name, self.get_queryset())
         except ProdTask.DoesNotExist:
             return Response({'detail': f"No task named '{name}'"},
                             status=status.HTTP_404_NOT_FOUND)
