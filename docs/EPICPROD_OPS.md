@@ -111,10 +111,17 @@ ePIC-tailored task and job views in swf-monitor:
 |---|---|
 | Task | `panda/tasks/<jeditaskid>/` |
 | Job  | `panda/jobs/<pandaid>/` |
+| System status | `panda/system/` |
 
 - Internal (BNL CILogon): `https://pandaserver02.sdcc.bnl.gov/swf-monitor/<path>`
 - External (swf-remote proxy, django login): `https://epic-devcloud.org/prod/<path>`
 - Generic BigPanDA: `https://pandamon01.sdcc.bnl.gov/task/<jeditaskid>/`
+
+System status is documented in [SYSTEM_STATUS.md](SYSTEM_STATUS.md). The page
+and its JSON endpoint read cached DB rows refreshed by `epicprod_ops_agent`;
+they do not probe services from Apache requests. The production nav `System`
+item turns red when the cached aggregate is red or stale, so both
+`pandaserver02` and devcloud surface infrastructure trouble quickly.
 
 ## Logs
 
