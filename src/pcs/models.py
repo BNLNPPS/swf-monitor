@@ -525,7 +525,7 @@ class Questionnaire(models.Model):
     )
     repository = models.TextField(blank=True, default='')
     contact = models.TextField(blank=True, default='')
-    nevents = models.CharField(max_length=100, blank=True, default='')
+    nevents = models.TextField(blank=True, default='')
     benchmark = models.TextField(blank=True, default='')
     estimate = models.TextField(blank=True, default='')
 
