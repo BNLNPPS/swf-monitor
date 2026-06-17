@@ -5,7 +5,7 @@ Web views for ePIC PanDA production monitoring — jobs, tasks, errors,
 activity overview, and detail pages with rich cross-linking.
 """
 
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
 from django.conf import settings
@@ -30,8 +30,19 @@ from ..panda.constants import (
 )
 from ..cell_fmt import fill_cell
 from ..activemq_connection import ActiveMQConnectionManager
+from ..epicprod_inventory import inventory_for_job_context
 
 logger = logging.getLogger(__name__)
+
+
+def _pcs_task_for_jeditaskid(jeditaskid):
+    try:
+        from pcs.models import ProdTask
+        return (ProdTask.objects.select_related('dataset')
+                .filter(panda_task_id=int(jeditaskid)).first())
+    except Exception:
+        logger.exception("PCS lookup failed for PanDA task %s", jeditaskid)
+        return None
 
 
 # ── Column definitions ───────────────────────────────────────────────────────
@@ -395,7 +406,25 @@ def panda_job_detail(request, pandaid):
     trf = job.get('transformation') or ''
     if 'pandaserver-doma.cern.ch/trf/' in trf:
         job['transformation_view_url'] = reverse('monitor_app:panda_view_text') + '?url=' + trf
+    if job.get('jeditaskid'):
+        data['pcs_task'] = _pcs_task_for_jeditaskid(job['jeditaskid'])
+    data.update(inventory_for_job_context(data))
     return render(request, 'monitor_app/panda_job_detail.html', data)
+
+
+def epicprod_job_refresh(request, pandaid):
+    if request.method != 'POST':
+        return redirect('monitor_app:panda_job_detail', pandaid=pandaid)
+    msg = {
+        'msg_type': 'sync_epicprod_inventory',
+        'namespace': 'prodops',
+        'pandaid': str(pandaid),
+    }
+    try:
+        ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+    except Exception as e:
+        logger.error("epicprod inventory refresh trigger failed for job %s: %s", pandaid, e)
+    return redirect('monitor_app:panda_job_detail', pandaid=pandaid)
 
 
 # ── View text (transformation script viewer) ────────────────────────────────
@@ -603,6 +632,7 @@ def panda_task_detail(request, jeditaskid):
     if isinstance(task, dict) and 'error' in task:
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
+    pcs_task = _pcs_task_for_jeditaskid(jeditaskid)
 
     # Get jobs for this task
     jobs_data = list_jobs(taskid=int(jeditaskid), days=90, limit=200)
@@ -612,6 +642,7 @@ def panda_task_detail(request, jeditaskid):
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
         'jeditaskid': jeditaskid,
+        'pcs_task': pcs_task,
         'jobs': jobs,
         'job_summary': summary,
         'job_count': len(jobs),

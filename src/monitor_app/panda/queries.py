@@ -1171,8 +1171,8 @@ def study_job(pandaid):
     if task_info:
         result["task"] = task_info
 
-    # Monitoring page URL
-    result["monitor_url"] = f"https://epic-devcloud.org/panda/jobs/{pandaid}/"
+    # Official PanDA monitoring page URL.
+    result["monitor_url"] = f"https://pandamon01.sdcc.bnl.gov/job?pandaid={pandaid}"
 
     # 5. Log analysis for failure-adjacent statuses. 'closed' covers
     # lost-heartbeat (pilot killed at slot boundary before reporting back);

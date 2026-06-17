@@ -22,7 +22,14 @@
                 <div class="card-body">
                     <table class="table table-sm mb-0">
                         <tr><td><strong>Task ID</strong></td><td>{{ task.jeditaskid }} {% copy_btn task.jeditaskid %}</td></tr>
-                        {% if task.taskname %}<tr><td><strong>Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>{% endif %}
+                        {% if pcs_task %}
+                        <tr><td><strong>Name</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}"><code>{{ pcs_task.composed_name }}</code></a></td></tr>
+                        {% elif task.taskname %}
+                        <tr><td><strong>Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>
+                        {% endif %}
+                        {% if pcs_task and task.taskname and task.taskname != pcs_task.composed_name %}
+                        <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>
+                        {% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ task.status|state_class }}" title="{{ task.status|state_title }}">{{ task.status }}</td></tr>
                         {% if task.username %}
                         <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_tasks_list' %}?username={{ task.username }}">{{ task.username }}</a></td></tr>

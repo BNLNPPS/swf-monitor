@@ -35,6 +35,8 @@ Capabilities:
   evgen_rucio_update — assimilate the JLab Rucio EVGEN inventory (epic:/EVGEN/*)
                        and resolve each PCS evgen Dataset onto metadata['rucio']
                        (delegates to scripts/import_evgen_rucio.py --apply).
+  sync_epicprod_inventory — refresh the monitor's ePIC production job/file
+                       inventory and parsed failure diagnosis for a PanDA job.
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -90,6 +92,11 @@ CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "
 EVGEN_RUCIO_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "import_evgen_rucio.py"
 EVGEN_RUCIO_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_RUCIO_TIMEOUT", "900"))
 
+# Inventory refresh doer: a Django management command that reads PanDA/log
+# evidence and writes monitor-side EpicProdJob/EpicProdFile rows.
+MANAGE_PY = Path(__file__).resolve().parent.parent / "src" / "manage.py"
+INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_INVENTORY_TIMEOUT", "180"))
+
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
 # explicitly — every message to this agent carries namespace=prodops.
@@ -106,7 +113,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
-                   "health_ping", "shutdown"}
+                   "sync_epicprod_inventory", "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace is
@@ -338,6 +345,63 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
+
+    def _handle_sync_epicprod_inventory(self, m):
+        """Refresh one job/task inventory record on the worker pool."""
+        if not (m.get("pandaid") or m.get("jeditaskid") or m.get("task_name")):
+            self.logger.error(
+                "PRODOPS sync_epicprod_inventory: need pandaid, jeditaskid, or task_name")
+            return
+        if m.get("pandaid"):
+            key = f"pandaid:{m['pandaid']}"
+            label = f"sync_epicprod_inventory pandaid={m['pandaid']}"
+        elif m.get("jeditaskid"):
+            key = f"jeditaskid:{m['jeditaskid']}"
+            label = f"sync_epicprod_inventory jeditaskid={m['jeditaskid']}"
+        else:
+            key = f"task:{m['task_name']}"
+            label = f"sync_epicprod_inventory task={m['task_name']}"
+        self.run_in_background(
+            self._do_sync_epicprod_inventory, m,
+            dedup_key=f"sync_inventory:{key}",
+            label=label)
+
+    def _do_sync_epicprod_inventory(self, m):
+        cmd = [sys.executable, str(MANAGE_PY), "sync_epicprod_inventory"]
+        if m.get("pandaid"):
+            cmd += ["--pandaid", str(m["pandaid"])]
+        elif m.get("jeditaskid"):
+            cmd += ["--jeditaskid", str(m["jeditaskid"])]
+        else:
+            cmd += ["--prod-task", str(m["task_name"])]
+        self.logger.info(f"PRODOPS sync_epicprod_inventory: {' '.join(cmd)}")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=INVENTORY_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f"timed out after {INVENTORY_TIMEOUT}s"
+            self.logger.error(f"PRODOPS sync_epicprod_inventory TIMEOUT: {reason}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'epicprod_inventory_ready', 'ok': False,
+                'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
+                'task_name': m.get('task_name'), 'error': reason})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  sync-epicprod-inventory: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  sync-epicprod-inventory: {line}")
+        ok = p.returncode == 0
+        reason = ''
+        if not ok:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(f"PRODOPS sync_epicprod_inventory FAILED rc={p.returncode}")
+        else:
+            self.logger.info("PRODOPS sync_epicprod_inventory done")
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'epicprod_inventory_ready', 'ok': ok,
+            'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
+            'task_name': m.get('task_name'), 'error': reason})
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver

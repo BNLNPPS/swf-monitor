@@ -23,6 +23,7 @@ Flow:
   4. Parse ``jediTaskID=<N>`` and POST it to
      ``/pcs/api/prod-tasks/record-submission/`` so the ProdTask records its
      panda_task_id and flips to 'submitted'.
+  5. Best-effort: write expected output inventory from the exact submitted spec.
 
 Every failure is surfaced (stderr + non-zero exit); nothing is swallowed. Exit
 codes match submit-prod-task.py so the agent handler treats both doers alike:
@@ -55,6 +56,7 @@ SUBMIT_TMP_ROOT = os.path.join(os.environ.get("SWF_TMP_DIR", "/data/swf-tmp"), "
 HERE = os.path.dirname(os.path.abspath(__file__))
 KERNEL_SCRIPT = os.path.join(HERE, "evgen_panda_submit.py")
 DISPATCHER_SCRIPT = os.path.join(HERE, "evgen_job_dispatcher.py")
+MANAGE_PY = os.path.join(os.path.dirname(HERE), "src", "manage.py")
 
 JEDITASKID_RE = re.compile(r"jediTaskID=(\d+)")
 
@@ -118,6 +120,34 @@ def _assemble_sandbox(spec, proxy_path, root):
     with open(os.path.join(workdir, "spec.json"), "w") as f:
         json.dump(spec, f, indent=2)
     return workdir
+
+
+def _sync_expected_inventory(task_name, spec_path):
+    """Best-effort local DB update for expected file inventory.
+
+    This runs only after record-submission succeeds, so the PCS task has the
+    JEDI id needed for expected rows. Failure here must not turn a successful
+    submission into a failed submission.
+    """
+    if not os.path.isfile(MANAGE_PY):
+        _log(f"WARNING: cannot sync expected inventory; manage.py not found: {MANAGE_PY}")
+        return
+    cmd = [
+        sys.executable, MANAGE_PY, "sync_epicprod_inventory",
+        "--prod-task", task_name,
+        "--spec-file", spec_path,
+    ]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        _log("WARNING: expected inventory sync timed out after 60s")
+        return
+    for line in (p.stdout or "").splitlines():
+        _log(f"  inventory-sync: {line}")
+    for line in (p.stderr or "").splitlines():
+        _log(f"  inventory-sync: {line}")
+    if p.returncode != 0:
+        _log(f"WARNING: expected inventory sync failed rc={p.returncode}")
 
 
 def main():
@@ -217,6 +247,7 @@ def main():
                            {"name": args.task_name}, {"jedi_task_id": jedi_task_id},
                            args.token, owner=args.owner)
             _log(f"recorded jediTaskID={jedi_task_id} on ProdTask {args.task_name}")
+            _sync_expected_inventory(args.task_name, os.path.join(workdir, "spec.json"))
             print(jedi_task_id)
             return 0
         except Exception as e:

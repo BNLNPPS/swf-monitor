@@ -640,6 +640,124 @@ class RucioEndpoint(models.Model):
         return self.endpoint_name
 
 
+class EpicProdJob(models.Model):
+    """
+    ePIC production interpretation of a PanDA job.
+
+    PanDA remains the source for scheduler state. This table stores the
+    production-facing diagnosis: derived phase, concise failure reason, and
+    extensible parsed job history for the operator pages.
+    """
+    pandaid = models.BigIntegerField(primary_key=True)
+    jeditaskid = models.BigIntegerField(null=True, blank=True, db_index=True)
+    prod_task = models.ForeignKey(
+        'pcs.ProdTask',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='epicprod_jobs',
+    )
+    seq_number = models.IntegerField(null=True, blank=True, db_index=True)
+    job_index = models.IntegerField(null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=40, blank=True, default='', db_index=True)
+    phase = models.CharField(max_length=80, blank=True, default='', db_index=True)
+    failure_summary = models.TextField(blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'swf_epicprod_jobs'
+        ordering = ['-pandaid']
+        indexes = [
+            models.Index(fields=['jeditaskid', 'seq_number']),
+            models.Index(fields=['prod_task', 'status']),
+            models.Index(fields=['phase', 'status']),
+        ]
+
+    def __str__(self):
+        return f"EpicProd job {self.pandaid}"
+
+
+class EpicProdFile(models.Model):
+    """
+    Expected and observed files for ePIC production jobs.
+
+    Expected rows are generated from the same submission manifest/environment
+    contract the payload uses. Observed rows/status are later updated from
+    PanDA, payload logs, and cached Rucio state.
+    """
+    ROLE_CHOICES = [
+        ('input', 'Input'),
+        ('output', 'Output'),
+        ('log', 'Log'),
+    ]
+    STATUS_CHOICES = [
+        ('expected', 'Expected'),
+        ('produced_local', 'Produced locally'),
+        ('validated', 'Validated'),
+        ('registered', 'Registered'),
+        ('failed', 'Failed'),
+        ('conflict', 'Conflict'),
+        ('missing', 'Missing'),
+        ('unknown', 'Unknown'),
+    ]
+
+    prod_task = models.ForeignKey(
+        'pcs.ProdTask',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='epicprod_files',
+    )
+    job = models.ForeignKey(
+        EpicProdJob,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='files',
+    )
+    jeditaskid = models.BigIntegerField(null=True, blank=True, db_index=True)
+    pandaid = models.BigIntegerField(null=True, blank=True, db_index=True)
+    seq_number = models.IntegerField(null=True, blank=True, db_index=True)
+    job_index = models.IntegerField(null=True, blank=True, db_index=True)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, db_index=True)
+    stage = models.CharField(max_length=40, blank=True, default='', db_index=True)
+    scope = models.CharField(max_length=100, blank=True, default='', db_index=True)
+    dataset_name = models.CharField(max_length=1024, blank=True, default='')
+    did_name = models.CharField(max_length=1024, blank=True, default='', db_index=True)
+    lfn = models.CharField(max_length=512, blank=True, default='')
+    rse_expected = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(
+        max_length=40,
+        choices=STATUS_CHOICES,
+        default='expected',
+        db_index=True,
+    )
+    status_detail = models.TextField(blank=True, default='')
+    bytes = models.BigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=128, blank=True, default='')
+    source = models.CharField(max_length=80, blank=True, default='', db_index=True)
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_epicprod_files'
+        ordering = ['jeditaskid', 'seq_number', 'role', 'stage', 'lfn']
+        indexes = [
+            models.Index(fields=['prod_task', 'role', 'stage']),
+            models.Index(fields=['jeditaskid', 'seq_number']),
+            models.Index(fields=['pandaid', 'role', 'stage']),
+            models.Index(fields=['scope', 'did_name']),
+            models.Index(fields=['status', 'stage']),
+        ]
+
+    def __str__(self):
+        return self.did_name or self.lfn or f"EpicProd file {self.pk}"
+
+
 class AIMemory(models.Model):
     """
     AI dialogue history for cross-session context.

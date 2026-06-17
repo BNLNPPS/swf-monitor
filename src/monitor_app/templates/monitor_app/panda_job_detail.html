@@ -7,7 +7,13 @@
 <div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Job {{ pandaid }}</h2>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}" class="btn btn-outline-secondary btn-sm">Back to Jobs</a>
+        <div class="d-flex gap-2">
+            <form method="post" action="{% url 'monitor_app:epicprod_job_refresh' pandaid %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-primary btn-sm">Refresh ePIC Prod</button>
+            </form>
+            <a href="{% url 'monitor_app:panda_jobs_list' %}" class="btn btn-outline-secondary btn-sm">Back to Jobs</a>
+        </div>
     </div>
 
     {% if error %}
@@ -22,9 +28,6 @@
                 <div class="card-body">
                     <table class="table table-sm mb-0">
                         <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }} {% copy_btn job.pandaid %}</td></tr>
-                        {% if job.jeditaskid %}
-                        <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' job.jeditaskid %}">{{ job.jeditaskid }}</a></td></tr>
-                        {% endif %}
                         {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td><code>{{ job.jobname }}</code></td></tr>{% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td></tr>
                         {% if job.produsername %}
@@ -76,6 +79,30 @@
         </div>
     </div>
 
+    {% if epicprod_job %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>ePIC Production Diagnosis</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                {% if epicprod_job.phase %}<tr><td><strong>Phase</strong></td><td>{{ epicprod_job.phase }}</td></tr>{% endif %}
+                {% if epicprod_job.failure_summary %}<tr><td><strong>Failure</strong></td><td class="text-danger">{{ epicprod_job.failure_summary }}</td></tr>{% endif %}
+                {% if epicprod_job.last_refreshed_at %}<tr><td><strong>Refreshed</strong></td><td>{{ epicprod_job.last_refreshed_at|fmt_dt }}</td></tr>{% endif %}
+            </table>
+            {% if epicprod_job.data.timeline %}
+            <hr>
+            <ol class="mb-0">
+                {% for event in epicprod_job.data.timeline %}
+                <li>
+                    <strong>{{ event.phase }}</strong>{% if event.message %}: {{ event.message }}{% endif %}
+                    {% if event.path %}<br><code style="word-break:break-all;">{{ event.path }}</code>{% endif %}
+                </li>
+                {% endfor %}
+            </ol>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Errors -->
     {% if job.errors %}
     <div class="card mb-3">
@@ -100,11 +127,16 @@
     <!-- Task context -->
     {% if task %}
     <div class="card mb-3">
-        <div class="card-header"><strong>Parent Task</strong></div>
+        <div class="card-header"><strong>Task</strong></div>
         <div class="card-body">
             <table class="table table-sm mb-0">
                 <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.jeditaskid %}">{{ task.jeditaskid }}</a></td></tr>
-                {% if task.taskname %}<tr><td><strong>Name</strong></td><td><code>{{ task.taskname }}</code></td></tr>{% endif %}
+                {% if pcs_task %}
+                <tr><td><strong>PCS Task</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}"><code>{{ pcs_task.composed_name }}</code></a></td></tr>
+                {% endif %}
+                {% if task.taskname %}
+                <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>
+                {% endif %}
                 {% if task.status %}<tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>{% endif %}
                 {% if task.username %}<tr><td><strong>User</strong></td><td>{{ task.username }}</td></tr>{% endif %}
                 {% if task.errordialog %}<tr><td><strong>Error</strong></td><td style="color:#dc3545;">{{ task.errordialog }}</td></tr>{% endif %}
@@ -114,19 +146,25 @@
     {% endif %}
 
     <!-- Files -->
-    {% if files %}
+    {% if display_files %}
     <div class="card mb-3">
-        <div class="card-header"><strong>Files ({{ files|length }})</strong></div>
+        <div class="card-header"><strong>Files ({{ display_files|length }})</strong></div>
         <div class="card-body">
             <table class="table table-sm table-bordered mb-0">
-                <thead><tr><th>Type</th><th>LFN</th><th>Size</th><th>Status</th></tr></thead>
+                <thead><tr><th>Role</th><th>Stage</th><th>File / DID</th><th>RSE</th><th>Size</th><th>Status</th><th>Source</th></tr></thead>
                 <tbody>
-                {% for f in files %}
+                {% for f in display_files %}
                 <tr>
-                    <td>{{ f.type }}</td>
-                    <td style="word-break:break-all;"><code>{{ f.lfn }}</code></td>
-                    <td>{{ f.fsize|default:"" }}</td>
+                    <td>{{ f.role }}</td>
+                    <td>{{ f.stage }}</td>
+                    <td style="word-break:break-all;">
+                        <code>{% if f.did_name %}{{ f.scope }}:{{ f.did_name }}{% else %}{{ f.lfn }}{% endif %}</code>
+                        {% if f.status_detail %}<br><span class="text-muted">{{ f.status_detail }}</span>{% endif %}
+                    </td>
+                    <td>{{ f.rse|default:"" }}</td>
+                    <td>{{ f.size|default:"" }}</td>
                     <td>{{ f.status|default:"" }}</td>
+                    <td>{{ f.source|default:"" }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
