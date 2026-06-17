@@ -8,6 +8,16 @@ This document describes the integration design: how PCS task parameters map to J
 
 **Approach:** Direct API submission. PCS owns the full task specification. JEDI's existing `GenTaskRefiner` handles the task — no custom server-side plugin required.
 
+## Reference implementation — the working basis
+
+Our EVGEN submission is derived from the EIC production submitter maintained by Sakib Rahman in `eic/job_submission_condor`, branch **`feature-add-panda-wrapper`**. This is the authoritative working template; `scripts/evgen_panda_submit.py` in this repo is adapted from it, and any divergence in submission behavior is checked against it first.
+
+- [`scripts/submit_csv.sh`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_csv.sh#L107-L151) — PanDA-mode entry: stages the sandbox, derives the `group.EIC.<dataset>` name from the detector version/config and the CSV's first path, and builds the `submit_panda_api.py` command line.
+- [`scripts/submit_panda_api.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda_api.py) — builds the `taskParamMap` (`noInput=True`, `noOutput=True`; container `multiStepExec`; `%RNDM`→`${SEQNUMBER}` pseudo-input; sandbox tarball via `Client.putFile`) and submits with `panda_api.get_api().submit_task(params)`.
+- [`scripts/submit_panda.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda.py) — the per-job in-container payload: reads row *n* of the chunked CSV and runs the hepmc3 campaign `run.sh`.
+
+Submission chain: `submit_csv.sh` → `submit_panda_api.py` (`client.submit_task`); `submit_panda.py` is the payload invoked per `${SEQNUMBER}`.
+
 ## Architecture
 
 ```
@@ -531,6 +541,12 @@ This is the intended test-phase submission path. Server-side submission from swf
 - `panda-client/pandaclient/example_task.py` — client-side task dict example
 - `panda-client/pandaclient/panda_api.py` — `submit_task()` high-level API
 - `panda-client/pandaclient/Client.py:1304` — `insertTaskParams()` implementation
+
+### Working submitter — our reference and basis (eic/job_submission_condor)
+Branch **`feature-add-panda-wrapper`** — Sakib Rahman's working EVGEN production submitter (see "Reference implementation" above):
+- [`scripts/submit_csv.sh`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_csv.sh#L107-L151)
+- [`scripts/submit_panda_api.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda_api.py)
+- [`scripts/submit_panda.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda.py)
 
 ### PCS Source Code (swf-monitor)
 - `src/pcs/models.py` — ProdTask, ProdConfig, Dataset, tag models

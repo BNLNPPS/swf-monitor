@@ -1114,6 +1114,7 @@
             {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
         if (resp.ok) {
             pendingSubmitName = t.name;   // the SSE outcome handlers match on this
+            subscribeSubmitOutcomes();    // open the live outcome stream now — never on page load
             btnSubmitTask.textContent = 'Submitted — awaiting PanDA ID…';
             if (submitPollTimer) clearTimeout(submitPollTimer);
             pollForPandaTask(t.id, 30);   // ~5 min at 10s; SSE is the live path, this is the backstop
@@ -1141,9 +1142,14 @@
         if (idx >= 0 && allTasks[idx].id === selectedItemId) showTaskDetail(allTasks[idx].id);
         renderList();
     }
-    (function subscribeSubmitOutcomes() {
+    // Opened only after a submit is fired (called from the Submit handler),
+    // never on page load — so composing pins no streaming worker. Idempotent:
+    // one stream per compose session, reused across repeat submits.
+    let submitOutcomeES = null;
+    function subscribeSubmitOutcomes() {
+        if (submitOutcomeES) return;
         const types = 'prodtask_submitted,prodtask_submit_failed,prodtask_submit_unrecorded';
-        const es = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=${types}`);
+        const es = submitOutcomeES = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=${types}`);
         es.addEventListener('prodtask_submitted', ev => {
             let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
             if (d.task_name) applySubmitted(d.task_name, d.jedi_task_id);
@@ -1170,7 +1176,7 @@
                     + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this jediTaskID needs re-recording.`);
             }
         });
-    })();
+    }
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 

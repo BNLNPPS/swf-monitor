@@ -90,6 +90,14 @@ def build_task_params(spec, archive_name):
         'prodSourceLabel': spec.get('prodSourceLabel', 'test'),
         'processingType': spec.get('processingType', 'epicproduction'),
         'taskType': spec.get('taskType', 'prod'),
+        # Producer envelope from commands.py (the proven 36439 path). A prod-role
+        # submission gets NO server-side defaults — insertTaskParamsPanda only
+        # fills userName/taskType/taskPriority on the non-prodRole branch — so a
+        # producer must supply them itself. The omitted taskPriority is precisely
+        # what broke this Sakib-derived user-mode template under our prod token.
+        'taskPriority': int(spec.get('taskPriority', 900)),
+        'cloud': spec.get('cloud', spec.get('workingGroup', 'EIC')),
+        'campaign': spec.get('campaign', ''),
         'taskName': spec['outDS'],
         'userName': None,                # filled by the client from the token
         'noInput': True,                 # payload stages its own EVGEN input
@@ -101,6 +109,7 @@ def build_task_params(spec, archive_name):
         'sourceURL': _source_url(),
         'coreCount': int(spec.get('nCore', 1)),
         'ramCount': int(spec.get('memory', 4096)),
+        'ramUnit': 'MBPerCore',                      # producer envelope (commands.py)
         'nEvents': int(spec.get('nJobs', 1)),       # one job per manifest row
         'nEventsPerJob': int(spec.get('nEventsPerJob', 1)),
         'jobParameters': [
