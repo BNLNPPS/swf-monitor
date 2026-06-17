@@ -45,14 +45,13 @@
   {% endif %}
 
   <div class="table-responsive">
-    <table class="table table-sm table-striped align-middle" style="width:auto; min-width: 72rem;">
+    <table class="table table-sm table-striped align-middle" style="width:auto; min-width: 96rem;">
       <thead>
         <tr>
           <th>Submitted</th>
           <th>Status</th>
           <th>Description</th>
           <th>Repository</th>
-          <th>Contact</th>
           <th>Events</th>
           <th>Benchmark</th>
           <th>Estimate</th>
@@ -63,22 +62,26 @@
         <tr>
           <td class="text-nowrap">{{ q.submitted_at|date:"Y-m-d H:i" }}</td>
           <td>{{ q.status }}</td>
-          <td style="max-width: 28rem;">{{ q.description|linebreaksbr }}</td>
-          <td style="max-width: 22rem; overflow-wrap:anywhere;">
+          <td style="min-width: 34rem; max-width: 42rem; overflow-wrap:anywhere;">
+            {{ q.description|linebreaksbr }}
+            {% if q.contact %}
+              <div class="text-muted mt-2"><strong>Contact:</strong> {{ q.contact|linebreaksbr }}</div>
+            {% endif %}
+          </td>
+          <td style="min-width: 26rem; max-width: 34rem; overflow-wrap:anywhere;">
             {% if q.repository|slice:":4" == "http" %}
               <a href="{{ q.repository }}" rel="noopener noreferrer">{{ q.repository }}</a>
             {% else %}
               {{ q.repository|linebreaksbr }}
             {% endif %}
           </td>
-          <td>{{ q.contact }}</td>
-          <td>{{ q.nevents }}</td>
+          <td style="width: 12rem; max-width: 12rem; white-space: normal; overflow-wrap: anywhere;">{{ q.nevents }}</td>
           <td style="max-width: 18rem;">{{ q.benchmark|linebreaksbr }}</td>
           <td style="max-width: 22rem;">{{ q.estimate|linebreaksbr }}</td>
         </tr>
         {% empty %}
         <tr>
-          <td colspan="8" class="text-muted">No questionnaire responses imported.</td>
+          <td colspan="7" class="text-muted">No questionnaire responses imported.</td>
         </tr>
         {% endfor %}
       </tbody>
