@@ -104,7 +104,8 @@
               data-missing-email="{% if q.has_email %}0{% else %}1{% endif %}"
               data-search="{{ q.search_text }}">
 	          <td class="text-nowrap">
-	            <div><a href="{% url 'pcs:questionnaire_detail' pk=q.pk %}">{{ q.submitted_at|date:"Y-m-d H:i" }}</a></div>
+	            <div><a href="{% url 'pcs:questionnaire_detail' pk=q.pk %}">Request #{{ q.pk }}</a></div>
+	            <div class="text-muted small">{{ q.submitted_at|date:"Y-m-d H:i" }}</div>
 	            {% if user.is_authenticated %}
 	              <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
 	                      data-bs-toggle="modal" data-bs-target="#questionnaire-raw-{{ q.id }}">
