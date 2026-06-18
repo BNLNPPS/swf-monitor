@@ -192,7 +192,7 @@
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
-    const QUESTIONNAIRE_LIST_URL = "{{ request.META.SCRIPT_NAME }}{% url 'pcs:questionnaires_list' %}";
+    const QUESTIONNAIRE_LIST_URL = "../../questionnaires/";
 
     // ── Tag-based naming: the new system's names enter the world here ──
     // The dataset's human-facing identity is its tag-composed name
@@ -224,6 +224,15 @@
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
     }
+    function isUrl(value) {
+        return /^https?:\/\//i.test(String(value || '').trim());
+    }
+    function textOrUrl(value) {
+        const s = String(value || '').trim();
+        if (!s) return '';
+        const escaped = htmlEscape(s);
+        return isUrl(s) ? `<a href="${escaped}" rel="noopener noreferrer">${escaped}</a>` : escaped;
+    }
     // Legacy import rows carry an opaque csv_import.<hash> / past.<…> key and a
     // synthetic DID (not a Rucio DID) — both plumbing, hidden from the panels.
     function isLegacyKey(ds) { return ds && /^(csv_import|past)\./.test(ds.dataset_name || ''); }
@@ -237,7 +246,7 @@
          ['Reco', ds.reco_tag, 'r'], ['Background', ds.background_tag, 'k']].forEach(([label, tag, type]) => {
             if (type === 'k' && !tag) return;
             const params = Object.entries((tag && tag.parameters) || {}).filter(([,v]) => v)
-                .map(([k,v]) => `<code>${k}</code>=${v}`).join(', ');
+                .map(([k,v]) => `${htmlEscape(k)}=${textOrUrl(v)}`).join(', ');
             rows += `<tr><td>${label}</td><td>${tagLink(type, tag)}</td><td>${(tag && tag.description) || ''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
         });
         return `<h6>Tags</h6><table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
@@ -410,7 +419,7 @@
         if (taskToEdit) {
             composeTaskId = taskToEdit.id;
             composeTaskName = taskToEdit.composed_name || taskToEdit.name;
-            document.getElementById('task-name').value = taskToEdit.name;
+            document.getElementById('task-name').value = composeTaskName;
             document.getElementById('task-description').value = taskToEdit.description || '';
             document.getElementById('task-csv').value = taskToEdit.csv_file || '';
             document.getElementById('identity-badge').textContent = 'editing';
@@ -423,7 +432,7 @@
                 document.getElementById('condor-preview').textContent = taskToEdit.condor_command || '';
                 document.getElementById('panda-preview').textContent = taskToEdit.panda_command || '';
             }
-            panelTitle.textContent = `Edit: ${taskToEdit.name}`;
+            panelTitle.textContent = `Edit: ${composeTaskName}`;
             btnSave.disabled = true; // no changes yet
         } else {
             panelTitle.textContent = 'New Production Task';
@@ -515,11 +524,14 @@
             items = allTasks.filter(t => {
                 if (!q) return true;
                 const ds = allDatasets.find(d => d.id === t.dataset_id);
-                return t.name.toLowerCase().includes(q) || t.prod_config_name.toLowerCase().includes(q)
-                    || dsComposedName(ds).toLowerCase().includes(q);
+                return taskComposedName(t).toLowerCase().includes(q)
+                    || (t.name || '').toLowerCase().includes(q)
+                    || t.prod_config_name.toLowerCase().includes(q)
+                    || dsComposedName(ds).toLowerCase().includes(q)
+                    || ((ds && ds.source_location) || '').toLowerCase().includes(q);
             }).map(t => {
                 const ds = allDatasets.find(d => d.id === t.dataset_id);
-                return { id: t.id, type: 'task', label: t.name,
+                return { id: t.id, type: 'task', label: taskComposedName(t),
                     meta: `${t.status} | ${dsComposedName(ds)} | ${t.prod_config_name}`,
                     mod: t.updated_at || t.created_at || '',
                     selected: t.id === selectedItemId };
@@ -743,13 +755,13 @@
         hideTaskActions();
         browseContent.innerHTML = `
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td><code>${dsComposedName(ds)}</code></td></tr>
-                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>` : ''}
+                <tr><td style="width:30%"><strong>Name</strong></td><td>${textOrUrl(dsComposedName(ds))}</td></tr>
+                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td>${textOrUrl(ds.did)}</td></tr>` : ''}
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
                 <tr><td><strong>Stage</strong></td><td>${ds.stage || '-'}</td></tr>
                 <tr><td><strong>External</strong></td><td>${ds.external ? 'yes' : 'no'}</td></tr>
                 ${ds.source_kind ? `<tr><td><strong>Source Kind</strong></td><td>${ds.source_kind}</td></tr>` : ''}
-                ${ds.source_location ? `<tr><td><strong>Source path</strong></td><td><code>${ds.source_location}</code></td></tr>` : ''}
+                ${ds.source_location ? `<tr><td><strong>Source path</strong></td><td>${textOrUrl(ds.source_location)}</td></tr>` : ''}
                 ${ds.validation_status ? `<tr><td><strong>Validation</strong></td><td>${ds.validation_status}</td></tr>` : ''}
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
                 ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
@@ -770,7 +782,7 @@
         function row(l,v) { return `<tr><td style="width:40%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
         let dataRows = '';
         if (c.data && Object.keys(c.data).length) {
-            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.'+k, `<code>${v}</code>`); });
+            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.'+k, textOrUrl(v)); });
         }
         browseContent.innerHTML = `
             ${c.description ? `<p>${c.description}</p>` : ''}
@@ -787,7 +799,7 @@
             <div class="row"><div class="col-md-6">
                 <h6>Software Stack</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                    ${row('JUG_XL', c.jug_xl_tag)}${row('Container', c.container_image?`<code>${c.container_image}</code>`:'-')}
+                    ${row('JUG_XL', c.jug_xl_tag)}${row('Container', c.container_image ? textOrUrl(c.container_image) : '-')}
                 </table></div><div class="col-md-6">
                 <h6>Resources</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
@@ -808,13 +820,9 @@
         const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const csvImp = (t.overrides && t.overrides.csv_import) || null;
 
-        // Title: dataset path (matches the compose view row title), with the
-        // standard ePIC volatile prefix stripped. Full path on hover. Never the
-        // internal csv_import.<hash> key — fall back to the tag-based name.
-        const PFX = '/volatile/eic/EPIC/';
-        const dsPath = (ds && ds.source_location) || t.name || dsComposedName(ds);
-        panelTitle.textContent = dsPath.startsWith(PFX) ? dsPath.slice(PFX.length) : dsPath;
-        panelTitle.title = dsPath;
+        const sourcePath = (ds && ds.source_location) || '';
+        panelTitle.textContent = taskComposedName(t);
+        panelTitle.title = taskComposedName(t);
 
         const canOperate = !!currentUser;
         // A locked (ready) or already-submitted task is frozen — only a draft
@@ -822,18 +830,23 @@
         // available to any signed-in user.
         const operatorDraft = canOperate && t.status === 'draft';
         const submitted = !!t.panda_task_id;
+        const readinessProblems = Array.isArray(t.readiness) ? t.readiness.slice() : [];
+        if (t.task_params_error) {
+            const specProblem = t.task_params_error === 'task has no matched Rucio EVGEN input (run the EVGEN matcher first)'
+                ? 'No matched Rucio EVGEN input (run the EVGEN matcher first).'
+                : t.task_params_error;
+            if (!readinessProblems.includes(specProblem)) readinessProblems.push(specProblem);
+        }
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
         if (btnEditTask) btnEditTask.style.display = operatorDraft ? 'inline-block' : 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = operatorDraft ? 'inline-block' : 'none';
         if (btnLockTask) btnLockTask.style.display = operatorDraft ? 'inline-block' : 'none';
-        // Submit: meaningful inside the buildable lifecycle (draft or ready).
-        // Per commissioning relaxation #4 a draft task is directly submittable —
-        // the status='ready' lock freeze is lifted and readiness is advisory
-        // (shown above) — so the button is enabled for both. Not shown for a
-        // past_output archive, which is never in the buildable flow.
+        // Submit is shown only when the task is in the buildable lifecycle and
+        // the readiness checks agree it can produce a submission spec.
         if (submitTaskWrap) {
             const inLifecycle = t.status === 'draft' || t.status === 'ready';
-            if (canOperate && !submitted && inLifecycle) {
+            const readyToSubmit = !readinessProblems.length;
+            if (canOperate && !submitted && inLifecycle && readyToSubmit) {
                 submitTaskWrap.style.display = 'inline-block';
                 btnSubmitTask.disabled = false;
                 btnSubmitTask.style.pointerEvents = '';
@@ -863,16 +876,14 @@
         if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
             const requestLinks = t.questionnaire_matches.map(m => {
                 const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
-                const confidence = m.confidence ? ` <span class="text-muted">(${htmlEscape(m.confidence)})</span>` : '';
-                return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>${confidence}`;
+                return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>`;
             }).join(', ');
-            html += `<div class="alert alert-info py-2 px-3 mb-2"><strong>Request:</strong> ${requestLinks}</div>`;
+            html += `<div class="mb-2">${requestLinks}</div>`;
         }
-        // Submit-readiness — shown while the task is still a draft (the state where
-        // it matters for the next step, Lock). Empty list = ready.
-        if (t.status === 'draft' && Array.isArray(t.readiness)) {
-            html += t.readiness.length
-                ? `<div class="alert alert-warning py-2 px-3 mb-2"><strong>Not submit-ready</strong><ul class="mb-0 mt-1">${t.readiness.map(p => `<li>${p}</li>`).join('')}</ul></div>`
+        // Submit-readiness. Empty list means the task can produce a submission spec.
+        if ((t.status === 'draft' || t.status === 'ready') && Array.isArray(readinessProblems)) {
+            html += readinessProblems.length
+                ? `<div class="alert alert-warning py-2 px-3 mb-2"><strong>Not submit-ready</strong><ul class="mb-0 mt-1">${readinessProblems.map(p => `<li>${htmlEscape(p)}</li>`).join('')}</ul></div>`
                 : `<div class="alert alert-success py-2 px-3 mb-2 mb-0"><strong>Submit-ready</strong></div>`;
         }
         if (t.description) html += `<p>${t.description}</p>`;
@@ -885,19 +896,19 @@
             const f = csvImp.filters || {};
             const nevM = csvImp.nevents ? `${(Number(csvImp.nevents)/1e6).toFixed(1)} M` : '';
             const rows = [
-                ['Name (tag-based)', ds ? `<code>${dsComposedName(ds)}</code>` : ''],
-                ['Source path', `<code>${dsPath}</code>`],
-                ['Sample',      csvImp.evgen],
-                ['Gen version', csvImp.gen_version],
-                ['Geom',        f.detector],
-                ['Beam',        f.beam],
-                ['Physics',     f.physics],
-                ['Q&sup2;',     f.q2],
-                ['Species',     f.species],
-                ['Energy',      f.energy],
-                ['Nev',         nevM],
-                ['Background',  csvImp.background],
-                ['Detector',    ds ? `${ds.detector_version} / ${ds.detector_config}` : ''],
+                ['Name', ds ? textOrUrl(dsComposedName(ds)) : ''],
+                ['Source path', textOrUrl(sourcePath)],
+                ['Sample',      textOrUrl(csvImp.evgen)],
+                ['Gen version', textOrUrl(csvImp.gen_version)],
+                ['Geom',        textOrUrl(f.detector)],
+                ['Beam',        textOrUrl(f.beam)],
+                ['Physics',     textOrUrl(f.physics)],
+                ['Q&sup2;',     textOrUrl(f.q2)],
+                ['Species',     textOrUrl(f.species)],
+                ['Energy',      textOrUrl(f.energy)],
+                ['Nev',         textOrUrl(nevM)],
+                ['Background',  textOrUrl(csvImp.background)],
+                ['Detector',    ds ? textOrUrl(`${ds.detector_version} / ${ds.detector_config}`) : ''],
             ].filter(([,v]) => v && v !== '-');
             html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;"><tbody>${
                 rows.map(([k,v]) => `<tr><td style="width:30%"><strong>${k}</strong></td><td>${v}</td></tr>`).join('')
@@ -907,7 +918,7 @@
             // Non-CSV task: the dataset's tag-based name plus its tag mapping.
             html += `<h6>Dataset</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                    <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td><code>${ds ? dsComposedName(ds) : t.dataset_name}</code></td></tr>
+                    <tr><td style="width:30%"><strong>Name</strong></td><td>${textOrUrl(ds ? dsComposedName(ds) : t.dataset_name)}</td></tr>
                     ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
                 </table>`;
             html += tagTableHtml(ds);
@@ -917,19 +928,19 @@
         html += `<h6>Config: ${t.prod_config_name}</h6>`;
         if (cfg) {
             function cfgRow(l,v) { return `<tr><td style="width:35%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
-            let cfgRows = cfgRow('JUG_XL', cfg.jug_xl_tag) + cfgRow('Container', cfg.container_image ? `<code>${cfg.container_image}</code>` : '-')
+            let cfgRows = cfgRow('JUG_XL', cfg.jug_xl_tag) + cfgRow('Container', cfg.container_image ? textOrUrl(cfg.container_image) : '-')
                 + cfgRow('BG Mixing', cfg.bg_mixing?'Yes':'No') + cfgRow('Copy', [cfg.copy_reco?'Reco':'', cfg.copy_full?'Full':'', cfg.copy_log?'Log':''].filter(Boolean).join(', ')||'-')
                 + cfgRow('Rucio', cfg.use_rucio?`Yes${cfg.rucio_rse?' ('+cfg.rucio_rse+')':''}` : 'No')
                 + cfgRow('Hours/Job', cfg.target_hours_per_job) + cfgRow('Events/Task', cfg.events_per_task);
             if (cfg.panda_site) cfgRows += cfgRow('PanDA Site', cfg.panda_site);
             if (cfg.panda_working_group) cfgRows += cfgRow('Working Group', cfg.panda_working_group);
             if (cfg.data && Object.keys(cfg.data).length) {
-                Object.entries(cfg.data).forEach(([k,v]) => { cfgRows += cfgRow('data.'+k, `<code>${v}</code>`); });
+                Object.entries(cfg.data).forEach(([k,v]) => { cfgRows += cfgRow('data.'+k, textOrUrl(v)); });
             }
             html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">${cfgRows}</table>`;
         }
 
-        if (t.csv_file) html += `<p><strong>CSV:</strong> <code>${t.csv_file}</code></p>`;
+        if (t.csv_file) html += `<p><strong>CSV:</strong> ${textOrUrl(t.csv_file)}</p>`;
         if (t.condor_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">Condor</strong>
             <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
             <div class="command-block" id="browse-condor">${t.condor_command}</div>`;
@@ -941,8 +952,6 @@
             html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA EVGEN Submission Spec</strong>
                 <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
                 <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
-        } else if (t.task_params_error) {
-            html += `<div class="alert alert-warning py-2 px-3 mb-2"><strong>PanDA EVGEN submission spec unavailable:</strong> ${htmlEscape(t.task_params_error)}</div>`;
         }
         browseContent.innerHTML = html;
     }
@@ -957,9 +966,9 @@
         document.getElementById('dataset-badge').className = 'badge bg-success';
         document.getElementById('dataset-display').innerHTML = `
             <table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">
-                <tr><td style="width:35%"><strong>Name (tag-based)</strong></td><td><code>${dsComposedName(ds)}</code></td></tr>
+                <tr><td style="width:35%"><strong>Name</strong></td><td>${textOrUrl(dsComposedName(ds))}</td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
-                ${ds.external ? `<tr><td><strong>Source path</strong></td><td><code>${ds.source_location || '-'}</code></td></tr>` : ''}
+                ${ds.external ? `<tr><td><strong>Source path</strong></td><td>${textOrUrl(ds.source_location || '-')}</td></tr>` : ''}
                 <tr><td><strong>Tags</strong></td><td>${[ds.physics_tag.label, ds.evgen_tag.label, ds.simu_tag.label, ds.reco_tag.label].join(', ')}${ds.background_tag ? ', ' + ds.background_tag.label : ''}</td></tr>
             </table>`;
         const allParams = {};
@@ -991,7 +1000,7 @@
          ['PanDA Site', cfg.panda_site||'-'], ['Working Group', cfg.panda_working_group||'-'], ['Rucio RSE', cfg.rucio_rse||'-'],
         ].forEach(([k,v]) => { rows += `<tr><td style="width:40%"><strong>${k}</strong></td><td>${v||'-'}</td></tr>`; });
         if (cfg.data && Object.keys(cfg.data).length) {
-            Object.entries(cfg.data).forEach(([k,v]) => { rows += `<tr><td><strong>data.${k}</strong></td><td><code>${v}</code></td></tr>`; });
+            Object.entries(cfg.data).forEach(([k,v]) => { rows += `<tr><td><strong>data.${k}</strong></td><td>${textOrUrl(v)}</td></tr>`; });
         }
         document.getElementById('config-display').innerHTML = `<table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">${rows}</table>`;
         updateSaveButton();
@@ -1076,7 +1085,7 @@
             enterComposeMode(null);
             applyDatasetToCompose(t.dataset_id);
             applyConfigToCompose(t.prod_config_id);
-            document.getElementById('task-name').value = t.name + ' (copy)';
+            document.getElementById('task-name').value = taskComposedName(t) + ' (copy)';
             document.getElementById('task-description').value = t.description || '';
             document.getElementById('task-csv').value = t.csv_file || '';
             panelTitle.textContent = 'New Task (copy)';

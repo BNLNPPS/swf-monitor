@@ -499,6 +499,9 @@ def prodtask_readiness_problems(task):
     - **Output.** The task must produce a physics output — at least one of
       ``copy_reco`` / ``copy_full``. A task that copies neither (logs only)
       produces nothing worth submitting.
+    - **EVGEN input.** The client-API EVGEN submit path needs at least one
+      matched JLab Rucio EVGEN input. Without it the submission spec builder
+      refuses to emit a manifest.
     - **Physics is really bound.** An imported catalog row carries its real beam
       in its metadata (``overrides['csv_import']['filters']['beam']``, e.g.
       ``18x275``). The import pins every such row to one placeholder anchor
@@ -513,6 +516,8 @@ def prodtask_readiness_problems(task):
     cfg = task.get_effective_config()
     if not (cfg.get('copy_reco') or cfg.get('copy_full')):
         problems.append('No physics output configured (enable copy of reco or full).')
+    if not task.has_input:
+        problems.append('No matched Rucio EVGEN input (run the EVGEN matcher first).')
 
     csv_filters = (((task.overrides or {}).get('csv_import') or {})
                    .get('filters') or {})

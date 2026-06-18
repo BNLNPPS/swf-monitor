@@ -25,9 +25,11 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
 /* Filter bar — titles wrap; values only show for the chosen facet. */
 .pcs-cl-bar { border: 1px solid #dee2e6; border-radius: .375rem;
               padding: .4rem .5rem; margin-bottom: .5rem; background: #fbfbfc; }
-.pcs-cl-bar-search { display: flex; gap: .35rem; margin-bottom: .35rem; }
+.pcs-cl-bar-search { display: flex; flex-wrap: wrap; gap: .35rem; margin-bottom: .35rem; }
 .pcs-cl-bar-search input { flex: 1; padding: .25rem .5rem; font-size: .9rem;
-                            border: 1px solid #ced4da; border-radius: .25rem; }
+                            border: 1px solid #ced4da; border-radius: .25rem;
+                            min-width: 12rem; }
+.pcs-cl-bar-search .btn { white-space: nowrap; }
 .pcs-cl-bar-titles { display: flex; flex-wrap: wrap; gap: .25rem .35rem;
                      font-size: .9rem; line-height: 1.5; }
 .pcs-cl-facet { display: inline-flex; align-items: baseline; gap: .25rem;
@@ -55,6 +57,11 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
                             border-radius: .25rem; padding: 0 .4rem;
                             margin-right: .35rem; text-decoration: none; }
 .pcs-cl-values .v-toggle.active { background: #0d6efd; color: #fff; border-color: #0d6efd; }
+.pcs-cl-values.all { max-height: none; overflow: visible; }
+.pcs-cl-values .facet-section { padding: .25rem 0 .35rem; border-bottom: 1px solid #eef0f2; }
+.pcs-cl-values .facet-section:last-child { border-bottom: 0; padding-bottom: 0; }
+.pcs-cl-values .facet-section-title { margin-bottom: .1rem; color: #495057; font-weight: 600; font-size: .82rem; }
+.pcs-cl-values .facet-section-values { overflow-wrap: anywhere; }
 
 /* Card rows. */
 .pcs-cl-list { flex: 1; overflow-y: auto; min-height: 0; border: 1px solid #dee2e6;
@@ -116,6 +123,8 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
       <input type="search" id="pcs-cl-q" value="{{ filters.q|default:'' }}"
              placeholder="Search dataset / description…">
       <button type="button" class="btn btn-sm btn-outline-secondary" id="pcs-cl-clear">Clear</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="pcs-cl-expand">Expand all</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="pcs-cl-collapse">Collapse all</button>
       <div class="btn-group btn-group-sm ms-2" id="pcs-cl-sort" role="group" aria-label="Sort">
         <button type="button" class="btn btn-outline-secondary active" data-sort="recent" style="font-size:.68rem; padding:.03rem .3rem; min-width:3.4rem;">Recent</button>
         <button type="button" class="btn btn-outline-secondary" data-sort="alpha" style="font-size:.68rem; padding:.03rem .3rem; min-width:3.4rem;">A&ndash;Z</button>
@@ -147,7 +156,7 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
 
   <div class="pcs-cl-list" id="pcs-cl-list" tabindex="0">
     {% for t in tasks %}
-    {% with ds_path_full=t.dataset.source_location|default:t.dataset.composed_name gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters %}
+    {% with task_name=t.composed_name source_path=t.dataset.source_location|default:'' gen_ver=t.overrides.csv_import.gen_version evgen=t.overrides.csv_import.evgen|default:'' bg=t.overrides.csv_import.background nev=t.overrides.csv_import.nevents path_filters=t.overrides.csv_import.filters %}
     <div class="pcs-cl-row{% if focused_task_id == t.pk %} selected{% endif %}"
          data-task-id="{{ t.pk }}"
          data-status="{{ t.status|default:'' }}"
@@ -172,12 +181,12 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
          data-incomplete-output="{% if t.output_incomplete %}1{% else %}0{% endif %}"
          data-has-simu="{% if 'FULL' in t.output_stages %}1{% else %}0{% endif %}"
          data-has-reco="{% if 'RECO' in t.output_stages %}1{% else %}0{% endif %}"
-         data-search="{{ ds_path_full|lower }} {{ t.description|default:''|lower }}"
-         data-name="{{ ds_path_full|lower }}"
+         data-search="{{ task_name|lower }} {{ source_path|lower }} {{ t.description|default:''|lower }}"
+         data-name="{{ task_name|lower }}"
          data-modified="{{ t.updated_at|date:'c' }}">
 
       <div class="r1">
-        <span class="ds-path" title="{{ ds_path_full }}">{{ ds_path_full|cut:"/volatile/eic/EPIC/" }}</span>
+        <span class="ds-path" title="{{ task_name }}">{{ task_name }}</span>
         <span class="status-badge {{ t.status|state_class }}" title="{{ t.status|state_title }}">{{ t.status|state_label }}</span>
         {% if t.priority %}<span class="prio">P={{ t.priority }}</span>{% endif %}
       </div>
@@ -258,6 +267,8 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
   const rows      = Array.from(listEl.querySelectorAll('.pcs-cl-row'));
   const qInput    = root.querySelector('#pcs-cl-q');
   const clearBtn  = root.querySelector('#pcs-cl-clear');
+  const expandBtn = root.querySelector('#pcs-cl-expand');
+  const collapseBtn = root.querySelector('#pcs-cl-collapse');
   const titlesEl  = root.querySelector('#pcs-cl-titles');
   const valuesEl  = root.querySelector('#pcs-cl-values');
   const visibleEl = root.querySelector('#pcs-cl-visible');
@@ -269,6 +280,7 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
   [...OUT_BOOL, ...FLAG_BOOL].forEach(k => state[k] = initial.get(k) === '1');
 
   let openFacet = null; // facet key with values panel open ('' or null = closed)
+  let expandAll = false;
 
   function energyMeV(s) {
     const m = String(s).match(/^([\d.]+)\s*(eV|keV|MeV|GeV|TeV)$/i);
@@ -330,7 +342,7 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
       const k = f.dataset.facet;
       const chosenEl = f.querySelector('.facet-chosen');
       const countEl  = f.querySelector('.facet-count');
-      f.classList.toggle('open', openFacet === k);
+      f.classList.toggle('open', expandAll || openFacet === k);
 
       if (STR.includes(k)) {
         const counts = strCountsFor(k);
@@ -353,34 +365,49 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
   }
 
   function renderValuesPanel() {
-    if (!openFacet) {
+    valuesEl.classList.toggle('all', expandAll);
+    if (!openFacet && !expandAll) {
       valuesEl.classList.remove('open');
       valuesEl.innerHTML = '';
       return;
     }
-    let html = '';
-    if (STR.includes(openFacet)) {
-      const k = openFacet;
-      const entries = strCountsFor(k);
-      const allActive = state[k] === '' ? ' active' : '';
-      html = `<a href="#" class="v-link${allActive}" data-vlink-facet="${k}" data-vlink-value="">All</a>`;
-      html += entries.map(([v, n]) => {
-        const active = state[k] === v ? ' active' : '';
-        return `<a href="#" class="v-link${active}" data-vlink-facet="${k}" data-vlink-value="${escapeAttr(v)}">${escapeAttr(v)} <span class="facet-count">(${n})</span></a>`;
-      }).join('');
-    } else if (openFacet === '__output') {
-      html = OUT_BOOL.map(k => {
-        const n = boolCountFor(k);
-        const active = state[k] ? ' active' : '';
-        return `<a href="#" class="v-toggle${active}" data-vtoggle="${k}">${BOOL_LABEL[k]} (${n})</a>`;
-      }).join('');
-    } else if (openFacet === '__flags') {
-      html = FLAG_BOOL.map(k => {
-        const n = boolCountFor(k);
-        const active = state[k] ? ' active' : '';
-        return `<a href="#" class="v-toggle${active}" data-vtoggle="${k}">${BOOL_LABEL[k]} (${n})</a>`;
-      }).join('');
-    }
+    const facetLabel = (facet) => {
+      const el = titlesEl.querySelector(`.pcs-cl-facet[data-facet="${facet}"] .facet-label`);
+      return el ? el.textContent.trim() : facet;
+    };
+    const renderFacetValues = (facet) => {
+      let html = '';
+      if (STR.includes(facet)) {
+        const k = facet;
+        const entries = strCountsFor(k);
+        const allActive = state[k] === '' ? ' active' : '';
+        html = `<a href="#" class="v-link${allActive}" data-vlink-facet="${k}" data-vlink-value="">All</a>`;
+        html += entries.map(([v, n]) => {
+          const active = state[k] === v ? ' active' : '';
+          return `<a href="#" class="v-link${active}" data-vlink-facet="${k}" data-vlink-value="${escapeAttr(v)}">${escapeAttr(v)} <span class="facet-count">(${n})</span></a>`;
+        }).join('');
+      } else if (facet === '__output') {
+        html = OUT_BOOL.map(k => {
+          const n = boolCountFor(k);
+          const active = state[k] ? ' active' : '';
+          return `<a href="#" class="v-toggle${active}" data-vtoggle="${k}">${BOOL_LABEL[k]} (${n})</a>`;
+        }).join('');
+      } else if (facet === '__flags') {
+        html = FLAG_BOOL.map(k => {
+          const n = boolCountFor(k);
+          const active = state[k] ? ' active' : '';
+          return `<a href="#" class="v-toggle${active}" data-vtoggle="${k}">${BOOL_LABEL[k]} (${n})</a>`;
+        }).join('');
+      }
+      return html;
+    };
+    const html = expandAll
+      ? [...STR, '__output', '__flags'].map(facet => `
+          <div class="facet-section">
+            <div class="facet-section-title">${escapeAttr(facetLabel(facet))}</div>
+            <div class="facet-section-values">${renderFacetValues(facet)}</div>
+          </div>`).join('')
+      : renderFacetValues(openFacet);
     valuesEl.innerHTML = html;
     valuesEl.classList.add('open');
   }
@@ -424,6 +451,7 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
     const f = e.target.closest('.pcs-cl-facet');
     if (!f) return;
     const k = f.dataset.facet;
+    expandAll = false;
     openFacet = (openFacet === k) ? null : k;
     renderTitles();
     renderValuesPanel();
@@ -457,7 +485,22 @@ Row click is exposed via a 'pcs-cl:select' CustomEvent on the list root
     STR.forEach(k => state[k] = '');
     [...OUT_BOOL, ...FLAG_BOOL].forEach(k => state[k] = false);
     openFacet = null;
+    expandAll = false;
     applyFilters();
+  });
+
+  // ── Values panel expansion ──
+  expandBtn.addEventListener('click', () => {
+    expandAll = true;
+    openFacet = null;
+    renderTitles();
+    renderValuesPanel();
+  });
+  collapseBtn.addEventListener('click', () => {
+    expandAll = false;
+    openFacet = null;
+    renderTitles();
+    renderValuesPanel();
   });
 
   // ── Row click → custom event for the compose page ──
