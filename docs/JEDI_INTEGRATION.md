@@ -78,8 +78,8 @@ Submission chain: `submit_csv.sh` → `submit_panda_api.py` (`client.submit_task
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `prodSourceLabel` | `config.data['prod_source_label']` | `'managed'` for production, `'test'` for testing |
-| `taskType` | `'production'` | Fixed for PCS production tasks |
+| `prodSourceLabel` | `config.data['prod_source_label']` | `'test'` during commissioning; production submissions may use `'managed'` |
+| `taskType` | `'prod'` | PanDA task type for the live client-API EVGEN path |
 | `processingType` | `config.data['processing_type']` | e.g. `'epicproduction'` |
 | `taskPriority` | `config.data` or default | 0-1000, production typically 900 |
 | `transPath` | `config.data['transformation']` | Payload executable or TRF URL |
@@ -196,8 +196,8 @@ taskParamMap = {
     'campaign': '26.02.0',
 
     # Processing
-    'prodSourceLabel': 'managed',
-    'taskType': 'production',
+    'prodSourceLabel': 'test',
+    'taskType': 'prod',
     'processingType': 'epicproduction',
     'taskPriority': 900,
 

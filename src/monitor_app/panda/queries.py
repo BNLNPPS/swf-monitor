@@ -36,6 +36,101 @@ _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
 _NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
 
 
+def _pcs_owner_map(jeditaskids):
+    """Return {jediTaskID: PCS created_by} for PanDA tasks linked to PCS."""
+    ids = [int(tid) for tid in set(jeditaskids or []) if tid]
+    if not ids:
+        return {}
+    try:
+        from pcs.models import ProdTask
+        return {
+            int(panda_task_id): created_by
+            for panda_task_id, created_by in ProdTask.objects
+            .filter(panda_task_id__in=ids)
+            .values_list('panda_task_id', 'created_by')
+            if panda_task_id and created_by
+        }
+    except Exception as e:
+        logger.warning("_pcs_owner_map failed: %s", e)
+        return {}
+
+
+def _pcs_taskids_for_owner(username):
+    """Return linked PanDA task IDs owned, and linked IDs owned by others."""
+    if not username:
+        return [], []
+    try:
+        from pcs.models import ProdTask
+        linked = ProdTask.objects.filter(panda_task_id__isnull=False)
+        if '%' in username:
+            needle = username.replace('%', '')
+            owner_qs = linked.filter(created_by__contains=needle)
+        else:
+            owner_qs = linked.filter(created_by=username)
+        owner_ids = {
+            int(panda_task_id)
+            for panda_task_id in owner_qs.values_list('panda_task_id', flat=True)
+            if panda_task_id
+        }
+        other_ids = {
+            int(panda_task_id)
+            for panda_task_id in linked.values_list('panda_task_id', flat=True)
+            if panda_task_id and int(panda_task_id) not in owner_ids
+        }
+        return sorted(owner_ids), sorted(other_ids)
+    except Exception as e:
+        logger.warning("_pcs_taskids_for_owner failed: %s", e)
+        return [], []
+
+
+def _in_clause(field, values):
+    placeholders = ', '.join(['%s'] * len(values))
+    return f'"{field}" IN ({placeholders})', list(values)
+
+
+def _effective_username_filter(db_field, username):
+    """Filter by displayed owner: PCS created_by for linked tasks, raw PanDA otherwise."""
+    raw_clause, raw_val = like_or_eq(db_field, username)
+    owner_ids, other_ids = _pcs_taskids_for_owner(username)
+    clauses = []
+    params = []
+
+    if owner_ids:
+        owner_clause, owner_params = _in_clause('jeditaskid', owner_ids)
+        clauses.append(owner_clause)
+        params.extend(owner_params)
+
+    raw_params = [raw_val]
+    if other_ids:
+        other_clause, other_params = _in_clause('jeditaskid', other_ids)
+        raw_clause = f'({raw_clause} AND NOT {other_clause})'
+        raw_params.extend(other_params)
+    clauses.append(raw_clause)
+    params.extend(raw_params)
+
+    return '(' + ' OR '.join(clauses) + ')', params
+
+
+def _apply_effective_owners(rows, user_field):
+    owner_map = _pcs_owner_map([row.get('jeditaskid') for row in rows])
+    if not owner_map:
+        return rows
+    for row in rows:
+        owner = owner_map.get(row.get('jeditaskid'))
+        if owner:
+            row[user_field] = owner
+    return rows
+
+
+def _aggregate_effective_user_counts(rows):
+    owner_map = _pcs_owner_map([row[1] for row in rows])
+    counts = {}
+    for raw_user, jeditaskid, count in rows:
+        user = owner_map.get(jeditaskid) or raw_user
+        counts[user] = counts.get(user, 0) + count
+    return sorted(counts.items(), key=lambda item: item[1], reverse=True)
+
+
 def _nersc_portal_log_urls(computingsite, pandaid):
     """Build Perlmutter log URLs by scraping the NERSC portal dir listing.
 
@@ -110,9 +205,9 @@ def list_jobs(days=7, status=None, username=None, site=None,
         where.append('"jobstatus" = %s')
         params.append(status)
     if username:
-        clause, val = like_or_eq('produsername', username)
+        clause, vals = _effective_username_filter('produsername', username)
         where.append(clause)
-        params.append(val)
+        params.extend(vals)
     if site:
         clause, val = like_or_eq('computingsite', site)
         where.append(clause)
@@ -130,8 +225,12 @@ def list_jobs(days=7, status=None, username=None, site=None,
     conn = connections['panda']
 
     # Summary counts (without pagination cursor)
-    count_where = [w for w in where if '"pandaid" <' not in w]
-    count_params = [p for i, p in enumerate(params) if '"pandaid" <' not in where[i]]
+    if before_id:
+        count_where = where[:-1]
+        count_params = params[:-1]
+    else:
+        count_where = where
+        count_params = params
     count_sql, count_full_params = build_count_query(count_where, count_params)
 
     summary = {}
@@ -171,6 +270,7 @@ def list_jobs(days=7, status=None, username=None, site=None,
     dest_map = _bulk_destinationse([j['pandaid'] for j in jobs])
     for j in jobs:
         j['destinationse'] = dest_map.get(j['pandaid'])
+    _apply_effective_owners(jobs, 'produsername')
 
     return {
         "summary": summary,
@@ -423,9 +523,9 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         where.append('"status" = %s')
         params.append(status)
     if username:
-        clause, val = like_or_eq('username', username)
+        clause, vals = _effective_username_filter('username', username)
         where.append(clause)
-        params.append(val)
+        params.extend(vals)
     if taskname:
         clause, val = like_or_eq('taskname', taskname)
         where.append(clause)
@@ -440,9 +540,13 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         where.append('"jeditaskid" = %s')
         params.append(taskid)
     if processingtype:
-        clause, val = like_or_eq('processingtype', processingtype)
-        where.append(clause)
-        params.append(val)
+        if processingtype == '__blank__':
+            where.append('("processingtype" IS NULL OR "processingtype" = %s)')
+            params.append('')
+        else:
+            clause, val = like_or_eq('processingtype', processingtype)
+            where.append(clause)
+            params.append(val)
     if before_id:
         where.append('"jeditaskid" < %s')
         params.append(before_id)
@@ -503,6 +607,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
         t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
         t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
+    _apply_effective_owners(tasks, 'username')
 
     has_more = len(rows) > limit
     next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
@@ -665,11 +770,9 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
     job_filters = ''
 
     if username:
-        if '%' in username:
-            job_filters += ' AND "produsername" LIKE %s'
-        else:
-            job_filters += ' AND "produsername" = %s'
-        job_params.append(username)
+        clause, vals = _effective_username_filter('produsername', username)
+        job_filters += f' AND {clause}'
+        job_params.extend(vals)
     if site:
         if '%' in site:
             job_filters += ' AND "computingsite" LIKE %s'
@@ -716,12 +819,28 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
 
         job_total = sum(job_by_status.values())
 
-        user_rows = _job_agg('produsername')
+        job_user_sql = f"""
+            SELECT "jobstatus", "produsername", "jeditaskid", COUNT(*)
+            FROM (
+                SELECT "jobstatus", "produsername", "jeditaskid"
+                FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {base_job_where}
+                UNION ALL
+                SELECT "jobstatus", "produsername", "jeditaskid"
+                FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {base_job_where}
+            ) combined
+            GROUP BY "jobstatus", "produsername", "jeditaskid"
+        """
+        with conn.cursor() as cursor:
+            cursor.execute(job_user_sql, job_params + job_params)
+            job_user_rows = cursor.fetchall()
+
+        job_owner_map = _pcs_owner_map([row[2] for row in job_user_rows])
         user_map = {}
-        for status_val, user_val, count in user_rows:
+        for status_val, user_val, jeditaskid, count in job_user_rows:
+            user_val = job_owner_map.get(jeditaskid) or user_val
             if user_val not in user_map:
                 user_map[user_val] = {'user': user_val, 'total': 0}
-            user_map[user_val][status_val] = count
+            user_map[user_val][status_val] = user_map[user_val].get(status_val, 0) + count
             user_map[user_val]['total'] += count
         by_user = sorted(user_map.values(), key=lambda x: x['total'], reverse=True)
 
@@ -747,11 +866,9 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
     task_params.extend(_stale['params'])
 
     if username:
-        if '%' in username:
-            task_where.append('"username" LIKE %s')
-        else:
-            task_where.append('"username" = %s')
-        task_params.append(username)
+        clause, vals = _effective_username_filter('username', username)
+        task_where.append(clause)
+        task_params.extend(vals)
     if workinggroup:
         task_where.append('"workinggroup" = %s')
         task_params.append(workinggroup)
@@ -786,27 +903,28 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
                     'type': row[0] or '-',
                     'count': row[1],
                     'is_test': 'test' in (row[0] or '').lower(),
+                    'filter_value': row[0] or '__blank__',
                 }
                 for row in cursor.fetchall()
             ]
 
         task_user_sql = f"""
-            SELECT "status", "username", COUNT(*)
+            SELECT "status", "username", "jeditaskid"
             FROM "{PANDA_SCHEMA}"."jedi_tasks"
             WHERE {task_where_sql}
-            GROUP BY "status", "username"
-            ORDER BY COUNT(*) DESC
         """
         with conn.cursor() as cursor:
             cursor.execute(task_user_sql, task_params)
             task_user_rows = cursor.fetchall()
 
+        task_owner_map = _pcs_owner_map([row[2] for row in task_user_rows])
         task_user_map = {}
-        for status_val, user_val, count in task_user_rows:
+        for status_val, user_val, jeditaskid in task_user_rows:
+            user_val = task_owner_map.get(jeditaskid) or user_val
             if user_val not in task_user_map:
                 task_user_map[user_val] = {'user': user_val, 'total': 0}
-            task_user_map[user_val][status_val] = count
-            task_user_map[user_val]['total'] += count
+            task_user_map[user_val][status_val] = task_user_map[user_val].get(status_val, 0) + 1
+            task_user_map[user_val]['total'] += 1
         task_by_user = sorted(task_user_map.values(), key=lambda x: x['total'], reverse=True)
 
     except Exception as e:
@@ -1276,16 +1394,16 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
                  order_by='"pandaid" DESC', limit=100, offset=0, search=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
     cutoff = timezone.now() - timedelta(days=days)
-    where = ['COALESCE("modificationtime", "creationdate") >= %s']
+    where = ['"modificationtime" >= %s']
     params = [cutoff]
 
     if status:
         where.append('"jobstatus" = %s')
         params.append(status)
     if username:
-        clause, val = like_or_eq('produsername', username)
+        clause, vals = _effective_username_filter('produsername', username)
         where.append(clause)
-        params.append(val)
+        params.extend(vals)
     if site:
         clause, val = like_or_eq('computingsite', site)
         where.append(clause)
@@ -1346,10 +1464,12 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
         logger.error(f"list_jobs_dt query failed: {e}")
         return [], total, filtered
 
+    _apply_effective_owners(rows, 'produsername')
     return rows, total, filtered
 
 
 def list_tasks_dt(days=7, status=None, username=None, taskname=None,
+                  processingtype=None,
                   workinggroup=None, order_by='"jeditaskid" DESC',
                   limit=100, offset=0, search=None):
     """List JEDI tasks for DataTables (returns rows, total, filtered counts)."""
@@ -1365,13 +1485,21 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
         where.append('"status" = %s')
         params.append(status)
     if username:
-        clause, val = like_or_eq('username', username)
+        clause, vals = _effective_username_filter('username', username)
         where.append(clause)
-        params.append(val)
+        params.extend(vals)
     if taskname:
         clause, val = like_or_eq('taskname', taskname)
         where.append(clause)
         params.append(val)
+    if processingtype:
+        if processingtype == '__blank__':
+            where.append('("processingtype" IS NULL OR "processingtype" = %s)')
+            params.append('')
+        else:
+            clause, val = like_or_eq('processingtype', processingtype)
+            where.append(clause)
+            params.append(val)
     if workinggroup:
         where.append('"workinggroup" = %s')
         params.append(workinggroup)
@@ -1442,6 +1570,7 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
         logger.error(f"list_tasks_dt query failed: {e}")
         return [], total, filtered
 
+    _apply_effective_owners(rows, 'username')
     return rows, total, filtered
 
 
@@ -1474,15 +1603,38 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
         params = list(base_params)
         for other_db_field, other_name, other_value in filter_config:
             if other_name != filter_name and other_value:
+                if other_name == 'username':
+                    clause, vals = _effective_username_filter(other_db_field, other_value)
+                    where.append(clause)
+                    params.extend(vals)
+                    continue
                 clause, val = like_or_eq(other_db_field, other_value)
                 where.append(clause)
                 params.append(val)
 
-        sql, full_params = build_union_count_by_field(db_field, where, params)
+        if filter_name == 'username':
+            where_sql = ' WHERE ' + ' AND '.join(where) if where else ''
+            sql = f"""
+                SELECT "produsername", "jeditaskid", COUNT(*) FROM (
+                    SELECT "produsername", "jeditaskid"
+                    FROM "{PANDA_SCHEMA}"."jobsactive4"{where_sql}
+                    UNION ALL
+                    SELECT "produsername", "jeditaskid"
+                    FROM "{PANDA_SCHEMA}"."jobsarchived4"{where_sql}
+                ) combined
+                GROUP BY "produsername", "jeditaskid"
+            """
+            full_params = list(params) + list(params)
+        else:
+            sql, full_params = build_union_count_by_field(db_field, where, params)
         try:
             with conn.cursor() as cursor:
                 cursor.execute(sql, full_params)
-                result[filter_name] = [(row[0], row[1]) for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                if filter_name == 'username':
+                    result[filter_name] = _aggregate_effective_user_counts(rows)
+                else:
+                    result[filter_name] = [(row[0], row[1]) for row in rows]
         except Exception as e:
             logger.error(f"job_filter_counts {filter_name} failed: {e}")
             result[filter_name] = []
@@ -1490,8 +1642,9 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
     return result
 
 
-def task_filter_counts(days=7, status=None, username=None, workinggroup=None):
-    """Get filter option counts for task list (status, username, workinggroup)."""
+def task_filter_counts(days=7, status=None, username=None,
+                       processingtype=None, workinggroup=None):
+    """Get filter option counts for task list."""
     cutoff = timezone.now() - timedelta(days=days)
     base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
     base_params = [cutoff]
@@ -1506,6 +1659,7 @@ def task_filter_counts(days=7, status=None, username=None, workinggroup=None):
     filter_config = [
         ('status', 'status', status),
         ('username', 'username', username),
+        ('processingtype', 'processingtype', processingtype),
         ('workinggroup', 'workinggroup', workinggroup),
     ]
 
@@ -1514,14 +1668,40 @@ def task_filter_counts(days=7, status=None, username=None, workinggroup=None):
         params = list(base_params)
         for other_db_field, other_name, other_value in filter_config:
             if other_name != filter_name and other_value:
-                where.append(f'"{other_db_field}" = %s')
-                params.append(other_value)
+                if other_name == 'username':
+                    clause, vals = _effective_username_filter(other_db_field, other_value)
+                    where.append(clause)
+                    params.extend(vals)
+                elif other_db_field == 'processingtype' and other_value == '__blank__':
+                    where.append('("processingtype" IS NULL OR "processingtype" = %s)')
+                    params.append('')
+                else:
+                    where.append(f'"{other_db_field}" = %s')
+                    params.append(other_value)
 
-        sql, full_params = build_task_count_by_field(db_field, where, params)
+        if filter_name == 'username':
+            where_sql = ' WHERE ' + ' AND '.join(where) if where else ''
+            sql = f"""
+                SELECT "username", "jeditaskid", COUNT(*)
+                FROM "{PANDA_SCHEMA}"."jedi_tasks"{where_sql}
+                GROUP BY "username", "jeditaskid"
+            """
+            full_params = list(params)
+        else:
+            sql, full_params = build_task_count_by_field(db_field, where, params)
         try:
             with conn.cursor() as cursor:
                 cursor.execute(sql, full_params)
-                result[filter_name] = [(row[0], row[1]) for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                if filter_name == 'username':
+                    result[filter_name] = _aggregate_effective_user_counts(rows)
+                elif filter_name == 'processingtype':
+                    result[filter_name] = [
+                        (row[0] or '__blank__', row[1])
+                        for row in rows
+                    ]
+                else:
+                    result[filter_name] = [(row[0], row[1]) for row in rows]
         except Exception as e:
             logger.error(f"task_filter_counts {filter_name} failed: {e}")
             result[filter_name] = []

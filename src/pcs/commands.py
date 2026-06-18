@@ -595,6 +595,7 @@ def build_evgen_task_params(task):
     return {
         'outDS': out_ds,
         'vo': data.get('vo', 'epic'),
+        'userName': task.created_by,
         'workingGroup': cfg.get('panda_working_group') or 'EIC',
         'site': cfg.get('panda_site') or 'BNL_OSG_PanDA_1',
         'prodSourceLabel': data.get('prod_source_label', 'test'),

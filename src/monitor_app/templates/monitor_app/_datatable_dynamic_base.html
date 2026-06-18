@@ -295,7 +295,8 @@ $(document).ready(function() {
         const badges = [];
         {% for field in filter_fields %}
         if (currentFilters.{{ field.name }} !== '' && currentFilters.{{ field.name }} !== null && currentFilters.{{ field.name }} !== undefined) {
-            badges.push(`<span class="badge bg-info me-1">{{ field.name }}: ${currentFilters.{{ field.name }}}</span>`);
+            const {{ field.name }}Label = currentFilters.{{ field.name }} === '__blank__' ? '-' : currentFilters.{{ field.name }};
+            badges.push(`<span class="badge bg-info me-1">{{ field.name }}: ${ {{ field.name }}Label }</span>`);
         }
         {% endfor %}
 
@@ -330,7 +331,8 @@ $(document).ready(function() {
                         const value = item[0];
                         const count = item[1];
                         const activeClass = currentFilters.{{ field.name }} === value ? 'filter-active' : '';
-                        {{ field.name }}Html += `<a href="#" data-filter="{{ field.name }}" data-value="${value}" class="filter-link ${activeClass}">${value} (${count})</a>`;
+                        const label = value === '__blank__' ? '-' : value;
+                        {{ field.name }}Html += `<a href="#" data-filter="{{ field.name }}" data-value="${value}" class="filter-link ${activeClass}">${label} (${count})</a>`;
                     });
                 }
                 $('#{{ field.name }}-options').html({{ field.name }}Html);

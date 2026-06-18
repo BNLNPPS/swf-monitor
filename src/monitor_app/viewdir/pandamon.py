@@ -73,7 +73,7 @@ TASK_COLUMNS = [
     {'name': 'jeditaskid', 'title': 'Task ID', 'orderable': True},
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
-    {'name': 'processingtype', 'title': 'Type', 'orderable': True},
+    {'name': 'processingtype', 'title': 'Processing type', 'orderable': True},
     {'name': 'username', 'title': 'User', 'orderable': True},
     {'name': 'creationdate', 'title': 'Created', 'orderable': True},
     {'name': 'modificationtime', 'title': 'Modified', 'orderable': True},
@@ -311,9 +311,11 @@ def panda_tasks_list(request):
         'filter_fields': [
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
+            {'name': 'processingtype', 'label': 'Processing type', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
+        'selected_processingtype': request.GET.get('processingtype', ''),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_tasks_list.html', context)
@@ -326,6 +328,7 @@ def panda_tasks_datatable_ajax(request):
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
     taskname = request.GET.get('taskname', '') or None
+    processingtype = request.GET.get('processingtype', '') or None
 
     order_col = TASK_ORDER_MAP.get(dt.order_column_idx, '"jeditaskid"')
     order_dir = 'ASC' if dt.order_direction == 'asc' else 'DESC'
@@ -339,6 +342,7 @@ def panda_tasks_datatable_ajax(request):
     # in list_tasks_dt's filter contract for backward compat with direct callers.
     rows, total, filtered = list_tasks_dt(
         days=days, status=status, username=username, taskname=taskname,
+        processingtype=processingtype,
         order_by=order_by, limit=dt.length, offset=dt.start,
         search=dt.search_value or None,
     )
@@ -397,10 +401,13 @@ def panda_tasks_filter_counts(request):
     days = _get_days(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
+    processingtype = request.GET.get('processingtype', '') or None
     workinggroup = request.GET.get('workinggroup', '') or None
 
     counts = task_filter_counts(days=days, status=status,
-                                username=username, workinggroup=workinggroup)
+                                username=username,
+                                processingtype=processingtype,
+                                workinggroup=workinggroup)
     return JsonResponse({'filter_counts': counts})
 
 

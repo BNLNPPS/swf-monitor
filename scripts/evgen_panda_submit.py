@@ -99,7 +99,7 @@ def build_task_params(spec, archive_name):
         'cloud': spec.get('cloud', spec.get('workingGroup', 'EIC')),
         'campaign': spec.get('campaign', ''),
         'taskName': spec['outDS'],
-        'userName': None,                # filled by the client from the token
+        'userName': spec.get('userName') or os.environ.get('SWF_TASK_OWNER') or None,
         'noInput': True,                 # payload stages its own EVGEN input
         'noOutput': True,                # payload self-registers RECO to JLab
         'architecture': '',

@@ -50,9 +50,10 @@
                     </table>
                     {% if tasks.by_type %}
                     <div class="mt-3">
-                        <strong>Task type:</strong>
+                        <strong>Processing type:</strong>
                         {% for entry in tasks.by_type %}
-                        <span class="badge {% if entry.is_test %}bg-warning text-dark{% else %}bg-secondary{% endif %} me-1">{{ entry.type|default:"-" }}: {{ entry.count }}</span>
+                        <a class="badge {% if entry.is_test %}bg-warning text-dark{% else %}bg-secondary{% endif %} me-1 text-decoration-none"
+                           href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}&processingtype={{ entry.filter_value|urlencode }}">{{ entry.type|default:"-" }}: {{ entry.count }}</a>
                         {% endfor %}
                     </div>
                     {% endif %}
@@ -139,7 +140,7 @@
                         <tbody>
                         {% for entry in jobs.by_site %}
                         <tr>
-                            <td><a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&site={{ entry.site }}">{{ entry.site }}</a></td>
+                            <td><a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&site={{ entry.site|urlencode }}">{{ entry.site }}</a></td>
                             <td>{{ entry.total }}</td>
                             <td>
                                 {% for key, val in entry.items %}{% if key != 'site' and key != 'total' %}<a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}&site={{ entry.site|urlencode }}&status={{ key|urlencode }}">{{ key }}:{{ val }}</a> {% endif %}{% endfor %}

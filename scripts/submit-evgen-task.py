@@ -200,6 +200,8 @@ def main():
     if not spec.get('outDS') or not spec.get('csvRows'):
         _log(f"ERROR: incomplete EVGEN spec for '{args.task_name}': {raw[:500]}")
         return 3
+    if args.owner and not spec.get('userName'):
+        spec['userName'] = args.owner
     _log(f"EVGEN spec for {args.task_name}: outDS={spec['outDS']} "
          f"nJobs={spec.get('nJobs')} skipScout={spec.get('skipScout')}")
 
