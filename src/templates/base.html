@@ -108,6 +108,10 @@
       .nav-mode { display: none; }
       .nav-mode.active { display: contents; }
       #mode-label { border-right: 1px solid rgba(255,255,255,.2); padding-right: 12px; margin-right: 4px; }
+      .nav-label {
+        color: #adb5bd;
+        font-weight: 700;
+      }
       .nav-system-error { color: #ff8174 !important; font-weight: 700; }
       /* One-click copy icon for IDs — see swf_fmt.copy_btn template tag */
       .copy-btn {
@@ -248,17 +252,7 @@
         {# ── Production mode ── #}
         <span class="nav-mode nav-production">
         <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
-        <div class="dropdown">
-            <button class="dropbtn">Tasks</button>
-            <div class="dropdown-content">
-                <a href="{% url 'monitor_app:panda_tasks_list' %}">PanDA tasks</a>
-                <a href="{% url 'pcs:pcs_catalog' %}">Production Task Catalog</a>
-            </div>
-        </div>
-        <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
-        <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
-        <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>
+        <a href="{% url 'pcs:questionnaires_list' %}">Requests</a>
         <div class="dropdown">
             <button class="dropbtn">PCS</button>
             <div class="dropdown-content">
@@ -274,6 +268,15 @@
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks">Prod Tasks</a>
             </div>
         </div>
+        <a href="{% url 'pcs:pcs_catalog' %}">Campaigns</a>
+        <span class="nav-label">PanDA</span>
+        <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
+        <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
+        <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>
+        <a href="{% url 'monitor_app:panda_diagnostics_list' %}">Diagnostics</a>
+        <a href="{% url 'monitor_app:epic_queues_list' %}">Queues</a>
+        </span>
+        <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:system_status' %}"
            id="system-status-nav-link"
            class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}"
@@ -281,8 +284,6 @@
            data-system-status-url="{% url 'monitor_app:system_status_json' %}"
            {% if system_status_latest_checked_at %}data-system-checked-at="{{ system_status_latest_checked_at|date:'c' }}"{% endif %}
            title="{{ system_status_reason|default:'' }}">System</a>
-        </span>
-        <span class="nav-spacer"></span>
         <a href="{% url 'monitor_app:about' %}">About</a>
         <div class="nav-auth">
             {% if user.is_authenticated %}

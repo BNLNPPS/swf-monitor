@@ -1,15 +1,31 @@
 {% extends 'base.html' %}
 
-{% block title %}epicprod - ePIC Production - SWF Monitor{% endblock %}
+{% block title %}epicprod - ePIC Production System - SWF Monitor{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
-    <h1 class="mb-4">epicprod - ePIC Production</h1>
-    <p class="lead mb-5">ePIC experiment production configuration, management and monitoring</p>
+    <style>
+      .prod-section-bar {
+        width: 100%;
+        background: #e7f1ff;
+        border-left: 6px solid #0d6efd;
+        border-top: 1px solid #b6d4ff;
+        border-bottom: 1px solid #b6d4ff;
+        color: #123c69;
+        font-weight: 700;
+        font-size: 1.25rem;
+        padding: .55rem .8rem;
+        margin: 1.25rem 0 1rem;
+      }
+    </style>
+    <h1 class="mb-4">epicprod - ePIC Production System</h1>
+    <p class="lead mb-0">ePIC experiment production requests, configuration, management and monitoring</p>
+
+    <div class="prod-section-bar">Physics Configuration System - PCS</div>
 
     {% include "pcs/_pcs_sections.html" %}
 
-    <h3 class="mb-3">Production Monitor</h3>
+    <div class="prod-section-bar">PanDA Production</div>
     <div class="row mb-4">
         <div class="col-md-4 mb-3">
             <div class="card h-100">
