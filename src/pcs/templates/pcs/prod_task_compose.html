@@ -192,6 +192,7 @@
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
+    const QUESTIONNAIRE_LIST_URL = "{{ request.META.SCRIPT_NAME }}{% url 'pcs:questionnaires_list' %}";
 
     // ── Tag-based naming: the new system's names enter the world here ──
     // The dataset's human-facing identity is its tag-composed name
@@ -214,6 +215,14 @@
     function taskComposedName(t) { return (t && (t.composed_name || t.name)) || ''; }
     function taskApiUrl(t, suffix) {
         return `/swf-monitor/pcs/api/prod-tasks/${encodeURIComponent(taskComposedName(t))}/${suffix || ''}`;
+    }
+    function htmlEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
     }
     // Legacy import rows carry an opaque csv_import.<hash> / past.<…> key and a
     // synthetic DID (not a Rucio DID) — both plumbing, hidden from the panels.
@@ -291,6 +300,7 @@
             if (r.ok) {
                 const d = await r.json();
                 if (d.task_params_json !== undefined) t.task_params_json = d.task_params_json;
+                if (d.task_params_error !== undefined) t.task_params_error = d.task_params_error;
                 if (d.condor_command !== undefined) t.condor_command = d.condor_command;
                 if (d.panda_command !== undefined) t.panda_command = d.panda_command;
                 t._hydrated = true;
@@ -850,6 +860,14 @@
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
+        if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
+            const requestLinks = t.questionnaire_matches.map(m => {
+                const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
+                const confidence = m.confidence ? ` <span class="text-muted">(${htmlEscape(m.confidence)})</span>` : '';
+                return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>${confidence}`;
+            }).join(', ');
+            html += `<div class="alert alert-info py-2 px-3 mb-2"><strong>Request:</strong> ${requestLinks}</div>`;
+        }
         // Submit-readiness — shown while the task is still a draft (the state where
         // it matters for the next step, Lock). Empty list = ready.
         if (t.status === 'draft' && Array.isArray(t.readiness)) {
@@ -919,11 +937,12 @@
             <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
             <div class="command-block" id="browse-panda">${t.panda_command}</div>`;
         if (t.task_params_json) {
-            const escaped = t.task_params_json
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const escaped = htmlEscape(t.task_params_json);
             html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA EVGEN Submission Spec</strong>
                 <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
                 <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
+        } else if (t.task_params_error) {
+            html += `<div class="alert alert-warning py-2 px-3 mb-2"><strong>PanDA EVGEN submission spec unavailable:</strong> ${htmlEscape(t.task_params_error)}</div>`;
         }
         browseContent.innerHTML = html;
     }

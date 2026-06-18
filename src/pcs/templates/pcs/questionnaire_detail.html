@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}Request #{{ questionnaire.id }} - PCS{% endblock %}
 
@@ -15,7 +16,7 @@
   <div class="d-flex justify-content-between align-items-start mb-3">
     <div>
       <h1 class="h2 mb-1">Request #{{ questionnaire.id }}</h1>
-      <div class="text-muted">Submitted {{ questionnaire.submitted_at|date:"Y-m-d H:i" }}</div>
+      <div class="text-muted">Submitted {{ questionnaire.submitted_at|fmt_dt }}</div>
     </div>
     <a href="{% url 'pcs:questionnaires_list' %}" class="btn btn-sm btn-outline-secondary">All requests</a>
   </div>
@@ -106,7 +107,7 @@
               </td>
               <td>{{ match.confidence|default:"-" }}</td>
               <td style="min-width:18rem; overflow-wrap:anywhere;">{{ match.reason|default:"-" }}</td>
-              <td class="small text-muted">{{ match.matched_by|default:"-" }}<br>{{ match.matched_at|default:"" }}</td>
+              <td class="small text-muted">{{ match.matched_by|default:"-" }}<br>{{ match.matched_at_display|default:"" }}</td>
               {% if user.is_authenticated %}
               <td class="text-end">
                 {% if match.task_id %}

@@ -16,6 +16,7 @@ from django.http import JsonResponse, Http404
 from django.contrib import messages
 from django.db.models import Count, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +199,13 @@ def _questionnaire_prod_matches(questionnaire, *, status=None):
             continue
         if status and (match.get('status') or 'accepted') != status:
             continue
+        match = dict(match)
+        matched_at = match.get('matched_at')
+        if matched_at:
+            dt = parse_datetime(str(matched_at))
+            match['matched_at_display'] = format_datetime(dt) if dt else matched_at
+        else:
+            match['matched_at_display'] = ''
         matches.append(match)
     return matches
 
@@ -1854,6 +1862,7 @@ def prod_task_compose(request):
     # open (prod_task_compose_task_detail). Readiness (cheap) is included so the
     # detail panel can show submit-readiness without a round trip.
     from .services import prodtask_readiness_problems
+    tasks_list = _annotate_task_questionnaire_matches(tasks_list)
     tasks_data = []
     for t in tasks_list:
         tasks_data.append({
@@ -1876,7 +1885,15 @@ def prod_task_compose(request):
             'description': t.description,
             'created_by': t.created_by,
             'readiness': prodtask_readiness_problems(t),
-            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': format_datetime(t.updated_at),
+            'questionnaire_matches': [
+                {
+                    'id': item['questionnaire'].pk,
+                    'confidence': item.get('confidence') or '',
+                    'reason': item.get('reason') or '',
+                }
+                for item in getattr(t, 'questionnaire_matches', [])
+            ],
         })
 
     # Datasets: only those used by the in-scope tasks — campaign-coherent, and
@@ -1965,6 +1982,7 @@ def prod_task_compose(request):
             .filter(campaign=campaign)
             .order_by('dataset__dataset_name')
         )
+        campaign_tasks = _annotate_task_questionnaire_matches(campaign_tasks)
 
     context = {
         'datasets_json': json.dumps(datasets_data),
@@ -2052,10 +2070,13 @@ def prod_task_compose_task_detail(request, name):
         raise Http404(f"No task {name!r}")
     try:
         task_params_json = json.dumps(build_evgen_task_params(task), indent=2, default=str)
+        task_params_error = ''
     except Exception as e:                                       # noqa: BLE001
-        task_params_json = f'// Error building EVGEN submission spec: {e}'
+        task_params_json = ''
+        task_params_error = str(e)
     return JsonResponse({
         'task_params_json': task_params_json,
+        'task_params_error': task_params_error,
         'condor_command': task.condor_command,
         'panda_command': task.panda_command,
     })

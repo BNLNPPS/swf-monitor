@@ -489,7 +489,8 @@ This calls `Client.insertTaskParams(task_params)` and handles the response. Auth
 
 ### Phase 3: UI Integration
 
-- Add a "Submit to JEDI" button on the ProdTask detail page (alongside existing command display)
+- Add a "Submit to JEDI" button on the task compose view's focused-task panel,
+  alongside the generated submission artifact display.
 - Show the taskParamMap as formatted JSON for review before submission
 - After submission, display the JEDI task ID with link to ePIC production monitoring
 - Status tracking via `Client.getTaskStatus(jedi_task_id)`
