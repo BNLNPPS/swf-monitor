@@ -34,6 +34,56 @@ STALE_TASK_DAYS = 60
 # Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
 _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
 _NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
+_PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
+_PANDA_USER_EQUIVALENCES = {
+    # Canonical monitor display name -> equivalent login/name variants.
+    'Torre Wenaus': ('wenaus',),
+}
+_PANDA_USER_TO_CANONICAL = {
+    name: canonical
+    for canonical, names in _PANDA_USER_EQUIVALENCES.items()
+    for name in (canonical, *names)
+}
+
+
+def _display_processing_type(value):
+    value = value or ''
+    m = _PANDA_CLIENT_PROCESSING_RE.match(value)
+    if m:
+        return f'panda-client-{m.group(1)}'
+    return value or '-'
+
+
+def _processing_type_filter_value(value):
+    value = value or ''
+    m = _PANDA_CLIENT_PROCESSING_RE.match(value)
+    if m:
+        return f'panda-client-%-{m.group(1)}'
+    return value or '__blank__'
+
+
+def _aggregate_processing_type_counts(rows):
+    counts = {}
+    filter_values = {}
+    for raw_value, count in rows:
+        label = _display_processing_type(raw_value)
+        counts[label] = counts.get(label, 0) + count
+        filter_values[label] = _processing_type_filter_value(raw_value)
+    return [
+        (label, count, filter_values[label])
+        for label, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    ]
+
+
+def _canonical_user(value):
+    return _PANDA_USER_TO_CANONICAL.get(value, value)
+
+
+def _user_filter_values(value):
+    canonical = _canonical_user(value)
+    values = {canonical}
+    values.update(_PANDA_USER_EQUIVALENCES.get(canonical, ()))
+    return sorted(v for v in values if v)
 
 
 def _pcs_owner_map(jeditaskids):
@@ -44,7 +94,7 @@ def _pcs_owner_map(jeditaskids):
     try:
         from pcs.models import ProdTask
         return {
-            int(panda_task_id): created_by
+            int(panda_task_id): _canonical_user(created_by)
             for panda_task_id, created_by in ProdTask.objects
             .filter(panda_task_id__in=ids)
             .values_list('panda_task_id', 'created_by')
@@ -63,15 +113,24 @@ def _pcs_taskids_for_owner(username):
         from pcs.models import ProdTask
         linked = ProdTask.objects.filter(panda_task_id__isnull=False)
         if '%' in username:
-            needle = username.replace('%', '')
-            owner_qs = linked.filter(created_by__contains=needle)
+            variants = [v.replace('%', '') for v in _user_filter_values(username)]
+            owner_ids = set()
+            for needle in variants:
+                owner_ids.update(
+                    int(panda_task_id)
+                    for panda_task_id in linked
+                    .filter(created_by__contains=needle)
+                    .values_list('panda_task_id', flat=True)
+                    if panda_task_id
+                )
         else:
-            owner_qs = linked.filter(created_by=username)
-        owner_ids = {
-            int(panda_task_id)
-            for panda_task_id in owner_qs.values_list('panda_task_id', flat=True)
-            if panda_task_id
-        }
+            owner_ids = {
+                int(panda_task_id)
+                for panda_task_id in linked
+                .filter(created_by__in=_user_filter_values(username))
+                .values_list('panda_task_id', flat=True)
+                if panda_task_id
+            }
         other_ids = {
             int(panda_task_id)
             for panda_task_id in linked.values_list('panda_task_id', flat=True)
@@ -90,7 +149,7 @@ def _in_clause(field, values):
 
 def _effective_username_filter(db_field, username):
     """Filter by displayed owner: PCS created_by for linked tasks, raw PanDA otherwise."""
-    raw_clause, raw_val = like_or_eq(db_field, username)
+    raw_values = _user_filter_values(username)
     owner_ids, other_ids = _pcs_taskids_for_owner(username)
     clauses = []
     params = []
@@ -100,7 +159,13 @@ def _effective_username_filter(db_field, username):
         clauses.append(owner_clause)
         params.extend(owner_params)
 
-    raw_params = [raw_val]
+    raw_parts = []
+    raw_params = []
+    for raw_value in raw_values:
+        raw_clause, raw_val = like_or_eq(db_field, raw_value)
+        raw_parts.append(raw_clause)
+        raw_params.append(raw_val)
+    raw_clause = '(' + ' OR '.join(raw_parts) + ')'
     if other_ids:
         other_clause, other_params = _in_clause('jeditaskid', other_ids)
         raw_clause = f'({raw_clause} AND NOT {other_clause})'
@@ -119,6 +184,16 @@ def _apply_effective_owners(rows, user_field):
         owner = owner_map.get(row.get('jeditaskid'))
         if owner:
             row[user_field] = owner
+        elif row.get(user_field):
+            row[user_field] = _canonical_user(row[user_field])
+    return rows
+
+
+def _apply_processing_type_display(rows):
+    for row in rows:
+        if 'processingtype' in row:
+            row['processingtype_raw'] = row.get('processingtype')
+            row['processingtype'] = _display_processing_type(row.get('processingtype'))
     return rows
 
 
@@ -126,7 +201,7 @@ def _aggregate_effective_user_counts(rows):
     owner_map = _pcs_owner_map([row[1] for row in rows])
     counts = {}
     for raw_user, jeditaskid, count in rows:
-        user = owner_map.get(jeditaskid) or raw_user
+        user = owner_map.get(jeditaskid) or _canonical_user(raw_user)
         counts[user] = counts.get(user, 0) + count
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
 
@@ -608,6 +683,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
         t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     _apply_effective_owners(tasks, 'username')
+    _apply_processing_type_display(tasks)
 
     has_more = len(rows) > limit
     next_before_id = tasks[-1]['jeditaskid'] if tasks and has_more else None
@@ -837,7 +913,7 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         job_owner_map = _pcs_owner_map([row[2] for row in job_user_rows])
         user_map = {}
         for status_val, user_val, jeditaskid, count in job_user_rows:
-            user_val = job_owner_map.get(jeditaskid) or user_val
+            user_val = job_owner_map.get(jeditaskid) or _canonical_user(user_val)
             if user_val not in user_map:
                 user_map[user_val] = {'user': user_val, 'total': 0}
             user_map[user_val][status_val] = user_map[user_val].get(status_val, 0) + count
@@ -900,12 +976,13 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             cursor.execute(task_type_sql, task_params)
             task_by_type = [
                 {
-                    'type': row[0] or '-',
-                    'count': row[1],
-                    'is_test': 'test' in (row[0] or '').lower(),
-                    'filter_value': row[0] or '__blank__',
+                    'type': label,
+                    'count': count,
+                    'is_test': 'test' in label.lower(),
+                    'filter_value': filter_value,
                 }
-                for row in cursor.fetchall()
+                for label, count, filter_value
+                in _aggregate_processing_type_counts(cursor.fetchall())
             ]
 
         task_user_sql = f"""
@@ -920,7 +997,7 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         task_owner_map = _pcs_owner_map([row[2] for row in task_user_rows])
         task_user_map = {}
         for status_val, user_val, jeditaskid in task_user_rows:
-            user_val = task_owner_map.get(jeditaskid) or user_val
+            user_val = task_owner_map.get(jeditaskid) or _canonical_user(user_val)
             if user_val not in task_user_map:
                 task_user_map[user_val] = {'user': user_val, 'total': 0}
             task_user_map[user_val][status_val] = task_user_map[user_val].get(status_val, 0) + 1
@@ -1571,6 +1648,7 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
         return [], total, filtered
 
     _apply_effective_owners(rows, 'username')
+    _apply_processing_type_display(rows)
     return rows, total, filtered
 
 
@@ -1697,8 +1775,9 @@ def task_filter_counts(days=7, status=None, username=None,
                     result[filter_name] = _aggregate_effective_user_counts(rows)
                 elif filter_name == 'processingtype':
                     result[filter_name] = [
-                        (row[0] or '__blank__', row[1])
-                        for row in rows
+                        (label, count, filter_value)
+                        for label, count, filter_value
+                        in _aggregate_processing_type_counts(rows)
                     ]
                 else:
                     result[filter_name] = [(row[0], row[1]) for row in rows]

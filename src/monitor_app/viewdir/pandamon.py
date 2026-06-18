@@ -179,7 +179,16 @@ def _fmt_dt(val):
 _fill_cell = fill_cell  # backwards-compat alias within this module
 
 
-DAYS_OPTIONS = [1, 3, 7, 14, 30]
+DAYS_OPTIONS = [
+    (1, '1d'),
+    (3, '3d'),
+    (7, '7d'),
+    (14, '14d'),
+    (30, '30d'),
+    (90, '3mo'),
+    (180, '6mo'),
+    (365, '1yr'),
+]
 
 
 def _get_days(request):
@@ -194,7 +203,10 @@ def _days_context(days):
     """Build days selector context for templates."""
     return {
         'days': days,
-        'days_options': [{'value': d, 'active': d == days} for d in DAYS_OPTIONS],
+        'days_options': [
+            {'value': value, 'label': label, 'active': value == days}
+            for value, label in DAYS_OPTIONS
+        ],
     }
 
 

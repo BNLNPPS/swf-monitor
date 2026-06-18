@@ -6,9 +6,9 @@
     <strong>Time window:</strong>
     {% for opt in days_options %}
     {% if opt.active %}
-    <a href="?days={{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
+    <a href="?days={{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
     {% else %}
-    <a href="?days={{ opt.value }}" style="margin-right:0.8em;">{{ opt.value }}d</a>
+    <a href="?days={{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
     {% endif %}
     {% endfor %}
 </div>

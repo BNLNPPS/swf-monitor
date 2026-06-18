@@ -293,9 +293,13 @@ $(document).ready(function() {
     function updateActiveFiltersDisplay() {
         {% block update_active_filters_display %}
         const badges = [];
+        function displayFilterValue(value) {
+            if (value === '__blank__') return '-';
+            return String(value).replace(/^panda-client-%-(jedi-.+)$/, 'panda-client-$1');
+        }
         {% for field in filter_fields %}
         if (currentFilters.{{ field.name }} !== '' && currentFilters.{{ field.name }} !== null && currentFilters.{{ field.name }} !== undefined) {
-            const {{ field.name }}Label = currentFilters.{{ field.name }} === '__blank__' ? '-' : currentFilters.{{ field.name }};
+            const {{ field.name }}Label = displayFilterValue(currentFilters.{{ field.name }});
             badges.push(`<span class="badge bg-info me-1">{{ field.name }}: ${ {{ field.name }}Label }</span>`);
         }
         {% endfor %}
@@ -328,10 +332,10 @@ $(document).ready(function() {
                 let {{ field.name }}Html = '';
                 if (filterCounts.{{ field.name }}) {
                     filterCounts.{{ field.name }}.forEach(function(item) {
-                        const value = item[0];
+                        const label = item[0] === '__blank__' ? '-' : item[0];
                         const count = item[1];
+                        const value = item.length > 2 ? item[2] : item[0];
                         const activeClass = currentFilters.{{ field.name }} === value ? 'filter-active' : '';
-                        const label = value === '__blank__' ? '-' : value;
                         {{ field.name }}Html += `<a href="#" data-filter="{{ field.name }}" data-value="${value}" class="filter-link ${activeClass}">${label} (${count})</a>`;
                     });
                 }

@@ -6,9 +6,9 @@
     <strong>Time window:</strong>
     {% for opt in days_options %}
     {% if opt.active %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.value }}d</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
     {% else %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="margin-right:0.8em;">{{ opt.value }}d</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}" style="margin-right:0.8em;">{{ opt.label }}</a>
     {% endif %}
     {% endfor %}
     {% if selected_taskid %}
