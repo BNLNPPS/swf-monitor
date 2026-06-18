@@ -169,6 +169,18 @@ def _questionnaire_contacts(questionnaire):
     ]
 
 
+def _questionnaire_contact_names(questionnaire):
+    names = []
+    seen = set()
+    for contact in _questionnaire_contacts(questionnaire):
+        name = (contact.get('name') or '').strip()
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            names.append(name)
+    return names
+
+
 def _questionnaire_has_email(questionnaire):
     return any(contact.get('emails') for contact in _questionnaire_contacts(questionnaire))
 
@@ -190,6 +202,7 @@ def questionnaires_list(request):
         row.generator_filter = row.generator_display or '__undefined__'
         row.has_contact = bool(_questionnaire_contacts(row))
         row.has_email = _questionnaire_has_email(row)
+        row.contact_filter = '||'.join(_questionnaire_contact_names(row))
         row.search_text = ' '.join([
             row.description or '',
             row.repository or '',

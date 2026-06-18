@@ -48,15 +48,20 @@
     </div>
     <div class="pcs-tlf-bar-row">
       <span class="pcs-tlf-label">Contact:</span>
+      <a href="#" data-filter="contact" data-value="" class="filter-link filter-active">All</a>
+      <span id="pcs-qf-contact-opts"></span>
+    </div>
+    <div class="pcs-tlf-bar-row">
+      <span class="pcs-tlf-label">Completeness:</span>
       <a href="#" data-toggle="missing_contact" class="filter-link">missing contact (<span data-count="missing_contact">0</span>)</a>
       <a href="#" data-toggle="missing_email" class="filter-link">missing email (<span data-count="missing_email">0</span>)</a>
     </div>
   </div>
 
   {% if is_tunnel %}
-  <div class="alert alert-secondary py-2 small text-muted mb-4" style="max-width: 58rem;">
+  <p class="small text-muted fst-italic mb-4" style="max-width: 58rem;">
     CSV import is available from pandaserver02.
-  </div>
+  </p>
   {% elif user.is_authenticated %}
   <div class="mb-4 p-3 border rounded bg-light" style="max-width: 58rem;">
     <h2 class="h5 mb-3">Import Request Questionnaire CSV Export</h2>
@@ -93,6 +98,7 @@
 	        <tr class="pcs-qf-data"
               data-repo="{{ q.repository_display }}"
               data-generator="{{ q.generator_filter }}"
+              data-contact="{{ q.contact_filter }}"
               data-missing-contact="{% if q.has_contact %}0{% else %}1{% endif %}"
               data-missing-email="{% if q.has_email %}0{% else %}1{% endif %}"
               data-search="{{ q.search_text }}">
@@ -175,9 +181,9 @@
   {% endif %}
   <script>
   (function() {
-    const STR = ['repo', 'generator'];
+    const STR = ['repo', 'generator', 'contact'];
     const BOOL = ['missing_contact', 'missing_email'];
-    const DS = {repo: 'repo', generator: 'generator'};
+    const DS = {repo: 'repo', generator: 'generator', contact: 'contact'};
     const BD = {missing_contact: 'missingContact', missing_email: 'missingEmail'};
     const LABELS = {generator: {'__undefined__': 'Undefined'}};
 
@@ -190,9 +196,15 @@
       q: (initial.get('q') || '').trim(),
       repo: initial.get('repo') || '',
       generator: initial.get('generator') || '',
+      contact: initial.get('contact') || '',
       missing_contact: initial.get('missing_contact') === '1',
       missing_email: initial.get('missing_email') === '1',
     };
+
+    function valuesFor(tr, k) {
+      const raw = tr.dataset[DS[k]] || '';
+      return k === 'contact' ? raw.split('||').filter(Boolean) : (raw ? [raw] : []);
+    }
 
     function rowMatches(tr, skip) {
       if (skip !== 'q' && state.q) {
@@ -200,7 +212,7 @@
       }
       for (const k of STR) {
         if (k === skip) continue;
-        if (state[k] && tr.dataset[DS[k]] !== state[k]) return false;
+        if (state[k] && !valuesFor(tr, k).includes(state[k])) return false;
       }
       for (const k of BOOL) {
         if (k === skip) continue;
@@ -219,13 +231,14 @@
     }
 
     function renderBar() {
-      const strCounts = {repo: {}, generator: {}};
+      const strCounts = {repo: {}, generator: {}, contact: {}};
       const boolCounts = {missing_contact: 0, missing_email: 0};
       for (const tr of rows) {
         for (const k of STR) {
           if (rowMatches(tr, k)) {
-            const v = tr.dataset[DS[k]];
-            if (v) strCounts[k][v] = (strCounts[k][v] || 0) + 1;
+            for (const v of valuesFor(tr, k)) {
+              strCounts[k][v] = (strCounts[k][v] || 0) + 1;
+            }
           }
         }
         for (const k of BOOL) {
@@ -260,7 +273,7 @@
     function syncUrl() {
       const u = new URL(window.location.href);
       const p = u.searchParams;
-      ['q', 'repo', 'generator', 'missing_contact', 'missing_email'].forEach(k => p.delete(k));
+      ['q', 'repo', 'generator', 'contact', 'missing_contact', 'missing_email'].forEach(k => p.delete(k));
       if (state.q) p.set('q', state.q);
       for (const k of STR) if (state[k]) p.set(k, state[k]);
       for (const k of BOOL) if (state[k]) p.set(k, '1');
