@@ -115,6 +115,17 @@
     </div>
     {% endif %}
 
+    <!-- Payload log (clean, fetched from the Rucio log tarball by the prod-ops agent) -->
+    {% if log_file %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Payload Log</strong></div>
+        <div class="card-body">
+            <a href="{% url 'monitor_app:panda_payload_log' pandaid %}" target="_blank" rel="noopener">View payload log</a>
+            <span class="text-muted ms-2">clean payload.stdout / stderr from the Rucio log tarball</span>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Log URLs -->
     {% if log_urls %}
     <div class="card mb-3">
@@ -128,17 +139,6 @@
                 </tr>
                 {% endfor %}
             </table>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- Payload log (clean, fetched from the Rucio log tarball by the prod-ops agent) -->
-    {% if log_file %}
-    <div class="card mb-3">
-        <div class="card-header"><strong>Payload Log</strong></div>
-        <div class="card-body">
-            <a href="{% url 'monitor_app:panda_payload_log' pandaid %}" target="_blank" rel="noopener">View payload log</a>
-            <span class="text-muted ms-2">clean payload.stdout / stderr from the Rucio log tarball</span>
         </div>
     </div>
     {% endif %}
