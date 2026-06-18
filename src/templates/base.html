@@ -262,7 +262,6 @@
 
         {# ── Production mode ── #}
         <span class="nav-mode nav-production">
-        <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
         <a href="{% url 'pcs:questionnaires_list' %}">Requests</a>
         <div class="dropdown">
             <button class="dropbtn">PCS</button>
@@ -281,6 +280,7 @@
         </div>
         <a href="{% url 'pcs:pcs_catalog' %}">Campaigns</a>
         <strong class="nav-label nav-panda-label">PanDA</strong>
+        <a href="{% url 'monitor_app:panda_activity' %}">Activity</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
         <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>

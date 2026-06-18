@@ -51,7 +51,7 @@ def _display_processing_type(value):
     m = _PANDA_CLIENT_PROCESSING_RE.match(value)
     if m:
         return f'panda-client-{m.group(1)}'
-    return value or '-'
+    return value or 'None'
 
 
 def _processing_type_filter_value(value):

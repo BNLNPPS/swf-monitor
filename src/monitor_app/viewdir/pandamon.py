@@ -541,9 +541,54 @@ def _extract_trf_text(data):
 
 
 def _transformation_text_response(text, url, cache_status):
-    response = HttpResponse(text, content_type='text/plain; charset=utf-8')
-    filename = _transformation_filename(url)
-    response['Content-Disposition'] = f'inline; filename="{filename}.txt"'
+    title = _transformation_filename(url)
+    html = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{escape(title)}</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #fff;
+      color: #111;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+    }}
+    header {{
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #d0d7de;
+      background: #f6f8fa;
+    }}
+    h1 {{
+      margin: 0 0 0.35rem 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+    }}
+    a {{
+      color: #005ea8;
+    }}
+    pre {{
+      margin: 0;
+      padding: 1rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 14px;
+      line-height: 1.35;
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{escape(title)}</h1>
+    <a href="{escape(url)}">{escape(url)}</a>
+  </header>
+  <pre>{escape(text)}</pre>
+</body>
+</html>
+"""
+    response = HttpResponse(html, content_type='text/html; charset=utf-8')
     response['X-PanDA-TRF-Cache'] = cache_status
     return response
 

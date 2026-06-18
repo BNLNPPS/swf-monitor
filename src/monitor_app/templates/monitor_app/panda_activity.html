@@ -36,7 +36,7 @@
             <div class="card">
                 <div class="card-header"><strong>Tasks</strong></div>
                 <div class="card-body">
-                    <h3>{{ tasks.total|default:"0" }}</h3>
+                    <h3><a href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}">{{ tasks.total|default:"0" }}</a></h3>
                     <table class="table table-sm table-bordered mb-0">
                         <thead><tr><th>Status</th><th>Count</th></tr></thead>
                         <tbody>
@@ -65,7 +65,7 @@
             <div class="card">
                 <div class="card-header"><strong>Jobs</strong></div>
                 <div class="card-body">
-                    <h3>{{ jobs.total|default:"0" }}</h3>
+                    <h3><a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}">{{ jobs.total|default:"0" }}</a></h3>
                     <table class="table table-sm table-bordered mb-0">
                         <thead><tr><th>Status</th><th>Count</th></tr></thead>
                         <tbody>

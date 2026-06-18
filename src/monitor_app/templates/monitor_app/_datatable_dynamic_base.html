@@ -322,7 +322,7 @@ $(document).ready(function() {
         {% block update_active_filters_display %}
         const badges = [];
         function displayFilterValue(value) {
-            if (value === '__blank__') return '-';
+            if (value === '__blank__') return 'None';
             return String(value).replace(/^panda-client-%-(jedi-.+)$/, 'panda-client-$1');
         }
         {% for field in filter_fields %}
