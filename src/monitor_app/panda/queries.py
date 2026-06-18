@@ -9,6 +9,7 @@ import logging
 import json
 import re
 from datetime import timedelta
+from urllib.parse import unquote
 from django.utils import timezone
 from django.db import connections
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 TERMINAL_TASK_STATUSES = ('done', 'failed', 'aborted', 'broken', 'finished')
 STALE_TASK_DAYS = 60
+PSEUDO_TASK_DATASETS = {'seq_number', 'pseudo_dataset'}
 
 # NERSC Perlmutter jobs publish their per-job pilot & slurm logs here.
 # Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
@@ -246,27 +248,51 @@ def _get_task_datasets(jeditaskid):
     except Exception as e:
         logger.error("_get_task_datasets failed: %s", e)
         return []
+    visible = []
     for dataset in datasets:
+        if (
+            dataset.get('type') == 'pseudo_input'
+            or (dataset.get('type') or '').startswith('tmpl_')
+            or dataset.get('datasetname') in PSEUDO_TASK_DATASETS
+        ):
+            continue
         nfiles = dataset.get('nfiles') or 0
         finished = dataset.get('nfilesfinished') or 0
         failed = dataset.get('nfilesfailed') or 0
         dataset['files_percent'] = round(100 * (finished + failed) / nfiles, 1) if nfiles else None
         dataset['rse'] = dataset.get('destination') or dataset.get('site') or ''
-    return datasets
+        visible.append(dataset)
+    return visible
 
 
 def _format_task_job_parameter(param):
     if not isinstance(param, dict):
-        return str(param)
+        return {'label': 'Parameter', 'value': str(param)}
+    if param.get('type') == 'template':
+        if (
+            param.get('param_type') == 'pseudo_input'
+            or param.get('dataset') in PSEUDO_TASK_DATASETS
+        ):
+            return None
+        bits = []
+        if param.get('dataset'):
+            bits.append(f"dataset={param.get('dataset')}")
+        if param.get('value'):
+            bits.append(f"value={param.get('value')}")
+        return {'label': f"{param.get('param_type') or 'Template'} template", 'value': ', '.join(bits)}
     if param.get('type') == 'constant':
-        return param.get('value', '')
-    bits = []
-    param_type = param.get('param_type') or param.get('type') or 'parameter'
-    bits.append(f"{param_type} template:")
-    for key in ('value', 'dataset', 'offset', 'hidden', 'expandedList'):
-        if key in param:
-            bits.append(f"{key}={param.get(key)!r}")
-    return ' '.join(bits)
+        value = (param.get('value') or '').strip()
+        if not value or value in {'"', '-p "'}:
+            return None
+        source_match = re.search(r'--sourceURL\s+(\S+)', value)
+        if source_match:
+            return {'label': 'Source URL', 'value': source_match.group(1)}
+        if value.startswith('-r '):
+            return {'label': 'Work directory', 'value': value[3:].strip()}
+        if value.startswith('-a '):
+            return {'label': 'Sandbox', 'value': value[3:].strip()}
+        return {'label': 'Payload command', 'value': unquote(value).strip('"')}
+    return {'label': param.get('type') or 'Parameter', 'value': str(param)}
 
 
 def _get_task_parameters(jeditaskid):
@@ -292,10 +318,13 @@ def _get_task_parameters(jeditaskid):
     job_params = params.get('jobParameters') if isinstance(params, dict) else None
     if not isinstance(job_params, list):
         return params, []
-    return params, [
-        line for line in (_format_task_job_parameter(param) for param in job_params)
-        if line
+    items = [
+        item for item in (_format_task_job_parameter(param) for param in job_params)
+        if item and item.get('value') not in (None, '')
     ]
+    if not any(item.get('label') == 'Source URL' for item in items) and params.get('sourceURL'):
+        items.insert(0, {'label': 'Source URL', 'value': params.get('sourceURL')})
+    return params, items
 
 
 def _nersc_portal_log_urls(computingsite, pandaid):

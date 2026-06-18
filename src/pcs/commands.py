@@ -560,22 +560,10 @@ def build_evgen_task_params(task):
             'carries no per-file event count)')
     csv_rows = _evgen_manifest_from_inputs(task, n_events)
 
-    # outDS the way the proven recipe derives it from the input path
-    # (submit_csv.sh): <detector_version>/<detector_config>[/<tag_prefix>]/<dir>,
-    # slashes→dots, '='→'-'. noOutput means nothing registers under it — it is
-    # the taskName only. The composed-identity naming is a separate, deferred
-    # PCS concern; reproduce the working name here.
-    head = csv_rows[0].split(',')[0].rpartition('/')[0]
+    # The composed PCS identity is unique (including the sample segment where
+    # needed) and is the PanDA taskName/outDS even for noOutput EVGEN tasks.
     env = _evgen_env(task)
-    tag_prefix = env.get('TAG_PREFIX', '')
-    scope = data.get('scope') or 'group.EIC'
-    path_parts = [ds.detector_version, ds.detector_config]
-    if tag_prefix:
-        path_parts.append(tag_prefix)
-    if head:
-        path_parts.append(head)
-    dataset_identifier = '/'.join(path_parts).replace('/', '.').replace('=', '-')
-    out_ds = f'{scope}.{dataset_identifier}'
+    out_ds = task.composed_name or ds.composed_name or ds.build_dataset_name()
 
     # Container: an explicit image wins; else build the cvmfs eic_xl ref from the
     # jug_xl tag, as submit_csv.sh does.
@@ -587,7 +575,7 @@ def build_evgen_task_params(task):
             'no container image (set container_image or jug_xl_tag on the config)')
 
     # csv_base: a filesystem-safe stem for the per-task manifest in the sandbox.
-    csv_base = re.sub(r'[^A-Za-z0-9._-]', '_', dataset_identifier) or 'evgen_input'
+    csv_base = re.sub(r'[^A-Za-z0-9._-]', '_', out_ds) or 'evgen_input'
 
     hours = cfg.get('target_hours_per_job')
     walltime_hours = float(hours) if hours is not None else float(data.get('walltime_hours', 2.0))

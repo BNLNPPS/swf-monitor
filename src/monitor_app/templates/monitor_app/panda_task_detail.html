@@ -151,8 +151,16 @@
     <div class="card mb-3">
         <div class="card-header"><strong>Job parameters</strong></div>
         <div class="card-body">
-            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{% for line in task.job_parameters %}{{ line }}{% if not forloop.last %}
-{% endif %}{% endfor %}</div>
+            <table class="table table-sm mb-0">
+                <tbody>
+                {% for item in task.job_parameters %}
+                <tr>
+                    <td style="width:12rem;"><strong>{{ item.label }}</strong></td>
+                    <td style="overflow-wrap:anywhere;">{{ item.value }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
     {% endif %}

@@ -5,8 +5,9 @@ mapping functions, so we do not need the ORM.
 """
 from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
-from pcs.commands import build_task_params
+from pcs.commands import build_evgen_task_params, build_task_params
 from pcs.models import Dataset
 
 
@@ -159,6 +160,50 @@ class BuildTaskParamsTest(TestCase):
         self.assertNotIn('nFiles', params)
         self.assertNotIn('skipScout', params)
         self.assertNotIn('useRucio', params)
+
+    @patch('pcs.services.fetch_jlab_rucio_did_files')
+    def test_evgen_uses_composed_name_for_outds(self, fetch_files):
+        fetch_files.return_value = [{
+            'name': '/EVGEN/DIS/NC/sample/lAger3.6.1-1.0_run1.hepmc3',
+        }]
+        physics_tag = SimpleNamespace(
+            tag_label='p3001',
+            parameters={'beam_energy_electron': 10, 'beam_energy_hadron': 100},
+        )
+        evgen_tag = SimpleNamespace(tag_label='e1', parameters={})
+        dataset = SimpleNamespace(
+            scope='group.EIC',
+            detector_version='26.02.0',
+            detector_config='epic_craterlake',
+            physics_tag=physics_tag,
+            evgen_tag=evgen_tag,
+            composed_name='group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1.sample',
+            build_dataset_name=lambda: 'group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1.sample',
+        )
+        task = SimpleNamespace(
+            composed_name=dataset.composed_name,
+            output_dataset=dataset,
+            inputs=[{'did': 'epic:/EVGEN/DIS/NC/sample'}],
+            created_by='wenaus',
+            get_effective_config=lambda: {
+                'panda_site': 'BNL_OSG_PanDA_1',
+                'panda_working_group': 'EIC',
+                'container_image': '/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:26.02.0-stable',
+                'target_hours_per_job': 2,
+                'copy_reco': True,
+                'copy_full': False,
+                'copy_log': True,
+                'use_rucio': True,
+                'bg_mixing': False,
+                'data': {'events_per_job': 1},
+            },
+        )
+
+        spec = build_evgen_task_params(task)
+
+        self.assertEqual(spec['outDS'], dataset.composed_name)
+        self.assertEqual(spec['csvBase'], dataset.composed_name)
+        self.assertIn(dataset.composed_name, spec['exec'])
 
 
 class DatasetMetadataTest(TestCase):

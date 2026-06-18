@@ -398,9 +398,8 @@ per manifest row.
   below `EVGEN/` — the payload prepends `root://…/volatile/eic/EPIC/` to
   `EVGEN/<file>`. Rucio carries no per-file event count, so `nevents` is the
   configured per-job count (`events_per_job`) and there is one job per file.
-  `outDS` follows the proven path-derived form
-  (`{scope}.{detector_version}.{detector_config}.{dir}`); under `noOutput` it is
-  the task name only.
+  `outDS` is the PCS composed task/dataset identity; under `noOutput` it is the
+  PanDA task name only.
 - **`scripts/evgen_panda_submit.py`** — the submission kernel, this repo's owned
   port of `submit_panda_api.py`: it builds the `taskParamMap`, uploads the
   sandbox to the PanDA cache, and submits via `pandaclient` under the operator's
