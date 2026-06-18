@@ -98,6 +98,14 @@ originating contact, benchmark, and estimate without duplicating those values. A
 specific field is denormalized onto `ProdRequest` when it becomes a query filter
 or dispatch key, not before.
 
+For questionnaire-to-production-task matches, the same boundary applies. When an
+operator establishes a match, PCS records the link and exposes navigation from
+the task UI back to the request, and code can follow that link to retrieve the
+request contact/email if needed for notifications or other workflow. The contact
+data itself remains on the request/questionnaire record and is not copied onto
+`ProdTask`, at least until matches are validated enough to treat them as
+authoritative task metadata.
+
 ## Access and contact handling
 
 The Questionnaire browser is readable by the collaboration without a login, on
