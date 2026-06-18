@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load swf_fmt %}
 
-{% block title %}Request Questionnaire - PCS{% endblock %}
+{% block title %}Request Questionnaire Responses - PCS{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
@@ -23,9 +23,15 @@
   </style>
 
   <div class="mb-3">
-    <h1 class="mb-1">Request Questionnaire</h1>
-    <div class="text-muted">
-      <span id="pcs-qf-shown">{{ total_count }}</span> shown of {{ total_count }}
+    <h1 class="mb-1">Request Questionnaire Responses</h1>
+    <div class="d-flex flex-wrap align-items-center gap-3">
+      <div class="text-muted">
+        <span id="pcs-qf-shown">{{ total_count }}</span> shown of {{ total_count }}
+      </div>
+      <a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform"
+         target="_blank" rel="noopener noreferrer">
+        Questionnaire form
+      </a>
     </div>
   </div>
 
@@ -65,7 +71,7 @@
   </p>
   {% elif user.is_authenticated %}
   <div class="mb-4 p-3 border rounded bg-light" style="max-width: 58rem;">
-    <h2 class="h5 mb-3">Import Request Questionnaire CSV Export</h2>
+    <h2 class="h5 mb-3">Import Request Questionnaire Responses CSV Export</h2>
     <form method="post" action="{% url 'pcs:questionnaire_import' %}">
       {% csrf_token %}
       <div class="mb-3">

@@ -23,12 +23,12 @@
                     <table class="table table-sm mb-0">
                         <tr><td><strong>Task ID</strong></td><td>{{ task.jeditaskid }} {% copy_btn task.jeditaskid %}</td></tr>
                         {% if pcs_task %}
-                        <tr><td><strong>Name</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}"><code>{{ pcs_task.composed_name }}</code></a></td></tr>
+                        <tr><td><strong>Name</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}">{{ pcs_task.composed_name }}</a></td></tr>
                         {% elif task.taskname %}
-                        <tr><td><strong>Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>
+                        <tr><td><strong>Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
                         {% endif %}
                         {% if pcs_task and task.taskname and task.taskname != pcs_task.composed_name %}
-                        <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>
+                        <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
                         {% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ task.status|state_class }}" title="{{ task.status|state_title }}">{{ task.status }}</td></tr>
                         {% if task.username %}
@@ -36,7 +36,7 @@
                         {% endif %}
                         {% if task.workinggroup %}<tr><td><strong>Working Group</strong></td><td>{{ task.workinggroup }}</td></tr>{% endif %}
                         {% if task.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ task.processingtype }}</td></tr>{% endif %}
-                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td><code>{{ task.transpath }}</code></td></tr>{% endif %}
+                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{{ task.transpath }}</td></tr>{% endif %}
                         {% if task.reqid %}<tr><td><strong>Request ID</strong></td><td>{{ task.reqid }}</td></tr>{% endif %}
                         {% if task.parent_tid %}<tr><td><strong>Parent Task</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.parent_tid %}">{{ task.parent_tid }}</a></td></tr>{% endif %}
                     </table>

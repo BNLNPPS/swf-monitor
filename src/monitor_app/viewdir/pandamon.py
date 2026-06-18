@@ -452,6 +452,23 @@ def panda_job_detail(request, pandaid):
         job['transformation_view_url'] = _panda_view_text_url(trf)
     if job.get('jeditaskid'):
         data['pcs_task'] = _pcs_task_for_jeditaskid(job['jeditaskid'])
+    data['job_record_items'] = [
+        {'name': key, 'value': '' if value is None else value}
+        for key, value in sorted((data.get('job_record') or {}).items())
+    ]
+    data['job_parameter_items'] = [
+        {'label': label, 'value': job.get(key)}
+        for label, key in (
+            ('Special handling', 'specialhandling'),
+            ('Attempt number', 'attemptnr'),
+            ('CPU consumption time (s)', 'cpuconsumptiontime'),
+            ('Job metrics', 'jobmetrics'),
+            ('Job parameters', 'jobparameters'),
+            ('Pilot ID', 'pilotid'),
+            ('Batch ID', 'batchid'),
+        )
+        if job.get(key) not in (None, '')
+    ]
     data.update(inventory_for_job_context(data))
     return render(request, 'monitor_app/panda_job_detail.html', data)
 

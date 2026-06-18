@@ -1260,7 +1260,8 @@ def study_job(pandaid):
     if not row:
         return {"error": f"Job {pandaid} not found"}
 
-    job = row_to_dict(row, STUDY_FIELDS)
+    full_job = row_to_dict(row, STUDY_FIELDS)
+    job = dict(full_job)
     job['errors'] = extract_errors(job)
 
     # Strip null fields for readability
@@ -1372,6 +1373,7 @@ def study_job(pandaid):
     result = {
         "pandaid": pandaid,
         "job": job,
+        "job_record": full_job,
         "files": files,
         "log_urls": log_urls,
     }

@@ -226,13 +226,15 @@ Context expected:
           data-has-input="{% if t.has_input %}1{% else %}0{% endif %}"
           data-no-input="{% if t.dataset.stage == 'evgen' and not t.has_input %}1{% else %}0{% endif %}"
           data-incomplete-input="{% if t.input_incomplete %}1{% else %}0{% endif %}"
-          data-search="{{ ds_path|lower }} {{ t.description|default:''|lower }}">
+          data-search="{{ ds_path|lower }} {{ t.composed_name|lower }} {{ t.description|default:''|lower }}">
         <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.composed_name }}"></td>
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
         <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
         <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}">
           {% if t.campaign %}
-            <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}</div>
+            <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
+              &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
+            </div>
           {% endif %}
           <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ ds_path }}</a></div>
           {% if gen_ver %}

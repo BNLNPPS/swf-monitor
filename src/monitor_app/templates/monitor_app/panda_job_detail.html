@@ -28,18 +28,28 @@
                 <div class="card-body">
                     <table class="table table-sm mb-0">
                         <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }} {% copy_btn job.pandaid %}</td></tr>
-                        {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td><code>{{ job.jobname }}</code></td></tr>{% endif %}
+                        {% if job.batchid %}<tr><td><strong>Batch ID</strong></td><td style="word-break:break-all;">{{ job.batchid }}</td></tr>{% endif %}
+                        {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td style="word-break:break-all;">{{ job.jobname }}</td></tr>{% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td></tr>
-                        {% if job.produsername %}
-                        <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?username={{ job.produsername }}">{{ job.produsername }}</a></td></tr>
+                        {% if job.jobsubstatus %}<tr><td><strong>Substatus</strong></td><td>{{ job.jobsubstatus }}</td></tr>{% endif %}
+                        {% if job.currentpriority or job.assignedpriority %}<tr><td><strong>Priority</strong></td><td>{{ job.currentpriority|default:job.assignedpriority }}{% if job.currentpriority and job.assignedpriority and job.currentpriority != job.assignedpriority %} (assigned: {{ job.assignedpriority }}){% endif %}</td></tr>{% endif %}
+                        {% if job.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ job.attemptnr }}</td></tr>{% endif %}
+                        {% if job.produsername or job.vo %}
+                        <tr><td><strong>Owner / VO</strong></td><td>{% if job.produsername %}<a href="{% url 'monitor_app:panda_jobs_list' %}?username={{ job.produsername }}">{{ job.produsername }}</a>{% endif %}{% if job.produsername and job.vo %} / {% endif %}{{ job.vo|default:"" }}</td></tr>
                         {% endif %}
-                        {% if job.computingsite %}
-                        <tr><td><strong>Site</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ job.computingsite }}">{{ job.computingsite }}</a></td></tr>
-                        {% endif %}
+                        {% if job.workinggroup %}<tr><td><strong>WG</strong></td><td>{{ job.workinggroup }}</td></tr>{% endif %}
+                        {% if job.jeditaskid %}<tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' job.jeditaskid %}">{{ job.jeditaskid }}</a></td></tr>{% endif %}
+                        {% if job.computingsite %}<tr><td><strong>Site</strong></td><td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ job.computingsite }}">{{ job.computingsite }}</a></td></tr>{% endif %}
+                        {% if harvester.harvesterid or harvester.workerid %}<tr><td><strong>Harvester instance / Worker ID</strong></td><td>{% if harvester.harvesterid %}{{ harvester.harvesterid }}{% endif %}{% if harvester.harvesterid and harvester.workerid %}<br>{% endif %}{{ harvester.workerid|default:"" }}</td></tr>{% endif %}
+                        {% if job.wn %}<tr><td><strong>Worker Node</strong></td><td style="word-break:break-all;">{{ job.wn }}</td></tr>{% endif %}
                         {% if job.computingelement %}<tr><td><strong>CE</strong></td><td>{{ job.computingelement }}</td></tr>{% endif %}
-                        {% if job.transformation %}<tr><td><strong>Transformation</strong></td><td>{% if job.transformation_view_url %}<a href="{{ job.transformation_view_url }}" target="_blank" rel="noopener"><code>{{ job.transformation }}</code></a>{% elif job.transformation_is_url %}<a href="{{ job.transformation }}" target="_blank" rel="noopener"><code>{{ job.transformation }}</code></a>{% else %}<code>{{ job.transformation }}</code>{% endif %}</td></tr>{% endif %}
+                        {% if job.container_name %}<tr><td><strong>Container</strong></td><td style="word-break:break-all;">{{ job.container_name }}</td></tr>{% endif %}
+                        {% if job.transformation %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{% if job.transformation_view_url %}<a href="{{ job.transformation_view_url }}" target="_blank" rel="noopener">{{ job.transformation }}</a>{% elif job.transformation_is_url %}<a href="{{ job.transformation }}" target="_blank" rel="noopener">{{ job.transformation }}</a>{% else %}{{ job.transformation }}{% endif %}</td></tr>{% endif %}
+                        {% if job.creationtime or job.modificationtime %}<tr><td><strong>Created / Last modified</strong></td><td>{% if job.creationtime %}{{ job.creationtime|fmt_dt }}{% endif %}{% if job.creationtime and job.modificationtime %}<br>{% endif %}{% if job.modificationtime %}{{ job.modificationtime|fmt_dt }}{% endif %}</td></tr>{% endif %}
+                        {% if job.waittime or job.duration %}<tr><td><strong>Time to start / Duration [d:h:m:s]</strong></td><td>{% if job.waittime %}{{ job.waittime }}{% endif %}{% if job.waittime and job.duration %}<br>{% endif %}{% if job.duration %}{{ job.duration }}{% endif %}</td></tr>{% endif %}
                         {% if job.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ job.processingtype }}</td></tr>{% endif %}
                         {% if job.reqid %}<tr><td><strong>Request ID</strong></td><td>{{ job.reqid }}</td></tr>{% endif %}
+                        {% if job.corecount %}<tr><td><strong>Cores</strong></td><td>{{ job.corecount }}{% if job.actualcorecount %} (actual: {{ job.actualcorecount }}){% endif %}</td></tr>{% endif %}
                     </table>
                 </div>
             </div>
@@ -55,6 +65,8 @@
                         {% if job.starttime %}<tr><td><strong>Started</strong></td><td>{{ job.starttime|fmt_dt }}</td></tr>{% endif %}
                         {% if job.endtime %}<tr><td><strong>Ended</strong></td><td>{{ job.endtime|fmt_dt }}</td></tr>{% endif %}
                         {% if job.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ job.modificationtime|fmt_dt }}</td></tr>{% endif %}
+                        {% if job.duration %}<tr><td><strong>Duration</strong></td><td>{{ job.duration }}</td></tr>{% endif %}
+                        {% if job.waittime %}<tr><td><strong>Wait Time</strong></td><td>{{ job.waittime }}</td></tr>{% endif %}
                     </table>
                 </div>
             </div>
@@ -67,7 +79,10 @@
                         {% if job.corecount %}<tr><td><strong>Cores</strong></td><td>{{ job.corecount }}{% if job.actualcorecount %} (actual: {{ job.actualcorecount }}){% endif %}</td></tr>{% endif %}
                         {% if job.nevents %}<tr><td><strong>Events</strong></td><td>{{ job.nevents }}</td></tr>{% endif %}
                         {% if job.cpuconsumptiontime %}<tr><td><strong>CPU Time</strong></td><td>{{ job.cpuconsumptiontime }} {{ job.cpuconsumptionunit }}</td></tr>{% endif %}
+                        {% if job.cpuefficiency %}<tr><td><strong>CPU Efficiency</strong></td><td>{{ job.cpuefficiency }}%</td></tr>{% endif %}
                         {% if job.maxrss %}<tr><td><strong>Max RSS</strong></td><td>{{ job.maxrss }} KB</td></tr>{% endif %}
+                        {% if job.avgpss %}<tr><td><strong>Avg PSS</strong></td><td>{{ job.avgpss }} KB</td></tr>{% endif %}
+                        {% if job.maxpss %}<tr><td><strong>Max PSS</strong></td><td>{{ job.maxpss }} KB</td></tr>{% endif %}
                         {% if job.maxvmem %}<tr><td><strong>Max VMem</strong></td><td>{{ job.maxvmem }} KB</td></tr>{% endif %}
                         {% if job.maxwalltime %}<tr><td><strong>Max Walltime</strong></td><td>{{ job.maxwalltime }}s</td></tr>{% endif %}
                         {% if job.inputfilebytes %}<tr><td><strong>Input Size</strong></td><td>{{ job.inputfilebytes }} bytes</td></tr>{% endif %}
@@ -94,7 +109,7 @@
                 {% for event in epicprod_job.data.timeline %}
                 <li>
                     <strong>{{ event.phase }}</strong>{% if event.message %}: {{ event.message }}{% endif %}
-                    {% if event.path %}<br><code style="word-break:break-all;">{{ event.path }}</code>{% endif %}
+                    {% if event.path %}<br><span style="word-break:break-all;">{{ event.path }}</span>{% endif %}
                 </li>
                 {% endfor %}
             </ol>
@@ -132,14 +147,32 @@
             <table class="table table-sm mb-0">
                 <tr><td><strong>Task ID</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.jeditaskid %}">{{ task.jeditaskid }}</a></td></tr>
                 {% if pcs_task %}
-                <tr><td><strong>PCS Task</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}"><code>{{ pcs_task.composed_name }}</code></a></td></tr>
+                <tr><td><strong>PCS Task</strong></td><td style="word-break:break-all;"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}">{{ pcs_task.composed_name }}</a></td></tr>
                 {% endif %}
                 {% if task.taskname %}
-                <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;"><code>{{ task.taskname }}</code></td></tr>
+                <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
                 {% endif %}
                 {% if task.status %}<tr><td><strong>Status</strong></td><td>{{ task.status }}</td></tr>{% endif %}
                 {% if task.username %}<tr><td><strong>User</strong></td><td>{{ task.username }}</td></tr>{% endif %}
                 {% if task.errordialog %}<tr><td><strong>Error</strong></td><td style="color:#dc3545;">{{ task.errordialog }}</td></tr>{% endif %}
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if job_parameter_items %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Other job parameters</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                <tbody>
+                {% for item in job_parameter_items %}
+                <tr>
+                    <td style="width:16rem;"><strong>{{ item.label }}</strong></td>
+                    <td style="word-break:break-word; overflow-wrap:anywhere;">{{ item.value }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
             </table>
         </div>
     </div>
@@ -158,7 +191,7 @@
                     <td>{{ f.role }}</td>
                     <td>{{ f.stage }}</td>
                     <td style="word-break:break-all;">
-                        <code>{% if f.did_name %}{{ f.scope }}:{{ f.did_name }}{% else %}{{ f.lfn }}{% endif %}</code>
+                        {% if f.did_name %}{{ f.scope }}:{{ f.did_name }}{% else %}{{ f.lfn }}{% endif %}
                         {% if f.status_detail %}<br><span class="text-muted">{{ f.status_detail }}</span>{% endif %}
                     </td>
                     <td>{{ f.rse|default:"" }}</td>
@@ -221,6 +254,24 @@
         <a href="{{ monitor_url }}" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
         {% endif %}
     </div>
+
+    {% if job_record_items %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>All job parameters</strong></div>
+        <div class="card-body">
+            <table class="table table-sm table-bordered mb-0">
+                <tbody>
+                {% for item in job_record_items %}
+                <tr>
+                    <th style="width:18rem;">{{ item.name }}</th>
+                    <td style="word-break:break-all;">{{ item.value }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
 
     {% endif %}
 </div>

@@ -195,7 +195,7 @@ $(document).ready(function() {
     let currentFilters = {% block initial_filters %}{}{% endblock %};
 
     function formatQueryCount(value) {
-        return Number(value || 0).toLocaleString();
+        return String(Number(value || 0));
     }
 
     function updateQueryCount(recordsDisplay, recordsTotal) {
