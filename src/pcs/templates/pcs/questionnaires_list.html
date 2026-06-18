@@ -70,20 +70,18 @@
     CSV import is available from pandaserver02.
   </p>
   {% elif user.is_authenticated %}
-  <div class="mb-4 p-3 border rounded bg-light" style="max-width: 58rem;">
-    <h2 class="h5 mb-3">Import Request Questionnaire Responses CSV Export</h2>
-    <form method="post" action="{% url 'pcs:questionnaire_import' %}">
+  <div class="mb-3 p-2 border rounded bg-light" style="max-width: 42rem;">
+    <form method="post" action="{% url 'pcs:questionnaire_import' %}" class="row g-2 align-items-end">
       {% csrf_token %}
-      <div class="mb-3">
-        <label class="form-label" for="csv-url">CSV export URL</label>
+      <div class="col">
+        <label class="form-label small mb-1" for="csv-url">Import questionnaire CSV from URL</label>
         <input id="csv-url" name="csv_url" type="url" class="form-control"
-               placeholder="https://docs.google.com/spreadsheets/.../export?format=csv">
+               placeholder="https://docs.google.com/spreadsheets/.../export?format=csv"
+               required>
       </div>
-      <div class="mb-3">
-        <label class="form-label" for="csv-text">Or pasted CSV text</label>
-        <textarea id="csv-text" name="csv_text" rows="5" class="form-control"></textarea>
+      <div class="col-auto">
+        <button class="btn btn-primary" type="submit">Import</button>
       </div>
-      <button class="btn btn-primary" type="submit">Import</button>
     </form>
   </div>
   {% endif %}

@@ -74,12 +74,85 @@
         </div>
     </div>
 
-    <!-- Error dialog -->
+    <!-- Logged status -->
     {% if task.errordialog %}
     <div class="card mb-3">
-        <div class="card-header" style="background:#f8d7da;"><strong>Error</strong></div>
+        <div class="card-header" style="background:#f8d7da;"><strong>Logged status</strong></div>
         <div class="card-body">
-            <pre style="white-space:pre-wrap;margin:0;">{{ task.errordialog }}</pre>
+            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{{ task.errordialog }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Requested resources -->
+    {% if requested_resource_items %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Requested resources</strong></div>
+        <div class="card-body">
+            <table class="table table-sm mb-0">
+                <tbody>
+                {% for item in requested_resource_items %}
+                <tr>
+                    <td style="width:12rem;"><strong>{{ item.label }}</strong></td>
+                    <td style="overflow-wrap:anywhere;">{{ item.value }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Dataset processing -->
+    {% if task.datasets %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Dataset processing information</strong></div>
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered table-striped mb-0">
+                    <thead>
+                        <tr>
+                            <th>Dataset / container</th>
+                            <th>Type</th>
+                            <th>Stream</th>
+                            <th>Status</th>
+                            <th>Files</th>
+                            <th>Finished</th>
+                            <th>Failed</th>
+                            <th>%</th>
+                            <th>Events</th>
+                            <th>RSE / Site</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for dataset in task.datasets %}
+                    <tr>
+                        <td style="overflow-wrap:anywhere;">{{ dataset.datasetname }}</td>
+                        <td>{{ dataset.type|default:"" }}</td>
+                        <td>{{ dataset.streamname|default:"" }}</td>
+                        <td class="{{ dataset.status|state_class }}" title="{{ dataset.status|state_title }}">{{ dataset.status|default:"" }}</td>
+                        <td>{{ dataset.nfiles|default:0|intcomma }}</td>
+                        <td>{{ dataset.nfilesfinished|default:0|intcomma }}</td>
+                        <td>{{ dataset.nfilesfailed|default:0|intcomma }}</td>
+                        <td>{% if dataset.files_percent is not None %}{{ dataset.files_percent }}%{% else %}-{% endif %}</td>
+                        <td>{{ dataset.nevents|default:0|intcomma }}</td>
+                        <td>{{ dataset.rse }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Job parameters -->
+    {% if task.job_parameters %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>Job parameters</strong></div>
+        <div class="card-body">
+            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{% for line in task.job_parameters %}{{ line }}{% if not forloop.last %}
+{% endif %}{% endfor %}</div>
         </div>
     </div>
     {% endif %}
@@ -138,6 +211,24 @@
         <a href="https://pandamon01.sdcc.bnl.gov/task/{{ jeditaskid }}/" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90" class="btn btn-outline-secondary btn-sm">All Jobs for Task</a>
     </div>
+
+    {% if task_record_items %}
+    <div class="card mb-3">
+        <div class="card-header"><strong>PanDA/JEDI task parameters</strong></div>
+        <div class="card-body">
+            <table class="table table-sm table-bordered mb-0">
+                <tbody>
+                {% for item in task_record_items %}
+                <tr>
+                    <th style="width:18rem;">{{ item.name }}</th>
+                    <td style="word-break:break-all;">{{ item.value }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
 
     {% endif %}
 </div>

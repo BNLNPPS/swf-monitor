@@ -394,22 +394,22 @@ def questionnaire_import(request):
             action_label='Questionnaire import')
     from .services import questionnaire_intake_csv, ServiceError
     csv_url = (request.POST.get('csv_url') or '').strip()
-    csv_text = request.POST.get('csv_text') or ''
-    source_url = csv_url or (request.POST.get('source_url') or '').strip()
-    if csv_url:
-        try:
-            with urlopen(csv_url, timeout=30) as response:
-                csv_text = response.read().decode('utf-8-sig')
-        except Exception as e:
-            messages.error(request, f'Questionnaire CSV fetch failed: {e}')
-            return redirect(reverse('pcs:questionnaires_list'))
+    if not csv_url:
+        messages.error(request, 'Provide a questionnaire CSV import URL.')
+        return redirect(reverse('pcs:questionnaires_list'))
+    try:
+        with urlopen(csv_url, timeout=30) as response:
+            csv_text = response.read().decode('utf-8-sig')
+    except Exception as e:
+        messages.error(request, f'Questionnaire CSV fetch failed: {e}')
+        return redirect(reverse('pcs:questionnaires_list'))
     if not csv_text.strip():
-        messages.error(request, 'Provide a questionnaire CSV export URL or pasted CSV text.')
+        messages.error(request, 'Questionnaire CSV import URL returned no CSV text.')
         return redirect(reverse('pcs:questionnaires_list'))
     try:
         summary = questionnaire_intake_csv(
             csv_text,
-            source_url=source_url,
+            source_url=csv_url,
             created_by=getattr(request.user, 'username', '') or 'questionnaire_import',
         )
     except ServiceError as e:

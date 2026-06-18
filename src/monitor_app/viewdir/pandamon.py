@@ -48,6 +48,13 @@ def _pcs_task_for_jeditaskid(jeditaskid):
         return None
 
 
+def _unit_value(value, unit, *, default_unit=''):
+    if value in (None, ''):
+        return None
+    unit = unit or default_unit
+    return f'{value} {unit}'.strip()
+
+
 # ── Column definitions ───────────────────────────────────────────────────────
 
 JOB_COLUMNS = [
@@ -819,6 +826,24 @@ def panda_task_detail(request, jeditaskid):
     jobs_data = list_jobs(taskid=int(jeditaskid), days=90, limit=200)
     jobs = jobs_data.get('jobs', []) if not jobs_data.get('error') else []
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
+    task_record = task.get('task_record') or {}
+    task_record_items = [
+        {'name': key, 'value': '' if value is None else value}
+        for key, value in sorted(task_record.items())
+    ]
+    requested_resource_items = [
+        {'label': label, 'value': value}
+        for label, value in (
+            ('Container', task_record.get('container_name')),
+            ('Cores', task_record.get('corecount') or task.get('corecount')),
+            ('RAM', _unit_value(task_record.get('ramcount'), task_record.get('ramunit'))),
+            ('Walltime', _unit_value(task_record.get('walltime'), task_record.get('walltimeunit'), default_unit='s')),
+            ('Work disk', _unit_value(task_record.get('workdiskcount'), task_record.get('workdiskunit'))),
+            ('Resource type', task_record.get('resource_type') or task_record.get('resourcetype')),
+            ('Site', task_record.get('site') or task.get('site')),
+        )
+        if value not in (None, '')
+    ]
 
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
@@ -827,6 +852,8 @@ def panda_task_detail(request, jeditaskid):
         'jobs': jobs,
         'job_summary': summary,
         'job_count': len(jobs),
+        'requested_resource_items': requested_resource_items,
+        'task_record_items': task_record_items,
     })
 
 

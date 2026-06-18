@@ -6,6 +6,7 @@ directly. Callers in async contexts should wrap with sync_to_async.
 """
 
 import logging
+import json
 import re
 from datetime import timedelta
 from django.utils import timezone
@@ -204,6 +205,97 @@ def _aggregate_effective_user_counts(rows):
         user = owner_map.get(jeditaskid) or _canonical_user(raw_user)
         counts[user] = counts.get(user, 0) + count
     return sorted(counts.items(), key=lambda item: item[1], reverse=True)
+
+
+def _get_task_record(jeditaskid):
+    sql = f"""
+        SELECT *
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE "jeditaskid" = %s
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [jeditaskid])
+            row = cursor.fetchone()
+            if not row:
+                return {}
+            columns = [col[0] for col in cursor.description]
+            return row_to_dict(row, columns)
+    except Exception as e:
+        logger.error("_get_task_record failed: %s", e)
+        return {}
+
+
+def _get_task_datasets(jeditaskid):
+    fields = [
+        'datasetname', 'type', 'streamname', 'status',
+        'nfiles', 'nfilesfinished', 'nfilesfailed', 'nfilesused',
+        'nevents', 'neventsused', 'site', 'destination',
+    ]
+    field_list = ', '.join(f'"{field}"' for field in fields)
+    sql = f"""
+        SELECT {field_list}
+        FROM "{PANDA_SCHEMA}"."jedi_datasets"
+        WHERE "jeditaskid" = %s
+        ORDER BY "datasetid"
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [jeditaskid])
+            datasets = [row_to_dict(row, fields) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error("_get_task_datasets failed: %s", e)
+        return []
+    for dataset in datasets:
+        nfiles = dataset.get('nfiles') or 0
+        finished = dataset.get('nfilesfinished') or 0
+        failed = dataset.get('nfilesfailed') or 0
+        dataset['files_percent'] = round(100 * (finished + failed) / nfiles, 1) if nfiles else None
+        dataset['rse'] = dataset.get('destination') or dataset.get('site') or ''
+    return datasets
+
+
+def _format_task_job_parameter(param):
+    if not isinstance(param, dict):
+        return str(param)
+    if param.get('type') == 'constant':
+        return param.get('value', '')
+    bits = []
+    param_type = param.get('param_type') or param.get('type') or 'parameter'
+    bits.append(f"{param_type} template:")
+    for key in ('value', 'dataset', 'offset', 'hidden', 'expandedList'):
+        if key in param:
+            bits.append(f"{key}={param.get(key)!r}")
+    return ' '.join(bits)
+
+
+def _get_task_parameters(jeditaskid):
+    sql = f"""
+        SELECT "taskparams"
+        FROM "{PANDA_SCHEMA}"."jedi_taskparams"
+        WHERE "jeditaskid" = %s
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, [jeditaskid])
+            row = cursor.fetchone()
+    except Exception as e:
+        logger.error("_get_task_parameters failed: %s", e)
+        return {}, []
+    if not row or not row[0]:
+        return {}, []
+    raw = row[0]
+    try:
+        params = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return {'raw': raw}, [raw]
+    job_params = params.get('jobParameters') if isinstance(params, dict) else None
+    if not isinstance(job_params, list):
+        return params, []
+    return params, [
+        line for line in (_format_task_job_parameter(param) for param in job_params)
+        if line
+    ]
 
 
 def _nersc_portal_log_urls(computingsite, pandaid):
@@ -1820,4 +1912,7 @@ def get_task(jeditaskid):
     task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
     task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     _apply_effective_owners([task], 'username')
+    task['datasets'] = _get_task_datasets(jeditaskid)
+    task['taskparams'], task['job_parameters'] = _get_task_parameters(jeditaskid)
+    task['task_record'] = _get_task_record(jeditaskid)
     return task
