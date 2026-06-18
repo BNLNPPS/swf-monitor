@@ -61,10 +61,13 @@
         display: flex;
         gap: 1em;
       }
+      nav a {
+        color: #ADD8E6;
+      }
       /* Dropdown Button */
       .dropbtn {
         background-color: inherit;
-        color: #ADD8E6; /* Light Blue */
+        color: #8fc7e8;
         text-decoration: none;
         padding: 0;
         font-size: inherit;
@@ -107,10 +110,18 @@
       /* Nav mode flipper */
       .nav-mode { display: none; }
       .nav-mode.active { display: contents; }
-      #mode-label { border-right: 1px solid rgba(255,255,255,.2); padding-right: 12px; margin-right: 4px; }
+      #mode-label {
+        border-right: 1px solid rgba(255,255,255,.2);
+        color: #fff;
+        padding-right: 12px;
+        margin-right: 4px;
+      }
       .nav-label {
-        color: #adb5bd;
+        color: #fff;
         font-weight: 700;
+      }
+      .nav-panda-label {
+        margin-left: 1.5em;
       }
       .nav-system-error { color: #ff8174 !important; font-weight: 700; }
       /* One-click copy icon for IDs — see swf_fmt.copy_btn template tag */
@@ -269,7 +280,7 @@
             </div>
         </div>
         <a href="{% url 'pcs:pcs_catalog' %}">Campaigns</a>
-        <span class="nav-label">PanDA</span>
+        <strong class="nav-label nav-panda-label">PanDA</strong>
         <a href="{% url 'monitor_app:panda_tasks_list' %}">Tasks</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}">Jobs</a>
         <a href="{% url 'monitor_app:panda_errors_list' %}">Errors</a>

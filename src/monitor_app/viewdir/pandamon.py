@@ -13,6 +13,7 @@ from django.conf import settings
 import json
 import logging
 import os
+from html import escape
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -72,6 +73,7 @@ TASK_COLUMNS = [
     {'name': 'jeditaskid', 'title': 'Task ID', 'orderable': True},
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
+    {'name': 'processingtype', 'title': 'Type', 'orderable': True},
     {'name': 'username', 'title': 'User', 'orderable': True},
     {'name': 'creationdate', 'title': 'Created', 'orderable': True},
     {'name': 'modificationtime', 'title': 'Modified', 'orderable': True},
@@ -104,22 +106,22 @@ TASK_FIELD_NAMES = [c['name'] for c in TASK_COLUMNS]
 
 TASK_ORDER_MAP = {
     0: '"jeditaskid"', 1: '"taskname"', 2: '"status"',
-    3: '"username"', 4: '"creationdate"', 5: '"modificationtime"',
+    3: '"processingtype"', 4: '"username"', 5: '"creationdate"', 6: '"modificationtime"',
     # Aggregates surface as SELECT aliases from build_task_query_dt.
     # Wrapped expressions in ORDER BY can't reference SELECT aliases in PG,
     # so these stay as bare alias names; the view's order_by construction
     # appends 'NULLS LAST' for computed_failurerate and computed_progress so
     # tasks with no terminal jobs (rate/progress=NULL) don't surface at the
     # top of a DESC ranking.
-    6: 'computed_progress',
-    7: 'nactive',
-    8: 'nfinished',
-    9: 'nfailed',
-    10: 'nrunning',
-    11: 'nretries',
-    12: 'computed_failurerate',
-    13: 'nfinalfailed',
-    14: 'computed_finalfailurerate',
+    7: 'computed_progress',
+    8: 'nactive',
+    9: 'nfinished',
+    10: 'nfailed',
+    11: 'nrunning',
+    12: 'nretries',
+    13: 'computed_failurerate',
+    14: 'nfinalfailed',
+    15: 'computed_finalfailurerate',
 }
 
 ERROR_COLUMNS = [
@@ -361,10 +363,19 @@ def panda_tasks_datatable_ajax(request):
         comp_ffr = task.get('computed_finalfailurerate')
         comp_ffr_str = f'{comp_ffr * 100:.1f}%' if comp_ffr is not None else ''
 
+        processingtype = task.get('processingtype') or ''
+        processingtype_html = escape(processingtype)
+        processingtype_display = (
+            f'<span class="badge bg-warning text-dark">{processingtype_html}</span>'
+            if 'test' in processingtype.lower()
+            else processingtype_html
+        )
+
         data.append([
             f'<a href="{task_url}">{task["jeditaskid"]}</a>',
             f'<a href="{task_url}" title="{task.get("taskname", "")}">{taskname_display}</a>',
             _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
+            processingtype_display,
             f'<a href="{tasks_by_user_url}">{task["username"]}</a>' if tasks_by_user_url else '',
             _fmt_dt(task.get('creationdate')),
             _fmt_dt(task.get('modificationtime')),

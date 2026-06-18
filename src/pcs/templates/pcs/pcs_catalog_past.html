@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load swf_fmt %}
-{% block title %}Production Task Catalog — {% if active_lifecycle == 'last' %}Last{% elif active_lifecycle == 'future' %}Future{% else %}Past{% endif %}{% endblock %}
+{% block title %}Campaign Task Catalog — {% if active_lifecycle == 'last' %}Last{% elif active_lifecycle == 'future' %}Future{% else %}Past{% endif %}{% endblock %}
 
 {% block content %}
 <style>
@@ -28,7 +28,7 @@
 
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
-    <h2 class="me-3 mb-0">Production Task Catalog</h2>
+    <h2 class="me-3 mb-0">Campaign Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
     {% if not is_tunnel %}
     {% if user.is_authenticated %}

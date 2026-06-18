@@ -411,7 +411,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     constants.py for the bucketing; cancelled and closed are excluded.
     """
     cutoff = timezone.now() - timedelta(days=days)
-    where = ['"modificationtime" >= %s']
+    where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
 
     # Exclude stale non-terminal tasks (created >60 days ago, still pending)
@@ -739,7 +739,7 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         return {"error": str(e)}
 
     # ── Task aggregation ──
-    task_where = ['"modificationtime" >= %s']
+    task_where = ['COALESCE("modificationtime", "creationdate") >= %s']
     task_params = [cutoff]
 
     _stale = _stale_task_filter()
@@ -771,6 +771,24 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
             task_by_status = {row[0]: row[1] for row in cursor.fetchall()}
 
         task_total = sum(task_by_status.values())
+
+        task_type_sql = f"""
+            SELECT COALESCE("processingtype", ''), COUNT(*)
+            FROM "{PANDA_SCHEMA}"."jedi_tasks"
+            WHERE {task_where_sql}
+            GROUP BY COALESCE("processingtype", '')
+            ORDER BY COUNT(*) DESC
+        """
+        with conn.cursor() as cursor:
+            cursor.execute(task_type_sql, task_params)
+            task_by_type = [
+                {
+                    'type': row[0] or '-',
+                    'count': row[1],
+                    'is_test': 'test' in (row[0] or '').lower(),
+                }
+                for row in cursor.fetchall()
+            ]
 
         task_user_sql = f"""
             SELECT "status", "username", COUNT(*)
@@ -805,6 +823,7 @@ def get_activity(days=1, username=None, site=None, workinggroup=None):
         "tasks": {
             "total": task_total,
             "by_status": task_by_status,
+            "by_type": task_by_type,
             "by_user": task_by_user,
         },
         "filters": {
@@ -1249,7 +1268,7 @@ TASK_ORDER_COLUMNS = {f: f'"{f}"' for f in TASK_LIST_FIELDS}
 JOB_SEARCH_FIELDS = ['pandaid', 'jeditaskid', 'produsername', 'jobstatus',
                      'computingsite', 'transformation']
 TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
-                      'workinggroup', 'transpath']
+                      'processingtype', 'workinggroup', 'transpath']
 
 
 def list_jobs_dt(days=7, status=None, username=None, site=None,
@@ -1257,7 +1276,7 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
                  order_by='"pandaid" DESC', limit=100, offset=0, search=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
     cutoff = timezone.now() - timedelta(days=days)
-    where = ['"modificationtime" >= %s']
+    where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
 
     if status:
@@ -1335,7 +1354,7 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
                   limit=100, offset=0, search=None):
     """List JEDI tasks for DataTables (returns rows, total, filtered counts)."""
     cutoff = timezone.now() - timedelta(days=days)
-    where = ['"modificationtime" >= %s']
+    where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
 
     _stale = _stale_task_filter()
@@ -1474,7 +1493,7 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
 def task_filter_counts(days=7, status=None, username=None, workinggroup=None):
     """Get filter option counts for task list (status, username, workinggroup)."""
     cutoff = timezone.now() - timedelta(days=days)
-    base_where = ['"modificationtime" >= %s']
+    base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
     base_params = [cutoff]
 
     _stale = _stale_task_filter()
