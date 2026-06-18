@@ -13,8 +13,10 @@ from django.conf import settings
 import json
 import logging
 import os
+import hashlib
 from html import escape
 from datetime import datetime
+from urllib.parse import urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from ..utils import DataTablesProcessor
@@ -150,6 +152,10 @@ DIAG_COLUMNS = [
 _EASTERN = ZoneInfo('America/New_York')
 
 
+def _panda_view_text_url(url):
+    return reverse('monitor_app:panda_view_text') + '?' + urlencode({'url': url})
+
+
 def _linkify(text):
     """Wrap text in an <a> tag if it looks like a URL.
 
@@ -159,7 +165,7 @@ def _linkify(text):
     if text and text.startswith(('http://', 'https://')):
         href = text
         if 'pandaserver-doma.cern.ch/trf/' in text:
-            href = reverse('monitor_app:panda_view_text') + '?url=' + text
+            href = _panda_view_text_url(text)
         return f'<a href="{href}" target="_blank" rel="noopener">{text}</a>'
     return text
 
@@ -189,6 +195,10 @@ DAYS_OPTIONS = [
     (180, '6mo'),
     (365, '1yr'),
 ]
+
+
+def _url_with_query(view_name, **params):
+    return reverse(view_name) + '?' + urlencode(params)
 
 
 def _get_days(request):
@@ -239,6 +249,8 @@ def panda_jobs_list(request):
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_jobs_filter_counts'),
         'columns': JOB_COLUMNS,
+        'show_query_count': True,
+        'query_count_label': 'jobs',
         'filter_fields': [
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
@@ -278,9 +290,9 @@ def panda_jobs_datatable_ajax(request):
     for job in rows:
         job_url = reverse('monitor_app:panda_job_detail', args=[job['pandaid']])
         task_url = reverse('monitor_app:panda_task_detail', args=[job['jeditaskid']]) if job.get('jeditaskid') else None
-        jobs_by_user_url = reverse('monitor_app:panda_jobs_list') + f'?days={days}&username={job["produsername"]}' if job.get('produsername') else None
-        jobs_by_site_url = reverse('monitor_app:panda_jobs_list') + f'?days={days}&site={job["computingsite"]}' if job.get('computingsite') else None
-        jobs_by_status_url = reverse('monitor_app:panda_jobs_list') + f'?days={days}&status={job["jobstatus"]}' if job.get('jobstatus') else None
+        jobs_by_user_url = _url_with_query('monitor_app:panda_jobs_list', days=days, username=job['produsername']) if job.get('produsername') else None
+        jobs_by_site_url = _url_with_query('monitor_app:panda_jobs_list', days=days, site=job['computingsite']) if job.get('computingsite') else None
+        jobs_by_status_url = _url_with_query('monitor_app:panda_jobs_list', days=days, status=job['jobstatus']) if job.get('jobstatus') else None
 
         data.append([
             f'<a href="{job_url}">{job["pandaid"]}</a>',
@@ -320,6 +332,8 @@ def panda_tasks_list(request):
         'ajax_url': reverse('monitor_app:panda_tasks_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:panda_tasks_filter_counts'),
         'columns': TASK_COLUMNS,
+        'show_query_count': True,
+        'query_count_label': 'tasks',
         'filter_fields': [
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
@@ -362,8 +376,8 @@ def panda_tasks_datatable_ajax(request):
     data = []
     for task in rows:
         task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
-        tasks_by_user_url = reverse('monitor_app:panda_tasks_list') + f'?days={days}&username={task["username"]}' if task.get('username') else None
-        tasks_by_status_url = reverse('monitor_app:panda_tasks_list') + f'?days={days}&status={task["status"]}' if task.get('status') else None
+        tasks_by_user_url = _url_with_query('monitor_app:panda_tasks_list', days=days, username=task['username']) if task.get('username') else None
+        tasks_by_status_url = _url_with_query('monitor_app:panda_tasks_list', days=days, status=task['status']) if task.get('status') else None
 
         # Truncate taskname for display
         taskname_display = task.get('taskname', '') or ''
@@ -435,7 +449,7 @@ def panda_job_detail(request, pandaid):
     job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
     trf = job.get('transformation') or ''
     if 'pandaserver-doma.cern.ch/trf/' in trf:
-        job['transformation_view_url'] = reverse('monitor_app:panda_view_text') + '?url=' + trf
+        job['transformation_view_url'] = _panda_view_text_url(trf)
     if job.get('jeditaskid'):
         data['pcs_task'] = _pcs_task_for_jeditaskid(job['jeditaskid'])
     data.update(inventory_for_job_context(data))
@@ -459,6 +473,81 @@ def epicprod_job_refresh(request, pandaid):
 
 # ── View text (transformation script viewer) ────────────────────────────────
 
+def _is_panda_trf_url(url):
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == 'https'
+        and parsed.netloc.lower() == 'pandaserver-doma.cern.ch'
+        and parsed.path.startswith('/trf/')
+    )
+
+
+def _trf_cache_paths(url):
+    cache_root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
+    cache_dir = os.path.join(cache_root, 'panda-trf')
+    key = hashlib.sha256(url.encode('utf-8')).hexdigest()
+    return {
+        'dir': cache_dir,
+        'raw': os.path.join(cache_dir, f'{key}.bin'),
+        'text': os.path.join(cache_dir, f'{key}.txt'),
+        'url': os.path.join(cache_dir, f'{key}.url'),
+    }
+
+
+def _write_file_atomic(path, mode, data):
+    tmp_path = f'{path}.tmp'
+    with open(tmp_path, mode) as handle:
+        handle.write(data)
+    os.replace(tmp_path, path)
+
+
+def _transformation_filename(url):
+    parsed = urlparse(url)
+    name = os.path.basename(parsed.path.rstrip('/')) or 'transformation'
+    return ''.join(ch if ch.isalnum() or ch in ('-', '_', '.') else '_' for ch in name)
+
+
+def _extract_trf_text(data):
+    import io
+    import zipfile
+
+    parts = []
+    lines = []
+    for line in data.split(b'\n'):
+        try:
+            lines.append(line.decode('utf-8'))
+        except UnicodeDecodeError:
+            break
+    if lines:
+        parts.append(f'=== Shell header ({len(lines)} lines) ===\n')
+        parts.append('\n'.join(lines))
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            for name in zf.namelist():
+                try:
+                    content = zf.read(name).decode('utf-8')
+                    parts.append(f'\n\n=== {name} ===\n')
+                    parts.append(content)
+                except UnicodeDecodeError:
+                    parts.append(f'\n\n=== {name} (binary, skipped) ===\n')
+                except KeyError as e:
+                    parts.append(f'\n\n=== {name} (missing: {e}) ===\n')
+    except zipfile.BadZipFile:
+        if not parts:
+            parts.append(data.decode('utf-8', errors='replace'))
+
+    return ''.join(parts)
+
+
+def _transformation_text_response(text, url, cache_status):
+    response = HttpResponse(text, content_type='text/plain; charset=utf-8')
+    filename = _transformation_filename(url)
+    response['Content-Disposition'] = f'inline; filename="{filename}.txt"'
+    response['X-PanDA-TRF-Cache'] = cache_status
+    return response
+
+
 def panda_view_text(request):
     """Fetch a PanDA transformation URL — self-extracting zip with embedded scripts.
 
@@ -466,48 +555,48 @@ def panda_view_text(request):
     as readable plain text.
     """
     import httpx
-    import io
-    import zipfile
+
     url = request.GET.get('url', '')
-    if not url or not url.startswith('https://'):
+    if not url or not _is_panda_trf_url(url):
         return HttpResponse('Missing or invalid url parameter', status=400,
                             content_type='text/plain')
+
+    paths = _trf_cache_paths(url)
     try:
-        resp = httpx.get(url, timeout=15, follow_redirects=True)
+        if os.path.exists(paths['text']):
+            with open(paths['text'], 'r', encoding='utf-8') as handle:
+                return _transformation_text_response(handle.read(), url, 'HIT')
+    except OSError as e:
+        logger.error("failed reading cached transformation text for %s: %s", url, e)
+        return HttpResponse(f'Failed to read cached transformation text: {e}', status=500,
+                            content_type='text/plain')
+
+    try:
+        if os.path.exists(paths['raw']):
+            with open(paths['raw'], 'rb') as handle:
+                data = handle.read()
+        else:
+            resp = httpx.get(url, timeout=30, follow_redirects=True)
+            resp.raise_for_status()
+            data = resp.content
+            os.makedirs(paths['dir'], exist_ok=True)
+            _write_file_atomic(paths['raw'], 'wb', data)
+            _write_file_atomic(paths['url'], 'w', url)
     except Exception as e:
+        logger.error("failed fetching transformation %s: %s", url, e)
         return HttpResponse(f'Failed to fetch: {e}', status=502,
                             content_type='text/plain')
-    data = resp.content
-    parts = []
-    # Extract the bash header (text before binary zip data)
+
     try:
-        lines = []
-        for line in data.split(b'\n'):
-            try:
-                lines.append(line.decode('utf-8'))
-            except UnicodeDecodeError:
-                break
-        if lines:
-            parts.append(f'=== Shell header ({len(lines)} lines) ===\n')
-            parts.append('\n'.join(lines))
-    except Exception:
-        pass
-    # Extract text files from the zip
-    try:
-        buf = io.BytesIO(data)
-        with zipfile.ZipFile(buf) as zf:
-            for name in zf.namelist():
-                try:
-                    content = zf.read(name).decode('utf-8')
-                    parts.append(f'\n\n=== {name} ===\n')
-                    parts.append(content)
-                except (UnicodeDecodeError, KeyError):
-                    parts.append(f'\n\n=== {name} (binary, skipped) ===\n')
-    except zipfile.BadZipFile:
-        if not parts:
-            # Not a zip, just serve as text
-            parts.append(data.decode('utf-8', errors='replace'))
-    return HttpResponse(''.join(parts), content_type='text/plain; charset=utf-8')
+        text = _extract_trf_text(data)
+        os.makedirs(paths['dir'], exist_ok=True)
+        _write_file_atomic(paths['text'], 'w', text)
+    except Exception as e:
+        logger.error("failed extracting transformation %s: %s", url, e)
+        return HttpResponse(f'Failed to extract transformation text: {e}', status=500,
+                            content_type='text/plain')
+
+    return _transformation_text_response(text, url, 'MISS')
 
 
 # ── Payload log (clean, from the Rucio log tarball via the prod-ops agent) ────
