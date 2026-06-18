@@ -27,9 +27,6 @@
                         {% elif task.taskname %}
                         <tr><td><strong>Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
                         {% endif %}
-                        {% if pcs_task and task.taskname and task.taskname != pcs_task.composed_name %}
-                        <tr><td><strong>PanDA Name</strong></td><td style="word-break:break-all;">{{ task.taskname }}</td></tr>
-                        {% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ task.status|state_class }}" title="{{ task.status|state_title }}">{{ task.status }}</td></tr>
                         {% if task.username %}
                         <tr><td><strong>User</strong></td><td><a href="{% url 'monitor_app:panda_tasks_list' %}?username={{ task.username }}">{{ task.username }}</a></td></tr>
@@ -37,8 +34,6 @@
                         {% if task.workinggroup %}<tr><td><strong>Working Group</strong></td><td>{{ task.workinggroup }}</td></tr>{% endif %}
                         {% if task.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ task.processingtype }}</td></tr>{% endif %}
                         {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{{ task.transpath }}</td></tr>{% endif %}
-                        {% if task.reqid %}<tr><td><strong>Request ID</strong></td><td>{{ task.reqid }}</td></tr>{% endif %}
-                        {% if task.parent_tid %}<tr><td><strong>Parent Task</strong></td><td><a href="{% url 'monitor_app:panda_task_detail' task.parent_tid %}">{{ task.parent_tid }}</a></td></tr>{% endif %}
                     </table>
                 </div>
             </div>
@@ -67,7 +62,6 @@
                         {% if task.corecount %}<tr><td><strong>Cores</strong></td><td>{{ task.corecount }}</td></tr>{% endif %}
                         {% if task.taskpriority %}<tr><td><strong>Priority</strong></td><td>{{ task.taskpriority }}{% if task.currentpriority %} (current: {{ task.currentpriority }}){% endif %}</td></tr>{% endif %}
                         {% if task.site %}<tr><td><strong>Site</strong></td><td>{{ task.site }}</td></tr>{% endif %}
-                        {% if task.gshare %}<tr><td><strong>Global Share</strong></td><td>{{ task.gshare }}</td></tr>{% endif %}
                     </table>
                 </div>
             </div>
@@ -214,12 +208,6 @@
         </div>
     </div>
 
-    <!-- External links -->
-    <div class="mb-3">
-        <a href="https://pandamon01.sdcc.bnl.gov/task/{{ jeditaskid }}/" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90" class="btn btn-outline-secondary btn-sm">All Jobs for Task</a>
-    </div>
-
     {% if task_record_items %}
     <div class="card mb-3">
         <div class="card-header"><strong>PanDA/JEDI task parameters</strong></div>
@@ -237,6 +225,12 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- External links -->
+    <div class="mb-3">
+        <a href="https://pandamon01.sdcc.bnl.gov/task/{{ jeditaskid }}/" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
+        <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90" class="btn btn-outline-secondary btn-sm">All Jobs for Task</a>
+    </div>
 
     {% endif %}
 </div>
