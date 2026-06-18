@@ -246,6 +246,14 @@ Context expected:
               {% if issue %}{% if t.description %} · {% endif %}<a href="{{ issue }}" target="_blank" rel="noopener">issue</a>{% endif %}
             </div>
           {% endif %}
+          {% if t.questionnaire_matches %}
+            <div><strong class="text-muted">Request:</strong>
+              {% for qm in t.questionnaire_matches %}
+                {% if not forloop.first %}, {% endif %}
+                <a href="{% url 'pcs:questionnaire_detail' pk=qm.questionnaire.pk %}">#{{ qm.questionnaire.pk }}</a>{% if qm.confidence %} <span class="text-muted">({{ qm.confidence }})</span>{% endif %}
+              {% endfor %}
+            </div>
+          {% endif %}
           {% if other_text|informative_text %}
             <div><strong class="text-muted">Other:</strong> {{ other_text }}</div>
           {% endif %}

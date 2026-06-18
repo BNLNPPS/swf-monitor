@@ -19,6 +19,9 @@ urlpatterns = [
     # Questionnaire intake
     path('questionnaires/', views.questionnaires_list, name='questionnaires_list'),
     path('questionnaires/import/', views.questionnaire_import, name='questionnaire_import'),
+    path('questionnaires/<int:pk>/', views.questionnaire_detail, name='questionnaire_detail'),
+    path('questionnaires/<int:pk>/matches/', views.questionnaire_match_add, name='questionnaire_match_add'),
+    path('questionnaires/<int:pk>/matches/<int:task_id>/remove/', views.questionnaire_match_remove, name='questionnaire_match_remove'),
 
     # Rucio DID detail — self-hosted live browser (no public Rucio webui).
     # files route first: <path:name> is greedy, so the /files/ suffix must match before the page route.

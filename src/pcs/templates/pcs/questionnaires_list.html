@@ -88,6 +88,7 @@
 	          <th>Submitted</th>
 	          <th>Description</th>
 	          <th>Repository</th>
+	          <th>Prod matches</th>
 	          <th>Events</th>
           <th>Benchmark</th>
           <th>Estimate</th>
@@ -103,7 +104,7 @@
               data-missing-email="{% if q.has_email %}0{% else %}1{% endif %}"
               data-search="{{ q.search_text }}">
 	          <td class="text-nowrap">
-	            <div>{{ q.submitted_at|date:"Y-m-d H:i" }}</div>
+	            <div><a href="{% url 'pcs:questionnaire_detail' pk=q.pk %}">{{ q.submitted_at|date:"Y-m-d H:i" }}</a></div>
 	            {% if user.is_authenticated %}
 	              <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
 	                      data-bs-toggle="modal" data-bs-target="#questionnaire-raw-{{ q.id }}">
@@ -127,13 +128,18 @@
               <div class="text-muted mt-2"><strong>Generator:</strong> {{ q.generator_display }}</div>
             {% endif %}
           </td>
+          <td class="text-nowrap">
+            <a href="{% url 'pcs:questionnaire_detail' pk=q.pk %}">
+              {{ q.prod_match_count }} match{{ q.prod_match_count|pluralize:"es" }}
+            </a>
+          </td>
           <td style="width: 12rem; max-width: 12rem; white-space: normal; overflow-wrap: anywhere;">{{ q.nevents }}</td>
           <td style="max-width: 18rem;">{{ q.benchmark|linebreaksbr }}</td>
           <td style="max-width: 22rem;">{{ q.estimate|linebreaksbr }}</td>
         </tr>
 	        {% endfor %}
           <tr id="pcs-qf-empty" style="display:none;">
-            <td colspan="6" class="text-muted">No questionnaire responses match the current filter.</td>
+            <td colspan="7" class="text-muted">No questionnaire responses match the current filter.</td>
           </tr>
       </tbody>
 	    </table>

@@ -15,6 +15,7 @@ from django.urls import reverse
 from django.http import JsonResponse, Http404
 from django.contrib import messages
 from django.db.models import Count, Q
+from django.utils import timezone
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +191,75 @@ def _questionnaire_data_label(questionnaire, key):
     return (value.get('label') or '').strip() if isinstance(value, dict) else ''
 
 
+def _questionnaire_prod_matches(questionnaire, *, status=None):
+    matches = []
+    for match in (questionnaire.data or {}).get('prod_matches') or []:
+        if not isinstance(match, dict):
+            continue
+        if status and (match.get('status') or 'accepted') != status:
+            continue
+        matches.append(match)
+    return matches
+
+
+def _task_display_name(task):
+    return task.composed_name or task.name
+
+
+def _resolve_questionnaire_match_task(match):
+    from .services import resolve_prodtask
+    qs = ProdTask.objects.select_related('campaign', 'dataset', 'prod_config')
+    for key in (match.get('task_name'), match.get('legacy_name'), match.get('task_id')):
+        if not key:
+            continue
+        try:
+            return resolve_prodtask(str(key), qs)
+        except ProdTask.DoesNotExist:
+            continue
+    return None
+
+
+def _annotate_questionnaire_matches(questionnaires):
+    for questionnaire in questionnaires:
+        matches = _questionnaire_prod_matches(questionnaire, status='accepted')
+        questionnaire.prod_match_count = len(matches)
+        questionnaire.prod_matches = matches
+
+
+def _annotate_task_questionnaire_matches(tasks):
+    tasks = list(tasks)
+    by_id = {task.pk: task for task in tasks}
+    by_name = {}
+    for task in tasks:
+        task.questionnaire_matches = []
+        if task.name:
+            by_name[task.name] = task
+        if task.composed_name:
+            by_name[task.composed_name] = task
+
+    questionnaires = Questionnaire.objects.all()
+    for questionnaire in questionnaires:
+        for match in _questionnaire_prod_matches(questionnaire, status='accepted'):
+            task = None
+            task_id = match.get('task_id')
+            if isinstance(task_id, int):
+                task = by_id.get(task_id)
+            elif str(task_id).isdigit():
+                task = by_id.get(int(task_id))
+            if task is None:
+                task = by_name.get(match.get('task_name') or '')
+            if task is None:
+                task = by_name.get(match.get('legacy_name') or '')
+            if task is None:
+                continue
+            task.questionnaire_matches.append({
+                'questionnaire': questionnaire,
+                'confidence': match.get('confidence') or '',
+                'reason': match.get('reason') or '',
+            })
+    return tasks
+
+
 def questionnaires_list(request):
     rows = list(Questionnaire.objects.all())
     authenticated = request.user.is_authenticated
@@ -213,10 +283,99 @@ def questionnaires_list(request):
             row.benchmark or '',
             row.estimate or '',
         ]).lower()
+    _annotate_questionnaire_matches(rows)
     return render(request, 'pcs/questionnaires_list.html', {
         'questionnaires': rows,
         'total_count': len(rows),
     })
+
+
+def questionnaire_detail(request, pk):
+    questionnaire = get_object_or_404(Questionnaire, pk=pk)
+    authenticated = request.user.is_authenticated
+    questionnaire.contact_display = _questionnaire_contact_display(
+        questionnaire, authenticated=authenticated)
+    questionnaire.repository_display = _questionnaire_data_label(
+        questionnaire, 'repository_curated')
+    questionnaire.generator_display = _questionnaire_data_label(
+        questionnaire, 'generator')
+    matches = []
+    for match in _questionnaire_prod_matches(questionnaire):
+        resolved = _resolve_questionnaire_match_task(match)
+        matches.append({'match': match, 'task': resolved})
+    return render(request, 'pcs/questionnaire_detail.html', {
+        'questionnaire': questionnaire,
+        'matches': matches,
+        'confidence_choices': ('high', 'medium', 'low'),
+    })
+
+
+@_login_required_flash
+def questionnaire_match_add(request, pk):
+    questionnaire = get_object_or_404(Questionnaire, pk=pk)
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:questionnaire_detail', kwargs={'pk': pk}),
+            action_label='Questionnaire match')
+    task_key = (request.POST.get('task') or '').strip()
+    confidence = (request.POST.get('confidence') or '').strip()
+    reason = (request.POST.get('reason') or '').strip()
+    if confidence not in {'high', 'medium', 'low'}:
+        confidence = 'medium'
+    if not task_key:
+        messages.error(request, 'Provide a production task name or id.')
+        return redirect('pcs:questionnaire_detail', pk=pk)
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(
+            task_key, ProdTask.objects.select_related('dataset', 'campaign'))
+    except ProdTask.DoesNotExist:
+        messages.error(request, f'No production task matches {task_key!r}.')
+        return redirect('pcs:questionnaire_detail', pk=pk)
+
+    data = dict(questionnaire.data or {})
+    matches = [
+        match for match in (data.get('prod_matches') or [])
+        if isinstance(match, dict) and match.get('task_id') != task.pk
+    ]
+    matches.append({
+        'task_id': task.pk,
+        'task_name': _task_display_name(task),
+        'legacy_name': task.name,
+        'confidence': confidence,
+        'status': 'accepted',
+        'reason': reason,
+        'matched_by': getattr(request.user, 'username', '') or 'web',
+        'matched_at': timezone.now().isoformat(),
+    })
+    data['prod_matches'] = matches
+    questionnaire.data = data
+    questionnaire.save(update_fields=['data', 'updated_at'])
+    messages.success(request, f'Matched request #{pk} to {_task_display_name(task)}.')
+    return redirect('pcs:questionnaire_detail', pk=pk)
+
+
+@_login_required_flash
+def questionnaire_match_remove(request, pk, task_id):
+    questionnaire = get_object_or_404(Questionnaire, pk=pk)
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:questionnaire_detail', kwargs={'pk': pk}),
+            action_label='Questionnaire match removal')
+    data = dict(questionnaire.data or {})
+    before = len(data.get('prod_matches') or [])
+    data['prod_matches'] = [
+        match for match in (data.get('prod_matches') or [])
+        if not (isinstance(match, dict) and str(match.get('task_id')) == str(task_id))
+    ]
+    questionnaire.data = data
+    questionnaire.save(update_fields=['data', 'updated_at'])
+    removed = before - len(data['prod_matches'])
+    if removed:
+        messages.success(request, f'Removed {removed} production match.')
+    else:
+        messages.warning(request, 'No matching production task link was present.')
+    return redirect('pcs:questionnaire_detail', pk=pk)
 
 
 @_login_required_flash
@@ -1448,6 +1607,7 @@ def pcs_catalog(request):
             .filter(campaign__in=selected_campaigns, status='past_output')
             .order_by('campaign__name', 'dataset__dataset_name')
         )
+        past_tasks = _annotate_task_questionnaire_matches(past_tasks)
         agg_files = sum((c.data or {}).get('past_summary', {}).get('file_count', 0)
                         for c in selected_campaigns)
         agg_size = sum((c.data or {}).get('past_summary', {}).get('data_size_bytes', 0)
@@ -1543,8 +1703,9 @@ def pcs_catalog(request):
             evgen_rucio_unmatched = (target.data or {}).get('evgen_rucio_unmatched', []) or []
             evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
 
+    tasks = _annotate_task_questionnaire_matches(list(qs))
     context = {
-        'tasks': list(qs),
+        'tasks': tasks,
         'show_tabs': True,
         'columns_mode': 'full',
         'active_lifecycle': active_lifecycle,
