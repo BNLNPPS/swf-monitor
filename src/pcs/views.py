@@ -138,8 +138,64 @@ def pcs_hub(request):
 
 # ── Questionnaire intake ───────────────────────────────────────────
 
+def _questionnaire_contact_display(questionnaire, *, authenticated):
+    if not authenticated:
+        return _redact_contact(questionnaire.contact)
+
+    contacts = (questionnaire.data or {}).get('contacts') or []
+    parts = []
+    for contact in contacts:
+        if not isinstance(contact, dict):
+            continue
+        name = (contact.get('name') or '').strip()
+        emails = [
+            str(email).strip()
+            for email in (contact.get('emails') or [])
+            if str(email).strip()
+        ]
+        if name and emails:
+            parts.append(f"{name} ({', '.join(emails)})")
+        elif name:
+            parts.append(name)
+        elif emails:
+            parts.append(', '.join(emails))
+    return ', '.join(parts) or questionnaire.contact
+
+
+def _questionnaire_contacts(questionnaire):
+    return [
+        contact for contact in ((questionnaire.data or {}).get('contacts') or [])
+        if isinstance(contact, dict)
+    ]
+
+
+def _questionnaire_has_email(questionnaire):
+    return any(contact.get('emails') for contact in _questionnaire_contacts(questionnaire))
+
+
+def _questionnaire_data_label(questionnaire, key):
+    value = (questionnaire.data or {}).get(key) or {}
+    return (value.get('label') or '').strip() if isinstance(value, dict) else ''
+
+
+def _questionnaire_filter_options(rows, key):
+    counts = {}
+    for row in rows:
+        label = _questionnaire_data_label(row, key)
+        if label:
+            counts[label] = counts.get(label, 0) + 1
+    return [
+        {'label': label, 'count': counts[label]}
+        for label in sorted(counts, key=lambda x: x.lower())
+    ]
+
+
 def questionnaires_list(request):
     q = (request.GET.get('q') or '').strip()
+    repo_filter = (request.GET.get('repo') or '').strip()
+    generator_filter = (request.GET.get('generator') or '').strip()
+    missing_contact = request.GET.get('missing_contact') == '1'
+    missing_email = request.GET.get('missing_email') == '1'
     qs = Questionnaire.objects.all()
     if q:
         qs = qs.filter(
@@ -150,15 +206,43 @@ def questionnaires_list(request):
             | Q(benchmark__icontains=q)
             | Q(estimate__icontains=q)
         )
-    rows = list(qs[:200])
-    if not request.user.is_authenticated:
-        for row in rows:
-            row.contact = _redact_contact(row.contact)
+    all_rows = list(qs)
+    repo_options = _questionnaire_filter_options(all_rows, 'repository_curated')
+    generator_options = _questionnaire_filter_options(all_rows, 'generator')
+    rows = all_rows
+    if repo_filter:
+        rows = [
+            row for row in rows
+            if _questionnaire_data_label(row, 'repository_curated') == repo_filter
+        ]
+    if generator_filter:
+        rows = [
+            row for row in rows
+            if _questionnaire_data_label(row, 'generator') == generator_filter
+        ]
+    if missing_contact:
+        rows = [row for row in rows if not _questionnaire_contacts(row)]
+    if missing_email:
+        rows = [row for row in rows if not _questionnaire_has_email(row)]
+    rows = rows[:200]
+    authenticated = request.user.is_authenticated
+    for row in rows:
+        row.contact_display = _questionnaire_contact_display(
+            row, authenticated=authenticated)
+        row.repository_display = _questionnaire_data_label(
+            row, 'repository_curated')
+        row.generator_display = _questionnaire_data_label(row, 'generator')
     return render(request, 'pcs/questionnaires_list.html', {
         'questionnaires': rows,
         'query': q,
         'total_count': Questionnaire.objects.count(),
         'shown_count': len(rows),
+        'repo_filter': repo_filter,
+        'generator_filter': generator_filter,
+        'missing_contact': missing_contact,
+        'missing_email': missing_email,
+        'repo_options': repo_options,
+        'generator_options': generator_options,
     })
 
 

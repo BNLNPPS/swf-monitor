@@ -11,11 +11,37 @@
         {{ shown_count }} shown{% if total_count != shown_count %} of {{ total_count }}{% endif %}
       </div>
     </div>
-    <form method="get" class="d-flex gap-2" style="min-width: min(34rem, 100%);">
+    <form method="get" class="d-flex flex-wrap gap-2 justify-content-end" style="min-width: min(58rem, 100%);">
       <input type="search" name="q" class="form-control" value="{{ query }}"
-             placeholder="Search request questionnaire">
+             placeholder="Search request questionnaire" style="max-width: 24rem;">
+      <select name="repo" class="form-select" style="max-width: 15rem;" aria-label="Repository filter">
+        <option value="">All repos</option>
+        {% for option in repo_options %}
+          <option value="{{ option.label }}" {% if option.label == repo_filter %}selected{% endif %}>
+            {{ option.label }} ({{ option.count }})
+          </option>
+        {% endfor %}
+      </select>
+      <select name="generator" class="form-select" style="max-width: 15rem;" aria-label="Generator filter">
+        <option value="">All generators</option>
+        {% for option in generator_options %}
+          <option value="{{ option.label }}" {% if option.label == generator_filter %}selected{% endif %}>
+            {{ option.label }} ({{ option.count }})
+          </option>
+        {% endfor %}
+      </select>
+      <label class="form-check d-flex align-items-center gap-1 mb-0">
+        <input class="form-check-input" type="checkbox" name="missing_contact" value="1"
+               {% if missing_contact %}checked{% endif %}>
+        <span class="form-check-label text-nowrap">Missing contact</span>
+      </label>
+      <label class="form-check d-flex align-items-center gap-1 mb-0">
+        <input class="form-check-input" type="checkbox" name="missing_email" value="1"
+               {% if missing_email %}checked{% endif %}>
+        <span class="form-check-label text-nowrap">Missing email</span>
+      </label>
       <button class="btn btn-outline-primary" type="submit">Search</button>
-      {% if query %}
+      {% if query or repo_filter or generator_filter or missing_contact or missing_email %}
         <a class="btn btn-outline-secondary" href="{% url 'pcs:questionnaires_list' %}">Clear</a>
       {% endif %}
     </form>
@@ -64,8 +90,8 @@
           <td>{{ q.status }}</td>
           <td style="min-width: 34rem; max-width: 42rem; overflow-wrap:anywhere;">
             {{ q.description|linebreaksbr }}
-            {% if q.contact %}
-              <div class="text-muted mt-2"><strong>Contact:</strong> {{ q.contact|linebreaksbr }}</div>
+            {% if q.contact_display %}
+              <div class="text-muted mt-2"><strong>Contact:</strong> {{ q.contact_display }}</div>
             {% endif %}
           </td>
           <td style="min-width: 26rem; max-width: 34rem; overflow-wrap:anywhere;">
@@ -73,6 +99,9 @@
               <a href="{{ q.repository }}" rel="noopener noreferrer">{{ q.repository }}</a>
             {% else %}
               {{ q.repository|linebreaksbr }}
+            {% endif %}
+            {% if q.generator_display %}
+              <div class="text-muted mt-2"><strong>Generator:</strong> {{ q.generator_display }}</div>
             {% endif %}
           </td>
           <td style="width: 12rem; max-width: 12rem; white-space: normal; overflow-wrap: anywhere;">{{ q.nevents }}</td>
