@@ -17,7 +17,7 @@
       <select name="repo" class="form-select" style="max-width: 15rem;" aria-label="Repository filter">
         <option value="">All repos</option>
         {% for option in repo_options %}
-          <option value="{{ option.label }}" {% if option.label == repo_filter %}selected{% endif %}>
+          <option value="{{ option.value }}" {% if option.value == repo_filter %}selected{% endif %}>
             {{ option.label }} ({{ option.count }})
           </option>
         {% endfor %}
@@ -25,7 +25,7 @@
       <select name="generator" class="form-select" style="max-width: 15rem;" aria-label="Generator filter">
         <option value="">All generators</option>
         {% for option in generator_options %}
-          <option value="{{ option.label }}" {% if option.label == generator_filter %}selected{% endif %}>
+          <option value="{{ option.value }}" {% if option.value == generator_filter %}selected{% endif %}>
             {{ option.label }} ({{ option.count }})
           </option>
         {% endfor %}
@@ -72,22 +72,28 @@
 
   <div class="table-responsive">
     <table class="table table-sm table-striped align-middle" style="width:auto; min-width: 96rem;">
-      <thead>
-        <tr>
-          <th>Submitted</th>
-          <th>Status</th>
-          <th>Description</th>
-          <th>Repository</th>
-          <th>Events</th>
+	      <thead>
+	        <tr>
+	          <th>Submitted</th>
+	          <th>Description</th>
+	          <th>Repository</th>
+	          <th>Events</th>
           <th>Benchmark</th>
           <th>Estimate</th>
         </tr>
       </thead>
       <tbody>
-        {% for q in questionnaires %}
-        <tr>
-          <td class="text-nowrap">{{ q.submitted_at|date:"Y-m-d H:i" }}</td>
-          <td>{{ q.status }}</td>
+	        {% for q in questionnaires %}
+	        <tr>
+	          <td class="text-nowrap">
+	            <div>{{ q.submitted_at|date:"Y-m-d H:i" }}</div>
+	            {% if user.is_authenticated %}
+	              <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
+	                      data-bs-toggle="modal" data-bs-target="#questionnaire-raw-{{ q.id }}">
+                Raw
+              </button>
+            {% endif %}
+          </td>
           <td style="min-width: 34rem; max-width: 42rem; overflow-wrap:anywhere;">
             {{ q.description|linebreaksbr }}
             {% if q.contact_display %}
@@ -108,13 +114,54 @@
           <td style="max-width: 18rem;">{{ q.benchmark|linebreaksbr }}</td>
           <td style="max-width: 22rem;">{{ q.estimate|linebreaksbr }}</td>
         </tr>
-        {% empty %}
-        <tr>
-          <td colspan="7" class="text-muted">No questionnaire responses imported.</td>
-        </tr>
-        {% endfor %}
+	        {% empty %}
+	        <tr>
+	          <td colspan="6" class="text-muted">No questionnaire responses imported.</td>
+	        </tr>
+	        {% endfor %}
       </tbody>
-    </table>
-  </div>
+	    </table>
+	  </div>
+  {% if user.is_authenticated %}
+    {% for q in questionnaires %}
+    <div class="modal fade" id="questionnaire-raw-{{ q.id }}" tabindex="-1"
+         aria-labelledby="questionnaire-raw-title-{{ q.id }}" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="modal-title h5" id="questionnaire-raw-title-{{ q.id }}">
+              Raw Questionnaire {{ q.id }}
+            </h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <dl class="row mb-0">
+              <dt class="col-sm-3">Submitted</dt>
+              <dd class="col-sm-9">{{ q.submitted_at|date:"Y-m-d H:i:s O" }}</dd>
+              <dt class="col-sm-3">Status</dt>
+              <dd class="col-sm-9">{{ q.status }}</dd>
+              <dt class="col-sm-3">Description</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.description|linebreaksbr }}</dd>
+              <dt class="col-sm-3">Repository</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.repository|linebreaksbr }}</dd>
+              <dt class="col-sm-3">Contact</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.contact|linebreaksbr }}</dd>
+              <dt class="col-sm-3">Events</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.nevents|linebreaksbr }}</dd>
+              <dt class="col-sm-3">Benchmark</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.benchmark|linebreaksbr }}</dd>
+              <dt class="col-sm-3">Estimate</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.estimate|linebreaksbr }}</dd>
+              <dt class="col-sm-3">Source row</dt>
+              <dd class="col-sm-9">{{ q.source_row|default:"-" }}</dd>
+              <dt class="col-sm-3">Source URL</dt>
+              <dd class="col-sm-9" style="overflow-wrap:anywhere;">{{ q.source_url|default:"-" }}</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% endif %}
 </div>
 {% endblock %}

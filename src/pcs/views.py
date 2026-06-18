@@ -178,16 +178,27 @@ def _questionnaire_data_label(questionnaire, key):
     return (value.get('label') or '').strip() if isinstance(value, dict) else ''
 
 
-def _questionnaire_filter_options(rows, key):
+def _questionnaire_filter_options(rows, key, *, include_undefined=False):
     counts = {}
+    undefined_count = 0
     for row in rows:
         label = _questionnaire_data_label(row, key)
         if label:
             counts[label] = counts.get(label, 0) + 1
-    return [
-        {'label': label, 'count': counts[label]}
+        elif include_undefined:
+            undefined_count += 1
+    options = []
+    if include_undefined and undefined_count:
+        options.append({
+            'label': 'Undefined',
+            'value': '__undefined__',
+            'count': undefined_count,
+        })
+    options.extend([
+        {'label': label, 'value': label, 'count': counts[label]}
         for label in sorted(counts, key=lambda x: x.lower())
-    ]
+    ])
+    return options
 
 
 def questionnaires_list(request):
@@ -208,7 +219,8 @@ def questionnaires_list(request):
         )
     all_rows = list(qs)
     repo_options = _questionnaire_filter_options(all_rows, 'repository_curated')
-    generator_options = _questionnaire_filter_options(all_rows, 'generator')
+    generator_options = _questionnaire_filter_options(
+        all_rows, 'generator', include_undefined=True)
     rows = all_rows
     if repo_filter:
         rows = [
@@ -216,10 +228,16 @@ def questionnaires_list(request):
             if _questionnaire_data_label(row, 'repository_curated') == repo_filter
         ]
     if generator_filter:
-        rows = [
-            row for row in rows
-            if _questionnaire_data_label(row, 'generator') == generator_filter
-        ]
+        if generator_filter == '__undefined__':
+            rows = [
+                row for row in rows
+                if not _questionnaire_data_label(row, 'generator')
+            ]
+        else:
+            rows = [
+                row for row in rows
+                if _questionnaire_data_label(row, 'generator') == generator_filter
+            ]
     if missing_contact:
         rows = [row for row in rows if not _questionnaire_contacts(row)]
     if missing_email:
