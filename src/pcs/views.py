@@ -178,71 +178,8 @@ def _questionnaire_data_label(questionnaire, key):
     return (value.get('label') or '').strip() if isinstance(value, dict) else ''
 
 
-def _questionnaire_filter_options(rows, key, *, include_undefined=False):
-    counts = {}
-    undefined_count = 0
-    for row in rows:
-        label = _questionnaire_data_label(row, key)
-        if label:
-            counts[label] = counts.get(label, 0) + 1
-        elif include_undefined:
-            undefined_count += 1
-    options = []
-    if include_undefined and undefined_count:
-        options.append({
-            'label': 'Undefined',
-            'value': '__undefined__',
-            'count': undefined_count,
-        })
-    options.extend([
-        {'label': label, 'value': label, 'count': counts[label]}
-        for label in sorted(counts, key=lambda x: x.lower())
-    ])
-    return options
-
-
 def questionnaires_list(request):
-    q = (request.GET.get('q') or '').strip()
-    repo_filter = (request.GET.get('repo') or '').strip()
-    generator_filter = (request.GET.get('generator') or '').strip()
-    missing_contact = request.GET.get('missing_contact') == '1'
-    missing_email = request.GET.get('missing_email') == '1'
-    qs = Questionnaire.objects.all()
-    if q:
-        qs = qs.filter(
-            Q(description__icontains=q)
-            | Q(repository__icontains=q)
-            | Q(contact__icontains=q)
-            | Q(nevents__icontains=q)
-            | Q(benchmark__icontains=q)
-            | Q(estimate__icontains=q)
-        )
-    all_rows = list(qs)
-    repo_options = _questionnaire_filter_options(all_rows, 'repository_curated')
-    generator_options = _questionnaire_filter_options(
-        all_rows, 'generator', include_undefined=True)
-    rows = all_rows
-    if repo_filter:
-        rows = [
-            row for row in rows
-            if _questionnaire_data_label(row, 'repository_curated') == repo_filter
-        ]
-    if generator_filter:
-        if generator_filter == '__undefined__':
-            rows = [
-                row for row in rows
-                if not _questionnaire_data_label(row, 'generator')
-            ]
-        else:
-            rows = [
-                row for row in rows
-                if _questionnaire_data_label(row, 'generator') == generator_filter
-            ]
-    if missing_contact:
-        rows = [row for row in rows if not _questionnaire_contacts(row)]
-    if missing_email:
-        rows = [row for row in rows if not _questionnaire_has_email(row)]
-    rows = rows[:200]
+    rows = list(Questionnaire.objects.all())
     authenticated = request.user.is_authenticated
     for row in rows:
         row.contact_display = _questionnaire_contact_display(
@@ -250,17 +187,22 @@ def questionnaires_list(request):
         row.repository_display = _questionnaire_data_label(
             row, 'repository_curated')
         row.generator_display = _questionnaire_data_label(row, 'generator')
+        row.generator_filter = row.generator_display or '__undefined__'
+        row.has_contact = bool(_questionnaire_contacts(row))
+        row.has_email = _questionnaire_has_email(row)
+        row.search_text = ' '.join([
+            row.description or '',
+            row.repository or '',
+            row.repository_display or '',
+            row.generator_display or '',
+            row.contact_display or '',
+            row.nevents or '',
+            row.benchmark or '',
+            row.estimate or '',
+        ]).lower()
     return render(request, 'pcs/questionnaires_list.html', {
         'questionnaires': rows,
-        'query': q,
-        'total_count': Questionnaire.objects.count(),
-        'shown_count': len(rows),
-        'repo_filter': repo_filter,
-        'generator_filter': generator_filter,
-        'missing_contact': missing_contact,
-        'missing_email': missing_email,
-        'repo_options': repo_options,
-        'generator_options': generator_options,
+        'total_count': len(rows),
     })
 
 

@@ -262,6 +262,7 @@
         <div class="dropdown">
             <button class="dropbtn">PCS</button>
             <div class="dropdown-content">
+                <a href="{% url 'pcs:questionnaires_list' %}">Requests</a>
                 <a href="{% url 'pcs:pcs_hub' %}">PCS Hub</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='p' %}">Physics Tags</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen Tags</a>
