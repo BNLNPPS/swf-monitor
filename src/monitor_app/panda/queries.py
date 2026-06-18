@@ -1366,6 +1366,7 @@ def study_job(pandaid):
                              'errordialog', 'failurerate', 'workinggroup']
                     task_info = row_to_dict(trow, tcols)
                     task_info = {k: v for k, v in task_info.items() if v is not None}
+                    _apply_effective_owners([task_info], 'username')
         except Exception as e:
             logger.error(f"study_job task query failed: {e}")
 
@@ -1818,4 +1819,5 @@ def get_task(jeditaskid):
     task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
     task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
     task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
+    _apply_effective_owners([task], 'username')
     return task
