@@ -137,7 +137,7 @@
       <form method="post" action="{% url 'pcs:questionnaire_match_add' pk=questionnaire.pk %}" class="row g-3">
         {% csrf_token %}
         <div class="col-lg-5">
-          <label class="form-label" for="match-task">Prod task name or id</label>
+          <label class="form-label" for="match-task">Prod task name</label>
           <input id="match-task" name="task" class="form-control" required>
         </div>
         <div class="col-lg-2">

@@ -1,11 +1,13 @@
 {% extends 'base.html' %}
 
-{% block title %}ePIC Production - SWF Monitor{% endblock %}
+{% block title %}epicprod - ePIC Production - SWF Monitor{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
-    <h1 class="mb-4">ePIC Production</h1>
-    <p class="lead mb-5">ePIC experiment production monitoring and configuration</p>
+    <h1 class="mb-4">epicprod - ePIC Production</h1>
+    <p class="lead mb-5">ePIC experiment production configuration, management and monitoring</p>
+
+    {% include "pcs/_pcs_sections.html" %}
 
     <h3 class="mb-3">Production Monitor</h3>
     <div class="row mb-4">
@@ -59,6 +61,5 @@
         </div>
     </div>
 
-    {% include "pcs/_pcs_sections.html" %}
 </div>
 {% endblock %}

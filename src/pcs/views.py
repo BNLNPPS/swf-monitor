@@ -331,7 +331,7 @@ def questionnaire_match_add(request, pk):
     if confidence not in {'high', 'medium', 'low'}:
         confidence = 'medium'
     if not task_key:
-        messages.error(request, 'Provide a production task name or id.')
+        messages.error(request, 'Provide a production task name.')
         return redirect('pcs:questionnaire_detail', pk=pk)
     from .services import resolve_prodtask
     try:

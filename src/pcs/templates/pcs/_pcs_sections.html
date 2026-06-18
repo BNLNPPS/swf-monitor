@@ -1,16 +1,7 @@
 {# Shared PCS sections — included by both PCS hub and Production hub #}
 
-<h3 class="mb-3">ePIC Production</h3>
+<h3 class="mb-3">Requests</h3>
 <div class="row mb-4">
-    <div class="col-md-4 mb-3">
-        <div class="card h-100">
-            <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Production Task Catalog</a></strong>
-                <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
-                <p class="card-text">Production tasks across campaigns.</p>
-            </div>
-        </div>
-    </div>
     <div class="col-md-4 mb-3">
         <div class="card h-100">
             <div class="card-body d-flex flex-column">
@@ -80,7 +71,7 @@
     </div>
 </div>
 
-<h3 class="mb-3">Production Task Creation</h3>
+<h3 class="mb-3">Production Tasks</h3>
 <div class="row mb-4">
     <div class="col-md-4 mb-3">
         <div class="card h-100">
@@ -106,6 +97,17 @@
                 <p class="mb-2"><strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Prod Task Creation</a></strong>
                 <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
                 <p class="card-text">Compose Dataset + Config into full production task specs with submission commands.</p>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+                <p class="mb-2"><strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Production Task Catalog</a></strong>
+                <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
+                <p class="card-text">Production tasks across campaigns.</p>
             </div>
         </div>
     </div>
