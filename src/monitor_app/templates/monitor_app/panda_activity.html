@@ -22,8 +22,8 @@
     <div class="mb-4">
         <a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}" class="btn btn-outline-primary me-2">All Jobs</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}" class="btn btn-outline-primary me-2">All Tasks</a>
-        <a href="{% url 'monitor_app:panda_errors_list' %}?days={{ days }}" class="btn btn-outline-danger me-2">Error Summary</a>
-        <a href="{% url 'monitor_app:panda_diagnostics_list' %}?days={{ days }}" class="btn btn-outline-warning me-2">Diagnostics</a>
+        <a href="{% url 'monitor_app:panda_errors_list' %}?days={{ days }}" class="btn btn-warning text-dark me-2">Error Summary</a>
+        <a href="{% url 'monitor_app:panda_diagnostics_list' %}?days={{ days }}" class="btn btn-warning text-dark me-2">Diagnostics</a>
     </div>
 
     {% if error %}
