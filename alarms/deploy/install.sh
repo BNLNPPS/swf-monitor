@@ -12,6 +12,8 @@ VENV="${SWF_ALARMS_VENV:-$DEPLOY_ROOT/shared/alarms-venv}"
 CONFIG_DIR="${SWF_ALARMS_CONFIG_DIR:-$DEPLOY_ROOT/config/alarms}"
 CONFIG="${SWF_ALARMS_CONFIG:-$CONFIG_DIR/config.toml}"
 LOG_DIR="${SWF_ALARMS_LOG_DIR:-$DEPLOY_ROOT/shared/logs/swf-alarms}"
+BUILD_DIR=$(mktemp -d)
+trap 'rm -rf "$BUILD_DIR"' EXIT
 
 echo "[swf-alarms install] repo dir:  $HERE"
 
@@ -19,9 +21,12 @@ if [ ! -d "$VENV" ]; then
     echo "[swf-alarms install] creating venv"
     python3 -m venv "$VENV"
 fi
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" "$LOG_DIR"
+chmod 775 "$CONFIG_DIR" "$LOG_DIR"
 "$VENV/bin/pip" install --upgrade pip >/dev/null
-"$VENV/bin/pip" install "$HERE" >/dev/null
+cp -R "$HERE"/. "$BUILD_DIR"/
+"$VENV/bin/pip" install "$BUILD_DIR" >/dev/null
+chmod -R u+rwX,g+rwX,o+rX "$VENV"
 
 if [ ! -f "$CONFIG" ]; then
     echo "[swf-alarms install] no config.toml yet — copying config.toml.example"
@@ -29,7 +34,6 @@ if [ ! -f "$CONFIG" ]; then
     echo "[swf-alarms install] edit $CONFIG before first run"
 fi
 
-mkdir -p "$LOG_DIR"
 chmod 775 "$LOG_DIR"
 
 echo "[swf-alarms install] done."
