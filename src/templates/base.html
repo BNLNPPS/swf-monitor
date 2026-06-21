@@ -33,23 +33,53 @@
         padding: 0.65rem 1rem 1rem;
         position: relative;
       }
-      main > .container:first-child,
-      main > .container-fluid:first-child {
+      main > .container,
+      main > .container-fluid {
         margin-top: 0 !important;
       }
-      main > h1:first-child,
-      main > h2:first-child,
-      main > .container:first-child > h1:first-child,
-      main > .container:first-child > h2:first-child,
-      main > .container-fluid:first-child > h1:first-child,
-      main > .container-fluid:first-child > h2:first-child,
-      main > .container:first-child > .d-flex:first-child h1,
-      main > .container:first-child > .d-flex:first-child h2,
-      main > .container-fluid:first-child > .d-flex:first-child h1,
-      main > .container-fluid:first-child > .d-flex:first-child h2 {
+      main > h1,
+      main > h2,
+      main > .container > h1,
+      main > .container > h2,
+      main > .container-fluid > h1,
+      main > .container-fluid > h2,
+      main > .container > div.mb-3 > h1,
+      main > .container > div.mb-3 > h2,
+      main > .container > div.mb-4 > div > h1,
+      main > .container > div.mb-4 > div > h2,
+      main > .container > .d-flex h1,
+      main > .container > .d-flex h2,
+      main > .container-fluid > div.mb-3 > h1,
+      main > .container-fluid > div.mb-3 > h2,
+      main > .container-fluid > div.mb-4 > div > h1,
+      main > .container-fluid > div.mb-4 > div > h2,
+      main > .container-fluid > .d-flex h1,
+      main > .container-fluid > .d-flex h2 {
         font-size: 1.7rem;
         line-height: 1.2;
-        margin-top: 0;
+        margin-top: 0 !important;
+      }
+      main > h1,
+      main > h2,
+      main > .container > h1,
+      main > .container > h2,
+      main > .container-fluid > h1,
+      main > .container-fluid > h2,
+      main > .container > div.mb-3 > h1,
+      main > .container > div.mb-3 > h2,
+      main > .container > div.mb-4 > div > h1,
+      main > .container > div.mb-4 > div > h2,
+      main > .container-fluid > div.mb-3 > h1,
+      main > .container-fluid > div.mb-3 > h2,
+      main > .container-fluid > div.mb-4 > div > h1,
+      main > .container-fluid > div.mb-4 > div > h2 {
+        margin-bottom: 0.2rem !important;
+      }
+      main > .container > .d-flex h1,
+      main > .container > .d-flex h2,
+      main > .container-fluid > .d-flex h1,
+      main > .container-fluid > .d-flex h2 {
+        margin-bottom: 0 !important;
       }
       .btn.btn-dark-green {
         background-color: #166534; border-color: #166534; color: #fff;
@@ -377,7 +407,7 @@
     </div>
     <main>
         {% timezone "America/New_York" %}
-        <div class="main-time-info">Times in {% now "T" %} · Built at {% now "Ymd H:i:s" %}</div>
+        <div class="main-time-info">Built at {% now "Ymd H:i:s" %} {% now "T" %}</div>
         {% endtimezone %}
         {% if messages %}
             {% for message in messages %}
