@@ -20,6 +20,20 @@
     </style>
     <h1 class="mb-4">epicprod - ePIC Production System</h1>
     <p class="lead mb-0">ePIC experiment production requests, configuration, management and monitoring</p>
+
+    <div class="prod-section-bar">Production Requests</div>
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-body d-flex flex-column">
+                    <p class="mb-2"><strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Request Questionnaire Responses</a></strong>
+                    <span class="badge bg-info">{{ questionnaires_count }}</span></p>
+                    <p class="card-text">Mirrored production-request form responses.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="prod-section-bar">Physics Configuration System - PCS</div>
 
     {% include "pcs/_pcs_sections.html" %}

@@ -65,7 +65,6 @@
         color: #ADD8E6;
       }
       nav a.nav-active {
-        color: #fff;
         font-weight: 700;
       }
       /* Dropdown Button */
@@ -79,7 +78,6 @@
         cursor: pointer;
       }
       .dropbtn.nav-active {
-        color: #fff;
         font-weight: 700;
       }
 
@@ -109,7 +107,6 @@
       }
       .dropdown-content a.nav-active {
         background-color: #e9ecef;
-        color: black;
         font-weight: 700;
       }
 
@@ -279,7 +276,6 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.pcs %} nav-active{% endif %}">PCS</button>
             <div class="dropdown-content">
-                <a href="{% url 'pcs:questionnaires_list' %}" class="{% if active_nav.requests %}nav-active{% endif %}">Requests</a>
                 <a href="{% url 'pcs:pcs_hub' %}" class="{% if active_nav.pcs_hub %}nav-active{% endif %}">PCS Hub</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="{% if active_nav.pcs_physics_tags %}nav-active{% endif %}">Physics Tags</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='e' %}" class="{% if active_nav.pcs_evgen_tags %}nav-active{% endif %}">EvGen Tags</a>

@@ -155,7 +155,7 @@ def _active_nav(request):
 
     return {
         'requests': namespace == 'pcs' and url_name in pcs_questionnaire_names,
-        'pcs': namespace == 'pcs',
+        'pcs': namespace == 'pcs' and url_name not in pcs_questionnaire_names,
         'pcs_hub': namespace == 'pcs' and url_name == 'pcs_hub',
         'pcs_tags': namespace == 'pcs' and url_name in pcs_tag_names,
         'pcs_physics_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'p',
