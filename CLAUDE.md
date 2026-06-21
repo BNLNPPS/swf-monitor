@@ -7,6 +7,11 @@ Shared workspace rules — doc-first, git policy, environment — live in the
 workspace `../CLAUDE.md`. This file is the repo's doc index and the one pattern
 every designer/implementer should hold in mind.
 
+The workspace rule "Stay Within Scope Without Stopping" is mandatory here:
+do not overreach beyond the requested change, and do not respond to a scope
+correction by stopping or discarding the requested work. Keep the valid part,
+remove only the unauthorized part, and continue inside the clarified boundary.
+
 ## Key pattern — credentialed async action with live browser push
 
 We are building a live, automated, responsive production system. The standard way
