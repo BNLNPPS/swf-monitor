@@ -57,7 +57,7 @@
       nav {
         display: flex;
         align-items: center;
-        gap: 1em;
+        gap: .8em;
       }
       .sticky-header {
         position: sticky;
@@ -69,7 +69,7 @@
       }
       .nav-auth {
         display: flex;
-        gap: 1em;
+        gap: .8em;
       }
       nav a {
         color: #ADD8E6;
@@ -95,7 +95,7 @@
       .dropdown {
         position: relative;
         display: inline-block;
-        margin-right: 1em;
+        margin-right: .35em;
       }
 
       /* Dropdown Content (Hidden by Default) */
@@ -236,7 +236,7 @@
     <nav>
         <div class="dropdown" id="mode-flipper">
             <button class="dropbtn" id="mode-label">
-                <span class="mode-title mode-title-production">epicprod - ePIC Production</span>
+                <span class="mode-title mode-title-production">epicprod</span>
                 <span class="mode-title mode-title-testbed">ePIC Testbed</span>
             </button>
             <div class="dropdown-content">
@@ -247,7 +247,7 @@
 
         {# ── Testbed mode ── #}
         <span class="nav-mode nav-testbed">
-        <div class="dropdown">
+        <div class="dropdown" id="system-status-dropdown">
             <button class="dropbtn{% if active_nav.workflows %} nav-active{% endif %}">Workflows</button>
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:workflows_home' %}" class="{% if active_nav.workflows %}nav-active{% endif %}">Views</a>
@@ -294,6 +294,7 @@
             <button class="dropbtn{% if active_nav.pcs %} nav-active{% endif %}">PCS</button>
             <div class="dropdown-content">
                 <a href="{% url 'pcs:pcs_hub' %}" class="{% if active_nav.pcs_hub %}nav-active{% endif %}">PCS Hub</a>
+                <a href="{% url 'pcs:physics_categories_list' %}" class="{% if active_nav.pcs_categories %}nav-active{% endif %}">Physics Categories</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="{% if active_nav.pcs_physics_tags %}nav-active{% endif %}">Physics Tags</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='e' %}" class="{% if active_nav.pcs_evgen_tags %}nav-active{% endif %}">EvGen Tags</a>
                 <a href="{% url 'pcs:tag_compose' tag_type='s' %}" class="{% if active_nav.pcs_simu_tags %}nav-active{% endif %}">Simu Tags</a>
@@ -314,19 +315,25 @@
         <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">Queues</a>
         </span>
         <span class="nav-spacer"></span>
-        <a href="{% url 'monitor_app:system_status' %}"
-           id="system-status-nav-link"
-           class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}"
-           data-system-status="{{ system_status_overall|default:'unknown' }}"
-           data-system-status-url="{% url 'monitor_app:system_status_json' %}"
-           {% if system_status_latest_checked_at %}data-system-checked-at="{{ system_status_latest_checked_at|date:'c' }}"{% endif %}
-           title="{{ system_status_reason|default:'' }}">System</a>
-        <a href="{% url 'monitor_app:about' %}" class="{% if active_nav.about %}nav-active{% endif %}">About</a>
-        <div class="nav-auth">
-            {% if user.is_authenticated %}
-                {% if user.is_staff %}
+        <div class="dropdown">
+            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.about %} nav-active{% endif %}"
+                    id="system-status-nav-link"
+                    data-system-status="{{ system_status_overall|default:'unknown' }}"
+                    data-system-status-url="{% url 'monitor_app:system_status_json' %}"
+                    {% if system_status_latest_checked_at %}data-system-checked-at="{{ system_status_latest_checked_at|date:'c' }}"{% endif %}
+                    title="{{ system_status_reason|default:'' }}">System</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:system_status' %}"
+                   id="system-status-dropdown-link"
+                   class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}">System Status</a>
+                {% if user.is_authenticated and user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}
+                <a href="{% url 'monitor_app:about' %}" class="{% if active_nav.about %}nav-active{% endif %}">About</a>
+            </div>
+        </div>
+        <div class="nav-auth">
+            {% if user.is_authenticated %}
                 <a href="{% url 'monitor_app:account' %}" class="{% if active_nav.account %}nav-active{% endif %}">Account</a>
                 <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;">{% csrf_token %}<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font:inherit;">Logout</button></form>
             {% else %}
@@ -376,8 +383,10 @@ function applyNavMode(mode) {
 })();
 (function() {
     const staleAfterSeconds = 15 * 60;
+    const dropdown = document.getElementById('system-status-dropdown');
     const link = document.getElementById('system-status-nav-link');
     if (!link) return;
+    const dropdownLink = document.getElementById('system-status-dropdown-link');
     const statusUrl = link.getAttribute('data-system-status-url');
     function refreshSystemNav() {
         const status = link.getAttribute('data-system-status') || 'unknown';
@@ -389,7 +398,9 @@ function applyNavMode(mode) {
                 stale = (Date.now() - ts) / 1000 > staleAfterSeconds;
             }
         }
-        link.classList.toggle('nav-system-error', status === 'error' || stale);
+        const showError = status === 'error' || stale;
+        link.classList.toggle('nav-system-error', showError);
+        if (dropdownLink) dropdownLink.classList.toggle('nav-system-error', showError);
         if (stale) {
             link.title = 'System status is stale by more than 15 minutes.';
         }
@@ -416,6 +427,10 @@ function applyNavMode(mode) {
     }
     refreshSystemNav();
     pollSystemStatus();
+    if (dropdown) {
+        dropdown.addEventListener('mouseenter', pollSystemStatus);
+        dropdown.addEventListener('focusin', pollSystemStatus);
+    }
     setInterval(refreshSystemNav, 10000);
     setInterval(pollSystemStatus, 60000);
 })();

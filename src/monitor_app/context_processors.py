@@ -164,6 +164,10 @@ def _active_nav(request):
         'requests': namespace == 'pcs' and url_name in pcs_questionnaire_names,
         'pcs': namespace == 'pcs' and url_name in pcs_names,
         'pcs_hub': namespace == 'pcs' and url_name == 'pcs_hub',
+        'pcs_categories': namespace == 'pcs' and url_name in {
+            'physics_categories_list',
+            'physics_category_create',
+        },
         'pcs_tags': namespace == 'pcs' and url_name in pcs_tag_names,
         'pcs_physics_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'p',
         'pcs_evgen_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'e',
