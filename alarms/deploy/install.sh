@@ -21,7 +21,7 @@ if [ ! -d "$VENV" ]; then
 fi
 mkdir -p "$CONFIG_DIR"
 "$VENV/bin/pip" install --upgrade pip >/dev/null
-"$VENV/bin/pip" install -e "$HERE" >/dev/null
+"$VENV/bin/pip" install "$HERE" >/dev/null
 
 if [ ! -f "$CONFIG" ]; then
     echo "[swf-alarms install] no config.toml yet — copying config.toml.example"
