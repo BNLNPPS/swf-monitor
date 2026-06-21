@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load swf_fmt %}
-{% block title %}Production Task Catalog — {% if active_lifecycle == 'last' %}Last{% else %}Past{% endif %}{% endblock %}
+{% block title %}Campaign Task Catalog — {% if active_lifecycle == 'last' %}Last{% elif active_lifecycle == 'future' %}Future{% else %}Past{% endif %}{% endblock %}
 
 {% block content %}
 <style>
@@ -28,8 +28,10 @@
 
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
-    <h2 class="me-3 mb-0">Production Task Catalog</h2>
+    <h2 class="me-3 mb-0">Campaign Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    {% if not is_tunnel %}
+    {% if user.is_authenticated %}
     {% if active_lifecycle == 'last' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
@@ -40,25 +42,67 @@
       </button>
     </form>
     {% else %}
-    <form method="post" action="{% url 'pcs:pcs_catalog_past_update' %}" class="ms-2 d-inline">
+    <form method="post" action="{% url 'pcs:pcs_catalog_past_update' %}" class="ms-2 d-inline" id="epicprod-update-form">
       {% csrf_token %}
-      <button type="submit" class="btn btn-sm btn-outline-primary"
-              title="Re-import 2026 FULL/RECO campaign output from epic-prod"
-              onclick="return confirm('Re-import 2026 past-campaign output datasets from epic-prod?');">
+      <button type="submit" id="epicprod-update-btn" class="btn btn-sm btn-outline-primary"
+              title="Re-import 2026 FULL/RECO campaign output from epic-prod (runs in the prod-ops agent; updates live when done)">
         Update from epic-prod
       </button>
     </form>
     {% endif %}
+    {% endif %}
+    {% endif %}
   </div>
+
+  <script>
+  // Update from epic-prod — fire-and-notify via the prod-ops agent + SSE push;
+  // the ~4900-dataset walk runs off the request (it times the gateway out) and
+  // the page updates when catalog_import_ready arrives. See docs/SSE_PUSH.md.
+  (function () {
+    const form = document.getElementById('epicprod-update-form');
+    const btn  = document.getElementById('epicprod-update-btn');
+    if (!form || !btn) return;
+    const label = btn.textContent.trim();
+    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Updating…' : label; }
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Re-import 2026 past-campaign output datasets from epic-prod?')) return;
+      busy(true);
+      const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/catalog-import/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ source: 'epic-prod' }),
+        });
+        if (r.status !== 202) {
+          let m = 'queue failed';
+          try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
+          throw new Error(m);
+        }
+        // Open the push stream ONLY now that the import is queued — never on
+        // page load — so viewing the past catalog pins no streaming worker.
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=catalog_import_ready");
+        es.addEventListener('catalog_import_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.source !== 'epic-prod') return;
+          if (d.ok === false) { es.close(); busy(false); alert('epic-prod import failed: ' + (d.error || 'unknown error')); }
+          else { window.location.reload(); }
+        });
+      } catch (err) {
+        busy(false);
+        alert('Could not queue the epic-prod import: ' + err.message);
+      }
+    });
+  })();
+  </script>
 
   {% if show_tabs %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
     {% for tab in lifecycle_tabs %}
       <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
          href="?lifecycle={{ tab.key }}">
-        {{ tab.label }}{% if tab.key != 'past' and tab.campaigns %} <span class="text-muted">·</span>
-          {% for c in tab.campaigns %}{{ c.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
-        {% endif %}
+        {{ tab.label }}{% if tab.detail %} <span class="text-muted">·</span> {{ tab.detail }}{% endif %}
       </a>
     {% endfor %}
   </div>
@@ -74,6 +118,7 @@
       {% for r in rucio_detected %}
         {% if r.version != rucio_current_name %}
         <span>{{ r.version }} <span class="text-muted">({{ r.count }})</span>
+          {% if user.is_authenticated %}
           <form method="post" action="{% url 'pcs:pcs_catalog_set_last' %}" class="d-inline">
             {% csrf_token %}
             <input type="hidden" name="name" value="{{ r.version }}">
@@ -81,6 +126,7 @@
                     title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot"
                     onclick="return confirm('Set PCS last to {{ r.version }} and pull snapshot?');">Make last</button>
           </form>
+          {% endif %}
         </span>
         {% endif %}
       {% endfor %}
@@ -109,16 +155,16 @@
   {% if active_lifecycle != 'last' %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Release:</span>
-    <a href="?lifecycle=past&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
        class="{% if active_release == 'all' %}active{% endif %}"
        style="font-weight:600">All</a>
     {% for grp in release_year_groups %}
       <span class="text-muted mx-1">|</span>
-      <a href="?lifecycle=past&amp;release={{ grp.all_key }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+      <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ grp.all_key }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
          class="{% if active_release == grp.all_key %}active{% endif %}"
          style="font-weight:600">All {{ grp.year }}</a>
       {% for v in grp.versions %}
-        <a href="?lifecycle=past&amp;release={{ v|urlencode }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
+        <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ v|urlencode }}{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
            class="{% if active_release == v %}active{% endif %}">{{ v }}</a>
       {% endfor %}
     {% endfor %}
@@ -127,14 +173,14 @@
 
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Stage:</span>
-    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}"
        class="{% if not active_stage %}active{% endif %}">All ({{ stage_counts.all }})</a>
     {% if stage_counts.FULL %}
-    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}&amp;stage=FULL"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}&amp;stage=FULL"
        class="{% if active_stage == 'FULL' %}active{% endif %}">Simu ({{ stage_counts.FULL }})</a>
     {% endif %}
     {% if stage_counts.RECO %}
-    <a href="?lifecycle=past&amp;release={{ active_release|urlencode }}&amp;stage=RECO"
+    <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}&amp;stage=RECO"
        class="{% if active_stage == 'RECO' %}active{% endif %}">Reco ({{ stage_counts.RECO }})</a>
     {% endif %}
   </div>
@@ -207,27 +253,28 @@
       </thead>
       <tbody>
       {% for t in tasks %}
-        {% with output=t.overrides.past_output ds_did=t.dataset.metadata.source.location %}
+        {% with o=t.outputs.0 tf=t.dataset.tag_facets %}
         <tr class="pcs-pdl-row"
-            data-detector="{{ output.filters.detector|default:'' }}"
-            data-beam="{{ output.filters.beam|default:'' }}"
-            data-physics="{{ output.filters.physics|default:'' }}"
-            data-q2="{{ output.filters.q2|default:'' }}"
-            data-species="{{ output.filters.species|default:'' }}"
-            data-energy="{{ output.filters.energy|default:'' }}"
-            data-incomplete="{% if not output.complete %}1{% else %}0{% endif %}"
-            data-search="{{ ds_did|lower }}">
+            data-detector="{{ tf.detector }}"
+            data-beam="{{ tf.beam }}"
+            data-physics="{{ tf.physics }}"
+            data-q2="{{ tf.q2 }}"
+            data-species="{{ tf.species }}"
+            data-energy="{{ tf.energy }}"
+            data-incomplete="{% if not o.complete %}1{% else %}0{% endif %}"
+            data-search="{{ o.did|lower }} {{ t.dataset.composed_name|lower }}">
           <td><input type="checkbox" class="pcs-pdl-cb" name="task" value="{{ t.pk }}"></td>
           <td class="small text-muted">{{ forloop.counter }}</td>
-          <td class="small">{% if output.stage == 'FULL' %}SIMU{% else %}{{ output.stage }}{% endif %}</td>
-          <td class="small">{{ output.version }}</td>
+          <td class="small">{% if o.stage == 'FULL' %}SIMU{% else %}{{ o.stage }}{% endif %}</td>
+          <td class="small">{{ o.version }}</td>
           <td class="small">
-            <div><strong class="text-muted">Output:</strong> {{ ds_did }}</div>
+            <div><strong class="text-muted">Tags:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.name|urlencode }}" title="Tag breakdown for this dataset">{{ t.dataset.composed_name }}</a></div>
+            <div><strong class="text-muted">Output:</strong> <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a></div>
             <div class="text-muted">
-              {{ t.dataset.file_count }} files
-              &middot; {{ t.dataset.data_size|filesizeformat }}
-              {% if output.rses %}&middot;
-                {% for r in output.rses %}{% if not forloop.first %}, {% endif %}{{ r.name }}{% if r.status != 'complete' %} <span class="pcs-pdl-rse-bad">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}
+              {{ o.file_count }} files
+              &middot; {{ o.bytes|filesizeformat }}
+              {% if o.rses %}&middot;
+                {% for r in o.rses %}{% if not forloop.first %}, {% endif %}{{ r.rse }}{% if not r.complete %} <span class="pcs-pdl-rse-bad">({{ r.files }}/{{ r.total }})</span>{% endif %}{% endfor %}
               {% endif %}
             </div>
           </td>

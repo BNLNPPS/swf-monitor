@@ -1,0 +1,280 @@
+{% extends 'base.html' %}
+
+{% block title %}epicprod - ePIC Production System - SWF Monitor{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-0 prod-workflow-home">
+    <style>
+      .prod-workflow-home {
+        --prod-border: #cfd8e3;
+        --prod-muted: #5d6b7a;
+        --prod-panel: #fff;
+        --prod-band: #f6f8fb;
+      }
+      .prod-workflow-header {
+        margin-bottom: .75rem;
+      }
+      .prod-workflow-header h1 {
+        font-size: 1.7rem;
+        margin: 0 0 .1rem;
+      }
+      .prod-workflow-header p {
+        color: var(--prod-muted);
+        margin-bottom: 0;
+      }
+      .workflow-grid {
+        align-items: stretch;
+        display: grid;
+        gap: .9rem;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+      .workflow-stage {
+        background: var(--prod-panel);
+        border: 1px solid var(--prod-border);
+        border-radius: 6px;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .workflow-stage-header {
+        background: var(--prod-band);
+        border-bottom: 1px solid var(--prod-border);
+        padding: .65rem .75rem .55rem;
+      }
+      .workflow-stage-title {
+        color: #1f2937;
+        font-size: 1.02rem;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .workflow-stage-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: .7rem;
+        padding: .7rem;
+      }
+      .workflow-group {
+        min-width: 0;
+      }
+      .workflow-group-title {
+        color: #495057;
+        font-size: .8rem;
+        font-weight: 700;
+        margin: 0 0 .35rem;
+        text-transform: uppercase;
+      }
+      .workflow-link-row {
+        border: 1px solid #e1e7ef;
+        border-radius: 5px;
+        margin-bottom: .4rem;
+        min-width: 0;
+        padding: .45rem .5rem;
+      }
+      .workflow-link-row:last-child {
+        margin-bottom: 0;
+      }
+      .workflow-link-line {
+        align-items: center;
+        display: flex;
+        gap: .35rem;
+        justify-content: space-between;
+        min-width: 0;
+      }
+      .workflow-link-line a {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .workflow-link-desc {
+        color: var(--prod-muted);
+        font-size: .82rem;
+        line-height: 1.25;
+        margin-top: .18rem;
+      }
+      .workflow-link-row .badge {
+        flex: 0 0 auto;
+      }
+      @media (max-width: 1300px) {
+        .workflow-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 760px) {
+        .workflow-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+
+    <div class="prod-workflow-header">
+        <h1>epicprod - ePIC Production System</h1>
+        <p>ePIC experiment production requests, configuration, management and monitoring</p>
+    </div>
+
+    <div class="workflow-grid">
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">Production Requests</div>
+            </div>
+            <div class="workflow-stage-body">
+                <div class="workflow-link-row" title="Production request questionnaire intake">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Production Requests</a></strong>
+                        <span class="badge bg-info">{{ questionnaires_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">Production request questionnaire intake</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">Physics Configuration</div>
+            </div>
+            <div class="workflow-stage-body">
+                <div class="workflow-group">
+                    <div class="workflow-group-title">Tags</div>
+                    <div class="workflow-link-row" title="Tags describing physics processes and machine configurations">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics</a></strong>
+                            <span class="badge bg-info">{{ physics_tags_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Tags describing physics processes and machine configurations</div>
+                    </div>
+                    <div class="workflow-link-row" title="Physics category numbering">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:physics_categories_list' %}" class="text-decoration-none">Physics Categories</a></strong>
+                            <span class="badge bg-info">{{ categories_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Physics category numbering</div>
+                    </div>
+                    <div class="workflow-link-row" title="Generator configurations, versions">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:tag_compose' tag_type='e' %}" class="text-decoration-none">Event Generation</a></strong>
+                            <span class="badge bg-info">{{ evgen_tags_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Generator configurations, versions</div>
+                    </div>
+                    <div class="workflow-link-row" title="Simulation tags corresponding to production simulation releases">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:tag_compose' tag_type='s' %}" class="text-decoration-none">Simulation</a></strong>
+                            <span class="badge bg-info">{{ simu_tags_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Simulation tags corresponding to production simulation releases</div>
+                    </div>
+                    <div class="workflow-link-row" title="Reconstruction tags corresponding to production reconstruction releases">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:tag_compose' tag_type='r' %}" class="text-decoration-none">Reconstruction</a></strong>
+                            <span class="badge bg-info">{{ reco_tags_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Reconstruction tags corresponding to production reconstruction releases</div>
+                    </div>
+                    <div class="workflow-link-row" title="Backgrounds for physics overlay">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:tag_compose' tag_type='k' %}" class="text-decoration-none">Background</a></strong>
+                            <span class="badge bg-info">{{ background_tags_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Backgrounds for physics overlay</div>
+                    </div>
+                </div>
+                <div class="workflow-group">
+                    <div class="workflow-group-title">Datasets/tasks</div>
+                    <div class="workflow-link-row" title="Datasets to be produced">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:datasets_compose' %}" class="text-decoration-none">Datasets</a></strong>
+                            <span class="badge bg-info">{{ datasets_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Datasets to be produced</div>
+                    </div>
+                    <div class="workflow-link-row" title="Submission templates">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:prod_configs_compose' %}" class="text-decoration-none">Configurations</a></strong>
+                            <span class="badge bg-info">{{ prod_configs_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Submission templates</div>
+                    </div>
+                    <div class="workflow-link-row" title="Submit-ready production tasks">
+                        <div class="workflow-link-line">
+                            <strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Task Creation</a></strong>
+                            <span class="badge bg-info">{{ prod_tasks_count }}</span>
+                        </div>
+                        <div class="workflow-link-desc">Submit-ready production tasks</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">Campaign Catalogs</div>
+            </div>
+            <div class="workflow-stage-body">
+                <div class="workflow-link-row" title="Tasks/datasets making up current, past and future production campaigns">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Campaign Task Catalogs</a></strong>
+                        <span class="badge bg-info">{{ prod_tasks_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">Tasks/datasets making up current, past and future production campaigns</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">PanDA Execution</div>
+            </div>
+            <div class="workflow-stage-body">
+                <div class="workflow-link-row" title="Overview of PanDA production activity with job and task counts by status, user, and site">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_activity' %}" class="text-decoration-none">Activity</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Production activity</div>
+                </div>
+                <div class="workflow-link-row" title="PanDA/JEDI task browser">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_tasks_list' %}" class="text-decoration-none">Tasks</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">PanDA/JEDI task browser</div>
+                </div>
+                <div class="workflow-link-row" title="PanDA production job browser">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_jobs_list' %}" class="text-decoration-none">Jobs</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">PanDA production job browser</div>
+                </div>
+                <div class="workflow-link-row" title="Top error patterns across failed jobs">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_errors_list' %}" class="text-decoration-none">Error Summary</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Top error patterns across failed jobs</div>
+                </div>
+                <div class="workflow-link-row" title="Production alarm system">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:alarms_dashboard' %}" class="text-decoration-none">Alarms</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Production alarm system</div>
+                </div>
+                <div class="workflow-link-row" title="Failed jobs with error details">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Failed jobs with error details</div>
+                </div>
+                <div class="workflow-link-row" title="ePIC compute queues">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">EIC PanDA Queues</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">ePIC compute queues</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">Validation</div>
+            </div>
+            <div class="workflow-stage-body"></div>
+        </section>
+    </div>
+</div>
+{% endblock %}

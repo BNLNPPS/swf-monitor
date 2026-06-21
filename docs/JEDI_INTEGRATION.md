@@ -8,6 +8,16 @@ This document describes the integration design: how PCS task parameters map to J
 
 **Approach:** Direct API submission. PCS owns the full task specification. JEDI's existing `GenTaskRefiner` handles the task — no custom server-side plugin required.
 
+## Reference implementation — the working basis
+
+Our EVGEN submission is derived from the EIC production submitter maintained by Sakib Rahman in `eic/job_submission_condor`, branch **`feature-add-panda-wrapper`**. This is the authoritative working template; `scripts/evgen_panda_submit.py` in this repo is adapted from it, and any divergence in submission behavior is checked against it first.
+
+- [`scripts/submit_csv.sh`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_csv.sh#L107-L151) — PanDA-mode entry: stages the sandbox, derives the `group.EIC.<dataset>` name from the detector version/config and the CSV's first path, and builds the `submit_panda_api.py` command line.
+- [`scripts/submit_panda_api.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda_api.py) — builds the `taskParamMap` (`noInput=True`, `noOutput=True`; container `multiStepExec`; `%RNDM`→`${SEQNUMBER}` pseudo-input; sandbox tarball via `Client.putFile`) and submits with `panda_api.get_api().submit_task(params)`.
+- [`scripts/submit_panda.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda.py) — the per-job in-container payload: reads row *n* of the chunked CSV and runs the hepmc3 campaign `run.sh`.
+
+Submission chain: `submit_csv.sh` → `submit_panda_api.py` (`client.submit_task`); `submit_panda.py` is the payload invoked per `${SEQNUMBER}`.
+
 ## Architecture
 
 ```
@@ -58,7 +68,7 @@ This document describes the integration design: how PCS task parameters map to J
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `taskName` | `dataset.task_name` | Dataset name without `.bN` block suffix |
+| `taskName` | dataset composed identity name (`Dataset.build_dataset_name`, minus the `.bN` block suffix) | see [Output dataset and file naming](#output-dataset-and-file-naming) |
 | `userName` | `task.created_by` | PCS user who created the task |
 | `vo` | `'eic'` | Virtual organization |
 | `workingGroup` | `config.panda_working_group` | e.g. `'EIC'` |
@@ -68,8 +78,8 @@ This document describes the integration design: how PCS task parameters map to J
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `prodSourceLabel` | `config.data['prod_source_label']` | `'managed'` for production, `'test'` for testing |
-| `taskType` | `'production'` | Fixed for PCS production tasks |
+| `prodSourceLabel` | `config.data['prod_source_label']` | `'test'` during commissioning; production submissions may use `'managed'` |
+| `taskType` | `'prod'` | PanDA task type for the live client-API EVGEN path |
 | `processingType` | `config.data['processing_type']` | e.g. `'epicproduction'` |
 | `taskPriority` | `config.data` or default | 0-1000, production typically 900 |
 | `transPath` | `config.data['transformation']` | Payload executable or TRF URL |
@@ -102,8 +112,8 @@ This document describes the integration design: how PCS task parameters map to J
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `log` | Built from `dataset.did` | Log dataset template |
-| `jobParameters` | Built from config | Execution command + output file templates |
+| `log` | Built from the output dataset name | Log dataset template (`<scope>:<name>.log`) |
+| `jobParameters` | Built from config + tags | Execution command + tag-based output file template |
 
 ### Flags
 
@@ -112,6 +122,61 @@ This document describes the integration design: how PCS task parameters map to J
 | `skipScout` | `config.data['skip_scout']` | Skip scout jobs if True |
 | `disableAutoRetry` | `config.data` | Optional |
 | `useRucio` | `config.use_rucio` | Whether to register outputs in Rucio |
+
+## Output dataset and file naming
+
+The output carries two naming conventions, applied at different levels.
+
+### Output dataset (Rucio DID)
+
+The `taskName` of the taskParamMap (`build_task_params`), the `--outDS` of the
+prun command (`build_panda_command`), and the output and log dataset templates
+all use the dataset's **composed identity name** — the classification tags plus
+any sample-variant discriminator, defined in [PCS.md](PCS.md#datasets):
+
+    {scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
+
+`{detector_version}` is the version of the detector/software conditions for the
+produced data. Campaign membership is production bookkeeping and does not rename
+the dataset identity. The task name is this name without the trailing `.bN`
+block suffix; the Rucio DID is the same name with the `{scope}:` prefix and the
+block suffix
+(`group.EIC:….r1.45to135deg.b1`).
+
+This composed name **is** the dataset identity. It supersedes the path-based RECO
+DID (`/RECO/<campaign>/<detector_config>/<suffix>`) built by `_output_dataset_name`
+(commit 6ea0d8e); that builder and the "path is the identity" convention are
+retired on the PanDA side. ePIC's slash paths remain in use only as Rucio
+references for external EVGEN inputs and for the data-lineage sweep (see
+[EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md)) — never to name PanDA
+outputs. Samples that share a tag composition — single-particle datasets
+differing only by polar-angle range — are told apart by the `{sample_name}`
+segment (`3to50deg`, `45to135deg`), so they no longer collide and need no
+path-based name.
+
+### Output files (LFN)
+
+Logical file names carry the composed identity name — the dataset name with the
+`{scope}.` prefix and `.bN` block suffix removed:
+
+    {detector_version}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.${SN}.edm4eic.root
+    {detector_version}.{detector_config}.<p>.<e>.<s>.<r>[.<k>][.<sample_name>].$PANDAID.log.${SN}.log.tgz   (log)
+
+The LFN base is thus literally our composed name, using the same dot separator as
+the DID — decoupled from ePIC's `/RECO/...` slash convention, which PCS uses only
+for input/lineage references, never to name PanDA outputs. The `{sample_name}`
+segment distinguishes the variant datasets of one composition at the file-base
+level. `$PANDAID` and `${SN}` are PanDA template variables substituted
+server-side when jobs are generated: `${SN}` is a per-task serial number
+(`task_complex_module.py`), and `$PANDAID` is the globally unique PanDA job id,
+substituted unconditionally (`job_complex_module.py`, line 3056) — it keeps each
+file name unique even across variant datasets, and needs no identifier known at
+build time. File names are resolved through Rucio by dataset, so the LFN form
+does not affect dataset-level discoverability.
+
+`$JEDITASKID`, the task-level identifier, is also available but is substituted
+only for non-`managed` jobs (`job_complex_module.py`, line 3058); `$PANDAID`
+applies to managed production as well.
 
 ## Example: taskParamMap Built from PCS
 
@@ -131,8 +196,8 @@ taskParamMap = {
     'campaign': '26.02.0',
 
     # Processing
-    'prodSourceLabel': 'managed',
-    'taskType': 'production',
+    'prodSourceLabel': 'test',
+    'taskType': 'prod',
     'processingType': 'epicproduction',
     'taskPriority': 900,
 
@@ -163,7 +228,7 @@ taskParamMap = {
         'param_type': 'log',
         'token': 'local',
         'destination': 'local',
-        'value': 'group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1.log.${SN}.log.tgz',
+        'value': '26.02.0.epic_craterlake.p3001.e1.s1.r1.$PANDAID.log.${SN}.log.tgz',
     },
 
     # Job parameters: execution command + output file spec
@@ -184,12 +249,20 @@ taskParamMap = {
             'token': 'local',
             'destination': 'local',
             'dataset': 'group.EIC:group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1',
-            'value': 'group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1.${SN}.root',
+            'value': '26.02.0.epic_craterlake.p3001.e1.s1.r1.$PANDAID.${SN}.edm4eic.root',
             'offset': 1000,
         },
     ],
 }
 ```
+
+In both modes `taskName` and the output dataset are the composed identity name;
+the modes differ only in how the sample is produced, not in how it is named. The
+example above is the generation-only case (`noInput=True`, no input path). A
+single-particle external-EVGEN task (a `csv_manifest` input) would instead be,
+for example, `group.EIC.26.02.0.epic_craterlake.p1141.e37.s1.r1.130to177deg`,
+with LFN base `26.02.0.epic_craterlake.p1141.e37.s1.r1.130to177deg` and the input
+staged as described below.
 
 ## External EVGEN Inputs
 
@@ -202,16 +275,29 @@ PCS-side dataset model.
 
 ### Mode summary
 
-| Mode | When | `noInput` | How payload sees the input |
+| Mode | When | `noInput` | How the payload sees the input |
 |------|------|-----------|----------------------------|
 | Generation-only | No external EVGEN; payload generates events | `True` | n/a |
-| External EVGEN — payload-staged | External CSV manifest names the input files | `True` | `CSV_FILE=<location>` env var; payload script downloads and stages the listed files at runtime |
-| External EVGEN — Rucio input | (Future) input is a registered Rucio dataset | `False` | JEDI drives input via standard `pfnList`/dataset reference |
+| External EVGEN — payload-staged (filesystem) | A CSV manifest names input files on a filesystem path | `True` | `CSV_FILE=<location>` env var; the payload downloads and stages the listed files at runtime |
+| External EVGEN — payload-staged (Rucio-resident) | Input is a dataset registered in JLab Rucio | `True` | input DID passed via env; the payload pulls the registered dataset from JLab Rucio at runtime |
+| External EVGEN — JEDI-driven | Input is a Rucio dataset resolved by JEDI | `False` | `--inDS`/`pfnList`; does not apply — see the single-Rucio constraint below |
 
-Only the first two modes are in scope for the current PCS implementation.
-Rucio-managed input is the natural follow-on once externally supplied EVGEN
-files are registered as Rucio datasets, but it is deferred — moving from
-payload-staged to Rucio-driven input is a localized later change.
+### Data handling and the single-Rucio constraint
+
+A PanDA server is configured against one Rucio instance. The BNL PanDA server
+used for ePIC production uses BNL Rucio, where PanDA registers job logs. ePIC
+production data — EVGEN inputs and RECO/FULL outputs — is held in JLab Rucio, a
+separate instance. The production payload performs all science-data movement
+directly against JLab Rucio, so PanDA does not resolve, transfer, or register
+the science data on either the input or the output side.
+
+JEDI-driven input (`--inDS`/`pfnList`, `noInput=False`) would require JEDI to
+resolve the input DID and its replicas through PanDA's Rucio, which is BNL Rucio,
+where the EVGEN is absent; it therefore does not apply. Rucio-resident EVGEN
+input is staged by the payload from JLab Rucio instead: the registered input DID
+is passed to the payload through the environment, by the same mechanism as the
+filesystem `CSV_FILE` path, and `noInput` remains `True`. This keeps the input
+side consistent with the output side, with PanDA out of the science-data path.
 
 ### Payload-staged external EVGEN
 
@@ -250,6 +336,16 @@ This is **not** a JEDI parameter. It is an env var the payload reads. JEDI
 sees an opaque constant string and stages it into each job's command line as
 written.
 
+### Sample-variant submit_params
+
+A sample variant's `submit_params` (e.g. the gun angle bounds for an angular
+range; see [PCS.md](PCS.md#sample-variants)) reach the job mode-dependently. In
+generation mode they are injected into the payload command string
+(`jobParameters[0]`) as gun parameters — the same mechanism as `CSV_FILE` above.
+In external-EVGEN mode the discriminator is already carried by the input
+path/manifest, so `submit_params` is empty. The exact parameter spelling is
+fixed in implementation planning.
+
 ### What this does *not* require
 
 - No new JEDI fields. `pfnList`, input-dataset references, and `nFilesPerJob`
@@ -276,6 +372,87 @@ When JEDI processes this task, `GenTaskRefiner` (61 lines, `panda-server/pandaje
 7. **Dataset templates** — instantiated per-site if DDM interface is available
 
 The `GenJobBroker` then handles site selection using the simplified non-ATLAS brokerage logic: filter by queue status, disk space, walltime constraints, then select.
+
+## Client-API EVGEN submission
+
+The live Submit path is the client-API EVGEN submission, which reproduces the
+proven condor-side recipe (`eic/job_submission_condor`, `submit_panda_api.py`) as
+code owned by this repo and runs it inside the prod-ops agent. It supersedes the
+prun path for the Submit button; prun (`build_panda_command`,
+`scripts/submit-prod-task.py`) is retained but unwired.
+
+A production EVGEN task is `noInput=True`+`noOutput=True`: the containerized
+payload streams its EVGEN input from JLab over xrootd and self-registers RECO to
+JLab Rucio, so PanDA handles no science data (the single-Rucio constraint above).
+The `taskParamMap` wraps the generic `runGen` TRF through `multiStepExec`, carries
+a `sourceURL`, and turns `%RNDM=0` into a per-job `${SEQNUMBER}`, so one job runs
+per manifest row.
+
+### Components
+
+- **`commands.build_evgen_task_params(task)`** (`?fmt=evgen`) — the
+  credential-free spec. It resolves the task's matched JLab Rucio EVGEN DID(s)
+  (`Dataset.metadata['rucio']['matched']`, written by the EVGEN assimilation) to
+  their files over the public `eicread` read, and emits one manifest row
+  (`file,ext,nevents,ichunk`) per file. A Rucio file's name is the xrootd path
+  below `EVGEN/` — the payload prepends `root://…/volatile/eic/EPIC/` to
+  `EVGEN/<file>`. Rucio carries no per-file event count, so `nevents` is the
+  configured per-job count (`events_per_job`) and there is one job per file.
+  `outDS` is the PCS composed task/dataset identity; under `noOutput` it is the
+  PanDA task name only.
+- **`scripts/evgen_panda_submit.py`** — the submission kernel, this repo's owned
+  port of `submit_panda_api.py`: it builds the `taskParamMap`, uploads the
+  sandbox to the PanDA cache, and submits via `pandaclient` under the operator's
+  OIDC token.
+- **`scripts/submit-evgen-task.py`** — the credentialed doer, the EVGEN
+  counterpart of `submit-prod-task.py`. It fetches the spec, assembles the
+  sandbox (the manifest, the `environment-*.sh` the payload sources, the in-job
+  dispatcher, and the JLab x509 proxy), runs the kernel under the panda-client
+  environment, and records the jediTaskID back via `record-submission`.
+- **`scripts/evgen_job_dispatcher.py`** — shipped in the sandbox. In-job it reads
+  the manifest row for its `${SEQNUMBER}` and invokes the payload
+  (`/opt/campaigns/hepmc3/scripts/run.sh`), which sources `environment*.sh` from
+  the unpacked sandbox.
+- **`agents/epicprod_ops_agent.py`** — the `submit_evgen_task` handler and doer,
+  deduped per task, emitting the same `prodtask_submitted` /
+  `prodtask_submit_failed` / `prodtask_submit_unrecorded` SSE events as the prun
+  path, so the compose page needs no change.
+
+### Output authentication
+
+The payload registers RECO to JLab Rucio as `eicprod`. The doer ships the
+`eicprod` x509 proxy in the sandbox — the proven condor-template method
+(`submit_csv.sh` copies the proxy in; the payload's `run.sh` reads it back through
+`environment*.sh` → `rucio.cfg`). This is settled and needs no verification: the
+working condor jobs register their output with this same `eicprod` credential, so
+its success there is the proof it authenticates as `eicprod@JLab`.
+
+The proxy is named by `EVGEN_X509_PROXY` and shipped verbatim — **there is no
+fallback** (no silent default). It is **not** `X509_USER_PROXY`
+(`longproxy-for-rucio`), the agent's BNL Rucio metadata and log-fetch credential
+(account `panda`), which does not write JLab output; shipping it would break the
+pattern. The operator points `EVGEN_X509_PROXY` at the `eicprod` proxy; the web
+tier and the MCP server hold no credential.
+
+### Commissioning defaults
+
+Scouts are off on this path by default (`skipScout`), so the walltime is used
+directly and the `noInput` pseudo-input HS06 brokerage pitfall is avoided; a
+config can re-enable them.
+
+## Implementation status (2026-06-16)
+
+The **live** Submit path is the **client-API EVGEN doer** (`submit_evgen_task`),
+described under [Client-API EVGEN submission](#client-api-evgen-submission). The
+prun path of 2026-06-03 — `build_panda_command` + `scripts/submit-prod-task.py`,
+which produced the first managed submission (jediTaskID 36439, see
+[EPICPROD_OPS.md](EPICPROD_OPS.md)) — is retained but unwired from the button.
+
+`build_task_params` (the generation-only `taskParamMap`, `?fmt=jedi`) remains a
+preview: `noInput` with JEDI-managed outputs, without the `noOutput`, sandbox, and
+`multiStepExec` the production payload needs. The client-API path (`?fmt=evgen`)
+is the production form. Phase 2 (`pcs/submission.py`, in-process
+`insertTaskParams`) is not built. Phases 3-4 (status polling) remain design.
 
 ## Implementation Plan
 
@@ -311,7 +488,8 @@ This calls `Client.insertTaskParams(task_params)` and handles the response. Auth
 
 ### Phase 3: UI Integration
 
-- Add a "Submit to JEDI" button on the ProdTask detail page (alongside existing command display)
+- Add a "Submit to JEDI" button on the task compose view's focused-task panel,
+  alongside the generated submission artifact display.
 - Show the taskParamMap as formatted JSON for review before submission
 - After submission, display the JEDI task ID with link to ePIC production monitoring
 - Status tracking via `Client.getTaskStatus(jedi_task_id)`
@@ -364,6 +542,12 @@ This is the intended test-phase submission path. Server-side submission from swf
 - `panda-client/pandaclient/example_task.py` — client-side task dict example
 - `panda-client/pandaclient/panda_api.py` — `submit_task()` high-level API
 - `panda-client/pandaclient/Client.py:1304` — `insertTaskParams()` implementation
+
+### Working submitter — our reference and basis (eic/job_submission_condor)
+Branch **`feature-add-panda-wrapper`** — Sakib Rahman's working EVGEN production submitter (see "Reference implementation" above):
+- [`scripts/submit_csv.sh`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_csv.sh#L107-L151)
+- [`scripts/submit_panda_api.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda_api.py)
+- [`scripts/submit_panda.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda.py)
 
 ### PCS Source Code (swf-monitor)
 - `src/pcs/models.py` — ProdTask, ProdConfig, Dataset, tag models

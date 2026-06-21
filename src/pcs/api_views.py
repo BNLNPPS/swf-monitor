@@ -29,13 +29,14 @@ from rest_framework.response import Response
 from django.db.models import Count
 
 from .models import (
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
-    Dataset, ProdConfig, ProdTask,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
+    Dataset, ProdConfig, ProdTask, Questionnaire,
 )
 from .serializers import (
     PhysicsCategorySerializer, PhysicsTagSerializer,
-    EvgenTagSerializer, SimuTagSerializer, RecoTagSerializer,
+    EvgenTagSerializer, SimuTagSerializer, RecoTagSerializer, BackgroundTagSerializer,
     DatasetSerializer, ProdConfigSerializer, ProdTaskSerializer,
+    QuestionnaireSerializer,
 )
 from .schemas import validate_parameters, get_tag_model
 from . import services
@@ -167,10 +168,19 @@ class RecoTagViewSet(_SimpleTagViewSet):
     tag_type = 'r'
 
 
+class BackgroundTagViewSet(_SimpleTagViewSet):
+    queryset = BackgroundTag.objects.all()
+    serializer_class = BackgroundTagSerializer
+    tag_type = 'k'
+
+
 class DatasetViewSet(viewsets.ModelViewSet):
-    """Dataset CRUD. POST validates all tags are locked and creates block 1. No DELETE."""
+    """Dataset CRUD. POST composes tags and creates block 1. No DELETE.
+
+    Tags may be draft during alpha — reproducibility locking is enforced at
+    submission prep, not composition. See docs/COMMISSIONING_RELAXATIONS.md."""
     queryset = Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
     serializer_class = DatasetSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
@@ -180,14 +190,6 @@ class DatasetViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        # Validate all tags are locked
-        for field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']:
-            tag = serializer.validated_data[field]
-            if tag.status != 'locked':
-                return Response(
-                    {field: [f'Tag {tag.tag_label} must be locked before use in a dataset.']},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
         instance = serializer.save(created_by=request.user.username)
         return Response(self.get_serializer(instance).data, status=status.HTTP_201_CREATED)
 
@@ -211,6 +213,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
                 evgen_tag_label=request.data.get('evgen_tag'),
                 simu_tag_label=request.data.get('simu_tag'),
                 reco_tag_label=request.data.get('reco_tag'),
+                background_tag_label=request.data.get('background_tag'),
                 description=request.data.get('description', ''),
                 created_by=request.user.username,
             )
@@ -235,6 +238,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
             evgen_tag=dataset.evgen_tag,
             simu_tag=dataset.simu_tag,
             reco_tag=dataset.reco_tag,
+            background_tag=dataset.background_tag,
             block_num=new_block_num,
             blocks=new_block_num,
             did=f"{dataset.scope}:{dataset.dataset_name}.b{new_block_num}",
@@ -256,6 +260,39 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user.username)
 
 
+class QuestionnaireViewSet(viewsets.ReadOnlyModelViewSet):
+    """Read-only Google Form response mirror plus authenticated intake."""
+    queryset = Questionnaire.objects.all()
+    serializer_class = QuestionnaireSerializer
+    authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @action(detail=False, methods=['post'], url_path='intake')
+    def intake(self, request):
+        try:
+            if 'csv_text' in request.data:
+                summary = services.questionnaire_intake_csv(
+                    request.data.get('csv_text'),
+                    source_url=request.data.get('source_url', ''),
+                    created_by=request.user.username,
+                )
+            else:
+                rows = request.data.get('rows')
+                if rows is None:
+                    return Response(
+                        {'detail': 'Provide either csv_text or rows.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                summary = services.questionnaire_intake(
+                    rows,
+                    source_url=request.data.get('source_url', ''),
+                    created_by=request.user.username,
+                )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(summary)
+
+
 class ProdTaskViewSet(viewsets.ModelViewSet):
     """Production tasks: Dataset + ProdConfig compositions with command generation."""
     queryset = ProdTask.objects.select_related(
@@ -264,13 +301,32 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     )
     serializer_class = ProdTaskSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
-    permission_classes = [IsOwnerOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    # Detail routes are keyed by the composed tag name. Composed names contain
+    # dots, so the default lookup regex ([^/.]+) is widened to allow them.
+    # get_object() resolves the composed name (and, inbound-only, the legacy
+    # stored name or a bare pk) via the shared resolver, so /pcs/api/prod-tasks/
+    # never emits a pk. The detail=False actions (command, record-submission, …)
+    # are registered before this detail route, so they are matched first.
+    lookup_field = 'name'
+    lookup_value_regex = '[^/]+'
+
+    def get_object(self):
+        try:
+            task = services.resolve_prodtask(
+                self.kwargs[self.lookup_field], self.get_queryset())
+        except ProdTask.DoesNotExist:
+            from django.http import Http404
+            raise Http404(f"No task {self.kwargs.get(self.lookup_field)!r}")
+        self.check_object_permissions(self.request, task)
+        return task
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user.username)
 
     @action(detail=True, methods=['post'], url_path='generate-commands')
-    def generate_commands(self, request, pk=None):
+    def generate_commands(self, request, name=None):
         task = self.get_object()
         task.generate_commands()
         task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
@@ -297,20 +353,20 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         from django.http import HttpResponse, JsonResponse
         from .commands import (
             build_condor_command, build_panda_command,
-            build_task_params, build_task_dump,
+            build_task_params, build_task_dump, build_evgen_task_params,
         )
 
         name = request.query_params.get('name')
         fmt = request.query_params.get('fmt', '').lower()
         if not name:
             return Response({'detail': 'Missing ?name='}, status=status.HTTP_400_BAD_REQUEST)
-        if fmt not in ('condor', 'panda', 'jedi', 'dump'):
+        if fmt not in ('condor', 'panda', 'jedi', 'evgen', 'dump'):
             return Response(
-                {'detail': "fmt must be one of: condor, panda, jedi, dump"},
+                {'detail': "fmt must be one of: condor, panda, jedi, evgen, dump"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            task = self.get_queryset().get(name=name)
+            task = services.resolve_prodtask(name, self.get_queryset())
         except ProdTask.DoesNotExist:
             return Response({'detail': f"No task named '{name}'"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -320,10 +376,23 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return HttpResponse(build_panda_command(task), content_type='text/plain')
         if fmt == 'jedi':
             return JsonResponse(build_task_params(task), json_dumps_params={'indent': 2})
+        if fmt == 'evgen':
+            # Client-API EVGEN production spec for the submit-evgen-task doer.
+            # Builds the manifest by resolving the matched DID(s) against JLab
+            # Rucio. A misconfigured task raises ValueError (400); a Rucio
+            # failure raises ServiceError (its status) — never a silent empty
+            # spec.
+            try:
+                return JsonResponse(build_evgen_task_params(task),
+                                    json_dumps_params={'indent': 2})
+            except ValueError as e:
+                return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except ServiceError as e:
+                return Response({'detail': e.detail}, status=e.status)
         return JsonResponse(build_task_dump(task), json_dumps_params={'indent': 2})
 
     @action(detail=True, methods=['post'], url_path='set-status')
-    def set_status(self, request, pk=None):
+    def set_status(self, request, name=None):
         task = self.get_object()
         try:
             services.prodtask_set_status(
@@ -333,8 +402,105 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
 
+    @action(detail=True, methods=['post'])
+    def lock(self, request, name=None):
+        """Lock a draft task → 'ready'. PCS-consistent with the tag lock: a
+        dedicated, one-way lifecycle action — the UI offers no unlock, so a
+        locked task is frozen for reproducibility. 'ready' is the task's locked
+        state. Authenticated users may operate production tasks; the transition
+        map (draft → ready only) is enforced by the service."""
+        task = self.get_object()
+        try:
+            services.prodtask_set_status(task=task, new_status='ready')
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=True, methods=['post'])
+    def submit(self, request, name=None):
+        """Request automated PanDA submission of a locked (ready) task — the
+        submit trigger used by the compose panel (and the task-detail "Submit in
+        Compose" link), so the user can submit without leaving the view.
+        Authenticated users may operate production tasks; the web tier holds no
+        PanDA credential, so this only publishes a request to the prod-ops
+        agent."""
+        task = self.get_object()
+        try:
+            services.prodtask_submit_request(task=task)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        data = dict(self.get_serializer(task).data)
+        # Commissioning: submit is allowed from draft; readiness problems are
+        # surfaced as a non-blocking warning rather than gating the submission.
+        warnings = services.prodtask_readiness_problems(task)
+        if warnings:
+            data['warnings'] = warnings
+        return Response(data)
+
+    @action(detail=True, methods=['post'], url_path='reset-submission')
+    def reset_submission(self, request, name=None):
+        """Detach a broken/aborted submission so a task can be re-submitted:
+        panda_task_id → None, status → draft. Authenticated users may operate
+        production tasks; this is the recovery path for a task pinned to a dead
+        jediTaskID (the submit gate refuses while panda_task_id is set). Does
+        not touch PanDA — the web tier holds no credential. See
+        docs/EPICPROD_OPS.md."""
+        task = self.get_object()
+        try:
+            services.prodtask_reset_submission(task=task)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=False, methods=['post'], url_path='rucio-snapshot-update')
+    def rucio_snapshot_update(self, request):
+        """Request a JLab Rucio snapshot refresh for the current campaign — the
+        external-safe trigger for the catalog 'Update from Rucio' button (a
+        /pcs/api/ POST returning JSON, so it survives the swf-remote proxy; see
+        docs/EPICPROD_OPS_AGENT.md). The web tier holds no credential; this only
+        publishes a rucio_snapshot_update to the prod-ops agent, which refreshes
+        the snapshot and rematches produced datasets onto each task's outputs in
+        the background, then pushes rucio_snapshot_ready over the SSE relay."""
+        user = getattr(request.user, 'username', '') or 'rucio_snapshot'
+        try:
+            services.rucio_snapshot_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['post'], url_path='evgen-rucio-update')
+    def evgen_rucio_update(self, request):
+        """Request a JLab Rucio EVGEN-input assimilation — the external-safe
+        trigger for the catalog 'Update EVGEN from Rucio' button (a /pcs/api/
+        POST returning JSON, so it survives the swf-remote proxy). The web tier
+        holds no credential; this only publishes an evgen_rucio_update to the
+        prod-ops agent, which fetches epic:/EVGEN/*, resolves each PCS evgen
+        Dataset onto metadata['rucio'] in the background, then pushes
+        evgen_rucio_ready over the SSE relay. See docs/EPICPROD_EVGEN_INPUTS.md."""
+        user = getattr(request.user, 'username', '') or 'evgen_rucio'
+        try:
+            services.evgen_rucio_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['post'], url_path='catalog-import')
+    def catalog_import(self, request):
+        """Request a background catalog import — the external-safe trigger for the
+        'Update from CSV' and 'Update from epic-prod' buttons. The web tier only
+        publishes a catalog_import to the prod-ops agent, which runs the import
+        off the WSGI request (the epic-prod walk times the gateway out) and pushes
+        catalog_import_ready over the SSE relay. ``source``: 'csv' | 'epic-prod'.
+        See docs/EPICPROD_OPS_AGENT.md, docs/SSE_PUSH.md."""
+        user = getattr(request.user, 'username', '') or 'catalog_import'
+        try:
+            services.catalog_import_request(request.data.get('source'), created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
     @action(detail=True, methods=['post'], url_path='link-input')
-    def link_input(self, request, pk=None):
+    def link_input(self, request, name=None):
         """Thin wrapper over ``services.prodtask_link_input``."""
         task = self.get_object()
         try:
@@ -391,7 +557,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Missing ?name='},
                             status=status.HTTP_400_BAD_REQUEST)
         try:
-            task = self.get_queryset().get(name=name)
+            task = services.resolve_prodtask(name, self.get_queryset())
         except ProdTask.DoesNotExist:
             return Response({'detail': f"No task named '{name}'"},
                             status=status.HTTP_404_NOT_FOUND)

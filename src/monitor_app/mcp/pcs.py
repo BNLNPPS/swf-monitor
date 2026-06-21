@@ -14,7 +14,7 @@ def _list_tags_sync(tag_type, category=None, status=None, creator=None,
     from pcs.schemas import TAG_SCHEMAS, get_tag_model
 
     if tag_type not in TAG_SCHEMAS:
-        return {"error": f"Invalid tag_type '{tag_type}'. Use: p, e, s, r"}
+        return {"error": f"Invalid tag_type '{tag_type}'. Use: p, e, s, r, k"}
 
     model = get_tag_model(tag_type)
     qs = model.objects.order_by('-tag_number')
@@ -59,8 +59,8 @@ def _list_tags_sync(tag_type, category=None, status=None, creator=None,
 def _get_tag_sync(tag_label):
     """Get a single tag by label (e.g. 'p1001', 'e3', 'r1')."""
     label = tag_label.strip().lower()
-    if not label or label[0] not in ('p', 'e', 's', 'r'):
-        return {"error": f"Invalid tag label '{tag_label}'. Format: p1001, e3, s1, r1"}
+    if not label or label[0] not in ('p', 'e', 's', 'r', 'k'):
+        return {"error": f"Invalid tag label '{tag_label}'. Format: p1001, e3, s1, r1, k1"}
 
     prefix = label[0]
     try:
@@ -97,7 +97,7 @@ def _search_tags_sync(query, tag_type=None):
     """Search across tag descriptions and parameters."""
     from pcs.schemas import TAG_SCHEMAS, get_tag_model
 
-    types = [tag_type] if tag_type else ['p', 'e', 's', 'r']
+    types = [tag_type] if tag_type else ['p', 'e', 's', 'r', 'k']
     results = []
 
     for tt in types:
@@ -143,11 +143,13 @@ async def pcs_list_tags(
     """
     List PCS tags (production task configurations) with optional filtering.
 
-    PCS tags capture physics process, event generation, simulation, and
-    reconstruction configurations for ePIC Monte Carlo production campaigns.
+    PCS tags capture physics process, event generation, simulation,
+    reconstruction, and background configurations for ePIC Monte Carlo
+    production campaigns.
 
     Args:
-        tag_type: Tag type — 'p' (physics), 'e' (evgen), 's' (simu), 'r' (reco). Required.
+        tag_type: Tag type — 'p' (physics), 'e' (evgen), 's' (simu), 'r' (reco),
+                  'k' (background). Required.
         category: Physics tags only — filter by category name (e.g. 'DIS', 'DVCS', 'EXCLUSIVE').
         status: Filter by status: 'draft' or 'locked'.
         creator: Filter by creator username.
@@ -169,7 +171,7 @@ async def pcs_get_tag(tag_label: str) -> dict:
     Get full details of a single PCS tag by its label.
 
     Args:
-        tag_label: The tag label, e.g. 'p1001', 'e3', 's1', 'r1'.
+        tag_label: The tag label, e.g. 'p1001', 'e3', 's1', 'r1', 'k1'.
                    Case-insensitive.
 
     Returns:
@@ -193,7 +195,7 @@ async def pcs_search_tags(
     Args:
         query: Search text (case-insensitive). Matches against tag label,
                description, and all parameter values.
-        tag_type: Optional — restrict to one type: 'p', 'e', 's', 'r'.
+        tag_type: Optional — restrict to one type: 'p', 'e', 's', 'r', 'k'.
                   If omitted, searches all tag types.
 
     Returns:
@@ -214,6 +216,7 @@ async def pcs_search_tags(
 
 def _dataset_to_dict(ds, full=True):
     out = {
+        'composed_name': ds.composed_name,
         'did': ds.did,
         'dataset_name': ds.dataset_name,
         'scope': ds.scope,
@@ -230,6 +233,7 @@ def _dataset_to_dict(ds, full=True):
             'evgen_tag': ds.evgen_tag.tag_label,
             'simu_tag': ds.simu_tag.tag_label,
             'reco_tag': ds.reco_tag.tag_label,
+            'background_tag': ds.background_tag.tag_label if ds.background_tag_id else None,
             'block_num': ds.block_num,
             'blocks': ds.blocks,
             'description': ds.description,
@@ -242,6 +246,7 @@ def _dataset_to_dict(ds, full=True):
 
 def _prodtask_to_dict(t, full=True):
     out = {
+        'composed_name': t.composed_name,
         'name': t.name,
         'status': t.status,
         'panda_task_id': t.panda_task_id,
@@ -272,12 +277,14 @@ def _dataset_list_sync(stage=None, source_kind=None, source_location=None,
                        scope=None, name_contains=None, limit=20, offset=0):
     from pcs.models import Dataset
     qs = Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     ).order_by('-created_at')
     if scope:
         qs = qs.filter(scope=scope)
     if name_contains:
-        qs = qs.filter(dataset_name__icontains=name_contains)
+        from django.db.models import Q
+        qs = qs.filter(Q(dataset_name__icontains=name_contains)
+                       | Q(composed_name__icontains=name_contains))
     # stage / source_kind / source_location are derived from metadata JSON
     if stage:
         qs = qs.filter(metadata__stage=stage)
@@ -290,17 +297,19 @@ def _dataset_list_sync(stage=None, source_kind=None, source_location=None,
     return {'count': total, 'limit': limit, 'offset': offset, 'datasets': items}
 
 
-def _dataset_get_sync(did=None, dataset_name=None):
+def _dataset_get_sync(name=None, did=None, dataset_name=None):
     from pcs.models import Dataset
-    if not (did or dataset_name):
-        return {'error': 'Provide did or dataset_name'}
+    from pcs import services
+    key = name or did or dataset_name
+    if not key:
+        return {'error': 'Provide name (composed name), did, or dataset_name'}
     qs = Dataset.objects.select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
-    ds = (qs.filter(did=did).first() if did
-          else qs.filter(dataset_name=dataset_name).first())
-    if not ds:
-        return {'error': f'Dataset not found: {did or dataset_name}'}
+    try:
+        ds = services.resolve_dataset(key, queryset=qs)
+    except Dataset.DoesNotExist:
+        return {'error': f'Dataset not found: {key}'}
     return _dataset_to_dict(ds, full=True)
 
 
@@ -319,11 +328,12 @@ async def pcs_dataset_list(
 
     Filters cover the dataset metadata model — `stage` (e.g. 'evgen'),
     external `source_kind` (e.g. 'csv_manifest'), exact `source_location`,
-    and name/scope. Use `name_contains` for substring match.
+    and name/scope. `name_contains` substring-matches both the composed tag
+    name and the legacy dataset_name.
 
     Returns:
-        count, limit, offset, and a list of dataset summaries (DID,
-        dataset_name, scope, detector, stage, source_kind, source_location).
+        count, limit, offset, and a list of dataset summaries (composed_name,
+        DID, dataset_name, scope, detector, stage, source_kind, source_location).
     """
     return await sync_to_async(_dataset_list_sync)(
         stage=stage, source_kind=source_kind,
@@ -333,18 +343,24 @@ async def pcs_dataset_list(
 
 
 @mcp.tool()
-async def pcs_dataset_get(did: str = None, dataset_name: str = None) -> dict:
+async def pcs_dataset_get(name: str = None, did: str = None,
+                          dataset_name: str = None) -> dict:
     """
-    Get full details of a single Dataset by DID or dataset_name.
+    Get full details of a single Dataset by its composed name, DID, or legacy
+    dataset_name. Any one resolves it; the composed tag name is preferred.
 
     Args:
+        name: Composed tag-based identity (canonical) — the Rucio dataset /
+              PanDA outDS name, e.g.
+              'group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1'.
         did: Rucio-style DID, e.g. 'group.EIC:....b1'.
-        dataset_name: Dataset name without scope/block suffix.
+        dataset_name: Legacy stored name (e.g. 'csv_import.<hash>').
 
-    Returns: full dataset record (tags, blocks, metadata).
+    Returns: full dataset record, including composed_name, the four (+ optional
+    background k) tag labels, blocks, and metadata.
     """
     return await sync_to_async(_dataset_get_sync)(
-        did=did, dataset_name=dataset_name,
+        name=name, did=did, dataset_name=dataset_name,
     )
 
 
@@ -353,6 +369,7 @@ async def pcs_dataset_get(did: str = None, dataset_name: str = None) -> dict:
 def _dataset_intake_sync(*, source_location, source_kind, scope, stage,
                          detector_version, detector_config,
                          physics_tag, evgen_tag, simu_tag, reco_tag,
+                         background_tag,
                          description, created_by):
     from pcs import services
     try:
@@ -362,6 +379,7 @@ def _dataset_intake_sync(*, source_location, source_kind, scope, stage,
             detector_version=detector_version, detector_config=detector_config,
             physics_tag_label=physics_tag, evgen_tag_label=evgen_tag,
             simu_tag_label=simu_tag,       reco_tag_label=reco_tag,
+            background_tag_label=background_tag,
             description=description, created_by=created_by,
         )
     except services.ServiceError as e:
@@ -377,6 +395,7 @@ async def pcs_dataset_intake(
     evgen_tag: str = None,
     simu_tag: str = None,
     reco_tag: str = None,
+    background_tag: str = None,
     detector_version: str = None,
     detector_config: str = None,
     scope: str = 'group.EIC.evgen',
@@ -400,6 +419,7 @@ async def pcs_dataset_intake(
         detector_version=detector_version, detector_config=detector_config,
         physics_tag=physics_tag, evgen_tag=evgen_tag,
         simu_tag=simu_tag, reco_tag=reco_tag,
+        background_tag=background_tag,
         description=description, created_by=created_by,
     )
 
@@ -417,7 +437,9 @@ def _prodtask_list_sync(status=None, public_catalog_issue=None,
     if public_catalog_issue is not None:
         qs = qs.filter(overrides__public_catalog_issue=public_catalog_issue)
     if name_contains:
-        qs = qs.filter(name__icontains=name_contains)
+        from django.db.models import Q
+        qs = qs.filter(Q(name__icontains=name_contains)
+                       | Q(dataset__composed_name__icontains=name_contains))
     total = qs.count()
     items = [_prodtask_to_dict(t, full=False) for t in qs[offset:offset + limit]]
     return {'count': total, 'limit': limit, 'offset': offset, 'tasks': items}
@@ -425,31 +447,43 @@ def _prodtask_list_sync(status=None, public_catalog_issue=None,
 
 def _prodtask_get_sync(name):
     from pcs.models import ProdTask
-    t = (ProdTask.objects.select_related('dataset', 'prod_config')
-                          .filter(name=name).first())
-    if not t:
+    from pcs import services
+    qs = ProdTask.objects.select_related('dataset', 'prod_config')
+    try:
+        t = services.resolve_prodtask(name, queryset=qs)
+    except ProdTask.DoesNotExist:
         return {'error': f'Task not found: {name}'}
     return _prodtask_to_dict(t, full=True)
 
 
 def _prodtask_artifact_sync(name, fmt):
     from pcs.models import ProdTask
+    from pcs import services
     from pcs.commands import (
         build_condor_command, build_panda_command,
-        build_task_params, build_task_dump,
+        build_task_params, build_task_dump, build_evgen_task_params,
     )
-    if fmt not in ('condor', 'panda', 'jedi', 'dump'):
-        return {'error': "fmt must be one of: condor, panda, jedi, dump"}
-    t = ProdTask.objects.select_related('dataset', 'prod_config').filter(name=name).first()
-    if not t:
+    if fmt not in ('condor', 'panda', 'jedi', 'evgen', 'dump'):
+        return {'error': "fmt must be one of: condor, panda, jedi, evgen, dump"}
+    qs = ProdTask.objects.select_related('dataset', 'prod_config')
+    try:
+        t = services.resolve_prodtask(name, queryset=qs)
+    except ProdTask.DoesNotExist:
         return {'error': f'Task not found: {name}'}
+    cname = t.composed_name
     if fmt == 'condor':
-        return {'name': name, 'fmt': 'condor', 'value': build_condor_command(t)}
+        return {'name': cname, 'fmt': 'condor', 'value': build_condor_command(t)}
     if fmt == 'panda':
-        return {'name': name, 'fmt': 'panda', 'value': build_panda_command(t)}
+        return {'name': cname, 'fmt': 'panda', 'value': build_panda_command(t)}
     if fmt == 'jedi':
-        return {'name': name, 'fmt': 'jedi', 'taskParamMap': build_task_params(t)}
-    return {'name': name, 'fmt': 'dump', 'dump': build_task_dump(t)}
+        return {'name': cname, 'fmt': 'jedi', 'taskParamMap': build_task_params(t)}
+    if fmt == 'evgen':
+        try:
+            return {'name': cname, 'fmt': 'evgen',
+                    'submissionSpec': build_evgen_task_params(t)}
+        except ValueError as e:
+            return {'error': str(e)}
+    return {'name': cname, 'fmt': 'dump', 'dump': build_task_dump(t)}
 
 
 @mcp.tool()
@@ -465,11 +499,13 @@ async def pcs_prodtask_list(
 
     Filters: lifecycle `status` (draft/ready/submitted/completed/failed),
     `public_catalog_issue` (GitHub issue number on epic-prod), or
-    `name_contains` (substring).
+    `name_contains` (substring, matched against both the composed tag name
+    and the legacy stored name).
 
     Returns:
-        count, limit, offset, and task summaries (name, status,
-        panda_task_id, output/input/intermediate DIDs, input_source_*).
+        count, limit, offset, and task summaries (composed_name — the canonical
+        tag-based identity — plus legacy name, status, panda_task_id,
+        output/input/intermediate DIDs, input_source_*).
     """
     return await sync_to_async(_prodtask_list_sync)(
         status=status, public_catalog_issue=public_catalog_issue,
@@ -480,11 +516,18 @@ async def pcs_prodtask_list(
 @mcp.tool()
 async def pcs_prodtask_get(name: str) -> dict:
     """
-    Get full details of a single ProdTask by name.
+    Get full details of a single ProdTask.
 
-    Returns: name, status, panda_task_id, prod_config, description,
-    overrides, csv_file (legacy), the three dataset DID lists, and the
-    derived input_source_{kind,location,stage}.
+    Args:
+        name: The task identity. Accepts the composed tag-based name (canonical
+              — the Rucio dataset / PanDA outDS, e.g.
+              'group.EIC.26.02.0.epic_craterlake.p3001.e1.s1.r1'), the legacy
+              stored name, or a bare pk. The composed name is preferred.
+
+    Returns: composed_name (canonical identity), legacy name, status,
+    panda_task_id, prod_config, description, overrides, csv_file (legacy),
+    the three dataset DID lists, and the derived
+    input_source_{kind,location,stage}.
     """
     return await sync_to_async(_prodtask_get_sync)(name=name)
 
@@ -495,12 +538,14 @@ async def pcs_prodtask_artifact(name: str, fmt: str = 'dump') -> dict:
     Get a ProdTask submission artifact regenerated from current PCS state.
 
     Args:
-        name: ProdTask.name.
-        fmt:  'condor' | 'panda' | 'jedi' | 'dump' (default 'dump').
+        name: Task identity — composed tag-based name (preferred), legacy
+              stored name, or bare pk.
+        fmt:  'condor' | 'panda' | 'jedi' | 'evgen' | 'dump' (default 'dump').
 
     Returns: a dict with the requested artifact.
         - condor / panda: {value: <command string>}
         - jedi:           {taskParamMap: {...}}  (passable to insertTaskParams)
+        - evgen:          {submissionSpec: {...}} (live prod-ops doer input)
         - dump:           {dump: {task, dataset, tags, prod_config, effective_config}}
     """
     return await sync_to_async(_prodtask_artifact_sync)(name=name, fmt=fmt)
@@ -522,8 +567,10 @@ def _prodtask_intake_sync(payload, created_by):
 def _prodtask_link_input_sync(task_name, did=None, dids=None):
     from pcs.models import ProdTask
     from pcs import services
-    task = ProdTask.objects.select_related('dataset', 'prod_config').filter(name=task_name).first()
-    if not task:
+    qs = ProdTask.objects.select_related('dataset', 'prod_config')
+    try:
+        task = services.resolve_prodtask(task_name, queryset=qs)
+    except ProdTask.DoesNotExist:
         return {'error': f'Task not found: {task_name}'}
     try:
         services.prodtask_link_input(task=task, did=did, dids=dids)
@@ -535,8 +582,10 @@ def _prodtask_link_input_sync(task_name, did=None, dids=None):
 def _prodtask_set_status_sync(task_name, new_status):
     from pcs.models import ProdTask
     from pcs import services
-    task = ProdTask.objects.select_related('dataset', 'prod_config').filter(name=task_name).first()
-    if not task:
+    qs = ProdTask.objects.select_related('dataset', 'prod_config')
+    try:
+        task = services.resolve_prodtask(task_name, queryset=qs)
+    except ProdTask.DoesNotExist:
         return {'error': f'Task not found: {task_name}'}
     try:
         services.prodtask_set_status(task=task, new_status=new_status)
@@ -569,8 +618,8 @@ async def pcs_prodtask_intake(
     OR (public_catalog_csv_path, public_catalog_row_key). On match, the
     existing task's catalogue mapping is merged into overrides and
     description / input_dataset_did are optionally updated. On no match,
-    creates a draft requiring `name`, `dataset` (DID or name), and
-    `prod_config` (name).
+    creates a draft requiring `name`, `dataset` (composed tag name preferred,
+    DID and legacy dataset_name accepted), and `prod_config` (name).
 
     Returns: {created: bool, task: {...}}.
     """
@@ -600,8 +649,10 @@ async def pcs_prodtask_link_input(
     """
     Link input Dataset(s) to a ProdTask via overrides JSON.
 
-    Provide one of `did` (single DID) or `dids` (list of DIDs), not both.
-    Linked Datasets must already exist; this never creates Datasets.
+    `task_name` accepts the composed tag-based name (preferred), the legacy
+    stored name, or a bare pk. Provide one of `did` (single DID) or `dids`
+    (list of DIDs), not both. Linked Datasets must already exist; this never
+    creates Datasets.
 
     Returns: {task: {...}}.
     """
@@ -614,6 +665,9 @@ async def pcs_prodtask_link_input(
 async def pcs_prodtask_set_status(task_name: str, status: str) -> dict:
     """
     Transition a ProdTask to a new lifecycle state.
+
+    `task_name` accepts the composed tag-based name (preferred), the legacy
+    stored name, or a bare pk.
 
     Allowed transitions:
         draft     -> ready

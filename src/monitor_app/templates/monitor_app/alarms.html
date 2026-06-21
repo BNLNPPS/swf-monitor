@@ -1,0 +1,401 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load swf_fmt %}
+{% load humanize %}
+
+{% block title %}Alarms — ePIC Production Monitor{% endblock %}
+
+{% block extra_head %}
+<script>
+  // In-place refresh: fetch the same URL, swap the <main> contents.
+  // The browser keeps scrollY untouched during innerHTML replacement,
+  // so there's no reload, no scroll save/restore dance, no ghosting.
+  (function() {
+    var INTERVAL_MS = {{ auto_refresh_seconds }} * 1000;
+
+    function reExecuteScripts(root) {
+      // innerHTML inserts <script> nodes without executing them.
+      // Re-create each so inline scripts (countdown, scroll handlers)
+      // run in the new content.
+      var old = root.querySelectorAll('script');
+      for (var i = 0; i < old.length; i++) {
+        var s = document.createElement('script');
+        if (old[i].src) s.src = old[i].src;
+        else s.textContent = old[i].textContent;
+        old[i].parentNode.replaceChild(s, old[i]);
+      }
+    }
+
+    async function refresh() {
+      try {
+        var resp = await fetch(window.location.href, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+        if (!resp.ok) return;
+        var text = await resp.text();
+        var doc = new DOMParser().parseFromString(text, 'text/html');
+        var newMain = doc.querySelector('main');
+        var curMain = document.querySelector('main');
+        if (!newMain || !curMain) return;
+        // Skip if the fetched doc doesn't look like our dashboard
+        // (e.g. session expired → login page).
+        if (!newMain.querySelector('.alarms-scope')) return;
+        curMain.innerHTML = newMain.innerHTML;
+        reExecuteScripts(curMain);
+      } catch (e) { /* network blip — try again next tick */ }
+    }
+    setInterval(refresh, INTERVAL_MS);
+  })();
+</script>
+{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
+<style>
+  html { scroll-behavior: auto !important; }
+  .alarm-section-header {
+    background: #d8d8d8;
+    color: #222;
+    padding: 6px 12px;
+    border-radius: 3px;
+    font-size: 1.1em;
+    font-weight: 600;
+    margin-top: 1.8em;
+    margin-bottom: 0.8em;
+  }
+  .alarm-section-header .num {
+    color: #555;
+    font-weight: 700;
+    margin-right: 8px;
+  }
+  /* Kill Bootstrap's `code` pink-on-white within the alarms dashboard —
+     identifiers (team names, alarm slugs, entry_ids) should
+     not read as errors. */
+  .alarms-scope code,
+  .alarm-label {
+    font-family: "SF Mono", Monaco, Menlo, monospace;
+    font-size: 0.92em;
+    color: #444;
+    background: #ececec;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .quiet-badge {
+    background: #a58700; color: #fff; padding: 1px 8px;
+    border-radius: 3px; font-size: 0.75em; font-weight: 500;
+    margin-left: 6px;
+  }
+  /* Description / body panel — soft grey instead of white card. */
+  .alarm-desc {
+    background: #f3f3f3;
+    color: #333;
+    padding: 10px 14px;
+    border-radius: 4px;
+    max-width: 1000px;
+    margin-bottom: 0.8em;
+  }
+  .alarm-desc .label {
+    color: #777;
+    font-size: 0.82em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .alarm-desc pre {
+    white-space: pre-wrap;
+    margin: 0;
+    color: #333;
+    font-family: inherit;
+    font-size: 0.95em;
+  }
+</style>
+<div class="container-fluid mt-3 alarms-scope" style="max-width: 1400px;">
+    <div class="d-flex justify-content-between align-items-baseline mb-2">
+      <h2 class="mb-0">Alarms</h2>
+      <div class="text-muted" style="font-size: 0.9em;">
+        Built at {{ built_at_dt|date:"Y-m-d H:i:s" }} ·
+        all times {{ built_at_dt|date:"T" }} ·
+        auto-refresh {{ auto_refresh_seconds }}s
+      </div>
+    </div>
+    <div class="mb-3" style="font-size: 0.92em;">
+      <a href="#summary">alarm summary</a>
+      {% for r in summary_rows %}
+        <span class="text-muted">&middot;</span> <a href="#section-{{ r.entry_id }}">{{ r.title|default:r.name }}</a>
+      {% endfor %}
+      <span class="text-muted">&middot;</span> <a href="#recent-runs">recent crons</a>
+    </div>
+
+    {% if health.status == 'ok' %}
+        <div class="ok_fill p-3 mb-3" style="border-radius:4px;">
+            <strong>Cron engine: OK.</strong>
+            {% for r in health.reasons %}{{ r }} {% endfor %}
+            Cycle 5 min. Next check in <span id="next-tick-countdown" data-secs="{{ next_check_seconds }}">{{ next_check_seconds }}s</span>.
+        </div>
+    {% elif health.status == 'warn' %}
+        <div class="warning_fill p-3 mb-3" style="border-radius:4px;">
+            <strong>Cron engine: Warning.</strong>
+            <ul class="mb-0">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+            <div class="mt-1">Cycle 5 min. Next check in <span id="next-tick-countdown" data-secs="{{ next_check_seconds }}">{{ next_check_seconds }}s</span>.</div>
+        </div>
+    {% elif health.status == 'bad' %}
+        <div class="failed_fill p-3 mb-3" style="border-radius:4px;">
+            <strong>Cron engine: BAD.</strong>
+            <ul class="mb-0">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+            <div class="mt-1">Cycle 5 min. Next check in <span id="next-tick-countdown" data-secs="{{ next_check_seconds }}">{{ next_check_seconds }}s</span>.</div>
+        </div>
+    {% else %}
+        <div class="unknown_fill p-3 mb-3" style="border-radius:4px;">
+            <strong>Cron engine: unknown.</strong>
+            {% for r in health.reasons %}{{ r }} {% endfor %}
+            Cycle 5 min. Next check in <span id="next-tick-countdown" data-secs="{{ next_check_seconds }}">{{ next_check_seconds }}s</span>.
+        </div>
+    {% endif %}
+    <script>
+      (function(){
+        var el = document.getElementById('next-tick-countdown');
+        if (!el) return;
+        var secs = parseInt(el.getAttribute('data-secs'), 10);
+        function fmt(s) {
+          if (s <= 0) return 'due any moment';
+          var m = Math.floor(s / 60), r = s % 60;
+          return m > 0 ? (m + 'm ' + r + 's') : (r + 's');
+        }
+        el.textContent = fmt(secs);
+        setInterval(function(){
+          secs -= 1;
+          el.textContent = fmt(secs);
+        }, 1000);
+      })();
+    </script>
+
+    <section class="mb-4">
+        <div class="alarm-section-header">
+          Teams
+          <span class="text-muted" style="font-size:0.85em; font-weight:400;">
+            — reusable recipient lists, referenced as <code>@teamname</code>
+          </span>
+        </div>
+        {% if teams %}
+        <table class="table table-sm table-hover" style="max-width:1100px;">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Title</th>
+                    <th>Members</th>
+                    <th>Modified</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in teams %}
+                <tr>
+                    <td><code>{{ t.name }}</code></td>
+                    <td>{{ t.title|default:'' }}</td>
+                    <td><small>{{ t.content }}</small></td>
+                    <td><small>{{ t.modified|fmt_dt }}</small></td>
+                    <td>
+                        <a class="btn btn-dark-green btn-sm"
+                           href="{% url 'monitor_app:team_edit' at_name=t.name %}">Edit</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No teams defined yet.</p>
+        {% endif %}
+
+        <a class="btn btn-sm btn-primary"
+           href="{% url 'monitor_app:team_new' %}">Create team</a>
+    </section>
+
+    <div id="summary" class="alarm-section-header">
+      Alarm summary
+      <span class="text-muted" style="font-size:0.85em; font-weight:400;">
+        — one row per configured alarm
+      </span>
+    </div>
+    <form method="get" class="d-flex align-items-center gap-2 mb-2">
+        <label class="text-muted">Since:</label>
+        <input type="number" name="hours" value="{{ hours }}" min="1" max="720"
+               class="form-control form-control-sm" style="width:90px;"
+               title="How far back to look when counting/listing past alarms. View filter only; does not change alarm behavior.">
+        <span class="text-muted">hours ago</span>
+        <button class="btn btn-primary btn-sm">Apply</button>
+    </form>
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr>
+                <th>Alarm</th>
+                <th title="Per-alarm email switch. When OFF, the alarm's detection still runs and events still appear here — only email notifications are suppressed. Flip in the editor.">Emails</th>
+                <th>Alarm tasks in last {{ hours }}h</th>
+                <th>Current alarm tasks</th>
+                <th>Last alarm</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in summary_rows %}
+            <tr>
+                <td>
+                  <a href="#section-{{ r.entry_id }}"><span class="text-muted">Alarm {{ forloop.counter }}:</span> {{ r.title|default:r.name }}</a>
+                  {% if r.quiet %}<span class="quiet-badge" title="No detections in the last few runs despite prior history — may indicate a silently broken alarm.">quiet</span>{% endif %}
+                </td>
+                <td class="{% if r.enabled %}ok_fill{% else %}paused_fill{% endif %}"
+                    title="{% if r.enabled %}Emails are ON — notifications are sent on new detections.{% else %}Emails are OFF — detection still runs and events appear on this dashboard; mail is suppressed.{% endif %}">
+                    {% if r.enabled %}on{% else %}off{% endif %}
+                </td>
+                <td class="{% if r.count %}failed_fill{% else %}ok_fill{% endif %}">{{ r.count }}</td>
+                <td class="{% if r.active %}failed_fill{% else %}ok_fill{% endif %}">{{ r.active }}</td>
+                <td>{% if r.last_fired_dt %}{{ r.last_fired_dt|naturaltime }}{% else %}—{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="text-muted">No alarm configs defined.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% for sec in sections %}
+    <section id="section-{{ sec.config.entry_id }}">
+        <div class="alarm-section-header d-flex justify-content-between align-items-center">
+          <div>
+            <span class="num">Alarm {{ forloop.counter }}:</span>
+            {{ sec.config.title|default:sec.config.name }}
+            {% if not sec.config.enabled %}
+              <span class="paused_fill ms-1" style="font-size:0.75em; padding: 2px 10px; border-radius:3px; font-weight:500;"
+                    title="Emails OFF — detection still runs; only email notifications are suppressed.">emails off</span>
+            {% endif %}
+            <span class="text-muted ms-2" style="font-size:0.8em; font-weight:400;">
+              <code>{{ sec.config.entry_id }}</code>
+            </span>
+          </div>
+          <a class="btn btn-dark-green btn-sm"
+             href="{% url 'monitor_app:alarm_config_edit' entry_id=sec.config.entry_id %}">Edit</a>
+        </div>
+
+        <table class="table table-sm mb-2" style="max-width:1000px;">
+            <tbody>
+                <tr><th style="width:180px;">Created / modified</th>
+                    <td>{{ sec.config.created|fmt_dt }} / {{ sec.config.modified|fmt_dt }}</td></tr>
+                <tr><th>Recipients</th>
+                    <td>{{ sec.config.recipients_text|default:'—' }}</td></tr>
+                <tr><th>Source</th>
+                    <td>
+                      <a href="https://github.com/BNLNPPS/swf-monitor/blob/infra/baseline-v36/alarms/swf_alarms/alarms/{{ sec.config.name }}.py"
+                         target="_blank" rel="noopener">alarms/swf_alarms/alarms/{{ sec.config.name }}.py</a>
+                    </td></tr>
+            </tbody>
+        </table>
+
+        <h4 style="font-size: 1em;" class="mt-3 mb-2">
+            Current alarm tasks —
+            {% if sec.active %}<span class="text-danger">{{ sec.active }}</span>{% else %}0{% endif %}
+        </h4>
+        {% if sec.active_rows %}
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Metric</th>
+                    <th>First fired</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ar in sec.active_rows %}
+                <tr>
+                    <td>
+                      <a href="{% url 'monitor_app:alarm_task_history' entry_id=sec.config.entry_id %}?key={{ ar.dedupe_key|urlencode }}&hours={{ hours }}">
+                        {{ ar.subject }}
+                      </a>
+                    </td>
+                    <td>{{ ar.metric|default:'—' }}</td>
+                    <td>{{ ar.fire_time|fmt_dt }}{% if ar.fire_time_dt %} <span class="text-muted">({{ ar.fire_time_dt|naturaltime }})</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p class="text-muted">No active alarms right now.</p>
+        {% endif %}
+
+        {% if sec.config.content %}
+        <div class="alarm-desc">
+            <div class="label">Description / email body</div>
+            <pre>{{ sec.config.content }}</pre>
+        </div>
+        {% endif %}
+        {% if sec.params_table %}
+        <div style="margin-bottom: 0.8em;">
+          <div class="text-muted" style="font-size:0.82em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Params</div>
+          <table class="table table-sm" style="max-width:1100px; font-size:0.9em;">
+            <thead>
+              <tr>
+                <th>Param</th>
+                <th>Value</th>
+                <th>Type</th>
+                <th>Required</th>
+                <th>Default</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in sec.params_table %}
+              <tr{% if p.required %} style="font-weight:600;"{% endif %}>
+                <td><code>{{ p.name }}</code></td>
+                <td>{% if p.has_value %}<code>{{ p.value }}</code>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td><small>{{ p.type }}</small></td>
+                <td>{% if p.required %}<span class="text-danger">yes</span>{% else %}no{% endif %}</td>
+                <td><small>{% if p.has_default %}{{ p.default|default_if_none:"—" }}{% else %}—{% endif %}</small></td>
+                <td><small>{{ p.description }}</small></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        {% if sec.preview_body %}
+        <div style="margin-bottom: 0.8em;">
+          <div class="text-muted" style="font-size:0.82em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Current email preview (what would ship now if emails were on)</div>
+          <pre style="background:#f3f3f3; color:#333; padding:10px 14px; border:1px solid #e0e0e0; border-radius:4px; font-size:12.5px; margin:0; white-space:pre-wrap; max-width:1100px;"><span class="text-muted">Subject:</span> <strong>{{ sec.preview_subject }}</strong>
+{{ sec.preview_body }}</pre>
+        </div>
+        {% endif %}
+    </section>
+    {% endfor %}
+
+    <div id="recent-runs" class="alarm-section-header">
+      Recent cron engine runs
+      <span class="text-muted" style="font-size:0.85em; font-weight:400;">
+        — each run, with per-alarm breakdown
+      </span>
+    </div>
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Started</th>
+                <th>Per-alarm results</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in recent_runs %}
+            <tr>
+                <td style="white-space:nowrap;">{{ r.data.started_at|fmt_dt }}</td>
+                <td>
+                  {% if r.data.per_alarm %}
+                    {% for alarm_id, pc in r.data.per_alarm.items %}
+                      <div style="font-size:0.9em;">
+                        <a href="{% url 'monitor_app:alarm_run_report' run_uuid=r.id entry_id=alarm_id %}"><code>{{ alarm_id }}</code></a>:
+                        seen {{ pc.alarms_seen|default:0 }}{% if pc.bundle_sent %}, emailed{% endif %}{% if pc.errors %}, <span class="text-danger">error{% if pc.error_message %} — {{ pc.error_message }}{% endif %}</span>{% endif %}
+                      </div>
+                    {% endfor %}
+                  {% else %}
+                    <span class="text-muted">—</span>
+                  {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

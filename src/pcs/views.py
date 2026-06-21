@@ -7,13 +7,16 @@ Read operations are public; create/edit/lock require login.
 """
 import json
 from functools import wraps
+from urllib.request import urlopen
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
-from django.http import JsonResponse
+from django.http import JsonResponse, Http404
 from django.contrib import messages
 from django.db.models import Count, Q
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 
 # ---------------------------------------------------------------------------
@@ -45,11 +48,12 @@ def _post_only_redirect(request, fallback_url, action_label='This action'):
 from monitor_app.utils import DataTablesProcessor, get_filter_params, format_datetime
 
 from .models import (
-    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
     Dataset, ProdConfig, ProdTask,
-    Campaign, ProdRequest,
+    Campaign, Questionnaire, ProdRequest,
     PRODTASK_STATUS_CHOICES,
 )
+from .serializers import _redact_contact
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
@@ -122,7 +126,9 @@ def pcs_hub_counts():
         'evgen_tags_count': EvgenTag.objects.count(),
         'simu_tags_count': SimuTag.objects.count(),
         'reco_tags_count': RecoTag.objects.count(),
+        'background_tags_count': BackgroundTag.objects.count(),
         'datasets_count': Dataset.objects.values('dataset_name').distinct().count(),
+        'questionnaires_count': Questionnaire.objects.count(),
         'prod_configs_count': ProdConfig.objects.count(),
         'prod_tasks_count': ProdTask.objects.count(),
     }
@@ -132,10 +138,295 @@ def pcs_hub(request):
     return render(request, 'pcs/pcs_hub.html', pcs_hub_counts())
 
 
+# ── Questionnaire intake ───────────────────────────────────────────
+
+def _questionnaire_contact_display(questionnaire, *, authenticated):
+    if not authenticated:
+        return _redact_contact(questionnaire.contact)
+
+    contacts = (questionnaire.data or {}).get('contacts') or []
+    parts = []
+    for contact in contacts:
+        if not isinstance(contact, dict):
+            continue
+        name = (contact.get('name') or '').strip()
+        emails = [
+            str(email).strip()
+            for email in (contact.get('emails') or [])
+            if str(email).strip()
+        ]
+        if name and emails:
+            parts.append(f"{name} ({', '.join(emails)})")
+        elif name:
+            parts.append(name)
+        elif emails:
+            parts.append(', '.join(emails))
+    return ', '.join(parts) or questionnaire.contact
+
+
+def _questionnaire_contacts(questionnaire):
+    return [
+        contact for contact in ((questionnaire.data or {}).get('contacts') or [])
+        if isinstance(contact, dict)
+    ]
+
+
+def _questionnaire_contact_names(questionnaire):
+    names = []
+    seen = set()
+    for contact in _questionnaire_contacts(questionnaire):
+        name = (contact.get('name') or '').strip()
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            names.append(name)
+    return names
+
+
+def _questionnaire_has_email(questionnaire):
+    return any(contact.get('emails') for contact in _questionnaire_contacts(questionnaire))
+
+
+def _questionnaire_data_label(questionnaire, key):
+    value = (questionnaire.data or {}).get(key) or {}
+    return (value.get('label') or '').strip() if isinstance(value, dict) else ''
+
+
+def _questionnaire_prod_matches(questionnaire, *, status=None):
+    matches = []
+    for match in (questionnaire.data or {}).get('prod_matches') or []:
+        if not isinstance(match, dict):
+            continue
+        if status and (match.get('status') or 'accepted') != status:
+            continue
+        match = dict(match)
+        matched_at = match.get('matched_at')
+        if matched_at:
+            dt = parse_datetime(str(matched_at))
+            match['matched_at_display'] = format_datetime(dt) if dt else matched_at
+        else:
+            match['matched_at_display'] = ''
+        matches.append(match)
+    return matches
+
+
+def _task_display_name(task):
+    return task.composed_name or task.name
+
+
+def _resolve_questionnaire_match_task(match):
+    from .services import resolve_prodtask
+    qs = ProdTask.objects.select_related('campaign', 'dataset', 'prod_config')
+    for key in (match.get('task_name'), match.get('legacy_name'), match.get('task_id')):
+        if not key:
+            continue
+        try:
+            return resolve_prodtask(str(key), qs)
+        except ProdTask.DoesNotExist:
+            continue
+    return None
+
+
+def _annotate_questionnaire_matches(questionnaires):
+    for questionnaire in questionnaires:
+        matches = _questionnaire_prod_matches(questionnaire, status='accepted')
+        questionnaire.prod_match_count = len(matches)
+        questionnaire.prod_matches = matches
+
+
+def _annotate_task_questionnaire_matches(tasks):
+    tasks = list(tasks)
+    by_id = {task.pk: task for task in tasks}
+    by_name = {}
+    for task in tasks:
+        task.questionnaire_matches = []
+        if task.name:
+            by_name[task.name] = task
+        if task.composed_name:
+            by_name[task.composed_name] = task
+
+    questionnaires = Questionnaire.objects.all()
+    for questionnaire in questionnaires:
+        for match in _questionnaire_prod_matches(questionnaire, status='accepted'):
+            task = None
+            task_id = match.get('task_id')
+            if isinstance(task_id, int):
+                task = by_id.get(task_id)
+            elif str(task_id).isdigit():
+                task = by_id.get(int(task_id))
+            if task is None:
+                task = by_name.get(match.get('task_name') or '')
+            if task is None:
+                task = by_name.get(match.get('legacy_name') or '')
+            if task is None:
+                continue
+            task.questionnaire_matches.append({
+                'questionnaire': questionnaire,
+                'confidence': match.get('confidence') or '',
+                'reason': match.get('reason') or '',
+            })
+    return tasks
+
+
+def questionnaires_list(request):
+    rows = list(Questionnaire.objects.all())
+    authenticated = request.user.is_authenticated
+    for row in rows:
+        row.contact_display = _questionnaire_contact_display(
+            row, authenticated=authenticated)
+        row.repository_display = _questionnaire_data_label(
+            row, 'repository_curated')
+        row.generator_display = _questionnaire_data_label(row, 'generator')
+        row.generator_filter = row.generator_display or '__undefined__'
+        row.has_contact = bool(_questionnaire_contacts(row))
+        row.has_email = _questionnaire_has_email(row)
+        row.contact_filter = '||'.join(_questionnaire_contact_names(row))
+        row.search_text = ' '.join([
+            row.description or '',
+            row.repository or '',
+            row.repository_display or '',
+            row.generator_display or '',
+            row.contact_display or '',
+            row.nevents or '',
+            row.benchmark or '',
+            row.estimate or '',
+        ]).lower()
+    _annotate_questionnaire_matches(rows)
+    return render(request, 'pcs/questionnaires_list.html', {
+        'questionnaires': rows,
+        'total_count': len(rows),
+    })
+
+
+def questionnaire_detail(request, pk):
+    questionnaire = get_object_or_404(Questionnaire, pk=pk)
+    authenticated = request.user.is_authenticated
+    questionnaire.contact_display = _questionnaire_contact_display(
+        questionnaire, authenticated=authenticated)
+    questionnaire.repository_display = _questionnaire_data_label(
+        questionnaire, 'repository_curated')
+    questionnaire.generator_display = _questionnaire_data_label(
+        questionnaire, 'generator')
+    matches = []
+    for match in _questionnaire_prod_matches(questionnaire):
+        resolved = _resolve_questionnaire_match_task(match)
+        matches.append({'match': match, 'task': resolved})
+    return render(request, 'pcs/questionnaire_detail.html', {
+        'questionnaire': questionnaire,
+        'matches': matches,
+        'confidence_choices': ('high', 'medium', 'low'),
+    })
+
+
+@_login_required_flash
+def questionnaire_match_add(request, pk):
+    questionnaire = get_object_or_404(Questionnaire, pk=pk)
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:questionnaire_detail', kwargs={'pk': pk}),
+            action_label='Questionnaire match')
+    task_key = (request.POST.get('task') or '').strip()
+    confidence = (request.POST.get('confidence') or '').strip()
+    reason = (request.POST.get('reason') or '').strip()
+    if confidence not in {'high', 'medium', 'low'}:
+        confidence = 'medium'
+    if not task_key:
+        messages.error(request, 'Provide a production task name.')
+        return redirect('pcs:questionnaire_detail', pk=pk)
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(
+            task_key, ProdTask.objects.select_related('dataset', 'campaign'))
+    except ProdTask.DoesNotExist:
+        messages.error(request, f'No production task matches {task_key!r}.')
+        return redirect('pcs:questionnaire_detail', pk=pk)
+
+    data = dict(questionnaire.data or {})
+    matches = [
+        match for match in (data.get('prod_matches') or [])
+        if isinstance(match, dict) and match.get('task_id') != task.pk
+    ]
+    matches.append({
+        'task_id': task.pk,
+        'task_name': _task_display_name(task),
+        'legacy_name': task.name,
+        'confidence': confidence,
+        'status': 'accepted',
+        'reason': reason,
+        'matched_by': getattr(request.user, 'username', '') or 'web',
+        'matched_at': timezone.now().isoformat(),
+    })
+    data['prod_matches'] = matches
+    questionnaire.data = data
+    questionnaire.save(update_fields=['data', 'updated_at'])
+    messages.success(request, f'Matched request #{pk} to {_task_display_name(task)}.')
+    return redirect('pcs:questionnaire_detail', pk=pk)
+
+
+@_login_required_flash
+def questionnaire_match_remove(request, pk, task_id):
+    questionnaire = get_object_or_404(Questionnaire, pk=pk)
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:questionnaire_detail', kwargs={'pk': pk}),
+            action_label='Questionnaire match removal')
+    data = dict(questionnaire.data or {})
+    before = len(data.get('prod_matches') or [])
+    data['prod_matches'] = [
+        match for match in (data.get('prod_matches') or [])
+        if not (isinstance(match, dict) and str(match.get('task_id')) == str(task_id))
+    ]
+    questionnaire.data = data
+    questionnaire.save(update_fields=['data', 'updated_at'])
+    removed = before - len(data['prod_matches'])
+    if removed:
+        messages.success(request, f'Removed {removed} production match.')
+    else:
+        messages.warning(request, 'No matching production task link was present.')
+    return redirect('pcs:questionnaire_detail', pk=pk)
+
+
+@_login_required_flash
+def questionnaire_import(request):
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:questionnaires_list'),
+            action_label='Questionnaire import')
+    from .services import questionnaire_intake_csv, ServiceError
+    csv_url = (request.POST.get('csv_url') or '').strip()
+    if not csv_url:
+        messages.error(request, 'Provide a questionnaire CSV import URL.')
+        return redirect(reverse('pcs:questionnaires_list'))
+    try:
+        with urlopen(csv_url, timeout=30) as response:
+            csv_text = response.read().decode('utf-8-sig')
+    except Exception as e:
+        messages.error(request, f'Questionnaire CSV fetch failed: {e}')
+        return redirect(reverse('pcs:questionnaires_list'))
+    if not csv_text.strip():
+        messages.error(request, 'Questionnaire CSV import URL returned no CSV text.')
+        return redirect(reverse('pcs:questionnaires_list'))
+    try:
+        summary = questionnaire_intake_csv(
+            csv_text,
+            source_url=csv_url,
+            created_by=getattr(request.user, 'username', '') or 'questionnaire_import',
+        )
+    except ServiceError as e:
+        messages.error(request, f'Questionnaire import failed: {e.detail}')
+        return redirect(reverse('pcs:questionnaires_list'))
+    messages.success(
+        request,
+        f'Questionnaire import: {summary["created"]} new, '
+        f'{summary["updated"]} updated, {summary["unchanged"]} unchanged.'
+    )
+    return redirect(reverse('pcs:questionnaires_list'))
+
+
 # ── Physics Categories ────────────────────────────────────────────
 
 def physics_categories_list(request):
-    categories = PhysicsCategory.objects.annotate(tag_count=Count('tags'))
+    categories = PhysicsCategory.objects.annotate(tag_count=Count('tags')).order_by('digit')
     return render(request, 'pcs/physics_categories_list.html', {'categories': categories})
 
 
@@ -159,6 +450,7 @@ TAG_MODELS = {
     'e': EvgenTag,
     's': SimuTag,
     'r': RecoTag,
+    'k': BackgroundTag,
 }
 
 
@@ -260,9 +552,7 @@ def tag_detail(request, tag_type, tag_number):
 
     datasets = []
     if tag.status == 'locked':
-        filter_kwarg = {f'{schema["prefix"]}__tag_number' if schema["prefix"] == 'p' else f'{"physics" if schema["prefix"] == "p" else {"e": "evgen", "s": "simu", "r": "reco"}[schema["prefix"]]}_tag': tag}
-        # Build the correct filter field name
-        field_map = {'p': 'physics_tag', 'e': 'evgen_tag', 's': 'simu_tag', 'r': 'reco_tag'}
+        field_map = {'p': 'physics_tag', 'e': 'evgen_tag', 's': 'simu_tag', 'r': 'reco_tag', 'k': 'background_tag'}
         datasets = Dataset.objects.filter(**{field_map[tag_type]: tag}).order_by('-created_at')
 
     defs = get_param_defs(tag_type)
@@ -387,6 +677,7 @@ def tag_compose(request, tag_type):
             'parameters': t.parameters,
             'created_by': t.created_by,
             'created_at': t.created_at.strftime('%Y-%m-%d %H:%M'),
+            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
         }
         if tag_type == 'p':
             entry['category_digit'] = t.category.digit
@@ -401,7 +692,8 @@ def tag_compose(request, tag_type):
     # Peek at next tag suffix from PersistentState (read-only, no increment)
     from monitor_app.models import PersistentState
     state_keys = {'p': 'pcs_next_physics', 'e': 'pcs_next_evgen',
-                  's': 'pcs_next_simu', 'r': 'pcs_next_reco'}
+                  's': 'pcs_next_simu', 'r': 'pcs_next_reco',
+                  'k': 'pcs_next_background'}
     try:
         ps = PersistentState.objects.get(id=1)
         next_suffix = ps.state_data.get(state_keys[tag_type], 1)
@@ -421,6 +713,31 @@ def tag_compose(request, tag_type):
         'selected_tag_json': json.dumps(selected_tag),
     }
     return render(request, 'pcs/tag_compose.html', context)
+
+
+def tag_datasets(request, tag_type, tag_number):
+    """On-demand 'used by' for a tag: the datasets composed with it, each with a
+    representative task so the tag detail can link into the compose page (the
+    task anchors the campaign). GET JSON, read-only."""
+    if tag_type not in TAG_SCHEMAS:
+        return JsonResponse({'error': 'Invalid tag type'}, status=400)
+    model = get_tag_model(tag_type)
+    tag = get_object_or_404(model, tag_number=tag_number)
+    datasets = tag.datasets.select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
+    ).prefetch_related('prod_tasks').order_by('-created_at')
+    out = []
+    for ds in datasets:
+        tasks = list(ds.prod_tasks.all())
+        # A live (non-archive) task is the better link target; fall back to any.
+        rep = [t for t in tasks if t.status != 'past_output'] or tasks
+        out.append({
+            'composed_name': ds.build_dataset_name(),
+            'dataset_id': ds.id,
+            'task_name': rep[0].name if rep else '',
+            'task_count': len(tasks),
+        })
+    return JsonResponse({'datasets': out})
 
 
 def param_defs_api(request, tag_type):
@@ -563,6 +880,7 @@ def datasets_compose(request):
                 evgen_tag=cd['evgen_tag'],
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
+                background_tag=cd.get('background_tag'),
                 description=cd.get('description', ''),
                 metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
@@ -572,13 +890,14 @@ def datasets_compose(request):
             return redirect(f"{reverse('pcs:datasets_compose')}?selected={urlquote(ds.dataset_name)}")
 
     qs = Dataset.objects.filter(block_num=1).select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
     ).order_by('-created_at')
     datasets_data = []
     for ds in qs:
         datasets_data.append({
             'id': ds.id,
             'dataset_name': ds.dataset_name,
+            'composed_name': ds.build_dataset_name(),
             'did': ds.did,
             'scope': ds.scope,
             'detector_version': ds.detector_version,
@@ -595,6 +914,9 @@ def datasets_compose(request):
                          'description': ds.simu_tag.description, 'parameters': ds.simu_tag.parameters},
             'reco_tag': {'id': ds.reco_tag_id, 'label': ds.reco_tag.tag_label,
                          'description': ds.reco_tag.description, 'parameters': ds.reco_tag.parameters},
+            'background_tag': ({'id': ds.background_tag_id, 'label': ds.background_tag.tag_label,
+                                'description': ds.background_tag.description, 'parameters': ds.background_tag.parameters}
+                               if ds.background_tag_id else None),
         })
 
     # Full tag data for browsing and diffs
@@ -607,7 +929,8 @@ def datasets_compose(request):
         for t in qs_tags:
             entry = {'id': t.id, 'tag_number': t.tag_number, 'label': t.tag_label,
                      'description': t.description, 'status': t.status,
-                     'parameters': t.parameters, 'created_by': t.created_by}
+                     'parameters': t.parameters, 'created_by': t.created_by,
+                     'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M')}
             if ttype == 'p':
                 entry['category_name'] = t.category.name
             tag_list.append(entry)
@@ -629,6 +952,7 @@ def datasets_list(request):
         {'name': 'evgen_tag__tag_label', 'title': 'EvGen', 'orderable': True},
         {'name': 'simu_tag__tag_label', 'title': 'Simu', 'orderable': True},
         {'name': 'reco_tag__tag_label', 'title': 'Reco', 'orderable': True},
+        {'name': 'background_tag__tag_label', 'title': 'Background', 'orderable': True},
         {'name': 'blocks', 'title': 'Blocks', 'orderable': True},
         {'name': 'created_at', 'title': 'Created', 'orderable': True},
     ]
@@ -644,18 +968,19 @@ def datasets_list(request):
 def datasets_datatable_ajax(request):
     col_names = [
         'dataset_name', 'physics_tag__tag_label', 'evgen_tag__tag_label',
-        'simu_tag__tag_label', 'reco_tag__tag_label', 'blocks', 'created_at',
+        'simu_tag__tag_label', 'reco_tag__tag_label', 'background_tag__tag_label',
+        'blocks', 'created_at',
     ]
-    dt = DataTablesProcessor(request, col_names, default_order_column=6, default_order_direction='desc')
+    dt = DataTablesProcessor(request, col_names, default_order_column=7, default_order_direction='desc')
 
     # Only show block 1 rows (one row per logical dataset)
     qs = Dataset.objects.filter(block_num=1).select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag'
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'
     )
 
     records_total = Dataset.objects.filter(block_num=1).count()
     search_fields = ['dataset_name', 'physics_tag__tag_label', 'evgen_tag__tag_label',
-                     'simu_tag__tag_label', 'reco_tag__tag_label']
+                     'simu_tag__tag_label', 'reco_tag__tag_label', 'background_tag__tag_label']
     qs = dt.apply_search(qs, search_fields)
     records_filtered = qs.count()
     qs = qs.order_by(dt.get_order_by())
@@ -668,12 +993,20 @@ def datasets_datatable_ajax(request):
         e_url = f"{reverse('pcs:tag_compose', args=['e'])}?selected={ds.evgen_tag.tag_number}"
         s_url = f"{reverse('pcs:tag_compose', args=['s'])}?selected={ds.simu_tag.tag_number}"
         r_url = f"{reverse('pcs:tag_compose', args=['r'])}?selected={ds.reco_tag.tag_number}"
+        # Name: the tag-composed name (build_dataset_name); the internal
+        # csv_import.<hash> dataset_name is plumbing and is never shown.
+        if ds.background_tag_id:
+            k_url = f"{reverse('pcs:tag_compose', args=['k'])}?selected={ds.background_tag.tag_number}"
+            k_cell = f'<a href="{k_url}" title="{ds.background_tag.description}">{ds.background_tag.tag_label}</a>'
+        else:
+            k_cell = '-'
         data.append([
-            f'<a href="{detail_url}">{ds.dataset_name}</a>',
+            f'<a href="{detail_url}">{ds.composed_name}</a>',
             f'<a href="{p_url}" title="{ds.physics_tag.description}">{ds.physics_tag.tag_label}</a>',
             f'<a href="{e_url}" title="{ds.evgen_tag.description}">{ds.evgen_tag.tag_label}</a>',
             f'<a href="{s_url}" title="{ds.simu_tag.description}">{ds.simu_tag.tag_label}</a>',
             f'<a href="{r_url}" title="{ds.reco_tag.description}">{ds.reco_tag.tag_label}</a>',
+            k_cell,
             str(ds.blocks),
             format_datetime(ds.created_at),
         ])
@@ -728,6 +1061,7 @@ def dataset_create(request):
                 evgen_tag=cd['evgen_tag'],
                 simu_tag=cd['simu_tag'],
                 reco_tag=cd['reco_tag'],
+                background_tag=cd.get('background_tag'),
                 description=cd.get('description', ''),
                 metadata=cd.get('metadata') or None,
                 created_by=cd['created_by'],
@@ -758,6 +1092,7 @@ def dataset_add_block(request, pk):
         evgen_tag=dataset.evgen_tag,
         simu_tag=dataset.simu_tag,
         reco_tag=dataset.reco_tag,
+        background_tag=dataset.background_tag,
         block_num=new_block_num,
         blocks=new_block_num,
         did=f"{dataset.scope}:{dataset.dataset_name}.b{new_block_num}",
@@ -906,7 +1241,7 @@ def prod_config_edit(request, pk):
 
 # ── Production Tasks ─────────────────────────────────────────────
 
-TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag}
+TAG_MODELS_MAP = {'p': PhysicsTag, 'e': EvgenTag, 's': SimuTag, 'r': RecoTag, 'k': BackgroundTag}
 
 
 LIFECYCLE_KEYS = ('past', 'last', 'current', 'future')
@@ -1026,44 +1361,86 @@ def pcs_catalog_set_last(request):
 
 @_login_required_flash
 def pcs_catalog_rucio_update(request):
-    """POST handler for 'Update from Rucio' button on the catalog.
+    """No-JS POST fallback for the catalog 'Update from Rucio' button.
 
-    Pulls the JLab Rucio snapshot for the current PCS campaign
-    (both /RECO/<v>/* and /FULL/<v>/* under scope=epic) and writes
-    a JSON file under the snapshot directory. Redirects back to
-    the catalog with a flash summary. POST-only.
+    The button's JavaScript posts to the /pcs/api/ endpoint (the external-safe
+    trigger that survives the swf-remote proxy — see docs/EPICPROD_OPS_AGENT.md);
+    this page-view handles the no-JavaScript case only and is reachable on the
+    internal face. Both publish the same rucio_snapshot_update via
+    services.rucio_snapshot_update_request. POST-only.
+    See docs/EPICPROD_DATA_LINEAGE.md, docs/EPICPROD_OPS_AGENT.md.
     """
     if request.method != 'POST':
         return _post_only_redirect(
             request, reverse('pcs:pcs_catalog'),
             action_label='Update from Rucio')
-    from .services import import_jlab_rucio_current_snapshot, ServiceError
+    from .services import rucio_snapshot_update_request, ServiceError
     user = getattr(request.user, 'username', '') or 'rucio_snapshot'
-    # Pull snapshots for both the current and (when set) the last
-    # campaign in one click — operator already consented to a refresh.
-    targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
-                   .order_by('lifecycle'))
-    if not targets:
-        messages.error(request, 'No current Campaign defined in PCS.')
+    try:
+        rucio_snapshot_update_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
         return redirect(reverse('pcs:pcs_catalog'))
-    summaries, overall_errors = [], []
-    for camp in targets:
-        try:
-            summaries.append(import_jlab_rucio_current_snapshot(
-                campaign_name=camp.name, created_by=user))
-        except (ServiceError, OSError) as e:
-            overall_errors.append(f'{camp.lifecycle} {camp.name}: {e}')
-    parts = [
-        f"{s['campaign']} (" + ', '.join(f'{k}={v}' for k, v in s['paths'].items()) + ')'
-        for s in summaries
-    ]
-    msg = 'JLab Rucio snapshot: ' + ' | '.join(parts) if parts else 'no snapshot pulled'
-    if overall_errors:
-        msg += ' | errors: ' + '; '.join(overall_errors)
-        messages.warning(request, msg)
-    else:
-        messages.success(request, msg)
+    messages.success(request, 'Rucio update queued — refreshing in the background.')
     return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_evgen_update(request):
+    """No-JS POST fallback for the catalog 'Update EVGEN from Rucio' button.
+
+    The button's JavaScript posts to the /pcs/api/ endpoint (the external-safe
+    trigger); this page-view handles the no-JavaScript case on the internal
+    face. Both publish the same evgen_rucio_update via
+    services.evgen_rucio_update_request. POST-only.
+    See docs/EPICPROD_EVGEN_INPUTS.md, docs/EPICPROD_OPS_AGENT.md.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update EVGEN from Rucio')
+    from .services import evgen_rucio_update_request, ServiceError
+    user = getattr(request.user, 'username', '') or 'evgen_rucio'
+    try:
+        evgen_rucio_update_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(reverse('pcs:pcs_catalog'))
+    messages.success(request, 'EVGEN update queued — refreshing in the background.')
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+def rucio_did_detail(request, scope, name):
+    """Self-hosted Rucio DID detail — a live, read-only browser for any DID,
+    since ePIC has no public Rucio webui. GET page-view → external-safe through
+    the swf-remote proxy (no write, no redirect, no agent credential; reads use
+    the public eicread userpass). Generic over DID type — input EVGEN and output
+    RECO render identically; only the links into it differ. The file list loads
+    on demand (rucio_did_files). A back-link to associated ProdTasks is a planned
+    phase-1.5 add (reverse lookup over overrides['outputs'] / input DIDs).
+    See docs/EPICPROD_DATA_LINEAGE.md."""
+    from .services import fetch_jlab_rucio_did, ServiceError
+    norm = '/' + name.lstrip('/')
+    ctx = {'scope': scope, 'name': norm, 'name_url': norm.lstrip('/'),
+           'did': f'{scope}:{norm}'}
+    try:
+        ctx['r'] = fetch_jlab_rucio_did(scope, norm)
+    except ServiceError as e:
+        ctx['error'] = e.detail
+        return render(request, 'pcs/rucio_did_detail.html', ctx, status=e.status)
+    return render(request, 'pcs/rucio_did_detail.html', ctx)
+
+
+def rucio_did_files(request, scope, name):
+    """On-demand JSON file list for the DID detail page (can be thousands)."""
+    from .services import fetch_jlab_rucio_did_files, ServiceError
+    if not request.user.is_authenticated:
+        return JsonResponse({'error': 'Login required'}, status=403)
+    try:
+        files = fetch_jlab_rucio_did_files(scope, name)
+    except ServiceError as e:
+        return JsonResponse({'error': e.detail}, status=e.status)
+    return JsonResponse({'files': files, 'count': len(files)})
 
 
 @_login_required_flash
@@ -1099,7 +1476,6 @@ def pcs_catalog_past_update(request):
     return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=past')
 
 
-@_login_required_flash
 def pcs_catalog(request):
     """Production Task Catalog — lifecycle-grouped task listing.
 
@@ -1117,15 +1493,28 @@ def pcs_catalog(request):
         k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
         for k in LIFECYCLE_KEYS
     }
+    def _tab_detail(key, camps):
+        # Future campaigns are stage-prefixed (RECO/26.06.0); show the bare
+        # version so the tab reads "Future · 26.06.0", mirroring Current.
+        if key == 'past':
+            return ''
+        if key == 'future':
+            return ', '.join(sorted(
+                {c.name.split('/', 1)[1] for c in camps if '/' in c.name}))
+        return ', '.join(c.name for c in camps)
     lifecycle_tabs = [
         {'key': 'past',    'label': 'Past',    'color': 'secondary',
-         'campaigns': campaigns_by_lifecycle['past']},
+         'campaigns': campaigns_by_lifecycle['past'],
+         'detail': _tab_detail('past', campaigns_by_lifecycle['past'])},
         {'key': 'last',    'label': 'Last',    'color': 'last-green',
-         'campaigns': campaigns_by_lifecycle['last']},
+         'campaigns': campaigns_by_lifecycle['last'],
+         'detail': _tab_detail('last', campaigns_by_lifecycle['last'])},
         {'key': 'current', 'label': 'Current', 'color': 'success',
-         'campaigns': campaigns_by_lifecycle['current']},
+         'campaigns': campaigns_by_lifecycle['current'],
+         'detail': _tab_detail('current', campaigns_by_lifecycle['current'])},
         {'key': 'future',  'label': 'Future',  'color': 'primary',
-         'campaigns': campaigns_by_lifecycle['future']},
+         'campaigns': campaigns_by_lifecycle['future'],
+         'detail': _tab_detail('future', campaigns_by_lifecycle['future'])},
     ]
 
     # Past lifecycle: per-release view of output datasets. Each release
@@ -1139,8 +1528,11 @@ def pcs_catalog(request):
     # Last campaign's name (e.g. 26.04.1) and adds the Rucio timeline
     # plot above the table — a hybrid of Past's row model and Current's
     # snapshot view.
-    if active_lifecycle in ('past', 'last'):
-        past_campaigns = list(campaigns_by_lifecycle['past'])
+    if active_lifecycle in ('past', 'last', 'future'):
+        # Future and Past share the release-table view; each lists its own
+        # lifecycle's produced releases (Last pins to a past version, below).
+        past_campaigns = list(
+            campaigns_by_lifecycle['future' if active_lifecycle == 'future' else 'past'])
         # Time flows left to right; releases ordered ASC.
         release_versions = sorted(
             {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
@@ -1215,10 +1607,15 @@ def pcs_catalog(request):
 
         past_tasks = list(
             ProdTask.objects
-            .select_related('campaign', 'dataset')
+            .select_related(
+                'campaign', 'dataset', 'dataset__physics_tag',
+                'dataset__evgen_tag', 'dataset__simu_tag',
+                'dataset__reco_tag', 'dataset__background_tag',
+            )
             .filter(campaign__in=selected_campaigns, status='past_output')
             .order_by('campaign__name', 'dataset__dataset_name')
         )
+        past_tasks = _annotate_task_questionnaire_matches(past_tasks)
         agg_files = sum((c.data or {}).get('past_summary', {}).get('file_count', 0)
                         for c in selected_campaigns)
         agg_size = sum((c.data or {}).get('past_summary', {}).get('data_size_bytes', 0)
@@ -1281,6 +1678,11 @@ def pcs_catalog(request):
 
     qs = ProdTask.objects.select_related(
         'campaign', 'dataset', 'prod_config', 'request',
+        # Each row's composed name (models.py composed_name) reads the dataset's
+        # five tag FKs; prefetch them so the unpaginated list is one query, not
+        # 1 + 5N.
+        'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
+        'dataset__reco_tag', 'dataset__background_tag',
     ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
     qs = _apply_catalog_filters(qs, filters)
 
@@ -1291,6 +1693,8 @@ def pcs_catalog(request):
     rucio_unmatched_campaign = ''
     rucio_detected = []
     rucio_current_name = ''
+    evgen_rucio_unmatched = []
+    evgen_rucio_checked_at = ''
     if active_lifecycle == 'current':
         camp_list = campaigns_by_lifecycle['current']
         target = camp_list[0] if camp_list else None
@@ -1304,9 +1708,12 @@ def pcs_catalog(request):
             rucio_unmatched_campaign = target.name
             rucio_detected = (target.data or {}).get('detected_releases', []) or []
             rucio_current_name = target.name
+            evgen_rucio_unmatched = (target.data or {}).get('evgen_rucio_unmatched', []) or []
+            evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
 
+    tasks = _annotate_task_questionnaire_matches(list(qs))
     context = {
-        'tasks': list(qs),
+        'tasks': tasks,
         'show_tabs': True,
         'columns_mode': 'full',
         'active_lifecycle': active_lifecycle,
@@ -1323,6 +1730,8 @@ def pcs_catalog(request):
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
         'rucio_detected': rucio_detected,
         'rucio_current_name': rucio_current_name,
+        'evgen_rucio_unmatched': evgen_rucio_unmatched,
+        'evgen_rucio_checked_at': evgen_rucio_checked_at,
     }
     return render(request, 'pcs/pcs_catalog.html', context)
 
@@ -1352,7 +1761,7 @@ def prod_tasks_datatable_ajax(request):
 
     qs = ProdTask.objects.select_related('dataset', 'prod_config')
     records_total = qs.count()
-    search_fields = ['name', 'description', 'dataset__dataset_name', 'prod_config__name', 'created_by']
+    search_fields = ['name', 'description', 'dataset__composed_name', 'dataset__dataset_name', 'prod_config__name', 'created_by']
     qs = dt.apply_search(qs, search_fields)
     records_filtered = qs.count()
     qs = qs.order_by(dt.get_order_by())
@@ -1362,10 +1771,10 @@ def prod_tasks_datatable_ajax(request):
                      'completed': 'success', 'failed': 'danger'}
     data = []
     for t in page:
-        detail_url = reverse('pcs:prod_task_detail', args=[t.pk])
+        detail_url = reverse('pcs:prod_task_detail', args=[t.composed_name])
         color = status_colors.get(t.status, 'secondary')
         data.append([
-            f'<a href="{detail_url}">{t.name}</a>',
+            f'<a href="{detail_url}">{t.composed_name}</a>',
             f'<span class="badge bg-{color}">{t.status}</span>',
             t.dataset.dataset_name,
             t.prod_config.name,
@@ -1376,35 +1785,122 @@ def prod_tasks_datatable_ajax(request):
     return dt.create_response(data, records_total, records_filtered)
 
 
-def prod_task_detail(request, pk):
-    from .commands import build_task_params
-    task = get_object_or_404(
-        ProdTask.objects.select_related(
+def prod_task_detail(request, name):
+    from .commands import build_evgen_task_params
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
             'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-        ),
-        pk=pk,
-    )
+        ))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
+    # Canonical task URL is the composed name; 301 a legacy/raw-name or stale
+    # /tasks/<pk>/ inbound to it so a pk is never a resting URL.
+    if name != task.composed_name:
+        return redirect('pcs:prod_task_detail', name=task.composed_name, permanent=True)
     try:
-        task_params = build_task_params(task)
+        task_params = build_evgen_task_params(task)
         task_params_json = json.dumps(task_params, indent=2, sort_keys=False, default=str)
         task_params_error = None
     except Exception as e:
         task_params_json = None
         task_params_error = str(e)
+    can_operate = request.user.is_authenticated
     return render(request, 'pcs/prod_task_detail.html', {
         'task': task,
         'task_params_json': task_params_json,
         'task_params_error': task_params_error,
+        'can_operate': can_operate,
+        'can_submit': can_operate and task.panda_task_id is None and task.status in ('draft', 'ready'),
+        'can_reset_submission': can_operate and task.panda_task_id is not None,
     })
 
 
 def prod_task_compose(request):
-    """Two-pane compose UI for building production tasks."""
-    from .commands import build_task_params
-    # Preload all component data as JSON for client-side browsing
-    datasets_qs = Dataset.objects.filter(block_num=1).select_related(
-        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+    """Two-pane compose UI for building production tasks.
+
+    The page is scoped to ONE campaign — the current campaign by default, or the
+    campaign of the ?selected=<name> task. Only that campaign's tasks, and the
+    datasets they use, are shipped inline; cross-campaign and historical browsing
+    is the full catalog's job (linked from the page caption). Per-item heavy
+    detail (tag parameters, EVGEN submission spec, cached commands) is still omitted and
+    hydrated on open (prod_task_compose_dataset_detail / _task_detail).
+    """
+    # Resolve the campaign first — it scopes the whole page. Default = the
+    # current campaign; a ?selected=<name> task in another campaign follows that
+    # task's campaign.
+    selected_name = request.GET.get('selected') or None
+    focused_task = None
+    if selected_name:
+        from .services import resolve_prodtask
+        try:
+            focused_task = resolve_prodtask(
+                selected_name, ProdTask.objects.select_related('campaign', 'dataset'))
+        except ProdTask.DoesNotExist:
+            focused_task = None
+    # Hand the JS the canonical composed name as the selection key (it resolves
+    # composed-name-or-legacy), so a legacy-name or pk ?selected still focuses.
+    if focused_task is not None:
+        selected_name = focused_task.composed_name
+    campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
+    if campaign is None:
+        campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+
+    # Campaign-scoped task set — the single inline JSON source. Shipping every
+    # campaign's tasks (and the ~4900 past_output archive rows) was what made
+    # this page multi-MB and prone to proxy read timeouts.
+    tasks_list = []
+    if campaign is not None:
+        tasks_list = list(
+            ProdTask.objects.select_related(
+                'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+                'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+            ).filter(campaign=campaign).order_by('-updated_at')
+        )
+    # Light task entries: EVGEN submission spec + cached commands omitted, hydrated on
+    # open (prod_task_compose_task_detail). Readiness (cheap) is included so the
+    # detail panel can show submit-readiness without a round trip.
+    from .services import prodtask_readiness_problems
+    tasks_list = _annotate_task_questionnaire_matches(tasks_list)
+    tasks_data = []
+    for t in tasks_list:
+        tasks_data.append({
+            'id': t.id,
+            'name': t.name,
+            # Canonical identity (stored dataset.composed_name); the JS keys and
+            # links tasks on this, never on the pk or the legacy slash name.
+            'composed_name': t.composed_name,
+            'status': t.status,
+            # The recorded submission — the JS reads `submitted = !!t.panda_task_id`
+            # to show the PanDA-task link + the operator Reset control. Omitting it
+            # left every submitted task with only the Copy button on page load.
+            'panda_task_id': t.panda_task_id,
+            'dataset_id': t.dataset_id,
+            'dataset_name': t.dataset.dataset_name,
+            'prod_config_id': t.prod_config_id,
+            'prod_config_name': t.prod_config.name,
+            'csv_file': t.csv_file,
+            'overrides': t.overrides or {},
+            'description': t.description,
+            'created_by': t.created_by,
+            'readiness': prodtask_readiness_problems(t),
+            'updated_at': format_datetime(t.updated_at),
+            'questionnaire_matches': [
+                {
+                    'id': item['questionnaire'].pk,
+                    'confidence': item.get('confidence') or '',
+                    'reason': item.get('reason') or '',
+                }
+                for item in getattr(t, 'questionnaire_matches', [])
+            ],
+        })
+
+    # Datasets: only those used by the in-scope tasks — campaign-coherent, and
+    # keeps the past_output archive datasets off the page.
+    dataset_ids = {t.dataset_id for t in tasks_list}
+    datasets_qs = Dataset.objects.filter(id__in=dataset_ids).select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
     ).order_by('-created_at')
     datasets_data = []
     for ds in datasets_qs:
@@ -1420,15 +1916,22 @@ def prod_task_compose(request):
             'source_kind': ds.source_kind,
             'source_location': ds.source_location,
             'validation_status': ds.validation_status,
-            'metadata': ds.metadata or {},
-            'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description,
-                            'parameters': ds.physics_tag.parameters},
-            'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description,
-                          'parameters': ds.evgen_tag.parameters},
-            'simu_tag': {'label': ds.simu_tag.tag_label, 'description': ds.simu_tag.description,
-                         'parameters': ds.simu_tag.parameters},
-            'reco_tag': {'label': ds.reco_tag.tag_label, 'description': ds.reco_tag.description,
-                         'parameters': ds.reco_tag.parameters},
+            # tag .parameters and .metadata omitted from the light payload;
+            # hydrated on open (prod_task_compose_dataset_detail). Labels +
+            # descriptions stay for the list, search, and the diff.
+            'physics_tag': {'label': ds.physics_tag.tag_label, 'description': ds.physics_tag.description},
+            'evgen_tag': {'label': ds.evgen_tag.tag_label, 'description': ds.evgen_tag.description},
+            'simu_tag': {'label': ds.simu_tag.tag_label, 'description': ds.simu_tag.description},
+            'reco_tag': {'label': ds.reco_tag.tag_label, 'description': ds.reco_tag.description},
+            # Background (k) is optional; null when the dataset carries no
+            # standalone-background tag.
+            'background_tag': ({'label': ds.background_tag.tag_label,
+                                'description': ds.background_tag.description}
+                               if ds.background_tag_id else None),
+            # The dataset's name in the tag-based system. The human-facing
+            # identity on the page — the internal csv_import.<hash> dataset_name
+            # and its synthetic DID are plumbing and are not shown.
+            'composed_name': ds.build_dataset_name(),
             'created_by': ds.created_by,
             'created_at': ds.created_at.strftime('%Y-%m-%d %H:%M'),
         })
@@ -1461,55 +1964,25 @@ def prod_task_compose(request):
             'updated_at': pc.updated_at.strftime('%Y-%m-%d %H:%M'),
         })
 
-    tasks_qs = ProdTask.objects.select_related(
-        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-        'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-    ).order_by('-updated_at')
-    tasks_data = []
-    for t in tasks_qs:
-        try:
-            task_params = build_task_params(t)
-            task_params_json = json.dumps(task_params, indent=2, default=str)
-        except Exception as e:
-            task_params_json = f'// Error building taskParamMap: {e}'
-        tasks_data.append({
-            'id': t.id,
-            'name': t.name,
-            'status': t.status,
-            'dataset_id': t.dataset_id,
-            'dataset_name': t.dataset.dataset_name,
-            'prod_config_id': t.prod_config_id,
-            'prod_config_name': t.prod_config.name,
-            'csv_file': t.csv_file,
-            'overrides': t.overrides or {},
-            'description': t.description,
-            'condor_command': t.condor_command,
-            'panda_command': t.panda_command,
-            'task_params_json': task_params_json,
-            'created_by': t.created_by,
-            'updated_at': t.updated_at.strftime('%Y-%m-%d %H:%M'),
-        })
-
-    # Workbench left-panel task list: same partial-friendly shape the catalog
-    # uses, but scoped to one campaign. Default = the current campaign; if
-    # ?selected=<name> resolves to a task in a different campaign, scope
-    # follows that task's campaign so the workbench reflects what the user
-    # is focusing on (per EPICPROD_TASK_CATALOG.md §6).
-    selected_name = request.GET.get('selected') or None
-    focused_task = None
-    if selected_name:
-        focused_task = ProdTask.objects.select_related('campaign').filter(name=selected_name).first()
-    workbench_campaign = focused_task.campaign if (focused_task and focused_task.campaign) else None
-    if workbench_campaign is None:
-        workbench_campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
-    workbench_tasks = []
-    if workbench_campaign is not None:
-        workbench_tasks = list(
+    # Left-panel task list: same campaign scope, dataset-name order, the
+    # partial-friendly shape the catalog uses.
+    campaign_tasks = []
+    if campaign is not None:
+        campaign_tasks = list(
             ProdTask.objects
-            .select_related('campaign', 'dataset', 'prod_config', 'request')
-            .filter(campaign=workbench_campaign)
+            .select_related(
+                'campaign', 'dataset', 'prod_config', 'request',
+                # The compose list falls back to dataset.composed_name (5 tag
+                # FKs) when a row has no source path; prefetch so native-dataset
+                # campaigns don't hit the same 1 + 5N as the catalog (a9a93ae).
+                'dataset__physics_tag', 'dataset__evgen_tag',
+                'dataset__simu_tag', 'dataset__reco_tag',
+                'dataset__background_tag',
+            )
+            .filter(campaign=campaign)
             .order_by('dataset__dataset_name')
         )
+        campaign_tasks = _annotate_task_questionnaire_matches(campaign_tasks)
 
     context = {
         'datasets_json': json.dumps(datasets_data),
@@ -1517,42 +1990,93 @@ def prod_task_compose(request):
         'tasks_json': json.dumps(tasks_data),
         'selected_item_json': json.dumps(selected_name),
         'username': request.user.username if request.user.is_authenticated else '',
-        # Workbench left-panel context (consumed by _task_workbench_list.html):
-        'tasks': workbench_tasks,
+        # Left-panel task-list context (consumed by the list partial):
+        'tasks': campaign_tasks,
         'focused_task_id': focused_task.id if focused_task else None,
-        'focused_campaign': workbench_campaign,
+        'focused_campaign': campaign,
         'filters': {},
     }
     return render(request, 'pcs/prod_task_compose.html', context)
 
 
 @_login_required_flash
-def prod_task_delete(request, pk):
+def prod_task_delete(request, name):
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related('dataset'))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
     if request.method != 'POST':
         return _post_only_redirect(
-            request, reverse('pcs:prod_task_detail', kwargs={'pk': pk}),
+            request, reverse('pcs:prod_task_detail', kwargs={'name': task.composed_name}),
             action_label='Task delete')
-    task = get_object_or_404(ProdTask, pk=pk)
     if task.status != 'draft':
         messages.error(request, "Only draft tasks can be deleted.")
-        return redirect('pcs:prod_task_detail', pk=pk)
+        return redirect('pcs:prod_task_detail', name=task.composed_name)
     task.delete()
-    messages.success(request, f"Task '{task.name}' deleted.")
+    messages.success(request, f"Task '{task.composed_name}' deleted.")
     return redirect('pcs:prod_tasks_list')
 
 
-def prod_task_generate_commands(request, pk):
+def prod_task_generate_commands(request, name):
     """JSON endpoint: regenerate and return commands for a ProdTask."""
-    task = get_object_or_404(
-        ProdTask.objects.select_related(
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
             'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-        ),
-        pk=pk,
-    )
+        ))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
     task.generate_commands()
     task.save(update_fields=['condor_command', 'panda_command', 'updated_at'])
     return JsonResponse({
+        'condor_command': task.condor_command,
+        'panda_command': task.panda_command,
+    })
+
+
+def prod_task_compose_dataset_detail(request, pk):
+    """On-demand hydration for the compose view: a dataset's tag parameters and
+    metadata, which the light initial payload omits. The compose JS merges this
+    into the dataset entry the first time it is opened (never clobbering). GET
+    JSON; read-only."""
+    ds = get_object_or_404(Dataset.objects.select_related(
+        'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'), pk=pk)
+    payload = {
+        'physics_tag': {'parameters': ds.physics_tag.parameters},
+        'evgen_tag': {'parameters': ds.evgen_tag.parameters},
+        'simu_tag': {'parameters': ds.simu_tag.parameters},
+        'reco_tag': {'parameters': ds.reco_tag.parameters},
+        'metadata': ds.metadata or {},
+    }
+    if ds.background_tag_id:
+        payload['background_tag'] = {'parameters': ds.background_tag.parameters}
+    return JsonResponse(payload)
+
+
+def prod_task_compose_task_detail(request, name):
+    """On-demand hydration for the compose view: a task's live EVGEN submission
+    spec and cached condor/panda commands, which the light initial payload omits.
+    The compose JS merges this into the task entry the first time it is opened
+    (never clobbering). GET JSON; read-only — does not regenerate/save commands."""
+    from .commands import build_evgen_task_params
+    from .services import resolve_prodtask
+    try:
+        task = resolve_prodtask(name, ProdTask.objects.select_related(
+            'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config'))
+    except ProdTask.DoesNotExist:
+        raise Http404(f"No task {name!r}")
+    try:
+        task_params_json = json.dumps(build_evgen_task_params(task), indent=2, default=str)
+        task_params_error = ''
+    except Exception as e:                                       # noqa: BLE001
+        task_params_json = ''
+        task_params_error = str(e)
+    return JsonResponse({
+        'task_params_json': task_params_json,
+        'task_params_error': task_params_error,
         'condor_command': task.condor_command,
         'panda_command': task.panda_command,
     })

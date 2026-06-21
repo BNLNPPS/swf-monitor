@@ -5,11 +5,20 @@
 
 {% block content %}
 <style>
-.compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); }
-.component-browser { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; }
-.spec-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .75rem; }
-.panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; }
+.compose-wrap { display: flex; gap: 1.5rem; padding: 1rem 1.5rem; height: calc(100vh - 80px); overflow: hidden; }
+.component-browser { flex: 0 0 38%; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.spec-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.panel-header { display: flex; flex-direction: column; align-items: stretch; gap: .4rem; margin-bottom: .75rem; }
+.panel-header #panel-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 1.0rem; }
+#panel-buttons { display: flex; flex-wrap: wrap; gap: .25rem; }
+.btn.pcs-reset-submit-btn { background: #f6c343; border-color: #9a6500; color: #1f1600; }
+.btn.pcs-reset-submit-btn:hover,
+.btn.pcs-reset-submit-btn:focus { background: #9a4f00; border-color: #6f3600; color: #fff; }
+.btn.pcs-reset-submit-btn:active { background: #763700; border-color: #512500; color: #fff; }
+.panel-body { flex: 1; overflow-y: auto; padding-right: .5rem; min-height: 0; }
+/* Datasets/Configs left pane: a flex column so its item-list scrolls inside the
+   pane instead of growing the page. min-height:0 lets the overflow child shrink. */
+#generic-list-host { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 .browser-tabs { display: flex; gap: 0; border-bottom: 2px solid #dee2e6; margin-bottom: .75rem; }
 .browser-tab { padding: .4rem .75rem; cursor: pointer; border-bottom: 2px solid transparent;
@@ -21,7 +30,7 @@
                    border-radius: .375rem; font-size: .85rem; margin-bottom: .5rem; }
 .filter-row { display: flex; flex-wrap: wrap; gap: .3rem; margin-bottom: .5rem; }
 
-.item-list { flex: 1; overflow-y: auto; border: 1px solid #dee2e6; border-radius: .375rem; }
+.item-list { flex: 1; overflow-y: auto; min-height: 0; border: 1px solid #dee2e6; border-radius: .375rem; }
 .item-entry { padding: .5rem .75rem; border-bottom: 1px solid #f0f0f0; cursor: pointer; font-size: .82rem; }
 .item-entry:hover { background: #f8f9fa; }
 .item-entry.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
@@ -77,12 +86,16 @@
         {# Datasets / Configs tabs: existing JS-driven list + free-text search. #}
         <div id="generic-list-host">
             <input type="text" class="browser-search" id="browser-search" placeholder="Search...">
+            <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem; align-self:flex-start;">
+                <button type="button" class="btn btn-outline-secondary active" data-sort="recent" style="font-size:.68rem; padding:.03rem .3rem; min-width:3.4rem;">Recent</button>
+                <button type="button" class="btn btn-outline-secondary" data-sort="alpha" style="font-size:.68rem; padding:.03rem .3rem; min-width:3.4rem;">A&ndash;Z</button>
+            </div>
             <div class="filter-row" id="browser-filters"></div>
             <div class="item-list" id="item-list" tabindex="0"></div>
         </div>
         {# Tasks tab: server-rendered catalog-style list with collapsed filter bar. #}
         <div id="tasks-list-host" style="display:none; flex:1; min-height:0; flex-direction:column;">
-            {% include "pcs/_task_workbench_list.html" %}
+            {% include "pcs/_task_compose_list.html" %}
         </div>
     </div>
 
@@ -95,6 +108,12 @@
                 <button class="btn btn-dark-green btn-sm" id="btn-copy-task" style="display:none;">Copy</button>
                 <button class="btn btn-dark-green btn-sm" id="btn-edit-task" style="display:none;">Edit</button>
                 <button class="btn btn-danger btn-sm" id="btn-delete-task" style="display:none;">Delete</button>
+                <button class="btn btn-success btn-sm" id="btn-lock-task" style="display:none;">Lock</button>
+                <span id="submit-task-wrap" tabindex="0" style="display:none;">
+                    <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
+                </span>
+                <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
+                <button class="btn pcs-reset-submit-btn btn-sm" id="btn-reset-task" style="display:none;">Reset submission</button>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -147,7 +166,7 @@
                             <div class="col-md-9"><label class="form-label" style="font-size:.82rem;"><strong>CSV File</strong></label>
                                 <input type="text" id="task-csv" class="form-control form-control-sm" placeholder="e.g. DIS/NC/10x100/minQ2=1/DIS_NC_10x100_minQ2=1.csv"></div>
                             <div class="col-md-3"><label class="form-label" style="font-size:.82rem;">&nbsp;</label>
-                                <button class="btn btn-primary btn-sm d-block w-100" id="btn-generate">Generate Commands</button></div>
+                                <button class="btn btn-primary btn-sm d-block w-100" id="btn-generate">Save Draft &amp; Generate Commands</button></div>
                         </div>
                         <div id="commands-area" style="display:none;">
                             <div class="d-flex justify-content-between align-items-center mt-3 mb-1">
@@ -173,23 +192,130 @@
     const allTasks    = {{ tasks_json|safe }};
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
+    const QUESTIONNAIRE_LIST_URL = "../../questionnaires/";
+
+    // ── Tag-based naming: the new system's names enter the world here ──
+    // The dataset's human-facing identity is its tag-composed name
+    // (build_dataset_name); the internal csv_import.<hash> dataset_name and its
+    // synthetic DID are plumbing and are never shown.
+    const TAG_COMPOSE_URLS = {
+        p: "{% url 'pcs:tag_compose' tag_type='p' %}", e: "{% url 'pcs:tag_compose' tag_type='e' %}",
+        s: "{% url 'pcs:tag_compose' tag_type='s' %}", r: "{% url 'pcs:tag_compose' tag_type='r' %}",
+        k: "{% url 'pcs:tag_compose' tag_type='k' %}",
+    };
+    function tagLink(type, tag) {
+        if (!tag || !tag.label) return '<span class="text-muted">-</span>';
+        const t = (tag.description || '').replace(/"/g, '&quot;');
+        return `<a href="${TAG_COMPOSE_URLS[type]}?selected=${encodeURIComponent(tag.label)}" title="${t}">${tag.label}</a>`;
+    }
+    function dsComposedName(ds) { return (ds && (ds.composed_name || ds.dataset_name)) || ''; }
+    // A task's canonical identity — the composed tag name; legacy stored name as
+    // fallback. Every task URL and label keys on this, never the pk (the integer
+    // id stays an in-memory handle only).
+    function taskComposedName(t) { return (t && (t.composed_name || t.name)) || ''; }
+    function taskApiUrl(t, suffix) {
+        return `/swf-monitor/pcs/api/prod-tasks/${encodeURIComponent(taskComposedName(t))}/${suffix || ''}`;
+    }
+    function htmlEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+    function isUrl(value) {
+        return /^https?:\/\//i.test(String(value || '').trim());
+    }
+    function textOrUrl(value) {
+        const s = String(value || '').trim();
+        if (!s) return '';
+        const escaped = htmlEscape(s);
+        return isUrl(s) ? `<a href="${escaped}" rel="noopener noreferrer">${escaped}</a>` : escaped;
+    }
+    // Legacy import rows carry an opaque csv_import.<hash> / past.<…> key and a
+    // synthetic DID (not a Rucio DID) — both plumbing, hidden from the panels.
+    function isLegacyKey(ds) { return ds && /^(csv_import|past)\./.test(ds.dataset_name || ''); }
+    // The p/e/s/r/k mapping as a linked table — the dataset's tag composition.
+    // Background (k) is shown only when present. Parameters appear once the
+    // dataset is hydrated (the light list payload omits them).
+    function tagTableHtml(ds) {
+        if (!ds) return '';
+        let rows = '';
+        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'],
+         ['Reco', ds.reco_tag, 'r'], ['Background', ds.background_tag, 'k']].forEach(([label, tag, type]) => {
+            if (type === 'k' && !tag) return;
+            const params = Object.entries((tag && tag.parameters) || {}).filter(([,v]) => v)
+                .map(([k,v]) => `${htmlEscape(k)}=${textOrUrl(v)}`).join(', ');
+            rows += `<tr><td>${label}</td><td>${tagLink(type, tag)}</td><td>${(tag && tag.description) || ''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+        });
+        return `<h6>Tags</h6><table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
+            <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
+            <tbody>${rows}</tbody></table>`;
+    }
     const initialSelected = {{ selected_item_json|safe }};  // string key (name) or null
     const urlParams = new URLSearchParams(window.location.search);
-    const initialTab = urlParams.get('tab') || 'datasets';
+    // This is the Prod Tasks page — default the browser to the Tasks tab, not
+    // Datasets. A ?selected=<name> resolves to its own entity type below.
+    const initialTab = urlParams.get('tab') || 'tasks';
 
     // Selection-key helpers: the URL carries the stable name, but internal
     // lookups use integer ids. Accept singular or plural type.
     function itemKeyOf(type, id) {
-        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.id === id)    || {}).name;
-        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.id === id) || {}).dataset_name;
+        if (type === 'task' || type === 'tasks')       return taskComposedName(allTasks.find(x => x.id === id));
+        // Datasets key on the composed (tag-based) name — the human-facing
+        // identity shown on the page, now unique — never the internal
+        // csv_import.<hash> dataset_name (which appears nowhere on the page).
+        if (type === 'dataset' || type === 'datasets') return dsComposedName(allDatasets.find(x => x.id === id));
         if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.id === id)  || {}).name;
         return null;
     }
     function itemIdOf(type, key) {
-        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => x.name === key)            || {}).id;
-        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => x.dataset_name === key) || {}).id;
+        if (type === 'task' || type === 'tasks')       return (allTasks.find(x => taskComposedName(x) === key || x.name === key) || {}).id;
+        // Accept the composed name; fall back to the legacy internal name so
+        // old bookmarks still resolve.
+        if (type === 'dataset' || type === 'datasets') return (allDatasets.find(x => dsComposedName(x) === key || x.dataset_name === key) || {}).id;
         if (type === 'config' || type === 'configs')   return (allConfigs.find(x => x.name === key)          || {}).id;
         return null;
+    }
+
+    // ── On-demand detail hydration ──
+    // The initial payload is light. The first time an item is opened we fetch
+    // the omitted heavy fields and MERGE them into the array entry, marking it
+    // hydrated so we never refetch and never clobber. Every item the detail /
+    // diff / apply / command machinery touches has first been opened, so the
+    // data is always present when those run.
+    async function hydrateDataset(id) {
+        const ds = allDatasets.find(d => d.id === id);
+        if (!ds || ds._hydrated) return ds;
+        try {
+            const r = await fetch(`/swf-monitor/pcs/datasets/${id}/compose-detail/`);
+            if (r.ok) {
+                const d = await r.json();
+                ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag'].forEach(k => {
+                    if (d[k]) ds[k] = Object.assign({}, ds[k], d[k]);
+                });
+                if (d.metadata !== undefined) ds.metadata = d.metadata;
+                ds._hydrated = true;
+            }
+        } catch (e) { /* leave light; detail falls back to labels */ }
+        return ds;
+    }
+    async function hydrateTask(id) {
+        const t = allTasks.find(x => x.id === id);
+        if (!t || t._hydrated) return t;
+        try {
+            const r = await fetch(`/swf-monitor/pcs/tasks/${encodeURIComponent(taskComposedName(t))}/compose-detail/`);
+            if (r.ok) {
+                const d = await r.json();
+                if (d.task_params_json !== undefined) t.task_params_json = d.task_params_json;
+                if (d.task_params_error !== undefined) t.task_params_error = d.task_params_error;
+                if (d.condor_command !== undefined) t.condor_command = d.condor_command;
+                if (d.panda_command !== undefined) t.panda_command = d.panda_command;
+                t._hydrated = true;
+            }
+        } catch (e) { /* leave light */ }
+        return t;
     }
 
     // ── State ──
@@ -197,7 +323,7 @@
     let mode = 'browse';  // 'browse' or 'compose'
     let selectedItemId = null;  // currently highlighted item in left list
     // Compose state
-    let composeDatasetId = null, composeConfigId = null, composeTaskId = null;
+    let composeDatasetId = null, composeConfigId = null, composeTaskId = null, composeTaskName = null;
     let composeDataset = null, composeConfig = null;
 
     const itemList = document.getElementById('item-list');
@@ -212,6 +338,11 @@
     const btnEditTask = document.getElementById('btn-edit-task');
     const btnCopyTask = document.getElementById('btn-copy-task');
     const btnDeleteTask = document.getElementById('btn-delete-task');
+    const btnLockTask = document.getElementById('btn-lock-task');
+    const submitTaskWrap = document.getElementById('submit-task-wrap');
+    const btnSubmitTask = document.getElementById('btn-submit-task');
+    const linkPandaTask = document.getElementById('link-panda-task');
+    const btnResetTask = document.getElementById('btn-reset-task');
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -243,7 +374,10 @@
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
-        composeTaskId = null; composeDatasetId = null; composeConfigId = null;
+        if (btnLockTask) btnLockTask.style.display = 'none';
+        if (submitTaskWrap) submitTaskWrap.style.display = 'none';
+        if (linkPandaTask) linkPandaTask.style.display = 'none';
+        composeTaskId = null; composeTaskName = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
     }
@@ -256,11 +390,14 @@
         if (btnEditTask) btnEditTask.style.display = 'none';
         if (btnCopyTask) btnCopyTask.style.display = 'none';
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
+        if (btnLockTask) btnLockTask.style.display = 'none';
+        if (submitTaskWrap) submitTaskWrap.style.display = 'none';
+        if (linkPandaTask) linkPandaTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
         // Clear compose state
-        composeTaskId = null; composeDatasetId = null; composeConfigId = null;
+        composeTaskId = null; composeTaskName = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         document.getElementById('task-name').value = '';
         document.getElementById('task-description').value = '';
@@ -281,10 +418,11 @@
 
         if (taskToEdit) {
             composeTaskId = taskToEdit.id;
-            document.getElementById('task-name').value = taskToEdit.name;
+            composeTaskName = taskToEdit.composed_name || taskToEdit.name;
+            document.getElementById('task-name').value = composeTaskName;
             document.getElementById('task-description').value = taskToEdit.description || '';
             document.getElementById('task-csv').value = taskToEdit.csv_file || '';
-            document.getElementById('identity-badge').textContent = `editing #${taskToEdit.id}`;
+            document.getElementById('identity-badge').textContent = 'editing';
             document.getElementById('identity-badge').style.display = '';
             document.getElementById('identity-badge').className = 'badge bg-warning';
             applyDatasetToCompose(taskToEdit.dataset_id);
@@ -294,7 +432,7 @@
                 document.getElementById('condor-preview').textContent = taskToEdit.condor_command || '';
                 document.getElementById('panda-preview').textContent = taskToEdit.panda_command || '';
             }
-            panelTitle.textContent = `Edit: ${taskToEdit.name}`;
+            panelTitle.textContent = `Edit: ${composeTaskName}`;
             btnSave.disabled = true; // no changes yet
         } else {
             panelTitle.textContent = 'New Production Task';
@@ -312,7 +450,7 @@
         browseType = tabName;
         selectedItemId = null;
         searchBox.value = '';
-        // Tasks tab uses the server-rendered workbench partial; everything
+        // Tasks tab uses the server-rendered compose view partial; everything
         // else uses the JS-driven generic list.
         const onTasks = (tabName === 'tasks');
         genericListHost.style.display = onTasks ? 'none' : '';
@@ -326,15 +464,18 @@
             if (btnDeleteTask) btnDeleteTask.style.display = 'none';
             if (btnEditTask) btnEditTask.style.display = 'none';
             if (btnCopyTask) btnCopyTask.style.display = 'none';
+            if (btnLockTask) btnLockTask.style.display = 'none';
+            if (submitTaskWrap) submitTaskWrap.style.display = 'none';
+            if (linkPandaTask) linkPandaTask.style.display = 'none';
         }
         renderList();
         updateUrl();
     }
 
-    // ── Workbench partial: route row clicks to the existing detail flow ──
-    const wbRoot = document.getElementById('pcs-wb-root');
-    if (wbRoot) {
-        wbRoot.addEventListener('pcs-wb:select', (e) => {
+    // ── Compose view partial: route row clicks to the existing detail flow ──
+    const clRoot = document.getElementById('pcs-cl-root');
+    if (clRoot) {
+        clRoot.addEventListener('pcs-cl:select', (e) => {
             const tid = e.detail && e.detail.taskId;
             if (!Number.isFinite(tid)) return;
             onItemClick('task', tid);
@@ -345,33 +486,59 @@
     });
 
     searchBox.addEventListener('input', renderList);
+    document.querySelectorAll('#list-sort button').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('#list-sort button').forEach(x => x.classList.toggle('active', x === b));
+        renderList();
+    }));
 
     // ── Render list ──
+    function sortItems(arr) {
+        const m = (document.querySelector('#list-sort .active') || {dataset: {}}).dataset.sort || 'recent';
+        const cp = arr.slice();
+        if (m === 'alpha') cp.sort((a, b) => (a.label || '').localeCompare(b.label || '', undefined, {numeric: true}));
+        else cp.sort((a, b) => (b.mod || '').localeCompare(a.mod || ''));
+        return cp;
+    }
+
     function renderList() {
         const q = searchBox.value.toLowerCase();
         let items = [];
         if (browseType === 'datasets') {
-            items = allDatasets.filter(d => !q || d.dataset_name.toLowerCase().includes(q) ||
+            items = allDatasets.filter(d => !q || dsComposedName(d).toLowerCase().includes(q) ||
+                (d.source_location || '').toLowerCase().includes(q) ||
                 d.physics_tag.label.toLowerCase().includes(q) || d.physics_tag.description.toLowerCase().includes(q)
-            ).map(d => ({ id: d.id, type: 'dataset', label: d.dataset_name,
+            ).map(d => ({ id: d.id, type: 'dataset', label: dsComposedName(d),
                 meta: `${d.physics_tag.label} ${d.evgen_tag.label} ${d.simu_tag.label} ${d.reco_tag.label}`
+                    + (d.background_tag ? ' ' + d.background_tag.label : '')
                     + `${d.external ? ' | external ' + (d.stage || 'dataset') : ''} | ${d.created_by}`,
+                mod: d.updated_at || d.created_at || '',
                 selected: d.id === selectedItemId }));
         } else if (browseType === 'configs') {
             items = allConfigs.filter(c => !q || c.name.toLowerCase().includes(q) ||
                 (c.jug_xl_tag||'').toLowerCase().includes(q) || c.description.toLowerCase().includes(q)
             ).map(c => ({ id: c.id, type: 'config', label: c.name,
                 meta: `JUG_XL: ${c.jug_xl_tag || '-'} | ${c.created_by}`,
+                mod: c.updated_at || c.created_at || '',
                 selected: c.id === selectedItemId }));
         } else if (browseType === 'tasks') {
-            items = allTasks.filter(t => !q || t.name.toLowerCase().includes(q) ||
-                t.dataset_name.toLowerCase().includes(q) || t.prod_config_name.toLowerCase().includes(q)
-            ).map(t => ({ id: t.id, type: 'task', label: t.name,
-                meta: `${t.status} | ${t.dataset_name} | ${t.prod_config_name}`,
-                selected: t.id === selectedItemId }));
+            items = allTasks.filter(t => {
+                if (!q) return true;
+                const ds = allDatasets.find(d => d.id === t.dataset_id);
+                return taskComposedName(t).toLowerCase().includes(q)
+                    || (t.name || '').toLowerCase().includes(q)
+                    || t.prod_config_name.toLowerCase().includes(q)
+                    || dsComposedName(ds).toLowerCase().includes(q)
+                    || ((ds && ds.source_location) || '').toLowerCase().includes(q);
+            }).map(t => {
+                const ds = allDatasets.find(d => d.id === t.dataset_id);
+                return { id: t.id, type: 'task', label: taskComposedName(t),
+                    meta: `${t.status} | ${dsComposedName(ds)} | ${t.prod_config_name}`,
+                    mod: t.updated_at || t.created_at || '',
+                    selected: t.id === selectedItemId };
+            });
         }
         filterRow.innerHTML = '';
-        itemList.innerHTML = items.map(it =>
+        itemList.innerHTML = sortItems(items).map(it =>
             `<div class="item-entry${it.selected ? ' selected' : ''}" data-type="${it.type}" data-id="${it.id}">
                 <div class="item-label">${it.label}</div>
                 <div class="item-meta">${it.meta}</div>
@@ -471,7 +638,7 @@
 
         // Top-level suggestion
         datasetSuggestion.innerHTML = `<span class="sg-source">Replace with:</span>
-            <span class="sg-value">${browsedDs.dataset_name}</span>
+            <span class="sg-value">${dsComposedName(browsedDs)}</span>
             <button type="button" class="btn btn-warning btn-sm btn-apply" id="ds-apply-all">Apply</button>`;
         datasetSuggestion.classList.add('visible');
         document.getElementById('ds-apply-all').addEventListener('click', () => {
@@ -492,13 +659,15 @@
                     <span class="fd-new">${browsedDs[key]||'-'}</span></div>`;
             }
         });
-        // Tag diffs
-        [['physics_tag','Physics'], ['evgen_tag','EvGen'], ['simu_tag','Simu'], ['reco_tag','Reco']].forEach(([key, label]) => {
-            if (cur[key].label !== browsedDs[key].label) {
+        // Tag diffs (background included; either side may lack a k tag)
+        [['physics_tag','Physics'], ['evgen_tag','EvGen'], ['simu_tag','Simu'], ['reco_tag','Reco'], ['background_tag','Background']].forEach(([key, label]) => {
+            const curLabel = (cur[key] && cur[key].label) || '-';
+            const newLabel = (browsedDs[key] && browsedDs[key].label) || '-';
+            if (curLabel !== newLabel) {
                 diffHtml += `<div class="field-diff">
                     <span class="fd-label">${label}:</span>
-                    <span class="fd-current">${cur[key].label}</span> <span class="fd-arrow">&rarr;</span>
-                    <span class="fd-new">${browsedDs[key].label}</span></div>`;
+                    <span class="fd-current">${curLabel}</span> <span class="fd-arrow">&rarr;</span>
+                    <span class="fd-new">${newLabel}</span></div>`;
             }
         });
         if (diffHtml) {
@@ -511,8 +680,17 @@
     }
 
     // ── Item click ──
-    function onItemClick(type, id) {
+    async function onItemClick(type, id) {
         selectedItemId = id;
+        // Opening an item hydrates it (and, for a task, its dataset) so the
+        // detail / diff / apply machinery below always finds the heavy fields.
+        if (type === 'dataset') {
+            await hydrateDataset(id);
+        } else if (type === 'task') {
+            await hydrateTask(id);
+            const ht = allTasks.find(x => x.id === id);
+            if (ht) await hydrateDataset(ht.dataset_id);
+        }
         if (mode === 'compose') {
             // Clear previous diffs before showing new ones
             document.querySelectorAll('.field-diff-container').forEach(el => el.remove());
@@ -540,38 +718,58 @@
         updateUrl();
     }
 
+    // Dataset/config detail panels are read-only here — hide every task-only
+    // action (Submit/Lock/Edit/Copy/Delete/PanDA link/New) that a prior task
+    // view may have left visible. Submit-to-PanDA is task business, not dataset.
+    function hideTaskActions() {
+        [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
+         linkPandaTask, btnResetTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
+    }
+
     // ── BROWSE: Show details ──
+    // Jump to a task in the Tasks tab and open its detail — the navigation a
+    // 'used by' link performs. Mirrors a left-list click.
+    function gotoTask(taskId) {
+        if (browseType !== 'tasks') switchTab('tasks');
+        onItemClick('task', taskId);
+    }
+
+    // 'Used by' list: the tasks that consume this dataset. Empty for a dataset
+    // no task references yet. Rendered as links into the Tasks tab.
+    function tasksUsingDatasetHtml(ds) {
+        const users = allTasks.filter(t => t.dataset_id === ds.id);
+        if (!users.length) return `<h6>Used by</h6><div class="empty-state" style="padding:.25rem 0;">No tasks use this dataset yet.</div>`;
+        const rows = users.map(t =>
+            `<li><a href="#" class="goto-task" data-task-id="${t.id}">${taskComposedName(t)}</a>
+                 <span class="item-meta">— ${t.status} | ${t.prod_config_name}</span></li>`).join('');
+        return `<h6>Used by <span class="text-muted" style="font-weight:normal;">(${users.length} task${users.length > 1 ? 's' : ''})</span></h6>
+            <ul class="mb-3" style="font-size:.82rem;">${rows}</ul>`;
+    }
+
     function showDatasetDetail(id) {
         const ds = allDatasets.find(d => d.id === id);
         if (!ds) return;
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
-        panelTitle.textContent = ds.dataset_name;
-        if (btnEditTask) btnEditTask.style.display = 'none';
-        if (btnNewTask) btnNewTask.style.display = 'none';
-        let tagsHtml = '';
-        [['Physics', ds.physics_tag, 'p'], ['EvGen', ds.evgen_tag, 'e'], ['Simu', ds.simu_tag, 's'], ['Reco', ds.reco_tag, 'r']].forEach(([label, tag]) => {
-            const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-            tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
-        });
+        panelTitle.textContent = dsComposedName(ds);
+        hideTaskActions();
         browseContent.innerHTML = `
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td style="width:30%"><strong>Name</strong></td><td>${textOrUrl(dsComposedName(ds))}</td></tr>
+                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td>${textOrUrl(ds.did)}</td></tr>` : ''}
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
                 <tr><td><strong>Stage</strong></td><td>${ds.stage || '-'}</td></tr>
                 <tr><td><strong>External</strong></td><td>${ds.external ? 'yes' : 'no'}</td></tr>
                 ${ds.source_kind ? `<tr><td><strong>Source Kind</strong></td><td>${ds.source_kind}</td></tr>` : ''}
-                ${ds.source_location ? `<tr><td><strong>Source Location</strong></td><td><code>${ds.source_location}</code></td></tr>` : ''}
+                ${ds.source_location ? `<tr><td><strong>Source path</strong></td><td>${textOrUrl(ds.source_location)}</td></tr>` : ''}
                 ${ds.validation_status ? `<tr><td><strong>Validation</strong></td><td>${ds.validation_status}</td></tr>` : ''}
-                <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
                 <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
                 ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
             </table>
-            <h6>Tags</h6>
-            <table class="table table-sm table-bordered" style="font-size:.82rem;">
-                <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
-                <tbody>${tagsHtml}</tbody>
-            </table>`;
+            ${tagTableHtml(ds)}
+            ${tasksUsingDatasetHtml(ds)}`;
+        browseContent.querySelectorAll('.goto-task').forEach(a =>
+            a.addEventListener('click', e => { e.preventDefault(); gotoTask(parseInt(a.dataset.taskId, 10)); }));
     }
 
     function showConfigDetail(id) {
@@ -580,12 +778,11 @@
         browseEmpty.style.display = 'none';
         browseContent.style.display = 'block';
         panelTitle.textContent = c.name;
-        if (btnEditTask) btnEditTask.style.display = 'none';
-        if (btnNewTask) btnNewTask.style.display = 'none';
+        hideTaskActions();
         function row(l,v) { return `<tr><td style="width:40%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
         let dataRows = '';
         if (c.data && Object.keys(c.data).length) {
-            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.'+k, `<code>${v}</code>`); });
+            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.'+k, textOrUrl(v)); });
         }
         browseContent.innerHTML = `
             ${c.description ? `<p>${c.description}</p>` : ''}
@@ -602,7 +799,7 @@
             <div class="row"><div class="col-md-6">
                 <h6>Software Stack</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                    ${row('JUG_XL', c.jug_xl_tag)}${row('Container', c.container_image?`<code>${c.container_image}</code>`:'-')}
+                    ${row('JUG_XL', c.jug_xl_tag)}${row('Container', c.container_image ? textOrUrl(c.container_image) : '-')}
                 </table></div><div class="col-md-6">
                 <h6>Resources</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
@@ -623,84 +820,127 @@
         const cfg = allConfigs.find(c => c.id === t.prod_config_id);
         const csvImp = (t.overrides && t.overrides.csv_import) || null;
 
-        // Title: dataset path (matches the workbench row title), with the
-        // standard ePIC volatile prefix stripped. Full path on hover. The
-        // internal csv_import.<slug> name is only a stable key, not a label.
-        const PFX = '/volatile/eic/EPIC/';
-        const dsPath = (ds && ds.source_location) || t.dataset_name || t.name;
-        panelTitle.textContent = dsPath.startsWith(PFX) ? dsPath.slice(PFX.length) : dsPath;
-        panelTitle.title = dsPath;
+        const sourcePath = (ds && ds.source_location) || '';
+        panelTitle.textContent = taskComposedName(t);
+        panelTitle.title = taskComposedName(t);
 
-        const isOwner = currentUser && t.created_by === currentUser;
+        const canOperate = !!currentUser;
+        // A locked (ready) or already-submitted task is frozen — only a draft
+        // shows Edit/Delete/Lock, mirroring the tag lifecycle. Copy is always
+        // available to any signed-in user.
+        const operatorDraft = canOperate && t.status === 'draft';
+        const submitted = !!t.panda_task_id;
+        const readinessProblems = Array.isArray(t.readiness) ? t.readiness.slice() : [];
+        if (t.task_params_error) {
+            const specProblem = t.task_params_error === 'task has no matched Rucio EVGEN input (run the EVGEN matcher first)'
+                ? 'No matched Rucio EVGEN input (run the EVGEN matcher first).'
+                : t.task_params_error;
+            if (!readinessProblems.includes(specProblem)) readinessProblems.push(specProblem);
+        }
         if (btnCopyTask) btnCopyTask.style.display = currentUser ? 'inline-block' : 'none';
-        if (btnEditTask) btnEditTask.style.display = isOwner ? 'inline-block' : 'none';
-        if (btnDeleteTask) btnDeleteTask.style.display = isOwner ? 'inline-block' : 'none';
-        const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger'};
+        if (btnEditTask) btnEditTask.style.display = operatorDraft ? 'inline-block' : 'none';
+        if (btnDeleteTask) btnDeleteTask.style.display = operatorDraft ? 'inline-block' : 'none';
+        if (btnLockTask) btnLockTask.style.display = operatorDraft ? 'inline-block' : 'none';
+        // Submit is shown only when the task is in the buildable lifecycle and
+        // the readiness checks agree it can produce a submission spec.
+        if (submitTaskWrap) {
+            const inLifecycle = t.status === 'draft' || t.status === 'ready';
+            const readyToSubmit = !readinessProblems.length;
+            if (canOperate && !submitted && inLifecycle && readyToSubmit) {
+                submitTaskWrap.style.display = 'inline-block';
+                btnSubmitTask.disabled = false;
+                btnSubmitTask.style.pointerEvents = '';
+                btnSubmitTask.textContent = 'Submit to PanDA';
+                submitTaskWrap.title = '';
+            } else {
+                submitTaskWrap.style.display = 'none';
+            }
+        }
+        // PanDA task link once the agent has recorded the jediTaskID.
+        if (linkPandaTask) {
+            if (submitted) {
+                linkPandaTask.style.display = 'inline-block';
+                linkPandaTask.href = `/swf-monitor/panda/tasks/${t.panda_task_id}/`;
+                linkPandaTask.textContent = `PanDA Task ${t.panda_task_id}`;
+            } else {
+                linkPandaTask.style.display = 'none';
+            }
+        }
+        // Reset submission — operator recovery for a task pinned to a dead
+        // jediTaskID; detaches the PanDA reference and returns it to draft.
+        if (btnResetTask) btnResetTask.style.display = (submitted && canOperate) ? 'inline-block' : 'none';
+        const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
+        if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
+            const requestLinks = t.questionnaire_matches.map(m => {
+                const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
+                return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>`;
+            }).join(', ');
+            html += `<div class="mb-2">${requestLinks}</div>`;
+        }
+        // Submit-readiness. Empty list means the task can produce a submission spec.
+        if ((t.status === 'draft' || t.status === 'ready') && Array.isArray(readinessProblems)) {
+            html += readinessProblems.length
+                ? `<div class="alert alert-warning py-2 px-3 mb-2"><strong>Not submit-ready</strong><ul class="mb-0 mt-1">${readinessProblems.map(p => `<li>${htmlEscape(p)}</li>`).join('')}</ul></div>`
+                : `<div class="alert alert-success py-2 px-3 mb-2 mb-0"><strong>Submit-ready</strong></div>`;
+        }
         if (t.description) html += `<p>${t.description}</p>`;
 
         if (csvImp) {
-            // CSV-imported task: the dataset's physics/evgen/simu/reco tags are
-            // auto-generated placeholders. Show the path-decomposed filter
-            // fields (carried in overrides.csv_import) — these are the real
-            // physics characterization the user cares about.
+            // CSV-imported task. The path-decomposed filter fields (carried in
+            // overrides.csv_import) describe the source sample; the tag mapping
+            // below — resolved from the path during import — is the dataset's
+            // identity in the tag-based system, shown headed by its composed name.
             const f = csvImp.filters || {};
             const nevM = csvImp.nevents ? `${(Number(csvImp.nevents)/1e6).toFixed(1)} M` : '';
             const rows = [
-                ['Path',        `<code>${dsPath}</code>`],
-                ['Sample',      csvImp.evgen],
-                ['Gen version', csvImp.gen_version],
-                ['Geom',        f.detector],
-                ['Beam',        f.beam],
-                ['Physics',     f.physics],
-                ['Q&sup2;',     f.q2],
-                ['Species',     f.species],
-                ['Energy',      f.energy],
-                ['Nev',         nevM],
-                ['Background',  csvImp.background],
-                ['Detector',    ds ? `${ds.detector_version} / ${ds.detector_config}` : ''],
+                ['Name', ds ? textOrUrl(dsComposedName(ds)) : ''],
+                ['Source path', textOrUrl(sourcePath)],
+                ['Sample',      textOrUrl(csvImp.evgen)],
+                ['Gen version', textOrUrl(csvImp.gen_version)],
+                ['Geom',        textOrUrl(f.detector)],
+                ['Beam',        textOrUrl(f.beam)],
+                ['Physics',     textOrUrl(f.physics)],
+                ['Q&sup2;',     textOrUrl(f.q2)],
+                ['Species',     textOrUrl(f.species)],
+                ['Energy',      textOrUrl(f.energy)],
+                ['Nev',         textOrUrl(nevM)],
+                ['Background',  textOrUrl(csvImp.background)],
+                ['Detector',    ds ? textOrUrl(`${ds.detector_version} / ${ds.detector_config}`) : ''],
             ].filter(([,v]) => v && v !== '-');
             html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;"><tbody>${
                 rows.map(([k,v]) => `<tr><td style="width:30%"><strong>${k}</strong></td><td>${v}</td></tr>`).join('')
             }</tbody></table>`;
+            html += tagTableHtml(ds);
         } else {
-            // Non-CSV task: show the dataset's real tag metadata.
+            // Non-CSV task: the dataset's tag-based name plus its tag mapping.
             html += `<h6>Dataset</h6>
                 <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                    <tr><td style="width:30%"><strong>Name</strong></td><td>${t.dataset_name}</td></tr>
+                    <tr><td style="width:30%"><strong>Name</strong></td><td>${textOrUrl(ds ? dsComposedName(ds) : t.dataset_name)}</td></tr>
                     ${ds ? `<tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>` : ''}
                 </table>`;
-            if (ds) {
-                let tagsHtml = '';
-                [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
-                    const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-                    tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
-                });
-                html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                    <thead><tr><th>Type</th><th>Tag</th><th>Description</th><th>Parameters</th></tr></thead>
-                    <tbody>${tagsHtml}</tbody></table>`;
-            }
+            html += tagTableHtml(ds);
         }
 
         // Config summary
         html += `<h6>Config: ${t.prod_config_name}</h6>`;
         if (cfg) {
             function cfgRow(l,v) { return `<tr><td style="width:35%"><strong>${l}</strong></td><td>${v||'-'}</td></tr>`; }
-            let cfgRows = cfgRow('JUG_XL', cfg.jug_xl_tag) + cfgRow('Container', cfg.container_image ? `<code>${cfg.container_image}</code>` : '-')
+            let cfgRows = cfgRow('JUG_XL', cfg.jug_xl_tag) + cfgRow('Container', cfg.container_image ? textOrUrl(cfg.container_image) : '-')
                 + cfgRow('BG Mixing', cfg.bg_mixing?'Yes':'No') + cfgRow('Copy', [cfg.copy_reco?'Reco':'', cfg.copy_full?'Full':'', cfg.copy_log?'Log':''].filter(Boolean).join(', ')||'-')
                 + cfgRow('Rucio', cfg.use_rucio?`Yes${cfg.rucio_rse?' ('+cfg.rucio_rse+')':''}` : 'No')
                 + cfgRow('Hours/Job', cfg.target_hours_per_job) + cfgRow('Events/Task', cfg.events_per_task);
             if (cfg.panda_site) cfgRows += cfgRow('PanDA Site', cfg.panda_site);
             if (cfg.panda_working_group) cfgRows += cfgRow('Working Group', cfg.panda_working_group);
             if (cfg.data && Object.keys(cfg.data).length) {
-                Object.entries(cfg.data).forEach(([k,v]) => { cfgRows += cfgRow('data.'+k, `<code>${v}</code>`); });
+                Object.entries(cfg.data).forEach(([k,v]) => { cfgRows += cfgRow('data.'+k, textOrUrl(v)); });
             }
             html += `<table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">${cfgRows}</table>`;
         }
 
-        if (t.csv_file) html += `<p><strong>CSV:</strong> <code>${t.csv_file}</code></p>`;
+        if (t.csv_file) html += `<p><strong>CSV:</strong> ${textOrUrl(t.csv_file)}</p>`;
         if (t.condor_command) html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">Condor</strong>
             <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-condor')">Copy</button></div>
             <div class="command-block" id="browse-condor">${t.condor_command}</div>`;
@@ -708,9 +948,8 @@
             <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-panda')">Copy</button></div>
             <div class="command-block" id="browse-panda">${t.panda_command}</div>`;
         if (t.task_params_json) {
-            const escaped = t.task_params_json
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">JEDI taskParamMap</strong>
+            const escaped = htmlEscape(t.task_params_json);
+            html += `<div class="d-flex justify-content-between align-items-center mt-2 mb-1"><strong style="font-size:.82rem;">PanDA EVGEN Submission Spec</strong>
                 <button class="btn btn-dark-green btn-sm" style="font-size:.7rem;" onclick="copyCmd('browse-task-params')">Copy</button></div>
                 <pre class="command-block" id="browse-task-params" style="white-space: pre;">${escaped}</pre>`;
         }
@@ -723,18 +962,19 @@
         if (!ds) return;
         clearAllSuggestions();
         composeDatasetId = id; composeDataset = ds;
-        document.getElementById('dataset-badge').textContent = ds.dataset_name;
+        document.getElementById('dataset-badge').textContent = dsComposedName(ds);
         document.getElementById('dataset-badge').className = 'badge bg-success';
         document.getElementById('dataset-display').innerHTML = `
             <table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">
-                <tr><td style="width:35%"><strong>Name</strong></td><td>${ds.dataset_name}</td></tr>
-                <tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>
+                <tr><td style="width:35%"><strong>Name</strong></td><td>${textOrUrl(dsComposedName(ds))}</td></tr>
                 <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
-                ${ds.external ? `<tr><td><strong>Input Source</strong></td><td>${ds.source_kind || '-'}: <code>${ds.source_location || '-'}</code></td></tr>` : ''}
-                <tr><td><strong>Tags</strong></td><td>${ds.physics_tag.label}, ${ds.evgen_tag.label}, ${ds.simu_tag.label}, ${ds.reco_tag.label}</td></tr>
+                ${ds.external ? `<tr><td><strong>Source path</strong></td><td>${textOrUrl(ds.source_location || '-')}</td></tr>` : ''}
+                <tr><td><strong>Tags</strong></td><td>${[ds.physics_tag.label, ds.evgen_tag.label, ds.simu_tag.label, ds.reco_tag.label].join(', ')}${ds.background_tag ? ', ' + ds.background_tag.label : ''}</td></tr>
             </table>`;
         const allParams = {};
-        [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]].forEach(([label, tag]) => {
+        const paramTags = [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]];
+        if (ds.background_tag) paramTags.push(['Background', ds.background_tag]);
+        paramTags.forEach(([label, tag]) => {
             Object.entries(tag.parameters || {}).forEach(([k, v]) => { if (v) allParams[`${label}: ${k}`] = v; });
         });
         document.getElementById('physics-display').innerHTML = Object.entries(allParams).map(([k,v]) =>
@@ -742,7 +982,7 @@
         document.getElementById('physics-badge').textContent = `${Object.keys(allParams).length} params`;
         document.getElementById('physics-badge').className = 'badge bg-success';
         document.querySelector('[data-section="physics"]').classList.remove('collapsed');
-        if (!document.getElementById('task-name').value) document.getElementById('task-name').value = ds.dataset_name;
+        if (!document.getElementById('task-name').value) document.getElementById('task-name').value = dsComposedName(ds);
         updateSaveButton();
     }
 
@@ -760,48 +1000,48 @@
          ['PanDA Site', cfg.panda_site||'-'], ['Working Group', cfg.panda_working_group||'-'], ['Rucio RSE', cfg.rucio_rse||'-'],
         ].forEach(([k,v]) => { rows += `<tr><td style="width:40%"><strong>${k}</strong></td><td>${v||'-'}</td></tr>`; });
         if (cfg.data && Object.keys(cfg.data).length) {
-            Object.entries(cfg.data).forEach(([k,v]) => { rows += `<tr><td><strong>data.${k}</strong></td><td><code>${v}</code></td></tr>`; });
+            Object.entries(cfg.data).forEach(([k,v]) => { rows += `<tr><td><strong>data.${k}</strong></td><td>${textOrUrl(v)}</td></tr>`; });
         }
         document.getElementById('config-display').innerHTML = `<table class="table table-sm table-bordered mb-0" style="font-size:.82rem;">${rows}</table>`;
         updateSaveButton();
     }
 
-    // ── Generate commands ──
-    document.getElementById('btn-generate').addEventListener('click', function() {
-        if (!composeDataset || !composeConfig) { alert('Select both a dataset and a config first.'); return; }
-        const ds = composeDataset, cfg = composeConfig;
-        const csv = document.getElementById('task-csv').value || '<csv_file>';
-        const physics = ds.physics_tag.parameters || {};
-        const env = {};
-        env.EBEAM = physics.beam_energy_electron||''; env.PBEAM = physics.beam_energy_hadron||'';
-        env.DETECTOR_VERSION = ds.detector_version; env.DETECTOR_CONFIG = ds.detector_config;
-        env.JUG_XL_TAG = cfg.jug_xl_tag||'';
-        env.COPYRECO = cfg.copy_reco?'true':'false'; env.COPYFULL = cfg.copy_full?'true':'false'; env.COPYLOG = cfg.copy_log?'true':'false';
-        if (cfg.use_rucio) { env.USERUCIO = 'true'; env.X509_USER_PROXY = 'secrets/x509_user_proxy'; }
-        if (cfg.rucio_rse) env.OUT_RSE = cfg.rucio_rse;
-        if (cfg.bg_mixing) {
-            const evgen = ds.evgen_tag.parameters||{};
-            env.SIGNAL_FREQ = evgen.signal_freq||'0'; env.SIGNAL_STATUS = evgen.signal_status||'0';
-            if (evgen.bg_tag_prefix) env.TAG_PREFIX = evgen.bg_tag_prefix;
-            env.CSV_FILE = csv; if (evgen.bg_files) env.BG_FILES = evgen.bg_files;
+    // ── Generate commands (server-authoritative) ──
+    // The submitted outDS and LFNs depend on the task's campaign binding, which
+    // is resolved server-side (commands.py _output_dataset_name) — so the only
+    // faithful preview is the server's own. Persist the task as a draft, have
+    // the server build the commands, then show exactly those. The saved id is
+    // retained so a later Save updates the same task, not a duplicate.
+    document.getElementById('btn-generate').addEventListener('click', async function() {
+        if (!composeDatasetId || !composeConfigId) { alert('Select both a dataset and a config first.'); return; }
+        const name = document.getElementById('task-name').value.trim();
+        if (!name) { alert('Enter a task name first.'); return; }
+        const payload = { name, description: document.getElementById('task-description').value,
+            dataset: composeDatasetId, prod_config: composeConfigId,
+            csv_file: document.getElementById('task-csv').value, created_by: currentUser };
+        const saveUrl = composeTaskId ? `/swf-monitor/pcs/api/prod-tasks/${encodeURIComponent(composeTaskName)}/` : '/swf-monitor/pcs/api/prod-tasks/';
+        const resp = await fetch(saveUrl, { method: composeTaskId ? 'PATCH' : 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}, body: JSON.stringify(payload) });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert('Could not save the task to generate commands: ' + (Object.values(err).flat().join(', ') || ('HTTP ' + resp.status)));
+            return;
         }
-        const condorCmd = Object.entries(env).filter(([,v])=>v).map(([k,v])=>`${k}=${v}`).join(' \\\n  ')
-            + ` \\\n  scripts/submit_csv.sh osg_csv hepmc3 ${csv} ${cfg.target_hours_per_job||'2'}`;
-        const data = cfg.data||{}, pParts = ['prun'];
-        if (data.exec_command) pParts.push(`--exec "${data.exec_command}"`);
-        pParts.push(`--outDS ${ds.did}`);
-        if (cfg.container_image) pParts.push(`--containerImage ${cfg.container_image}`);
-        if (cfg.panda_site) pParts.push(`--site ${cfg.panda_site}`);
-        if (cfg.panda_working_group) pParts.push(`--workingGroup ${cfg.panda_working_group}`);
-        pParts.push(`--prodSourceLabel ${data.prod_source_label||'test'}`); pParts.push(`--vo ${data.vo||'wlcg'}`);
-        if (data.processing_type) pParts.push(`--processingType ${data.processing_type}`);
-        if (data.n_jobs) pParts.push(`--nJobs ${data.n_jobs}`);
-        if (data.events_per_job) pParts.push(`--nEventsPerJob ${data.events_per_job}`);
-        if (data.corecount) pParts.push(`--nCore ${data.corecount}`);
-        if (data.no_build) pParts.push('--noBuild'); if (data.skip_scout) pParts.push('--expertOnly_skipScout');
-        document.getElementById('condor-preview').textContent = condorCmd;
-        document.getElementById('panda-preview').textContent = pParts.join(' \\\n  ');
+        const saved = await resp.json();
+        composeTaskId = saved.id;
+        composeTaskName = saved.composed_name;
+        const gen = await fetch(taskApiUrl(saved, 'generate-commands/'), {
+            method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken} });
+        if (!gen.ok) { alert('Command generation failed (HTTP ' + gen.status + ').'); return; }
+        const t = await (await fetch(taskApiUrl(saved, ''))).json();
+        document.getElementById('condor-preview').textContent = t.condor_command || '';
+        document.getElementById('panda-preview').textContent = t.panda_command || '';
         document.getElementById('commands-area').style.display = 'block';
+        const badge = document.getElementById('identity-badge');
+        badge.textContent = 'saved (draft)';
+        badge.className = 'badge bg-warning';
+        badge.style.display = '';
+        updateSaveButton();
     });
 
     // ── Save ──
@@ -818,14 +1058,14 @@
         const payload = { name, description: document.getElementById('task-description').value,
             dataset: composeDatasetId, prod_config: composeConfigId,
             csv_file: document.getElementById('task-csv').value, created_by: currentUser };
-        const url = composeTaskId ? `/swf-monitor/pcs/api/prod-tasks/${composeTaskId}/` : '/swf-monitor/pcs/api/prod-tasks/';
+        const url = composeTaskId ? `/swf-monitor/pcs/api/prod-tasks/${encodeURIComponent(composeTaskName)}/` : '/swf-monitor/pcs/api/prod-tasks/';
         const resp = await fetch(url, { method: composeTaskId ? 'PATCH' : 'POST',
             headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}, body: JSON.stringify(payload) });
         if (resp.ok) {
             const data = await resp.json();
-            await fetch(`/swf-monitor/pcs/api/prod-tasks/${data.id}/generate-commands/`, {
+            await fetch(taskApiUrl(data, 'generate-commands/'), {
                 method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken} });
-            window.location.href = `/swf-monitor/pcs/tasks/${data.id}/`;
+            window.location.href = `/swf-monitor/pcs/tasks/${encodeURIComponent(data.composed_name)}/`;
         } else {
             const err = await resp.json();
             alert('Save failed: ' + Object.values(err).flat().join(', '));
@@ -845,7 +1085,7 @@
             enterComposeMode(null);
             applyDatasetToCompose(t.dataset_id);
             applyConfigToCompose(t.prod_config_id);
-            document.getElementById('task-name').value = t.name + ' (copy)';
+            document.getElementById('task-name').value = taskComposedName(t) + ' (copy)';
             document.getElementById('task-description').value = t.description || '';
             document.getElementById('task-csv').value = t.csv_file || '';
             panelTitle.textContent = 'New Task (copy)';
@@ -856,7 +1096,7 @@
         const t = allTasks.find(x => x.id === selectedItemId);
         if (!t) return;
         if (!confirm(`Delete prod task "${t.name}"? This cannot be undone.`)) return;
-        const resp = await fetch(`/swf-monitor/pcs/api/prod-tasks/${t.id}/`,
+        const resp = await fetch(taskApiUrl(t, ''),
             {method: 'DELETE', headers: {'X-CSRFToken': csrfToken}});
         if (resp.ok || resp.status === 204) {
             window.location.href = window.location.pathname;
@@ -866,6 +1106,141 @@
             alert(msg);
         }
     });
+    if (btnLockTask) btnLockTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Lock "${t.name}"? It becomes ready for submission and can no longer be edited. This cannot be undone.`)) return;
+        const resp = await fetch(taskApiUrl(t, 'lock/'),
+            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
+        if (resp.ok) {
+            const updated = await resp.json();
+            const idx = allTasks.findIndex(x => x.id === t.id);
+            if (idx >= 0) allTasks[idx].status = updated.status || 'ready';
+            renderList();
+            showTaskDetail(t.id);   // stay in the panel; Submit goes green, Lock/Edit/Delete vanish
+        } else {
+            let msg = `Lock failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
+    });
+    if (btnResetTask) btnResetTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Reset submission on "${t.name}"? This detaches PanDA Task ${t.panda_task_id} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.`)) return;
+        const resp = await fetch(taskApiUrl(t, 'reset-submission/'),
+            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
+        if (resp.ok) {
+            const updated = await resp.json();
+            const idx = allTasks.findIndex(x => x.id === t.id);
+            if (idx >= 0) { allTasks[idx].status = updated.status || 'draft'; allTasks[idx].panda_task_id = null; }
+            renderList();
+            showTaskDetail(t.id);   // stay in the panel; Submit returns, PanDA link + Reset vanish
+        } else {
+            let msg = `Reset failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+        }
+    });
+
+    // After submit, the agent records the jediTaskID asynchronously (usually
+    // seconds). Poll the task until panda_task_id appears so the PanDA link
+    // shows on its own — no manual refresh. Bounded so it can't poll forever.
+    let submitPollTimer = null;
+    let pendingSubmitName = null;   // task awaiting a submit outcome; set on submit, cleared by the SSE handlers below
+    function pollForPandaTask(taskId, attemptsLeft) {
+        submitPollTimer = setTimeout(async () => {
+            try {
+                const r = await fetch(taskApiUrl(allTasks.find(x => x.id === taskId), ''));
+                if (r.ok) {
+                    const data = await r.json();
+                    const idx = allTasks.findIndex(x => x.id === taskId);
+                    if (idx >= 0) { allTasks[idx].panda_task_id = data.panda_task_id; allTasks[idx].status = data.status; }
+                    if (data.panda_task_id) {
+                        if (selectedItemId === taskId) showTaskDetail(taskId);
+                        renderList();
+                        return;   // done
+                    }
+                }
+            } catch (e) { /* transient; keep trying */ }
+            if (attemptsLeft > 1) pollForPandaTask(taskId, attemptsLeft - 1);
+            else if (pendingSubmitName) resetSubmitButton();   // no confirmation arrived in the window
+        }, 10000);   // every 10s
+    }
+
+    if (btnSubmitTask) btnSubmitTask.addEventListener('click', async () => {
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        if (!confirm(`Submit "${t.name}" to PanDA?`)) return;
+        btnSubmitTask.disabled = true;
+        btnSubmitTask.textContent = 'Submitting…';
+        const resp = await fetch(taskApiUrl(t, 'submit/'),
+            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
+        if (resp.ok) {
+            pendingSubmitName = t.name;   // the SSE outcome handlers match on this
+            subscribeSubmitOutcomes();    // open the live outcome stream now — never on page load
+            btnSubmitTask.textContent = 'Submitted — awaiting PanDA ID…';
+            if (submitPollTimer) clearTimeout(submitPollTimer);
+            pollForPandaTask(t.id, 30);   // ~5 min at 10s; SSE is the live path, this is the backstop
+        } else {
+            let msg = `Submit failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            alert(msg);
+            btnSubmitTask.disabled = false;
+            btnSubmitTask.textContent = 'Submit to PanDA';
+        }
+    });
+
+    // Live submit outcomes via the SSE relay (docs/SSE_PUSH.md). The prod-ops
+    // agent emits exactly one event per submission outcome on /topic/epictopic;
+    // the stream is filtered by msg_type server-side, so we match our task_name
+    // here. The 10s poll above stays as the success backstop if an event is missed.
+    function resetSubmitButton() {
+        if (btnSubmitTask) { btnSubmitTask.disabled = false; btnSubmitTask.textContent = 'Submit to PanDA'; }
+    }
+    function applySubmitted(taskName, jediId) {
+        const idx = allTasks.findIndex(x => x.name === taskName);
+        if (idx >= 0) { allTasks[idx].panda_task_id = jediId; allTasks[idx].status = 'submitted'; }
+        if (submitPollTimer) clearTimeout(submitPollTimer);
+        if (pendingSubmitName === taskName) pendingSubmitName = null;
+        if (idx >= 0 && allTasks[idx].id === selectedItemId) showTaskDetail(allTasks[idx].id);
+        renderList();
+    }
+    // Opened only after a submit is fired (called from the Submit handler),
+    // never on page load — so composing pins no streaming worker. Idempotent:
+    // one stream per compose session, reused across repeat submits.
+    let submitOutcomeES = null;
+    function subscribeSubmitOutcomes() {
+        if (submitOutcomeES) return;
+        const types = 'prodtask_submitted,prodtask_submit_failed,prodtask_submit_unrecorded';
+        const es = submitOutcomeES = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=${types}`);
+        es.addEventListener('prodtask_submitted', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (d.task_name) applySubmitted(d.task_name, d.jedi_task_id);
+        });
+        es.addEventListener('prodtask_submit_failed', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (d.task_name && d.task_name === pendingSubmitName) {
+                if (submitPollTimer) clearTimeout(submitPollTimer);
+                pendingSubmitName = null;
+                resetSubmitButton();
+                alert('Submission failed: ' + (d.reason || 'unknown error'));
+            }
+        });
+        es.addEventListener('prodtask_submit_unrecorded', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (d.task_name && d.task_name === pendingSubmitName) {
+                if (submitPollTimer) clearTimeout(submitPollTimer);
+                pendingSubmitName = null;
+                if (btnSubmitTask) {
+                    btnSubmitTask.disabled = true;
+                    btnSubmitTask.textContent = `Submitted (jediTaskID ${d.jedi_task_id}) — recording failed`;
+                }
+                alert(`Submitted to PanDA as jediTaskID ${d.jedi_task_id}, but recording it on the task `
+                    + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this jediTaskID needs re-recording.`);
+            }
+        });
+    }
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 
@@ -887,10 +1262,10 @@
     if (initialSelected) autoId = itemIdOf(browseType, initialSelected);
     if (!autoId) {
         if (browseType === 'tasks') {
-            // Mirror the workbench's current-campaign-first ordering so the
+            // Mirror the compose view's current-campaign-first ordering so the
             // initial right-pane detail corresponds to the first visible row.
-            const firstWb = document.querySelector('#pcs-wb-list .pcs-wb-row');
-            if (firstWb) autoId = parseInt(firstWb.dataset.taskId, 10);
+            const firstRow = document.querySelector('#pcs-cl-list .pcs-cl-row');
+            if (firstRow) autoId = parseInt(firstRow.dataset.taskId, 10);
         } else {
             const firstList = browseType === 'datasets' ? allDatasets : allConfigs;
             if (firstList.length > 0) autoId = firstList[0].id;
@@ -898,19 +1273,31 @@
     }
     if (autoId) {
         selectedItemId = autoId;
-        if (browseType === 'tasks')    showTaskDetail(autoId);
-        else if (browseType === 'datasets') showDatasetDetail(autoId);
-        else if (browseType === 'configs')  showConfigDetail(autoId);
-        renderList();
-        // Mirror selection in the workbench list (server-rendered, so JS-driven
-        // renderList() can't reach it).
-        if (browseType === 'tasks') {
-            document.querySelectorAll('#pcs-wb-list .pcs-wb-row').forEach(r =>
-                r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
-            const sel = document.querySelector(`#pcs-wb-list .pcs-wb-row[data-task-id="${autoId}"]`);
-            if (sel) sel.scrollIntoView({block: 'nearest'});
-        }
-        updateUrl();
+        (async () => {
+            // Hydrate the auto-selected item before its detail renders (same
+            // contract as a click).
+            if (browseType === 'tasks') {
+                await hydrateTask(autoId);
+                const it = allTasks.find(x => x.id === autoId);
+                if (it) await hydrateDataset(it.dataset_id);
+                showTaskDetail(autoId);
+            } else if (browseType === 'datasets') {
+                await hydrateDataset(autoId);
+                showDatasetDetail(autoId);
+            } else if (browseType === 'configs') {
+                showConfigDetail(autoId);
+            }
+            renderList();
+            // Mirror selection in the compose view list (server-rendered, so JS-driven
+            // renderList() can't reach it).
+            if (browseType === 'tasks') {
+                document.querySelectorAll('#pcs-cl-list .pcs-cl-row').forEach(r =>
+                    r.classList.toggle('selected', parseInt(r.dataset.taskId, 10) === autoId));
+                const sel = document.querySelector(`#pcs-cl-list .pcs-cl-row[data-task-id="${autoId}"]`);
+                if (sel) sel.scrollIntoView({block: 'nearest'});
+            }
+            updateUrl();
+        })();
     }
 })();
 

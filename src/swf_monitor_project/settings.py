@@ -63,8 +63,6 @@ else:
 INSTALLED_APPS = [
     "daphne",  # Add daphne for ASGI server
     "channels",  # Add channels for WebSocket support
-    # "mcp_app",  # Replaced by mcp_server (proper MCP spec implementation)
-    "mcp_server",  # django-mcp-server for Model Context Protocol
     "oauth2_provider",  # OAuth2 authentication for MCP
     "django.contrib.admin",
     "django.contrib.auth",
@@ -111,6 +109,7 @@ TEMPLATES = [
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
                 "monitor_app.middleware.tunnel_context",
+                "monitor_app.context_processors.system_status_nav",
             ],
         },
     },
@@ -263,10 +262,8 @@ AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
 AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
 AUTH0_ALGORITHMS = ["RS256"]
 
-# MCP server identity. These constants are the single source of truth for
-# both the live django-mcp-server config below and the FastMCP candidate
-# being stood up in the migration to swf_monitor_project.mcp_asgi. See
-# docs/MCP_FASTMCP_MIGRATION_PLAN.md.
+# MCP server identity. Single source of truth for the FastMCP server hosted by
+# swf_monitor_project.mcp_asgi. See docs/MCP.md → Architecture.
 #
 # Name MUST remain "swf-testbed": clients hardcode it in .mcp.json and in
 # Claude Code permission strings like mcp__swf-monitor__*.
@@ -310,14 +307,15 @@ COMMON QUERIES:
 - Tags using pythia8? → pcs_search_tags(query='pythia8')
 - List PCS Datasets? → pcs_dataset_list()
 - External EVGEN datasets? → pcs_dataset_list(stage='evgen', source_kind='csv_manifest')
-- One Dataset by DID? → pcs_dataset_get(did='group.EIC:...b1')
+- One Dataset by composed name? → pcs_dataset_get(name='group.EIC.26.02.0...')
 - Register an external EVGEN CSV manifest? → pcs_dataset_intake(source_location='path/to/input.csv', physics_tag='p1001', evgen_tag='e1', simu_tag='s1', reco_tag='r1', detector_version='26.02.0', detector_config='epic_craterlake')
 - List ProdTasks? → pcs_prodtask_list()
 - Tasks awaiting submission? → pcs_prodtask_list(status='ready')
 - Submitted tasks? → pcs_prodtask_list(status='submitted')
 - One task in detail? → pcs_prodtask_get(name='group.EIC.26.02.0...')
-- Get the JEDI taskParamMap? → pcs_prodtask_artifact(name='...', fmt='jedi')
-- Intake a draft task from a GitHub issue? → pcs_prodtask_intake(public_catalog_issue=42, name='...', dataset='...', prod_config='...')
+- Get the live EVGEN submission spec? → pcs_prodtask_artifact(name='...', fmt='evgen')
+- Get the obsolete JEDI taskParamMap for comparison only? → pcs_prodtask_artifact(name='...', fmt='jedi')
+- Intake a draft task from a GitHub issue? → pcs_prodtask_intake(public_catalog_issue=42, name='...', dataset='group.EIC.26.02.0...', prod_config='...')
 - Update a task on re-intake? → pcs_prodtask_intake(public_catalog_issue=42, public_catalog_pr=99) (idempotent on issue)
 - Link an input Dataset? → pcs_prodtask_link_input(task_name='...', did='group.EIC.evgen:...b1')
 - Mark a task ready for submission? → pcs_prodtask_set_status(task_name='...', status='ready')
@@ -345,16 +343,11 @@ FILTERING:
 Use swf_list_available_tools() to see all available tools with descriptions."""
 
 # Bearer token for the FastMCP ASGI service. Read from production.env in
-# deployments. Empty default keeps Phase 1 candidate (no env set) returning
+# deployments. Empty default makes the server (no env set) return
 # 503 "MCP token not configured" rather than letting unauthenticated
-# requests through; the operational token is generated and installed as
-# part of Phase 2 step 11.
+# requests through; the operational token is generated and installed at
+# deploy time. Enforced by MCPRequestGuard in swf_monitor_project.mcp_asgi.
 MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
-
-# MCP authentication - start with no auth for development, enable OAuth2 for production
-# DJANGO_MCP_AUTHENTICATION_CLASSES = [
-#     "oauth2_provider.contrib.rest_framework.OAuth2Authentication",
-# ]
 
 # ActiveMQ Settings
 ACTIVEMQ_HOST = config('ACTIVEMQ_HOST', default='localhost')
@@ -366,6 +359,14 @@ ACTIVEMQ_USE_SSL = config('ACTIVEMQ_USE_SSL', default=False, cast=bool)
 ACTIVEMQ_SSL_CERT_FILE = config('ACTIVEMQ_SSL_CERT_FILE', default='')
 ACTIVEMQ_SSL_KEY_FILE = config('ACTIVEMQ_SSL_KEY_FILE', default='')
 ACTIVEMQ_SSL_CA_CERTS = config('ACTIVEMQ_SSL_CA_CERTS', default='')
+
+# Managed scratch/cache root (see docs/EPICPROD_OPS.md). The payload-log view
+# serves extracted job logs from $SWF_TMP_DIR/panda-logs/<jeditaskid>/<pandaid>/.
+SWF_TMP_DIR = config('SWF_TMP_DIR', default='/data/swf-tmp')
+
+# Payload-log retrieval: cap auto-retries of a failed fetch before the view stops
+# re-triggering and surfaces the error (operator can override with ?force=1).
+EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, cast=int)
 
 # Channel layer settings
 # Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
@@ -388,6 +389,15 @@ else:
 
 # SSE relay group name
 SSE_CHANNEL_GROUP = config('SSE_CHANNEL_GROUP', default='workflow_events')
+
+# Base URL used by the alarm editor's "test" endpoint.
+_monitor_url = config('SWF_MONITOR_URL',
+                      default='https://pandaserver02.sdcc.bnl.gov')
+_alarm_default_base = _monitor_url.rstrip('/')
+if DEPLOYMENT_SUBPATH and not _alarm_default_base.endswith(DEPLOYMENT_SUBPATH):
+    _alarm_default_base += DEPLOYMENT_SUBPATH
+SWF_ALARMS_BASE_URL = config('SWF_ALARMS_BASE_URL',
+                             default=_alarm_default_base)
 
 # Basic Logging Configuration
 # Set DJANGO_LOGGING_MODE='none' to disable all logging configuration (useful for schema generation, etc.)

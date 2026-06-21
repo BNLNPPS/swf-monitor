@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}System Status - SWF Monitor{% endblock %}
+
+{% block content %}
+<style>
+    .system-status-section {
+        max-width: 100%;
+    }
+    .system-status-table-wrap {
+        display: inline-block;
+        max-width: 100%;
+        overflow-x: auto;
+    }
+    .system-status-table {
+        width: auto;
+        margin-bottom: 0;
+    }
+    .system-status-table th,
+    .system-status-table td {
+        white-space: nowrap;
+    }
+    .system-status-table .system-summary-cell {
+        max-width: 52rem;
+        white-space: normal;
+    }
+</style>
+<div class="container-fluid mt-4">
+    <div class="mb-4">
+        <div>
+            <h1 class="mb-2">System Status</h1>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge {{ summary.overall_status|state_class }}"
+                      title="{{ summary.overall_reason }}">Overall {{ summary.overall_status|state_label }}</span>
+                <span class="badge text-bg-success">OK {{ summary.ok }}</span>
+                <span class="badge text-bg-warning">Warning {{ summary.warning }}</span>
+                <span class="badge text-bg-danger">Error {{ summary.error }}</span>
+                <span class="badge text-bg-secondary">Unknown {{ summary.unknown }}</span>
+                <span class="badge text-bg-light text-dark border">Total {{ summary.total }}</span>
+            </div>
+            <div class="mt-2 text-muted">
+                Last check:
+                {% if summary.latest_checked_at %}
+                    <span data-relative-time="{{ summary.latest_checked_at|date:'c' }}"
+                          title="{{ summary.latest_checked_at|date:'Y-m-d H:i:s T' }}">just now</span>
+                {% else %}
+                    never
+                {% endif %}
+            </div>
+        </div>
+        <form method="post" action="{% url 'monitor_app:system_status_refresh' %}" class="mt-3">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-primary">Refresh</button>
+        </form>
+    </div>
+
+    {% if not groups %}
+        <div class="alert alert-warning">
+            No system status rows have been collected yet.
+        </div>
+    {% endif %}
+
+    {% for group in groups %}
+        <section class="system-status-section mb-4">
+            <h2 class="h4 mb-3">{% if group.category == 'external' %}Public Web Services{% else %}{{ group.category|title }}{% endif %}</h2>
+            <div class="system-status-table-wrap">
+                <table class="table table-sm align-middle system-status-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 18rem;">Name</th>
+                            <th style="width: 8rem;">Status</th>
+                            <th>Summary</th>
+                            <th style="width: 13rem;">Checked</th>
+                            <th style="width: 7rem;">Data</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for item in group.items %}
+                        <tr>
+                            <td class="fw-semibold">{{ item.name }}</td>
+                            <td class="{{ item.status|state_class }}" title="{{ item.status|state_title }}">{% if item.status == 'ok' %}OK{% else %}{{ item.status|state_label }}{% endif %}</td>
+                            <td class="system-summary-cell">{{ item.summary|urlize }}</td>
+                            <td>{{ item.checked_at|date:"Y-m-d H:i:s T"|default:"-" }}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-secondary" type="button"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#status-data-{{ item.pk }}"
+                                        aria-expanded="false"
+                                        aria-controls="status-data-{{ item.pk }}">
+                                    JSON
+                                </button>
+                            </td>
+                        </tr>
+                        <tr class="collapse" id="status-data-{{ item.pk }}">
+                            <td colspan="5">
+                                <pre class="mb-0 small bg-light border rounded p-3">{{ item.data|pprint|urlize }}</pre>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    {% endfor %}
+</div>
+<script>
+(function() {
+    function formatElapsed(seconds) {
+        if (seconds < 5) return 'just now';
+        if (seconds < 60) return seconds + 's ago';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + 'm ago';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 48) return hours + 'h ago';
+        return Math.floor(hours / 24) + 'd ago';
+    }
+    function updateRelativeTimes() {
+        const now = Date.now();
+        document.querySelectorAll('[data-relative-time]').forEach(function(el) {
+            const ts = Date.parse(el.getAttribute('data-relative-time'));
+            if (Number.isNaN(ts)) return;
+            el.textContent = formatElapsed(Math.max(0, Math.floor((now - ts) / 1000)));
+        });
+    }
+    updateRelativeTimes();
+    setInterval(updateRelativeTimes, 1000);
+})();
+</script>
+{% endblock %}

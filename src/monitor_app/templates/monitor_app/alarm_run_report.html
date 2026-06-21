@@ -1,0 +1,89 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load swf_fmt %}
+
+{% block title %}Run report — {{ alarm_entry_id }} — Alarms{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
+<style>
+  .report-bundle {
+    background: #111; color: #ddd; padding: 14px 18px;
+    border-radius: 4px; font-family: "SF Mono", Monaco, Menlo, monospace;
+    font-size: 13px; white-space: pre-wrap;
+  }
+  .report-bundle h3 {
+    color: #daa520; font-size: 0.95em; margin: 1.2em 0 0.4em; font-weight: 600;
+  }
+  .report-bundle .det {
+    border-top: 1px dashed #333; padding-top: 8px; margin-top: 10px;
+  }
+  .report-bundle .det-subject { color: #fff; font-weight: 600; margin-bottom: 4px; }
+</style>
+
+<div class="container mt-3" style="max-width: 1100px;">
+  <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
+
+  <h2 class="mb-1">Alarm run report</h2>
+  <div class="text-muted mb-3">
+    <code>{{ alarm_entry_id }}</code> — run started
+    {{ run_started_at|fmt_dt }}
+    {% if run_finished_at %}· finished {{ run_finished_at|fmt_dt }}{% endif %}
+  </div>
+
+  <table class="table table-sm mb-3" style="max-width:900px;">
+    <tbody>
+      <tr><th style="width:200px;">Emails (this alarm)</th>
+          <td>{% if email_enabled %}on{% else %}off{% endif %}</td></tr>
+      <tr><th>Bundle this tick</th>
+          <td>
+            {% if new_events or continuing_events %}
+              {{ new_events|length }} new, {{ continuing_events|length }} continuing
+            {% else %}
+              empty
+            {% endif %}
+          </td></tr>
+      <tr><th>Email shipped?</th>
+          <td>{% if bundle_sent %}yes{% elif new_events or continuing_events %}no (emails off or no recipients){% else %}— (nothing to ship){% endif %}</td></tr>
+      <tr><th>Recipients (resolved)</th>
+          <td>{{ recipients|join:', '|default:'—' }}</td></tr>
+      {% if errors %}
+      <tr><th>Error</th>
+          <td class="text-danger">{{ error_message|default:'yes' }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  <h3 style="font-size:1em;">Email body (as it would be sent)</h3>
+  <div class="report-bundle">
+<span style="color:#aaa;">Subject:</span> <span style="color:#fff;">{{ subject }}</span>
+{% if description %}
+
+{{ description }}
+
+---
+{% endif %}
+{% if new_events %}
+<h3>NEW ({{ new_events|length }})</h3>
+{% for ev in new_events %}
+<div class="det">
+<div class="det-subject">[{{ forloop.counter }}] <a href="{% url 'monitor_app:alarm_event_detail' event_uuid=ev.id %}" style="color:#8fd3ff;">{{ ev.title|default:ev.data.subject }}</a></div>
+{% with body=ev.content %}{% if body %}{{ body }}{% endif %}{% endwith %}
+</div>
+{% endfor %}
+{% endif %}
+{% if continuing_events %}
+<h3>CONTINUING — renotification ({{ continuing_events|length }})</h3>
+{% for ev in continuing_events %}
+<div class="det">
+<div class="det-subject">[{{ forloop.counter }}] <a href="{% url 'monitor_app:alarm_event_detail' event_uuid=ev.id %}" style="color:#8fd3ff;">{{ ev.title|default:ev.data.subject }}</a></div>
+{% with body=ev.content %}{% if body %}{{ body }}{% endif %}{% endwith %}
+</div>
+{% endfor %}
+{% endif %}
+{% if not new_events and not continuing_events %}
+<em style="color:#888;">(nothing — this alarm had no bundle this tick)</em>
+{% endif %}
+  </div>
+</div>
+{% endblock %}

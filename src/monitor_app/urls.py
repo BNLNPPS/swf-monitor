@@ -1,4 +1,5 @@
 from django.urls import path, include
+from . import alarm_views
 from .views import (
     home,
     authenticated_home,
@@ -77,14 +78,22 @@ from .viewdir.pandamon import (
     panda_tasks_datatable_ajax,
     panda_tasks_filter_counts,
     panda_job_detail,
+    epicprod_job_refresh,
     panda_task_detail,
     panda_errors_list,
     panda_errors_datatable_ajax,
     panda_diagnostics_list,
     panda_diagnostics_datatable_ajax,
     panda_view_text,
+    panda_payload_log,
     epic_queues_list,
     epic_queue_detail,
+)
+
+from .viewdir.system_status import (
+    system_status_json,
+    system_status_page,
+    system_status_refresh,
 )
 
 # Import iDDS database views from new dedicated module
@@ -192,6 +201,12 @@ urlpatterns = [
 
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
+    path('panda/system/', system_status_page, name='system_status'),
+    path('panda/system/status.json', system_status_json, name='system_status_json'),
+    path('panda/system/refresh/', system_status_refresh, name='system_status_refresh'),
+    path('system/', system_status_page, name='system_status_root'),
+    path('system/status.json', system_status_json, name='system_status_json_root'),
+    path('system/refresh/', system_status_refresh, name='system_status_refresh_root'),
     
     # PanDA Queues
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),
@@ -220,6 +235,9 @@ urlpatterns = [
     path('panda/jobs/datatable/', panda_jobs_datatable_ajax, name='panda_jobs_datatable_ajax'),
     path('panda/jobs/filter-counts/', panda_jobs_filter_counts, name='panda_jobs_filter_counts'),
     path('panda/jobs/<int:pandaid>/', panda_job_detail, name='panda_job_detail'),
+    path('panda/jobs/<int:pandaid>/payload-log/', panda_payload_log, name='panda_payload_log'),
+    path('epicprod/jobs/<int:pandaid>/', panda_job_detail, name='epicprod_job_detail'),
+    path('epicprod/jobs/<int:pandaid>/refresh/', epicprod_job_refresh, name='epicprod_job_refresh'),
     path('panda/view-text/', panda_view_text, name='panda_view_text'),
     path('panda/tasks/', panda_tasks_list, name='panda_tasks_list'),
     path('panda/tasks/datatable/', panda_tasks_datatable_ajax, name='panda_tasks_datatable_ajax'),
@@ -231,6 +249,28 @@ urlpatterns = [
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
     path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
     path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
+
+    # Alarms
+    path('alarms/', alarm_views.alarms_dashboard, name='alarms_dashboard'),
+    path('alarms/events/<str:event_uuid>/', alarm_views.alarm_event_detail,
+         name='alarm_event_detail'),
+    path('alarms/runs/<str:run_uuid>/<str:entry_id>/',
+         alarm_views.alarm_run_report, name='alarm_run_report'),
+    path('alarms/<str:entry_id>/task/',
+         alarm_views.alarm_task_history, name='alarm_task_history'),
+    path('alarms/teams/new/', alarm_views.team_new, name='team_new'),
+    path('alarms/teams/create/', alarm_views.team_create, name='team_create'),
+    path('alarms/teams/<str:at_name>/edit/', alarm_views.team_edit, name='team_edit'),
+    path('alarms/teams/<str:at_name>/save/', alarm_views.team_save, name='team_save'),
+    path('alarms/teams/<str:at_name>/versions/<int:version_num>/',
+         alarm_views.team_version, name='team_version'),
+    path('alarms/<str:entry_id>/edit/', alarm_views.alarm_config_edit,
+         name='alarm_config_edit'),
+    path('alarms/<str:entry_id>/save/', alarm_views.alarm_config_save,
+         name='alarm_config_save'),
+    path('alarms/<str:entry_id>/versions/<int:version_num>/',
+         alarm_views.alarm_config_version, name='alarm_config_version'),
+    path('alarms/<str:entry_id>/test/', alarm_views.alarm_test, name='alarm_test'),
 
     # PanDA Database
     path('panda-database/', panda_database_tables_list, name='panda_database_tables_list'),

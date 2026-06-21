@@ -2,7 +2,6 @@
 TF Slices views for fast processing workflow monitoring.
 """
 
-from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.urls import reverse
@@ -10,7 +9,6 @@ from .models import TFSlice
 from .utils import DataTablesProcessor, get_filter_params, format_datetime
 
 
-@login_required
 def tf_slices_list(request):
     """
     TF slices list view using server-side DataTables.

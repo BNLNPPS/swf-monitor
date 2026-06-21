@@ -1,0 +1,30 @@
+[Unit]
+Description=ePIC Production Operations Agent (epicprod-ops)
+After=network.target
+# System singleton on the anycast queue /queue/epicprod.ops. A persistent agent
+# that keeps exiting is sick regardless of exit code: cap the restart burst so it
+# lands in 'failed' (visible) instead of flapping forever. The cleaner-killer cron
+# reaps duplicates and recovers a capped-out unit (reset-failed + restart).
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=wenauseic
+Group=eic
+WorkingDirectory=/opt/swf-monitor/current
+# All env (REQUESTS_CA_BUNDLE, X509_USER_PROXY, ACTIVEMQ_*, SWF_*) comes from the
+# deploy EnvironmentFile — the single source the web tier and crons also read.
+# SWF_TMP_DIR is omitted: the agent and the web view both default to /data/swf-tmp.
+EnvironmentFile=/opt/swf-monitor/config/env/production.env
+ExecStart=/opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/agents/epicprod_ops_agent.py
+Restart=always
+RestartSec=15
+# Deliberate-shutdown back door: the agent exits 100 on a bus 'shutdown' (see
+# agents/epicprod_ops_agent.py). systemd must treat that as a clean, final stop,
+# not a failure to restart. Any other exit code is a crash and is restarted.
+SuccessExitStatus=100
+RestartPreventExitStatus=100
+
+[Install]
+WantedBy=multi-user.target

@@ -56,6 +56,10 @@ Filter field configuration format:
         </div>
     </div>
 
+    {% if show_query_count %}
+    <div id="query-count" class="query-count mb-2" aria-live="polite">Query count: loading...</div>
+    {% endif %}
+
     <!-- DataTable -->
     <div class="table-responsive">
         <table id="main-table" class="table table-striped table-bordered table-sm">
@@ -173,6 +177,10 @@ Filter field configuration format:
     text-align: center;
     font-weight: bold;
 }
+.query-count {
+    color: #333;
+    font-weight: 600;
+}
 </style>
 
 <!-- DataTables CSS/JS -->
@@ -185,6 +193,22 @@ Filter field configuration format:
 $(document).ready(function() {
     // Initialize current filters
     let currentFilters = {% block initial_filters %}{}{% endblock %};
+
+    function formatQueryCount(value) {
+        return String(Number(value || 0));
+    }
+
+    function updateQueryCount(recordsDisplay, recordsTotal) {
+        const queryCount = $('#query-count');
+        if (!queryCount.length) return;
+
+        const label = '{{ query_count_label|default:"records"|escapejs }}';
+        let text = `Query count: ${formatQueryCount(recordsDisplay)} ${label}`;
+        if (recordsTotal !== recordsDisplay) {
+            text += ` (${formatQueryCount(recordsTotal)} total in window)`;
+        }
+        queryCount.text(text);
+    }
     
     // Initialize DataTable
     let table = $('#main-table').DataTable({
@@ -228,6 +252,10 @@ $(document).ready(function() {
         dom: '<"top"f>rt<"bottom"ip><"clear">', // Search, table, processing, info and pagination
         responsive: true,
         pagingType: "full_numbers",
+        drawCallback: function() {
+            const info = this.api().page.info();
+            updateQueryCount(info.recordsDisplay, info.recordsTotal);
+        },
         language: {
             processing: 'Loading data...',
             search: "Search:",
@@ -293,9 +321,14 @@ $(document).ready(function() {
     function updateActiveFiltersDisplay() {
         {% block update_active_filters_display %}
         const badges = [];
+        function displayFilterValue(value) {
+            if (value === '__blank__') return 'None';
+            return String(value).replace(/^panda-client-%-(jedi-.+)$/, 'panda-client-$1');
+        }
         {% for field in filter_fields %}
         if (currentFilters.{{ field.name }} !== '' && currentFilters.{{ field.name }} !== null && currentFilters.{{ field.name }} !== undefined) {
-            badges.push(`<span class="badge bg-info me-1">{{ field.name }}: ${currentFilters.{{ field.name }}}</span>`);
+            const {{ field.name }}Label = displayFilterValue(currentFilters.{{ field.name }});
+            badges.push(`<span class="badge bg-info me-1">{{ field.name }}: ${ {{ field.name }}Label }</span>`);
         }
         {% endfor %}
 
@@ -327,10 +360,11 @@ $(document).ready(function() {
                 let {{ field.name }}Html = '';
                 if (filterCounts.{{ field.name }}) {
                     filterCounts.{{ field.name }}.forEach(function(item) {
-                        const value = item[0];
+                        const label = item[0] === '__blank__' ? '-' : item[0];
                         const count = item[1];
+                        const value = item.length > 2 ? item[2] : item[0];
                         const activeClass = currentFilters.{{ field.name }} === value ? 'filter-active' : '';
-                        {{ field.name }}Html += `<a href="#" data-filter="{{ field.name }}" data-value="${value}" class="filter-link ${activeClass}">${value} (${count})</a>`;
+                        {{ field.name }}Html += `<a href="#" data-filter="{{ field.name }}" data-value="${value}" class="filter-link ${activeClass}">${label} (${count})</a>`;
                     });
                 }
                 $('#{{ field.name }}-options').html({{ field.name }}Html);

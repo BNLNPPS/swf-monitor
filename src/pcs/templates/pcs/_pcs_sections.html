@@ -1,18 +1,5 @@
 {# Shared PCS sections — included by both PCS hub and Production hub #}
 
-<h3 class="mb-3">ePIC Production</h3>
-<div class="row mb-4">
-    <div class="col-md-4 mb-3">
-        <div class="card h-100">
-            <div class="card-body d-flex flex-column">
-                <p class="mb-2"><strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Production Task Catalog</a></strong>
-                <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
-                <p class="card-text">Production tasks across campaigns.</p>
-            </div>
-        </div>
-    </div>
-</div>
-
 <h3 class="mb-3">Tags</h3>
 <div class="row mb-4" style="display:flex; flex-wrap:wrap;">
     <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
@@ -60,9 +47,18 @@
             </div>
         </div>
     </div>
+    <div style="flex:1; min-width:160px; padding:0 .5rem; margin-bottom:1rem;">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+                <p class="mb-1"><strong><a href="{% url 'pcs:tag_compose' tag_type='k' %}" class="text-decoration-none">Background</a></strong>
+                <span class="badge bg-info">{{ background_tags_count }}</span></p>
+                <p class="card-text small">Beam-gas, synchrotron radiation, overlay samples.</p>
+            </div>
+        </div>
+    </div>
 </div>
 
-<h3 class="mb-3">Production Task Creation</h3>
+<h3 class="mb-3">Production Tasks</h3>
 <div class="row mb-4">
     <div class="col-md-4 mb-3">
         <div class="card h-100">
@@ -88,6 +84,17 @@
                 <p class="mb-2"><strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Prod Task Creation</a></strong>
                 <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
                 <p class="card-text">Compose Dataset + Config into full production task specs with submission commands.</p>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column">
+                <p class="mb-2"><strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Campaign Task Catalog</a></strong>
+                <span class="badge bg-info">{{ prod_tasks_count }}</span></p>
+                <p class="card-text">Production tasks across campaigns.</p>
             </div>
         </div>
     </div>

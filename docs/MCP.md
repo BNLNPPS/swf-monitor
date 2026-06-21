@@ -6,7 +6,7 @@ The SWF Monitor implements the [Model Context Protocol](https://modelcontextprot
 
 **Endpoint:** `/swf-monitor/mcp/`
 
-**Package:** [django-mcp-server](https://github.com/omarbenhamid/django-mcp-server)
+**Server:** FastMCP, from the official [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp`), hosted by a standalone Starlette ASGI app. (django-mcp-server was retired; see Architecture.)
 
 ## Design Philosophy
 
@@ -543,10 +543,10 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 500 tasks). Cursor-based pagination via before_id. |
 | `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
-| `panda_list_queues` | `cloud`, `site`, `resource_type`, `status`, `limit` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
+| `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
 | `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
-| `panda_resource_usage` | `days`, `username`, `site`, `workinggroup` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
-| `panda_harvester_workers` | `status`, `site`, `resourcetype`, `days` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
+| `panda_resource_usage` | `days`, `site`, `username`, `taskid` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
+| `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:
 - `days`: Time window in days (default 1)
@@ -641,8 +641,8 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 **Architecture:**
 - Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
 - Holds connections to the local swf-monitor MCP (HTTP — the `swf_*`, `pcs_*`, `panda_*` tools) plus stdio-launched external servers: **LXR** (EIC code browser cross-reference), **uproot** (ROOT file analysis), **GitHub**, **Zenodo**, **XRootD**, **JLab-Rucio**, **BNL-Rucio**, and **corun/codoc**
-- The corun MCP server is a standalone stdio server that calls prod corun over REST (`CORUN_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; pandabot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun generation does not hold pandabot's single response lock.
-- On startup, if `CORUN_API_TOKEN` is configured, pandabot ensures a corun notification subscription exists. Corun sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#pandabot` Mattermost channel. There is no pandabot-side polling tracker.
+- The corun MCP server is a standalone stdio server that calls prod corun over REST (`CORUN_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; pandabot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun generation does not hold pandabot's single response lock. Tool surface and config detail: [corun-mcp-server](https://github.com/eic/corun-mcp-server) README.
+- On startup, if `CORUN_API_TOKEN` is configured, pandabot ensures a corun notification subscription exists. Corun sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#pandabot` Mattermost channel. There is no pandabot-side polling tracker. Callback payload schema: corun-ai `docs/job-system.md` § Job Notifications.
 - Registers in-process **epicdoc** tools (`epic_doc_search`, `epic_doc_contents`) backed by a ChromaDB vector store of ePIC docs — runs inside the bot process, not as a separate MCP server
 - **Bamboo** log analysis is used via the `panda_study_job` and `panda_harvester_workers` swf-monitor MCP tools, not as a separate MCP server
 - For JLab Rucio campaign dataset queries, the bot should search the `epic` scope first (for example `scope="epic", name="*26.04.1*", type="DATASET"`) and must not infer absence from a single empty scope or from an XRootD permission error
@@ -677,7 +677,7 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 
 | Category | Tools | Count |
 |----------|-------|-------|
-| Tool Discovery | `swf_list_available_tools` | 1 |
+| Tool Discovery | `swf_list_available_tools`, `get_server_instructions` | 2 |
 | System State | `swf_get_system_state` | 1 |
 | Agents | `swf_list_agents`, `swf_get_agent` | 2 |
 | Namespaces | `swf_list_namespaces`, `swf_get_namespace` | 2 |
@@ -694,8 +694,9 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
+| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **44** |
+| **Total** | | **54** |
 
 ---
 
@@ -866,12 +867,14 @@ swf-monitor/
 │   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
 │   │   └── views.py                        # OAuth protected resource metadata
 │   └── swf_monitor_project/
+│       ├── mcp_asgi.py                     # Standalone Starlette ASGI app: FastMCP host + MCPRequestGuard
 │       ├── settings.py                     # Server config, Auth0 settings
 │       └── urls.py                         # Route registration (/mcp/, /.well-known/)
 ```
 
 | File | Purpose |
 |------|---------|
+| `src/swf_monitor_project/mcp_asgi.py` | **ASGI entrypoint** - Starlette app hosting the FastMCP server, with `MCPRequestGuard` (bearer token, POST-only, `/health`) |
 | `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, common.py) |
 | `src/monitor_app/panda/bot.py` | **PanDA Mattermost bot** - MCP client using HTTP POST, Claude Haiku for responses |
 | `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
@@ -882,18 +885,19 @@ swf-monitor/
 
 ### Architecture
 
-MCP is integrated directly into Django rather than as a separate service, but the `/mcp/` endpoint is served by a **separate ASGI worker** (uvicorn) fronted by Apache `ProxyPass`. The rest of swf-monitor stays on mod_wsgi. MCP is operated here as stateless POST request/response traffic; isolating it on the ASGI worker keeps MCP failures out of the main app. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
+The MCP server is a **FastMCP** instance (`mcp.server.fastmcp.FastMCP`, bundled in the official `mcp` Python SDK), shared across every `@mcp.tool()` in the `monitor_app.mcp` package. It is served by a standalone Starlette ASGI app (`swf_monitor_project/mcp_asgi.py`) under uvicorn on `127.0.0.1:8001`, separate from the mod_wsgi Django site so MCP failures stay isolated from the main app. Traffic is stateless POST JSON-RPC; Apache `ProxyPass` exposes `/swf-monitor/mcp/` for external callers while local clients use the loopback URL directly. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
 
-- **Django** exposes the MCP endpoint alongside the REST API (same codebase, same URL tree)
-- **ASGI (uvicorn)** serves `/mcp/` on `127.0.0.1:8001`; Apache ProxyPasses to it for external callers, while local bots use the loopback URL directly
-- **django-mcp-server** provides MCP spec compliance and tool registration
-- **Auth0 OAuth 2.1** authentication for Claude.ai remote connections (optional, disabled if AUTH0_DOMAIN not set)
+- **FastMCP from the `mcp` SDK** owns tool registration and the streamable-HTTP app (`mcp.streamable_http_app()`). **django-mcp-server is no longer used** — it was fully retired in the FastMCP migration.
+- **Starlette** is the ASGI host for the FastMCP app. It enters the dependency tree **only** transitively through `mcp` (`pip show starlette` → `Required-by: mcp, sse-starlette`); there is no first-party Starlette feature use beyond `mcp_asgi.py`. Pinned **`starlette>=1.2.1`** to clear CVE-2026-48710 ("BadHost" Host-header auth bypass; fixed in 1.0.1). The auth guard is immune regardless: `MCPRequestGuard` decides on the raw ASGI `scope["path"]` plus a bearer token, never `request.url`, so the Host-header/`request.url` path divergence the CVE exploits cannot reach it.
+- **`mcp_asgi.py` lifespan** owns `mcp.session_manager.run()` for the whole process lifetime — the fix for the per-request session-manager lifecycle the old Django adapter had.
+- **MCPRequestGuard** (in `mcp_asgi.py`) is the auth/transport gate: `/health` is open for the watchdog; every other request requires `POST` + `Authorization: Bearer <MCP_BEARER_TOKEN>` (401/403/503 otherwise) and path normalization for the proxy prefix forms.
+- **Auth0 OAuth 2.1** remains wired for remote Claude.ai connections but is not an operational dependency (disabled when `AUTH0_DOMAIN` is unset); local clients use the bearer-token loopback path.
 
 ### Tool Registration
 
 Tools are defined in `monitor_app/mcp/` using the `@mcp.tool()` decorator on async functions. Each function becomes an MCP tool that LLMs can discover and call.
 
-The package is auto-discovered by django-mcp-server via `monitor_app/mcp/__init__.py`.
+All tool modules share the one `FastMCP` instance created in `monitor_app/mcp/__init__.py` (`mcp = FastMCP(...)`) and imported as `from monitor_app.mcp import mcp`. Importing the package registers every decorated tool on that instance.
 
 **Tool docstrings are critical** - they are the only documentation the LLM sees when deciding which tool to use and how to call it.
 
@@ -916,12 +920,14 @@ MCP failures remain isolated from the main Django site.
 ### Settings
 
 ```python
-# Django MCP Server configuration
-DJANGO_MCP_GLOBAL_SERVER_CONFIG = {
-    "name": "swf-monitor",
-    "instructions": "ePIC Streaming Workflow Testbed monitoring and control server",
-    "stateless": True,
-}
+# MCP server identity — single source of truth. Name is hardcoded by clients
+# (.mcp.json, mcp__swf-monitor__* permission strings) and must not change.
+MCP_SERVER_NAME = "swf-testbed"
+MCP_SERVER_INSTRUCTIONS = """..."""   # tool-catalog crib shown to the LLM
+
+# Bearer token enforced by MCPRequestGuard in mcp_asgi.py.
+# Empty default → 503 "MCP token not configured" until set at deploy time.
+MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
 
 # Auth0 OAuth 2.1 configuration (optional - leave AUTH0_DOMAIN empty to disable)
 AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
@@ -936,7 +942,7 @@ AUTH0_ALGORITHMS = ["RS256"]
 ```python
 # In monitor_app/mcp/system.py, workflows.py, or new file in the mcp/ package
 
-from mcp_server import mcp_server as mcp
+from monitor_app.mcp import mcp
 
 @mcp.tool()
 async def my_new_tool(param: str, start_time: str = None, end_time: str = None) -> dict:
@@ -971,7 +977,7 @@ async def my_new_tool(param: str, start_time: str = None, end_time: str = None) 
 
 **IMPORTANT:** After adding a new `@mcp.tool()`, you MUST also:
 1. Add the tool to the hardcoded list in `swf_list_available_tools()` in `mcp/common.py`
-2. Update the server instructions in `settings.py` (`DJANGO_MCP_GLOBAL_SERVER_CONFIG`)
+2. Update the server instructions in `settings.py` (`MCP_SERVER_INSTRUCTIONS`)
 3. Update this documentation (`docs/MCP.md`)
 
 The `list_available_tools()` hardcoded list is what LLMs see when discovering available tools - if your tool isn't in that list, LLMs won't know it exists.
@@ -979,5 +985,6 @@ The `list_available_tools()` hardcoded list is what LLMs see when discovering av
 ### References
 
 - [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
-- [django-mcp-server GitHub](https://github.com/omarbenhamid/django-mcp-server)
+- [MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk)
+- [CVE-2026-48710 "BadHost"](https://github.com/advisories/GHSA-86qp-5c8j-p5mr) — Starlette Host-header auth bypass (fixed 1.0.1)
 - [OAuth2 Provider](https://django-oauth-toolkit.readthedocs.io/)

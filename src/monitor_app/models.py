@@ -1,8 +1,109 @@
 import logging
+import time
 import uuid
 from datetime import timedelta
 from django.db import models
 from django.utils import timezone
+
+
+VALID_KINDS = (
+    'alarm',
+    'event',
+    'engine_run',
+    'team',
+    'memory',
+    'list',
+    'action',
+)
+
+VALID_STATUSES = ('active', 'done', 'blocked', 'failed')
+
+
+def _new_entry_id() -> str:
+    """UUID4 default for Entry.id. Module-level so migrations can serialize it."""
+    return str(uuid.uuid4())
+
+
+class EntryContext(models.Model):
+    """Project/topic grouping for generic entries."""
+    name = models.CharField(max_length=255, primary_key=True)
+    title = models.CharField(max_length=255, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    timestamp_created = models.FloatField(default=time.time)
+    timestamp_modified = models.FloatField(default=time.time)
+    data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'entry_context'
+
+    def __str__(self):
+        return self.name
+
+
+class Entry(models.Model):
+    """Generic document-store row used by alarm configs, events, and runs."""
+
+    id = models.CharField(max_length=36, primary_key=True,
+                          default=_new_entry_id)
+    title = models.CharField(max_length=255, blank=True, default='')
+    content = models.TextField(blank=True, default='')
+    kind = models.CharField(max_length=50)
+    context = models.ForeignKey(EntryContext, on_delete=models.PROTECT,
+                                null=True, blank=True, related_name='entries')
+    name = models.CharField(max_length=255, null=True, blank=True)
+    data = models.JSONField(null=True, blank=True)
+    priority = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=50, null=True, blank=True)
+    archived = models.BooleanField(default=False)
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name='children')
+    timestamp_created = models.FloatField(default=time.time)
+    timestamp_modified = models.FloatField(default=time.time)
+    deleted_at = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'entry'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['context', 'name'],
+                condition=models.Q(name__isnull=False),
+                name='uniq_context_name',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['kind', '-timestamp_created']),
+            models.Index(fields=['context', 'kind', '-timestamp_created']),
+            models.Index(fields=['archived']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        slug = (self.data or {}).get('entry_id') or self.name or self.id[:8]
+        return f'{self.kind}:{slug}'
+
+    @property
+    def entry_id(self) -> str | None:
+        return (self.data or {}).get('entry_id')
+
+
+class EntryVersion(models.Model):
+    """Immutable snapshot of an Entry before substantive edits."""
+    entry = models.ForeignKey(Entry, on_delete=models.CASCADE,
+                              related_name='versions')
+    version_num = models.IntegerField()
+    title = models.CharField(max_length=255, blank=True, default='')
+    content = models.TextField(blank=True, default='')
+    data = models.JSONField(null=True, blank=True)
+    changed_by = models.CharField(max_length=100, default='unknown')
+    timestamp = models.FloatField(default=time.time)
+
+    class Meta:
+        db_table = 'entry_version'
+        constraints = [
+            models.UniqueConstraint(fields=['entry', 'version_num'],
+                                    name='uniq_entry_version_num'),
+        ]
+        indexes = [models.Index(fields=['entry', '-timestamp'])]
 
 
 class SystemAgent(models.Model):
@@ -638,6 +739,184 @@ class RucioEndpoint(models.Model):
     
     def __str__(self):
         return self.endpoint_name
+
+
+class EpicProdJob(models.Model):
+    """
+    ePIC production interpretation of a PanDA job.
+
+    PanDA remains the source for scheduler state. This table stores the
+    production-facing diagnosis: derived phase, concise failure reason, and
+    extensible parsed job history for the operator pages.
+    """
+    pandaid = models.BigIntegerField(primary_key=True)
+    jeditaskid = models.BigIntegerField(null=True, blank=True, db_index=True)
+    prod_task = models.ForeignKey(
+        'pcs.ProdTask',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='epicprod_jobs',
+    )
+    seq_number = models.IntegerField(null=True, blank=True, db_index=True)
+    job_index = models.IntegerField(null=True, blank=True, db_index=True)
+    status = models.CharField(max_length=40, blank=True, default='', db_index=True)
+    phase = models.CharField(max_length=80, blank=True, default='', db_index=True)
+    failure_summary = models.TextField(blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'swf_epicprod_jobs'
+        ordering = ['-pandaid']
+        indexes = [
+            models.Index(fields=['jeditaskid', 'seq_number']),
+            models.Index(fields=['prod_task', 'status']),
+            models.Index(fields=['phase', 'status']),
+        ]
+
+    def __str__(self):
+        return f"EpicProd job {self.pandaid}"
+
+
+class EpicProdFile(models.Model):
+    """
+    Expected and observed files for ePIC production jobs.
+
+    Expected rows are generated from the same submission manifest/environment
+    contract the payload uses. Observed rows/status are later updated from
+    PanDA, payload logs, and cached Rucio state.
+    """
+    ROLE_CHOICES = [
+        ('input', 'Input'),
+        ('output', 'Output'),
+        ('log', 'Log'),
+    ]
+    STATUS_CHOICES = [
+        ('expected', 'Expected'),
+        ('produced_local', 'Produced locally'),
+        ('validated', 'Validated'),
+        ('registered', 'Registered'),
+        ('failed', 'Failed'),
+        ('conflict', 'Conflict'),
+        ('missing', 'Missing'),
+        ('unknown', 'Unknown'),
+    ]
+
+    prod_task = models.ForeignKey(
+        'pcs.ProdTask',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='epicprod_files',
+    )
+    job = models.ForeignKey(
+        EpicProdJob,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='files',
+    )
+    jeditaskid = models.BigIntegerField(null=True, blank=True, db_index=True)
+    pandaid = models.BigIntegerField(null=True, blank=True, db_index=True)
+    seq_number = models.IntegerField(null=True, blank=True, db_index=True)
+    job_index = models.IntegerField(null=True, blank=True, db_index=True)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, db_index=True)
+    stage = models.CharField(max_length=40, blank=True, default='', db_index=True)
+    scope = models.CharField(max_length=100, blank=True, default='', db_index=True)
+    dataset_name = models.CharField(max_length=1024, blank=True, default='')
+    did_name = models.CharField(max_length=1024, blank=True, default='', db_index=True)
+    lfn = models.CharField(max_length=512, blank=True, default='')
+    rse_expected = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(
+        max_length=40,
+        choices=STATUS_CHOICES,
+        default='expected',
+        db_index=True,
+    )
+    status_detail = models.TextField(blank=True, default='')
+    bytes = models.BigIntegerField(null=True, blank=True)
+    checksum = models.CharField(max_length=128, blank=True, default='')
+    source = models.CharField(max_length=80, blank=True, default='', db_index=True)
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_epicprod_files'
+        ordering = ['jeditaskid', 'seq_number', 'role', 'stage', 'lfn']
+        indexes = [
+            models.Index(fields=['prod_task', 'role', 'stage']),
+            models.Index(fields=['jeditaskid', 'seq_number']),
+            models.Index(fields=['pandaid', 'role', 'stage']),
+            models.Index(fields=['scope', 'did_name']),
+            models.Index(fields=['status', 'stage']),
+        ]
+
+    def __str__(self):
+        return self.did_name or self.lfn or f"EpicProd file {self.pk}"
+
+
+class SystemStatus(models.Model):
+    """Current cached system status for operator-facing monitor pages."""
+
+    STATUS_CHOICES = [
+        ('ok', 'OK'),
+        ('warning', 'Warning'),
+        ('error', 'Error'),
+        ('unknown', 'Unknown'),
+    ]
+
+    name = models.CharField(max_length=120, unique=True)
+    category = models.CharField(max_length=80, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='unknown',
+        db_index=True,
+    )
+    summary = models.TextField(blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    checked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_system_status'
+        ordering = ['category', 'name']
+        indexes = [
+            models.Index(fields=['category', 'status']),
+            models.Index(fields=['status', 'checked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.name}: {self.status}"
+
+
+class SystemStatusHistory(models.Model):
+    """Append-only status observations for later incident/lifecycle review."""
+
+    name = models.CharField(max_length=120, db_index=True)
+    category = models.CharField(max_length=80, db_index=True)
+    status = models.CharField(max_length=20, db_index=True)
+    summary = models.TextField(blank=True, default='')
+    data = models.JSONField(default=dict, blank=True)
+    checked_at = models.DateTimeField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'swf_system_status_history'
+        ordering = ['-checked_at', 'name']
+        indexes = [
+            models.Index(fields=['name', '-checked_at']),
+            models.Index(fields=['category', '-checked_at']),
+            models.Index(fields=['status', '-checked_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.checked_at} {self.name}: {self.status}"
 
 
 class AIMemory(models.Model):

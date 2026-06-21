@@ -293,12 +293,12 @@ def get_available_tools_list() -> list:
         # PCS (Physics Configuration System) tools
         {
             "name": "pcs_list_tags",
-            "description": "List PCS (Physics Configuration System) tags — production task configurations for MC campaigns. Filter by type (p/e/s/r), category, status, creator, or text.",
+            "description": "List PCS (Physics Configuration System) tags — production task configurations for MC campaigns. Filter by type (p/e/s/r/k), category, status, creator, or text.",
             "parameters": ["tag_type", "category", "status", "creator", "search", "limit"],
         },
         {
             "name": "pcs_get_tag",
-            "description": "Get full details of a single PCS tag by label (e.g. 'p1001', 'e3', 'r1').",
+            "description": "Get full details of a single PCS tag by label (e.g. 'p1001', 'e3', 'r1', 'k1').",
             "parameters": ["tag_label"],
         },
         {
@@ -309,13 +309,13 @@ def get_available_tools_list() -> list:
         # PCS — datasets and prod tasks
         {
             "name": "pcs_dataset_list",
-            "description": "List PCS Datasets with optional filters: stage (e.g. 'evgen'), source_kind ('csv_manifest'), exact source_location, scope, name_contains.",
+            "description": "List PCS Datasets with optional filters: stage (e.g. 'evgen'), source_kind ('csv_manifest'), exact source_location, scope, name_contains. name_contains matches composed_name and legacy dataset_name.",
             "parameters": ["stage", "source_kind", "source_location", "scope", "name_contains", "limit", "offset"],
         },
         {
             "name": "pcs_dataset_get",
-            "description": "Get full details of a single Dataset by DID or dataset_name.",
-            "parameters": ["did", "dataset_name"],
+            "description": "Get full details of a single Dataset by composed tag name, DID, or legacy dataset_name. Prefer name=composed_name.",
+            "parameters": ["name", "did", "dataset_name"],
         },
         {
             "name": "pcs_dataset_intake",
@@ -334,17 +334,17 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "pcs_prodtask_artifact",
-            "description": "Regenerate a ProdTask submission artifact from current PCS state. fmt = condor | panda | jedi | dump.",
+            "description": "Regenerate a ProdTask submission artifact from current PCS state. fmt = condor | panda | jedi | evgen | dump. evgen is the live prod-ops submission spec.",
             "parameters": ["name", "fmt"],
         },
         {
             "name": "pcs_prodtask_intake",
-            "description": "Idempotent intake of a draft ProdTask. Idempotency key: public_catalog_issue OR (public_catalog_csv_path, public_catalog_row_key). Updates existing on match; creates draft requiring name/dataset/prod_config when no match.",
+            "description": "Idempotent intake of a draft ProdTask. Idempotency key: public_catalog_issue OR (public_catalog_csv_path, public_catalog_row_key). Updates existing on match; creates draft requiring name/dataset/prod_config; dataset accepts composed_name, DID, or legacy dataset_name.",
             "parameters": ["public_catalog_issue", "public_catalog_csv_path", "public_catalog_row_key", "name", "dataset", "prod_config", "description", "input_dataset_did", "public_catalog_repo", "public_catalog_pr", "public_catalog_row_index", "public_catalog_page_url", "public_catalog_commit_sha", "created_by"],
         },
         {
             "name": "pcs_prodtask_link_input",
-            "description": "Link input Dataset(s) to a ProdTask via overrides JSON. Provide one of did or dids; linked Datasets must already exist.",
+            "description": "Link input Dataset(s) to a ProdTask via overrides JSON. task_name accepts composed_name, legacy name, or pk. Provide one of did or dids; linked Datasets must already exist.",
             "parameters": ["task_name", "did", "dids"],
         },
         {

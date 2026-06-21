@@ -165,3 +165,16 @@ def copy_btn(value):
         f'title="Copy {safe}" aria-label="Copy">'
         f'<i class="bi bi-clipboard"></i></button>'
     )
+
+
+@register.filter(name='rucio_did_url')
+def rucio_did_url(did):
+    """Relative URL of the self-hosted Rucio DID-detail page for a DID string
+    like ``epic:/RECO/26.04.1/...``. Generic over scope, so EVGEN inputs and
+    RECO outputs both resolve. Empty string for a malformed DID (renders no
+    link). The view re-adds the leading slash a proxy may collapse."""
+    if not did or ':' not in str(did):
+        return ''
+    from django.urls import reverse
+    scope, name = str(did).split(':', 1)
+    return reverse('pcs:rucio_did_detail', args=[scope, name.lstrip('/')])

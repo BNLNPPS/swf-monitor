@@ -8,13 +8,15 @@ SWF Monitor forwards workflow messages it consumes from ActiveMQ to remote HTTP 
 
 For user documentation on SSE streaming including client setup and usage examples, see [SSE Real-Time Streaming](../../swf-testbed/docs/sse-streaming.md) in the testbed repository.
 
-Production runs Django under mod_wsgi (one or more daemon processes) with the ActiveMQ listener in a separate process, and `/swf-monitor/mcp/` on a separate uvicorn ASGI worker. To reliably fan out events to all SSE clients across processes, we use Django Channels with a Redis channel layer as an inter-process relay. WebSockets are not required or enabled for this feature.
+For the design that reuses this relay to push ops-agent action-completion events to the browser (payload-log fetch, PanDA submit) so results appear without refresh or polling, see [SSE_PUSH.md](SSE_PUSH.md).
+
+Production runs Django under mod_wsgi (one or more daemon processes) with the ActiveMQ listener running inside the mod_wsgi Apache process, and `/swf-monitor/mcp/` on a separate uvicorn ASGI worker. To reliably fan out events to all SSE clients across processes, we use Django Channels with a Redis channel layer as an inter-process relay. WebSockets are not required or enabled for this feature.
 
 Important: Redis/Channels is REQUIRED in any environment that must support remote ActiveMQ client recipients via SSE. The in-memory fallback is for single-process development only and is not suitable for production.
 
 ## Architecture
 
-1. ActiveMQ listener (management command/process) consumes messages and persists them (WorkflowMessage, SystemAgent).
+1. ActiveMQ listener (started inside the mod_wsgi Apache process) consumes messages and persists them (WorkflowMessage, SystemAgent).
 2. Listener publishes enriched message payloads to a Channels group (default: `workflow_events`).
 3. Each web/WSGI process starts a small background subscriber that joins the group and forwards messages into the in-memory `SSEMessageBroadcaster`.
 4. SSE clients connect to `/api/messages/stream/` and receive messages from per-client queues with heartbeats and optional filters.
@@ -34,7 +36,7 @@ Django settings detect `REDIS_URL` and configure `CHANNEL_LAYERS` accordingly.
 
 ## Authentication and CORS
 
-The SSE endpoint (`/api/messages/stream/`) implements manual token authentication (DRF removed to avoid content negotiation issues). Browser EventSource cannot send Authorization headers; use session authentication for same-origin access. For cross-origin browser use, configure CORS for credentialed requests (no wildcard origins) and ensure cookies are allowed.
+The SSE endpoint (`/api/messages/stream/`) implements manual token authentication (DRF removed to avoid content negotiation issues). Browser EventSource cannot send Authorization headers; use session authentication for same-origin access. The endpoint currently returns `Access-Control-Allow-Origin: *` (a wildcard hardcoded in `sse_views.py`). For credentialed cross-origin browser use, this would need to be replaced with a specific origin and cookies allowed.
 
 Non-browser clients (headless) may pass tokens using standard HTTP clients; avoid placing tokens in query strings unless explicitly approved.
 

@@ -11,7 +11,7 @@ field names don't change silently; breaking changes would rename the endpoint.
 """
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status as http_status
 
@@ -50,7 +50,7 @@ def _int_param(request, name, default=None, min_value=None, max_value=None):
 
 @api_view(['GET'])
 @authentication_classes(_AUTH)
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def tasks_list(request):
     """GET /api/panda/tasks/ — list JEDI tasks with per-task job counts.
 
@@ -113,7 +113,7 @@ def tasks_list(request):
 
 @api_view(['GET'])
 @authentication_classes(_AUTH)
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def task_detail(request, jeditaskid):
     """GET /api/panda/tasks/<jeditaskid>/ — one task with per-task job counts."""
     task = queries.get_task(jeditaskid)
@@ -126,7 +126,7 @@ def task_detail(request, jeditaskid):
 
 @api_view(['GET'])
 @authentication_classes(_AUTH)
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def activity(request):
     """GET /api/panda/activity/ — aggregate counts by task and job status.
 

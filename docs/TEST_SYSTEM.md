@@ -2,7 +2,7 @@
 
 ## Overview
 
-The SWF Monitor test system provides comprehensive coverage of Django web interface, REST APIs, database models, and system integrations. The test suite includes 88+ tests organized into focused modules for maintainability and AI-friendly navigation.
+The SWF Monitor test system provides comprehensive coverage of Django web interface, REST APIs, database models, and system integrations. The test suite collects 81 tests organized into focused modules for maintainability and AI-friendly navigation.
 
 ## Test Categories
 
@@ -35,22 +35,23 @@ The SWF Monitor test system provides comprehensive coverage of Django web interf
 src/monitor_app/tests/
 ├── __init__.py                              # Package marker
 ├── conftest.py                              # Shared fixtures and configuration
-├── test_system_agent_api.py                # System agent CRUD operations (7 tests)
-├── test_applog_api.py                       # Application log API testing (3 tests)
-├── test_applog_ui.py                        # Application log UI views (3 tests)
-├── test_monitor_app_ui.py                   # Monitor app UI functionality (8 tests)
-├── test_log_summary_api.py                  # Log summary API endpoint (1 test)
-├── test_run_api.py                          # Run management CRUD operations (7 tests)
-├── test_stf_file_api.py                     # STF file management API (9 tests)
-├── test_subscriber_api.py                   # Subscriber management API (9 tests)
-├── test_message_queue_dispatch_api.py       # Message queue dispatch testing (8 tests)
-├── test_rest_logging_integration.py        # End-to-end REST logging tests (7 tests)
-├── test_activemq_ssl_connection.py          # ActiveMQ SSL connectivity (4 tests)
-├── test_django_https_authentication.py     # Django HTTPS auth unit tests (7 tests)
-├── test_django_dual_server_integration.py  # Live server integration tests (5 tests)
-├── test_mcp_rest.py                         # MCP REST API endpoints (6 tests)
-├── test_sse_stream.py                       # SSE message streaming tests (5 tests)
-└── test_rest_logging.py                     # REST logging utilities (1 test)
+├── test_system_agent_api.py                # System agent CRUD operations
+├── test_applog_api.py                       # Application log API testing
+├── test_applog_ui.py                        # Application log UI views
+├── test_monitor_app_ui.py                   # Monitor app UI functionality
+├── test_log_summary_api.py                  # Log summary API endpoint
+├── test_run_api.py                          # Run management CRUD operations
+├── test_stf_file_api.py                     # STF file management API
+├── test_subscriber_api.py                   # Subscriber management API
+├── test_agent_monitor_integration.py       # Agent monitor integration
+├── test_rest_logging_integration.py        # End-to-end REST logging tests
+├── test_rest_logging.py                     # REST logging utilities
+├── test_activemq_ssl_connection.py          # ActiveMQ SSL connectivity
+├── test_django_https_authentication.py     # Django HTTPS auth unit tests
+├── test_django_dual_server_integration.py  # Live server integration tests
+└── test_sse_stream.py                       # SSE message streaming tests
+
+src/pcs/tests.py                             # PCS task-params and dataset metadata
 ```
 
 ## Running Tests
@@ -350,4 +351,4 @@ This comprehensive test system ensures the SWF Monitor maintains high quality, s
 
 ## History
 
-The current organized test structure was created through a comprehensive refactoring effort. For details about this transformation, see [Test Refactoring Report](TEST_REFACTORING_REPORT.md).
+The current organized test structure was created through a comprehensive refactoring effort that split the suite into the focused per-component modules listed above.

@@ -47,6 +47,8 @@ def main(argv):
     print(f'  rows:    {summary["rows"]}')
     print(f'  created: {summary["created"]}')
     print(f'  updated: {summary["updated"]}')
+    for action, n in sorted(summary.get('tag_actions', {}).items()):
+        print(f'  physics tag {action}: {n} rows')
     if summary['errors']:
         print(f'  errors:  {len(summary["errors"])}')
         for err in summary['errors'][:10]:

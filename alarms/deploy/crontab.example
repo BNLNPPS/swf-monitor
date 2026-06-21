@@ -1,0 +1,10 @@
+# swf-alarms cron entries. Install via:
+#   crontab -l > /tmp/ct.txt && cat /opt/swf-monitor/current/alarms/deploy/crontab.example >> /tmp/ct.txt && crontab /tmp/ct.txt
+# or merge into your existing crontab manually.
+#
+# Assumes the engine is installed in its own venv at
+# /opt/swf-monitor/shared/alarms-venv and the config lives at
+# /opt/swf-monitor/config/alarms/config.toml
+
+# Run every 5 minutes.
+*/5 * * * * /opt/swf-monitor/shared/alarms-venv/bin/swf-alarms-run --config /opt/swf-monitor/config/alarms/config.toml >> /opt/swf-monitor/shared/logs/swf-alarms/cron.log 2>&1

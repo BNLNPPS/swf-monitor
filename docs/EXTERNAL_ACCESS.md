@@ -51,6 +51,50 @@ REST API endpoints under `/pcs/api/` are already covered by a
 catch-all (`pcs/api/<path:path>`) — those do not need per-endpoint
 entries.
 
+## Write actions and triggers (POST/PATCH/DELETE) — read this before adding a button
+
+The proxy carries write requests, but under a strict contract set by
+`remote_app/monitor_client.py:proxy`. A browser-triggered action that ignores
+the contract **works on the internal face (`pandaserver02...`) and silently
+fails on the external face (`epic-devcloud.org`)** — the face nearly every
+collaborator uses. Build and verify write actions on the external face; the
+internal face hides every constraint below.
+
+What the proxy actually does (verified in `monitor_client.py`):
+
+- Forwards method + query + **body** + the user identity as **`X-Remote-User`**.
+- Sends only `Host`, `X-Remote-User`, `Content-Type` upstream — **every other
+  request header is dropped** (no `X-Requested-With`, no `X-CSRFToken`, no
+  cookies). swf-monitor therefore sees no Django session and no CSRF token.
+- **Cannot relay a redirect**: any upstream 3xx is turned into a `502` page. A
+  page-view POST that ends in `redirect()` (the POST-redirect-GET pattern)
+  returns 502 through the proxy.
+
+So the recipe for an externally-working browser-triggered (or agent-backed)
+action:
+
+1. **Trigger through `/pcs/api/`**, not a page-view URL. `/pcs/api/<path>` is
+   already proxied by the csrf-exempt `pcs_api_proxy` — no swf-remote entry
+   needed. A page-view POST is not viable here: it relies on session+CSRF (which
+   the proxy does not carry) and usually redirects (which the proxy cannot
+   relay).
+2. **Authenticate by `X-Remote-User`**, set by the proxy from the logged-in
+   user — not Django session/CSRF.
+3. **Return JSON, never a redirect** (e.g. `202 {"status": "queued"}`). A 3xx
+   becomes a 502 at the proxy boundary.
+4. **Do not branch on dropped headers.** `X-Requested-With`, `X-CSRFToken`, and
+   cookies do not survive the hop; the endpoint must behave correctly given only
+   `X-Remote-User` + body.
+5. **Completion returns over SSE.** The relay (`/api/messages/stream/`) is
+   already proxied (`sse_proxy`); the page holds an `EventSource` and updates
+   when the agent emits its event. See [SSE_PUSH.md](SSE_PUSH.md).
+6. **Verify on `epic-devcloud.org`, not internally.** The internal face
+   satisfies session+CSRF and relays redirects, so it passes while the external
+   face fails. Test where the users are.
+
+The supported write path is the `/pcs/api/` surface (per *Authentication*
+below); page-view POSTs through the proxy are not.
+
 ## Static assets
 
 CSS, JS, and images at `/swf-monitor/static/...` proxy through

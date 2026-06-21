@@ -9,18 +9,26 @@ to its native shape (DRF Response, MCP error dict).
 """
 import csv as _csv
 import hashlib as _hashlib
+import io as _io
+import json as _json
 import logging as _logging
+import os as _os
 import re as _re
+from datetime import datetime as _datetime
 
+from django.conf import settings as _settings
 from django.db import transaction
+from django.utils import timezone as _timezone
+from django.utils.dateparse import parse_datetime as _parse_datetime
 
 _log = _logging.getLogger(__name__)
 
 from .models import (
     Dataset, ProdConfig, ProdTask,
-    Campaign, ProdRequest,
-    PhysicsTag, EvgenTag, SimuTag, RecoTag,
+    Campaign, Questionnaire, ProdRequest,
+    PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
 )
+from .physics_match import derive_physics, derive_background, derive_evgen, single_particle_angle
 
 
 class ServiceError(Exception):
@@ -34,6 +42,12 @@ class ServiceError(Exception):
 # Allowed ProdTask lifecycle transitions. Submission and post-submission
 # state changes are recorded via prodtask_record_submission and
 # automation, not direct human transitions.
+#
+# Imported catalog rows enter as ``draft`` and follow the normal flow. The one
+# import status that is NOT a key here is ``past_output``: a frozen historical
+# archive (terminal — clone it, via Copy, to base new production on it), so the
+# generic set-status path can never move it. See
+# PCS_DATASET_REQUEST_WORKFLOW.md §Lifecycle and EPICPROD_TASK_CATALOG.md §6.
 PRODTASK_TRANSITIONS = {
     'draft':     {'ready'},
     'ready':     {'draft', 'submitted'},
@@ -60,6 +74,160 @@ REQUEST_TO_TASK_COPY_FIELDS = (
 
 
 # ---------------------------------------------------------------------------
+# Questionnaire
+# ---------------------------------------------------------------------------
+
+QUESTIONNAIRE_FIELD_MAP = {
+    'submitted_at': (
+        'Timestamp',
+        'submitted_at',
+    ),
+    'description': (
+        'Name the dataset, generator, and purpose',
+        'description',
+    ),
+    'repository': (
+        'Location of the repository with version control enforced per the input-processing guidelines (e.g. a tagged generator or steering-file repository)',
+        'Provide the location of the repository with proper version control enforced according to the input processing guidelines. See https://github.com/eic/LambdaGen/tags (only steering files+metadata) or https://github.com/eic/DEMPgen/tags (generator+steering files+metadata) for example.',
+        'repository',
+    ),
+    'contact': (
+        'Who is the contact person for the dataset generation',
+        'Who is the contact person for the dataset generation?',
+        'contact',
+    ),
+    'nevents': (
+        'How many events are requested',
+        'How many events are you requesting?',
+        'nevents',
+    ),
+    'benchmark': (
+        'Time to simulate the first 100 events and disk space the output file occupies',
+        'How much time does it take to simulate the first 100 events of the dataset and how much diskspace does the output file occupy?',
+        'benchmark',
+    ),
+    'estimate': (
+        'Total compute or storage required for the dataset, with justification for requests above 1% of the campaign budget (~120 core-years and ~35 TB per month)',
+        'Use the answers to the last two questions to estimate how much total compute or storage will be required for the entire dataset. Overall campaign compute budget per month is ~120 Core Years and ~35 TB. For requests that are bigger than 1% of these values, provide justification.',
+        'estimate',
+    ),
+}
+
+
+def _row_value(row, aliases):
+    lower = {str(k).strip().lower(): v for k, v in row.items()}
+    for alias in aliases:
+        key = alias.strip().lower()
+        if key in lower:
+            return '' if lower[key] is None else str(lower[key]).strip()
+    return ''
+
+
+def _parse_questionnaire_timestamp(value):
+    if not value:
+        raise ServiceError('Questionnaire row is missing Timestamp/submitted_at.')
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        for fmt in (
+            '%m/%d/%Y %H:%M:%S',
+            '%m/%d/%Y %H:%M',
+            '%Y-%m-%d %H:%M:%S',
+            '%Y-%m-%d %H:%M',
+        ):
+            try:
+                parsed = _datetime.strptime(value, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        raise ServiceError(f'Could not parse questionnaire timestamp {value!r}.')
+    if _timezone.is_naive(parsed):
+        parsed = _timezone.make_aware(parsed, _timezone.get_current_timezone())
+    return parsed
+
+
+def _questionnaire_payload_from_row(row):
+    payload = {
+        field: _row_value(row, aliases)
+        for field, aliases in QUESTIONNAIRE_FIELD_MAP.items()
+    }
+    payload['submitted_at'] = _parse_questionnaire_timestamp(payload['submitted_at'])
+    return payload
+
+
+def _questionnaire_content_hash(payload):
+    content = {
+        k: (payload[k].isoformat() if k == 'submitted_at' else payload[k])
+        for k in (
+            'submitted_at', 'description', 'repository', 'contact',
+            'nevents', 'benchmark', 'estimate',
+        )
+    }
+    raw = _json.dumps(content, sort_keys=True, separators=(',', ':'))
+    return _hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+@transaction.atomic
+def questionnaire_intake(rows, *, source_url='', created_by='questionnaire_import'):
+    """Idempotently mirror Google Form response rows into Questionnaire.
+
+    The Google Form remains the user-facing authority. PCS keys on the form
+    timestamp and updates the mirror only when the mirrored response content
+    hash changes.
+    """
+    summary = {'created': 0, 'updated': 0, 'unchanged': 0, 'items': []}
+    for idx, row in enumerate(rows, start=1):
+        if not isinstance(row, dict):
+            raise ServiceError(f'Questionnaire row {idx} is not an object.')
+        payload = _questionnaire_payload_from_row(row)
+        content_hash = _questionnaire_content_hash(payload)
+        source_row = str(idx)
+        defaults = {
+            **payload,
+            'source_url': source_url or '',
+            'source_row': source_row,
+            'content_hash': content_hash,
+            'created_by': created_by,
+        }
+        questionnaire, created = Questionnaire.objects.get_or_create(
+            submitted_at=payload['submitted_at'],
+            defaults=defaults,
+        )
+        if created:
+            action = 'created'
+            summary['created'] += 1
+        elif questionnaire.content_hash != content_hash:
+            for field in (
+                'description', 'repository', 'contact', 'nevents',
+                'benchmark', 'estimate',
+            ):
+                setattr(questionnaire, field, payload[field])
+            questionnaire.source_url = source_url or questionnaire.source_url
+            questionnaire.source_row = source_row
+            questionnaire.content_hash = content_hash
+            questionnaire.save(update_fields=[
+                'description', 'repository', 'contact', 'nevents',
+                'benchmark', 'estimate', 'source_url', 'source_row',
+                'content_hash', 'updated_at',
+            ])
+            action = 'updated'
+            summary['updated'] += 1
+        else:
+            action = 'unchanged'
+            summary['unchanged'] += 1
+        summary['items'].append({'id': questionnaire.pk, 'action': action})
+    return summary
+
+
+def questionnaire_intake_csv(csv_text, *, source_url='', created_by='questionnaire_import'):
+    if not csv_text:
+        raise ServiceError('csv_text is required.')
+    rows = _csv.DictReader(_io.StringIO(csv_text))
+    return questionnaire_intake(
+        list(rows), source_url=source_url, created_by=created_by)
+
+
+# ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
 
@@ -68,6 +236,7 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
                    detector_version=None, detector_config=None,
                    physics_tag_label=None, evgen_tag_label=None,
                    simu_tag_label=None, reco_tag_label=None,
+                   background_tag_label=None, sample_name='',
                    description='', created_by):
     """
     Idempotent intake of an external (e.g. EVGEN CSV manifest) Dataset.
@@ -112,14 +281,21 @@ def dataset_intake(*, source_location, source_kind='csv_manifest',
         tag = model.objects.filter(tag_label=label).first()
         if not tag:
             raise ServiceError(f'{field} not found: {label}')
-        if tag.status != 'locked':
-            raise ServiceError(f'{field} {label} must be locked before use')
         tags[field] = tag
 
+    if background_tag_label:
+        bg = BackgroundTag.objects.filter(tag_label=background_tag_label).first()
+        if not bg:
+            raise ServiceError(f'background_tag not found: {background_tag_label}')
+        tags['background_tag'] = bg
+
+    campaign = Campaign.objects.filter(name=detector_version).first()
     ds = Dataset(
         scope=scope,
         detector_version=detector_version,
         detector_config=detector_config,
+        campaign=campaign,
+        sample_name=sample_name,
         description=description,
         metadata={
             'stage': stage,
@@ -201,9 +377,12 @@ def prodtask_intake(*, payload, created_by):
         raise ServiceError(
             f'Creating a new task requires: {", ".join(missing)}'
         )
-    output_ds = (Dataset.objects.filter(did=dataset_handle).first()
-                 or Dataset.objects.filter(dataset_name=dataset_handle).first())
-    if not output_ds:
+    try:
+        output_ds = resolve_dataset(
+            dataset_handle,
+            queryset=Dataset.objects.order_by('block_num', 'id'),
+        )
+    except Dataset.DoesNotExist:
         raise ServiceError(f'Output dataset not found: {dataset_handle}')
     config = ProdConfig.objects.filter(name=config_handle).first()
     if not config:
@@ -261,6 +440,103 @@ def _known_prodtask_statuses():
     return known
 
 
+def resolve_prodtask(name, queryset=None):
+    """Resolve a ProdTask by its identity, the way every task URL and the
+    ``?name=`` API endpoints key on it. First match wins:
+
+      1. the composed tag name (``dataset.composed_name``) — the canonical
+         identity, an indexed lookup on the stored column;
+      2. the stored ``name`` — a legacy csv_import slash path or a native name
+         (also indexed; ``name`` is unique);
+      3. a bare integer pk — tolerated for a stale ``/tasks/<pk>/`` link inbound
+         only. It is never emitted; a detail view 301s it to the composed name.
+
+    Raises ``ProdTask.DoesNotExist`` if nothing matches, so it is a drop-in for
+    ``queryset.get(name=...)``.
+    """
+    qs = ProdTask.objects.all() if queryset is None else queryset
+    key = str(name)
+    t = qs.filter(dataset__composed_name=key).first()
+    if t is not None:
+        return t
+    t = qs.filter(name=key).first()
+    if t is not None:
+        return t
+    if key.isdigit():
+        t = qs.filter(pk=int(key)).first()
+        if t is not None:
+            return t
+    raise ProdTask.DoesNotExist(f"No ProdTask matches {name!r}")
+
+
+def resolve_dataset(name, queryset=None):
+    """Resolve a Dataset by its identity, the peer of ``resolve_prodtask``.
+    First match wins:
+
+      1. the composed tag name (``composed_name``) — the canonical identity,
+         an indexed lookup on the stored column;
+      2. the Rucio ``did`` (``scope:name.bN``);
+      3. the stored ``dataset_name`` — a legacy csv_import hash or native name.
+
+    Raises ``Dataset.DoesNotExist`` if nothing matches, so it is a drop-in for
+    ``queryset.get(...)``.
+    """
+    qs = Dataset.objects.all() if queryset is None else queryset
+    key = str(name)
+    for lookup in ('composed_name', 'did', 'dataset_name'):
+        d = qs.filter(**{lookup: key}).first()
+        if d is not None:
+            return d
+    raise Dataset.DoesNotExist(f"No Dataset matches {name!r}")
+
+
+def prodtask_readiness_problems(task):
+    """Reasons a task is NOT ready to lock/submit; empty list = ready.
+
+    Checks what a valid PanDA submission needs, independent of how the task was
+    built (composed tags or imported catalog metadata):
+
+    - **Output.** The task must produce a physics output — at least one of
+      ``copy_reco`` / ``copy_full``. A task that copies neither (logs only)
+      produces nothing worth submitting.
+    - **EVGEN input.** The client-API EVGEN submit path needs at least one
+      matched JLab Rucio EVGEN input. Without it the submission spec builder
+      refuses to emit a manifest.
+    - **Physics is really bound.** An imported catalog row carries its real beam
+      in its metadata (``overrides['csv_import']['filters']['beam']``, e.g.
+      ``18x275``). The import pins every such row to one placeholder anchor
+      physics tag, so if the bound tag's beam disagrees with the catalog beam,
+      the physics is a placeholder and the submission artifact would carry the
+      wrong beam. The physics automatch (``find_or_create_physics_tag`` wired
+      into the importer) binds the right tag, so this clears on reload. Background
+      rows are exempt: they stay parked on the anchor pending the ``k`` background
+      tag type, so their beam mismatch is expected, not an error.
+    """
+    problems = []
+    cfg = task.get_effective_config()
+    if not (cfg.get('copy_reco') or cfg.get('copy_full')):
+        problems.append('No physics output configured (enable copy of reco or full).')
+    if not task.has_input:
+        problems.append('No matched Rucio EVGEN input (run the EVGEN matcher first).')
+
+    csv_filters = (((task.overrides or {}).get('csv_import') or {})
+                   .get('filters') or {})
+    catalog_beam = csv_filters.get('beam') or ''
+    is_background = csv_filters.get('physics') == 'BACKGROUNDS'
+    if catalog_beam and not is_background and task.dataset_id and task.dataset.physics_tag_id:
+        pt = task.dataset.physics_tag
+        p = pt.parameters or {}
+        e = str(p.get('beam_energy_electron', '')).strip()
+        h = str(p.get('beam_energy_hadron', '')).strip()
+        tag_beam = f'{e}x{h}' if e and h else ''
+        if tag_beam and tag_beam != catalog_beam:
+            problems.append(
+                f'Wrong physics tag: this sample is {catalog_beam} but it is '
+                f'tagged {pt.tag_label} ({tag_beam}). Assign the matching '
+                f'physics tag.')
+    return problems
+
+
 def prodtask_set_status(*, task, new_status):
     """Lifecycle transition with rule enforcement."""
     valid = _known_prodtask_statuses()
@@ -275,6 +551,14 @@ def prodtask_set_status(*, task, new_status):
             f'Allowed from {task.status!r}: '
             f'{sorted(allowed) or "(terminal)"}'
         )
+    # Readiness gate: locking (→ ready) requires a submittable task. One
+    # chokepoint for the lock action, the detail-page lock, and REST/MCP
+    # set-status. See prodtask_readiness_problems.
+    if new_status == 'ready' and task.status != 'ready':
+        problems = prodtask_readiness_problems(task)
+        if problems:
+            raise ServiceError('Cannot lock — task is not ready: ' + ' '.join(problems))
+
     task.status = new_status
     task.save(update_fields=['status', 'updated_at'])
     return task
@@ -461,6 +745,23 @@ def _csvimport_slug(dataset_path, gen_version):
     return _hashlib.sha1(key).hexdigest()[:12]
 
 
+# Common prefix on every catalog source path; carries no distinguishing
+# information, so it is stripped from the human-readable task name (and the
+# compose title strips it the same way).
+EPIC_VOLATILE_PREFIX = '/volatile/eic/EPIC/'
+
+
+def _task_name_from_path(path):
+    """Human-readable ProdTask.name from a catalog source path: the path with
+    the common ``/volatile/eic/EPIC/`` prefix stripped (matching the compose
+    title). Paths are unique per catalog row. Returns '' for an empty path so
+    the caller can fall back to the slug name."""
+    p = (path or '').strip()
+    if p.startswith(EPIC_VOLATILE_PREFIX):
+        p = p[len(EPIC_VOLATILE_PREFIX):]
+    return p
+
+
 def _ensure_csvimport_anchors():
     """Resolve the placeholder Dataset-FK targets used by CSV-imported rows.
 
@@ -472,9 +773,9 @@ def _ensure_csvimport_anchors():
     when they bind a real Dataset/Config to a CSV-imported task.
     """
     def first_locked(model, label):
-        t = model.objects.filter(status='locked').order_by('tag_number').first()
+        t = model.objects.order_by('tag_number').first()
         if not t:
-            raise ServiceError(f'No locked {label} tag available for CSV import')
+            raise ServiceError(f'No {label} tag available for CSV import')
         return t
 
     physics = first_locked(PhysicsTag, 'physics')
@@ -494,14 +795,196 @@ def _ensure_csvimport_anchors():
     return physics, evgen, simu, reco, cfg, campaign
 
 
+# Process -> physics category digit, for numbering NEWLY created tags
+# (number = digit*1000 + global suffix). Existing tags are reused by their
+# physics parameters and keep their historically-assigned numbers/categories;
+# the seeded set predates this map and is internally inconsistent — renumbering
+# it is a separate cleanup, deliberately out of scope here.
+_PROCESS_CATEGORY = {
+    'SINGLE': 1,
+    'DIS': 2, 'DIS_NC': 2, 'DIS_CC': 2, 'DDIS': 2,
+    'DVCS': 3, 'DDVCS': 3, 'TCS': 3,
+    'SIDIS': 4, 'SIDIS_D0': 4, 'SIDIS_DIJET': 4, 'SIDIS_Lc': 4,
+    'DEMP': 5, 'DVMP': 5, 'MESON_SF': 5,
+    'DIFFRACTIVE_JPSI': 5, 'DIFFRACTIVE_PHI': 5, 'DIFFRACTIVE_RHO': 5,
+    'PHOTOPRODUCTION_JPSI': 5, 'UPSILON': 5,
+    'UCHANNEL_PI0': 5, 'UCHANNEL_RHO': 5, 'ALP': 5,
+}
+
+
+#: Every physics axis that defines a tag's identity. Matching compares the full
+#: set (a missing axis counts as ''), so a tag is reused only when every physics
+#: axis agrees — the old coarse (process, beam) key is what collapsed Q2 range,
+#: decay/charge, beam config, and the rest onto the first-created tag.
+_PHYSICS_MATCH_FIELDS = (
+    'process', 'beam_energy_electron', 'beam_energy_hadron',
+    'beam_species', 'nucleon', 'q2_range', 'decay_mode', 'hadron_charge',
+    'helicity', 'polarization', 'coherence', 'model', 'beam_config',
+    'state', 'mechanism', 'final_state', 'channel', 'mass',
+    'particle', 'gun_energy',
+)
+
+
+def _physics_key(params):
+    """Identity tuple over the full physics axis set (a missing axis == '')."""
+    return tuple((params or {}).get(f, '') for f in _PHYSICS_MATCH_FIELDS)
+
+
+def find_or_create_physics_tag(derived, *, created_by='csv_import', dry_run=False):
+    """Resolve the physics tag whose full parameter set equals ``derived``.
+
+    Matching keys on the complete physics axis set, not the ``(process, beam)``
+    subset: two compositions differing in any axis (Q2 range, species, decay,
+    beam config, ...) are different tags. A coarse DB filter on ``process``
+    narrows candidates; the full set is compared in Python so a tag stored with
+    only the axes it carries still matches (a missing axis counts as ''). Among
+    matches a locked tag is preferred, then the lowest number. A miss creates a
+    new *draft* tag, numbered via ``PhysicsTag.allocate_next`` and the category
+    map; locking is a deliberate later step at submission prep, not here.
+
+    Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``. In
+    ``dry_run`` nothing is written and a ``'create'`` returns ``(None, 'create')``.
+    """
+    process = derived.get('process')
+    want = _physics_key(derived)
+    matches = sorted(
+        (t for t in PhysicsTag.objects.filter(parameters__process=process)
+         if _physics_key(t.parameters) == want),
+        key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
+    )
+    if matches:
+        return matches[0], 'reuse'
+
+    digit = _PROCESS_CATEGORY.get(process)
+    if digit is None:
+        raise ServiceError(f'No physics category mapping for process {process!r}')
+    if dry_run:
+        return None, 'create'
+    category = PhysicsCategory.objects.get(digit=digit)
+    tag = PhysicsTag(
+        tag_number=PhysicsTag.allocate_next(category),
+        category=category,
+        status='draft',
+        parameters=derived,
+        created_by=created_by,
+    )
+    tag.save()
+    return tag, 'create'
+
+
+def _no_signal_physics_tag():
+    """The locked, signal-free physics tag (``p6001``) that standalone background
+    datasets name in the physics slot. Seeded by migration 0010."""
+    tag = PhysicsTag.objects.filter(tag_label='p6001').first()
+    if not tag:
+        raise ServiceError('No-signal physics tag p6001 is missing; run migrations.')
+    return tag
+
+
+#: Background-tag dedup key — the sample-defining params.
+_BG_MATCH_FIELDS = ('background_type', 'bg_source', 'bg_mechanism', 'bg_generator',
+                    'beam_energy_electron', 'beam_energy_hadron')
+
+
+def _background_description(p):
+    """Comma-joined description synthesised from background-tag parameters:
+    generator, type, beam energy, source, mechanism — each included only when
+    present. Single-beam samples show just the present energy."""
+    e = p.get('beam_energy_electron', 'N/A')
+    h = p.get('beam_energy_hadron', 'N/A')
+    if e != 'N/A' and h != 'N/A':
+        beam = f'{e}x{h} GeV'
+    elif e != 'N/A':
+        beam = f'{e} GeV'
+    elif h != 'N/A':
+        beam = f'{h} GeV'
+    else:
+        beam = ''
+    parts = [
+        p.get('bg_generator', ''),
+        p.get('background_type', ''),
+        beam,
+        p.get('bg_source', ''),
+        p.get('bg_mechanism', ''),
+    ]
+    return ', '.join(x for x in parts if x)
+
+
+def find_or_create_background_tag(params, *, created_by='csv_import', dry_run=False):
+    """Resolve the background (k) tag for derived background params.
+
+    Mirrors ``find_or_create_physics_tag``: match by the sample-defining
+    parameters, prefer a locked tag then the lowest number, or create a new
+    *draft* tag. Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``.
+    """
+    match = {f'parameters__{k}': params.get(k, '') for k in _BG_MATCH_FIELDS}
+    matches = sorted(
+        BackgroundTag.objects.filter(**match),
+        key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
+    )
+    if matches:
+        tag = matches[0]
+        # Backfill a synthesised description if missing (annotation, not a
+        # reproducibility field) — never overwrite an existing one.
+        if not tag.description and not dry_run:
+            tag.description = _background_description(params)
+            tag.save(update_fields=['description', 'updated_at'])
+        return tag, 'reuse'
+    if dry_run:
+        return None, 'create'
+    tag = BackgroundTag(
+        tag_number=BackgroundTag.allocate_next(),
+        status='draft',
+        description=_background_description(params),
+        parameters=params,
+        created_by=created_by,
+    )
+    tag.save()
+    return tag, 'create'
+
+
+def find_or_create_evgen_tag(params, *, created_by='csv_import', dry_run=False):
+    """Resolve the evgen (e) tag for derived ``{generator, generator_version}``
+    params. Mirrors ``find_or_create_physics_tag``: match by (generator,
+    generator_version), prefer locked then lowest number, or create a new *draft*
+    tag. Returns ``(tag, action)`` with action ``'reuse'`` | ``'create'``."""
+    match = {
+        'parameters__generator': params.get('generator', ''),
+        'parameters__generator_version': params.get('generator_version', ''),
+    }
+    # Radiative corrections split an otherwise-identical generator into distinct
+    # tags; match on it only when the derivation set it, so non-radiative
+    # generators keep matching by (generator, generator_version) alone.
+    if params.get('radiative'):
+        match['parameters__radiative'] = params['radiative']
+    matches = sorted(
+        EvgenTag.objects.filter(**match),
+        key=lambda t: (0 if t.status == 'locked' else 1, t.tag_number),
+    )
+    if matches:
+        return matches[0], 'reuse'
+    if dry_run:
+        return None, 'create'
+    tag = EvgenTag(
+        tag_number=EvgenTag.allocate_next(),
+        status='draft',
+        description=f"{params.get('generator', '')} {params.get('generator_version', '')}".strip(),
+        parameters=params,
+        created_by=created_by,
+    )
+    tag.save()
+    return tag, 'create'
+
+
 def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     """Import Sakib's epic-prod datasets.csv into the catalog.
 
     Each CSV row becomes (idempotently):
       - one Dataset (placeholder tags + ``26.02.0`` campaign labels,
         full row preserved in ``metadata['csv_import']``),
-      - one ProdTask (status='csv_import', linked to the Dataset, the
-        anchor ProdConfig, and the current Campaign).
+      - one ProdTask (status='draft', linked to the Dataset, the
+        anchor ProdConfig, and the current Campaign) — imported rows enter
+        the editable production lifecycle directly.
 
     Idempotency key per row: ``(Dataset Path, Generator/Dataset Version)``.
     Re-running updates the existing rows in place.
@@ -516,7 +999,8 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
     with open(path, newline='') as f:
         rows = list(_csv.DictReader(f))
 
-    summary = {'rows': len(rows), 'created': 0, 'updated': 0, 'errors': []}
+    summary = {'rows': len(rows), 'created': 0, 'updated': 0,
+               'tag_actions': {}, 'errors': []}
 
     with transaction.atomic():
         for i, row in enumerate(rows, 1):
@@ -528,7 +1012,54 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             slug = _csvimport_slug(ds_path, gen_ver)
             dataset_name = f'csv_import.{slug}'
-            task_name = f'csv_import.{slug}'
+            # Human-readable task name = the source path (the row's title), not
+            # an opaque hash, so URLs read clearly and the name can't be mistaken
+            # for the importer firing. Falls back to the slug name for a path-less
+            # (gen_version-only) row. The Rucio DID stays slug-based on
+            # dataset_name — its charset rules are a separate concern.
+            task_name = _task_name_from_path(ds_path) or dataset_name
+
+            # Derive the real physics from the path and resolve its locked tag,
+            # replacing the placeholder anchor. Backgrounds resolve to the
+            # signal-free p6001 physics tag plus a derived k background tag; an
+            # unrecognizable path keeps the anchor and is surfaced in errors
+            # rather than silently mis-tagged.
+            filters = _extract_csv_filters(ds_path, 'epic_craterlake')
+            derived = derive_physics(task_name, beam=filters.get('beam', ''))
+            is_background = bool(derived) and derived.get('process') in ('BEAMGAS', 'SYNRAD')
+            angular_range = single_particle_angle(task_name)
+            row_physics_tag = physics
+            row_background_tag = None
+            if derived is None:
+                summary['errors'].append(
+                    f'row {i}: path {task_name!r} is not a recognizable EVGEN '
+                    f'entry; left on placeholder tag {physics.tag_label}')
+            elif is_background:
+                # Standalone background: physics slot is the signal-free p6001
+                # sentinel; the background config itself becomes a k tag.
+                row_physics_tag = _no_signal_physics_tag()
+                bg_params = derive_background(task_name)
+                if bg_params:
+                    row_background_tag, bg_action = find_or_create_background_tag(
+                        bg_params, created_by=created_by)
+                    bg_key = f'bg-{bg_action}'
+                    summary['tag_actions'][bg_key] = summary['tag_actions'].get(bg_key, 0) + 1
+            else:
+                row_physics_tag, action = find_or_create_physics_tag(
+                    derived, created_by=created_by)
+                summary['tag_actions'][action] = summary['tag_actions'].get(action, 0) + 1
+
+            # Resolve the generator (evgen) from path/gen_version. Unresolved
+            # (ambiguous/underspecified) rows keep the placeholder anchor and are
+            # left for manual association — never guessed. See the curated
+            # derive_evgen and docs (campaign->tag mapping).
+            row_evgen_tag = evgen
+            ev_params = derive_evgen(task_name, gen_ver)
+            if ev_params:
+                row_evgen_tag, ev_action = find_or_create_evgen_tag(
+                    ev_params, created_by=created_by)
+                ev_key = f'evgen-{ev_action}'
+                summary['tag_actions'][ev_key] = summary['tag_actions'].get(ev_key, 0) + 1
 
             raw_priority = (row.get('Priority') or '').strip()
             try:
@@ -546,10 +1077,21 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
             if gen_ver:
                 metadata['source']['gen_version'] = gen_ver
 
+            # Single-particle samples share a (particle, energy) tag and differ
+            # only by polar-angle range — the sample-variant discriminator that
+            # composes into the dataset name. Empty for everything else (the
+            # tags are a unique identity there). Same value as the per-task
+            # angular_range above.
+            ds_sample_name = angular_range
             ds = Dataset.objects.filter(dataset_name=dataset_name, block_num=1).first()
             if ds:
                 ds.description = (row.get('Description') or '').strip()
                 ds.metadata = metadata
+                ds.campaign = campaign
+                ds.physics_tag = row_physics_tag
+                ds.evgen_tag = row_evgen_tag
+                ds.background_tag = row_background_tag
+                ds.sample_name = ds_sample_name
                 ds.save()
                 ds_created = False
             else:
@@ -558,8 +1100,11 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                     scope='group.EIC',
                     detector_version='26.02.0',
                     detector_config='epic_craterlake',
-                    physics_tag=physics, evgen_tag=evgen,
+                    campaign=campaign,
+                    physics_tag=row_physics_tag, evgen_tag=row_evgen_tag,
                     simu_tag=simu, reco_tag=reco,
+                    background_tag=row_background_tag,
+                    sample_name=ds_sample_name,
                     description=(row.get('Description') or '').strip(),
                     metadata=metadata,
                     created_by=created_by,
@@ -569,7 +1114,12 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             task_defaults = dict(
                 description=(row.get('Description') or '').strip(),
-                status='csv_import',
+                # Imported catalog rows enter the editable production lifecycle
+                # directly — turning Sakib's static default_datasets.csv list
+                # into the living, actionable current-campaign catalog is the
+                # whole point of the import. (The legacy 'csv_import' holding
+                # status + per-row Adopt step were retired; see migration 0008.)
+                status='draft',
                 dataset=ds,
                 prod_config=cfg,
                 campaign=campaign,
@@ -587,7 +1137,8 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                         'gen_version': gen_ver,
                         'evgen': _extract_evgen(gen_ver),
                         'other_use_text': (row.get('Other Use') or '').strip(),
-                        'filters': _extract_csv_filters(ds_path, ds.detector_config),
+                        'filters': filters,
+                        'angular_range': angular_range,
                     },
                 },
                 created_by=created_by,
@@ -595,11 +1146,11 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
 
             existing = ProdTask.objects.filter(name=task_name).first()
             if existing:
-                # Preserve status once an operator has moved the task off
-                # csv_import — re-imports must not roll back lifecycle.
-                preserve_status = existing.status != 'csv_import'
+                # A re-import refreshes the catalog data but never moves the
+                # task in its lifecycle — whatever state an operator has
+                # reached (draft/ready/submitted/…) is left untouched.
                 for k, v in task_defaults.items():
-                    if k == 'status' and preserve_status:
+                    if k == 'status':
                         continue
                     if k == 'overrides':
                         # Merge so non-csv_import override keys (added by
@@ -799,6 +1350,11 @@ def _decompose_past_did(did):
     return out
 
 
+def _version_tuple(v):
+    """'26.06.0' -> (26, 6, 0) for release comparison; non-numeric parts sort low."""
+    return tuple(int(p) if p.isdigit() else -1 for p in str(v or '').split('.'))
+
+
 def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                                     created_by='past_import'):
     """Import 2026 past-campaign output datasets from a cloned epic-prod.
@@ -823,6 +1379,8 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     import os as _os
     import yaml as _yaml
     physics, evgen, simu, reco, cfg, _ = _ensure_csvimport_anchors()
+    current_camp = Campaign.objects.filter(lifecycle='current').first()
+    current_v = _version_tuple(current_camp.name) if current_camp else None
 
     summary = {'campaigns': 0, 'rows': 0, 'created': 0, 'updated': 0, 'errors': []}
 
@@ -855,15 +1413,20 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                     summary['errors'].append(f'{campaign_name}: {e}')
                     continue
 
+                # A produced release newer than the current campaign is a
+                # FUTURE release, not past — classify by version so the lifecycle
+                # self-corrects on every import and as current advances.
+                lc = 'future' if (current_v is not None
+                                  and _version_tuple(version) > current_v) else 'past'
                 campaign, _ = Campaign.objects.get_or_create(
                     name=campaign_name,
-                    defaults={'lifecycle': 'past',
+                    defaults={'lifecycle': lc,
                               'description': f'{stage} campaign {version} '
                                              f'(epic-prod {index_path})',
                               'created_by': created_by},
                 )
-                if campaign.lifecycle != 'past':
-                    campaign.lifecycle = 'past'
+                if campaign.lifecycle != lc:
+                    campaign.lifecycle = lc
                     campaign.save(update_fields=['lifecycle'])
                 summary['campaigns'] += 1
 
@@ -891,6 +1454,26 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         },
                     }
 
+                    # Derive the real physics from the DID path remainder and bind
+                    # the matching tag, replacing the placeholder anchor (the p1006
+                    # dump). Standalone backgrounds take the signal-free p6001 tag;
+                    # an unparseable remainder keeps the anchor and is surfaced.
+                    # Evgen and background k tags for past rows stay a separate
+                    # (manual) association.
+                    remainder = decomposed.get('path_remainder', '')
+                    derived = derive_physics(
+                        remainder, beam=metadata['past_output']['filters'].get('beam', ''))
+                    row_physics_tag = physics
+                    if derived is None:
+                        summary['errors'].append(
+                            f'{campaign_name}: DID {epic_did!r} physics unresolved; '
+                            f'left on placeholder {physics.tag_label}')
+                    elif derived.get('process') in ('BEAMGAS', 'SYNRAD'):
+                        row_physics_tag = _no_signal_physics_tag()
+                    else:
+                        row_physics_tag, _ = find_or_create_physics_tag(
+                            derived, created_by=created_by)
+
                     pcs_did = f'group.EIC:{pcs_name}.b1'
                     ds, ds_created = Dataset.objects.get_or_create(
                         dataset_name=pcs_name, block_num=1,
@@ -898,7 +1481,8 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                             scope='group.EIC', did=pcs_did,
                             detector_version=version,
                             detector_config=decomposed.get('detector_config', ''),
-                            physics_tag=physics, evgen_tag=evgen,
+                            campaign=campaign,
+                            physics_tag=row_physics_tag, evgen_tag=evgen,
                             simu_tag=simu, reco_tag=reco,
                             file_count=block['file_count'],
                             data_size=block['data_size_bytes'],
@@ -911,8 +1495,10 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         ds.file_count = block['file_count']
                         ds.data_size = block['data_size_bytes']
                         ds.metadata = metadata
+                        ds.campaign = campaign
                         ds.detector_version = version
                         ds.detector_config = decomposed.get('detector_config', '')
+                        ds.physics_tag = row_physics_tag
                         ds.save()
 
                     task_defaults = dict(
@@ -975,7 +1561,7 @@ JLAB_RUCIO_URL      = '/'.join(['https://rucio-server.jlab.org:443'])
 JLAB_RUCIO_ACCOUNT  = 'eicread'
 JLAB_RUCIO_USERNAME = 'eicread'
 JLAB_RUCIO_PASSWORD = 'eicread'
-RUCIO_SNAPSHOT_DIR  = '/opt/swf-monitor/shared/rucio-snapshots'
+RUCIO_SNAPSHOT_DIR  = _os.path.join(_settings.SWF_TMP_DIR, 'rucio-snapshots')
 
 
 def _jlab_rucio_auth(timeout=30):
@@ -1078,6 +1664,79 @@ def fetch_jlab_rucio_campaign(campaign_path, *, scope='epic', token=None,
     return {'count': len(datasets), 'datasets': datasets}
 
 
+def fetch_jlab_rucio_did(scope, name):
+    """Live read of a single JLab Rucio DID for the self-hosted detail page.
+
+    Pure read over the public eicread userpass — no agent credential, no cache;
+    what it returns is true *now*. Generic over DID type: an input EVGEN dataset
+    and an output RECO dataset render through this same path. Returns Rucio's
+    full ``/meta`` (system + user attributes), the per-RSE dataset replicas, and
+    a derived summary (type, total bytes, file count). The file list is fetched
+    separately (``fetch_jlab_rucio_did_files``) — a populated RECO dataset has
+    thousands of files. Raises ServiceError(404) for an unknown DID, (502) if
+    JLab Rucio is unreachable. See docs/EPICPROD_DATA_LINEAGE.md."""
+    import json as _json
+    import urllib.error as _ue
+    name = '/' + name.lstrip('/')   # Rucio names are leading-slashed; a proxy may collapse '//'
+    try:
+        token = _jlab_rucio_auth()
+        meta = _json.loads(_jlab_rucio_get(f'/dids/{scope}/{name}/meta', token))
+        replicas = [r for r in _ndjson(
+            _jlab_rucio_get(f'/replicas/{scope}/{name}/datasets', token))
+            if isinstance(r, dict)]
+    except _ue.HTTPError as e:
+        if e.code == 404:
+            raise ServiceError(
+                f'DID not found in JLab Rucio: {scope}:{name}', status=404)
+        raise ServiceError(
+            f'JLab Rucio error {e.code} for {scope}:{name}', status=502)
+    except (_ue.URLError, OSError) as e:
+        raise ServiceError(f'Could not reach JLab Rucio: {e}', status=502)
+    # The DID record's length/bytes are often null; the replica rows carry the
+    # real totals. Take the max across RSEs as the dataset total.
+    def _from_replicas(key):
+        vals = [r.get(key) for r in replicas if isinstance(r.get(key), int)]
+        return max(vals) if vals else meta.get(key)
+    return {
+        'scope': scope, 'name': name, 'did': f'{scope}:{name}',
+        'type': meta.get('did_type') or meta.get('type'),
+        'account': meta.get('account'),
+        'is_open': meta.get('is_open'),
+        'availability': meta.get('availability'),
+        'bytes': _from_replicas('bytes'),
+        'file_count': _from_replicas('length'),
+        'created_at': meta.get('created_at'),
+        'updated_at': meta.get('updated_at'),
+        'meta': meta,
+        'replicas': replicas,
+    }
+
+
+def fetch_jlab_rucio_did_files(scope, name):
+    """Live file list for a JLab Rucio DID (on-demand; can be thousands).
+
+    Pure read; returns ``[{name, bytes, adler32, guid, events}, ...]``. Per-file
+    PFN resolution is intentionally omitted here — the bulk ``/replicas`` call is
+    too slow for a large dataset (it times out); the RSE-level replicas from
+    ``fetch_jlab_rucio_did`` already answer 'where does it live'."""
+    import urllib.error as _ue
+    name = '/' + name.lstrip('/')
+    try:
+        token = _jlab_rucio_auth()
+        files = [f for f in _ndjson(
+            _jlab_rucio_get(f'/dids/{scope}/{name}/files', token, timeout=120))
+            if isinstance(f, dict)]
+    except _ue.HTTPError as e:
+        if e.code == 404:
+            raise ServiceError(
+                f'DID not found in JLab Rucio: {scope}:{name}', status=404)
+        raise ServiceError(
+            f'JLab Rucio error {e.code} for {scope}:{name}', status=502)
+    except (_ue.URLError, OSError) as e:
+        raise ServiceError(f'Could not reach JLab Rucio: {e}', status=502)
+    return files
+
+
 def _request_input_tail(ds_path):
     """Return the comparable tail of a CSV input dataset path.
 
@@ -1140,6 +1799,57 @@ def _aggregate_rucio_match(matches):
         if not complete:
             st['incomplete'] += 1
     return by_stage
+
+
+def _did_version(did):
+    """Release version segment of a produced DID.
+
+    ``epic:/RECO/26.04.1/epic_craterlake/...`` -> ``26.04.1`` (segment after
+    the stage). Empty string if it can't be parsed.
+    """
+    name = (did or '').split(':', 1)[-1]
+    parts = [p for p in name.split('/') if p]   # [stage, version, ...]
+    return parts[1] if len(parts) > 1 else ''
+
+
+def _rucio_match_to_output(m, checked_at=None):
+    """Convert one produced Rucio dataset record into a unified ``outputs``
+    entry (one per dataset, lifecycle-neutral) — see EPICPROD_DATA_LINEAGE.md.
+
+    File count / byte size are taken as the max across RSE replicas (Rucio
+    reports them per replica, identical across RSEs), matching
+    ``_aggregate_rucio_match``.
+    """
+    did = m.get('did', '')
+    files = m.get('length') or 0
+    bytes_ = m.get('bytes') or 0
+    rses = []
+    complete = True
+    for r in m.get('rse_replicas', []) or []:
+        rse = r.get('rse')
+        if not rse:
+            continue
+        total = r.get('length') or 0
+        avail = r.get('available_length') or 0
+        files = max(files, total)
+        bytes_ = max(bytes_, r.get('bytes') or 0)
+        rse_complete = bool(total) and avail == total
+        complete = complete and rse_complete
+        rses.append({'rse': rse, 'files': avail, 'total': total,
+                     'complete': rse_complete})
+    entry = {
+        'did':        did,
+        'stage':      m.get('stage', ''),
+        'version':    _did_version(did),
+        'filters':    _extract_past_filters(did),
+        'rses':       rses,
+        'file_count': files,
+        'bytes':      bytes_,
+        'complete':   complete if rses else False,
+    }
+    if checked_at:
+        entry['checked_at'] = checked_at
+    return entry
 
 
 def _index_snapshot_by_tail(snapshot):
@@ -1260,6 +1970,7 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     """
     # Precompute (rec, did_filters) so the matcher loop is O(req * did).
     idx = _index_snapshot_by_tail(snapshot)
+    checked_at = snapshot.get('fetched_at')
     idx_filtered = [(rec, _extract_past_filters(rec['did']))
                     for _tail, rec in idx]
     qs = ProdTask.objects.filter(campaign=campaign).select_related('dataset')
@@ -1283,28 +1994,14 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
                     matches.append(rec)
         for m in matches:
             matched_dids.add(m['did'])
-        by_stage = _aggregate_rucio_match(matches)
-        any_incomplete = any(s.get('incomplete', 0) for s in by_stage.values())
-        has_output = len(matches) > 0
-        if not has_output:
-            output_status = 'no_output'
-        elif any_incomplete:
-            output_status = 'incomplete'
-        else:
-            output_status = 'complete'
         overrides = dict(t.overrides or {})
-        cv = dict(overrides.get('csv_import', {}) or {})
-        cv['output'] = {
-            'by_stage':      by_stage,
-            'matched_count': len(matches),
-            'campaign_name': campaign.name,
-            'status':        output_status,   # 'no_output' | 'complete' | 'incomplete'
-            'has_output':    has_output,
-            'has_incomplete': any_incomplete,
-            'has_simu':      'FULL' in by_stage,
-            'has_reco':      'RECO' in by_stage,
-        }
-        overrides['csv_import'] = cv
+        overrides['outputs'] = [_rucio_match_to_output(m, checked_at) for m in matches]
+        # Drop the superseded aggregate if present — outputs is now the home.
+        cv = overrides.get('csv_import')
+        if isinstance(cv, dict) and 'output' in cv:
+            cv = dict(cv)
+            cv.pop('output', None)
+            overrides['csv_import'] = cv
         t.overrides = overrides
         t.save(update_fields=['overrides', 'updated_at'])
         if matches:
@@ -1341,6 +2038,65 @@ def match_requests_to_rucio_snapshot(snapshot, *, campaign):
     campaign.data = {**(campaign.data or {}), 'rucio_unmatched': unmatched}
     campaign.save(update_fields=['data', 'updated_at'])
     summary['rucio_unmatched'] = len(unmatched)
+    return summary
+
+
+def migrate_outputs_schema(*, apply=False):
+    """One-time migration onto the unified ``ProdTask.overrides['outputs']``
+    schema — one entry per produced Rucio dataset, lifecycle-neutral
+    (EPICPROD_DATA_LINEAGE.md).
+
+    - ``past_output`` tasks: reshape ``overrides['past_output']`` + the
+      Dataset's Rucio DID/counts into one ``outputs`` entry; drop the
+      ``past_output`` key.
+    - tasks carrying the old ``csv_import.output`` rollup: drop that aggregate
+      (explicit DIDs are re-populated by the next Rucio match).
+
+    ``apply=False`` (default) is a dry run — counts only, no writes. Per-task
+    errors are collected, never swallowed.
+    """
+    summary = {'seen': 0, 'past_migrated': 0, 'aggregate_dropped': 0,
+               'errors': []}
+    for t in ProdTask.objects.select_related('dataset').iterator():
+        try:
+            ov = dict(t.overrides or {})
+            changed = False
+            po = ov.get('past_output')
+            if po and not ov.get('outputs'):
+                md = (t.dataset.metadata or {}) if t.dataset else {}
+                did = (md.get('source') or {}).get('location', '') if md else ''
+                rses = [{'rse': r.get('name'), 'files': r.get('files'),
+                         'total': r.get('total'),
+                         'complete': r.get('status') == 'complete'}
+                        for r in (po.get('rses') or [])]
+                ov['outputs'] = [{
+                    'did':        did,
+                    'stage':      po.get('stage', ''),
+                    'version':    po.get('version', ''),
+                    'filters':    po.get('filters', {}),
+                    'rses':       rses,
+                    'file_count': t.dataset.file_count if t.dataset else 0,
+                    'bytes':      t.dataset.data_size if t.dataset else 0,
+                    'complete':   po.get('complete', True),
+                }]
+                summary['past_migrated'] += 1
+                changed = True
+            if 'past_output' in ov:
+                ov.pop('past_output', None)
+                changed = True
+            cv = ov.get('csv_import')
+            if isinstance(cv, dict) and 'output' in cv:
+                cv = dict(cv)
+                cv.pop('output', None)
+                ov['csv_import'] = cv
+                summary['aggregate_dropped'] += 1
+                changed = True
+            summary['seen'] += 1
+            if changed and apply:
+                t.overrides = ov
+                t.save(update_fields=['overrides', 'updated_at'])
+        except Exception as e:                                # noqa: BLE001
+            summary['errors'].append(f'{t.name}: {e}')
     return summary
 
 
@@ -1581,6 +2337,308 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
     return summary
 
 
+def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
+    """Pull the JLab Rucio snapshot for the current (+last) PCS campaign(s) and
+    rematch produced datasets onto each task's ``overrides['outputs']``.
+
+    The work behind the catalog's "Update from Rucio" button. Slow and
+    network-bound (a live JLab Rucio fetch of /RECO + /FULL plus the match over
+    every task), so it runs off the web request — in the prod-ops agent's
+    ``rucio_snapshot_update`` doer. Returns ``{'summaries': [...], 'errors':
+    [...]}``; errors are collected per campaign, never swallowed.
+    """
+    targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
+                   .order_by('lifecycle'))
+    out = {'summaries': [], 'errors': []}
+    if not targets:
+        out['errors'].append('No current Campaign defined in PCS')
+        return out
+    for camp in targets:
+        try:
+            out['summaries'].append(import_jlab_rucio_current_snapshot(
+                campaign_name=camp.name, created_by=created_by))
+        except Exception as e:                                # noqa: BLE001
+            out['errors'].append(f'{camp.lifecycle} {camp.name}: {e}')
+    return out
+
+
+# ---------------------------------------------------------------------------
+# EVGEN input assimilation (JLab Rucio epic:/EVGEN/* -> PCS evgen Datasets)
+# ---------------------------------------------------------------------------
+
+EVGEN_RUCIO_SNAPSHOT_NAME = 'evgen-rucio.json'
+
+
+def _extract_evgen_did_filters(did):
+    """Filter axes of a JLab Rucio EVGEN DID.
+
+    EVGEN DIDs are detector-independent and shaped
+    ``epic:/EVGEN/<physics>/<generator>/<current>/<radiation>/<charge>/<beam>/<q2>``
+    — no version or detector segment (unlike RECO/FULL). Strip the leading
+    EVGEN and read the shared {beam, physics, q2, species, energy} from the
+    rest; detector is left empty (the same EVGEN feeds any detector config).
+    """
+    parts = did.split(':', 1)
+    rest = (parts[1] if len(parts) == 2 else did).lstrip('/')
+    segs = [s for s in rest.split('/') if s]
+    if segs and segs[0] == 'EVGEN':
+        segs = segs[1:]
+    out = _extract_path_filters(segs)
+    out['detector'] = ''
+    return out
+
+
+def _evgen_did_tail(did):
+    """Lower-cased path tail of an EVGEN DID, after scope and leading EVGEN.
+
+    ``epic:/EVGEN/DIS/pythia8.316-1.0/NC/noRad/ep/10x100/q2_1to10``
+    -> ``dis/pythia8.316-1.0/nc/norad/ep/10x100/q2_1to10``
+    """
+    name = did.split(':', 1)[-1].lstrip('/')
+    segs = [s for s in name.split('/') if s]
+    if segs and segs[0].upper() == 'EVGEN':
+        segs = segs[1:]
+    return '/'.join(segs).lower()
+
+
+_EVGEN_Q2_MIN_RE   = _re.compile(r'^minq2=([\d.]+)$')
+_EVGEN_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)(?:to|_)([\d.]+)$')
+_EVGEN_Q2_POINT_RE = _re.compile(r'^q2_([\d.]+)$')
+
+
+def _looks_evgen_q2(tok):
+    return tok.startswith('q2_') or tok.startswith('minq2=')
+
+
+def _evgen_q2_bounds(tok):
+    """Parse a lower-cased Q² token into (lo, hi, kind).
+
+    'minq2=1'  -> (1, inf, 'min'); 'q2_1to10' -> (1, 10, 'range')  (Rucio/SIDIS);
+    'q2_10_20' -> (10, 20, 'range') (EXCLUSIVE); 'q2_20' -> (20, 20, 'range').
+    """
+    m = _EVGEN_Q2_MIN_RE.match(tok)
+    if m:
+        return (float(m.group(1)), float('inf'), 'min')
+    m = _EVGEN_Q2_RANGE_RE.match(tok)
+    if m:
+        return (float(m.group(1)), float(m.group(2)), 'range')
+    m = _EVGEN_Q2_POINT_RE.match(tok)
+    if m:
+        v = float(m.group(1))
+        return (v, v, 'range')
+    return None
+
+
+def _evgen_q2_match(req_tok, did_tok):
+    """Q² compatibility for input resolution — distinct from the output
+    sweep's ``_q2_overlap``: an explicit request range must equal the Rucio
+    range exactly; a ``minQ2=N`` request matches any Rucio range lying entirely
+    at or above the floor (lo >= N). No boundary-touching overlap.
+    """
+    rb = _evgen_q2_bounds(req_tok)
+    db = _evgen_q2_bounds(did_tok)
+    if rb is None or db is None:
+        return req_tok == did_tok
+    if rb[2] == 'min':
+        return db[0] >= rb[0]
+    return rb[0] == db[0] and rb[1] == db[1]
+
+
+def _evgen_input_match(req_tail, did_tail):
+    """True if a request EVGEN path tail resolves to a Rucio EVGEN DID tail.
+
+    Input-side matcher — deliberately separate from the output sweep's
+    ``_filter_match`` so input and output match policies evolve independently
+    (a change here cannot affect the produced-output match). Both tails live in
+    the same EVGEN namespace, so the request tokens must appear, in order, as a
+    subsequence of the DID tokens, compared exactly EXCEPT the Q² token (range
+    semantics via ``_evgen_q2_match``). Exact comparison makes the match safe by
+    construction: a request that carries charge / generator / version (e.g.
+    ``ep_noradcor``, ``pythia6-eic``, ``1.2.0``) only matches a DID carrying the
+    same — never ep->en or a different version. A request that omits an axis
+    (abstract DIS: no generator/charge) fans out to the specific Rucio datasets
+    that carry it.
+    """
+    req = [t for t in req_tail.split('/') if t]
+    did = [t for t in did_tail.split('/') if t]
+    if not req:
+        return False
+    di = 0
+    for rt in req:
+        matched = False
+        while di < len(did):
+            dt = did[di]
+            di += 1
+            if _looks_evgen_q2(rt) and _looks_evgen_q2(dt):
+                if _evgen_q2_match(rt, dt):
+                    matched = True
+                    break
+            elif rt == dt:
+                matched = True
+                break
+        if not matched:
+            return False
+    return True
+
+
+def _rucio_evgen_entry(m, checked_at=None):
+    """One resolved Rucio EVGEN dataset -> a metadata['rucio'] match entry.
+
+    Input-side analog of ``_rucio_match_to_output``: same shape (did, rses,
+    file_count, bytes, complete), but the filter axes come from the EVGEN DID
+    extractor (detector-independent, no version segment). File count / byte
+    size are the max across RSE replicas (Rucio reports them per replica).
+    """
+    did = m.get('did', '')
+    files = m.get('length') or 0
+    bytes_ = m.get('bytes') or 0
+    rses = []
+    complete = True
+    for r in m.get('rse_replicas', []) or []:
+        rse = r.get('rse')
+        if not rse:
+            continue
+        total = r.get('length') or 0
+        avail = r.get('available_length') or 0
+        files = max(files, total)
+        bytes_ = max(bytes_, r.get('bytes') or 0)
+        rse_complete = bool(total) and avail == total
+        complete = complete and rse_complete
+        rses.append({'rse': rse, 'files': avail, 'total': total,
+                     'complete': rse_complete})
+    entry = {
+        'did':        did,
+        'stage':      'EVGEN',
+        'filters':    _extract_evgen_did_filters(did),
+        'rses':       rses,
+        'file_count': files,
+        'bytes':      bytes_,
+        'complete':   complete if rses else False,
+    }
+    if checked_at:
+        entry['checked_at'] = checked_at
+    return entry
+
+
+def fetch_jlab_rucio_evgen(*, scope='epic', token=None):
+    """JLab Rucio EVGEN dataset inventory (``epic:/EVGEN/*``).
+
+    Generator-level inputs are detector-independent and not campaign-
+    versioned, so the whole /EVGEN tree is one inventory. Same record shape
+    as ``fetch_jlab_rucio_campaign``.
+    """
+    return fetch_jlab_rucio_campaign('/EVGEN', scope=scope, token=token)
+
+
+def refresh_evgen_rucio(*, apply=False, snapshot_dir=RUCIO_SNAPSHOT_DIR,
+                        created_by='evgen_rucio'):
+    """Assimilate the JLab Rucio EVGEN inventory and resolve PCS evgen
+    Datasets to it. Re-sweepable: re-running picks up a grown listing.
+
+    Fetches ``epic:/EVGEN/*`` once, saves the snapshot, and for each PCS
+    Dataset with stage=evgen resolves the Rucio EVGEN dataset(s) that realize
+    it — matching on the shared filter axes (beam, physics, Q² overlap), never
+    on path strings: request paths carry ``minQ2=N`` and no
+    generator/radiation/charge, Rucio DIDs carry the full form and a
+    ``q2_<lo>to<hi>`` range, so one abstract request can resolve to several
+    Q²-range datasets. The resolved refs are written to each Dataset's
+    ``metadata['rucio']``; re-running overwrites them.
+
+    ``apply=False`` (default) is a dry run — fetch + match + summary, no DB
+    writes. NO-SILENT-FAILURES: network / parse / per-dataset errors are
+    collected into ``summary['errors']``.
+    """
+    import json as _json
+    import os as _os
+    import time as _time
+
+    summary = {'rucio_evgen': 0, 'datasets_seen': 0, 'datasets_matched': 0,
+               'datasets_unmatched': 0, 'rucio_unmatched': 0,
+               'applied': apply, 'snapshot_path': '', 'errors': [],
+               'samples': []}
+    try:
+        token = _jlab_rucio_auth()
+    except Exception as e:                                     # noqa: BLE001
+        raise ServiceError(f'JLab Rucio auth failed: {e}')
+    try:
+        inv = fetch_jlab_rucio_evgen(token=token)
+    except Exception as e:                                     # noqa: BLE001
+        raise ServiceError(f'JLab Rucio EVGEN fetch failed: {e}')
+
+    checked_at = _time.strftime('%Y-%m-%dT%H:%M:%S%z')
+    # Drop obvious throwaway DIDs (a stray '.../q2_1to10/test', any case).
+    records = [d for d in inv.get('datasets', [])
+               if d.get('did') and not d['did'].rstrip('/').lower().endswith('/test')]
+    summary['rucio_evgen'] = len(records)
+    indexed = [(d, _evgen_did_tail(d['did'])) for d in records]
+
+    snapshot = {'fetched_at': checked_at, 'scope': 'epic',
+                'count': len(records), 'datasets': records}
+    _os.makedirs(snapshot_dir, exist_ok=True)
+    out_path = _os.path.join(snapshot_dir, EVGEN_RUCIO_SNAPSHOT_NAME)
+    summary['snapshot_path'] = out_path
+    try:
+        with open(out_path, 'w') as f:
+            _json.dump(snapshot, f, indent=2)
+    except OSError as e:
+        summary['errors'].append(f'snapshot write {out_path}: {e}')
+
+    matched_dids = set()
+    qs = Dataset.objects.filter(metadata__stage='evgen')
+    for ds in qs.iterator():
+        summary['datasets_seen'] += 1
+        req_tail = _request_input_tail(ds.source_location)
+        if not req_tail:
+            summary['datasets_unmatched'] += 1
+            continue
+        matches = [d for d, dtail in indexed if _evgen_input_match(req_tail, dtail)]
+        if not matches:
+            summary['datasets_unmatched'] += 1
+            continue
+        summary['datasets_matched'] += 1
+        for d in matches:
+            matched_dids.add(d['did'])
+        entries = [_rucio_evgen_entry(d, checked_at) for d in matches]
+        if len(summary['samples']) < 12:
+            summary['samples'].append({
+                'dataset': ds.did,
+                'request': ds.source_location,
+                'matched': [e['did'] for e in entries],
+            })
+        if apply:
+            md = dict(ds.metadata or {})
+            md['rucio'] = {'matched': entries, 'checked_at': checked_at}
+            ds.metadata = md
+            try:
+                ds.save(update_fields=['metadata'])
+            except Exception as e:                            # noqa: BLE001
+                summary['errors'].append(f'{ds.did}: save: {e}')
+
+    unmatched_records = [d for d in records if d['did'] not in matched_dids]
+    summary['rucio_unmatched'] = len(unmatched_records)
+    if apply:
+        # Persist the unmatched-Rucio list (EVGEN registered but claimed by no
+        # request) onto the current Campaign, the same home the produced-output
+        # sweep uses for its rucio_unmatched, so the catalog can surface it.
+        unmatched_list = []
+        for d in unmatched_records:
+            reps = d.get('rse_replicas') or []
+            files = max([r.get('length') or 0 for r in reps] or [d.get('length') or 0])
+            bytes_ = max([r.get('bytes') or 0 for r in reps] or [d.get('bytes') or 0])
+            unmatched_list.append({
+                'did': d['did'], 'files': files, 'bytes': bytes_,
+                'rses': sorted({r.get('rse', '') for r in reps if r.get('rse')}),
+            })
+        camp = Campaign.objects.filter(lifecycle='current').first()
+        if camp is not None:
+            camp.data = {**(camp.data or {}),
+                         'evgen_rucio_unmatched': unmatched_list,
+                         'evgen_rucio_checked_at': checked_at}
+            camp.save(update_fields=['data', 'updated_at'])
+            summary['unmatched_persisted'] = len(unmatched_list)
+    return summary
+
+
 def set_pcs_campaign_lifecycle(new_name, target_lifecycle, *, created_by='operator'):
     """Set the PCS Campaign with lifecycle=`target_lifecycle` to `new_name`.
 
@@ -1632,33 +2690,171 @@ def rename_pcs_current_campaign(new_name, *, created_by='operator'):
 
 def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
     """
-    Record outcome of a JEDI submission. Two gates:
+    Record outcome of a JEDI submission.
 
-    - ``task.status`` must be 'ready' (no submit from draft, no re-submit).
-    - ``task.panda_task_id`` must be unset; refuses to overwrite (409).
+    - **Idempotent on the jediTaskID.** Re-recording the SAME id is a no-op
+      success — a doer retry, or a manual re-record after an orphaned
+      submission whose record-back POST failed. A DIFFERENT id on an
+      already-recorded task is refused (409).
+    - Otherwise the task must be in status 'ready' (no record from draft).
     """
-    if task.status != 'ready':
-        raise ServiceError(
-            f'Task must be in status=ready before submission '
-            f'(current: {task.status!r}). Mark it ready via '
-            f'set-status first.'
-        )
-    if task.panda_task_id is not None:
-        raise ServiceError(
-            f'Task already records panda_task_id={task.panda_task_id}. '
-            f'Refusing to overwrite.',
-            status=409,
-        )
     try:
-        task.panda_task_id = int(jedi_task_id)
+        incoming = int(jedi_task_id)
     except (TypeError, ValueError):
         raise ServiceError('jedi_task_id must be an integer')
+
+    if task.panda_task_id is not None:
+        if task.panda_task_id == incoming:
+            return task          # already recorded this submission — idempotent
+        raise ServiceError(
+            f'Task already records panda_task_id={task.panda_task_id}, '
+            f'cannot overwrite with {incoming}.',
+            status=409,
+        )
+
+    # Commissioning relaxation: recording a submission from a draft task is
+    # allowed — the 'ready' freeze is not required. See
+    # docs/COMMISSIONING_RELAXATIONS.md.
 
     valid = _known_prodtask_statuses()
     if new_status not in valid:
         raise ServiceError(
             f'Invalid status. Choose from: {", ".join(sorted(valid))}'
         )
+    task.panda_task_id = incoming
     task.status = new_status
     task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
     return task
+
+
+def prodtask_submit_request(*, task):
+    """Publish a submit_task request for a locked (ready) task to the prod-ops
+    agent. The web tier holds no PanDA credential — it only asks the agent to
+    run the submission, which records the jediTaskID back. Gates mirror
+    prodtask_record_submission so we never fire a submission whose outcome
+    would then be refused. Raises ServiceError on a bad state or an
+    unreachable queue. This is the single submit trigger, behind the REST
+    `submit` action (compose view + the task detail page's "Submit in Compose"
+    link); the legacy page-view submit was retired."""
+    import json as _json
+    if task.panda_task_id is not None:
+        raise ServiceError(
+            f'Already submitted as jediTaskID {task.panda_task_id}.', status=409)
+    # Commissioning relaxation: a draft task may be submitted directly — the
+    # 'ready' freeze is not required. Readiness is surfaced as a non-blocking
+    # warning by the caller, not gated here. See docs/COMMISSIONING_RELAXATIONS.md.
+    # The Submit button drives the client-API EVGEN doer (submit_evgen_task):
+    # noInput+noOutput, payload-staged EVGEN, self-registered RECO. The prun
+    # doer ('submit_task', build_panda_command, submit-prod-task.py) is kept but
+    # sidelined — not wired to the button. See docs/JEDI_INTEGRATION.md.
+    msg = {'msg_type': 'submit_evgen_task', 'namespace': 'prodops',
+           'task_name': task.name, 'owner': task.created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Submission could not be queued (ops-agent queue unreachable).', status=503)
+    return task
+
+
+def prodtask_reset_submission(*, task):
+    """Clear a recorded submission so a task can be re-submitted: panda_task_id
+    → None and status → 'draft'. This is the recovery path when a submission
+    breaks or is aborted PanDA-side and the task is left pinned to a dead
+    jediTaskID — the submit gate (prodtask_submit_request) refuses while
+    panda_task_id is set, and PCS has no other way back to the buildable
+    lifecycle. Does NOT touch the PanDA task itself (none of our credentials
+    live in the web tier); it only detaches the dead reference so the next
+    submission can fire. The API gates
+    this to authenticated operators. Raises ServiceError if there is nothing to
+    reset. See docs/EPICPROD_OPS.md."""
+    if task.panda_task_id is None:
+        raise ServiceError(
+            'Nothing to reset — task has no recorded submission.', status=409)
+    task.panda_task_id = None
+    task.status = 'draft'
+    task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+    return task
+
+
+def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):
+    """Publish a rucio_snapshot_update request to the prod-ops agent, which
+    refreshes the JLab Rucio snapshot for the current (+last) campaign and
+    rematches produced datasets onto each task's overrides['outputs'] in the
+    background, then pushes rucio_snapshot_ready over the SSE relay. The live
+    JLab fetch + per-task match is far too slow to run inline in a web request,
+    so the web tier only drops the message. Requires a current or last Campaign.
+    Raises ServiceError on a bad state or an unreachable queue. See
+    docs/EPICPROD_DATA_LINEAGE.md, docs/EPICPROD_OPS_AGENT.md."""
+    import json as _json
+    from .models import Campaign
+    if not Campaign.objects.filter(lifecycle__in=['current', 'last']).exists():
+        raise ServiceError('No current Campaign defined in PCS.', status=400)
+    msg = {'msg_type': 'rucio_snapshot_update', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Rucio update could not be queued (ops-agent queue unreachable).',
+            status=503)
+
+
+def evgen_rucio_update_request(*, created_by='evgen_rucio'):
+    """Publish an evgen_rucio_update request to the prod-ops agent, which
+    assimilates the JLab Rucio EVGEN inventory (epic:/EVGEN/*) and resolves each
+    PCS evgen Dataset onto metadata['rucio'] in the background, then pushes
+    evgen_rucio_ready over the SSE relay. The live JLab fetch + per-dataset match
+    is too slow to run inline in a web request, so the web tier only drops the
+    message. EVGEN is not campaign-bound, so there is no Campaign precondition.
+    Raises ServiceError if the queue is unreachable. See
+    docs/EPICPROD_EVGEN_INPUTS.md, docs/EPICPROD_OPS_AGENT.md."""
+    import json as _json
+    msg = {'msg_type': 'evgen_rucio_update', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'EVGEN update could not be queued (ops-agent queue unreachable).',
+            status=503)
+
+
+def catalog_import_request(source, *, created_by='catalog_import'):
+    """Publish a catalog import request to the prod-ops agent, which runs the
+    import in the background and pushes catalog_import_ready over the SSE relay.
+    The epic-prod past import walks ~4900 datasets — too slow to run inline in a
+    web request (it times the gateway out), so the web tier only drops the
+    message. ``source`` is 'csv' (the current default_datasets.csv) or
+    'epic-prod' (the past/future FULL+RECO output). Raises ServiceError on a bad
+    source or an unreachable queue. See docs/EPICPROD_OPS_AGENT.md, SSE_PUSH.md."""
+    import json as _json
+    if source not in ('csv', 'epic-prod'):
+        raise ServiceError(f'Unknown catalog import source {source!r}.', status=400)
+    msg = {'msg_type': 'catalog_import', 'source': source,
+           'namespace': 'prodops', 'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Catalog import could not be queued (ops-agent queue unreachable).',
+            status=503)

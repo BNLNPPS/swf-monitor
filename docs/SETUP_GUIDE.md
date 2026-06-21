@@ -7,13 +7,12 @@ This guide walks you through setting up the `swf-monitor` for local development.
 For experienced developers who want to get running immediately:
 
 ```bash
-# Clone and setup
-git clone https://github.com/BNLNPPS/swf-monitor.git
-cd swf-monitor
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+# swf-monitor runs in the SHARED swf-testbed virtual environment — it has no
+# venv of its own. Set up the workspace venv once (see
+# ../../swf-testbed/docs/installation.md), then activate it:
+cd swf-testbed && source .venv/bin/activate && cd ../swf-monitor
 
-# Configure environment  
+# Configure environment
 cp .env.example .env
 # Edit .env with your SECRET_KEY, DB_PASSWORD, and SWF_TESTUSER_PASSWORD
 
@@ -30,19 +29,28 @@ Visit `http://127.0.0.1:8000/` to access the monitoring dashboard.
 
 ## Installation Steps
 
-### 1. Clone and Setup Environment
+### 1. Set Up the Shared Virtual Environment
+
+swf-monitor has no virtual environment of its own. It runs in the shared
+**swf-testbed** venv, into which swf-common-lib, swf-monitor, and swf-testbed
+are installed editable. Every test runner, the dual-server script, and the
+production deploy use that one venv — the deploy ships it verbatim, so what is
+installed in it is what runs in production.
+
+Set it up once by following
+**[swf-testbed/docs/installation.md](../../swf-testbed/docs/installation.md)**
+(creates `swf-testbed/.venv` and runs `pip install -e ../swf-common-lib ../swf-monitor .`).
+Then activate it for any swf-monitor work:
 
 ```bash
-git clone https://github.com/BNLNPPS/swf-monitor.git
-cd swf-monitor
-
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+cd swf-testbed && source .venv/bin/activate && cd ../swf-monitor
 ```
+
+When you change swf-monitor's dependencies (`requirements.txt` / `pyproject.toml`,
+always `>=` floors), re-run that install so the shared venv — and therefore the
+next deploy — picks the change up. See
+[installation.md](../../swf-testbed/docs/installation.md) → "Changing
+dependencies" (reqmts ⇒ dev-update ⇒ prod).
 
 ### 2. Configure Environment Variables
 
@@ -160,5 +168,5 @@ All tests should pass.
 ### Getting Help
 
 - Check the [main documentation](README.md) for architectural overview
-- Review [API documentation](MCP_REST_IMPLEMENTATION.md) for integration details
+- Review the [REST API reference](API_REFERENCE.md) and [MCP documentation](MCP.md) for integration details
 - See the [testbed documentation](../../swf-testbed/README.md) for system context

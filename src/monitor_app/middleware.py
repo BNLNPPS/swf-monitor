@@ -59,6 +59,14 @@ class TunnelAuthMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        if _is_localhost(request):
+            # Tunnel/localhost requests authenticate via X-Remote-User over the
+            # trusted SSH tunnel, not a browser session, so session CSRF is
+            # meaningless for them (mirrors TunnelAuthentication for DRF). Exempt
+            # them so proxied form POSTs (e.g. the catalog Update-from-CSV button,
+            # whose token the proxy can't forward) are not rejected. Direct
+            # browser users (non-localhost) keep full CSRF protection.
+            request._dont_enforce_csrf_checks = True
         if not request.user.is_authenticated and _is_localhost(request):
             remote_user = request.META.get('HTTP_X_REMOTE_USER', '').strip()
             if remote_user:

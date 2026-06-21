@@ -1,0 +1,6 @@
+# Namespace config for the prod-ops singleton, loaded by BaseAgent via the
+# agent's explicit config_path. A fixed 'prodops' namespace makes the singleton
+# identifiable in the monitor and lets callers address it explicitly — every
+# message to the agent carries namespace=prodops. See docs/EPICPROD_OPS.md.
+[testbed]
+namespace = "prodops"

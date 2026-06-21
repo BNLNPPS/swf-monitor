@@ -129,6 +129,7 @@
                 {% if tag_type != 'e' %}<a href="{% url 'pcs:tag_compose' tag_type='e' %}">EvGen</a>{% else %}<span class="current">EvGen</span>{% endif %}
                 {% if tag_type != 's' %}<a href="{% url 'pcs:tag_compose' tag_type='s' %}">Simu</a>{% else %}<span class="current">Simu</span>{% endif %}
                 {% if tag_type != 'r' %}<a href="{% url 'pcs:tag_compose' tag_type='r' %}">Reco</a>{% else %}<span class="current">Reco</span>{% endif %}
+                {% if tag_type != 'k' %}<a href="{% url 'pcs:tag_compose' tag_type='k' %}">Background</a>{% else %}<span class="current">Background</span>{% endif %}
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
                 <h5 style="margin:0">{{ schema.label }} Tags</h5>
@@ -137,6 +138,10 @@
                 {% endif %}
             </div>
             <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
+            <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem; align-self:flex-start;">
+                <button type="button" class="btn btn-outline-secondary active" data-sort="recent" style="font-size:.68rem; padding:.03rem .3rem; min-width:3.4rem;">Recent</button>
+                <button type="button" class="btn btn-outline-secondary" data-sort="alpha" style="font-size:.68rem; padding:.03rem .3rem; min-width:3.4rem;">A&ndash;Z</button>
+            </div>
             <div class="filter-row" id="status-filters">
                 <span class="filter-pill active" data-status="all">All</span>
                 <span class="filter-pill" data-status="draft">Draft</span>
@@ -508,7 +513,41 @@
                 <div class="detail-value">${tag.created_by}</div>
             </div>
             <div style="margin-top:1rem; font-size:.9rem; font-weight:600; border-bottom:1px solid #dee2e6; padding-bottom:.35rem; margin-bottom:.75rem;">Parameters</div>
-            ${paramHtml}`;
+            ${paramHtml}
+            <div id="tag-usage" style="margin-top:1.25rem;"></div>`;
+        loadTagUsage(tagNumber);
+    }
+
+    // 'Used by' for a tag: the datasets composed with it, fetched on open
+    // (on-demand, like the compose-page hydration). Each links into the Prod
+    // Tasks compose page anchored on a task that uses it, so the campaign
+    // resolves. A stale response (user moved to another tag) is dropped.
+    async function loadTagUsage(tagNumber) {
+        const host = document.getElementById('tag-usage');
+        if (!host) return;
+        host.innerHTML = '<div style="color:#6c757d; font-size:.82rem;">Loading datasets…</div>';
+        let d;
+        try {
+            const r = await fetch(`/swf-monitor/pcs/tags/${tagType}/${tagNumber}/datasets/`);
+            if (!r.ok) { host.innerHTML = `<div class="text-danger" style="font-size:.82rem;">Could not load usage (HTTP ${r.status}).</div>`; return; }
+            d = await r.json();
+        } catch (e) {
+            host.innerHTML = '<div class="text-danger" style="font-size:.82rem;">Could not load usage.</div>';
+            return;
+        }
+        if (host !== document.getElementById('tag-usage')) return;  // superseded
+        const dss = d.datasets || [];
+        const header = `<div style="font-size:.9rem; font-weight:600; border-bottom:1px solid #dee2e6; padding-bottom:.35rem; margin-bottom:.5rem;">Used by <span class="text-muted" style="font-weight:normal;">(${dss.length} dataset${dss.length === 1 ? '' : 's'})</span></div>`;
+        if (!dss.length) { host.innerHTML = header + '<div style="color:#6c757d; font-size:.82rem;">No datasets use this tag.</div>'; return; }
+        const compose = '/swf-monitor/pcs/tasks/compose/';
+        const rows = dss.map(x => {
+            if (x.task_name) {
+                const href = `${compose}?tab=tasks&selected=${encodeURIComponent(x.task_name)}`;
+                return `<li><a href="${href}">${x.composed_name}</a>${x.task_count > 1 ? ` <span class="item-meta">(${x.task_count} tasks)</span>` : ''}</li>`;
+            }
+            return `<li>${x.composed_name} <span class="item-meta">(no task)</span></li>`;
+        }).join('');
+        host.innerHTML = header + `<ul style="font-size:.82rem;">${rows}</ul>`;
     }
 
     // ── Build choice dropdowns ──
@@ -560,6 +599,14 @@
     });
 
     // ── Tag list rendering ──
+    function sortItems(arr) {
+        const m = (document.querySelector('#list-sort .active') || {dataset: {}}).dataset.sort || 'recent';
+        const cp = arr.slice();
+        if (m === 'alpha') cp.sort((a, b) => (a.tag_label || '').localeCompare(b.tag_label || '', undefined, {numeric: true}));
+        else cp.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+        return cp;
+    }
+
     function renderTagList() {
         const q = searchInput.value.toLowerCase();
         const filtered = allTags.filter(t => {
@@ -580,7 +627,7 @@
             tagList.innerHTML = '<div class="tag-list-empty">No tags found</div>';
             return;
         }
-        tagList.innerHTML = filtered.map(t => {
+        tagList.innerHTML = sortItems(filtered).map(t => {
             const sel = t.tag_number === selectedTagNumber ? ' selected' : '';
             const statusCls = t.status === 'locked' ? 'bg-success text-white' : 'bg-secondary text-white';
             const cat = t.category_name ? `<span class="tag-item-cat">${t.category_name}</span>` : '';
@@ -714,6 +761,10 @@
 
     // ── Filters ──
     searchInput.addEventListener('input', renderTagList);
+    document.querySelectorAll('#list-sort button').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('#list-sort button').forEach(x => x.classList.toggle('active', x === b));
+        renderTagList();
+    }));
     document.querySelectorAll('#status-filters .filter-pill').forEach(pill => {
         pill.addEventListener('click', () => {
             document.querySelectorAll('#status-filters .filter-pill').forEach(p => p.classList.remove('active'));

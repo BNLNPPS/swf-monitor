@@ -95,7 +95,12 @@ function showPanel(evt, panelId) {
 
     // Show the selected panel and activate the corresponding nav item
     document.getElementById(panelId).classList.add('active');
-    evt.currentTarget.classList.add('active');
+    if (evt.currentTarget) evt.currentTarget.classList.add('active');
+}
+
+function showInitialPanel(panelId) {
+    const navItem = document.querySelector(`.account-nav li[onclick*="${panelId}"]`);
+    showPanel({currentTarget: navItem}, panelId);
 }
 
 document.addEventListener("DOMContentLoaded", function() {
@@ -106,10 +111,10 @@ document.addEventListener("DOMContentLoaded", function() {
 
     if (hasErrors || hasMessages) {
         // If so, show the 'Change Password' panel by default
-        showPanel({currentTarget: document.querySelector('li[onclick*="change-password"]_')}, 'change-password');
+        showInitialPanel('change-password');
     } else {
         // Otherwise, show the 'Account' panel
-        showPanel({currentTarget: document.querySelector('li[onclick*="account"]_')}, 'account');
+        showInitialPanel('account');
     }
 });
 </script>

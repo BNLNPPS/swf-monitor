@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swf-alarms"
+version = "0.1.0"
+description = "Standalone polling alarm engine for swf-monitor. REST-fed, Postgres Entry state, SES email + extensible channels."
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "boto3>=1.34",
+    "psycopg[binary]>=3.1",
+]
+
+[project.scripts]
+swf-alarms-run = "swf_alarms.run:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["swf_alarms*"]

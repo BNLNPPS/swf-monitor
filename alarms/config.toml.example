@@ -1,0 +1,25 @@
+# swf-alarms engine config — copy to config.toml.
+#
+# Alarm *configurations* (thresholds, recipients, severities, enabled flags)
+# live in the DB as kind='alarm' entries in the swf-alarms context. Edit
+# them in the dashboard UI, not here. This file only has settings the
+# engine itself needs to start up.
+
+[engine]
+# Monitor base URL for REST endpoints used by alarm checks.
+service_base_url = "https://pandaserver02.sdcc.bnl.gov/swf-monitor"
+request_timeout = 20
+log_path = "/opt/swf-monitor/shared/logs/swf-alarms/run.log"
+
+# Postgres - alarm state goes in swf-monitor's own DB. By default the
+# engine reads DB_* from swf-monitor's production.env so there is one
+# source of truth.
+[db]
+# env_path = "/opt/swf-monitor/config/env/production.env"
+# Or explicit DSN override:
+# dsn = "postgresql://admin:PASSWORD@localhost:5432/swfdb"
+
+[email]
+provider = "ses"
+region = "us-east-1"
+from = "wenaus@gmail.com"

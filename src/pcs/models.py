@@ -3,11 +3,14 @@ PCS (Physics Configuration System) data models.
 
 Tag lifecycle: draft (editable) → locked (immutable, usable in datasets).
 Tag numbering: physics tags = category.digit * 1000 + N; e/s/r tags increment from 1 via PersistentState.
-Datasets: composed from four locked tags, auto-named, with block management for Rucio's 100k file limit.
+Datasets: composed from four tags (plus optional background), auto-named, with block management for Rucio's 100k file limit.
 """
+import re
+
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
+from django.utils.functional import cached_property
 
 
 TAG_STATUS_CHOICES = [
@@ -150,22 +153,74 @@ class RecoTag(models.Model):
         return _allocate_simple_tag('pcs_next_reco')
 
 
+class BackgroundTag(models.Model):
+    """Background tag (k1, k2...). A named, versioned background configuration
+    (beam-gas, synchrotron radiation, or overlay samples), independent of any
+    physics signal. Number auto-incremented via PersistentState."""
+    tag_number = models.IntegerField(unique=True)
+    tag_label = models.CharField(max_length=10, unique=True)
+    status = models.CharField(max_length=10, choices=TAG_STATUS_CHOICES, default='draft')
+    description = models.TextField(blank=True, default='')
+    parameters = models.JSONField(default=dict)
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_background_tag'
+        ordering = ['tag_number']
+
+    def __str__(self):
+        return self.tag_label
+
+    def save(self, *args, **kwargs):
+        self.tag_label = f"k{self.tag_number}"
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def allocate_next(cls):
+        return _allocate_simple_tag('pcs_next_background')
+
+
 class Dataset(models.Model):
     """
-    Production dataset composed from four locked tags.
+    Production dataset composed from four tags plus an optional background.
 
     Each row is one block. Block 1 always exists. The dataset_name ties
     blocks together. The DID format is '{scope}:{dataset_name}.b{N}'.
-    All tags must be locked before a dataset can be created.
+    Tags may be draft during alpha; reproducibility locking is enforced at
+    submission prep, not at composition.
     """
     dataset_name = models.CharField(max_length=255)
+    # The composed (tag-based) identity, stored and kept current on every save
+    # (see save() / build_dataset_name). This is the canonical name used in URLs,
+    # the API, and the PanDA taskName / Rucio DID; it is read directly and
+    # indexed for resolution, never rebuilt from the tag FKs at read time. The
+    # legacy ``dataset_name`` above (a csv_import.<hash> for imported rows) is
+    # left untouched. Not unique: block rows (b1, b2, …) share a composed name.
+    composed_name = models.CharField(max_length=255, db_index=True, blank=True, default='')
     scope = models.CharField(max_length=100, default='group.EIC')
     detector_version = models.CharField(max_length=50)
     detector_config = models.CharField(max_length=100)
+    # Optional bookkeeping link to the production campaign that imported or owns
+    # this row. It is not part of the dataset identity; detector_version is the
+    # version segment because it describes the conditions of the produced data.
+    campaign = models.ForeignKey('Campaign', on_delete=models.PROTECT,
+                                 related_name='datasets', null=True, blank=True)
     physics_tag = models.ForeignKey(PhysicsTag, on_delete=models.PROTECT, related_name='datasets')
     evgen_tag = models.ForeignKey(EvgenTag, on_delete=models.PROTECT, related_name='datasets')
     simu_tag = models.ForeignKey(SimuTag, on_delete=models.PROTECT, related_name='datasets')
     reco_tag = models.ForeignKey(RecoTag, on_delete=models.PROTECT, related_name='datasets')
+    background_tag = models.ForeignKey(
+        BackgroundTag, on_delete=models.PROTECT, related_name='datasets',
+        null=True, blank=True,
+    )
+    # Sample-variant discriminator: the trailing identity segment that tells
+    # apart datasets sharing one tag composition (e.g. the single-particle
+    # angular range '130to177deg'). It is a production discriminator, not a
+    # physics parameter, so it is not a tag; it composes into the dataset name
+    # after the tag run. Empty when the tags alone are a unique identity.
+    sample_name = models.CharField(max_length=120, blank=True, default='')
     block_num = models.PositiveIntegerField(default=1)
     blocks = models.PositiveIntegerField(default=1)
     did = models.CharField(max_length=300, unique=True)
@@ -234,35 +289,89 @@ class Dataset(models.Model):
         }
 
     def clean(self):
-        for tag_field in ['physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag']:
-            tag = getattr(self, tag_field, None)
-            if tag and tag.status != 'locked':
+        # Draft tags are allowed on datasets during alpha — composition stays
+        # editable so ops can fix tag meaning. Reproducibility locking is
+        # enforced at submission prep, not here; tightened as we commission.
+        # Reserved-token rule (PCS.md §Sample Variants): the sample segment must
+        # not collide with the k-tag or block-suffix tokens that anchor the
+        # positional name parse — first segment != k<n>, last segment != b<n>.
+        if self.sample_name:
+            segs = self.sample_name.split('.')
+            if re.fullmatch(r'k\d+', segs[0]) or re.fullmatch(r'b\d+', segs[-1]):
                 raise ValidationError(
-                    {tag_field: f"Tag {tag.tag_label} must be locked before use in a dataset."}
-                )
+                    f"sample_name {self.sample_name!r} collides with a reserved "
+                    f"token (first segment k<n> or last segment b<n>).")
 
     def save(self, *args, **kwargs):
         if not self.dataset_name:
             self.dataset_name = self.build_dataset_name()
         if not self.did:
             self.did = f"{self.scope}:{self.dataset_name}.b{self.block_num}"
+        # Recompute the stored composed identity on every save so it can never
+        # drift from the tag composition, and is read directly at query time.
+        self.composed_name = self.build_dataset_name()
         if len(self.dataset_name) > 255:
             raise ValidationError("Dataset name exceeds 255 characters.")
         self.full_clean()
         super().save(*args, **kwargs)
 
     def build_dataset_name(self):
-        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}"""
-        return (
+        """Auto-name: {scope}.{detector_version}.{detector_config}.{p}.{e}.{s}.{r}[.{k}][.{sample_name}]
+
+        The version segment is the detector version because it describes the data
+        production conditions. Campaign is bookkeeping and must not move the
+        dataset identity. The background segment is appended only when the
+        dataset carries a background tag; the sample-variant segment only when
+        the dataset carries a sample_name. The sample segment is taken verbatim
+        and may contain periods (positional parse, see PCS.md §Sample Variants).
+        """
+        name = (
             f"{self.scope}.{self.detector_version}.{self.detector_config}"
             f".{self.physics_tag.tag_label}.{self.evgen_tag.tag_label}"
             f".{self.simu_tag.tag_label}.{self.reco_tag.tag_label}"
         )
+        if self.background_tag_id:
+            name = f"{name}.{self.background_tag.tag_label}"
+        if self.sample_name:
+            name = f"{name}.{self.sample_name}"
+        return name
 
     @property
     def task_name(self):
         """Task name = dataset_name (without .bN block suffix)."""
         return self.dataset_name
+
+    # composed_name is a stored, indexed column (see the field definition and
+    # save()), not a derived property — it is read directly. build_dataset_name()
+    # remains the single authority that populates it.
+
+    @property
+    def tag_facets(self):
+        """Catalog filter facets from the bound physics tag (process, beams, Q2,
+        species, energy) plus detector_config — the accurate replacement for
+        path/DID-string-derived facets now that every dataset carries its real
+        physics tag."""
+        p = (self.physics_tag.parameters if self.physics_tag_id else {}) or {}
+        e = p.get('beam_energy_electron', '')
+        h = p.get('beam_energy_hadron', '')
+        beam = f'{e}x{h}' if e and h and e != 'N/A' and h != 'N/A' else ''
+        return {
+            'detector': self.detector_config or '',
+            'beam': beam,
+            'physics': p.get('process', ''),
+            'q2': p.get('q2_range', ''),
+            'species': p.get('beam_species', ''),
+            'energy': p.get('gun_energy', ''),
+        }
+
+    @property
+    def has_internal_name(self):
+        """True when dataset_name/DID are legacy-import plumbing — an opaque
+        csv_import.<hash> or past.<…> key and a synthetic (non-Rucio) DID —
+        rather than a real Rucio identity. Used to keep those strings off the
+        UI; the source path is the real-world locator for such rows.
+        """
+        return self.dataset_name.startswith(('csv_import.', 'past.'))
 
 
 class ProdConfig(models.Model):
@@ -391,6 +500,53 @@ class Campaign(models.Model):
         return self.name
 
 
+QUESTIONNAIRE_STATUS_CHOICES = [
+    ('active', 'Active'),
+    ('review', 'Review'),
+    ('linked', 'Linked'),
+    ('closed', 'Closed'),
+]
+
+
+class Questionnaire(models.Model):
+    """
+    Read-only mirror of one ePIC production-request Google Form response.
+
+    Requesters still submit through the Google Form; PCS mirrors the backend
+    export so production records can link to the submitted request provenance.
+    """
+    submitted_at = models.DateTimeField(
+        unique=True,
+        help_text="Google Form response timestamp; the intake idempotency key",
+    )
+    description = models.TextField(
+        blank=True, default='',
+        help_text="Dataset, generator, and purpose as submitted",
+    )
+    repository = models.TextField(blank=True, default='')
+    contact = models.TextField(blank=True, default='')
+    nevents = models.TextField(blank=True, default='')
+    benchmark = models.TextField(blank=True, default='')
+    estimate = models.TextField(blank=True, default='')
+
+    status = models.CharField(
+        max_length=20, choices=QUESTIONNAIRE_STATUS_CHOICES, default='active')
+    source_url = models.CharField(max_length=500, blank=True, default='')
+    source_row = models.CharField(max_length=100, blank=True, default='')
+    content_hash = models.CharField(max_length=64, db_index=True)
+    data = models.JSONField(default=dict, blank=True)
+    created_by = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_questionnaire'
+        ordering = ['-submitted_at']
+
+    def __str__(self):
+        return f"questionnaire#{self.pk} {self.submitted_at:%Y-%m-%d %H:%M}"
+
+
 PRODREQUEST_STATUS_CHOICES = [
     ('new', 'New'),
     ('review', 'Review'),
@@ -410,6 +566,12 @@ class ProdRequest(models.Model):
     Use flags and requestor are duplicated onto ProdTask at task
     creation; both rows are mutable independently after that.
     """
+    questionnaire = models.ForeignKey(
+        Questionnaire, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name='prod_requests',
+        help_text="Originating Google Form response mirror, if linked",
+    )
+
     # Requester-facing fields (request spreadsheet)
     requestor = models.CharField(max_length=100, blank=True, default='',
                                  help_text="PWG or DSC making the request")
@@ -529,6 +691,17 @@ class ProdTask(models.Model):
     def __str__(self):
         return self.name
 
+    @cached_property
+    def composed_name(self):
+        """The task's canonical identity: its dataset's composed tag name
+        (group.EIC.<detector_version>.<detector>.p.e.s.r[.k][.sample]). This is
+        what every task URL and API lookup keys on; the stored ``name`` may be a
+        legacy csv_import slash path, kept resolvable but never the identity.
+        ``build_dataset_name`` is the single authority, so this can never drift
+        from the rendered name. Falls back to ``name`` only for the
+        schema-impossible datasetless task."""
+        return self.dataset.composed_name if self.dataset_id else self.name
+
     def _dids_from_overrides(self, list_key, single_key=None):
         """Resolve a list of DIDs from overrides JSON.
 
@@ -594,6 +767,54 @@ class ProdTask(models.Model):
         legacy ``self.dataset`` FK when no list override is set."""
         outputs = self.output_datasets
         return outputs[0] if outputs else None
+
+    @property
+    def outputs(self):
+        """Produced Rucio datasets — one entry per dataset, never aggregated,
+        lifecycle-neutral. The single home for the produced-output ↔ task
+        association, stored in ``overrides['outputs']``; each entry is
+        ``{did, stage, version, filters, rses:[{rse,files,total,complete}],
+        file_count, bytes, complete, checked_at}``. Supersedes the old
+        ``csv_import.output`` rollup and the ``past_output`` block — see
+        EPICPROD_DATA_LINEAGE.md."""
+        out = (self.overrides or {}).get('outputs')
+        return out if isinstance(out, list) else []
+
+    @property
+    def has_output(self):
+        """True if any produced Rucio dataset is recorded."""
+        return bool(self.outputs)
+
+    @property
+    def output_stages(self):
+        """Distinct production stages present in outputs, e.g. ['FULL', 'RECO']."""
+        return sorted({o.get('stage') for o in self.outputs if o.get('stage')})
+
+    @property
+    def output_incomplete(self):
+        """True if any produced dataset is not fully replicated at every RSE."""
+        return any(not o.get('complete', True) for o in self.outputs)
+
+    @property
+    def inputs(self):
+        """Resolved Rucio EVGEN input datasets — the matched entries written by
+        the EVGEN assimilation onto the bound Dataset's
+        ``metadata['rucio']['matched']`` (each ``{did, stage, filters, rses,
+        file_count, bytes, complete, checked_at}``). The input-side analog of
+        ``outputs``; see EPICPROD_EVGEN_INPUTS.md."""
+        md = (self.dataset.metadata or {}) if self.dataset_id else {}
+        matched = (md.get('rucio') or {}).get('matched')
+        return matched if isinstance(matched, list) else []
+
+    @property
+    def has_input(self):
+        """True if the EVGEN input request resolved to one or more Rucio datasets."""
+        return bool(self.inputs)
+
+    @property
+    def input_incomplete(self):
+        """True if any resolved Rucio input is not fully replicated at every RSE."""
+        return any(not i.get('complete', True) for i in self.inputs)
 
     @property
     def input_source_kind(self):

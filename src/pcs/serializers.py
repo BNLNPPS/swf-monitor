@@ -1,6 +1,8 @@
+import re
+
 from rest_framework import serializers
-from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag,
-                     Dataset, ProdConfig, ProdTask)
+from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
+                     Dataset, ProdConfig, ProdTask, Questionnaire)
 from .schemas import validate_parameters
 
 
@@ -74,11 +76,23 @@ class RecoTagSerializer(_SimpleTagSerializer):
         return value
 
 
+class BackgroundTagSerializer(_SimpleTagSerializer):
+    class Meta(_SimpleTagSerializer.Meta):
+        model = BackgroundTag
+
+    def validate_parameters(self, value):
+        ok, msg = validate_parameters('k', value)
+        if not ok:
+            raise serializers.ValidationError(msg)
+        return value
+
+
 class DatasetSerializer(serializers.ModelSerializer):
     physics_tag_label = serializers.CharField(source='physics_tag.tag_label', read_only=True)
     evgen_tag_label = serializers.CharField(source='evgen_tag.tag_label', read_only=True)
     simu_tag_label = serializers.CharField(source='simu_tag.tag_label', read_only=True)
     reco_tag_label = serializers.CharField(source='reco_tag.tag_label', read_only=True)
+    background_tag_label = serializers.CharField(source='background_tag.tag_label', read_only=True, allow_null=True)
     stage = serializers.CharField(read_only=True)
     external = serializers.BooleanField(source='is_external', read_only=True)
     source_kind = serializers.CharField(read_only=True)
@@ -89,8 +103,9 @@ class DatasetSerializer(serializers.ModelSerializer):
         model = Dataset
         fields = [
             'id', 'dataset_name', 'scope', 'detector_version', 'detector_config',
-            'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag',
+            'physics_tag', 'evgen_tag', 'simu_tag', 'reco_tag', 'background_tag',
             'physics_tag_label', 'evgen_tag_label', 'simu_tag_label', 'reco_tag_label',
+            'background_tag_label',
             'block_num', 'blocks', 'did', 'file_count', 'data_size',
             'stage', 'external', 'source_kind', 'source_location', 'validation_status',
             'description', 'metadata', 'created_by', 'created_at',
@@ -129,7 +144,49 @@ class ProdConfigSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
 
+def _redact_contact(value):
+    value = (value or '').strip()
+    if not value:
+        return ''
+    email_pattern = r'([A-Za-z0-9._%+-]+)@[A-Za-z0-9.-]+'
+    email = re.fullmatch(email_pattern, value)
+    if email:
+        return email.group(1)
+    value = re.sub(email_pattern, '', value).replace('<', ' ').replace('>', ' ')
+    parts = [p for p in value.replace(',', ' ').split() if p]
+    initials = ''.join(p[0].upper() for p in parts if p[0].isalpha())
+    return initials or ''
+
+
+class QuestionnaireSerializer(serializers.ModelSerializer):
+    contact = serializers.SerializerMethodField()
+    contact_redacted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Questionnaire
+        fields = [
+            'id', 'submitted_at', 'description', 'repository', 'contact',
+            'contact_redacted', 'nevents', 'benchmark', 'estimate',
+            'status', 'source_url', 'source_row', 'data',
+            'created_by', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def _authenticated(self):
+        request = self.context.get('request')
+        return bool(request and request.user and request.user.is_authenticated)
+
+    def get_contact(self, obj):
+        if self._authenticated():
+            return obj.contact
+        return _redact_contact(obj.contact)
+
+    def get_contact_redacted(self, obj):
+        return not self._authenticated()
+
+
 class ProdTaskSerializer(serializers.ModelSerializer):
+    composed_name = serializers.CharField(read_only=True)
     dataset_name = serializers.CharField(source='dataset.dataset_name', read_only=True)
     dataset_did = serializers.CharField(source='dataset.did', read_only=True)
     prod_config_name = serializers.CharField(source='prod_config.name', read_only=True)
@@ -140,7 +197,7 @@ class ProdTaskSerializer(serializers.ModelSerializer):
     class Meta:
         model = ProdTask
         fields = [
-            'id', 'name', 'description', 'status',
+            'id', 'name', 'composed_name', 'description', 'status',
             'dataset', 'dataset_name', 'dataset_did',
             'prod_config', 'prod_config_name',
             'csv_file', 'overrides',

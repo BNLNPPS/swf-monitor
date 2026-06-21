@@ -1,0 +1,451 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load swf_fmt %}
+
+{% block title %}Edit {{ alarm_entry_id }} — Alarms{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/material-darker.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/markdown/markdown.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/javascript/javascript.min.js"></script>
+
+<style>
+  .CodeMirror { height: auto !important; border: 1px solid #333; font-family: "SF Mono", Monaco, Menlo, monospace; font-size: 13px; }
+  .CodeMirror-scroll { min-height: 200px; max-height: 60vh; }
+  #content-editor .CodeMirror { min-height: 260px; }
+  #data-editor   .CodeMirror { min-height: 220px; }
+  .autosave-indicator { font-size: 12px; color: #888; margin-left: 1em; }
+  .autosave-indicator.saving { color: #daa520; }
+  .autosave-indicator.saved  { color: #4CAF50; }
+  .autosave-indicator.error  { color: #dc3545; }
+  .version-row.current td { background: #2a4a2a; }
+  .version-row td { padding: 4px 8px; font-size: 12.5px; border-top: 1px solid #2a2a2a; }
+  .version-row .vnum { color: #daa520; white-space: nowrap; }
+  .version-row .vts { color: #8a8a8a; white-space: nowrap; }
+  .version-row .vwho { color: #8a8a8a; white-space: nowrap; }
+  .version-row .vlines { color: #888; white-space: nowrap; }
+  .version-row .vprev { color: #bbb; max-width: 600px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .local-backup-row td { background: #2a2200 !important; color: #ff9800; }
+</style>
+
+<div class="container mt-3" style="max-width: 1100px;">
+    <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
+    <h2 class="mb-3">Edit <code>{{ alarm_entry_id }}</code></h2>
+
+    <div class="d-flex align-items-center mb-2">
+        <button id="save-btn" class="btn btn-sm btn-secondary" disabled>Save</button>
+        <span id="autosave-indicator" class="autosave-indicator"></span>
+    </div>
+
+    <h3 style="font-size:1em;" class="mt-3">Title</h3>
+    <input type="text" id="title-input" class="form-control" value="{{ title }}"
+           maxlength="255" placeholder="Short human-readable title">
+
+    <div class="row mt-3 g-3" style="max-width: 1000px;">
+        <div class="col-auto">
+            <label class="form-label text-muted" style="font-size:0.85em;"
+                   title="When OFF, this alarm's detection still runs and events still appear on the dashboard. Only email notifications are suppressed.">Emails</label><br>
+            <div class="form-check form-switch"
+                 title="When OFF, this alarm's detection still runs and events still appear on the dashboard. Only email notifications are suppressed.">
+                <input class="form-check-input" type="checkbox" id="enabled-input"
+                       {% if enabled %}checked{% endif %}>
+            </div>
+        </div>
+        <div class="col-auto">
+            <label class="form-label text-muted" style="font-size:0.85em;">Renotification window (hours)</label>
+            <input type="number" id="renotification-input" class="form-control form-control-sm"
+                   value="{{ renotification_window_hours }}" min="0" step="1" style="width:170px;"
+                   title="While an event is active, we don't re-email the same entity until this many hours have passed since the last notification. 0 = one email per event lifecycle, silent until clear.">
+        </div>
+    </div>
+
+    <h3 style="font-size:1em;" class="mt-3">Recipients</h3>
+    <p class="text-muted" style="font-size:0.85em;">
+      Email addresses and <code>@team</code> names, separated by commas or whitespace. Examples:
+      <code>@prodops</code>, <code>alice@example.com, @prodops</code>.
+    </p>
+    <input type="text" id="recipients-input" class="form-control" value="{{ recipients_text }}"
+           placeholder="@team1, user@example.com, …">
+
+    <h3 style="font-size:1em;" class="mt-3">Description / email body (markdown)</h3>
+    <div id="content-editor">
+        <textarea id="editor">{{ content }}</textarea>
+    </div>
+
+    <h3 style="font-size:1em;" class="mt-4">Params</h3>
+    {% if params_meta %}
+    <table class="table table-sm" style="max-width:1000px; font-size:0.9em;">
+      <thead>
+        <tr><th>Param</th><th>Type</th><th>Required</th><th>Default</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        {% for p in params_meta %}
+        <tr{% if p.required %} style="font-weight:600;"{% endif %}>
+          <td><code>{{ p.name }}</code></td>
+          <td><small>{{ p.type }}</small></td>
+          <td>{% if p.required %}<span class="text-danger">yes</span>{% else %}no{% endif %}</td>
+          <td><small>{% if p.has_default %}{{ p.default|default_if_none:"—" }}{% else %}—{% endif %}</small></td>
+          <td><small>{{ p.description }}</small></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted" style="font-size:0.85em;">
+      (This alarm's module does not declare <code>PARAMS</code>, so no
+      help table is rendered. Check the module source.)
+    </p>
+    {% endif %}
+    <div id="data-editor">
+        <textarea id="data-json">{{ data_json }}</textarea>
+    </div>
+
+    <div class="mt-3 d-flex gap-2 align-items-center">
+        <button id="test-btn" class="btn btn-sm btn-outline-info">Test (live, no email)</button>
+        <span id="test-status" class="text-muted" style="font-size:0.85em;"></span>
+    </div>
+    <div id="test-output" class="mt-2" style="display:none;">
+      <h4 style="font-size:0.95em;">Test result
+        <small id="test-meta" class="text-muted"></small>
+      </h4>
+      <pre id="test-body" style="white-space:pre-wrap; background:#111; color:#ddd; padding:10px; border-radius:4px; max-height:50vh; overflow:auto; font-size:12.5px;"></pre>
+    </div>
+
+    <div id="version-history" class="mt-4"></div>
+</div>
+
+<script>
+(function() {
+    var ALARM_ENTRY_ID = "{{ alarm_entry_id|escapejs }}";
+    var SAVE_URL    = "{% url 'monitor_app:alarm_config_save' entry_id=alarm_entry_id %}";
+    var VERSION_URL = "{% url 'monitor_app:alarm_config_version' entry_id=alarm_entry_id version_num=0 %}".slice(0, -2);  // append <num>/
+    var TEST_URL    = "{% url 'monitor_app:alarm_test' entry_id=alarm_entry_id %}";
+    var LOCAL_KEY   = 'swf-alarms-autosave-' + ALARM_ENTRY_ID;
+    var AUTOSAVE_MS = 10000;
+
+    var cmContent = CodeMirror.fromTextArea(document.getElementById('editor'), {
+        mode: 'markdown', theme: 'material-darker', lineNumbers: true,
+        lineWrapping: true, tabSize: 2,
+        extraKeys: {
+            'Cmd-S': function() { save(false); },
+            'Ctrl-S': function() { save(false); },
+        },
+    });
+    var cmData = CodeMirror.fromTextArea(document.getElementById('data-json'), {
+        mode: {name: 'javascript', json: true}, theme: 'material-darker',
+        lineNumbers: true, tabSize: 2,
+    });
+
+    var titleInput        = document.getElementById('title-input');
+    var enabledInput      = document.getElementById('enabled-input');
+    var renotificationInp = document.getElementById('renotification-input');
+    var recipientsInput   = document.getElementById('recipients-input');
+
+    var lastSavedTitle         = titleInput.value;
+    var lastSavedEnabled       = enabledInput.checked;
+    var lastSavedRenotification = renotificationInp.value;
+    var lastSavedRecipients    = recipientsInput.value;
+    var lastSavedContent = cmContent.getValue();
+    var lastSavedData    = cmData.getValue();
+
+    var indicator = document.getElementById('autosave-indicator');
+    function setIndicator(cls, text) {
+        indicator.className = 'autosave-indicator ' + cls;
+        indicator.textContent = text;
+    }
+
+    var saveBtn = document.getElementById('save-btn');
+    function isDirty() {
+        return titleInput.value !== lastSavedTitle
+            || enabledInput.checked !== lastSavedEnabled
+            || renotificationInp.value !== lastSavedRenotification
+            || recipientsInput.value !== lastSavedRecipients
+            || cmContent.getValue() !== lastSavedContent
+            || cmData.getValue() !== lastSavedData;
+    }
+    function updateSaveState() {
+        if (isDirty()) {
+            saveBtn.classList.remove('btn-secondary');
+            saveBtn.classList.add('btn-primary');
+            saveBtn.disabled = false;
+        } else {
+            saveBtn.classList.remove('btn-primary');
+            saveBtn.classList.add('btn-secondary');
+            saveBtn.disabled = true;
+        }
+    }
+
+    function save(isAutosave) {
+        var titleVal = titleInput.value;
+        var enabledVal = enabledInput.checked;
+        var renotificationVal = renotificationInp.value;
+        var recipientsVal = recipientsInput.value;
+        var contentVal = cmContent.getValue();
+        var dataStr = cmData.getValue();
+        var parsed;
+        try { parsed = JSON.parse(dataStr); }
+        catch (e) {
+            setIndicator('error', 'Invalid JSON in params: ' + e.message);
+            return Promise.reject(e);
+        }
+        if (isAutosave &&
+            titleVal === lastSavedTitle &&
+            enabledVal === lastSavedEnabled &&
+            renotificationVal === lastSavedRenotification &&
+            recipientsVal === lastSavedRecipients &&
+            contentVal === lastSavedContent &&
+            dataStr === lastSavedData) {
+            return Promise.resolve();
+        }
+        setIndicator('saving', isAutosave ? 'Autosaving…' : 'Saving…');
+        return fetch(SAVE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: titleVal,
+                enabled: enabledVal,
+                renotification_window_hours: parseInt(renotificationVal || '0', 10),
+                recipients: recipientsVal,
+                content: contentVal,
+                data: parsed,
+                autosave: !!isAutosave,
+            }),
+        }).then(function(r) {
+            if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || ('HTTP ' + r.status)); });
+            return r.json();
+        }).then(function(j) {
+            lastSavedTitle         = titleVal;
+            lastSavedEnabled       = enabledVal;
+            lastSavedRenotification = renotificationVal;
+            lastSavedRecipients    = recipientsVal;
+            lastSavedContent = contentVal;
+            lastSavedData    = dataStr;
+            try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
+            setIndicator('saved', (isAutosave ? 'Autosaved' : 'Saved') +
+                ' — v' + (j.version_num || 0) +
+                ' at ' + new Date((j.modified || 0) * 1000).toLocaleTimeString());
+            updateSaveState();
+            renderVersions();
+        }).catch(function(e) {
+            setIndicator('error', 'Save failed: ' + e.message);
+        });
+    }
+
+    document.getElementById('save-btn').addEventListener('click', function() { save(false); });
+
+    // Autosave loop.
+    setInterval(function() { save(true); }, AUTOSAVE_MS);
+
+    // localStorage backup on every change (crash-proof).
+    function backup() {
+        try {
+            localStorage.setItem(LOCAL_KEY, JSON.stringify({
+                title: titleInput.value,
+                enabled: enabledInput.checked,
+                renotification_window_hours: renotificationInp.value,
+                recipients: recipientsInput.value,
+                content: cmContent.getValue(),
+                data: cmData.getValue(),
+                ts: Date.now(),
+            }));
+        } catch (e) {}
+    }
+    function onChange() { backup(); updateSaveState(); }
+    cmContent.on('change', onChange);
+    cmData.on('change', onChange);
+    titleInput.addEventListener('input', onChange);
+    enabledInput.addEventListener('change', onChange);
+    renotificationInp.addEventListener('input', onChange);
+    recipientsInput.addEventListener('input', onChange);
+    updateSaveState();
+
+    // Flush on unload (best-effort).
+    window.addEventListener('beforeunload', function() {
+        var titleVal = titleInput.value;
+        var contentVal = cmContent.getValue();
+        var dataStr = cmData.getValue();
+        if (titleVal === lastSavedTitle &&
+            enabledInput.checked === lastSavedEnabled &&
+            renotificationInp.value === lastSavedRenotification &&
+            recipientsInput.value === lastSavedRecipients &&
+            contentVal === lastSavedContent && dataStr === lastSavedData) return;
+        try {
+            var blob = new Blob([JSON.stringify({
+                title: titleVal,
+                enabled: enabledInput.checked,
+                renotification_window_hours: parseInt(renotificationInp.value || '0', 10),
+                recipients: recipientsInput.value,
+                content: contentVal,
+                data: JSON.parse(dataStr),
+                autosave: true,
+            })], { type: 'application/json' });
+            navigator.sendBeacon(SAVE_URL, blob);
+        } catch (e) {}
+    });
+
+    // Version history table
+    var versions = JSON.parse('{{ versions_json|escapejs }}');
+
+    function renderVersions() {
+        // Reload versions from the server after a save.
+        fetch(window.location.pathname, { headers: {'X-Fragment': 'versions'} })
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                // Simple scrape: we re-render from the server-side list only on page load.
+                // For post-save, show last version as provisional; the server rendered row
+                // will appear on next full page load.
+            })
+            .catch(function() {});
+    }
+
+    function renderStaticVersions() {
+        var root = document.getElementById('version-history');
+        root.innerHTML = '';
+        var hasLocal = false;
+        try { hasLocal = !!localStorage.getItem(LOCAL_KEY); } catch (e) {}
+
+        var html = '<h3 style="font-size:1em;">Version history ' +
+                   '<span class="text-muted">(' + versions.length + ')</span></h3>';
+        html += '<table class="table table-sm"><tbody>';
+
+        // Local-backup row
+        if (hasLocal) {
+            try {
+                var local = JSON.parse(localStorage.getItem(LOCAL_KEY));
+                html += '<tr class="local-backup-row">';
+                html += '<td class="vnum">local</td>';
+                html += '<td class="vts">' + new Date(local.ts).toISOString().replace('T', ' ').slice(0, 19) + '</td>';
+                html += '<td class="vwho">autosave (browser)</td>';
+                html += '<td class="vlines">' + ((local.content || '').split('\n').length) + ' lines</td>';
+                html += '<td class="vprev">' + escapeHtml((local.content || '').split('\n')[0].slice(0, 120)) + '</td>';
+                html += '<td><button class="btn btn-sm btn-outline-warning" onclick="swfAlarmsRestoreLocal()">Restore</button></td>';
+                html += '</tr>';
+            } catch (e) {}
+        }
+
+        for (var i = 0; i < versions.length; i++) {
+            var v = versions[i];
+            html += '<tr class="version-row">';
+            html += '<td class="vnum">v' + v.version_num + '</td>';
+            html += '<td class="vts">' + fmtTs(v.timestamp) + '</td>';
+            html += '<td class="vwho">' + escapeHtml(v.changed_by || '') + '</td>';
+            html += '<td class="vlines">' + (v.line_count || 0) + ' lines</td>';
+            html += '<td class="vprev">' + escapeHtml((v.preview || '').slice(0, 120)) + '</td>';
+            html += '<td><button class="btn btn-sm btn-outline-secondary" onclick="swfAlarmsRestoreVersion(' +
+                    v.version_num + ')">Load</button></td>';
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        root.innerHTML = html;
+    }
+    renderStaticVersions();
+
+    function fmtTs(t) {
+        if (!t) return '';
+        return new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 19);
+    }
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, function(c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+    }
+
+    window.swfAlarmsRestoreVersion = function(n) {
+        if (!confirm('Load v' + n + ' into the editor? Unsaved changes will be lost.')) return;
+        fetch(VERSION_URL + n + '/')
+            .then(function(r) { return r.json(); })
+            .then(function(j) {
+                var d = j.data || {};
+                titleInput.value = j.title || '';
+                enabledInput.checked = !!d.enabled;
+                if (d.renotification_window_hours !== undefined)
+                    renotificationInp.value = d.renotification_window_hours;
+                if (Array.isArray(d.recipients)) {
+                    recipientsInput.value = d.recipients.join(', ');
+                } else if (d.recipients) {
+                    recipientsInput.value = String(d.recipients);
+                }
+                cmContent.setValue(j.content || '');
+                try { cmData.setValue(JSON.stringify({
+                    kind: d.kind,
+                    params: d.params,
+                }, null, 2)); } catch (e) {}
+                setIndicator('saved', 'v' + n + ' loaded — edit and save to commit.');
+                updateSaveState();
+            })
+            .catch(function(e) { setIndicator('error', 'Restore failed: ' + e.message); });
+    };
+    // ── Test + Preview ───────────────────────────────────────────────
+    var testOut   = document.getElementById('test-output');
+    var testBody  = document.getElementById('test-body');
+    var testMeta  = document.getElementById('test-meta');
+    var testStat  = document.getElementById('test-status');
+
+    function currentParamsParsed() {
+        try { return JSON.parse(cmData.getValue()); }
+        catch (e) { return null; }
+    }
+
+    document.getElementById('test-btn').addEventListener('click', function() {
+        var params = currentParamsParsed();
+        if (params === null) {
+            testStat.textContent = 'Invalid JSON in params — fix before testing.';
+            return;
+        }
+        testStat.textContent = 'Running (live fetch)…';
+        testOut.style.display = 'none';
+        fetch(TEST_URL, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({params: params}),
+        }).then(function(r) { return r.json(); })
+          .then(function(j) {
+            testStat.textContent = '';
+            testOut.style.display = '';
+            if (j.error) {
+                testMeta.textContent = ' — error after ' + (j.elapsed_ms||0) + ' ms';
+                testBody.textContent = j.error;
+                return;
+            }
+            testMeta.textContent = ' — ' + j.count + ' detection(s) in ' + (j.elapsed_ms||0) + ' ms';
+            if (!j.detections.length) {
+                testBody.textContent = '(no detections — conditions did not match any entity)';
+                return;
+            }
+            var lines = [];
+            for (var i = 0; i < j.detections.length; i++) {
+                var d = j.detections[i];
+                lines.push('[' + (i+1) + '] ' + d.subject);
+                if (d.body_context) lines.push('  ---');
+                if (d.body_context) lines.push(d.body_context.replace(/^/gm, '  '));
+                lines.push('');
+            }
+            testBody.textContent = lines.join('\n');
+          })
+          .catch(function(e) {
+            testStat.textContent = 'Test failed: ' + e.message;
+          });
+    });
+
+    window.swfAlarmsRestoreLocal = function() {
+        try {
+            var local = JSON.parse(localStorage.getItem(LOCAL_KEY));
+            if (!local) return;
+            if (!confirm('Restore from local browser backup? Unsaved server state will be overwritten on save.')) return;
+            titleInput.value = local.title || '';
+            if (local.enabled !== undefined)  enabledInput.checked = !!local.enabled;
+            if (local.renotification_window_hours !== undefined)
+                renotificationInp.value = local.renotification_window_hours;
+            if (local.recipients !== undefined) recipientsInput.value = local.recipients;
+            cmContent.setValue(local.content || '');
+            cmData.setValue(local.data || '{}');
+            setIndicator('saved', 'Local backup restored — save to commit.');
+            updateSaveState();
+        } catch (e) { setIndicator('error', 'Restore failed: ' + e.message); }
+    };
+})();
+</script>
+{% endblock %}
