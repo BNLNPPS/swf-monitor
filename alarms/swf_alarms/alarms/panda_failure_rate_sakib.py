@@ -10,7 +10,7 @@ point of the snowflake layout.
 """
 from __future__ import annotations
 
-from ..lib.failure_rate import task_failure_rate, PARAMS as _FR_PARAMS
+from ..common.failure_rate import task_failure_rate, PARAMS as _FR_PARAMS
 
 
 # This alarm's public param surface — same as the shared helper today,

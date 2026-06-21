@@ -62,7 +62,7 @@ Summary:
 
 1. Drop `swf_alarms/alarms/<name>.py` exposing a `PARAMS` dict and
    `def detect(client, params)`, yielding `Detection(...)` objects.
-2. Share math via `swf_alarms/lib/*` — no central registry.
+2. Share math via `swf_alarms/common/*`; there is no central registry.
 3. Create an `Entry` row (kind='alarm', context='swf-alarms',
    data.entry_id matching the module name) via data migration or
    Django shell.

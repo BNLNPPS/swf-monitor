@@ -16,6 +16,6 @@ Conventions each alarm module follows:
       raise on transient failures (log and yield nothing).
 
 Shared helpers (e.g. a common PanDA failure-rate computation) live in
-``swf_alarms.lib`` and are imported by the modules that want them —
+``swf_alarms.common`` and are imported by the modules that want them -
 the snowflake constraint is about ownership, not duplication.
 """

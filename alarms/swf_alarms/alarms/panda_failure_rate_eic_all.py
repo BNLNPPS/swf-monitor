@@ -6,7 +6,7 @@ shaping future per-owner alarms.
 """
 from __future__ import annotations
 
-from ..lib.failure_rate import task_failure_rate, PARAMS as _FR_PARAMS
+from ..common.failure_rate import task_failure_rate, PARAMS as _FR_PARAMS
 
 
 PARAMS = dict(_FR_PARAMS)

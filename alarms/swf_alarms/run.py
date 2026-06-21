@@ -48,7 +48,7 @@ import traceback
 
 from . import config as config_mod
 from . import db
-from .lib import Detection
+from .common import Detection
 from .fetch import Client, FetchError
 from .notify import Alarm, send_email_ses
 
