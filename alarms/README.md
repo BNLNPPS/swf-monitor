@@ -11,10 +11,10 @@ engine-developer entry point.
 
 - Runs on the monitor host without Django bootstrap, project PYTHONPATH,
   or a management command.
-  bootstrap, no project PYTHONPATH, no management command.
 - Lightweight deps (`httpx`, `boto3`, `psycopg`) mean a small, portable
   venv.
-- The Django side only *reads* alarm state to render dashboards.
+- The Django side renders dashboards and writes alarm/team configuration
+  edits; the standalone engine writes event and engine-run state.
 
 ## Install
 
@@ -57,7 +57,7 @@ another REST endpoint. No engine topology change is required.
 
 ## Adding a new alarm
 
-See `../docs/alarms.md` § "Adding a new alarm" for the full mechanism.
+See `../docs/alarms.md` "Adding a new alarm" for the full mechanism.
 Summary:
 
 1. Drop `swf_alarms/alarms/<name>.py` exposing a `PARAMS` dict and
