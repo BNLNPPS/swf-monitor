@@ -3,20 +3,21 @@
 {% block title %}epicprod - ePIC Production System - SWF Monitor{% endblock %}
 
 {% block content %}
-<div class="container-fluid mt-2 prod-workflow-home">
+<div class="container-fluid mt-0 prod-workflow-home">
     <style>
       .prod-workflow-home {
         --prod-border: #cfd8e3;
         --prod-muted: #5d6b7a;
         --prod-panel: #fff;
         --prod-band: #f6f8fb;
+        margin-top: -.35rem;
       }
       .prod-workflow-header {
-        margin-bottom: 1rem;
+        margin-bottom: .75rem;
       }
       .prod-workflow-header h1 {
         font-size: 1.7rem;
-        margin-bottom: .2rem;
+        margin: 0 0 .1rem;
       }
       .prod-workflow-header p {
         color: var(--prod-muted);
@@ -117,12 +118,12 @@
                 <div class="workflow-stage-title">Production Requests</div>
             </div>
             <div class="workflow-stage-body">
-                <div class="workflow-link-row" title="Google production request questionnaire intake.">
+                <div class="workflow-link-row" title="Production request questionnaire intake.">
                     <div class="workflow-link-line">
-                        <strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Google Production Request Questionnaire</a></strong>
+                        <strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Production Request Questionnaire</a></strong>
                         <span class="badge bg-info">{{ questionnaires_count }}</span>
                     </div>
-                    <div class="workflow-link-desc">Production request intake.</div>
+                    <div class="workflow-link-desc">Production request questionnaire intake.</div>
                 </div>
             </div>
         </section>
@@ -134,12 +135,12 @@
             <div class="workflow-stage-body">
                 <div class="workflow-group">
                     <div class="workflow-group-title">Tags</div>
-                    <div class="workflow-link-row" title="Tags describing physics processes and machine configurations.">
+                    <div class="workflow-link-row" title="Tags describing physics processes and machine configurations">
                         <div class="workflow-link-line">
                             <strong><a href="{% url 'pcs:tag_compose' tag_type='p' %}" class="text-decoration-none">Physics</a></strong>
                             <span class="badge bg-info">{{ physics_tags_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Physics processes and machine configurations.</div>
+                        <div class="workflow-link-desc">Tags describing physics processes and machine configurations</div>
                     </div>
                     <div class="workflow-link-row" title="Physics category numbering.">
                         <div class="workflow-link-line">
@@ -148,57 +149,57 @@
                         </div>
                         <div class="workflow-link-desc">Physics category numbering.</div>
                     </div>
-                    <div class="workflow-link-row" title="Generators with their versions and configurations.">
+                    <div class="workflow-link-row" title="Generators with their versions and configurations">
                         <div class="workflow-link-line">
                             <strong><a href="{% url 'pcs:tag_compose' tag_type='e' %}" class="text-decoration-none">Event Generation</a></strong>
                             <span class="badge bg-info">{{ evgen_tags_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Generators with versions and configurations.</div>
+                        <div class="workflow-link-desc">Generators with their versions and configurations</div>
                     </div>
-                    <div class="workflow-link-row" title="Simulation tags corresponding to production simulation releases.">
+                    <div class="workflow-link-row" title="Simulation tags corresponding to production simulation releases">
                         <div class="workflow-link-line">
                             <strong><a href="{% url 'pcs:tag_compose' tag_type='s' %}" class="text-decoration-none">Simulation</a></strong>
                             <span class="badge bg-info">{{ simu_tags_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Production simulation releases.</div>
+                        <div class="workflow-link-desc">Simulation tags corresponding to production simulation releases</div>
                     </div>
-                    <div class="workflow-link-row" title="Reconstruction tags corresponding to production reconstruction releases.">
+                    <div class="workflow-link-row" title="Reconstruction tags corresponding to production reconstruction releases">
                         <div class="workflow-link-line">
                             <strong><a href="{% url 'pcs:tag_compose' tag_type='r' %}" class="text-decoration-none">Reconstruction</a></strong>
                             <span class="badge bg-info">{{ reco_tags_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Production reconstruction releases.</div>
+                        <div class="workflow-link-desc">Reconstruction tags corresponding to production reconstruction releases</div>
                     </div>
-                    <div class="workflow-link-row" title="Background samples for physics signal overlay.">
+                    <div class="workflow-link-row" title="Background samples for physics signal overlay">
                         <div class="workflow-link-line">
                             <strong><a href="{% url 'pcs:tag_compose' tag_type='k' %}" class="text-decoration-none">Background</a></strong>
                             <span class="badge bg-info">{{ background_tags_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Background samples for signal overlay.</div>
+                        <div class="workflow-link-desc">Background samples for physics signal overlay</div>
                     </div>
                 </div>
                 <div class="workflow-group">
-                    <div class="workflow-group-title">Production Datasets and Tasks</div>
-                    <div class="workflow-link-row" title="Datasets to be produced, composed from selected tags.">
+                    <div class="workflow-group-title">Datasets and Tasks</div>
+                    <div class="workflow-link-row" title="Datasets to be produced, composed from selected tags">
                         <div class="workflow-link-line">
-                            <strong><a href="{% url 'pcs:datasets_compose' %}" class="text-decoration-none">Production Datasets</a></strong>
+                            <strong><a href="{% url 'pcs:datasets_compose' %}" class="text-decoration-none">Datasets</a></strong>
                             <span class="badge bg-info">{{ datasets_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Datasets to be produced from selected tags.</div>
+                        <div class="workflow-link-desc">Datasets to be produced, composed from selected tags</div>
                     </div>
-                    <div class="workflow-link-row" title="Production system submission templates.">
+                    <div class="workflow-link-row" title="Production system submission templates">
                         <div class="workflow-link-line">
-                            <strong><a href="{% url 'pcs:prod_configs_compose' %}" class="text-decoration-none">Production Configurations</a></strong>
+                            <strong><a href="{% url 'pcs:prod_configs_compose' %}" class="text-decoration-none">Configurations</a></strong>
                             <span class="badge bg-info">{{ prod_configs_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Production system submission templates.</div>
+                        <div class="workflow-link-desc">Production system submission templates</div>
                     </div>
-                    <div class="workflow-link-row" title="Submit-ready production tasks to produce datasets.">
+                    <div class="workflow-link-row" title="Submit-ready production tasks to produce datasets">
                         <div class="workflow-link-line">
-                            <strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Production Task Creation</a></strong>
+                            <strong><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="text-decoration-none">Task Creation</a></strong>
                             <span class="badge bg-info">{{ prod_tasks_count }}</span>
                         </div>
-                        <div class="workflow-link-desc">Submit-ready tasks to produce datasets.</div>
+                        <div class="workflow-link-desc">Submit-ready production tasks to produce datasets</div>
                     </div>
                 </div>
             </div>
@@ -206,24 +207,17 @@
 
         <section class="workflow-stage">
             <div class="workflow-stage-header">
-                <div class="workflow-stage-title">Production Campaign Catalogs</div>
+                <div class="workflow-stage-title">Campaign Catalogs</div>
             </div>
             <div class="workflow-stage-body">
-                <div class="workflow-link-row" title="Tasks and datasets making up current, past and future production campaigns.">
+                <div class="workflow-link-row" title="Tasks/datasets making up current, past and future production campaigns">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Campaign Task Catalogs</a></strong>
                         <span class="badge bg-info">{{ prod_tasks_count }}</span>
                     </div>
-                    <div class="workflow-link-desc">Tasks and datasets across production campaigns.</div>
+                    <div class="workflow-link-desc">Tasks/datasets making up current, past and future production campaigns</div>
                 </div>
             </div>
-        </section>
-
-        <section class="workflow-stage">
-            <div class="workflow-stage-header">
-                <div class="workflow-stage-title">Validation</div>
-            </div>
-            <div class="workflow-stage-body"></div>
         </section>
 
         <section class="workflow-stage">
@@ -237,37 +231,44 @@
                     </div>
                     <div class="workflow-link-desc">Production activity.</div>
                 </div>
-                <div class="workflow-link-row" title="PanDA/JEDI task browser.">
+                <div class="workflow-link-row" title="PanDA/JEDI task browser">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:panda_tasks_list' %}" class="text-decoration-none">Tasks</a></strong>
                     </div>
-                    <div class="workflow-link-desc">PanDA/JEDI task browser.</div>
+                    <div class="workflow-link-desc">PanDA/JEDI task browser</div>
                 </div>
-                <div class="workflow-link-row" title="PanDA production job browser.">
+                <div class="workflow-link-row" title="PanDA production job browser">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:panda_jobs_list' %}" class="text-decoration-none">Jobs</a></strong>
                     </div>
-                    <div class="workflow-link-desc">PanDA production job browser.</div>
+                    <div class="workflow-link-desc">PanDA production job browser</div>
                 </div>
-                <div class="workflow-link-row" title="Top error patterns across failed jobs.">
+                <div class="workflow-link-row" title="Top error patterns across failed jobs">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:panda_errors_list' %}" class="text-decoration-none">Error Summary</a></strong>
                     </div>
-                    <div class="workflow-link-desc">Top error patterns across failed jobs.</div>
+                    <div class="workflow-link-desc">Top error patterns across failed jobs</div>
                 </div>
-                <div class="workflow-link-row" title="Failed jobs with error details.">
+                <div class="workflow-link-row" title="Failed jobs with error details">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="text-decoration-none">Diagnostics</a></strong>
                     </div>
-                    <div class="workflow-link-desc">Failed jobs with error details.</div>
+                    <div class="workflow-link-desc">Failed jobs with error details</div>
                 </div>
-                <div class="workflow-link-row" title="ePIC compute queues configured in PanDA.">
+                <div class="workflow-link-row" title="ePIC compute queues configured in PanDA">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:epic_queues_list' %}" class="text-decoration-none">EIC PanDA Queues</a></strong>
                     </div>
-                    <div class="workflow-link-desc">ePIC compute queues configured in PanDA.</div>
+                    <div class="workflow-link-desc">ePIC compute queues configured in PanDA</div>
                 </div>
             </div>
+        </section>
+
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">Validation</div>
+            </div>
+            <div class="workflow-stage-body"></div>
         </section>
     </div>
 </div>

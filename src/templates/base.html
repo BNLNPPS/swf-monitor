@@ -71,6 +71,17 @@
         display: flex;
         gap: .8em;
       }
+      main {
+        position: relative;
+      }
+      .main-time-info {
+        color: #667085;
+        font-size: .75rem;
+        position: absolute;
+        right: 1rem;
+        top: .25rem;
+        white-space: nowrap;
+      }
       nav a {
         color: #ADD8E6;
       }
@@ -341,14 +352,11 @@
             {% endif %}
         </div>
     </nav>
-    {% timezone "America/New_York" %}
-    <div class="swf-time-banner" style="display:flex;justify-content:flex-end;gap:1.25em;padding:.25em 1em;font-size:.8em;color:#666;background:#f8f9fa;border-bottom:1px solid #e5e7eb;">
-        <span>Times in {% now "T" %}</span>
-        <span>Built at {% now "Ymd H:i:s" %}</span>
-    </div>
-    {% endtimezone %}
     </div>
     <main>
+        {% timezone "America/New_York" %}
+        <div class="main-time-info">Times in {% now "T" %} · Built at {% now "Ymd H:i:s" %}</div>
+        {% endtimezone %}
         {% if messages %}
             {% for message in messages %}
                 <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show w-100 mb-0 rounded-0" role="alert"
