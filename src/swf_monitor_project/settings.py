@@ -390,6 +390,15 @@ else:
 # SSE relay group name
 SSE_CHANNEL_GROUP = config('SSE_CHANNEL_GROUP', default='workflow_events')
 
+# Base URL used by the alarm editor's "test" endpoint.
+_monitor_url = config('SWF_MONITOR_URL',
+                      default='https://pandaserver02.sdcc.bnl.gov')
+_alarm_default_base = _monitor_url.rstrip('/')
+if DEPLOYMENT_SUBPATH and not _alarm_default_base.endswith(DEPLOYMENT_SUBPATH):
+    _alarm_default_base += DEPLOYMENT_SUBPATH
+SWF_ALARMS_BASE_URL = config('SWF_ALARMS_BASE_URL',
+                             default=_alarm_default_base)
+
 # Basic Logging Configuration
 # Set DJANGO_LOGGING_MODE='none' to disable all logging configuration (useful for schema generation, etc.)
 LOGGING_MODE = os.getenv('DJANGO_LOGGING_MODE', 'normal')

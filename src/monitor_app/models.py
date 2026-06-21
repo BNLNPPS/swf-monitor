@@ -1,8 +1,109 @@
 import logging
+import time
 import uuid
 from datetime import timedelta
 from django.db import models
 from django.utils import timezone
+
+
+VALID_KINDS = (
+    'alarm',
+    'event',
+    'engine_run',
+    'team',
+    'memory',
+    'list',
+    'action',
+)
+
+VALID_STATUSES = ('active', 'done', 'blocked', 'failed')
+
+
+def _new_entry_id() -> str:
+    """UUID4 default for Entry.id. Module-level so migrations can serialize it."""
+    return str(uuid.uuid4())
+
+
+class EntryContext(models.Model):
+    """Project/topic grouping for generic entries."""
+    name = models.CharField(max_length=255, primary_key=True)
+    title = models.CharField(max_length=255, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    timestamp_created = models.FloatField(default=time.time)
+    timestamp_modified = models.FloatField(default=time.time)
+    data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'entry_context'
+
+    def __str__(self):
+        return self.name
+
+
+class Entry(models.Model):
+    """Generic document-store row used by alarm configs, events, and runs."""
+
+    id = models.CharField(max_length=36, primary_key=True,
+                          default=_new_entry_id)
+    title = models.CharField(max_length=255, blank=True, default='')
+    content = models.TextField(blank=True, default='')
+    kind = models.CharField(max_length=50)
+    context = models.ForeignKey(EntryContext, on_delete=models.PROTECT,
+                                null=True, blank=True, related_name='entries')
+    name = models.CharField(max_length=255, null=True, blank=True)
+    data = models.JSONField(null=True, blank=True)
+    priority = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=50, null=True, blank=True)
+    archived = models.BooleanField(default=False)
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL,
+                               null=True, blank=True, related_name='children')
+    timestamp_created = models.FloatField(default=time.time)
+    timestamp_modified = models.FloatField(default=time.time)
+    deleted_at = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'entry'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['context', 'name'],
+                condition=models.Q(name__isnull=False),
+                name='uniq_context_name',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['kind', '-timestamp_created']),
+            models.Index(fields=['context', 'kind', '-timestamp_created']),
+            models.Index(fields=['archived']),
+            models.Index(fields=['status']),
+        ]
+
+    def __str__(self):
+        slug = (self.data or {}).get('entry_id') or self.name or self.id[:8]
+        return f'{self.kind}:{slug}'
+
+    @property
+    def entry_id(self) -> str | None:
+        return (self.data or {}).get('entry_id')
+
+
+class EntryVersion(models.Model):
+    """Immutable snapshot of an Entry before substantive edits."""
+    entry = models.ForeignKey(Entry, on_delete=models.CASCADE,
+                              related_name='versions')
+    version_num = models.IntegerField()
+    title = models.CharField(max_length=255, blank=True, default='')
+    content = models.TextField(blank=True, default='')
+    data = models.JSONField(null=True, blank=True)
+    changed_by = models.CharField(max_length=100, default='unknown')
+    timestamp = models.FloatField(default=time.time)
+
+    class Meta:
+        db_table = 'entry_version'
+        constraints = [
+            models.UniqueConstraint(fields=['entry', 'version_num'],
+                                    name='uniq_entry_version_num'),
+        ]
+        indexes = [models.Index(fields=['entry', '-timestamp'])]
 
 
 class SystemAgent(models.Model):

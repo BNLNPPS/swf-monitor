@@ -19,6 +19,8 @@ class MonitorAppConfig(AppConfig):
         Called when Django has finished loading all apps.
         Initialize ActiveMQ connection if appropriate.
         """
+        import monitor_app.signals  # noqa: F401
+
         if self._should_connect_activemq():
             self._initialize_activemq()
     

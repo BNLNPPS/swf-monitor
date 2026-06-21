@@ -1,4 +1,5 @@
 from django.urls import path, include
+from . import alarm_views
 from .views import (
     home,
     authenticated_home,
@@ -248,6 +249,28 @@ urlpatterns = [
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
     path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
     path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
+
+    # Alarms
+    path('alarms/', alarm_views.alarms_dashboard, name='alarms_dashboard'),
+    path('alarms/events/<str:event_uuid>/', alarm_views.alarm_event_detail,
+         name='alarm_event_detail'),
+    path('alarms/runs/<str:run_uuid>/<str:entry_id>/',
+         alarm_views.alarm_run_report, name='alarm_run_report'),
+    path('alarms/<str:entry_id>/task/',
+         alarm_views.alarm_task_history, name='alarm_task_history'),
+    path('alarms/teams/new/', alarm_views.team_new, name='team_new'),
+    path('alarms/teams/create/', alarm_views.team_create, name='team_create'),
+    path('alarms/teams/<str:at_name>/edit/', alarm_views.team_edit, name='team_edit'),
+    path('alarms/teams/<str:at_name>/save/', alarm_views.team_save, name='team_save'),
+    path('alarms/teams/<str:at_name>/versions/<int:version_num>/',
+         alarm_views.team_version, name='team_version'),
+    path('alarms/<str:entry_id>/edit/', alarm_views.alarm_config_edit,
+         name='alarm_config_edit'),
+    path('alarms/<str:entry_id>/save/', alarm_views.alarm_config_save,
+         name='alarm_config_save'),
+    path('alarms/<str:entry_id>/versions/<int:version_num>/',
+         alarm_views.alarm_config_version, name='alarm_config_version'),
+    path('alarms/<str:entry_id>/test/', alarm_views.alarm_test, name='alarm_test'),
 
     # PanDA Database
     path('panda-database/', panda_database_tables_list, name='panda_database_tables_list'),

@@ -1,0 +1,273 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load swf_fmt %}
+
+{% block title %}Edit team {{ team_name }} — Alarms{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/material-darker.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
+
+<style>
+  .CodeMirror { height: auto !important; border: 1px solid #333; font-family: "SF Mono", Monaco, Menlo, monospace; font-size: 13px; }
+  .CodeMirror-scroll { min-height: 260px; max-height: 60vh; }
+  .autosave-indicator { font-size: 12px; color: #888; margin-left: 1em; }
+  .autosave-indicator.saving { color: #daa520; }
+  .autosave-indicator.saved  { color: #4CAF50; }
+  .autosave-indicator.error  { color: #dc3545; }
+  .version-row td { padding: 4px 8px; font-size: 12.5px; border-top: 1px solid #2a2a2a; }
+  .version-row .vnum { color: #daa520; white-space: nowrap; }
+  .version-row .vts { color: #8a8a8a; white-space: nowrap; }
+  .version-row .vwho { color: #8a8a8a; white-space: nowrap; }
+  .local-backup-row td { background: #2a2200 !important; color: #ff9800; }
+</style>
+
+<div class="container mt-3" style="max-width: 1000px;">
+    <p><a href="{% url 'monitor_app:alarms_dashboard' %}">&larr; All alarms</a></p>
+    {% if create_mode %}
+      <h2 class="mb-3">New team</h2>
+    {% else %}
+      <h2 class="mb-3">Team <code>{{ team_name }}</code></h2>
+    {% endif %}
+
+    <div class="d-flex align-items-center mb-2">
+        <button id="save-btn" class="btn btn-sm btn-secondary" disabled>Save</button>
+        <span id="autosave-indicator" class="autosave-indicator"></span>
+    </div>
+
+    {% if create_mode %}
+    <h3 style="font-size:1em;" class="mt-3">Name</h3>
+    <p class="text-muted" style="font-size:0.85em;">
+      Short slug used as <code>@&lt;name&gt;</code> in alarm recipient
+      lists. No leading <code>@</code> — it's added automatically.
+    </p>
+    <input type="text" id="name-input" class="form-control"
+           maxlength="255" placeholder="e.g. eic-ops">
+    {% endif %}
+
+    <h3 style="font-size:1em;" class="mt-3">Title</h3>
+    <input type="text" id="title-input" class="form-control" value="{{ title }}"
+           maxlength="255" placeholder="Short human-readable title">
+
+    <h3 style="font-size:1em;" class="mt-3">Members (emails, space- or comma-separated)</h3>
+    <p class="text-muted" style="font-size:0.85em;">
+      One per line or several per line. Blanks and commas are fine.
+    </p>
+    <div id="content-editor">
+        <textarea id="editor">{{ content }}</textarea>
+    </div>
+
+    <div id="version-history" class="mt-4"></div>
+</div>
+
+{% if create_mode %}
+<script>
+(function() {
+    var CREATE_URL = "{% url 'monitor_app:team_create' %}";
+    var nameInput = document.getElementById('name-input');
+    var titleInput = document.getElementById('title-input');
+    var cmContent = CodeMirror.fromTextArea(document.getElementById('editor'), {
+        mode: null, theme: 'material-darker', lineNumbers: true,
+        lineWrapping: true, tabSize: 2,
+    });
+    var indicator = document.getElementById('autosave-indicator');
+    var saveBtn = document.getElementById('save-btn');
+    indicator.textContent = 'Enter a name and save to create.';
+
+    function updateSaveState() {
+        var dirty = nameInput.value.trim().length > 0;
+        saveBtn.disabled = !dirty;
+        saveBtn.className = 'btn btn-sm ' + (dirty ? 'btn-primary' : 'btn-secondary');
+    }
+    nameInput.addEventListener('input', updateSaveState);
+    updateSaveState();
+
+    saveBtn.addEventListener('click', function() {
+        var nm = nameInput.value.trim();
+        if (!nm) { indicator.textContent = 'name required'; return; }
+        indicator.className = 'autosave-indicator saving';
+        indicator.textContent = 'Creating…';
+        fetch(CREATE_URL, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                name: nm,
+                title: titleInput.value,
+                content: cmContent.getValue(),
+            }),
+        }).then(function(r) { return r.json().then(function(j){ return {ok: r.ok, j: j}; }); })
+          .then(function(o) {
+            if (!o.ok) {
+                indicator.className = 'autosave-indicator error';
+                indicator.textContent = 'Error: ' + (o.j.error || 'create failed');
+                return;
+            }
+            window.location = o.j.edit_url;
+          })
+          .catch(function(e) {
+            indicator.className = 'autosave-indicator error';
+            indicator.textContent = 'Error: ' + e.message;
+          });
+    });
+})();
+</script>
+{% else %}
+<script>
+(function() {
+    var AT_NAME    = "{{ team_name|escapejs }}";
+    var SAVE_URL   = "{% url 'monitor_app:team_save' at_name=team_name %}";
+    var VERSION_URL = "{% url 'monitor_app:team_version' at_name=team_name version_num=0 %}".slice(0, -2);
+    var LOCAL_KEY  = 'swf-teams-autosave-' + AT_NAME;
+    var AUTOSAVE_MS = 10000;
+
+    var cmContent = CodeMirror.fromTextArea(document.getElementById('editor'), {
+        mode: null, theme: 'material-darker', lineNumbers: true,
+        lineWrapping: true, tabSize: 2,
+        extraKeys: {
+            'Cmd-S': function() { save(false); },
+            'Ctrl-S': function() { save(false); },
+        },
+    });
+    var titleInput = document.getElementById('title-input');
+    var lastTitle = titleInput.value;
+    var lastContent = cmContent.getValue();
+
+    var indicator = document.getElementById('autosave-indicator');
+    function setIndicator(cls, text) {
+        indicator.className = 'autosave-indicator ' + cls;
+        indicator.textContent = text;
+    }
+
+    var saveBtn = document.getElementById('save-btn');
+    function isDirty() {
+        return titleInput.value !== lastTitle || cmContent.getValue() !== lastContent;
+    }
+    function updateSaveState() {
+        if (isDirty()) {
+            saveBtn.classList.remove('btn-secondary');
+            saveBtn.classList.add('btn-primary');
+            saveBtn.disabled = false;
+        } else {
+            saveBtn.classList.remove('btn-primary');
+            saveBtn.classList.add('btn-secondary');
+            saveBtn.disabled = true;
+        }
+    }
+
+    function save(isAutosave) {
+        var titleVal = titleInput.value;
+        var contentVal = cmContent.getValue();
+        if (isAutosave && titleVal === lastTitle && contentVal === lastContent) {
+            return Promise.resolve();
+        }
+        setIndicator('saving', isAutosave ? 'Autosaving…' : 'Saving…');
+        return fetch(SAVE_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: titleVal, content: contentVal, autosave: !!isAutosave,
+            }),
+        }).then(function(r) {
+            if (!r.ok) return r.json().then(function(j) { throw new Error(j.error || ('HTTP ' + r.status)); });
+            return r.json();
+        }).then(function(j) {
+            lastTitle = titleVal;
+            lastContent = contentVal;
+            try { localStorage.removeItem(LOCAL_KEY); } catch (e) {}
+            setIndicator('saved', (isAutosave ? 'Autosaved' : 'Saved') +
+                ' — v' + (j.version_num || 0) +
+                ' at ' + new Date((j.modified || 0) * 1000).toLocaleTimeString());
+            updateSaveState();
+        }).catch(function(e) {
+            setIndicator('error', 'Save failed: ' + e.message);
+        });
+    }
+
+    document.getElementById('save-btn').addEventListener('click', function() { save(false); });
+    setInterval(function() { save(true); }, AUTOSAVE_MS);
+
+    function backup() {
+        try {
+            localStorage.setItem(LOCAL_KEY, JSON.stringify({
+                title: titleInput.value,
+                content: cmContent.getValue(),
+                ts: Date.now(),
+            }));
+        } catch (e) {}
+    }
+    function onChange() { backup(); updateSaveState(); }
+    cmContent.on('change', onChange);
+    titleInput.addEventListener('input', onChange);
+    updateSaveState();
+
+    window.addEventListener('beforeunload', function() {
+        if (titleInput.value === lastTitle && cmContent.getValue() === lastContent) return;
+        try {
+            var blob = new Blob([JSON.stringify({
+                title: titleInput.value, content: cmContent.getValue(), autosave: true,
+            })], { type: 'application/json' });
+            navigator.sendBeacon(SAVE_URL, blob);
+        } catch (e) {}
+    });
+
+    // Version history (static from page render).
+    var versions = JSON.parse('{{ versions_json|escapejs }}');
+    function fmtTs(t) { return t ? new Date(t * 1000).toISOString().replace('T', ' ').slice(0, 19) : ''; }
+    function esc(s) { return String(s||'').replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+    var root = document.getElementById('version-history');
+    var hasLocal = false;
+    try { hasLocal = !!localStorage.getItem(LOCAL_KEY); } catch (e) {}
+
+    var html = '<h3 style="font-size:1em;">Version history <span class="text-muted">(' + versions.length + ')</span></h3>';
+    html += '<table class="table table-sm"><tbody>';
+    if (hasLocal) {
+        try {
+            var lo = JSON.parse(localStorage.getItem(LOCAL_KEY));
+            html += '<tr class="local-backup-row"><td class="vnum">local</td>' +
+                    '<td class="vts">' + new Date(lo.ts).toISOString().replace('T',' ').slice(0,19) + '</td>' +
+                    '<td class="vwho">autosave (browser)</td>' +
+                    '<td>' + esc((lo.content || '').slice(0,120)) + '</td>' +
+                    '<td><button class="btn btn-sm btn-outline-warning" onclick="swfTeamRestoreLocal()">Restore</button></td></tr>';
+        } catch (e) {}
+    }
+    for (var i = 0; i < versions.length; i++) {
+        var v = versions[i];
+        html += '<tr class="version-row"><td class="vnum">v' + v.version_num + '</td>' +
+                '<td class="vts">' + fmtTs(v.timestamp) + '</td>' +
+                '<td class="vwho">' + esc(v.changed_by || '') + '</td>' +
+                '<td>' + esc((v.preview || '').slice(0,120)) + '</td>' +
+                '<td><button class="btn btn-sm btn-outline-secondary" onclick="swfTeamRestoreVersion(' + v.version_num + ')">Load</button></td></tr>';
+    }
+    html += '</tbody></table>';
+    root.innerHTML = html;
+
+    window.swfTeamRestoreVersion = function(n) {
+        if (!confirm('Load v' + n + ' into the editor? Unsaved changes will be lost.')) return;
+        fetch(VERSION_URL + n + '/')
+            .then(function(r) { return r.json(); })
+            .then(function(j) {
+                titleInput.value = j.title || '';
+                cmContent.setValue(j.content || '');
+                setIndicator('saved', 'v' + n + ' loaded — edit and save to commit.');
+                updateSaveState();
+            })
+            .catch(function(e) { setIndicator('error', 'Restore failed: ' + e.message); });
+    };
+    window.swfTeamRestoreLocal = function() {
+        try {
+            var lo = JSON.parse(localStorage.getItem(LOCAL_KEY));
+            if (!lo) return;
+            if (!confirm('Restore from local browser backup? Unsaved server state will be overwritten on save.')) return;
+            titleInput.value = lo.title || '';
+            cmContent.setValue(lo.content || '');
+            setIndicator('saved', 'Local backup restored — save to commit.');
+            updateSaveState();
+        } catch (e) { setIndicator('error', 'Restore failed: ' + e.message); }
+    };
+})();
+</script>
+{% endif %}
+{% endblock %}

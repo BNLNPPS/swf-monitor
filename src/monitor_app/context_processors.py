@@ -159,6 +159,21 @@ def _active_nav(request):
         'rucio_endpoints_datatable_ajax',
         'rucio_endpoint_detail',
     }
+    alarm_names = {
+        'alarms_dashboard',
+        'alarm_event_detail',
+        'alarm_config_edit',
+        'alarm_config_save',
+        'alarm_config_version',
+        'alarm_test',
+        'alarm_run_report',
+        'alarm_task_history',
+        'team_create',
+        'team_new',
+        'team_edit',
+        'team_save',
+        'team_version',
+    }
 
     return {
         'requests': namespace == 'pcs' and url_name in pcs_questionnaire_names,
@@ -230,6 +245,7 @@ def _active_nav(request):
             'epic_queues_list',
             'epic_queue_detail',
         },
+        'alarms': namespace == 'monitor_app' and url_name in alarm_names,
         'panda_database': namespace == 'monitor_app' and url_name in panda_database_names,
         'idds_database': namespace == 'monitor_app' and url_name in idds_database_names,
         'rucio_endpoints': namespace == 'monitor_app' and url_name in rucio_endpoint_names,
