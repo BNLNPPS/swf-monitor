@@ -35,7 +35,7 @@
                     <td>{{ q.country|default:"—" }}</td>
                     <td>{{ q.tier|default:"—" }}</td>
                     <td>{{ q.corepower|default:"—" }}</td>
-                    <td>{{ q.last_update|truncatechars:19 }}</td>
+                    <td>{{ q.last_update|fmt_dt }}</td>
                     <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                 </tr>
             {% empty %}

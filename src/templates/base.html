@@ -25,6 +25,32 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      main {
+        padding: 0.65rem 1rem 1rem;
+        position: relative;
+      }
+      main > .container:first-child,
+      main > .container-fluid:first-child {
+        margin-top: 0 !important;
+      }
+      main > h1:first-child,
+      main > h2:first-child,
+      main > .container:first-child > h1:first-child,
+      main > .container:first-child > h2:first-child,
+      main > .container-fluid:first-child > h1:first-child,
+      main > .container-fluid:first-child > h2:first-child,
+      main > .container:first-child > .d-flex:first-child h1,
+      main > .container:first-child > .d-flex:first-child h2,
+      main > .container-fluid:first-child > .d-flex:first-child h1,
+      main > .container-fluid:first-child > .d-flex:first-child h2 {
+        font-size: 1.7rem;
+        line-height: 1.2;
+        margin-top: 0;
+      }
       .btn.btn-dark-green {
         background-color: #166534; border-color: #166534; color: #fff;
       }
@@ -70,9 +96,6 @@
       .nav-auth {
         display: flex;
         gap: .8em;
-      }
-      main {
-        position: relative;
       }
       .main-time-info {
         color: #667085;
