@@ -26,7 +26,7 @@
         align-items: stretch;
         display: grid;
         gap: .9rem;
-        grid-template-columns: 1.05fr 1.65fr 1.05fr 1.45fr;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
       }
       .workflow-stage {
         background: var(--prod-panel);
@@ -217,6 +217,13 @@
                     <div class="workflow-link-desc">Tasks and datasets across production campaigns.</div>
                 </div>
             </div>
+        </section>
+
+        <section class="workflow-stage">
+            <div class="workflow-stage-header">
+                <div class="workflow-stage-title">Validation</div>
+            </div>
+            <div class="workflow-stage-body"></div>
         </section>
 
         <section class="workflow-stage">
