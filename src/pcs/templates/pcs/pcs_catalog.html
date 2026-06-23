@@ -296,7 +296,6 @@
     function busy(on) { btn.disabled = on; btn.textContent = on ? 'Refreshing…' : label; }
     form.addEventListener('submit', async function (e) {
       e.preventDefault();
-      if (!confirm('Refresh progress data and rebuild the progress table cache?')) return;
       busy(true);
       const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
       try {

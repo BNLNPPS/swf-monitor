@@ -41,7 +41,6 @@ class ServiceError(Exception):
 
 
 PROGRESS_SNAPSHOT_KEY = 'progress_snapshot'
-PROGRESS_REFRESH_LOCK_KEY = 'pcs:campaign-progress-refresh:queued'
 
 
 def campaign_progress_snapshot_cache_key(campaign):
@@ -3224,12 +3223,8 @@ def campaign_progress_refresh_request(*, created_by='progress_refresh'):
     Page GETs only read cache.
     """
     import json as _json
-    from django.core.cache import cache as _cache
     if not Campaign.objects.filter(lifecycle='current').exists():
         raise ServiceError('No current Campaign defined in PCS.', status=400)
-    if not _cache.add(PROGRESS_REFRESH_LOCK_KEY, created_by, timeout=600):
-        raise ServiceError(
-            'A progress refresh is already queued or running.', status=409)
     msg = {'msg_type': 'campaign_progress_refresh', 'namespace': 'prodops',
            'created_by': created_by}
     from monitor_app.activemq_connection import ActiveMQConnectionManager
@@ -3237,11 +3232,9 @@ def campaign_progress_refresh_request(*, created_by='progress_refresh'):
         triggered = ActiveMQConnectionManager().send_message(
             '/queue/epicprod.ops', _json.dumps(msg))
     except Exception as e:
-        _cache.delete(PROGRESS_REFRESH_LOCK_KEY)
         raise ServiceError(
             f'Could not reach the prod-ops agent queue: {e}', status=503)
     if not triggered:
-        _cache.delete(PROGRESS_REFRESH_LOCK_KEY)
         raise ServiceError(
             'Progress refresh could not be queued (ops-agent queue unreachable).',
             status=503)
