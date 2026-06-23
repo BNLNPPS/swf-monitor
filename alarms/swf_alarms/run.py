@@ -25,7 +25,8 @@ Per-tick behavior (active/clear semantics):
         set data.clear_time = now (auto-clear — unconditional of `enabled`).
   3. If the alarm's emails are on AND (NEW or RENOTIFY) is non-empty:
      compose ONE bundled email listing every detection in both sections
-     and ship it via SES. On success, stamp `last_notified = now` on
+     and ship it via the configured mail channel. On success, stamp
+     `last_notified = now` on
      every included event. ``notifications_sent`` counts this as one,
      regardless of bundle size. Closes out the `engine_run` entry with
      aggregate counters + per-alarm detail (including `bundle_new`,
@@ -50,7 +51,7 @@ from . import config as config_mod
 from . import db
 from .common import Detection
 from .fetch import Client, FetchError
-from .notify import Alarm, send_email_ses
+from .notify import Alarm, send_email
 
 
 def _load_alarm_module(alarm_entry_id: str):
@@ -213,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                 # computed independently of send_mail so that the
                 # per-run report can show what WOULD have been emailed
                 # even when this alarm's emails are off. We gate the
-                # actual SES call later on send_mail.
+                # actual email send later on send_mail.
                 #   - Event never notified (last_notified missing/0 —
                 #     e.g. created while emails were off) → always bundle.
                 #   - Otherwise: renotification window must be set and
@@ -254,7 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         # One email per alarm per tick. Compose the bundle whenever
         # there's anything to bundle — store its identifiers on the
         # engine_run row so the dashboard can show a per-run report
-        # regardless of whether email went out. Send SES only when
+        # regardless of whether email went out. Send mail only when
         # this alarm's emails are on.
         bundle_sent = False
         bundle_new = len(new_bundle)
@@ -268,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                 renotify_bundle=renotify_bundle,
             )
             if send_mail:
-                ok = send_email_ses(
+                ok = send_email(
                     Alarm(
                         alarm_name=alarm_entry_id,
                         dedupe_key=f"bundle:{int(time.time())}",
@@ -281,8 +282,12 @@ def main(argv: list[str] | None = None) -> int:
                             "renotify_count": bundle_renotify,
                         },
                     ),
-                    region=cfg.email.region,
+                    provider=cfg.email.provider,
                     from_addr=cfg.email.from_addr,
+                    region=cfg.email.region,
+                    smtp_host=cfg.email.smtp_host,
+                    smtp_port=cfg.email.smtp_port,
+                    smtp_timeout=cfg.email.smtp_timeout,
                 )
                 if ok:
                     for event_uuid, _ in new_bundle:
@@ -291,6 +296,17 @@ def main(argv: list[str] | None = None) -> int:
                         db.mark_event_notified(conn, event_uuid)
                     notifications_sent += 1  # exactly one email, regardless of count
                     bundle_sent = True
+                else:
+                    msg = (
+                        f"email send failed for {alarm_entry_id}: "
+                        f"provider={cfg.email.provider} "
+                        f"recipients={','.join(recipients)}"
+                    )
+                    log.error(msg)
+                    errors += 1
+                    alarm_err = 1
+                    alarm_err_msg = msg
+                    error_traces.append(f"[{alarm_entry_id}] {msg}")
 
         per_alarm[alarm_entry_id] = {
             "enabled": email_enabled,

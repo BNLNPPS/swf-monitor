@@ -2,7 +2,8 @@
 
 Standalone polling alarm engine for the swf ecosystem (PanDA, streaming
 workflow). Zero Django coupling: pulls PanDA data via swf-monitor REST,
-persists state in swf-monitor's Postgres, sends email via AWS SES.
+persists state in swf-monitor's Postgres, sends email through the configured
+mail channel.
 
 Full system overview: see `../docs/alarms.md`. This README is the
 engine-developer entry point.
@@ -27,8 +28,8 @@ Creates `/opt/swf-monitor/shared/alarms-venv`, copies
 `config.toml.example` to `/opt/swf-monitor/config/alarms/config.toml`
 if absent.
 
-Edit `config.toml` (SES region, from address, DB DSN) before the first
-live run.
+Edit `config.toml` (SMTP or SES settings, from address, DB DSN) before the
+first live run.
 
 ## Run
 
@@ -86,7 +87,7 @@ False:
 - The algorithm still runs every tick.
 - Event rows are still created, and active/clear still ticks.
 - The dashboard still shows everything.
-- **No SES call is made.** `last_notified` is not updated.
+- **No email call is made.** `last_notified` is not updated.
 
 When True, the engine additionally sends email on new detections and on
 renotification. "Stop the algorithm entirely" is `archived=True`, not
@@ -104,7 +105,7 @@ only control.
 - **One email per alarm per tick.** Every detection that would warrant
   a send this tick (new events, plus events whose renotification
   window has elapsed, plus events created while emails were off) is
-  bundled into a single SES email. No more one-email-per-task.
+  bundled into a single email. No more one-email-per-task.
 - **Renotification window.** Per-alarm `data.renotification_window_hours`.
   Governs when a still-firing event is eligible to be re-included in
   the next bundle. 0 / missing = one email per event lifecycle (the
