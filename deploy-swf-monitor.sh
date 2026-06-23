@@ -257,6 +257,13 @@ if systemctl is-enabled swf-monitor-mcp-asgi.service >/dev/null 2>&1; then
     systemctl restart swf-monitor-mcp-asgi.service
 fi
 
+# Prod-ops agent launches doer subprocesses from the release tree. Restart every
+# deploy so it does not keep a deleted release as cwd or write through stale env.
+if systemctl is-enabled epicprod-ops-agent.service >/dev/null 2>&1; then
+    log "Restarting prod-ops agent (epicprod-ops-agent) to pick up new code/env..."
+    systemctl restart epicprod-ops-agent.service
+fi
+
 # Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
 PANDA_BOT_CHANGED=false
