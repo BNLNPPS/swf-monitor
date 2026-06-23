@@ -286,18 +286,70 @@
   })();
 
   // Refresh progress — rebuild the PanDA progress snapshot and rendered
-  // progress table cache in the prod-ops agent. The page never starts this on
-  // load; only this authenticated button queues it.
+  // progress table cache in the prod-ops agent. Manual clicks always queue.
+  // Page-load auto-refresh only fires when the displayed snapshot is stale.
   document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('progress-refresh-form');
     const btn  = document.getElementById('progress-refresh-btn');
     if (!form || !btn) return;
     const label = btn.textContent.trim();
-    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Refreshing…' : label; }
-    form.addEventListener('submit', async function (e) {
-      e.preventDefault();
+    const statusEl = document.getElementById('pcs-refresh-status');
+    const ageEl = document.querySelector('.pcs-live-age[data-updated-at]');
+    const AUTO_REFRESH_AFTER_MS = 15 * 60 * 1000;
+    const AUTO_REFRESH_RETRY_MS = 5 * 60 * 1000;
+    const REFRESH_STREAM_TIMEOUT_MS = 6 * 60 * 1000;
+    const AUTO_REFRESH_KEY = 'epicprod-progress-auto-refresh';
+    let refreshInFlight = false;
+    function busy(on) {
+      btn.disabled = on;
+      btn.textContent = on ? 'Refreshing…' : label;
+      if (statusEl) {
+        statusEl.textContent = on ? 'Refreshing.' : '';
+        statusEl.classList.toggle('is-active', on);
+      }
+    }
+    function staleAgeMs() {
+      if (!ageEl) return null;
+      const ms = Date.parse(ageEl.dataset.updatedAt || '');
+      if (!Number.isFinite(ms)) return null;
+      return Date.now() - ms;
+    }
+    function shouldAutoRefresh() {
+      const age = staleAgeMs();
+      if (age === null || age < AUTO_REFRESH_AFTER_MS) return false;
+      const stamp = ageEl.dataset.updatedAt || '';
+      let last = {};
+      try { last = JSON.parse(localStorage.getItem(AUTO_REFRESH_KEY) || '{}'); } catch (_) {}
+      if (last.stamp === stamp && Date.now() - (last.requestedAt || 0) < AUTO_REFRESH_RETRY_MS) {
+        return false;
+      }
+      try {
+        localStorage.setItem(AUTO_REFRESH_KEY, JSON.stringify({
+          stamp: stamp,
+          requestedAt: Date.now(),
+        }));
+      } catch (_) {}
+      return true;
+    }
+    async function queueRefresh(options) {
+      const auto = Boolean(options && options.auto);
+      if (refreshInFlight) return;
+      refreshInFlight = true;
       busy(true);
       const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      let es = null;
+      let streamTimer = null;
+      function closeStream() {
+        if (streamTimer) {
+          clearTimeout(streamTimer);
+          streamTimer = null;
+        }
+        if (es) {
+          es.close();
+          es = null;
+        }
+      }
+      window.addEventListener('beforeunload', closeStream, {once: true});
       try {
         const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/campaign-progress-refresh/', {
           method: 'POST',
@@ -308,22 +360,45 @@
           try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
           throw new Error(m);
         }
-        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=campaign_progress_ready");
+        es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=campaign_progress_ready");
+        streamTimer = setTimeout(function() {
+          closeStream();
+          refreshInFlight = false;
+          busy(false);
+          if (statusEl) statusEl.textContent = 'Refresh still pending.';
+          if (!auto) alert('Progress refresh did not finish within 6 minutes.');
+        }, REFRESH_STREAM_TIMEOUT_MS);
         es.addEventListener('campaign_progress_ready', function (ev) {
           let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
           if (d.ok === false) {
-            es.close();
+            closeStream();
+            refreshInFlight = false;
             busy(false);
-            alert('Progress refresh failed: ' + (d.error || 'unknown error'));
+            if (!auto) alert('Progress refresh failed: ' + (d.error || 'unknown error'));
           } else {
+            closeStream();
             window.location.reload();
           }
         });
+        es.onerror = function() {
+          closeStream();
+          refreshInFlight = false;
+          busy(false);
+          if (statusEl) statusEl.textContent = 'Refresh stream closed.';
+          if (!auto) alert('Progress refresh stream closed before completion.');
+        };
       } catch (err) {
+        closeStream();
+        refreshInFlight = false;
         busy(false);
-        alert('Could not queue the progress refresh: ' + err.message);
+        if (!auto) alert('Could not queue the progress refresh: ' + err.message);
       }
+    }
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      queueRefresh({auto: false});
     });
+    if (shouldAutoRefresh()) queueRefresh({auto: true});
   });
   </script>
 
@@ -387,6 +462,7 @@
       </button>
     </form>
     {% endif %}
+    <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
   {% endif %}
 
