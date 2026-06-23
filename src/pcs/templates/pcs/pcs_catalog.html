@@ -6,20 +6,23 @@
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
 <style>
 .pcs-view-switch .btn {
-  background: #6ea8fe;
-  border-color: #0d6efd;
-  color: #052c65;
+  background: #d8ecff;
+  border-color: #6ea8fe;
+  color: #084298;
 }
 .pcs-view-switch .btn.active,
-.pcs-view-switch .btn:focus {
+.pcs-view-switch .btn.active:hover,
+.pcs-view-switch .btn.active:focus {
   background: #0d6efd;
   border-color: #0a58ca;
   color: #fff;
+  cursor: default;
 }
-.pcs-view-switch .btn:hover {
-  background: #3d8bfd;
+.pcs-view-switch .btn:not(.active):hover,
+.pcs-view-switch .btn:not(.active):focus {
+  background: #b6dcff;
   border-color: #0a58ca;
-  color: #fff;
+  color: #052c65;
 }
 </style>
 
@@ -423,8 +426,11 @@
       e.preventDefault();
       const view = a.dataset.catalogView;
       stampOpen(currentView);
-      a.classList.add('active', 'disabled');
-      a.textContent = peerLabels[view].loading;
+      const peerIsKnown = a.dataset.peerSeen === '1' || recentlyOpen(view);
+      if (!peerIsKnown) {
+        a.classList.add('active', 'disabled');
+        a.textContent = peerLabels[view].loading;
+      }
       window.open(a.href, tabNames[view] || a.dataset.tabName || '_blank');
     });
   });
