@@ -373,7 +373,7 @@
   <div class="small text-muted mb-3 d-flex align-items-center gap-2 flex-wrap">
     <span>
     {% if progress_generated_at %}
-      Updated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}).
+      Updated <span class="pcs-live-age" data-updated-at="{{ progress_generated_at }}">{{ progress_generated_at|fmt_ago }}</span> ({{ progress_generated_at|fmt_dt }}).
     {% else %}
       Not updated yet.
     {% endif %}
@@ -394,7 +394,7 @@
   <div class="small text-muted mb-2 d-flex align-items-center gap-2 flex-wrap">
     <span>
       {% if task_list_cache_rendered_at %}
-        Updated {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}).
+        Updated <span class="pcs-live-age" data-updated-at="{{ task_list_cache_rendered_at }}">{{ task_list_cache_rendered_at|fmt_ago }}</span> ({{ task_list_cache_rendered_at|fmt_dt }}).
       {% else %}
         Not updated yet.
       {% endif %}
@@ -477,6 +477,32 @@
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
+(function() {
+  function ageLabel(updatedAt) {
+    const ms = Date.parse(updatedAt || '');
+    if (!Number.isFinite(ms)) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + ' min ago';
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return hours + ' h ago';
+    return Math.floor(hours / 24) + ' d ago';
+  }
+  function refreshAges() {
+    document.querySelectorAll('.pcs-live-age[data-updated-at]').forEach(el => {
+      const label = ageLabel(el.dataset.updatedAt);
+      if (label) el.textContent = label;
+    });
+  }
+  refreshAges();
+  setInterval(refreshAges, 30000);
+  window.addEventListener('pageshow', refreshAges);
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) refreshAges();
+  });
+})();
+
 (function() {
   const statusEl = document.getElementById('pcs-refresh-status');
   document.querySelectorAll('form.pcs-refresh-form').forEach(form => {

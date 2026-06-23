@@ -16,6 +16,27 @@ from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = Path(os.environ.get('SWF_ENV_FILE') or (BASE_DIR.parent / '.env'))
+
+
+def _env_file_value(key):
+    """Read one key from the deployed .env without letting os.environ override it."""
+    try:
+        lines = ENV_FILE.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        name, value = line.split('=', 1)
+        if name.strip() != key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        return value
+    return None
 
 # Rucio client reads these from os.environ directly, so bridge them from the
 # .env-loaded config. No-op if unset (e.g. in dev).
@@ -370,8 +391,18 @@ EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, c
 
 # Channel layer settings
 # Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
-REDIS_URL = config('REDIS_URL', default='')
-DJANGO_CACHE_DIR = config('DJANGO_CACHE_DIR', default=os.path.join(SWF_TMP_DIR, "django-cache"))
+_REDIS_URL_FILE_VALUE = _env_file_value('REDIS_URL')
+REDIS_URL = (
+    _REDIS_URL_FILE_VALUE
+    if _REDIS_URL_FILE_VALUE is not None
+    else config('REDIS_URL', default='')
+)
+_DJANGO_CACHE_DIR_FILE_VALUE = _env_file_value('DJANGO_CACHE_DIR')
+DJANGO_CACHE_DIR = (
+    _DJANGO_CACHE_DIR_FILE_VALUE
+    if _DJANGO_CACHE_DIR_FILE_VALUE is not None
+    else config('DJANGO_CACHE_DIR', default=os.path.join(SWF_TMP_DIR, "django-cache"))
+)
 if REDIS_URL:
     CACHES = {
         "default": {
