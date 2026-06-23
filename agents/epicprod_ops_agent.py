@@ -90,6 +90,8 @@ RUCIO_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "ru
 RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "900"))
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
+QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
+QUESTIONNAIRE_MATCH_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_MATCH_TIMEOUT", "300"))
 
 # EVGEN-input assimilation doer: a live JLab Rucio fetch of epic:/EVGEN/* plus
 # the per-dataset match — slow and network-bound, so generously bounded.
@@ -124,6 +126,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
+                   "questionnaire_match_update",
                    "sync_epicprod_inventory", "refresh_system_status",
                    "health_ping", "shutdown"}
 
@@ -596,6 +599,51 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': True,
                 'summary': summary[-1] if summary else ''})
+
+    def _handle_questionnaire_match_update(self, m):
+        """Rebuild task-local questionnaire-match caches off the receiver
+        thread, then push completion so the catalog button can reload."""
+        self.run_in_background(
+            self._do_questionnaire_match_update, m,
+            dedup_key="questionnaire_match_update",
+            label="questionnaire_match_update")
+
+    def _do_questionnaire_match_update(self, m):
+        created_by = m.get('created_by') or 'questionnaire_match'
+        cmd = [
+            sys.executable, str(QUESTIONNAIRE_MATCH_SCRIPT),
+            "--updated-by", str(created_by),
+        ]
+        self.logger.info("PRODOPS questionnaire_match_update: rebuilding cache")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=QUESTIONNAIRE_MATCH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                "PRODOPS questionnaire_match_update TIMEOUT after "
+                f"{QUESTIONNAIRE_MATCH_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'questionnaire_match_ready', 'ok': False,
+                'error': f'timed out after {QUESTIONNAIRE_MATCH_TIMEOUT}s'})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  update-questionnaire-matches: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  update-questionnaire-matches: {line}")
+        if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(
+                f"PRODOPS questionnaire_match_update FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'questionnaire_match_ready', 'ok': False,
+                'error': reason})
+        else:
+            summary = (p.stdout or "").strip()
+            self.logger.info("PRODOPS questionnaire_match_update done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'questionnaire_match_ready', 'ok': True,
+                'summary': summary})
 
     # -- helpers -------------------------------------------------------------
 

@@ -94,6 +94,13 @@
         Update EVGEN from Rucio
       </button>
     </form>
+    <form method="post" action="{% url 'pcs:pcs_catalog_questionnaire_match_update' %}" class="ms-2 d-inline" id="questionnaire-match-update-form">
+      {% csrf_token %}
+      <button type="submit" id="questionnaire-match-update-btn" class="btn btn-sm btn-outline-primary"
+              title="Rebuild task-local questionnaire request links (runs in the prod-ops agent; updates live when done)">
+        Update request links
+      </button>
+    </form>
     {% endif %}
     {% endif %}
     {% endif %}
@@ -176,6 +183,47 @@
       } catch (err) {
         busy(false);
         alert('Could not queue the EVGEN update: ' + err.message);
+      }
+    });
+  })();
+
+  // Update request links — rebuild the task-local questionnaire-match cache in
+  // the prod-ops agent and reload when questionnaire_match_ready arrives.
+  (function () {
+    const form = document.getElementById('questionnaire-match-update-form');
+    const btn  = document.getElementById('questionnaire-match-update-btn');
+    if (!form || !btn) return;
+    const label = btn.textContent.trim();
+    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Updating…' : label; }
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Rebuild questionnaire request links for the catalog?')) return;
+      busy(true);
+      const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/questionnaire-match-update/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        });
+        if (r.status !== 202) {
+          let m = 'queue failed';
+          try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
+          throw new Error(m);
+        }
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=questionnaire_match_ready");
+        es.addEventListener('questionnaire_match_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.ok === false) {
+            es.close();
+            busy(false);
+            alert('Request-link update failed: ' + (d.error || 'unknown error'));
+          } else {
+            window.location.reload();
+          }
+        });
+      } catch (err) {
+        busy(false);
+        alert('Could not queue the request-link update: ' + err.message);
       }
     });
   })();

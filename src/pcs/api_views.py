@@ -484,6 +484,19 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
+    @action(detail=False, methods=['post'], url_path='questionnaire-match-update')
+    def questionnaire_match_update(self, request):
+        """Request a background rebuild of the task-local questionnaire-match
+        cache. The web tier only queues questionnaire_match_update; the prod-ops
+        agent writes ProdTask.overrides['questionnaire_matches'] and pushes
+        questionnaire_match_ready over the SSE relay."""
+        user = getattr(request.user, 'username', '') or 'questionnaire_match'
+        try:
+            services.questionnaire_match_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
     @action(detail=False, methods=['post'], url_path='catalog-import')
     def catalog_import(self, request):
         """Request a background catalog import — the external-safe trigger for the

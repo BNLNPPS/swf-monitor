@@ -57,7 +57,7 @@ from .models import (
 from .serializers import _redact_contact
 
 CATALOG_TASK_LIST_CACHE_KEY = 'catalog_task_list_html_cache'
-CATALOG_TASK_LIST_CACHE_VERSION = 3
+CATALOG_TASK_LIST_CACHE_VERSION = 4
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
@@ -198,8 +198,6 @@ def _catalog_cache_dt(value):
 def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot):
     task_meta = ProdTask.objects.filter(campaign=campaign).aggregate(
         count=Count('id'), updated=Max('updated_at'))
-    questionnaire_meta = Questionnaire.objects.aggregate(
-        count=Count('id'), updated=Max('updated_at'))
     return {
         'version': CATALOG_TASK_LIST_CACHE_VERSION,
         'view': catalog_view,
@@ -207,8 +205,6 @@ def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot
         'campaign_name': campaign.name,
         'task_count': task_meta['count'] or 0,
         'task_updated_at': _catalog_cache_dt(task_meta['updated']),
-        'questionnaire_count': questionnaire_meta['count'] or 0,
-        'questionnaire_updated_at': _catalog_cache_dt(questionnaire_meta['updated']),
         'progress_generated_at': (
             (progress_snapshot or {}).get('generated_at') or ''
             if catalog_view == 'progress' else ''
@@ -377,29 +373,25 @@ def _annotate_questionnaire_matches(questionnaires):
 
 def _annotate_task_questionnaire_matches(tasks):
     tasks = list(tasks)
-    by_id = {task.pk: task for task in tasks}
-    by_name = {}
+    qids = set()
     for task in tasks:
         task.questionnaire_matches = []
-        if task.name:
-            by_name[task.name] = task
-        if task.composed_name:
-            by_name[task.composed_name] = task
-
-    questionnaires = Questionnaire.objects.all()
-    for questionnaire in questionnaires:
-        for match in _questionnaire_prod_matches(questionnaire, status='accepted'):
-            task = None
-            task_id = match.get('task_id')
-            if isinstance(task_id, int):
-                task = by_id.get(task_id)
-            elif str(task_id).isdigit():
-                task = by_id.get(int(task_id))
-            if task is None:
-                task = by_name.get(match.get('task_name') or '')
-            if task is None:
-                task = by_name.get(match.get('legacy_name') or '')
-            if task is None:
+        for match in (task.overrides or {}).get('questionnaire_matches') or []:
+            if not isinstance(match, dict):
+                continue
+            qid = match.get('questionnaire_id')
+            if isinstance(qid, int) or str(qid).isdigit():
+                qids.add(int(qid))
+    questionnaires = {
+        q.pk: q for q in Questionnaire.objects.filter(pk__in=qids)
+    } if qids else {}
+    for task in tasks:
+        for match in (task.overrides or {}).get('questionnaire_matches') or []:
+            if not isinstance(match, dict):
+                continue
+            qid = match.get('questionnaire_id')
+            questionnaire = questionnaires.get(int(qid)) if str(qid).isdigit() else None
+            if questionnaire is None:
                 continue
             task.questionnaire_matches.append({
                 'questionnaire': questionnaire,
@@ -1548,6 +1540,31 @@ def pcs_catalog_evgen_update(request):
         messages.error(request, e.detail)
         return redirect(reverse('pcs:pcs_catalog'))
     messages.success(request, 'EVGEN update queued — refreshing in the background.')
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_questionnaire_match_update(request):
+    """No-JS fallback for the catalog questionnaire-match cache button.
+
+    The JavaScript path posts to /pcs/api/ and waits for the prod-ops
+    questionnaire_match_ready event. This page-view only queues the same
+    background agent work when JavaScript is unavailable.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update questionnaire matches')
+    from .services import questionnaire_match_update_request, ServiceError
+    user = getattr(request.user, 'username', '') or 'questionnaire_match'
+    try:
+        questionnaire_match_update_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(reverse('pcs:pcs_catalog'))
+    messages.success(
+        request,
+        'Questionnaire match update queued — refreshing in the background.')
     return redirect(reverse('pcs:pcs_catalog'))
 
 

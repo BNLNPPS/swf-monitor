@@ -457,6 +457,85 @@ def questionnaire_intake_csv(csv_text, *, source_url='', created_by='questionnai
         list(rows), source_url=source_url, created_by=created_by)
 
 
+def rebuild_questionnaire_match_cache(*, updated_by='questionnaire_match'):
+    """Rebuild task-local questionnaire-match caches.
+
+    ``Questionnaire.data['prod_matches']`` is the editable source of truth.
+    Catalog and compose views read the inverse cache from
+    ``ProdTask.overrides['questionnaire_matches']`` so page rendering never
+    scans every questionnaire.
+    """
+    tasks = list(ProdTask.objects.select_related('dataset').all())
+    by_id = {task.pk: task for task in tasks}
+    by_name = {}
+    for task in tasks:
+        if task.name:
+            by_name[task.name] = task
+        if task.composed_name:
+            by_name[task.composed_name] = task
+
+    matches_by_task = {}
+    questionnaire_count = 0
+    accepted_count = 0
+    unresolved_count = 0
+    for questionnaire in Questionnaire.objects.all().only('id', 'data'):
+        questionnaire_count += 1
+        for match in (questionnaire.data or {}).get('prod_matches') or []:
+            if not isinstance(match, dict):
+                continue
+            if (match.get('status') or 'accepted') != 'accepted':
+                continue
+            accepted_count += 1
+            task = None
+            task_id = match.get('task_id')
+            if isinstance(task_id, int):
+                task = by_id.get(task_id)
+            elif str(task_id).isdigit():
+                task = by_id.get(int(task_id))
+            if task is None:
+                task = by_name.get(match.get('task_name') or '')
+            if task is None:
+                task = by_name.get(match.get('legacy_name') or '')
+            if task is None:
+                unresolved_count += 1
+                continue
+            matches_by_task.setdefault(task.pk, []).append({
+                'questionnaire_id': questionnaire.pk,
+                'confidence': match.get('confidence') or '',
+                'reason': match.get('reason') or '',
+                'matched_at': match.get('matched_at') or '',
+            })
+
+    now = _timezone.now()
+    changed = []
+    for task in tasks:
+        overrides = dict(task.overrides or {})
+        existing = overrides.get('questionnaire_matches') or []
+        rebuilt = matches_by_task.get(task.pk, [])
+        if existing == rebuilt:
+            continue
+        if rebuilt:
+            overrides['questionnaire_matches'] = rebuilt
+            overrides['questionnaire_matches_updated_at'] = now.isoformat()
+            overrides['questionnaire_matches_updated_by'] = updated_by
+        else:
+            overrides.pop('questionnaire_matches', None)
+            overrides.pop('questionnaire_matches_updated_at', None)
+            overrides.pop('questionnaire_matches_updated_by', None)
+        task.overrides = overrides
+        task.updated_at = now
+        changed.append(task)
+    if changed:
+        ProdTask.objects.bulk_update(changed, ['overrides', 'updated_at'], batch_size=200)
+    return {
+        'questionnaires': questionnaire_count,
+        'accepted_matches': accepted_count,
+        'resolved_matches': sum(len(v) for v in matches_by_task.values()),
+        'unresolved_matches': unresolved_count,
+        'tasks_updated': len(changed),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
@@ -3061,6 +3140,31 @@ def evgen_rucio_update_request(*, created_by='evgen_rucio'):
     if not triggered:
         raise ServiceError(
             'EVGEN update could not be queued (ops-agent queue unreachable).',
+            status=503)
+
+
+def questionnaire_match_update_request(*, created_by='questionnaire_match'):
+    """Publish a questionnaire_match_update request to the prod-ops agent.
+
+    The agent rebuilds the task-local inverse cache from
+    Questionnaire.data['prod_matches'] and then pushes
+    questionnaire_match_ready over the SSE relay. Catalog rendering reads the
+    cache from task overrides and does not scan questionnaires inline.
+    """
+    import json as _json
+    msg = {'msg_type': 'questionnaire_match_update', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Questionnaire match update could not be queued '
+            '(ops-agent queue unreachable).',
             status=503)
 
 
