@@ -378,7 +378,7 @@
       </span>
     {% endif %}
     {% if progress_generated_at %}
-      Progress cache updated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+      Progress cache updated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}).
       {% if task_list_cache_stale or task_list_cache_miss_suppressed %}
         <span style="color:#dc3545">Refresh needed.</span>
       {% endif %}
@@ -412,16 +412,14 @@
           <span style="color:#dc3545">Underlying data changed; page-load rebuild is suppressed.</span>
         {% endif %}
       {% else %}
-        Table is not available.
-        {% if task_list_cache_miss_suppressed %}
-          <span style="color:#dc3545">Page-load rebuild is suppressed to protect the host.</span>
-        {% endif %}
+        Table cache is being rebuilt.
       {% endif %}
     </span>
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
   {% endif %}
 
+  {% if catalog_timing_rows %}
   <details class="pcs-build-timing small text-muted mb-3">
     <summary>
       Server build timing: {{ catalog_timing_total_ms }} ms before final page template render.
@@ -443,6 +441,7 @@
       </tbody>
     </table>
   </details>
+  {% endif %}
 
   {% if rucio_unmatched %}
   <details class="mb-3 small">
@@ -474,10 +473,6 @@
 
   {% if task_list_html %}
     {{ task_list_html|safe }}
-  {% elif task_list_cache_miss_suppressed %}
-    <div class="alert alert-warning">
-      Cached table HTML is missing. The page did not rebuild it during this request.
-    </div>
   {% else %}
     {% include "pcs/_task_list_filter.html" %}
   {% endif %}

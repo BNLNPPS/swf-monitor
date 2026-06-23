@@ -60,6 +60,7 @@ from .models import (
 from .serializers import _redact_contact
 
 CATALOG_TASK_LIST_CACHE_VERSION = 4
+CATALOG_BUILD_TIMING_ENABLED = False
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
@@ -90,6 +91,8 @@ def _timing_note(timings, label, *, detail=''):
 
 
 def _timed(timings, label, fn, *, detail_fn=None):
+    if timings is None:
+        return fn()
     start = time.perf_counter()
     result = fn()
     detail = detail_fn(result) if detail_fn else ''
@@ -352,12 +355,39 @@ def _cached_current_task_list_html(campaign, catalog_view, context, progress_sna
             )
             return stale['html'], True, {**stale, 'stale': True}
 
+    tasks = _timed(
+        timings,
+        'table cache miss task query',
+        lambda: _current_catalog_tasks(campaign, catalog_view, progress_snapshot),
+        detail_fn=lambda rows: f'{len(rows)} rows',
+    )
+    html = _timed(
+        timings,
+        'table cache miss render',
+        lambda: render_to_string(
+            'pcs/_task_list_filter.html',
+            {
+                'tasks': tasks,
+                'catalog_view': catalog_view,
+                'columns_mode': 'full',
+                'status_choices': PRODTASK_STATUS_CHOICES,
+            },
+        ),
+        detail_fn=lambda value: f'{len(value)} html bytes',
+    )
+    entry = {
+        'signature': signature,
+        'html': html,
+        'rendered_at': timezone.now().isoformat(),
+    }
+    cache.set(cache_key, entry, None)
+    cache.set(latest_key, cache_key, None)
     _timing_note(
         timings,
         'table render',
-        detail='cache miss; page-load rebuild suppressed',
+        detail='cache miss rebuilt and cached',
     )
-    return None, False, {'cache_miss_suppressed': True}
+    return html, False, entry
 
 
 def rebuild_current_task_list_html_cache(campaign, catalog_view='catalog', progress_snapshot=None):
@@ -1827,8 +1857,8 @@ def pcs_catalog(request):
     sign-in. Catching auth at the GET prevents the silent-fail trap
     where an anonymous user sees buttons that quietly do nothing.
     """
-    build_start = time.perf_counter()
-    timings = []
+    build_start = time.perf_counter() if CATALOG_BUILD_TIMING_ENABLED else None
+    timings = [] if CATALOG_BUILD_TIMING_ENABLED else None
     filters = _timed(timings, 'parse filters', lambda: _parse_catalog_filters(request))
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
     if active_lifecycle not in LIFECYCLE_KEYS:
@@ -2149,8 +2179,9 @@ def pcs_catalog(request):
     context['task_list_cache_stale'] = bool(task_list_cache_meta.get('stale'))
     context['task_list_cache_miss_suppressed'] = bool(
         task_list_cache_meta.get('cache_miss_suppressed'))
-    context['catalog_timing_rows'] = timings
-    context['catalog_timing_total_ms'] = _timing_ms(time.perf_counter() - build_start)
+    if CATALOG_BUILD_TIMING_ENABLED:
+        context['catalog_timing_rows'] = timings
+        context['catalog_timing_total_ms'] = _timing_ms(time.perf_counter() - build_start)
     return render(request, 'pcs/pcs_catalog.html', context)
 
 
