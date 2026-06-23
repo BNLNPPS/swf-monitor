@@ -10,11 +10,12 @@ from functools import wraps
 from urllib.request import urlopen
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
+from django.template.loader import render_to_string
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.http import JsonResponse, Http404
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -54,6 +55,9 @@ from .models import (
     PRODTASK_STATUS_CHOICES,
 )
 from .serializers import _redact_contact
+
+CATALOG_TASK_LIST_CACHE_KEY = 'catalog_task_list_html_cache'
+CATALOG_TASK_LIST_CACHE_VERSION = 2
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
@@ -152,6 +156,71 @@ def _annotate_task_progress(tasks, snapshot):
         else:
             task.progress_first = empty_output
     return tasks
+
+
+def _catalog_cache_dt(value):
+    return value.isoformat() if value else ''
+
+
+def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot):
+    task_meta = ProdTask.objects.filter(campaign=campaign).aggregate(
+        count=Count('id'), updated=Max('updated_at'))
+    questionnaire_meta = Questionnaire.objects.aggregate(
+        count=Count('id'), updated=Max('updated_at'))
+    return {
+        'version': CATALOG_TASK_LIST_CACHE_VERSION,
+        'view': catalog_view,
+        'campaign_id': campaign.pk,
+        'campaign_name': campaign.name,
+        'task_count': task_meta['count'] or 0,
+        'task_updated_at': _catalog_cache_dt(task_meta['updated']),
+        'questionnaire_count': questionnaire_meta['count'] or 0,
+        'questionnaire_updated_at': _catalog_cache_dt(questionnaire_meta['updated']),
+        'progress_generated_at': (
+            (progress_snapshot or {}).get('generated_at') or ''
+            if catalog_view == 'progress' else ''
+        ),
+    }
+
+
+def _current_catalog_tasks(campaign, catalog_view, progress_snapshot):
+    tasks = list(
+        ProdTask.objects.select_related(
+            'campaign', 'dataset', 'prod_config', 'request',
+            'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
+            'dataset__reco_tag', 'dataset__background_tag',
+        ).filter(campaign=campaign).order_by('-updated_at')
+    )
+    tasks = _annotate_task_questionnaire_matches(tasks)
+    if catalog_view == 'progress':
+        tasks = _annotate_task_progress(tasks, progress_snapshot)
+    return tasks
+
+
+def _cached_current_task_list_html(campaign, catalog_view, context, progress_snapshot):
+    if campaign is None or catalog_view not in ('catalog', 'progress'):
+        return None, False
+    signature = _catalog_task_list_cache_signature(
+        campaign, catalog_view, progress_snapshot)
+    data = campaign.data or {}
+    cache = data.get(CATALOG_TASK_LIST_CACHE_KEY) or {}
+    cached = cache.get(catalog_view) or {}
+    if cached.get('signature') == signature and cached.get('html'):
+        return cached['html'], True
+
+    tasks = _current_catalog_tasks(campaign, catalog_view, progress_snapshot)
+    html = render_to_string(
+        'pcs/_task_list_filter.html',
+        {**context, 'tasks': tasks},
+    )
+    cache[catalog_view] = {
+        'signature': signature,
+        'html': html,
+        'rendered_at': timezone.now().isoformat(),
+    }
+    campaign.data = {**data, CATALOG_TASK_LIST_CACHE_KEY: cache}
+    campaign.save(update_fields=['data', 'updated_at'])
+    return html, False
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
@@ -1751,16 +1820,6 @@ def pcs_catalog(request):
             'rucio_current_name': rucio_current_name,
         })
 
-    qs = ProdTask.objects.select_related(
-        'campaign', 'dataset', 'prod_config', 'request',
-        # Each row's composed name (models.py composed_name) reads the dataset's
-        # five tag FKs; prefetch them so the unpaginated list is one query, not
-        # 1 + 5N.
-        'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
-        'dataset__reco_tag', 'dataset__background_tag',
-    ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
-    qs = _apply_catalog_filters(qs, filters)
-
     # Rucio arrivals timeline for the current campaign (when a snapshot
     # exists). Surfaced at the top of the page as a Plotly chart.
     rucio_timeline = None
@@ -1786,16 +1845,13 @@ def pcs_catalog(request):
             evgen_rucio_unmatched = (target.data or {}).get('evgen_rucio_unmatched', []) or []
             evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
 
-    tasks = _annotate_task_questionnaire_matches(list(qs))
     progress_snapshot = None
     progress_campaign = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
     if progress_campaign is not None:
         from .services import PROGRESS_SNAPSHOT_KEY
         progress_snapshot = (progress_campaign.data or {}).get(PROGRESS_SNAPSHOT_KEY)
-    if catalog_view == 'progress':
-        tasks = _annotate_task_progress(tasks, progress_snapshot)
     context = {
-        'tasks': tasks,
+        'tasks': [],
         'show_tabs': True,
         'columns_mode': 'full',
         'catalog_view': catalog_view,
@@ -1825,6 +1881,10 @@ def pcs_catalog(request):
         'progress_generated_at': (progress_snapshot or {}).get('generated_at') or '',
         'progress_generated_by': (progress_snapshot or {}).get('generated_by') or '',
     }
+    task_list_html, task_list_cache_hit = _cached_current_task_list_html(
+        progress_campaign, catalog_view, context, progress_snapshot)
+    context['task_list_html'] = task_list_html
+    context['task_list_cache_hit'] = task_list_cache_hit
     return render(request, 'pcs/pcs_catalog.html', context)
 
 

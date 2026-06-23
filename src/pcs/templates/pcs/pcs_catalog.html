@@ -38,6 +38,30 @@
       <a href="{{ catalog_view_urls.catalog }}" data-catalog-view="catalog" data-tab-name="epicprod-catalog-view" class="btn{% if catalog_view == 'catalog' %} active{% endif %}">{% if catalog_view == 'catalog' %}Catalog{% else %}Catalog view in new tab{% endif %}</a>
       <a href="{{ catalog_view_urls.progress }}" data-catalog-view="progress" data-tab-name="epicprod-progress-view" class="btn{% if catalog_view == 'progress' %} active{% endif %}">{% if catalog_view == 'progress' %}Progress{% else %}Progress view in new tab{% endif %}</a>
     </div>
+    <script>
+    (function() {
+      const currentView = '{{ catalog_view }}';
+      const peerView = currentView === 'progress' ? 'catalog' : 'progress';
+      const labels = {
+        catalog: 'Catalog view tab',
+        progress: 'Progress view tab',
+      };
+      const storagePrefix = 'epicprod-catalog-view-open:';
+      const freshMs = 12 * 60 * 60 * 1000;
+      let peerOpen = false;
+      try {
+        const ts = parseInt(localStorage.getItem(storagePrefix + peerView) || '0', 10);
+        peerOpen = ts && (Date.now() - ts) < freshMs;
+      } catch (_) {}
+      if (peerOpen) {
+        const a = document.querySelector(`.pcs-view-switch a[data-catalog-view="${peerView}"]`);
+        if (a && !a.classList.contains('active')) {
+          a.textContent = labels[peerView];
+          a.dataset.peerSeen = '1';
+        }
+      }
+    })();
+    </script>
     {% endif %}
     {% if catalog_view != 'progress' %}
     {% if not is_tunnel %}
@@ -276,7 +300,11 @@
   </details>
   {% endif %}
 
-  {% include "pcs/_task_list_filter.html" %}
+  {% if task_list_html %}
+    {{ task_list_html|safe }}
+  {% else %}
+    {% include "pcs/_task_list_filter.html" %}
+  {% endif %}
 </div>
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>

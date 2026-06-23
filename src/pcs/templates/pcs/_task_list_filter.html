@@ -48,9 +48,14 @@
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+.pcs-tlf-list.pcs-tlf-progress {
+  width: auto !important;
+  max-width: 100%;
+}
 .pcs-tlf-list.pcs-tlf-progress td.pcs-tlf-cell-dataset {
-  width: 42%;
-  min-width: 28em;
+  width: auto;
+  min-width: 24em;
+  max-width: 42em;
 }
 .pcs-tlf-progress-output td {
   border-top: 0;
@@ -213,9 +218,9 @@ Context expected:
         <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
         {% if catalog_view == 'progress' %}
         <th data-sort="dataset" class="pcs-sort sorting">Datasets</th>
+        <th data-sort="jobs" class="pcs-sort sorting">Jobs</th>
         <th data-sort="completion" class="pcs-sort sorting">Dataset fill</th>
         <th data-sort="processing" class="pcs-sort sorting">Processing</th>
-        <th data-sort="jobs" class="pcs-sort sorting">Jobs</th>
         <th data-sort="failures" class="pcs-sort sorting">Failures</th>
         <th data-sort="link" class="pcs-sort sorting">Link</th>
         {% else %}
@@ -346,6 +351,16 @@ Context expected:
             <span class="text-muted">&middot; {{ o.file_count }} file{{ o.file_count|pluralize }}</span>
           </td>
           <td class="small align-top">
+            {% if o.processing.jeditaskid %}
+              <div><strong>{{ o.processing.total_jobs }}</strong> total</div>
+              <div class="text-muted">{{ o.processing.nactive }} active, {{ o.processing.nfinished }} finished</div>
+            {% elif o.expected_jobs %}
+              <div><strong>{{ o.expected_jobs }}</strong></div>
+            {% else %}
+              <span class="text-muted">Unknown</span>
+            {% endif %}
+          </td>
+          <td class="small align-top">
             {% if o.expected_jobs %}
               <div class="d-flex align-items-center gap-2">
                 <div class="pcs-progress-track" title="{{ o.file_count }} / {{ o.expected_jobs }} {{ o.expected_source }}">
@@ -365,32 +380,18 @@ Context expected:
                 <div class="text-muted">{{ o.processing.processing_percent }}% terminal</div>
               {% endif %}
             {% else %}
-              <span class="text-muted">No linked processing task</span>
-            {% endif %}
-          </td>
-          <td class="small align-top">
-            {% if o.processing.jeditaskid %}
-              <div><strong>{{ o.processing.total_jobs }}</strong> total</div>
-              <div class="text-muted">{{ o.processing.nactive }} active, {{ o.processing.nfinished }} finished</div>
-            {% elif o.expected_jobs %}
-              <div><strong>{{ o.expected_jobs }}</strong> configured</div>
-            {% else %}
-              <span class="text-muted">Unknown</span>
+              <span class="text-muted">No linked task</span>
             {% endif %}
           </td>
           <td class="small align-top">
             {% if o.processing.jeditaskid %}
               <div>{{ o.processing.nfailed }} failed</div>
               <div class="text-muted">{{ o.processing.nfinalfailed }} final{% if o.processing.final_failure_rate is not None %} &middot; {{ o.processing.final_failure_rate }}%{% endif %}</div>
-            {% else %}
-              <span class="text-muted">Unknown</span>
             {% endif %}
           </td>
           <td class="small align-top">
             {% if o.link %}
               {{ o.link }}
-            {% else %}
-              <span class="text-muted">output record only</span>
             {% endif %}
           </td>
         </tr>
@@ -700,9 +701,9 @@ Context expected:
   function cellSortValue(dataRow, colIdx) {
     if (table.classList.contains('pcs-tlf-progress') && colIdx >= 4) {
       const progressSortKeys = {
-        4: 'progressCompletion',
-        5: 'progressProcessing',
-        6: 'progressJobs',
+        4: 'progressJobs',
+        5: 'progressCompletion',
+        6: 'progressProcessing',
         7: 'progressFailures',
         8: 'progressLink',
       };
