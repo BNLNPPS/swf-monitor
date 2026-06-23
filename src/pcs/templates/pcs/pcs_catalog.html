@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load swf_fmt %}
 {% block title %}Campaign Task Catalog{% endblock %}
 
 {% block content %}
@@ -6,8 +7,17 @@
 
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
+    {% if catalog_view == 'progress' %}
+    <h2 class="me-3 mb-0">Current Campaign {{ progress_campaign_name }} Progress</h2>
+    {% else %}
     <h2 class="me-3 mb-0">Campaign Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    {% if active_lifecycle == 'current' %}
+    <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Catalog view">
+      <a href="{{ catalog_view_urls.catalog }}" class="btn btn-outline-primary{% if catalog_view == 'catalog' %} active{% endif %}">Catalog</a>
+      <a href="{{ catalog_view_urls.progress }}" class="btn btn-outline-primary{% if catalog_view == 'progress' %} active{% endif %}">Progress</a>
+    </div>
+    {% endif %}
     {% if not is_tunnel %}
     {% if user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline" id="csv-update-form">
@@ -31,6 +41,7 @@
         Update EVGEN from Rucio
       </button>
     </form>
+    {% endif %}
     {% endif %}
     {% endif %}
   </div>
@@ -158,7 +169,7 @@
   })();
   </script>
 
-  {% if show_tabs %}
+  {% if show_tabs and catalog_view != 'progress' %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
     {% for tab in lifecycle_tabs %}
       <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
@@ -199,6 +210,21 @@
   {% endif %}
 
   <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
+
+  {% if catalog_view == 'progress' %}
+  <div class="small text-muted mb-3">
+    {% if progress_generated_at %}
+      Progress snapshot generated {{ progress_generated_at|fmt_dt }}{% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+    {% else %}
+      No progress snapshot has been generated yet.
+    {% endif %}
+    {% if progress_errors %}
+      <div class="mt-1" style="color:#dc3545">
+        {{ progress_errors|length }} progress refresh warning{{ progress_errors|length|pluralize }}.
+      </div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   {% if rucio_unmatched %}
   <details class="mb-3 small">

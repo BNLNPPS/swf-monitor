@@ -17,7 +17,7 @@ import re as _re
 from datetime import datetime as _datetime
 
 from django.conf import settings as _settings
-from django.db import transaction
+from django.db import connections, transaction
 from django.utils import timezone as _timezone
 from django.utils.dateparse import parse_datetime as _parse_datetime
 
@@ -37,6 +37,9 @@ class ServiceError(Exception):
         self.detail = detail
         self.status = status
         super().__init__(detail)
+
+
+PROGRESS_SNAPSHOT_KEY = 'progress_snapshot'
 
 
 # Allowed ProdTask lifecycle transitions. Submission and post-submission
@@ -71,6 +74,210 @@ REQUEST_TO_TASK_COPY_FIELDS = (
     'requestor', 'priority',
     'pre_tdr_use', 'early_science_use', 'other_use', 'new_request',
 )
+
+
+def _to_int(value, default=0):
+    try:
+        if value in (None, ''):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _progress_output_file_count(output):
+    """Best available dataset-level file count from a recorded output entry."""
+    if not isinstance(output, dict):
+        return 0
+    count = _to_int(output.get('file_count'), 0)
+    for rse in output.get('rses') or []:
+        count = max(count, _to_int(rse.get('files'), 0))
+    return count
+
+
+def _progress_candidate_tasknames(task, output):
+    names = []
+    for value in (task.composed_name, task.name):
+        if value:
+            names.append(value)
+    did = (output or {}).get('did') if isinstance(output, dict) else ''
+    if did and ':' in did:
+        did_name = did.split(':', 1)[1]
+        names.extend([did_name, did_name.lstrip('/')])
+        if did_name.endswith('.b1'):
+            names.extend([did_name[:-3], did_name.lstrip('/')[:-3]])
+    elif did:
+        names.append(did)
+    return [n for i, n in enumerate(names) if n and n not in names[:i]]
+
+
+def _panda_progress_summaries(task_ids, tasknames):
+    """Return read-only PanDA task summaries keyed by JEDI id and task name."""
+    ids = sorted({_to_int(tid) for tid in task_ids if _to_int(tid)})
+    names = sorted({str(n) for n in tasknames if n})
+    if not ids and not names:
+        return {}, {}, []
+
+    from monitor_app.panda.constants import PANDA_SCHEMA
+    from monitor_app.panda.queries import _get_task_job_counts
+    from monitor_app.panda.sql import row_to_dict
+
+    fields = [
+        'jeditaskid', 'taskname', 'status', 'username',
+        'creationdate', 'modificationtime', 'processingtype',
+        'site', 'workinggroup', 'errordialog',
+    ]
+    clauses = []
+    params = []
+    if ids:
+        clauses.append('"jeditaskid" IN (' + ','.join(['%s'] * len(ids)) + ')')
+        params.extend(ids)
+    if names:
+        clauses.append('"taskname" IN (' + ','.join(['%s'] * len(names)) + ')')
+        params.extend(names)
+    sql = f"""
+        SELECT {', '.join(f'"{field}"' for field in fields)}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {' OR '.join(clauses)}
+        ORDER BY "jeditaskid" DESC
+    """
+
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = [row_to_dict(row, fields) for row in cursor.fetchall()]
+    except Exception as e:
+        return {}, {}, [f'PanDA task lookup failed: {e}']
+
+    counts = _get_task_job_counts([row['jeditaskid'] for row in rows])
+    by_id = {}
+    by_name = {}
+    for row in rows:
+        tid = _to_int(row.get('jeditaskid'))
+        c = counts.get(tid, {})
+        nactive = _to_int(c.get('nactive'))
+        nfinished = _to_int(c.get('nfinished'))
+        nfailed = _to_int(c.get('nfailed'))
+        nfinalfailed = _to_int(c.get('nfinalfailed'))
+        nrunning = _to_int(c.get('nrunning'))
+        total_jobs = nactive + nfinished + nfailed
+        terminal_jobs = nfinished + nfailed
+        row.update({
+            'nactive': nactive,
+            'nfinished': nfinished,
+            'nfailed': nfailed,
+            'nfinalfailed': nfinalfailed,
+            'nrunning': nrunning,
+            'total_jobs': total_jobs,
+            'terminal_jobs': terminal_jobs,
+            'processing_percent': (
+                round(100 * terminal_jobs / total_jobs, 1) if total_jobs else None
+            ),
+            'final_failure_rate': (
+                round(100 * nfinalfailed / (nfinalfailed + nfinished), 1)
+                if (nfinalfailed + nfinished) else None
+            ),
+        })
+        by_id[tid] = row
+        by_name.setdefault(row.get('taskname') or '', row)
+    return by_id, by_name, []
+
+
+def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
+    """Build and store the cached campaign progress view.
+
+    Reads existing PCS output records and bounded PanDA summaries. It never
+    queries Rucio; Rucio output facts come from ``ProdTask.overrides['outputs']``.
+    """
+    if campaign is None:
+        raise ServiceError('No campaign selected for progress refresh.', status=400)
+
+    tasks = list(
+        ProdTask.objects
+        .select_related('campaign', 'dataset', 'prod_config')
+        .filter(campaign=campaign)
+        .order_by('-updated_at')
+    )
+    panda_ids = [t.panda_task_id for t in tasks if t.panda_task_id]
+    taskname_candidates = []
+    for task in tasks:
+        for output in (task.outputs or [{}]):
+            taskname_candidates.extend(_progress_candidate_tasknames(task, output))
+
+    panda_by_id, panda_by_name, errors = _panda_progress_summaries(
+        panda_ids, taskname_candidates)
+
+    rows = {}
+    for task in tasks:
+        cfg = task.get_effective_config()
+        data = cfg.get('data') or {}
+        configured_jobs = _to_int(data.get('n_jobs'), 0) or None
+        direct_panda = panda_by_id.get(_to_int(task.panda_task_id))
+        outputs = []
+
+        for output in task.outputs:
+            matched = direct_panda
+            link = 'recorded PanDA task' if matched else ''
+            if not matched:
+                for candidate in _progress_candidate_tasknames(task, output):
+                    matched = panda_by_name.get(candidate)
+                    if matched:
+                        link = 'task-name match'
+                        break
+
+            file_count = _progress_output_file_count(output)
+            expected_jobs = None
+            expected_source = ''
+            if matched and matched.get('total_jobs'):
+                expected_jobs = matched['total_jobs']
+                expected_source = 'observed PanDA jobs'
+            elif configured_jobs:
+                expected_jobs = configured_jobs
+                expected_source = 'configured jobs'
+
+            pct = round(100 * file_count / expected_jobs, 1) if expected_jobs else None
+            outputs.append({
+                'did': output.get('did') or '',
+                'stage': output.get('stage') or '',
+                'file_count': file_count,
+                'bytes': _to_int(output.get('bytes'), 0),
+                'complete': bool(output.get('complete', True)),
+                'checked_at': output.get('checked_at') or '',
+                'expected_jobs': expected_jobs,
+                'expected_source': expected_source,
+                'completion_percent': pct,
+                'completion_label': f'{pct:.1f}%' if pct is not None else '',
+                'completion_width': min(100, pct) if pct is not None else 0,
+                'processing': matched or {},
+                'processing_backend': 'PanDA' if matched else '',
+                'link': link,
+            })
+
+        rows[str(task.pk)] = {
+            'task_id': task.pk,
+            'task_name': task.composed_name,
+            'configured_jobs': configured_jobs,
+            'outputs': outputs,
+            'has_processing': bool(direct_panda or any(o.get('processing') for o in outputs)),
+        }
+
+    snapshot = {
+        'version': 1,
+        'campaign': campaign.name,
+        'generated_at': _timezone.now().isoformat(),
+        'generated_by': generated_by,
+        'task_count': len(tasks),
+        'rows': rows,
+        'errors': errors,
+    }
+    campaign.data = {**(campaign.data or {}), PROGRESS_SNAPSHOT_KEY: snapshot}
+    campaign.save(update_fields=['data', 'updated_at'])
+    return {
+        'campaign': campaign.name,
+        'tasks': len(tasks),
+        'errors': errors,
+        'generated_at': snapshot['generated_at'],
+    }
 
 
 # ---------------------------------------------------------------------------

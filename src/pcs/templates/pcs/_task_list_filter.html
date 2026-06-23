@@ -49,6 +49,18 @@
   overflow-wrap: anywhere;
 }
 .pcs-tlf-list tr.pcs-tlf-desc td { word-break: break-word; overflow-wrap: anywhere; }
+.pcs-progress-track {
+  width: 12em;
+  max-width: 100%;
+  height: 0.55rem;
+  background: #e9ecef;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pcs-progress-fill {
+  height: 100%;
+  background: #0d6efd;
+}
 </style>
 {% comment %}
 Shared task-list + filter partial used by:
@@ -187,6 +199,13 @@ Context expected:
         <th data-sort="index" class="pcs-sort sorting">#</th>
         <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
         <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
+        {% if catalog_view == 'progress' %}
+        <th data-sort="completion" class="pcs-sort sorting">Dataset fill</th>
+        <th data-sort="processing" class="pcs-sort sorting">Processing</th>
+        <th data-sort="jobs" class="pcs-sort sorting">Jobs</th>
+        <th data-sort="failures" class="pcs-sort sorting">Failures</th>
+        <th data-sort="link" class="pcs-sort sorting">Link</th>
+        {% else %}
         <th data-sort="status" class="pcs-sort sorting">Status</th>
         <th data-sort="nevents" class="pcs-sort sorting">Nev (M)</th>
         <th data-sort="background" class="pcs-sort sorting">Backgd</th>
@@ -194,6 +213,7 @@ Context expected:
         <th data-sort="pre_tdr_use" class="pcs-sort sorting">pTDR</th>
         <th data-sort="early_science_use" class="pcs-sort sorting">early</th>
         <th data-sort="priority" class="pcs-sort sorting">Priority</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody>
@@ -283,6 +303,95 @@ Context expected:
             </div>
           {% endif %}
         </td>
+        {% if catalog_view == 'progress' %}
+        <td class="small align-top" data-sort-val="{% if t.progress_first.completion_percent is not None %}{{ t.progress_first.completion_percent }}{% else %}-1{% endif %}">
+          {% if t.progress.outputs %}
+            {% for o in t.progress.outputs %}
+              <div class="{% if not forloop.first %}mt-2{% endif %}">
+                <div>
+                  {% if o.stage %}<strong>{{ o.stage }}</strong>{% else %}<strong>Output</strong>{% endif %}
+                  <span class="text-muted">&middot; {{ o.file_count }} file{{ o.file_count|pluralize }}</span>
+                </div>
+                {% if o.expected_jobs %}
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="pcs-progress-track" title="{{ o.file_count }} / {{ o.expected_jobs }} {{ o.expected_source }}">
+                      <div class="pcs-progress-fill" style="width:{{ o.completion_width }}%"></div>
+                    </div>
+                    <span>{{ o.completion_label }}</span>
+                  </div>
+                  <div class="text-muted">{{ o.file_count }} / {{ o.expected_jobs }} {{ o.expected_source }}</div>
+                {% else %}
+                  <div class="text-muted">No expected job count</div>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <span class="text-muted">No output recorded</span>
+          {% endif %}
+        </td>
+        <td class="small align-top" data-sort-val="{% if t.progress_first.processing.status %}{{ t.progress_first.processing.status }}{% endif %}">
+          {% if t.progress.outputs %}
+            {% for o in t.progress.outputs %}
+              <div class="{% if not forloop.first %}mt-2{% endif %}">
+                {% if o.processing.jeditaskid %}
+                  <a href="{% url 'monitor_app:panda_task_detail' o.processing.jeditaskid %}">PanDA {{ o.processing.jeditaskid }}</a>
+                  <div class="{{ o.processing.status|state_class }}" title="{{ o.processing.status|state_title }}">{{ o.processing.status|state_label }}</div>
+                  {% if o.processing.processing_percent is not None %}
+                    <div class="text-muted">{{ o.processing.processing_percent }}% terminal</div>
+                  {% endif %}
+                {% else %}
+                  <span class="text-muted">No linked processing task</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% else %}
+            <span class="text-muted">No output recorded</span>
+          {% endif %}
+        </td>
+        <td class="small align-top" data-sort-val="{{ t.progress_first.processing.total_jobs|default:t.progress_first.expected_jobs|default:'' }}">
+          {% if t.progress.outputs %}
+            {% for o in t.progress.outputs %}
+              <div class="{% if not forloop.first %}mt-2{% endif %}">
+                {% if o.processing.jeditaskid %}
+                  <div><strong>{{ o.processing.total_jobs }}</strong> total</div>
+                  <div class="text-muted">{{ o.processing.nactive }} active, {{ o.processing.nfinished }} finished</div>
+                {% elif o.expected_jobs %}
+                  <div><strong>{{ o.expected_jobs }}</strong> configured</div>
+                {% else %}
+                  <span class="text-muted">Unknown</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% endif %}
+        </td>
+        <td class="small align-top" data-sort-val="{{ t.progress_first.processing.nfailed|default:'' }}">
+          {% if t.progress.outputs %}
+            {% for o in t.progress.outputs %}
+              <div class="{% if not forloop.first %}mt-2{% endif %}">
+                {% if o.processing.jeditaskid %}
+                  <div>{{ o.processing.nfailed }} failed</div>
+                  <div class="text-muted">{{ o.processing.nfinalfailed }} final{% if o.processing.final_failure_rate is not None %} &middot; {{ o.processing.final_failure_rate }}%{% endif %}</div>
+                {% else %}
+                  <span class="text-muted">Unknown</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% endif %}
+        </td>
+        <td class="small align-top" data-sort-val="{{ t.progress_first.link|default:'' }}">
+          {% if t.progress.outputs %}
+            {% for o in t.progress.outputs %}
+              <div class="{% if not forloop.first %}mt-2{% endif %}">
+                {% if o.link %}
+                  {{ o.link }}
+                {% else %}
+                  <span class="text-muted">output record only</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          {% endif %}
+        </td>
+        {% else %}
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
         <td class="small text-end" data-sort-val="{{ nev|default:'' }}">{{ nev|millions }}</td>
         <td class="small text-center" data-sort-val="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}">{% if bg|lower == 'yes' %}Yes{% endif %}</td>
@@ -290,13 +399,14 @@ Context expected:
         <td class="small text-center">{% if t.pre_tdr_use %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
         <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
+        {% endif %}
       </tr>
       {% endwith %}
       {% empty %}
-      <tr><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr><td colspan="{% if catalog_view == 'progress' %}9{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
 
-      <tr id="pcs-tlf-empty" style="display:none"><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr id="pcs-tlf-empty" style="display:none"><td colspan="{% if catalog_view == 'progress' %}9{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
     </tbody>
   </table>
 </div>

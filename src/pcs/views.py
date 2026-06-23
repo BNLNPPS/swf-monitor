@@ -114,6 +114,44 @@ def _apply_catalog_filters(qs, filters):
     if filters['other_use']:
         qs = qs.filter(other_use=True)
     return qs
+
+
+def _catalog_view_url(request, active_lifecycle, view_mode):
+    q = request.GET.copy()
+    q['lifecycle'] = active_lifecycle
+    if view_mode == 'progress':
+        q['view'] = 'progress'
+    else:
+        q.pop('view', None)
+    encoded = q.urlencode()
+    return '?' + encoded if encoded else '?'
+
+
+def _annotate_task_progress(tasks, snapshot):
+    rows = (snapshot or {}).get('rows') or {}
+    empty = {'outputs': [], 'configured_jobs': None, 'has_processing': False}
+    empty_processing = {
+        'jeditaskid': '', 'status': '', 'total_jobs': '', 'nfailed': '',
+        'nactive': '', 'nfinished': '', 'nfinalfailed': '',
+        'processing_percent': None, 'final_failure_rate': None,
+    }
+    empty_output = {
+        'completion_percent': None, 'expected_jobs': '', 'link': '',
+        'processing': empty_processing,
+    }
+    for task in tasks:
+        task.progress = rows.get(str(task.pk), empty)
+        outputs = task.progress.get('outputs') or []
+        if outputs:
+            first = dict(empty_output)
+            first.update(outputs[0])
+            processing = dict(empty_processing)
+            processing.update(first.get('processing') or {})
+            first['processing'] = processing
+            task.progress_first = first
+        else:
+            task.progress_first = empty_output
+    return tasks
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
@@ -1410,6 +1448,40 @@ def pcs_catalog_evgen_update(request):
     return redirect(reverse('pcs:pcs_catalog'))
 
 
+@_login_required_flash
+def pcs_catalog_progress_refresh(request):
+    """Refresh the cached current-campaign progress snapshot.
+
+    This is intentionally a manual refresh path. The catalog page reads the
+    cached snapshot from Campaign.data and does not query Rucio or scan PanDA on
+    every page load.
+    """
+    target_url = reverse('pcs:pcs_catalog') + '?lifecycle=current&view=progress'
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, target_url,
+            action_label='Refresh progress')
+    from .services import refresh_campaign_progress_snapshot, ServiceError
+    campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+    user = getattr(request.user, 'username', '') or 'progress_refresh'
+    try:
+        summary = refresh_campaign_progress_snapshot(campaign, generated_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(target_url)
+    if summary['errors']:
+        messages.warning(
+            request,
+            f'Progress refreshed for {summary["campaign"]}: '
+            f'{summary["tasks"]} tasks, {len(summary["errors"])} warning(s).')
+    else:
+        messages.success(
+            request,
+            f'Progress refreshed for {summary["campaign"]}: '
+            f'{summary["tasks"]} tasks.')
+    return redirect(target_url)
+
+
 def rucio_did_detail(request, scope, name):
     """Self-hosted Rucio DID detail — a live, read-only browser for any DID,
     since ePIC has no public Rucio webui. GET page-view → external-safe through
@@ -1488,6 +1560,9 @@ def pcs_catalog(request):
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
     if active_lifecycle not in LIFECYCLE_KEYS:
         active_lifecycle = 'current'
+    catalog_view = (request.GET.get('view') or 'catalog').strip()
+    if active_lifecycle != 'current' or catalog_view not in ('catalog', 'progress'):
+        catalog_view = 'catalog'
 
     campaigns_by_lifecycle = {
         k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
@@ -1712,13 +1787,26 @@ def pcs_catalog(request):
             evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
 
     tasks = _annotate_task_questionnaire_matches(list(qs))
+    progress_snapshot = None
+    progress_campaign = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
+    if progress_campaign is not None:
+        from .services import PROGRESS_SNAPSHOT_KEY
+        progress_snapshot = (progress_campaign.data or {}).get(PROGRESS_SNAPSHOT_KEY)
+    if catalog_view == 'progress':
+        tasks = _annotate_task_progress(tasks, progress_snapshot)
     context = {
         'tasks': tasks,
         'show_tabs': True,
         'columns_mode': 'full',
+        'catalog_view': catalog_view,
+        'catalog_view_urls': {
+            'catalog': _catalog_view_url(request, active_lifecycle, 'catalog'),
+            'progress': _catalog_view_url(request, active_lifecycle, 'progress'),
+        },
         'active_lifecycle': active_lifecycle,
         'lifecycle_tabs': lifecycle_tabs,
         'active_campaigns': campaigns_by_lifecycle[active_lifecycle],
+        'progress_campaign_name': progress_campaign.name if progress_campaign else '',
         'focused_campaign': None,
         'focused_task_id': None,
         'filters': filters,
@@ -1732,6 +1820,10 @@ def pcs_catalog(request):
         'rucio_current_name': rucio_current_name,
         'evgen_rucio_unmatched': evgen_rucio_unmatched,
         'evgen_rucio_checked_at': evgen_rucio_checked_at,
+        'progress_snapshot': progress_snapshot,
+        'progress_errors': (progress_snapshot or {}).get('errors') or [],
+        'progress_generated_at': (progress_snapshot or {}).get('generated_at') or '',
+        'progress_generated_by': (progress_snapshot or {}).get('generated_by') or '',
     }
     return render(request, 'pcs/pcs_catalog.html', context)
 
