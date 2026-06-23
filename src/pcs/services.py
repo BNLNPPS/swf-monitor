@@ -104,10 +104,33 @@ def _progress_candidate_tasknames(task, output):
     if did and ':' in did:
         did_name = did.split(':', 1)[1]
         names.extend([did_name, did_name.lstrip('/')])
+        parts = [p for p in did_name.strip('/').split('/') if p]
+        if len(parts) >= 3 and parts[0] in ('FULL', 'RECO', 'SIMU'):
+            # Current legacy production names JLab Rucio outputs as
+            # epic:/RECO/<campaign>/<detector>/<path...>, while PanDA task
+            # names use group.EIC.<campaign>.<detector>.<path...>.
+            names.append('group.EIC.' + '.'.join(parts[1:]))
         if did_name.endswith('.b1'):
             names.extend([did_name[:-3], did_name.lstrip('/')[:-3]])
     elif did:
         names.append(did)
+    more = []
+    replacements = (
+        ('.e+.', '.e_plus.'),
+        ('.e-.', '.e_minus.'),
+        ('.pi+.', '.pi_plus.'),
+        ('.pi-.', '.pi_minus.'),
+    )
+    for name in names:
+        variants = {name}
+        for a, b in replacements:
+            new_variants = set()
+            for v in variants:
+                new_variants.add(v.replace(a, b))
+                new_variants.add(v.replace(b, a))
+            variants |= new_variants
+        more.extend(variants)
+    names.extend(more)
     return [n for i, n in enumerate(names) if n and n not in names[:i]]
 
 

@@ -11,6 +11,7 @@ from datetime import datetime, date
 from zoneinfo import ZoneInfo
 
 from django import template
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 
 from monitor_app.panda.constants import TASK_STATE_COLORS, JOB_STATE_COLORS
@@ -46,6 +47,33 @@ def fmt_dt(value):
     if isinstance(value, date):
         return value.strftime('%Y%m%d')
     return str(value)
+
+
+@register.filter(name='fmt_ago')
+def fmt_ago(value):
+    """Format a datetime / ISO string as a compact relative age."""
+    if not value:
+        return ''
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return value
+    if not isinstance(value, datetime):
+        return str(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=_EASTERN)
+    seconds = max(0, int((timezone.now() - value).total_seconds()))
+    if seconds < 60:
+        return 'just now'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes} min ago'
+    hours = minutes // 60
+    if hours < 48:
+        return f'{hours} h ago'
+    days = hours // 24
+    return f'{days} d ago'
 
 
 def _badge(status, colors):

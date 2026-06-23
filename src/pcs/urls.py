@@ -14,6 +14,7 @@ urlpatterns = [
     path('catalog/rucio-update/', views.pcs_catalog_rucio_update, name='pcs_catalog_rucio_update'),
     path('catalog/evgen-update/', views.pcs_catalog_evgen_update, name='pcs_catalog_evgen_update'),
     path('catalog/progress-refresh/', views.pcs_catalog_progress_refresh, name='pcs_catalog_progress_refresh'),
+    path('catalog/cache-refresh/', views.pcs_catalog_cache_refresh, name='pcs_catalog_cache_refresh'),
     path('catalog/set-current/', views.pcs_catalog_set_current, name='pcs_catalog_set_current'),
     path('catalog/set-last/', views.pcs_catalog_set_last, name='pcs_catalog_set_last'),
 

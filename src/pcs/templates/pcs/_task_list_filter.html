@@ -217,12 +217,13 @@ Context expected:
         <th data-sort="index" class="pcs-sort sorting">#</th>
         <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
         {% if catalog_view == 'progress' %}
+        <th data-sort="task_mod" data-default-dir="desc" class="pcs-sort sorting">Task mod</th>
         <th data-sort="dataset" class="pcs-sort sorting">Datasets</th>
         <th data-sort="jobs" class="pcs-sort sorting">Jobs</th>
-        <th data-sort="completion" class="pcs-sort sorting">Dataset fill</th>
-        <th data-sort="processing" class="pcs-sort sorting">Processing</th>
-        <th data-sort="failures" class="pcs-sort sorting">Failures</th>
-        <th data-sort="link" class="pcs-sort sorting">Link</th>
+        <th data-sort="completion" data-default-dir="desc" class="pcs-sort sorting">Dataset fill</th>
+        <th data-sort="processing" data-default-dir="desc" class="pcs-sort sorting">Processing</th>
+        <th data-sort="failures" data-default-dir="desc" class="pcs-sort sorting">Failures</th>
+        <th data-sort="link" data-default-dir="desc" class="pcs-sort sorting">Link</th>
         {% else %}
         <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
         <th data-sort="status" class="pcs-sort sorting">Status</th>
@@ -266,16 +267,19 @@ Context expected:
           data-no-input="{% if t.dataset.stage == 'evgen' and not t.has_input %}1{% else %}0{% endif %}"
           data-incomplete-input="{% if t.input_incomplete %}1{% else %}0{% endif %}"
           {% if catalog_view == 'progress' %}
-          data-progress-completion="{% if t.progress_first.completion_percent is not None %}{{ t.progress_first.completion_percent }}{% else %}-1{% endif %}"
-          data-progress-processing="{% if t.progress_first.processing.status %}{{ t.progress_first.processing.status }}{% endif %}"
-          data-progress-jobs="{{ t.progress_first.processing.total_jobs|default:t.progress_first.expected_jobs|default:'' }}"
-          data-progress-failures="{{ t.progress_first.processing.nfailed|default:'' }}"
-          data-progress-link="{{ t.progress_first.link|default:'' }}"
+          data-progress-completion="{{ t.progress_sort.completion }}"
+          data-progress-processing="{{ t.progress_sort.processing }}"
+          data-progress-jobs="{{ t.progress_sort.jobs }}"
+          data-progress-failures="{{ t.progress_sort.failures }}"
+          data-progress-link="{{ t.progress_sort.link }}"
           {% endif %}
           data-search="{{ ds_path|lower }} {{ t.composed_name|lower }} {{ t.description|default:''|lower }}">
         <td class="align-top"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.composed_name }}"></td>
         <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ forloop.counter }}</td>
         <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ t.requestor|default:"—" }}</td>
+        {% if catalog_view == 'progress' %}
+        <td class="align-top small text-muted" data-sort-val="{{ t.updated_at|date:'U' }}"{% if t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ t.updated_at|fmt_ago }}</td>
+        {% endif %}
         <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}"{% if catalog_view == 'progress' %} colspan="6"{% endif %}>
           {% if t.campaign %}
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
@@ -399,10 +403,10 @@ Context expected:
       {% endif %}
       {% endwith %}
       {% empty %}
-      <tr><td colspan="{% if catalog_view == 'progress' %}9{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr><td colspan="{% if catalog_view == 'progress' %}10{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
 
-      <tr id="pcs-tlf-empty" style="display:none"><td colspan="{% if catalog_view == 'progress' %}9{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr id="pcs-tlf-empty" style="display:none"><td colspan="{% if catalog_view == 'progress' %}10{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
     </tbody>
   </table>
 </div>
@@ -699,13 +703,13 @@ Context expected:
   }
 
   function cellSortValue(dataRow, colIdx) {
-    if (table.classList.contains('pcs-tlf-progress') && colIdx >= 4) {
+    if (table.classList.contains('pcs-tlf-progress') && colIdx >= 5) {
       const progressSortKeys = {
-        4: 'progressJobs',
-        5: 'progressCompletion',
-        6: 'progressProcessing',
-        7: 'progressFailures',
-        8: 'progressLink',
+        5: 'progressJobs',
+        6: 'progressCompletion',
+        7: 'progressProcessing',
+        8: 'progressFailures',
+        9: 'progressLink',
       };
       return dataRow.dataset[progressSortKeys[colIdx]] || '';
     }
@@ -744,7 +748,7 @@ Context expected:
         activeDir = -activeDir;
       } else {
         activeIdx = i;
-        activeDir = 1;
+        activeDir = h.dataset.defaultDir === 'desc' ? -1 : 1;
       }
       // Header columns include the checkbox col at index 0, which is also a TH.
       // The sortable headers start at index 1 in the THs of the row. But the

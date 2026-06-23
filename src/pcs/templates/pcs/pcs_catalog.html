@@ -260,7 +260,7 @@
   {% if catalog_view == 'progress' %}
   <div class="small text-muted mb-3">
     {% if progress_generated_at %}
-      Progress snapshot generated {{ progress_generated_at|fmt_dt }}{% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+      Progress snapshot generated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
     {% else %}
       No progress snapshot has been generated yet.
     {% endif %}
@@ -271,6 +271,30 @@
     {% endif %}
   </div>
   {% endif %}
+
+  <div class="small text-muted mb-2 d-flex align-items-center gap-2">
+    <span>
+      {% if task_list_cache_rendered_at %}
+        Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}){% if task_list_cache_hit %} from cache{% endif %}.
+      {% else %}
+        Table cache not built.
+      {% endif %}
+    </span>
+    {% if user.is_authenticated %}
+      {% if catalog_view == 'progress' %}
+      <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">Refresh progress</button>
+      </form>
+      {% else %}
+      <form method="post" action="{% url 'pcs:pcs_catalog_cache_refresh' %}" class="d-inline">
+        {% csrf_token %}
+        <input type="hidden" name="view" value="{{ catalog_view }}">
+        <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">Refresh table</button>
+      </form>
+      {% endif %}
+    {% endif %}
+  </div>
 
   {% if rucio_unmatched %}
   <details class="mb-3 small">
@@ -318,6 +342,31 @@
       + 'click <em>Update from Rucio</em> to populate the snapshot.</div>';
     return;
   }
+  function lastValue(stage, key) {
+    const arr = (stage || {})[key] || [];
+    return arr.length ? arr[arr.length - 1] : 0;
+  }
+  const plotSignature = [
+    data.campaign_name || '',
+    data.dates[0] || '',
+    data.dates[data.dates.length - 1] || '',
+    data.dates.length,
+    lastValue(data.simu, 'cum_datasets'),
+    lastValue(data.simu, 'cum_files'),
+    lastValue(data.simu, 'cum_bytes'),
+    lastValue(data.reco, 'cum_datasets'),
+    lastValue(data.reco, 'cum_files'),
+    lastValue(data.reco, 'cum_bytes'),
+  ].join('|');
+  const plotCacheKey = 'epicprod-rucio-timeline:' + (data.campaign_name || 'current');
+  try {
+    const cached = JSON.parse(localStorage.getItem(plotCacheKey) || 'null');
+    if (cached && cached.signature === plotSignature && cached.image) {
+      el.innerHTML = '<img alt="Rucio arrivals plot" src="' + cached.image + '" '
+        + 'style="display:block;max-width:100%;height:auto;">';
+      return;
+    }
+  } catch (_) {}
   const TB = 1e12;
   const SIMU_COLOR = '#1f77b4';
   const RECO_COLOR = '#ff7f0e';
@@ -373,7 +422,20 @@
     legend: {orientation: 'h', y: -0.12},
     showlegend: true,
   };
-  Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true});
+  Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true}).then(() => {
+    try {
+      Plotly.toImage(el, {format: 'png', width: Math.max(900, el.clientWidth || 900), height: 540})
+        .then(image => {
+          try {
+            localStorage.setItem(plotCacheKey, JSON.stringify({
+              signature: plotSignature,
+              image: image,
+              savedAt: Date.now(),
+            }));
+          } catch (_) {}
+        });
+    } catch (_) {}
+  });
 })();
 
 (function() {

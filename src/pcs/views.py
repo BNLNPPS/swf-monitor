@@ -57,7 +57,7 @@ from .models import (
 from .serializers import _redact_contact
 
 CATALOG_TASK_LIST_CACHE_KEY = 'catalog_task_list_html_cache'
-CATALOG_TASK_LIST_CACHE_VERSION = 2
+CATALOG_TASK_LIST_CACHE_VERSION = 3
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
@@ -155,6 +155,39 @@ def _annotate_task_progress(tasks, snapshot):
             task.progress_first = first
         else:
             task.progress_first = empty_output
+        linked = []
+        completion_values = []
+        job_values = []
+        for output in outputs:
+            if output.get('completion_percent') is not None:
+                completion_values.append(output.get('completion_percent'))
+            processing = output.get('processing') or {}
+            total_jobs = processing.get('total_jobs') or output.get('expected_jobs')
+            if total_jobs not in (None, ''):
+                try:
+                    job_values.append(int(total_jobs))
+                except (TypeError, ValueError):
+                    pass
+            if processing.get('jeditaskid'):
+                linked.append(output)
+        failure_values = []
+        for output in linked:
+            try:
+                failure_values.append(int((output.get('processing') or {}).get('nfailed') or 0))
+            except (TypeError, ValueError):
+                failure_values.append(0)
+        task.progress_sort = {
+            'completion': max(completion_values) if completion_values else -1,
+            'jobs': max(job_values) if job_values else '',
+            'processing': (
+                '1:' + str((linked[0].get('processing') or {}).get('status') or '')
+                if linked else '0:'
+            ),
+            'failures': (
+                f'1:{max(failure_values):09d}' if failure_values else '0:'
+            ),
+            'link': '1:' + str(linked[0].get('link') or '') if linked else '0:',
+        }
     return tasks
 
 
@@ -199,28 +232,29 @@ def _current_catalog_tasks(campaign, catalog_view, progress_snapshot):
 
 def _cached_current_task_list_html(campaign, catalog_view, context, progress_snapshot):
     if campaign is None or catalog_view not in ('catalog', 'progress'):
-        return None, False
+        return None, False, {}
     signature = _catalog_task_list_cache_signature(
         campaign, catalog_view, progress_snapshot)
     data = campaign.data or {}
     cache = data.get(CATALOG_TASK_LIST_CACHE_KEY) or {}
     cached = cache.get(catalog_view) or {}
     if cached.get('signature') == signature and cached.get('html'):
-        return cached['html'], True
+        return cached['html'], True, cached
 
     tasks = _current_catalog_tasks(campaign, catalog_view, progress_snapshot)
     html = render_to_string(
         'pcs/_task_list_filter.html',
         {**context, 'tasks': tasks},
     )
+    rendered_at = timezone.now().isoformat()
     cache[catalog_view] = {
         'signature': signature,
         'html': html,
-        'rendered_at': timezone.now().isoformat(),
+        'rendered_at': rendered_at,
     }
     campaign.data = {**data, CATALOG_TASK_LIST_CACHE_KEY: cache}
     campaign.save(update_fields=['data', 'updated_at'])
-    return html, False
+    return html, False, cache[catalog_view]
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
@@ -1551,6 +1585,33 @@ def pcs_catalog_progress_refresh(request):
     return redirect(target_url)
 
 
+@_login_required_flash
+def pcs_catalog_cache_refresh(request):
+    """Drop cached current-campaign catalog/progress table HTML."""
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Refresh catalog table')
+    view = (request.POST.get('view') or 'catalog').strip()
+    if view not in ('catalog', 'progress'):
+        view = 'catalog'
+    target_url = reverse('pcs:pcs_catalog') + '?lifecycle=current'
+    if view == 'progress':
+        target_url += '&view=progress'
+    campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+    if campaign is None:
+        messages.error(request, 'No current campaign found.')
+        return redirect(target_url)
+    data = dict(campaign.data or {})
+    cache = dict(data.get(CATALOG_TASK_LIST_CACHE_KEY) or {})
+    cache.pop(view, None)
+    data[CATALOG_TASK_LIST_CACHE_KEY] = cache
+    campaign.data = data
+    campaign.save(update_fields=['data', 'updated_at'])
+    messages.success(request, 'Catalog table cache cleared.')
+    return redirect(target_url)
+
+
 def rucio_did_detail(request, scope, name):
     """Self-hosted Rucio DID detail — a live, read-only browser for any DID,
     since ePIC has no public Rucio webui. GET page-view → external-safe through
@@ -1881,10 +1942,11 @@ def pcs_catalog(request):
         'progress_generated_at': (progress_snapshot or {}).get('generated_at') or '',
         'progress_generated_by': (progress_snapshot or {}).get('generated_by') or '',
     }
-    task_list_html, task_list_cache_hit = _cached_current_task_list_html(
+    task_list_html, task_list_cache_hit, task_list_cache_meta = _cached_current_task_list_html(
         progress_campaign, catalog_view, context, progress_snapshot)
     context['task_list_html'] = task_list_html
     context['task_list_cache_hit'] = task_list_cache_hit
+    context['task_list_cache_rendered_at'] = task_list_cache_meta.get('rendered_at') or ''
     return render(request, 'pcs/pcs_catalog.html', context)
 
 
