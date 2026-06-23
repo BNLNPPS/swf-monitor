@@ -1576,12 +1576,13 @@ def pcs_catalog_progress_refresh(request):
         messages.warning(
             request,
             f'Progress refreshed for {summary["campaign"]}: '
-            f'{summary["tasks"]} tasks, {len(summary["errors"])} warning(s).')
+            f'{summary["tasks"]} tasks, {len(summary["errors"])} warning(s). '
+            f'The rebuilt progress table is shown below.')
     else:
         messages.success(
             request,
             f'Progress refreshed for {summary["campaign"]}: '
-            f'{summary["tasks"]} tasks.')
+            f'{summary["tasks"]} tasks. The rebuilt progress table is shown below.')
     return redirect(target_url)
 
 
@@ -1608,7 +1609,7 @@ def pcs_catalog_cache_refresh(request):
     data[CATALOG_TASK_LIST_CACHE_KEY] = cache
     campaign.data = data
     campaign.save(update_fields=['data', 'updated_at'])
-    messages.success(request, 'Catalog table cache cleared.')
+    messages.success(request, 'Catalog table refreshed. The rebuilt table is shown below.')
     return redirect(target_url)
 
 

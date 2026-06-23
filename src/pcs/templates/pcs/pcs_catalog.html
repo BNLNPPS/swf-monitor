@@ -28,6 +28,13 @@
   flex: 0 0 29rem;
   white-space: nowrap;
 }
+.pcs-refresh-status {
+  min-height: 1.5rem;
+}
+.pcs-refresh-status.is-active {
+  color: #084298;
+  font-weight: 600;
+}
 </style>
 
 <div class="container-fluid mt-3 pcs-catalog">
@@ -272,7 +279,7 @@
   </div>
   {% endif %}
 
-  <div class="small text-muted mb-2 d-flex align-items-center gap-2">
+  <div class="small text-muted mb-2 d-flex align-items-center gap-2 flex-wrap">
     <span>
       {% if task_list_cache_rendered_at %}
         Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}){% if task_list_cache_hit %} from cache{% endif %}.
@@ -282,18 +289,23 @@
     </span>
     {% if user.is_authenticated %}
       {% if catalog_view == 'progress' %}
-      <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline">
+      <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline pcs-refresh-form"
+            data-refresh-message="Refreshing progress snapshot and rebuilding the table. This can take a little while."
+            data-refresh-button="Refreshing...">
         {% csrf_token %}
         <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">Refresh progress</button>
       </form>
       {% else %}
-      <form method="post" action="{% url 'pcs:pcs_catalog_cache_refresh' %}" class="d-inline">
+      <form method="post" action="{% url 'pcs:pcs_catalog_cache_refresh' %}" class="d-inline pcs-refresh-form"
+            data-refresh-message="Refreshing table: clearing the cached HTML, then rebuilding it before the page returns."
+            data-refresh-button="Refreshing...">
         {% csrf_token %}
         <input type="hidden" name="view" value="{{ catalog_view }}">
         <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">Refresh table</button>
       </form>
       {% endif %}
     {% endif %}
+    <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
 
   {% if rucio_unmatched %}
@@ -333,6 +345,24 @@
 
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
+(function() {
+  const statusEl = document.getElementById('pcs-refresh-status');
+  document.querySelectorAll('form.pcs-refresh-form').forEach(form => {
+    form.addEventListener('submit', function() {
+      const btn = form.querySelector('button[type="submit"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.dataset.originalText = btn.textContent.trim();
+        btn.textContent = form.dataset.refreshButton || 'Refreshing...';
+      }
+      if (statusEl) {
+        statusEl.textContent = form.dataset.refreshMessage || 'Refresh started.';
+        statusEl.classList.add('is-active');
+      }
+    });
+  });
+})();
+
 (function() {
   const data = {{ rucio_timeline_json|safe }};
   const el = document.getElementById('pcs-rucio-timeline');
