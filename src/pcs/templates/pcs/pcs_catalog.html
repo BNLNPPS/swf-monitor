@@ -4,14 +4,32 @@
 
 {% block content %}
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+<style>
+.pcs-view-switch .btn {
+  background: #6ea8fe;
+  border-color: #0d6efd;
+  color: #052c65;
+}
+.pcs-view-switch .btn.active,
+.pcs-view-switch .btn:focus {
+  background: #0d6efd;
+  border-color: #0a58ca;
+  color: #fff;
+}
+.pcs-view-switch .btn:hover {
+  background: #3d8bfd;
+  border-color: #0a58ca;
+  color: #fff;
+}
+</style>
 
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
     <h2 class="me-3 mb-0">{% if catalog_view == 'progress' %}Current Campaign {{ progress_campaign_name }} Progress{% else %}Campaign Task Catalog{% endif %}</h2>
     {% if active_lifecycle == 'current' %}
     <div class="btn-group btn-group-sm pcs-view-switch me-2" role="group" aria-label="Catalog view">
-      <a href="{{ catalog_view_urls.catalog }}" data-catalog-view="catalog" data-tab-name="epicprod-catalog-view" class="btn{% if catalog_view == 'catalog' %} btn-primary active{% else %} btn-outline-primary{% endif %}">{% if catalog_view == 'catalog' %}Catalog{% else %}Catalog view in new tab{% endif %}</a>
-      <a href="{{ catalog_view_urls.progress }}" data-catalog-view="progress" data-tab-name="epicprod-progress-view" class="btn{% if catalog_view == 'progress' %} btn-primary active{% else %} btn-outline-primary{% endif %}">{% if catalog_view == 'progress' %}Progress{% else %}Progress view in new tab{% endif %}</a>
+      <a href="{{ catalog_view_urls.catalog }}" data-catalog-view="catalog" data-tab-name="epicprod-catalog-view" class="btn{% if catalog_view == 'catalog' %} active{% endif %}">{% if catalog_view == 'catalog' %}Catalog{% else %}Catalog view in new tab{% endif %}</a>
+      <a href="{{ catalog_view_urls.progress }}" data-catalog-view="progress" data-tab-name="epicprod-progress-view" class="btn{% if catalog_view == 'progress' %} active{% endif %}">{% if catalog_view == 'progress' %}Progress{% else %}Progress view in new tab{% endif %}</a>
     </div>
     {% endif %}
     {% if catalog_view != 'progress' %}
@@ -330,8 +348,16 @@
     catalog: {newTab: 'Catalog view in new tab', existing: 'Catalog view tab', loading: 'Catalog loading...'},
     progress: {newTab: 'Progress view in new tab', existing: 'Progress view tab', loading: 'Progress loading...'},
   };
+  const tabNames = {
+    catalog: 'epicprod-catalog-view',
+    progress: 'epicprod-progress-view',
+  };
   const storagePrefix = 'epicprod-catalog-view-open:';
   const freshMs = 12 * 60 * 60 * 1000;
+
+  if (!window.name || window.name.startsWith('epicprod-')) {
+    window.name = tabNames[currentView];
+  }
 
   function stampOpen(view) {
     try {
@@ -397,10 +423,9 @@
       e.preventDefault();
       const view = a.dataset.catalogView;
       stampOpen(currentView);
-      a.classList.remove('btn-outline-primary');
-      a.classList.add('btn-primary', 'disabled');
+      a.classList.add('active', 'disabled');
       a.textContent = peerLabels[view].loading;
-      window.open(a.href, a.dataset.tabName || '_blank');
+      window.open(a.href, tabNames[view] || a.dataset.tabName || '_blank');
     });
   });
 })();
