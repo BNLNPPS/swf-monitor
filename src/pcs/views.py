@@ -59,7 +59,6 @@ from .models import (
 )
 from .serializers import _redact_contact
 
-CATALOG_TASK_LIST_CACHE_KEY = 'catalog_task_list_html_cache'
 CATALOG_TASK_LIST_CACHE_VERSION = 4
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
@@ -352,34 +351,6 @@ def _cached_current_task_list_html(campaign, catalog_view, context, progress_sna
                 detail='stale Django cache used; page-load rebuild suppressed',
             )
             return stale['html'], True, {**stale, 'stale': True}
-
-    data = _timed(timings, 'legacy table cache data read', lambda: _campaign_data(campaign))
-    legacy_cache = data.get(CATALOG_TASK_LIST_CACHE_KEY) or {}
-    legacy = legacy_cache.get(catalog_view) or {}
-    if legacy.get('html'):
-        entry = {
-            'signature': legacy.get('signature'),
-            'html': legacy['html'],
-            'rendered_at': legacy.get('rendered_at') or '',
-        }
-        if legacy.get('signature') == signature:
-            cache.set(cache_key, entry, None)
-            cache.set(latest_key, cache_key, None)
-            _timing_note(
-                timings,
-                'table render',
-                detail=f'legacy Campaign.data cache migrated, {len(entry["html"])} html bytes',
-            )
-            return entry['html'], True, entry
-        _timing_note(
-            timings,
-            'table render',
-            detail=(
-                f'stale legacy Campaign.data cache used, {len(entry["html"])} html bytes; '
-                'page-load rebuild suppressed'
-            ),
-        )
-        return entry['html'], True, {**entry, 'stale': True}
 
     _timing_note(
         timings,
@@ -2112,18 +2083,13 @@ def pcs_catalog(request):
     progress_refresh_error = ''
     progress_campaign = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
     if progress_campaign is not None:
-        from .services import PROGRESS_SNAPSHOT_KEY
+        from .services import load_campaign_progress_snapshot
         if catalog_view == 'progress' and progress_refresh_requested:
             progress_refresh_error = 'refresh=1 requested; page-load refresh is disabled to avoid running the heavy progress rebuild inside GET.'
-        progress_campaign_data = _timed(
-            timings,
-            'progress campaign data read',
-            lambda: _campaign_data(progress_campaign),
-        )
         progress_snapshot = _timed(
             timings,
             'progress snapshot cached read',
-            lambda: progress_campaign_data.get(PROGRESS_SNAPSHOT_KEY),
+            lambda: load_campaign_progress_snapshot(progress_campaign),
             detail_fn=lambda value: (
                 'generated_at=' + str((value or {}).get('generated_at') or '')
                 if value else 'missing'

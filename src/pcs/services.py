@@ -17,6 +17,7 @@ import re as _re
 from datetime import datetime as _datetime
 
 from django.conf import settings as _settings
+from django.core.cache import cache as _cache
 from django.db import connections, transaction
 from django.utils import timezone as _timezone
 from django.utils.dateparse import parse_datetime as _parse_datetime
@@ -41,6 +42,17 @@ class ServiceError(Exception):
 
 PROGRESS_SNAPSHOT_KEY = 'progress_snapshot'
 PROGRESS_REFRESH_LOCK_KEY = 'pcs:campaign-progress-refresh:queued'
+
+
+def campaign_progress_snapshot_cache_key(campaign):
+    if campaign is None:
+        return ''
+    return f'pcs:campaign-progress-snapshot:{campaign.pk}:{campaign.name}'
+
+
+def load_campaign_progress_snapshot(campaign):
+    key = campaign_progress_snapshot_cache_key(campaign)
+    return _cache.get(key) if key else None
 
 
 # Allowed ProdTask lifecycle transitions. Submission and post-submission
@@ -224,9 +236,12 @@ def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
     )
     panda_ids = [t.panda_task_id for t in tasks if t.panda_task_id]
     taskname_candidates = []
+    candidate_names_by_task_output = {}
     for task in tasks:
-        for output in (task.outputs or [{}]):
-            taskname_candidates.extend(_progress_candidate_tasknames(task, output))
+        for index, output in enumerate(task.outputs or [{}]):
+            candidates = _progress_candidate_tasknames(task, output)
+            candidate_names_by_task_output[(task.pk, index)] = candidates
+            taskname_candidates.extend(candidates)
 
     panda_by_id, panda_by_name, errors = _panda_progress_summaries(
         panda_ids, taskname_candidates)
@@ -239,11 +254,11 @@ def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
         direct_panda = panda_by_id.get(_to_int(task.panda_task_id))
         outputs = []
 
-        for output in task.outputs:
+        for index, output in enumerate(task.outputs):
             matched = direct_panda
             link = 'recorded PanDA task' if matched else ''
             if not matched:
-                for candidate in _progress_candidate_tasknames(task, output):
+                for candidate in candidate_names_by_task_output.get((task.pk, index), []):
                     matched = panda_by_name.get(candidate)
                     if matched:
                         link = 'task-name match'
@@ -294,8 +309,7 @@ def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
         'rows': rows,
         'errors': errors,
     }
-    campaign.data = {**(campaign.data or {}), PROGRESS_SNAPSHOT_KEY: snapshot}
-    campaign.save(update_fields=['data', 'updated_at'])
+    _cache.set(campaign_progress_snapshot_cache_key(campaign), snapshot, None)
     return {
         'campaign': campaign.name,
         'tasks': len(tasks),

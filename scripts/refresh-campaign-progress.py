@@ -18,6 +18,7 @@ django.setup()
 from pcs.models import Campaign  # noqa: E402
 from pcs.services import (  # noqa: E402
     PROGRESS_REFRESH_LOCK_KEY,
+    load_campaign_progress_snapshot,
     refresh_campaign_progress_snapshot,
 )
 from pcs.views import rebuild_current_task_list_html_cache  # noqa: E402
@@ -37,8 +38,7 @@ def main():
 
         progress = refresh_campaign_progress_snapshot(
             campaign, generated_by=args.generated_by)
-        campaign.refresh_from_db(fields=["data", "updated_at"])
-        snapshot = (campaign.data or {}).get("progress_snapshot") or {}
+        snapshot = load_campaign_progress_snapshot(campaign) or {}
         table = rebuild_current_task_list_html_cache(
             campaign, "progress", progress_snapshot=snapshot)
 
