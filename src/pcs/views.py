@@ -12,6 +12,7 @@ from functools import wraps
 from urllib.request import urlopen
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
+from django.template.loader import render_to_string
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.http import JsonResponse, Http404
@@ -386,6 +387,38 @@ def _cached_current_task_list_html(campaign, catalog_view, context, progress_sna
         detail='cache miss; page-load rebuild suppressed',
     )
     return None, False, {'cache_miss_suppressed': True}
+
+
+def rebuild_current_task_list_html_cache(campaign, catalog_view='catalog', progress_snapshot=None):
+    """Rebuild the current-campaign table fragment outside the page GET path."""
+    if campaign is None or catalog_view not in ('catalog', 'progress'):
+        raise ValueError('campaign and catalog/progress view are required')
+    signature = _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot)
+    tasks = _current_catalog_tasks(campaign, catalog_view, progress_snapshot)
+    html = render_to_string(
+        'pcs/_task_list_filter.html',
+        {
+            'tasks': tasks,
+            'catalog_view': catalog_view,
+            'columns_mode': 'full',
+            'status_choices': PRODTASK_STATUS_CHOICES,
+        },
+    )
+    entry = {
+        'signature': signature,
+        'html': html,
+        'rendered_at': timezone.now().isoformat(),
+    }
+    cache_key = _catalog_table_cache_key(campaign.pk, catalog_view, signature)
+    cache.set(cache_key, entry, None)
+    cache.set(_catalog_table_latest_key(campaign.pk, catalog_view), cache_key, None)
+    return {
+        'campaign': campaign.name,
+        'view': catalog_view,
+        'tasks': len(tasks),
+        'html_bytes': len(html),
+        'rendered_at': entry['rendered_at'],
+    }
 
 
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
@@ -1718,10 +1751,14 @@ def pcs_catalog_progress_refresh(request):
         return _post_only_redirect(
             request, target_url,
             action_label='Refresh progress')
-    messages.error(
-        request,
-        'Progress refresh is disabled in the web request path to protect the host. '
-        'Use a background refresh path; page loads read the cached snapshot only.')
+    from .services import campaign_progress_refresh_request, ServiceError
+    user = getattr(request.user, 'username', '') or 'progress_refresh'
+    try:
+        campaign_progress_refresh_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(target_url)
+    messages.success(request, 'Progress refresh queued — updating in the background.')
     return redirect(target_url)
 
 

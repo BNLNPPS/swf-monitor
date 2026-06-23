@@ -35,6 +35,8 @@ Capabilities:
   evgen_rucio_update — assimilate the JLab Rucio EVGEN inventory (epic:/EVGEN/*)
                        and resolve each PCS evgen Dataset onto metadata['rucio']
                        (delegates to scripts/import_evgen_rucio.py --apply).
+  campaign_progress_refresh — rebuild current campaign progress data and its
+                       rendered progress table cache.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -92,6 +94,9 @@ CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pc
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
 QUESTIONNAIRE_MATCH_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_MATCH_TIMEOUT", "300"))
+CAMPAIGN_PROGRESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-campaign-progress.py"
+CAMPAIGN_PROGRESS_TIMEOUT = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_TIMEOUT", "300"))
+CAMPAIGN_PROGRESS_MIN_INTERVAL = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_MIN_INTERVAL", "300"))
 
 # EVGEN-input assimilation doer: a live JLab Rucio fetch of epic:/EVGEN/* plus
 # the per-dataset match — slow and network-bound, so generously bounded.
@@ -126,7 +131,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
-                   "questionnaire_match_update",
+                   "questionnaire_match_update", "campaign_progress_refresh",
                    "sync_epicprod_inventory", "refresh_system_status",
                    "health_ping", "shutdown"}
 
@@ -137,6 +142,7 @@ class EpicProdOpsAgent(BaseAgent):
         super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE,
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
+        self._campaign_progress_last_start = 0
         self._system_status_thread = threading.Thread(
             target=self._system_status_periodic_loop,
             name="system-status-refresh",
@@ -643,6 +649,55 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info("PRODOPS questionnaire_match_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'questionnaire_match_ready', 'ok': True,
+                'summary': summary})
+
+    def _handle_campaign_progress_refresh(self, m):
+        """Rebuild current campaign progress data + progress table cache."""
+        now = time.time()
+        if now - self._campaign_progress_last_start < CAMPAIGN_PROGRESS_MIN_INTERVAL:
+            self.logger.warning("PRODOPS campaign_progress_refresh: cooldown active, dropping duplicate")
+            return
+        self._campaign_progress_last_start = now
+        self.run_in_background(
+            self._do_campaign_progress_refresh, m,
+            dedup_key="campaign_progress_refresh",
+            label="campaign_progress_refresh")
+
+    def _do_campaign_progress_refresh(self, m):
+        created_by = m.get('created_by') or 'progress_refresh'
+        cmd = [
+            sys.executable, str(CAMPAIGN_PROGRESS_SCRIPT),
+            "--generated-by", str(created_by),
+        ]
+        self.logger.info("PRODOPS campaign_progress_refresh: rebuilding progress cache")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=CAMPAIGN_PROGRESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                "PRODOPS campaign_progress_refresh TIMEOUT after "
+                f"{CAMPAIGN_PROGRESS_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'campaign_progress_ready', 'ok': False,
+                'error': f'timed out after {CAMPAIGN_PROGRESS_TIMEOUT}s'})
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  refresh-campaign-progress: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  refresh-campaign-progress: {line}")
+        if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(
+                f"PRODOPS campaign_progress_refresh FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'campaign_progress_ready', 'ok': False,
+                'error': reason})
+        else:
+            summary = (p.stdout or "").strip()
+            self.logger.info("PRODOPS campaign_progress_refresh done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'campaign_progress_ready', 'ok': True,
                 'summary': summary})
 
     # -- helpers -------------------------------------------------------------

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% load swf_fmt %}
-{% block title %}Campaign Task Catalog{% endblock %}
+{% block title %}{% if catalog_view == 'progress' %}Campaign Progress{% else %}Campaign Task Catalog{% endif %}{% endblock %}
 
 {% block content %}
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
@@ -284,6 +284,48 @@
       }
     });
   })();
+
+  // Refresh progress — rebuild the PanDA progress snapshot and rendered
+  // progress table cache in the prod-ops agent. The page never starts this on
+  // load; only this authenticated button queues it.
+  document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('progress-refresh-form');
+    const btn  = document.getElementById('progress-refresh-btn');
+    if (!form || !btn) return;
+    const label = btn.textContent.trim();
+    function busy(on) { btn.disabled = on; btn.textContent = on ? 'Refreshing…' : label; }
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!confirm('Refresh progress data and rebuild the progress table cache?')) return;
+      busy(true);
+      const token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/campaign-progress-refresh/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        });
+        if (r.status !== 202) {
+          let m = 'queue failed';
+          try { const j = await r.json(); m = j.detail || j.message || m; } catch (_) {}
+          throw new Error(m);
+        }
+        const es = new EventSource("{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=campaign_progress_ready");
+        es.addEventListener('campaign_progress_ready', function (ev) {
+          let d = {}; try { d = JSON.parse(ev.data); } catch (_) {}
+          if (d.ok === false) {
+            es.close();
+            busy(false);
+            alert('Progress refresh failed: ' + (d.error || 'unknown error'));
+          } else {
+            window.location.reload();
+          }
+        });
+      } catch (err) {
+        busy(false);
+        alert('Could not queue the progress refresh: ' + err.message);
+      }
+    });
+  });
   </script>
 
   {% if show_tabs and catalog_view != 'progress' %}
@@ -329,41 +371,49 @@
   <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
 
   {% if catalog_view == 'progress' %}
-  <div class="small text-muted mb-3">
+  <div class="small text-muted mb-3 d-flex align-items-center gap-2 flex-wrap">
+    <span>
     {% if progress_refresh_error %}
-      <div class="mb-1" style="color:#dc3545">
+      <span class="me-2" style="color:#dc3545">
         Progress refresh notice: {{ progress_refresh_error }}
-      </div>
+      </span>
     {% endif %}
     {% if progress_generated_at %}
-      {% if progress_refreshed_for_request %}
-        Progress snapshot refreshed for this page load {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
-      {% else %}
-        Cached progress snapshot generated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
-        {% if not progress_refresh_requested %}
-          <span style="color:#dc3545">URL has no refresh=1 flag; data may be stale.</span>
-        {% endif %}
+      Progress cache updated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+      {% if task_list_cache_stale or task_list_cache_miss_suppressed %}
+        <span style="color:#dc3545">Refresh needed.</span>
       {% endif %}
     {% else %}
-      No progress snapshot has been generated yet.
+      No progress cache has been generated yet.
+    {% endif %}
+    </span>
+    {% if user.is_authenticated and not is_tunnel %}
+    <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline" id="progress-refresh-form">
+      {% csrf_token %}
+      <button type="submit" id="progress-refresh-btn" class="btn btn-sm btn-outline-primary py-0 px-2"
+              title="Refresh progress data and rebuild the progress table cache in the background">
+        Refresh
+      </button>
+    </form>
     {% endif %}
     {% if progress_errors %}
-      <div class="mt-1" style="color:#dc3545">
+      <span class="ms-1" style="color:#dc3545">
         {{ progress_errors|length }} progress refresh warning{{ progress_errors|length|pluralize }}.
-      </div>
+      </span>
     {% endif %}
   </div>
   {% endif %}
 
+  {% if catalog_view != 'progress' %}
   <div class="small text-muted mb-2 d-flex align-items-center gap-2 flex-wrap">
     <span>
       {% if task_list_cache_rendered_at %}
-        Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}) from cache.
+        Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}).
         {% if task_list_cache_stale %}
           <span style="color:#dc3545">Underlying data changed; page-load rebuild is suppressed.</span>
         {% endif %}
       {% else %}
-        Table cache not available.
+        Table is not available.
         {% if task_list_cache_miss_suppressed %}
           <span style="color:#dc3545">Page-load rebuild is suppressed to protect the host.</span>
         {% endif %}
@@ -371,6 +421,7 @@
     </span>
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
+  {% endif %}
 
   <details class="pcs-build-timing small text-muted mb-3">
     <summary>

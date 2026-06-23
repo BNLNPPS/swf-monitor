@@ -206,15 +206,15 @@
 
         <section class="workflow-stage">
             <div class="workflow-stage-header">
-                <div class="workflow-stage-title">Campaign Catalogs</div>
+                <div class="workflow-stage-title">Campaign Progress</div>
             </div>
             <div class="workflow-stage-body">
-                <div class="workflow-link-row" title="Tasks/datasets making up current, past and future production campaigns">
+                <div class="workflow-link-row" title="Current campaign production progress">
                     <div class="workflow-link-line">
-                        <strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Campaign Task Catalogs</a></strong>
+                        <strong><a href="{% url 'pcs:pcs_catalog' %}?lifecycle=current&amp;view=progress" class="text-decoration-none">Campaign Progress</a></strong>
                         <span class="badge bg-info">{{ prod_tasks_count }}</span>
                     </div>
-                    <div class="workflow-link-desc">Tasks/datasets making up current, past and future production campaigns</div>
+                    <div class="workflow-link-desc">Current campaign task progress</div>
                 </div>
             </div>
         </section>

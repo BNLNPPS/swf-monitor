@@ -40,6 +40,7 @@ class ServiceError(Exception):
 
 
 PROGRESS_SNAPSHOT_KEY = 'progress_snapshot'
+PROGRESS_REFRESH_LOCK_KEY = 'pcs:campaign-progress-refresh:queued'
 
 
 # Allowed ProdTask lifecycle transitions. Submission and post-submission
@@ -3198,6 +3199,37 @@ def questionnaire_match_update_request(*, created_by='questionnaire_match'):
         raise ServiceError(
             'Questionnaire match update could not be queued '
             '(ops-agent queue unreachable).',
+            status=503)
+
+
+def campaign_progress_refresh_request(*, created_by='progress_refresh'):
+    """Publish a campaign_progress_refresh request to the prod-ops agent.
+
+    The agent rebuilds the current campaign's PanDA progress snapshot and the
+    rendered progress table cache, then pushes campaign_progress_ready over SSE.
+    Page GETs only read cache.
+    """
+    import json as _json
+    from django.core.cache import cache as _cache
+    if not Campaign.objects.filter(lifecycle='current').exists():
+        raise ServiceError('No current Campaign defined in PCS.', status=400)
+    if not _cache.add(PROGRESS_REFRESH_LOCK_KEY, created_by, timeout=600):
+        raise ServiceError(
+            'A progress refresh is already queued or running.', status=409)
+    msg = {'msg_type': 'campaign_progress_refresh', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        _cache.delete(PROGRESS_REFRESH_LOCK_KEY)
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        _cache.delete(PROGRESS_REFRESH_LOCK_KEY)
+        raise ServiceError(
+            'Progress refresh could not be queued (ops-agent queue unreachable).',
             status=503)
 
 

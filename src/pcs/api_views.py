@@ -497,6 +497,21 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
 
+    @action(detail=False, methods=['post'], url_path='campaign-progress-refresh')
+    def campaign_progress_refresh(self, request):
+        """Request a background rebuild of the current campaign progress cache.
+
+        The web tier only queues campaign_progress_refresh; the prod-ops agent
+        rebuilds both the PanDA progress snapshot and rendered progress table
+        cache, then pushes campaign_progress_ready over the SSE relay.
+        """
+        user = getattr(request.user, 'username', '') or 'progress_refresh'
+        try:
+            services.campaign_progress_refresh_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
     @action(detail=False, methods=['post'], url_path='catalog-import')
     def catalog_import(self, request):
         """Request a background catalog import — the external-safe trigger for the
