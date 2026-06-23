@@ -383,8 +383,6 @@ Context expected:
               {% if o.processing.processing_percent is not None %}
                 <div class="text-muted">{{ o.processing.processing_percent }}% terminal</div>
               {% endif %}
-            {% else %}
-              <span class="text-muted">No linked task</span>
             {% endif %}
           </td>
           <td class="small align-top">
@@ -492,6 +490,8 @@ Context expected:
     has_input: initial.get('has_input') === '1',
     no_input: initial.get('no_input') === '1',
     incomplete_input: initial.get('incomplete_input') === '1',
+    sort: initial.get('sort') || '',
+    dir: initial.get('dir') === 'desc' ? 'desc' : (initial.get('dir') === 'asc' ? 'asc' : ''),
   };
 
   function rowMatches(tr, skip) {
@@ -573,10 +573,15 @@ Context expected:
      'detector','beam','physics','q2','species','energy',
      'new_request','pre_tdr_use','early_science_use','other_use','background',
      'has_output','no_output','incomplete_output','has_simu','has_reco',
-     'has_input','no_input','incomplete_input'].forEach(k => p.delete(k));
+     'has_input','no_input','incomplete_input',
+     'sort','dir'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
     for (const k of BOOL) if (state[k]) p.set(k, '1');
+    if (state.sort && state.dir) {
+      p.set('sort', state.sort);
+      p.set('dir', state.dir);
+    }
     history.replaceState(null, '', u.toString());
   }
 
@@ -727,8 +732,20 @@ Context expected:
   }
 
   const headers = table.querySelectorAll('thead th.pcs-sort');
-  let activeIdx = -1;
-  let activeDir = 1;  // 1 asc, -1 desc
+  const requestedSort = state.sort;
+  const requestedDir = state.dir;
+  let syncInitialSortUrl = false;
+  let activeIdx = Array.from(headers).findIndex(h => h.dataset.sort === state.sort);
+  let activeDir = state.dir === 'desc' ? -1 : 1;  // 1 asc, -1 desc
+  if (activeIdx < 0) {
+    state.sort = '';
+    state.dir = '';
+    syncInitialSortUrl = Boolean(requestedSort || requestedDir);
+  } else if (!state.dir) {
+    activeDir = headers[activeIdx].dataset.defaultDir === 'desc' ? -1 : 1;
+    state.dir = activeDir === -1 ? 'desc' : 'asc';
+    syncInitialSortUrl = true;
+  }
 
   function renderIndicators() {
     headers.forEach((h, i) => {
@@ -740,7 +757,31 @@ Context expected:
       }
     });
   }
-  renderIndicators();
+  function applySort(updateUrl) {
+    if (activeIdx < 0) {
+      renderIndicators();
+      if (updateUrl) syncUrl();
+      return;
+    }
+    // Header columns include the checkbox col at index 0, which is also a TH.
+    // The sortable headers start at index 1 in the THs of the row. But the
+    // header NodeList "headers" is filtered to .pcs-sort only, so its index
+    // activeIdx corresponds to the (activeIdx+1)-th cell in the data row
+    // (offset by the checkbox TD).
+    const colIdx = activeIdx + 1;
+    const groups = buildGroups();
+    groups.sort((g1, g2) => {
+      const v1 = cellSortValue(g1[0], colIdx);
+      const v2 = cellSortValue(g2[0], colIdx);
+      return compareValues(v1, v2) * activeDir;
+    });
+    groups.forEach(grp => grp.forEach(tr => tbody.appendChild(tr)));
+    // Keep the empty-state row at the end of the tbody.
+    if (emptyRow) tbody.appendChild(emptyRow);
+    renderIndicators();
+    if (updateUrl) syncUrl();
+  }
+  applySort(syncInitialSortUrl);
 
   headers.forEach((h, i) => {
     h.addEventListener('click', () => {
@@ -750,22 +791,9 @@ Context expected:
         activeIdx = i;
         activeDir = h.dataset.defaultDir === 'desc' ? -1 : 1;
       }
-      // Header columns include the checkbox col at index 0, which is also a TH.
-      // The sortable headers start at index 1 in the THs of the row. But the
-      // header NodeList "headers" is filtered to .pcs-sort only, so its index
-      // i corresponds to the (i+1)-th cell in the data row (offset by the
-      // checkbox TD).
-      const colIdx = i + 1;
-      const groups = buildGroups();
-      groups.sort((g1, g2) => {
-        const v1 = cellSortValue(g1[0], colIdx);
-        const v2 = cellSortValue(g2[0], colIdx);
-        return compareValues(v1, v2) * activeDir;
-      });
-      groups.forEach(grp => grp.forEach(tr => tbody.appendChild(tr)));
-      // Keep the empty-state row at the end of the tbody.
-      if (emptyRow) tbody.appendChild(emptyRow);
-      renderIndicators();
+      state.sort = h.dataset.sort || '';
+      state.dir = activeDir === -1 ? 'desc' : 'asc';
+      applySort(true);
     });
   });
 })();

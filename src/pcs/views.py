@@ -167,10 +167,9 @@ def _catalog_view_url(request, active_lifecycle, view_mode):
     q['lifecycle'] = active_lifecycle
     if view_mode == 'progress':
         q['view'] = 'progress'
-        q['refresh'] = '1'
     else:
         q.pop('view', None)
-        q.pop('refresh', None)
+    q.pop('refresh', None)
     encoded = q.urlencode()
     return '?' + encoded if encoded else '?'
 
@@ -1765,7 +1764,7 @@ def pcs_catalog_progress_refresh(request):
 
 @_login_required_flash
 def pcs_catalog_cache_refresh(request):
-    """Drop cached current-campaign catalog/progress table HTML."""
+    """Manually rebuild cached current-campaign catalog/progress table HTML."""
     if request.method != 'POST':
         return _post_only_redirect(
             request, reverse('pcs:pcs_catalog'),
@@ -1776,10 +1775,16 @@ def pcs_catalog_cache_refresh(request):
     target_url = reverse('pcs:pcs_catalog') + '?lifecycle=current'
     if view == 'progress':
         target_url += '&view=progress'
-    messages.error(
-        request,
-        'Table rebuild is disabled in the web request path to protect the host. '
-        'The page will continue to use cached table HTML.')
+    campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+    if campaign is None:
+        messages.error(request, 'No current campaign is available.')
+        return redirect(target_url)
+    progress_snapshot = None
+    if view == 'progress':
+        from .services import load_campaign_progress_snapshot
+        progress_snapshot = load_campaign_progress_snapshot(campaign)
+    rebuild_current_task_list_html_cache(
+        campaign, view, progress_snapshot=progress_snapshot)
     return redirect(target_url)
 
 
@@ -2114,8 +2119,6 @@ def pcs_catalog(request):
     progress_campaign = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
     if progress_campaign is not None:
         from .services import load_campaign_progress_snapshot
-        if catalog_view == 'progress' and progress_refresh_requested:
-            progress_refresh_error = 'refresh=1 requested; page-load refresh is disabled to avoid running the heavy progress rebuild inside GET.'
         progress_snapshot = _timed(
             timings,
             'progress snapshot cached read',

@@ -367,38 +367,25 @@
     </div>
   {% endif %}
 
-  <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
+  <div id="pcs-rucio-timeline" class="mb-2"></div>
 
   {% if catalog_view == 'progress' %}
   <div class="small text-muted mb-3 d-flex align-items-center gap-2 flex-wrap">
     <span>
-    {% if progress_refresh_error %}
-      <span class="me-2" style="color:#dc3545">
-        Progress refresh notice: {{ progress_refresh_error }}
-      </span>
-    {% endif %}
     {% if progress_generated_at %}
-      Progress cache updated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}).
-      {% if task_list_cache_stale or task_list_cache_miss_suppressed %}
-        <span style="color:#dc3545">Refresh needed.</span>
-      {% endif %}
+      Updated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}).
     {% else %}
-      No progress cache has been generated yet.
+      Not updated yet.
     {% endif %}
     </span>
     {% if user.is_authenticated and not is_tunnel %}
     <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline" id="progress-refresh-form">
       {% csrf_token %}
       <button type="submit" id="progress-refresh-btn" class="btn btn-sm btn-outline-primary py-0 px-2"
-              title="Refresh progress data and rebuild the progress table cache in the background">
+              title="Refresh progress">
         Refresh
       </button>
     </form>
-    {% endif %}
-    {% if progress_errors %}
-      <span class="ms-1" style="color:#dc3545">
-        {{ progress_errors|length }} progress refresh warning{{ progress_errors|length|pluralize }}.
-      </span>
     {% endif %}
   </div>
   {% endif %}
@@ -407,14 +394,24 @@
   <div class="small text-muted mb-2 d-flex align-items-center gap-2 flex-wrap">
     <span>
       {% if task_list_cache_rendered_at %}
-        Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}).
-        {% if task_list_cache_stale %}
-          <span style="color:#dc3545">Underlying data changed; page-load rebuild is suppressed.</span>
-        {% endif %}
+        Updated {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}).
       {% else %}
-        Table cache is being rebuilt.
+        Not updated yet.
       {% endif %}
     </span>
+    {% if user.is_authenticated and not is_tunnel %}
+    <form method="post" action="{% url 'pcs:pcs_catalog_cache_refresh' %}"
+          class="d-inline pcs-refresh-form"
+          data-refresh-button="Refreshing..."
+          data-refresh-message="Refreshing.">
+      {% csrf_token %}
+      <input type="hidden" name="view" value="catalog">
+      <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2"
+              title="Refresh table">
+        Refresh
+      </button>
+    </form>
+    {% endif %}
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
   {% endif %}
@@ -550,7 +547,7 @@
     lastValue(data.reco, 'cum_files'),
     lastValue(data.reco, 'cum_bytes'),
   ].join('|');
-  const plotCacheKey = 'epicprod-rucio-timeline:' + (data.campaign_name || 'current');
+  const plotCacheKey = 'epicprod-rucio-timeline:v2:' + (data.campaign_name || 'current');
   try {
     const cached = JSON.parse(localStorage.getItem(plotCacheKey) || 'null');
     if (cached && cached.signature === plotSignature && cached.image) {
@@ -560,6 +557,7 @@
     }
   } catch (_) {}
   const TB = 1e12;
+  const RUCIO_PLOT_HEIGHT = 420;
   const SIMU_COLOR = '#1f77b4';
   const RECO_COLOR = '#ff7f0e';
   const tb = bytes => bytes.map(b => b / TB);
@@ -603,8 +601,8 @@
   const layout = {
     title: {text: 'Rucio arrivals — ' + (data.campaign_name || ''),
             font: {size: 14}},
-    margin: {l: 70, r: 30, t: 40, b: 40},
-    height: 540,
+    margin: {l: 70, r: 30, t: 36, b: 34},
+    height: RUCIO_PLOT_HEIGHT,
     // Single shared x axis, anchored to the bottom pane's y3.
     xaxis:  {anchor: 'y3', type: 'date'},
     yaxis:  {domain: [0.70, 1.00], title: 'datasets', rangemode: 'tozero'},
@@ -616,7 +614,7 @@
   };
   Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true}).then(() => {
     try {
-      Plotly.toImage(el, {format: 'png', width: Math.max(900, el.clientWidth || 900), height: 540})
+      Plotly.toImage(el, {format: 'png', width: Math.max(900, el.clientWidth || 900), height: RUCIO_PLOT_HEIGHT})
         .then(image => {
           try {
             localStorage.setItem(plotCacheKey, JSON.stringify({
