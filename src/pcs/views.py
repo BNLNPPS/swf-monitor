@@ -6,6 +6,7 @@ Tag list views use server-side DataTables via monitor_app._datatable_base.html.
 Read operations are public; create/edit/lock require login.
 """
 import json
+import time
 from functools import wraps
 from urllib.request import urlopen
 from urllib.parse import quote as urlquote
@@ -67,6 +68,34 @@ REQUESTOR_SEED_OPTIONS = (
 )
 
 
+def _timing_ms(seconds):
+    return round(seconds * 1000.0, 1)
+
+
+def _timing_record(timings, label, start, *, detail=''):
+    if timings is not None:
+        ms = _timing_ms(time.perf_counter() - start)
+        timings.append({
+            'label': label,
+            'ms': ms,
+            'ms_display': f'{ms} ms',
+            'detail': detail,
+        })
+
+
+def _timing_note(timings, label, *, detail=''):
+    if timings is not None:
+        timings.append({'label': label, 'ms': None, 'ms_display': '', 'detail': detail})
+
+
+def _timed(timings, label, fn, *, detail_fn=None):
+    start = time.perf_counter()
+    result = fn()
+    detail = detail_fn(result) if detail_fn else ''
+    _timing_record(timings, label, start, detail=detail)
+    return result
+
+
 def _requestor_options():
     """Distinct existing requestors ∪ seed options, sorted."""
     from itertools import chain
@@ -125,8 +154,10 @@ def _catalog_view_url(request, active_lifecycle, view_mode):
     q['lifecycle'] = active_lifecycle
     if view_mode == 'progress':
         q['view'] = 'progress'
+        q['refresh'] = '1'
     else:
         q.pop('view', None)
+        q.pop('refresh', None)
     encoded = q.urlencode()
     return '?' + encoded if encoded else '?'
 
@@ -212,35 +243,69 @@ def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot
     }
 
 
-def _current_catalog_tasks(campaign, catalog_view, progress_snapshot):
-    tasks = list(
-        ProdTask.objects.select_related(
-            'campaign', 'dataset', 'prod_config', 'request',
-            'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
-            'dataset__reco_tag', 'dataset__background_tag',
-        ).filter(campaign=campaign).order_by('-updated_at')
+def _current_catalog_tasks(campaign, catalog_view, progress_snapshot, timings=None):
+    def load_tasks():
+        return list(
+            ProdTask.objects.select_related(
+                'campaign', 'dataset', 'prod_config', 'request',
+                'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
+                'dataset__reco_tag', 'dataset__background_tag',
+            ).filter(campaign=campaign).order_by('-updated_at')
+        )
+    tasks = _timed(
+        timings,
+        'task query',
+        load_tasks,
+        detail_fn=lambda rows: f'{len(rows)} rows',
     )
-    tasks = _annotate_task_questionnaire_matches(tasks)
+    tasks = _timed(
+        timings,
+        'questionnaire match cache hydrate',
+        lambda: _annotate_task_questionnaire_matches(tasks),
+        detail_fn=lambda rows: f'{len(rows)} task-local cached match lists',
+    )
     if catalog_view == 'progress':
-        tasks = _annotate_task_progress(tasks, progress_snapshot)
+        tasks = _timed(
+            timings,
+            'progress row annotation',
+            lambda: _annotate_task_progress(tasks, progress_snapshot),
+            detail_fn=lambda rows: f'{len(rows)} rows',
+        )
     return tasks
 
 
-def _cached_current_task_list_html(campaign, catalog_view, context, progress_snapshot):
+def _cached_current_task_list_html(campaign, catalog_view, context, progress_snapshot, timings=None):
     if campaign is None or catalog_view not in ('catalog', 'progress'):
         return None, False, {}
-    signature = _catalog_task_list_cache_signature(
-        campaign, catalog_view, progress_snapshot)
+    signature = _timed(
+        timings,
+        'table cache signature',
+        lambda: _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot),
+    )
     data = campaign.data or {}
-    cache = data.get(CATALOG_TASK_LIST_CACHE_KEY) or {}
+    cache = _timed(
+        timings,
+        'table cache lookup',
+        lambda: data.get(CATALOG_TASK_LIST_CACHE_KEY) or {},
+    )
     cached = cache.get(catalog_view) or {}
     if cached.get('signature') == signature and cached.get('html'):
+        _timing_note(
+            timings,
+            'table render',
+            detail=f'cache hit, {len(cached["html"])} html bytes',
+        )
         return cached['html'], True, cached
 
-    tasks = _current_catalog_tasks(campaign, catalog_view, progress_snapshot)
-    html = render_to_string(
-        'pcs/_task_list_filter.html',
-        {**context, 'tasks': tasks},
+    tasks = _current_catalog_tasks(campaign, catalog_view, progress_snapshot, timings=timings)
+    html = _timed(
+        timings,
+        'table partial render',
+        lambda: render_to_string(
+            'pcs/_task_list_filter.html',
+            {**context, 'tasks': tasks},
+        ),
+        detail_fn=lambda value: f'{len(value)} html bytes',
     )
     rendered_at = timezone.now().isoformat()
     cache[catalog_view] = {
@@ -249,7 +314,11 @@ def _cached_current_task_list_html(campaign, catalog_view, context, progress_sna
         'rendered_at': rendered_at,
     }
     campaign.data = {**data, CATALOG_TASK_LIST_CACHE_KEY: cache}
-    campaign.save(update_fields=['data', 'updated_at'])
+    _timed(
+        timings,
+        'table cache save',
+        lambda: campaign.save(update_fields=['data', 'updated_at']),
+    )
     return html, False, cache[catalog_view]
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
@@ -1704,7 +1773,9 @@ def pcs_catalog(request):
     sign-in. Catching auth at the GET prevents the silent-fail trap
     where an anonymous user sees buttons that quietly do nothing.
     """
-    filters = _parse_catalog_filters(request)
+    build_start = time.perf_counter()
+    timings = []
+    filters = _timed(timings, 'parse filters', lambda: _parse_catalog_filters(request))
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
     if active_lifecycle not in LIFECYCLE_KEYS:
         active_lifecycle = 'current'
@@ -1712,10 +1783,15 @@ def pcs_catalog(request):
     if active_lifecycle != 'current' or catalog_view not in ('catalog', 'progress'):
         catalog_view = 'catalog'
 
-    campaigns_by_lifecycle = {
-        k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
-        for k in LIFECYCLE_KEYS
-    }
+    campaigns_by_lifecycle = _timed(
+        timings,
+        'campaign lifecycle query',
+        lambda: {
+            k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
+            for k in LIFECYCLE_KEYS
+        },
+        detail_fn=lambda value: f'{sum(len(v) for v in value.values())} campaigns',
+    )
     def _tab_detail(key, camps):
         # Future campaigns are stage-prefixed (RECO/26.06.0); show the bare
         # version so the tab reads "Future · 26.06.0", mirroring Current.
@@ -1913,22 +1989,63 @@ def pcs_catalog(request):
         target = camp_list[0] if camp_list else None
         if target is not None:
             from .services import load_rucio_snapshot, summarize_rucio_timeline
-            snap = load_rucio_snapshot(target.name)
+            snap = _timed(
+                timings,
+                'Rucio snapshot load',
+                lambda: load_rucio_snapshot(target.name),
+                detail_fn=lambda value: 'present' if value is not None else 'missing',
+            )
             if snap is not None:
-                rucio_timeline = summarize_rucio_timeline(snap)
+                rucio_timeline = _timed(
+                    timings,
+                    'Rucio timeline summarize',
+                    lambda: summarize_rucio_timeline(snap),
+                )
                 rucio_timeline['campaign_name'] = target.name
+            data_start = time.perf_counter()
             rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
             rucio_unmatched_campaign = target.name
             rucio_detected = (target.data or {}).get('detected_releases', []) or []
             rucio_current_name = target.name
             evgen_rucio_unmatched = (target.data or {}).get('evgen_rucio_unmatched', []) or []
             evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
+            _timing_record(
+                timings,
+                'Rucio cached metadata read',
+                data_start,
+                detail=f'{len(rucio_unmatched)} unmatched, {len(evgen_rucio_unmatched)} EVGEN unmatched',
+            )
 
     progress_snapshot = None
+    progress_refresh_requested = request.GET.get('refresh') == '1'
+    progress_refreshed_for_request = False
+    progress_refresh_error = ''
     progress_campaign = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
     if progress_campaign is not None:
         from .services import PROGRESS_SNAPSHOT_KEY
-        progress_snapshot = (progress_campaign.data or {}).get(PROGRESS_SNAPSHOT_KEY)
+        if catalog_view == 'progress' and progress_refresh_requested:
+            progress_refresh_error = 'refresh=1 requested; page-load refresh is disabled to avoid running the heavy progress rebuild inside GET.'
+        progress_snapshot = _timed(
+            timings,
+            'progress snapshot cached read',
+            lambda: (progress_campaign.data or {}).get(PROGRESS_SNAPSHOT_KEY),
+            detail_fn=lambda value: (
+                'generated_at=' + str((value or {}).get('generated_at') or '')
+                if value else 'missing'
+            ),
+        )
+    rucio_json = _timed(
+        timings,
+        'Rucio chart JSON encode',
+        lambda: json.dumps(rucio_timeline) if rucio_timeline else 'null',
+        detail_fn=lambda value: f'{len(value)} bytes',
+    )
+    requestor_options = _timed(
+        timings,
+        'requestor filter options',
+        _requestor_options,
+        detail_fn=lambda value: f'{len(value)} options',
+    )
     context = {
         'tasks': [],
         'show_tabs': True,
@@ -1945,10 +2062,10 @@ def pcs_catalog(request):
         'focused_campaign': None,
         'focused_task_id': None,
         'filters': filters,
-        'requestor_options': _requestor_options(),
+        'requestor_options': requestor_options,
         'status_choices': PRODTASK_STATUS_CHOICES,
         'form_action': reverse('pcs:pcs_catalog'),
-        'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
+        'rucio_timeline_json': rucio_json,
         'rucio_unmatched': rucio_unmatched,
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
         'rucio_detected': rucio_detected,
@@ -1959,12 +2076,17 @@ def pcs_catalog(request):
         'progress_errors': (progress_snapshot or {}).get('errors') or [],
         'progress_generated_at': (progress_snapshot or {}).get('generated_at') or '',
         'progress_generated_by': (progress_snapshot or {}).get('generated_by') or '',
+        'progress_refresh_requested': progress_refresh_requested,
+        'progress_refreshed_for_request': progress_refreshed_for_request,
+        'progress_refresh_error': progress_refresh_error,
     }
     task_list_html, task_list_cache_hit, task_list_cache_meta = _cached_current_task_list_html(
-        progress_campaign, catalog_view, context, progress_snapshot)
+        progress_campaign, catalog_view, context, progress_snapshot, timings=timings)
     context['task_list_html'] = task_list_html
     context['task_list_cache_hit'] = task_list_cache_hit
     context['task_list_cache_rendered_at'] = task_list_cache_meta.get('rendered_at') or ''
+    context['catalog_timing_rows'] = timings
+    context['catalog_timing_total_ms'] = _timing_ms(time.perf_counter() - build_start)
     return render(request, 'pcs/pcs_catalog.html', context)
 
 

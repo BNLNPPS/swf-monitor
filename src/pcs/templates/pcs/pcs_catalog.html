@@ -35,6 +35,22 @@
   color: #084298;
   font-weight: 600;
 }
+.pcs-build-timing summary {
+  cursor: pointer;
+}
+.pcs-build-timing table {
+  max-width: 52rem;
+}
+.pcs-build-timing td,
+.pcs-build-timing th {
+  padding: 0.15rem 0.5rem;
+  vertical-align: top;
+}
+.pcs-build-timing .pcs-time {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
 </style>
 
 <div class="container-fluid mt-3 pcs-catalog">
@@ -314,8 +330,20 @@
 
   {% if catalog_view == 'progress' %}
   <div class="small text-muted mb-3">
+    {% if progress_refresh_error %}
+      <div class="mb-1" style="color:#dc3545">
+        Progress refresh notice: {{ progress_refresh_error }}
+      </div>
+    {% endif %}
     {% if progress_generated_at %}
-      Progress snapshot generated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+      {% if progress_refreshed_for_request %}
+        Progress snapshot refreshed for this page load {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+      {% else %}
+        Cached progress snapshot generated {{ progress_generated_at|fmt_ago }} ({{ progress_generated_at|fmt_dt }}){% if progress_generated_by %} by {{ progress_generated_by }}{% endif %}.
+        {% if not progress_refresh_requested %}
+          <span style="color:#dc3545">URL has no refresh=1 flag; data may be stale.</span>
+        {% endif %}
+      {% endif %}
     {% else %}
       No progress snapshot has been generated yet.
     {% endif %}
@@ -355,6 +383,28 @@
     {% endif %}
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
+
+  <details class="pcs-build-timing small text-muted mb-3">
+    <summary>
+      Server build timing: {{ catalog_timing_total_ms }} ms before final page template render.
+    </summary>
+    <table class="table table-sm table-borderless mt-2 mb-1">
+      <tbody>
+        {% for row in catalog_timing_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="pcs-time">{% if row.ms_display %}{{ row.ms_display }}{% endif %}</td>
+          <td>{{ row.detail }}</td>
+        </tr>
+        {% endfor %}
+        <tr id="pcs-browser-timing">
+          <td>browser navigation</td>
+          <td class="pcs-time"></td>
+          <td>measuring load timing...</td>
+        </tr>
+      </tbody>
+    </table>
+  </details>
 
   {% if rucio_unmatched %}
   <details class="mb-3 small">
@@ -408,6 +458,33 @@
         statusEl.classList.add('is-active');
       }
     });
+  });
+})();
+
+(function() {
+  const row = document.getElementById('pcs-browser-timing');
+  if (!row || !window.performance) return;
+  window.addEventListener('load', function() {
+    const nav = performance.getEntriesByType
+      ? performance.getEntriesByType('navigation')[0]
+      : null;
+    const cells = row.querySelectorAll('td');
+    if (!cells.length) return;
+    if (nav) {
+      const total = Math.round(nav.loadEventEnd - nav.startTime);
+      const response = Math.round(nav.responseEnd - nav.requestStart);
+      const dom = Math.round(nav.domContentLoadedEventEnd - nav.responseEnd);
+      cells[1].textContent = total + ' ms';
+      cells[2].textContent = 'response ' + response + ' ms; DOM after response ' + dom
+        + ' ms; transfer ' + (nav.transferSize || 0) + ' bytes';
+      return;
+    }
+    if (performance.timing) {
+      const t = performance.timing;
+      const total = t.loadEventEnd - t.navigationStart;
+      cells[1].textContent = total + ' ms';
+      cells[2].textContent = 'legacy browser timing';
+    }
   });
 })();
 
@@ -477,7 +554,7 @@
     traces.push(
       {x: data.dates, y: data.reco.cum_datasets, name: 'Reco',
        legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
-       xaxis: 'x', yaxis: 'y'},
+       xaxis: 'x', yaxis: 'y', showlegend: false},
       {x: data.dates, y: data.reco.cum_files, legendgroup: 'reco',
        mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
        xaxis: 'x', yaxis: 'y2', showlegend: false},
@@ -602,8 +679,24 @@
       if (!peerIsKnown) {
         a.classList.add('active', 'disabled');
         a.textContent = peerLabels[view].loading;
+        window.open(a.href, tabNames[view] || a.dataset.tabName || '_blank');
+        return;
       }
-      window.open(a.href, tabNames[view] || a.dataset.tabName || '_blank');
+      const targetName = tabNames[view] || a.dataset.tabName || '_blank';
+      const peer = window.open('', targetName);
+      if (!peer) {
+        window.open(a.href, targetName);
+        return;
+      }
+      try {
+        if (peer.location.href === 'about:blank') {
+          peer.location.href = a.href;
+        } else {
+          peer.focus();
+        }
+      } catch (_) {
+        peer.focus();
+      }
     });
   });
 })();
