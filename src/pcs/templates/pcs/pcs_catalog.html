@@ -7,17 +7,14 @@
 
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
-    {% if catalog_view == 'progress' %}
-    <h2 class="me-3 mb-0">Current Campaign {{ progress_campaign_name }} Progress</h2>
-    {% else %}
-    <h2 class="me-3 mb-0">Campaign Task Catalog</h2>
-    <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
+    <h2 class="me-3 mb-0">{% if catalog_view == 'progress' %}Current Campaign {{ progress_campaign_name }} Progress{% else %}Campaign Task Catalog{% endif %}</h2>
     {% if active_lifecycle == 'current' %}
-    <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Catalog view">
-      <a href="{{ catalog_view_urls.catalog }}" class="btn btn-outline-primary{% if catalog_view == 'catalog' %} active{% endif %}">Catalog</a>
-      <a href="{{ catalog_view_urls.progress }}" class="btn btn-outline-primary{% if catalog_view == 'progress' %} active{% endif %}">Progress</a>
+    <div class="btn-group btn-group-sm pcs-view-switch me-2" role="group" aria-label="Catalog view">
+      <a href="{{ catalog_view_urls.catalog }}" data-catalog-view="catalog" data-tab-name="epicprod-catalog-view" class="btn{% if catalog_view == 'catalog' %} btn-primary active{% else %} btn-outline-primary{% endif %}">{% if catalog_view == 'catalog' %}Catalog{% else %}Catalog view in new tab{% endif %}</a>
+      <a href="{{ catalog_view_urls.progress }}" data-catalog-view="progress" data-tab-name="epicprod-progress-view" class="btn{% if catalog_view == 'progress' %} btn-primary active{% else %} btn-outline-primary{% endif %}">{% if catalog_view == 'progress' %}Progress{% else %}Progress view in new tab{% endif %}</a>
     </div>
     {% endif %}
+    {% if catalog_view != 'progress' %}
     {% if not is_tunnel %}
     {% if user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline" id="csv-update-form">
@@ -272,35 +269,43 @@
   const SIMU_COLOR = '#1f77b4';
   const RECO_COLOR = '#ff7f0e';
   const tb = bytes => bytes.map(b => b / TB);
+  function hasData(stage) {
+    return ['cum_datasets', 'cum_files', 'cum_bytes'].some(k =>
+      (stage[k] || []).some(v => Number(v) > 0));
+  }
   // Three stacked panes, sharing the time axis at the bottom:
   //   top    = cumulative datasets
   //   middle = cumulative files (registered)
   //   bottom = cumulative output (TB)
   // One legend entry per stage; toggling hides all three panes for
   // that stage via legendgroup.
-  const traces = [
-    // Top pane.
-    {x: data.dates, y: data.simu.cum_datasets, name: 'Simu',
-     legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
-     xaxis: 'x', yaxis: 'y'},
-    {x: data.dates, y: data.reco.cum_datasets, name: 'Reco',
-     legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
-     xaxis: 'x', yaxis: 'y'},
-    // Middle pane.
-    {x: data.dates, y: data.simu.cum_files, legendgroup: 'simu',
-     mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
-     xaxis: 'x', yaxis: 'y2', showlegend: false},
-    {x: data.dates, y: data.reco.cum_files, legendgroup: 'reco',
-     mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
-     xaxis: 'x', yaxis: 'y2', showlegend: false},
-    // Bottom pane.
-    {x: data.dates, y: tb(data.simu.cum_bytes), legendgroup: 'simu',
-     mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
-     xaxis: 'x', yaxis: 'y3', showlegend: false},
-    {x: data.dates, y: tb(data.reco.cum_bytes), legendgroup: 'reco',
-     mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
-     xaxis: 'x', yaxis: 'y3', showlegend: false},
-  ];
+  const traces = [];
+  if (hasData(data.simu || {})) {
+    traces.push(
+      {x: data.dates, y: data.simu.cum_datasets, name: 'Simu',
+       legendgroup: 'simu', mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+       xaxis: 'x', yaxis: 'y'},
+      {x: data.dates, y: data.simu.cum_files, legendgroup: 'simu',
+       mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+       xaxis: 'x', yaxis: 'y2', showlegend: false},
+      {x: data.dates, y: tb(data.simu.cum_bytes), legendgroup: 'simu',
+       mode: 'lines', line: {shape: 'hv', color: SIMU_COLOR},
+       xaxis: 'x', yaxis: 'y3', showlegend: false}
+    );
+  }
+  if (hasData(data.reco || {})) {
+    traces.push(
+      {x: data.dates, y: data.reco.cum_datasets, name: 'Reco',
+       legendgroup: 'reco', mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+       xaxis: 'x', yaxis: 'y'},
+      {x: data.dates, y: data.reco.cum_files, legendgroup: 'reco',
+       mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+       xaxis: 'x', yaxis: 'y2', showlegend: false},
+      {x: data.dates, y: tb(data.reco.cum_bytes), legendgroup: 'reco',
+       mode: 'lines', line: {shape: 'hv', color: RECO_COLOR},
+       xaxis: 'x', yaxis: 'y3', showlegend: false}
+    );
+  }
   const layout = {
     title: {text: 'Rucio arrivals — ' + (data.campaign_name || ''),
             font: {size: 14}},
@@ -316,6 +321,60 @@
     showlegend: true,
   };
   Plotly.newPlot(el, traces, layout, {displayModeBar: false, responsive: true});
+})();
+
+(function() {
+  const currentView = '{{ catalog_view }}';
+  const peerView = currentView === 'progress' ? 'catalog' : 'progress';
+  const peerLabels = {
+    catalog: {newTab: 'Catalog view in new tab', existing: 'Catalog view tab', loading: 'Catalog loading...'},
+    progress: {newTab: 'Progress view in new tab', existing: 'Progress view tab', loading: 'Progress loading...'},
+  };
+
+  function peerLink(view) {
+    return document.querySelector(`a[data-catalog-view="${view}"]`);
+  }
+
+  function markPeerSeen(view) {
+    const a = peerLink(view);
+    if (!a || a.classList.contains('active')) return;
+    a.textContent = peerLabels[view].existing;
+    a.dataset.peerSeen = '1';
+  }
+
+  let channel = null;
+  if ('BroadcastChannel' in window) {
+    channel = new BroadcastChannel('epicprod-catalog-view-tabs');
+    channel.onmessage = ev => {
+      const msg = ev.data || {};
+      if (msg.type === 'hello' && msg.view && msg.view !== currentView) {
+        markPeerSeen(msg.view);
+        channel.postMessage({type: 'present', view: currentView});
+      } else if (msg.type === 'present' && msg.view && msg.view !== currentView) {
+        markPeerSeen(msg.view);
+      } else if (msg.type === 'who') {
+        channel.postMessage({type: 'present', view: currentView});
+      }
+    };
+    channel.postMessage({type: 'hello', view: currentView});
+    channel.postMessage({type: 'who'});
+  }
+
+  document.querySelectorAll('a[data-catalog-view]').forEach(a => {
+    if (!a.classList.contains('active') && !a.dataset.peerSeen) {
+      const view = a.dataset.catalogView;
+      a.textContent = peerLabels[view].newTab;
+    }
+    a.addEventListener('click', e => {
+      if (a.classList.contains('active')) return;
+      e.preventDefault();
+      const view = a.dataset.catalogView;
+      a.classList.remove('btn-outline-primary');
+      a.classList.add('btn-primary', 'disabled');
+      a.textContent = peerLabels[view].loading;
+      window.open(a.href, a.dataset.tabName || '_blank');
+    });
+  });
 })();
 </script>
 {% endblock %}
