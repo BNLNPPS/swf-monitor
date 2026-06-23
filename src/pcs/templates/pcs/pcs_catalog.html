@@ -358,29 +358,17 @@
   <div class="small text-muted mb-2 d-flex align-items-center gap-2 flex-wrap">
     <span>
       {% if task_list_cache_rendered_at %}
-        Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}){% if task_list_cache_hit %} from cache{% endif %}.
+        Table built {{ task_list_cache_rendered_at|fmt_ago }} ({{ task_list_cache_rendered_at|fmt_dt }}) from cache.
+        {% if task_list_cache_stale %}
+          <span style="color:#dc3545">Underlying data changed; page-load rebuild is suppressed.</span>
+        {% endif %}
       {% else %}
-        Table cache not built.
+        Table cache not available.
+        {% if task_list_cache_miss_suppressed %}
+          <span style="color:#dc3545">Page-load rebuild is suppressed to protect the host.</span>
+        {% endif %}
       {% endif %}
     </span>
-    {% if user.is_authenticated %}
-      {% if catalog_view == 'progress' %}
-      <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline pcs-refresh-form"
-            data-refresh-message="Refreshing progress snapshot and rebuilding the table. This can take a little while."
-            data-refresh-button="Refreshing...">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">Refresh progress</button>
-      </form>
-      {% else %}
-      <form method="post" action="{% url 'pcs:pcs_catalog_cache_refresh' %}" class="d-inline pcs-refresh-form"
-            data-refresh-message="Refreshing table: clearing the cached HTML, then rebuilding it before the page returns."
-            data-refresh-button="Refreshing...">
-        {% csrf_token %}
-        <input type="hidden" name="view" value="{{ catalog_view }}">
-        <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2">Refresh table</button>
-      </form>
-      {% endif %}
-    {% endif %}
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
 
@@ -436,6 +424,10 @@
 
   {% if task_list_html %}
     {{ task_list_html|safe }}
+  {% elif task_list_cache_miss_suppressed %}
+    <div class="alert alert-warning">
+      Cached table HTML is missing. The page did not rebuild it during this request.
+    </div>
   {% else %}
     {% include "pcs/_task_list_filter.html" %}
   {% endif %}

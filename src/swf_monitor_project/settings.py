@@ -371,6 +371,22 @@ EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, c
 # Channel layer settings
 # Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
 REDIS_URL = config('REDIS_URL', default='')
+DJANGO_CACHE_DIR = config('DJANGO_CACHE_DIR', default=os.path.join(SWF_TMP_DIR, "django-cache"))
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+            "LOCATION": DJANGO_CACHE_DIR,
+        }
+    }
+
 if REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {

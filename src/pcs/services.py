@@ -1873,6 +1873,17 @@ JLAB_RUCIO_PASSWORD = 'eicread'
 RUCIO_SNAPSHOT_DIR  = _os.path.join(_settings.SWF_TMP_DIR, 'rucio-snapshots')
 
 
+def _rucio_timeline_path(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
+    return _os.path.join(snapshot_dir, f'timeline-{campaign_name}.json')
+
+
+def _write_json_atomic(path, value):
+    tmp = f'{path}.tmp'
+    with open(tmp, 'w') as f:
+        _json.dump(value, f, indent=2)
+    _os.replace(tmp, path)
+
+
 def _jlab_rucio_auth(timeout=30):
     """userpass-auth against JLab Rucio. Returns the X-Rucio-Auth-Token."""
     import urllib.request as _ur
@@ -2548,6 +2559,19 @@ def load_rucio_snapshot(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
         return None
 
 
+def load_rucio_timeline(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
+    """Read the precomputed Rucio arrivals timeline. Returns None if absent."""
+    path = _rucio_timeline_path(campaign_name, snapshot_dir=snapshot_dir)
+    if not _os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return _json.load(f)
+    except (OSError, _json.JSONDecodeError) as e:
+        _log.warning('load_rucio_timeline %s: %s', path, e)
+        return None
+
+
 def import_jlab_rucio_current_snapshot(*, campaign_name=None,
                                       snapshot_dir=RUCIO_SNAPSHOT_DIR,
                                       created_by='rucio_snapshot'):
@@ -2605,9 +2629,18 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
                                             'error': str(e)}
             summary['paths'][cpath] = 0
 
-    with open(out_path, 'w') as f:
-        _json.dump(snapshot, f, indent=2)
+    _write_json_atomic(out_path, snapshot)
     summary['file_bytes'] = _os.path.getsize(out_path)
+    try:
+        timeline = summarize_rucio_timeline(snapshot)
+        timeline['campaign_name'] = campaign_name
+        timeline['snapshot_fetched_at'] = snapshot['fetched_at']
+        timeline_path = _rucio_timeline_path(campaign_name, snapshot_dir=snapshot_dir)
+        _write_json_atomic(timeline_path, timeline)
+        summary['timeline_path'] = timeline_path
+        summary['timeline_bytes'] = _os.path.getsize(timeline_path)
+    except Exception as e:                                    # noqa: BLE001
+        summary['errors'].append(f'timeline summary failed: {e}')
 
     # Detect active 26.x releases in JLab Rucio + stash on the PCS
     # current Campaign so the catalog can surface a 'Switch current'

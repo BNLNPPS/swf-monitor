@@ -156,12 +156,16 @@ log "  .env source: $DEPLOY_ROOT/config/env/production.env (edit this file for c
 # Shared caches — writable by both httpd (WSGI) and service users
 mkdir -p "$DEPLOY_ROOT/shared/hf_cache"
 chmod 777 "$DEPLOY_ROOT/shared/hf_cache"
+mkdir -p "$DEPLOY_ROOT/shared/django-cache"
+chmod 777 "$DEPLOY_ROOT/shared/django-cache"
 # JLab Rucio snapshot files — written by the WSGI process when the
 # operator clicks 'Update from Rucio'.
 mkdir -p "$DEPLOY_ROOT/shared/rucio-snapshots"
 chmod 777 "$DEPLOY_ROOT/shared/rucio-snapshots"
 grep -q '^HF_HOME=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
     echo "HF_HOME=$DEPLOY_ROOT/shared/hf_cache" >> "$DEPLOY_ROOT/config/env/production.env"
+grep -q '^DJANGO_CACHE_DIR=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
+    echo "DJANGO_CACHE_DIR=$DEPLOY_ROOT/shared/django-cache" >> "$DEPLOY_ROOT/config/env/production.env"
 
 # Install WSGI module configuration if it exists in repository
 if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then

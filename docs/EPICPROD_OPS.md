@@ -183,6 +183,7 @@ not used for testbed scratch. Layout:
 /data/swf-tmp/
   panda-logs/<jeditaskid>/<pandaid>/   # extracted job log members
   downloads/                           # transient tarballs
+  django-cache/                        # fallback Django file cache if DJANGO_CACHE_DIR is unset
 ```
 
 Owned `wenauseic:eic`, setgid, world-readable so a web view can serve cached

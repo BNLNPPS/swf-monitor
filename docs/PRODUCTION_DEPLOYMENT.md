@@ -266,13 +266,15 @@ Key directives (abridged — see `apache-swf-monitor.conf` for the full file):
 
 ```apache
 # WSGI tuning — threads absorb bursty concurrency; listen-backlog absorbs retry
-# bursts; queue/inactivity/graceful timeouts bound failure modes. No
-# request-timeout because it would truncate /api/messages/stream/ SSE long-poll.
+# bursts; queue/inactivity/graceful timeouts bound failure modes. Request-count
+# and time-based recycling cap retained Python heap growth. No request-timeout
+# because it would truncate /api/messages/stream/ SSE long-poll.
 WSGIDaemonProcess swf-monitor \
     python-path=/opt/swf-monitor/current/src:/opt/swf-monitor/current/.venv/lib/python3.11/site-packages \
     python-home=/opt/swf-monitor/current/.venv \
     processes=1 threads=30 \
     listen-backlog=500 queue-timeout=30 \
+    maximum-requests=250 restart-interval=1800 \
     inactivity-timeout=300 graceful-timeout=15 \
     display-name=%{GROUP} lang='en_US.UTF-8' locale='en_US.UTF-8'
 
