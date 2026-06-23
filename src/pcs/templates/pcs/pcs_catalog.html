@@ -24,11 +24,15 @@
   border-color: #0a58ca;
   color: #052c65;
 }
+.pcs-catalog-title {
+  flex: 0 0 29rem;
+  white-space: nowrap;
+}
 </style>
 
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
-    <h2 class="me-3 mb-0">{% if catalog_view == 'progress' %}Current Campaign {{ progress_campaign_name }} Progress{% else %}Campaign Task Catalog{% endif %}</h2>
+    <h2 class="pcs-catalog-title me-3 mb-0">{% if catalog_view == 'progress' %}Current Campaign {{ progress_campaign_name }} Progress{% else %}Campaign Task Catalog{% endif %}</h2>
     {% if active_lifecycle == 'current' %}
     <div class="btn-group btn-group-sm pcs-view-switch me-2" role="group" aria-label="Catalog view">
       <a href="{{ catalog_view_urls.catalog }}" data-catalog-view="catalog" data-tab-name="epicprod-catalog-view" class="btn{% if catalog_view == 'catalog' %} active{% endif %}">{% if catalog_view == 'catalog' %}Catalog{% else %}Catalog view in new tab{% endif %}</a>

@@ -55,6 +55,8 @@
 .pcs-tlf-progress-output td {
   border-top: 0;
   background: #fbfcfd;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
 }
 .pcs-tlf-progress-output td.pcs-tlf-cell-dataset {
   padding-left: 1.25rem;
@@ -258,11 +260,18 @@ Context expected:
           data-has-input="{% if t.has_input %}1{% else %}0{% endif %}"
           data-no-input="{% if t.dataset.stage == 'evgen' and not t.has_input %}1{% else %}0{% endif %}"
           data-incomplete-input="{% if t.input_incomplete %}1{% else %}0{% endif %}"
+          {% if catalog_view == 'progress' %}
+          data-progress-completion="{% if t.progress_first.completion_percent is not None %}{{ t.progress_first.completion_percent }}{% else %}-1{% endif %}"
+          data-progress-processing="{% if t.progress_first.processing.status %}{{ t.progress_first.processing.status }}{% endif %}"
+          data-progress-jobs="{{ t.progress_first.processing.total_jobs|default:t.progress_first.expected_jobs|default:'' }}"
+          data-progress-failures="{{ t.progress_first.processing.nfailed|default:'' }}"
+          data-progress-link="{{ t.progress_first.link|default:'' }}"
+          {% endif %}
           data-search="{{ ds_path|lower }} {{ t.composed_name|lower }} {{ t.description|default:''|lower }}">
-        <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.composed_name }}"></td>
-        <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
-        <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
-        <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}">
+        <td class="align-top"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.composed_name }}"></td>
+        <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ forloop.counter }}</td>
+        <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ t.requestor|default:"—" }}</td>
+        <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}"{% if catalog_view == 'progress' %} colspan="6"{% endif %}>
           {% if t.campaign %}
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
               &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
@@ -314,14 +323,11 @@ Context expected:
               </ul>
             </div>
           {% endif %}
+          {% if catalog_view == 'progress' and not t.progress.outputs %}
+            <div class="text-muted">No output recorded</div>
+          {% endif %}
         </td>
-        {% if catalog_view == 'progress' %}
-        <td class="small align-top" data-sort-val="{% if t.progress_first.completion_percent is not None %}{{ t.progress_first.completion_percent }}{% else %}-1{% endif %}"></td>
-        <td class="small align-top" data-sort-val="{% if t.progress_first.processing.status %}{{ t.progress_first.processing.status }}{% endif %}"></td>
-        <td class="small align-top" data-sort-val="{{ t.progress_first.processing.total_jobs|default:t.progress_first.expected_jobs|default:'' }}"></td>
-        <td class="small align-top" data-sort-val="{{ t.progress_first.processing.nfailed|default:'' }}"></td>
-        <td class="small align-top" data-sort-val="{{ t.progress_first.link|default:'' }}"></td>
-        {% else %}
+        {% if catalog_view != 'progress' %}
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
         <td class="small text-end" data-sort-val="{{ nev|default:'' }}">{{ nev|millions }}</td>
         <td class="small text-center" data-sort-val="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}">{% if bg|lower == 'yes' %}Yes{% endif %}</td>
@@ -334,9 +340,6 @@ Context expected:
       {% if catalog_view == 'progress' %}
         {% for o in t.progress.outputs %}
         <tr class="pcs-tlf-progress-output">
-          <td></td>
-          <td></td>
-          <td></td>
           <td class="small pcs-tlf-cell-dataset align-top">
             {% if o.stage %}<strong>{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}:</strong>{% else %}<strong>Output:</strong>{% endif %}
             <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a>
@@ -350,7 +353,6 @@ Context expected:
                 </div>
                 <span>{{ o.completion_label }}</span>
               </div>
-              <div class="text-muted">{{ o.file_count }} / {{ o.expected_jobs }} {{ o.expected_source }}</div>
             {% else %}
               <span class="text-muted">No expected job count</span>
             {% endif %}
@@ -391,18 +393,6 @@ Context expected:
               <span class="text-muted">output record only</span>
             {% endif %}
           </td>
-        </tr>
-        {% empty %}
-        <tr class="pcs-tlf-progress-output">
-          <td></td>
-          <td></td>
-          <td></td>
-          <td class="small pcs-tlf-cell-dataset text-muted">No output recorded</td>
-          <td></td>
-          <td class="small text-muted">No linked processing task</td>
-          <td></td>
-          <td></td>
-          <td></td>
         </tr>
         {% endfor %}
       {% endif %}
@@ -708,6 +698,16 @@ Context expected:
   }
 
   function cellSortValue(dataRow, colIdx) {
+    if (table.classList.contains('pcs-tlf-progress') && colIdx >= 4) {
+      const progressSortKeys = {
+        4: 'progressCompletion',
+        5: 'progressProcessing',
+        6: 'progressJobs',
+        7: 'progressFailures',
+        8: 'progressLink',
+      };
+      return dataRow.dataset[progressSortKeys[colIdx]] || '';
+    }
     const cells = dataRow.children;
     if (colIdx >= cells.length) return '';
     const td = cells[colIdx];
