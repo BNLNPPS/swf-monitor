@@ -330,6 +330,23 @@
     catalog: {newTab: 'Catalog view in new tab', existing: 'Catalog view tab', loading: 'Catalog loading...'},
     progress: {newTab: 'Progress view in new tab', existing: 'Progress view tab', loading: 'Progress loading...'},
   };
+  const storagePrefix = 'epicprod-catalog-view-open:';
+  const freshMs = 12 * 60 * 60 * 1000;
+
+  function stampOpen(view) {
+    try {
+      localStorage.setItem(storagePrefix + view, String(Date.now()));
+    } catch (_) {}
+  }
+
+  function recentlyOpen(view) {
+    try {
+      const ts = parseInt(localStorage.getItem(storagePrefix + view) || '0', 10);
+      return ts && (Date.now() - ts) < freshMs;
+    } catch (_) {
+      return false;
+    }
+  }
 
   function peerLink(view) {
     return document.querySelector(`a[data-catalog-view="${view}"]`);
@@ -341,6 +358,16 @@
     a.textContent = peerLabels[view].existing;
     a.dataset.peerSeen = '1';
   }
+
+  stampOpen(currentView);
+  if (recentlyOpen(peerView)) {
+    markPeerSeen(peerView);
+  }
+  window.addEventListener('storage', ev => {
+    if (ev.key === storagePrefix + peerView && recentlyOpen(peerView)) {
+      markPeerSeen(peerView);
+    }
+  });
 
   let channel = null;
   if ('BroadcastChannel' in window) {
@@ -369,6 +396,7 @@
       if (a.classList.contains('active')) return;
       e.preventDefault();
       const view = a.dataset.catalogView;
+      stampOpen(currentView);
       a.classList.remove('btn-outline-primary');
       a.classList.add('btn-primary', 'disabled');
       a.textContent = peerLabels[view].loading;
