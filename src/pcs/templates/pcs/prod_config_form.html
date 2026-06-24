@@ -109,6 +109,10 @@
                     {{ form.target_hours_per_job }}
                 </div>
                 <div class="col-md-4">
+                    <label for="id_events_per_job" class="form-label">Events/Job</label>
+                    <input type="number" id="id_events_per_job" name="events_per_job" class="form-control" min="1" value="{{ config.data.events_per_job|default:'' }}">
+                </div>
+                <div class="col-md-4">
                     <label for="id_events_per_task" class="form-label">Events/Task</label>
                     {{ form.events_per_task }}
                 </div>
@@ -151,6 +155,10 @@
                     <label for="id_rucio_rse" class="form-label">RSE</label>
                     {{ form.rucio_rse }}
                 </div>
+                <div class="col-md-6">
+                    <label for="id_log_rse" class="form-label">Log RSE</label>
+                    <input type="text" id="id_log_rse" name="log_rse" class="form-control" value="{{ config.data.log_rse|default:'' }}">
+                </div>
             </div>
             <div class="mb-3">
                 <label for="id_rucio_replication_rules" class="form-label">Replication Rules (JSON)</label>
@@ -163,7 +171,7 @@
             <div class="mb-3">
                 <label for="id_data" class="form-label">Additional Parameters (JSON)</label>
                 {{ form.data }}
-                <small class="text-muted">Keys: workflow_mode, transformation, processing_type, prod_source_label, vo, n_jobs, events_per_job, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope</small>
+                <small class="text-muted">Keys: workflow_mode, transformation, processing_type, prod_source_label, vo, n_jobs, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope</small>
             </div>
         </fieldset>
 
@@ -193,6 +201,20 @@ async function saveConfig() {
         }
         else payload[name] = el.value;
     });
+    if (payload.data && (typeof payload.data !== 'object' || Array.isArray(payload.data))) {
+        const errDiv = document.getElementById('form-errors');
+        errDiv.innerHTML = '<p><strong>data:</strong> Additional Parameters must be valid JSON object syntax.</p>';
+        errDiv.style.display = 'block';
+        return;
+    }
+    const data = payload.data || {};
+    if (payload.events_per_job) data.events_per_job = payload.events_per_job;
+    else delete data.events_per_job;
+    if (payload.log_rse) data.log_rse = payload.log_rse;
+    else delete data.log_rse;
+    delete payload.events_per_job;
+    delete payload.log_rse;
+    payload.data = Object.keys(data).length ? data : {};
     const url = editing ? `/swf-monitor/pcs/api/prod-configs/${pk}/` : '/swf-monitor/pcs/api/prod-configs/';
     const method = editing ? 'PATCH' : 'POST';
     const errDiv = document.getElementById('form-errors');

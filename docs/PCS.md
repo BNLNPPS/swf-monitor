@@ -94,6 +94,12 @@ Each tag type has required and optional parameters defined in `pcs/schemas.py`. 
 - Required: `generator`, `generator_version`
 - Optional: `signal_freq`, `signal_status`, `bg_tag_prefix`, `bg_files`, `notes`
 
+**Background (k):**
+- Required: `background_type`
+- Optional: `bg_source`, `bg_mechanism`, `bg_generator`, `beam_energy_electron`,
+  `beam_energy_hadron`, `beam_species`, `cross_section`, `signal_freq`,
+  `signal_status`, `bg_tag_prefix`, `bg_files`, `evtgen_file`, `notes`
+
 **Simulation (s):**
 - Required: `detector_sim`, `sim_version`
 - Optional: `background_config`, `digitization`, `notes`
@@ -252,13 +258,14 @@ A production config is a reusable template capturing everything needed to build 
 | `prod_source_label` | `managed` | PanDA authorization (managed/test) |
 | `vo` | `wlcg` | Virtual organization |
 | `n_jobs` | `1000` | Jobs per task submission |
-| `events_per_job` | `100` | Events per individual job |
+| `events_per_job` | `100` | Events per individual job; stored in `ProdConfig.data` and surfaced as `Events/Job` |
 | `events_per_file` | `1000` | Events per output file |
 | `files_per_job` | `1` | Output files per job |
 | `corecount` | `1` | Cores per job |
 | `no_build` | `true` | Skip PanDA build step |
 | `skip_scout` | `true` | Skip scout jobs |
 | `exec_command` | `./run.sh` | Payload command (--exec) |
+| `log_rse` | `EIC-XRD-LOG` | Log-output RSE passed to the payload as `LOG_RSE`; stored in `ProdConfig.data` and surfaced as `Log RSE` |
 | `scope` | `group.EIC` | Rucio scope for submission |
 
 Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.

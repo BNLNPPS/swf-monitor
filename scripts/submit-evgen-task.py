@@ -51,6 +51,7 @@ RECORD_BACKOFF = 2          # seconds, multiplied by attempt number
 DEFAULT_PCLIENT_SETUP = os.path.expanduser("~/pclient/run/setup.sh")
 DEFAULT_AUTH_VO = "EIC.production"
 SUBMIT_TMP_ROOT = os.path.join(os.environ.get("SWF_TMP_DIR", "/data/swf-tmp"), "submit-evgen")
+BG_CONFIG_BASE = "https://eicweb.phy.anl.gov/EIC/campaigns/datasets/-/raw/{dataset_tag}/config_data"
 
 # The submission kernel + the in-job dispatcher live beside this doer.
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +88,30 @@ def _api_post_json(base, path, query, body, token, owner=None):
         return r.read().decode()
 
 
+def _stage_bg_files(env, sandbox):
+    """Copy or fetch BG_FILES into the worker sandbox when background mixing uses it."""
+    bg_files = (env.get('BG_FILES') or '').strip()
+    if not bg_files:
+        return
+    bg_base = os.path.basename(bg_files)
+    if not bg_base:
+        raise RuntimeError(f"invalid BG_FILES value: {bg_files!r}")
+    target = os.path.join(sandbox, bg_base)
+
+    if os.path.isfile(bg_files):
+        if os.path.abspath(bg_files) != os.path.abspath(target):
+            shutil.copy(bg_files, target)
+    else:
+        dataset_tag = env.get('DATASET_TAG') or os.environ.get('DATASET_TAG', 'main')
+        url = (
+            f"{BG_CONFIG_BASE.format(dataset_tag=urllib.parse.quote(dataset_tag, safe=''))}/"
+            f"{urllib.parse.quote(bg_files, safe='')}"
+        )
+        _log(f"staging BG_FILES from {url}")
+        urllib.request.urlretrieve(url, target)
+    env['BG_FILES'] = bg_base
+
+
 def _assemble_sandbox(spec, proxy_path, root):
     """Build the submission dir: spec.json + a sandbox/ holding the worker-facing
     files (manifest, env, dispatcher, proxy). Returns the submission dir path.
@@ -109,6 +134,7 @@ def _assemble_sandbox(spec, proxy_path, root):
     proxy_base = os.path.basename(proxy_path)
     env = dict(spec.get('env') or {})
     env['X509_USER_PROXY'] = proxy_base
+    _stage_bg_files(env, sandbox)
     with open(os.path.join(sandbox, f"environment-{csv_base}.sh"), "w") as f:
         for k, v in env.items():
             f.write(f'export {k}={v}\n')

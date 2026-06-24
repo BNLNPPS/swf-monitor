@@ -842,6 +842,23 @@ def prodtask_readiness_problems(task):
     if not task.has_input:
         problems.append('No matched Rucio EVGEN input (run the EVGEN matcher first).')
 
+    ds = task.dataset
+    if cfg.get('bg_mixing') and ds:
+        bg_params = {}
+        if ds.background_tag_id:
+            bg_params = ds.background_tag.parameters or {}
+        evgen_params = ds.evgen_tag.parameters or {}
+        bg_tag_prefix = bg_params.get('bg_tag_prefix') or evgen_params.get('bg_tag_prefix')
+        bg_files = bg_params.get('bg_files') or evgen_params.get('bg_files')
+        if not ds.background_tag_id and not (bg_tag_prefix or bg_files):
+            problems.append(
+                'Background mixing is enabled but no background tag or legacy '
+                'EvGen background parameters are attached.')
+        if ds.background_tag_id and not (bg_tag_prefix or bg_files):
+            problems.append(
+                'Background mixing is enabled but the background tag has no '
+                'bg_tag_prefix or bg_files parameter.')
+
     csv_filters = (((task.overrides or {}).get('csv_import') or {})
                    .get('filters') or {})
     catalog_beam = csv_filters.get('beam') or ''

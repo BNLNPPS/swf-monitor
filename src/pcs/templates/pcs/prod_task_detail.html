@@ -120,15 +120,15 @@
             <h5 class="card-title">Dataset Roles</h5>
             <p class="text-muted mb-2" style="font-size: 0.9em;">
                 Lists derived from <code>overrides.{input,output,intermediate}_dataset_dids</code>
-                (JSON, no schema column). Output falls back to the legacy single
-                <code>dataset</code> FK when no override is set.
+                (JSON, no schema column). The canonical requested/output dataset
+                remains the <code>dataset</code> FK.
             </p>
-            {% if task.output_datasets %}
-            <h6 class="mt-2">Output</h6>
+            {% if task.output_dataset_overrides %}
+            <h6 class="mt-2">Output Overrides</h6>
             <table class="table table-sm table-bordered mb-3">
                 <thead><tr><th style="width:35%">Name</th><th>DID</th><th>Source</th></tr></thead>
                 <tbody>
-                    {% for ds in task.output_datasets %}
+                    {% for ds in task.output_dataset_overrides %}
                     <tr>
                         <td><a href="{% url 'pcs:dataset_detail' pk=ds.pk %}">{{ ds.composed_name }}</a></td>
                         <td>{% if ds.has_internal_name %}<span class="text-muted">&mdash;</span>{% else %}<code>{{ ds.did }}</code>{% endif %}</td>

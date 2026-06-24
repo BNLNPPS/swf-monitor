@@ -216,7 +216,7 @@ class ProdTaskSerializer(serializers.ModelSerializer):
         return [d.did for d in obj.input_datasets]
 
     def get_output_dataset_dids(self, obj):
-        return [d.did for d in obj.output_datasets]
+        return [d.did for d in obj.output_dataset_overrides]
 
     def get_intermediate_dataset_dids(self, obj):
         return [d.did for d in obj.intermediate_datasets]

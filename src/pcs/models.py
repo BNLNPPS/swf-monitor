@@ -739,14 +739,14 @@ class ProdTask(models.Model):
         )
 
     @property
-    def output_datasets(self):
-        """List of output Datasets from overrides['output_dataset_dids'].
-        Falls back to ``[self.dataset]`` — the legacy single-output FK —
-        when the override is unset."""
+    def output_dataset_overrides(self):
+        """Datasets named by ``overrides['output_dataset_dids']`` only.
+
+        This is not the canonical task output. The canonical output/requested
+        dataset is the ``dataset`` FK until that field is renamed by migration.
+        """
         dids = self._dids_from_overrides('output_dataset_dids')
-        if dids:
-            return self._resolve_datasets(dids)
-        return [self.dataset] if self.dataset_id else []
+        return self._resolve_datasets(dids)
 
     @property
     def intermediate_datasets(self):
@@ -763,10 +763,12 @@ class ProdTask(models.Model):
 
     @property
     def output_dataset(self):
-        """Single helper: first of ``output_datasets`` — equivalent to the
-        legacy ``self.dataset`` FK when no list override is set."""
-        outputs = self.output_datasets
-        return outputs[0] if outputs else None
+        """Compatibility alias for the canonical output/requested dataset.
+
+        Do not read ``overrides['output_dataset_dids']`` here; that override
+        list is exposed separately as ``output_dataset_overrides``.
+        """
+        return self.dataset if self.dataset_id else None
 
     @property
     def outputs(self):

@@ -400,6 +400,11 @@ per manifest row.
   configured per-job count (`events_per_job`) and there is one job per file.
   `outDS` is the PCS composed task/dataset identity; under `noOutput` it is the
   PanDA task name only.
+  Payload environment is derived from PCS as well: output flags and `OUT_RSE`
+  come from `ProdConfig`, `LOG_RSE` comes from `ProdConfig.data['log_rse']`, and
+  background-mixing fields (`SIGNAL_FREQ`, `SIGNAL_STATUS`, `TAG_PREFIX`,
+  `BG_FILES`) prefer the dataset's background tag (`k`) parameters, falling back
+  to legacy EvGen tag parameters when no `k` value is present.
 - **`scripts/evgen_panda_submit.py`** — the submission kernel, this repo's owned
   port of `submit_panda_api.py`: it builds the `taskParamMap`, uploads the
   sandbox to the PanDA cache, and submits via `pandaclient` under the operator's
@@ -407,8 +412,9 @@ per manifest row.
 - **`scripts/submit-evgen-task.py`** — the credentialed doer, the EVGEN
   counterpart of `submit-prod-task.py`. It fetches the spec, assembles the
   sandbox (the manifest, the `environment-*.sh` the payload sources, the in-job
-  dispatcher, and the JLab x509 proxy), runs the kernel under the panda-client
-  environment, and records the jediTaskID back via `record-submission`.
+  dispatcher, staged `BG_FILES` JSON when configured, and the JLab x509 proxy),
+  runs the kernel under the panda-client environment, and records the jediTaskID
+  back via `record-submission`.
 - **`scripts/evgen_job_dispatcher.py`** — shipped in the sandbox. In-job it reads
   the manifest row for its `${SEQNUMBER}` and invokes the payload
   (`/opt/campaigns/hepmc3/scripts/run.sh`), which sources `environment*.sh` from
