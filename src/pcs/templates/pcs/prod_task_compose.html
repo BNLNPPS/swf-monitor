@@ -36,6 +36,18 @@
 .item-entry.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
 .item-label { font-weight: 600; }
 .item-meta { color: #6c757d; font-size: .75rem; }
+.pcs-ptask-summary { border: 1px solid #ced4da; border-radius: .375rem; overflow: hidden; margin-bottom: .75rem; }
+.pcs-ptask-head { display:flex; justify-content:space-between; align-items:center; gap:.75rem; padding:.45rem .65rem; background:#f8f9fa; border-bottom:1px solid #ced4da; font-weight:600; }
+.pcs-ptask-head .badge { font-size:.78rem; }
+.pcs-ptask-table { margin:0; font-size:.82rem; }
+.pcs-ptask-table th { white-space:nowrap; background:#f8f9fa; }
+.pcs-ptask-table td { vertical-align:top; }
+.pcs-ptask-name { min-width:18rem; word-break:break-word; }
+.pcs-ptask-datasets { min-width:18rem; word-break:break-word; }
+.pcs-ptask-muted { color:#495057; }
+.pcs-panda-ops { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin:.35rem 0 .75rem; }
+.pcs-panda-ops-label { font-weight:600; margin-right:.2rem; }
+.pcs-panda-op { font-size:.78rem; padding:.18rem .5rem; }
 
 .spec-section { margin-bottom: .75rem; border: 1px solid #dee2e6; border-radius: .375rem; overflow: hidden; }
 .spec-section-header { padding: .5rem .75rem; background: #f8f9fa; font-weight: 600; font-size: .85rem;
@@ -232,6 +244,96 @@
         if (!s) return '';
         const escaped = htmlEscape(s);
         return isUrl(s) ? `<a href="${escaped}" rel="noopener noreferrer">${escaped}</a>` : escaped;
+    }
+    function taskStatusBadge(status) {
+        const statusColors = {
+            draft:'secondary', ready:'primary', submitted:'info',
+            completed:'success', failed:'danger', past_output:'dark',
+            submit_failed:'danger',
+        };
+        const value = status || '-';
+        return value === '-'
+            ? '<span class="pcs-ptask-muted">-</span>'
+            : `<span class="badge bg-${statusColors[value] || 'secondary'}">${htmlEscape(value)}</span>`;
+    }
+    function pandaTasksHtml(t) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks.slice() : [];
+        if (!rows.length && t.panda_task_id) {
+            rows.push({
+                try_number: '?',
+                jedi_task_id: t.panda_task_id,
+                task_name: '',
+                out_ds: '',
+                log_ds: '',
+                site: '',
+                status_snapshot: t.status || '',
+                association_source: 'legacy panda_task_id',
+                match_reason: 'Recorded on campaign task before PandaTasks history was available.',
+                current: true,
+                created_at: '',
+                updated_at: t.updated_at || '',
+            });
+        }
+        if (!rows.length) return '';
+        const currentRows = rows.filter(pt => pt.current).length;
+        const rowHtml = rows.map(pt => {
+            const jedi = pt.jedi_task_id
+                ? `<a href="/swf-monitor/panda/tasks/${pt.jedi_task_id}/">${pt.jedi_task_id}</a>`
+                : '<span class="pcs-ptask-muted">pending</span>';
+            const current = pt.current ? ' <span class="badge bg-info">current</span>' : '';
+            const when = pt.updated_at || pt.created_at || '';
+            const datasets = [
+                pt.out_ds ? `<div><strong>out:</strong> <code>${htmlEscape(pt.out_ds)}</code></div>` : '',
+                pt.log_ds ? `<div><strong>log:</strong> <code>${htmlEscape(pt.log_ds)}</code></div>` : '',
+            ].filter(Boolean).join('');
+            const context = [
+                pt.site ? `<div><strong>site:</strong> ${htmlEscape(pt.site)}</div>` : '',
+                pt.association_source ? `<div><strong>source:</strong> ${htmlEscape(pt.association_source)}</div>` : '',
+                when ? `<div><strong>updated:</strong> ${htmlEscape(when)}</div>` : '',
+            ].filter(Boolean).join('');
+            const reason = pt.match_reason ? `<div class="pcs-ptask-muted">${htmlEscape(pt.match_reason)}</div>` : '';
+            return `<tr>
+                <td>try${htmlEscape(pt.try_number)}${current}</td>
+                <td>${jedi}</td>
+                <td>${taskStatusBadge(pt.status_snapshot)}</td>
+                <td class="pcs-ptask-name"><code>${htmlEscape(pt.task_name || '')}</code></td>
+                <td class="pcs-ptask-datasets">${datasets || '<span class="pcs-ptask-muted">-</span>'}</td>
+                <td>${context || '<span class="pcs-ptask-muted">-</span>'}${reason}</td>
+            </tr>`;
+        }).join('');
+        const countText = `${rows.length} PanDA task${rows.length === 1 ? '' : 's'}`;
+        const currentText = currentRows ? `${currentRows} current` : 'history';
+        return `<section class="pcs-ptask-summary" aria-label="PanDA task activity">
+            <div class="pcs-ptask-head">
+                <span>PanDA Tasks</span>
+                <span><span class="badge bg-secondary">${countText}</span> <span class="badge bg-info">${currentText}</span></span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered pcs-ptask-table">
+                    <thead><tr><th>Try</th><th>JEDI task</th><th>Status</th><th>PanDA task name</th><th>Datasets</th><th>Context</th></tr></thead>
+                    <tbody>${rowHtml}</tbody>
+                </table>
+            </div>
+        </section>`;
+    }
+    function currentPandaJediTaskId(t) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
+        const current = rows.find(pt => pt.current && pt.jedi_task_id);
+        if (current) return current.jedi_task_id;
+        for (let i = rows.length - 1; i >= 0; i--) {
+            if (rows[i].jedi_task_id) return rows[i].jedi_task_id;
+        }
+        return t.panda_task_id || null;
+    }
+    function pandaOperationsHtml(t) {
+        const jediTaskId = currentPandaJediTaskId(t);
+        if (!currentUser || !jediTaskId) return '';
+        return `<div class="pcs-panda-ops" data-jedi-task-id="${htmlEscape(jediTaskId)}">
+            <span class="pcs-panda-ops-label">PanDA Operations</span>
+            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="increase_attempts">Add Another Retry</button>
+            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="retry_failures">Restart And Retry Failures</button>
+            <button type="button" class="btn pcs-reset-submit-btn btn-sm pcs-panda-op" data-panda-op="rerun_entire_task">Rerun Entire Task</button>
+        </div>`;
     }
     // Legacy import rows carry an opaque csv_import.<hash> / past.<…> key and a
     // synthetic DID (not a Rucio DID) — both plumbing, hidden from the panels.
@@ -873,6 +975,8 @@
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
             <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
+        html += pandaTasksHtml(t);
+        html += pandaOperationsHtml(t);
         if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
             const requestLinks = t.questionnaire_matches.map(m => {
                 const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
@@ -1132,8 +1236,7 @@
             {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
         if (resp.ok) {
             const updated = await resp.json();
-            const idx = allTasks.findIndex(x => x.id === t.id);
-            if (idx >= 0) { allTasks[idx].status = updated.status || 'draft'; allTasks[idx].panda_task_id = null; }
+            updateTaskFromApiData(t.id, updated);
             renderList();
             showTaskDetail(t.id);   // stay in the panel; Submit returns, PanDA link + Reset vanish
         } else {
@@ -1143,28 +1246,109 @@
         }
     });
 
+    let pendingPandaOperation = null;
+    browseContent.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-panda-op]');
+        if (!btn) return;
+        const t = allTasks.find(x => x.id === selectedItemId);
+        if (!t) return;
+        const op = btn.dataset.pandaOp;
+        const wrap = btn.closest('.pcs-panda-ops');
+        const jediTaskId = wrap ? wrap.dataset.jediTaskId : currentPandaJediTaskId(t);
+        if (!jediTaskId) return;
+
+        let suffix = '';
+        let body = {jedi_task_id: Number(jediTaskId)};
+        let confirmText = '';
+        if (op === 'increase_attempts') {
+            suffix = 'panda-add-retry/';
+            body.increase = 1;
+            confirmText = `Add one more allowed PanDA retry to JEDI task ${jediTaskId}?`;
+        } else if (op === 'retry_failures') {
+            suffix = 'panda-retry-failures/';
+            body.new_parameters = {};
+            confirmText = `Ask PanDA to restart and retry failed work in JEDI task ${jediTaskId}?`;
+        } else if (op === 'rerun_entire_task') {
+            suffix = 'rerun-entire-task/';
+            confirmText = `Rerun the entire campaign task as a new PanDA task attempt? This creates a new output namespace.`;
+        } else {
+            return;
+        }
+        if (!confirm(confirmText)) return;
+
+        const oldText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Queued...';
+        const resp = await fetch(taskApiUrl(t, suffix), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify(body),
+        });
+        if (resp.ok) {
+            const updated = await resp.json().catch(() => null);
+            updateTaskFromApiData(t.id, updated);
+            if (op === 'rerun_entire_task') {
+                pendingSubmitName = t.name;
+                subscribeSubmitOutcomes();
+                if (submitPollTimer) clearTimeout(submitPollTimer);
+                pollForPandaTask(t.id, 30);
+                btn.textContent = 'Rerun queued';
+            } else {
+                pendingPandaOperation = {taskName: t.name, operation: op, jediTaskId: String(jediTaskId)};
+                subscribePandaOperationOutcomes();
+                btn.textContent = 'Operation queued';
+            }
+            setTimeout(() => { if (selectedItemId === t.id) showTaskDetail(t.id); }, 800);
+        } else {
+            let msg = `PanDA operation failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e2) {}
+            alert(msg);
+            btn.disabled = false;
+            btn.textContent = oldText;
+        }
+    });
+
     // After submit, the agent records the jediTaskID asynchronously (usually
     // seconds). Poll the task until panda_task_id appears so the PanDA link
     // shows on its own — no manual refresh. Bounded so it can't poll forever.
     let submitPollTimer = null;
     let pendingSubmitName = null;   // task awaiting a submit outcome; set on submit, cleared by the SSE handlers below
+    function updateTaskFromApiData(taskId, data) {
+        const idx = allTasks.findIndex(x => x.id === taskId);
+        if (idx < 0 || !data) return null;
+        [
+            'status', 'panda_task_id', 'panda_tasks', 'condor_cluster_id',
+            'condor_command', 'panda_command', 'task_params_json',
+            'task_params_error', 'readiness', 'updated_at',
+        ].forEach(key => {
+            if (Object.prototype.hasOwnProperty.call(data, key)) allTasks[idx][key] = data[key];
+        });
+        return allTasks[idx];
+    }
+    async function refreshTaskFromApi(taskId) {
+        const task = allTasks.find(x => x.id === taskId);
+        if (!task) return null;
+        const r = await fetch(taskApiUrl(task, ''));
+        if (!r.ok) return null;
+        const data = await r.json();
+        return updateTaskFromApiData(taskId, data);
+    }
     function pollForPandaTask(taskId, attemptsLeft) {
         submitPollTimer = setTimeout(async () => {
             try {
-                const r = await fetch(taskApiUrl(allTasks.find(x => x.id === taskId), ''));
-                if (r.ok) {
-                    const data = await r.json();
-                    const idx = allTasks.findIndex(x => x.id === taskId);
-                    if (idx >= 0) { allTasks[idx].panda_task_id = data.panda_task_id; allTasks[idx].status = data.status; }
-                    if (data.panda_task_id) {
-                        if (selectedItemId === taskId) showTaskDetail(taskId);
-                        renderList();
-                        return;   // done
-                    }
+                const updated = await refreshTaskFromApi(taskId);
+                if (updated && updated.panda_task_id) {
+                    if (selectedItemId === taskId) showTaskDetail(taskId);
+                    renderList();
+                    return;   // done
                 }
             } catch (e) { /* transient; keep trying */ }
             if (attemptsLeft > 1) pollForPandaTask(taskId, attemptsLeft - 1);
-            else if (pendingSubmitName) resetSubmitButton();   // no confirmation arrived in the window
+            else if (pendingSubmitName) {
+                pendingSubmitName = null;
+                closeSubmitOutcomeStream();
+                resetSubmitButton();   // no confirmation arrived in the window
+            }
         }, 10000);   // every 10s
     }
 
@@ -1177,6 +1361,12 @@
         const resp = await fetch(taskApiUrl(t, 'submit/'),
             {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
         if (resp.ok) {
+            const updated = await resp.json().catch(() => null);
+            updateTaskFromApiData(t.id, updated);
+            refreshTaskFromApi(t.id).then(fresh => {
+                if (fresh && selectedItemId === t.id) showTaskDetail(t.id);
+                if (fresh) renderList();
+            }).catch(() => {});
             pendingSubmitName = t.name;   // the SSE outcome handlers match on this
             subscribeSubmitOutcomes();    // open the live outcome stream now — never on page load
             btnSubmitTask.textContent = 'Submitted — awaiting PanDA ID…';
@@ -1198,22 +1388,40 @@
     function resetSubmitButton() {
         if (btnSubmitTask) { btnSubmitTask.disabled = false; btnSubmitTask.textContent = 'Submit to PanDA'; }
     }
-    function applySubmitted(taskName, jediId) {
+    async function applySubmitted(taskName, jediId) {
         const idx = allTasks.findIndex(x => x.name === taskName);
         if (idx >= 0) { allTasks[idx].panda_task_id = jediId; allTasks[idx].status = 'submitted'; }
         if (submitPollTimer) clearTimeout(submitPollTimer);
         if (pendingSubmitName === taskName) pendingSubmitName = null;
+        closeSubmitOutcomeStream();
+        if (idx >= 0) {
+            await refreshTaskFromApi(allTasks[idx].id).catch(() => null);
+        }
         if (idx >= 0 && allTasks[idx].id === selectedItemId) showTaskDetail(allTasks[idx].id);
         renderList();
     }
-    // Opened only after a submit is fired (called from the Submit handler),
-    // never on page load — so composing pins no streaming worker. Idempotent:
-    // one stream per compose session, reused across repeat submits.
     let submitOutcomeES = null;
+    let submitOutcomeTimeout = null;
+    function closeSubmitOutcomeStream() {
+        if (submitOutcomeTimeout) {
+            clearTimeout(submitOutcomeTimeout);
+            submitOutcomeTimeout = null;
+        }
+        if (submitOutcomeES) {
+            submitOutcomeES.close();
+            submitOutcomeES = null;
+        }
+    }
+    // Button-driven SSE rule: do not create page/session-scoped EventSource
+    // streams here. Every button action that needs an async outcome gets a
+    // short-lived stream, and that stream must close on matching outcome,
+    // timeout, or page unload. Reusing one stream for the whole compose page
+    // has previously leaked workers and choked the server.
     function subscribeSubmitOutcomes() {
-        if (submitOutcomeES) return;
+        closeSubmitOutcomeStream();
         const types = 'prodtask_submitted,prodtask_submit_failed,prodtask_submit_unrecorded';
         const es = submitOutcomeES = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=${types}`);
+        submitOutcomeTimeout = setTimeout(() => closeSubmitOutcomeStream(), 310000);
         es.addEventListener('prodtask_submitted', ev => {
             let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
             if (d.task_name) applySubmitted(d.task_name, d.jedi_task_id);
@@ -1223,6 +1431,7 @@
             if (d.task_name && d.task_name === pendingSubmitName) {
                 if (submitPollTimer) clearTimeout(submitPollTimer);
                 pendingSubmitName = null;
+                closeSubmitOutcomeStream();
                 resetSubmitButton();
                 alert('Submission failed: ' + (d.reason || 'unknown error'));
             }
@@ -1232,6 +1441,7 @@
             if (d.task_name && d.task_name === pendingSubmitName) {
                 if (submitPollTimer) clearTimeout(submitPollTimer);
                 pendingSubmitName = null;
+                closeSubmitOutcomeStream();
                 if (btnSubmitTask) {
                     btnSubmitTask.disabled = true;
                     btnSubmitTask.textContent = `Submitted (jediTaskID ${d.jedi_task_id}) — recording failed`;
@@ -1241,6 +1451,45 @@
             }
         });
     }
+    let pandaOperationES = null;
+    let pandaOperationTimeout = null;
+    function closePandaOperationStream() {
+        if (pandaOperationTimeout) {
+            clearTimeout(pandaOperationTimeout);
+            pandaOperationTimeout = null;
+        }
+        if (pandaOperationES) {
+            pandaOperationES.close();
+            pandaOperationES = null;
+        }
+    }
+    function subscribePandaOperationOutcomes() {
+        closePandaOperationStream();
+        const es = pandaOperationES = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=panda_task_operation_done`);
+        pandaOperationTimeout = setTimeout(() => {
+            if (pendingPandaOperation) {
+                pendingPandaOperation = null;
+                alert('PanDA operation queued, but no completion event arrived before timeout.');
+            }
+            closePandaOperationStream();
+        }, 150000);
+        es.addEventListener('panda_task_operation_done', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (!pendingPandaOperation) return;
+            if (d.task_name !== pendingPandaOperation.taskName) return;
+            if (String(d.jedi_task_id) !== String(pendingPandaOperation.jediTaskId)) return;
+            pendingPandaOperation = null;
+            closePandaOperationStream();
+            const ok = !!d.ok;
+            alert(ok ? 'PanDA operation completed.' : ('PanDA operation failed: ' + (d.error || 'unknown error')));
+            const t = allTasks.find(x => x.id === selectedItemId);
+            if (t) refreshTaskFromApi(t.id).then(() => showTaskDetail(t.id)).catch(() => {});
+        });
+    }
+    window.addEventListener('beforeunload', () => {
+        closeSubmitOutcomeStream();
+        closePandaOperationStream();
+    });
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 

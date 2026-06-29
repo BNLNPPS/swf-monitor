@@ -27,10 +27,11 @@ class IsOwnerOrReadOnly(BasePermission):
         return getattr(obj, 'created_by', None) == request.user.username
 from rest_framework.response import Response
 from django.db.models import Count
+from monitor_app.models import UserPreference
 
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
-    Dataset, ProdConfig, ProdTask, Questionnaire,
+    Dataset, ProdConfig, ProdTask, PandaTasks, Questionnaire,
 )
 from .serializers import (
     PhysicsCategorySerializer, PhysicsTagSerializer,
@@ -257,7 +258,22 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user.username)
+        obj = serializer.save(created_by=self.request.user.username)
+        _record_prod_config_scout_pref(self.request.user.username, obj)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        _record_prod_config_scout_pref(self.request.user.username, obj)
+
+
+def _record_prod_config_scout_pref(username, config):
+    data = config.data or {}
+    if isinstance(data, dict) and 'skip_scout' in data:
+        UserPreference.set_pref(
+            username,
+            'prod_config_scout_mode',
+            not bool(data.get('skip_scout')),
+        )
 
 
 class QuestionnaireViewSet(viewsets.ReadOnlyModelViewSet):
@@ -298,7 +314,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     queryset = ProdTask.objects.select_related(
         'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
         'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-    )
+    ).prefetch_related('panda_tasks')
     serializer_class = ProdTaskSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -383,7 +399,17 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             # failure raises ServiceError (its status) — never a silent empty
             # spec.
             try:
-                return JsonResponse(build_evgen_task_params(task),
+                panda_tasks = None
+                panda_tasks_id = request.query_params.get('panda_tasks_id')
+                if panda_tasks_id:
+                    panda_tasks = PandaTasks.objects.filter(
+                        pk=panda_tasks_id, prod_task=task).first()
+                    if panda_tasks is None:
+                        return Response(
+                            {'detail': f'No PandaTasks association {panda_tasks_id} for this task.'},
+                            status=status.HTTP_404_NOT_FOUND,
+                        )
+                return JsonResponse(build_evgen_task_params(task, panda_tasks=panda_tasks),
                                     json_dumps_params={'indent': 2})
             except ValueError as e:
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -451,6 +477,48 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
+
+    @action(detail=True, methods=['post'], url_path='panda-add-retry')
+    def panda_add_retry(self, request, name=None):
+        """Ask PanDA to increase allowed attempts for an existing JEDI task."""
+        task = self.get_object()
+        try:
+            result = services.prodtask_panda_operation_request(
+                task=task,
+                operation='increase_attempts',
+                jedi_task_id=request.data.get('jedi_task_id'),
+                increase=request.data.get('increase', 1),
+                created_by=getattr(request.user, 'username', '') or 'operator',
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=['post'], url_path='panda-retry-failures')
+    def panda_retry_failures(self, request, name=None):
+        """Ask PanDA to retry failed work in an existing JEDI task."""
+        task = self.get_object()
+        try:
+            result = services.prodtask_panda_operation_request(
+                task=task,
+                operation='retry_failures',
+                jedi_task_id=request.data.get('jedi_task_id'),
+                new_parameters=request.data.get('new_parameters') or {},
+                created_by=getattr(request.user, 'username', '') or 'operator',
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=['post'], url_path='rerun-entire-task')
+    def rerun_entire_task(self, request, name=None):
+        """Queue a new full PanDA task attempt for this campaign task."""
+        task = self.get_object()
+        try:
+            services.prodtask_rerun_entire_task_request(task=task)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=['post'], url_path='rucio-snapshot-update')
     def rucio_snapshot_update(self, request):
@@ -596,6 +664,31 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
                 task=task,
                 jedi_task_id=request.data.get('jedi_task_id'),
                 new_status=request.data.get('status', 'submitted'),
+                panda_tasks_id=request.data.get('panda_tasks_id'),
+                task_name=request.data.get('panda_task_name') or request.data.get('task_name'),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+    @action(detail=False, methods=['post'], url_path='record-submission-failure')
+    def record_submission_failure(self, request):
+        """Record a failed pre-JEDI submission attempt on its PandaTasks row."""
+        name = request.query_params.get('name') or request.data.get('name')
+        if not name:
+            return Response({'detail': 'Missing ?name='},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            task = services.resolve_prodtask(name, self.get_queryset())
+        except ProdTask.DoesNotExist:
+            return Response({'detail': f"No task named '{name}'"},
+                            status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, task)
+        try:
+            services.prodtask_record_submission_failure(
+                task=task,
+                panda_tasks_id=request.data.get('panda_tasks_id'),
+                reason=request.data.get('reason', ''),
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)

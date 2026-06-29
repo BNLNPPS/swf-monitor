@@ -212,7 +212,15 @@ def _prod_task_for_jeditaskid(jeditaskid):
     if not jeditaskid:
         return None
     try:
-        from pcs.models import ProdTask
+        from pcs.models import PandaTasks, ProdTask
+        assoc = (
+            PandaTasks.objects
+            .filter(jedi_task_id=int(jeditaskid))
+            .select_related('prod_task', 'prod_task__dataset', 'prod_task__prod_config')
+            .first()
+        )
+        if assoc:
+            return assoc.prod_task
         return (ProdTask.objects
                 .filter(panda_task_id=int(jeditaskid))
                 .select_related('dataset', 'prod_config')

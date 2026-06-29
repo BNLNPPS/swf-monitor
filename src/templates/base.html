@@ -401,7 +401,7 @@
                 <a href="{% url 'monitor_app:account' %}" class="{% if active_nav.account %}nav-active{% endif %}">Account</a>
                 <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;">{% csrf_token %}<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font:inherit;">Logout</button></form>
             {% else %}
-                <a href="{% url 'login' %}">Login</a>
+                <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Login</a>
             {% endif %}
         </div>
     </nav>

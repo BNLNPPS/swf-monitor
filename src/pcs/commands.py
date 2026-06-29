@@ -541,7 +541,7 @@ def _evgen_env(task):
     return {k: v for k, v in env.items() if v != ''}
 
 
-def build_evgen_task_params(task):
+def build_evgen_task_params(task, panda_tasks=None):
     """Build the client-API EVGEN production submission spec from a ProdTask.
 
     This is the production reproduction of the proven condor-side recipe
@@ -571,10 +571,14 @@ def build_evgen_task_params(task):
             'carries no per-file event count)')
     csv_rows = _evgen_manifest_from_inputs(task, n_events)
 
-    # The composed PCS identity is unique (including the sample segment where
-    # needed) and is the PanDA taskName/outDS even for noOutput EVGEN tasks.
+    # The composed PCS identity is the logical campaign task. The physical
+    # PanDA task/outDS name is attempt-specific when this is a retry or site race
+    # (try2, try3, ...), carried by the PandaTasks association row.
     env = _evgen_env(task)
-    out_ds = task.composed_name or ds.composed_name or ds.build_dataset_name()
+    out_ds = (
+        getattr(panda_tasks, 'task_name', '') or
+        task.composed_name or ds.composed_name or ds.build_dataset_name()
+    )
 
     # Container: an explicit image wins; else build the cvmfs eic_xl ref from the
     # jug_xl tag, as submit_csv.sh does.

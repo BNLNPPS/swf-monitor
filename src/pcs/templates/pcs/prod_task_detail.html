@@ -246,7 +246,7 @@
     </div>
     {% endif %}
 
-    {% if task.panda_task_id or task.condor_cluster_id %}
+    {% if task.panda_task_id or panda_tasks or task.condor_cluster_id %}
     <div class="card mb-3">
         <div class="card-body">
             <h5 class="card-title">Tracking</h5>
@@ -254,6 +254,38 @@
                 {% if task.panda_task_id %}<tr><td><strong>PanDA Task ID</strong></td><td>{{ task.panda_task_id }}</td></tr>{% endif %}
                 {% if task.condor_cluster_id %}<tr><td><strong>Condor Cluster ID</strong></td><td>{{ task.condor_cluster_id }}</td></tr>{% endif %}
             </table>
+            {% if panda_tasks %}
+            <h6>PanDA Tasks</h6>
+            <table class="table table-sm table-bordered mb-0">
+                <thead>
+                    <tr>
+                        <th>Try</th><th>JEDI task</th><th>Status</th><th>PanDA task name</th>
+                        <th>Datasets</th><th>Context</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pt in panda_tasks %}
+                    <tr>
+                        <td>try{{ pt.try_number }}{% if pt.current %} <span class="badge bg-info">current</span>{% endif %}</td>
+                        <td>{% if pt.jedi_task_id %}<a href="{% url 'monitor_app:panda_task_detail' pt.jedi_task_id %}">{{ pt.jedi_task_id }}</a>{% else %}-{% endif %}</td>
+                        <td>{{ pt.status_snapshot|default:"-" }}</td>
+                        <td style="word-break:break-all;"><code>{{ pt.task_name }}</code></td>
+                        <td style="word-break:break-all;">
+                            {% if pt.out_ds %}<div><strong>out:</strong> <code>{{ pt.out_ds }}</code></div>{% endif %}
+                            {% if pt.log_ds %}<div><strong>log:</strong> <code>{{ pt.log_ds }}</code></div>{% endif %}
+                            {% if not pt.out_ds and not pt.log_ds %}-{% endif %}
+                        </td>
+                        <td>
+                            {% if pt.site %}<div><strong>site:</strong> {{ pt.site }}</div>{% endif %}
+                            {% if pt.association_source %}<div><strong>source:</strong> {{ pt.association_source }}</div>{% endif %}
+                            {% if pt.updated_at %}<div><strong>updated:</strong> {{ pt.updated_at }}</div>{% endif %}
+                            {% if pt.match_reason %}<div class="text-muted">{{ pt.match_reason }}</div>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
         </div>
     </div>
     {% endif %}

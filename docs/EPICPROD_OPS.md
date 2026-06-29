@@ -73,21 +73,50 @@ is then cached under `$PANDA_CONFIG_ROOT` and reused by subsequent commands.
 `workinggroup` as `EIC` even though `--workingGroup EIC.production` was passed —
 the production dimension is the IAM role, not the working-group field.
 
-## Re-submitting after a broken submission
+## Campaign-task PanDA operations
 
-Once a PCS task records a `jediTaskID`, the submit path refuses a second
-submission (`prodtask_submit_request` raises while `panda_task_id` is set), and
-the task page shows the PanDA link in place of the Submit control. A submission
-that broke or aborted PanDA-side therefore leaves the task pinned to a dead task
-ID with no way forward. The **Reset submission** button (owner-only, shown beside
-the PanDA link on both the task page and the compose panel) clears that:
-`panda_task_id → None`, `status → draft`. The task returns to the buildable
-lifecycle and Submit goes live again. Reset only detaches the reference — it does
-not stop or delete the PanDA task, since the web tier holds no PanDA credential;
-abort the dead task in PanDA separately if needed.
+PCS records PanDA/JEDI task associations in `PandaTasks`, one row per physical
+submission attempt. `ProdTask.panda_task_id` is only the current/preferred
+pointer used by the existing UI. The first attempt uses the logical PCS composed
+task name as the PanDA `taskName`/`outDS`; later attempts use the same name with
+`.tryN` appended (`.try2`, `.try3`, …), so every retry or site race has a unique
+PanDA task name and Rucio output namespace.
 
-This is a commissioning-era recovery affordance. Gate or remove it once
-submissions are reliable, so a submitted task is not casually detached.
+`.tryN` is the production feature that makes whole-task rerun and future site
+racing safe: it preserves one logical campaign task identity while giving each
+physical PanDA submission its own concrete task and output names.
+
+The campaign task compose page shows the associated PanDA tasks in a `PanDA
+Tasks` table. When a campaign task has an associated JEDI task, the page exposes
+three operations:
+
+| Operation | When used | Effect |
+|---|---|---|
+| **Add Another Retry** | The PanDA task is still active and failures have exhausted the current attempt limit. | Queues `panda_api.increase_attempt_nr(jediTaskID, 1)` through the prod-ops agent. This increases the allowed attempts on the existing task. |
+| **Restart And Retry Failures** | The PanDA task is finished or otherwise retryable in PanDA, and only failed work should be retried. | Queues `panda_api.retry_task(jediTaskID, new_parameters={})` through the prod-ops agent. PanDA retries failed work within the existing task. |
+| **Rerun Entire Task** | The full task should be submitted again as a new concrete production attempt. | Allocates the next `PandaTasks` row, appends `.tryN` to the physical PanDA task and output names, and submits a new task. This reruns all work. |
+
+The first two operations are native PanDA operations on an existing JEDI task.
+They do not create a new Rucio output namespace. The third operation is a new PCS
+submission attempt and therefore creates a new physical PanDA task name and Rucio
+namespace.
+
+The older recovery path remains available for broken or aborted submission
+recording:
+
+1. From the PanDA task page, follow the PCS task link back to the campaign task.
+2. Use **Reset submission**. This clears only the current pointer
+   (`panda_task_id → None`, `status → draft`); it does not delete the
+   `PandaTasks` history row and does not stop or delete the PanDA task.
+3. Adjust the task/config if needed and submit again. PCS allocates the next
+   `tryN` physical name before submission and records the returned JEDI id on
+   that association row.
+
+PanDA tasks submitted outside PCS can still be associated: when a PanDA task page
+is opened, swf-monitor first looks in `PandaTasks`, then performs an exact
+PanDA-task-name match against PCS task identities. If exactly one PCS task
+matches, it records the association dynamically. Ambiguous or missing matches are
+left unlinked; no fuzzy match changes task state.
 
 ## TLS / CA — pip and Rucio from this host
 

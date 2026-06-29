@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import SystemAgent
+from .models import SystemAgent, UserPreference
 from .workflow_models import WorkflowDefinition, WorkflowExecution
 
 @admin.register(SystemAgent)
@@ -7,6 +7,13 @@ class SystemAgentAdmin(admin.ModelAdmin):
     list_display = ('instance_name', 'agent_type', 'status', 'last_heartbeat', 'agent_url')
     list_filter = ('status', 'agent_type')
     search_fields = ('instance_name', 'agent_type', 'agent_url')
+
+
+@admin.register(UserPreference)
+class UserPreferenceAdmin(admin.ModelAdmin):
+    list_display = ('username', 'updated_at')
+    search_fields = ('username',)
+    readonly_fields = ('updated_at',)
 
 
 @admin.register(WorkflowDefinition)

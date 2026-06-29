@@ -694,6 +694,43 @@ class PersistentState(models.Model):
             return current_id
 
 
+class UserPreference(models.Model):
+    """Per-user UI and workflow preferences stored as a JSON object."""
+    username = models.CharField(max_length=150, unique=True)
+    prefs = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'user_preference'
+        ordering = ['username']
+
+    def __str__(self):
+        return self.username
+
+    @classmethod
+    def get_prefs(cls, username):
+        if not username:
+            return {}
+        row = cls.objects.filter(username=username).first()
+        return dict(row.prefs or {}) if row else {}
+
+    @classmethod
+    def set_pref(cls, username, key, value):
+        if not username or not key:
+            return None
+        from django.db import transaction
+        with transaction.atomic():
+            row, _ = cls.objects.select_for_update().get_or_create(
+                username=username,
+                defaults={'prefs': {}},
+            )
+            prefs = dict(row.prefs or {})
+            prefs[key] = value
+            row.prefs = prefs
+            row.save(update_fields=['prefs', 'updated_at'])
+            return row
+
+
 class PandaQueue(models.Model):
     """
     Represents a PanDA compute queue configuration.

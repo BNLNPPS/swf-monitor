@@ -23,7 +23,10 @@ topic the monitor's listener consumes and the relay broadcasts — using
 | Action | Event | Payload |
 |---|---|---|
 | `_do_fetch_payload_log` (after `.done`) | `payload_log_ready` | `pandaid`, `jeditaskid` |
-| `_do_submit_task` (after record-submission OK) | `prodtask_submitted` | `task_name`, `jedi_task_id` |
+| `_do_submit_task` / `_do_submit_evgen_task` (after record-submission OK) | `prodtask_submitted` | `task_name`, `jedi_task_id` |
+| Submit failure before a JEDI id is recorded | `prodtask_submit_failed` | `task_name`, `reason` |
+| Submit succeeded but PCS record update failed | `prodtask_submit_unrecorded` | `task_name`, `jedi_task_id`, `reason` |
+| Existing PanDA task operation finished | `panda_task_operation_done` | `task_name`, `jedi_task_id`, `operation`, `ok`, `summary` or `error` |
 
 These ride the existing workflow topic rather than a dedicated channel: zero new
 relay infrastructure, and the events become a useful ops audit trail as enriched
@@ -37,7 +40,7 @@ Channels group (Redis in prod) → `SSEMessageBroadcaster` → per-client queues
 `/api/messages/stream/`, filtered by `msg_type`. No change here; see
 [SSE_RELAY.md](SSE_RELAY.md).
 
-## Browser consumer — one pattern, both faces
+## Browser consumer
 
 A page that has triggered an action opens an `EventSource` filtered to the event
 it awaits, e.g. `…/api/messages/stream/?msg_types=payload_log_ready`. On each
@@ -45,23 +48,32 @@ event it matches its own `pandaid` / `task_name` in the payload (server-side
 filters are by `msg_type`, not per-entity, so the last-mile match is done in JS),
 then loads the log or drops in the "PanDA Task N" link.
 
+Button-triggered actions must use short-lived streams. A button that queues an
+operation opens the `EventSource` only after the button click and closes it on
+the matching event, on timeout, and on page unload. It must not create or reuse a
+page-scoped stream for the whole compose session; leaked compose-page streams
+consume server workers.
+
 **Same template serves both faces.** The `EventSource` URL is written with the
 monitor's own `/swf-monitor/` prefix; swf-remote's existing body rewrite turns it
 into `/prod/api/messages/stream/` for devcloud automatically. Only the external
 proxy *route* is new (below) — the page is identical.
 
-This replaces the compose panel's 10 s `panda_task_id` poll with the
-`prodtask_submitted` event.
+For campaign task submission, `prodtask_submitted` is the live completion path
+and a bounded poll remains as a recording backstop.
 
 ### Reliability backstop — required
 
 SSE is best-effort with no replay on reconnect, and the agent can finish before
-the browser's `EventSource` has connected (the event is then lost). So a page,
-on load, must:
+the browser's `EventSource` has connected. An action that needs a browser update
+therefore must:
 
-1. open the `EventSource`,
-2. perform **one** immediate status check (catches an event that already fired),
-3. keep a slow (~25 s) fallback poll as the correctness net.
+1. open the `EventSource` before or immediately after queueing the action,
+2. perform an immediate status check where the result is also stored in the
+   database,
+3. keep a bounded fallback poll where the page can independently observe the
+   result,
+4. close the stream on match, timeout, or page unload.
 
 SSE is the live, sub-second path; the immediate check and slow poll exist only so
 a missed event cannot strand the user. Heartbeats (~30 s) keep the connection
@@ -124,8 +136,10 @@ appear shortly" instead of asking the user to refresh.
 The substrate is shared; the devcloud delta is just the streaming proxy.
 
 **Status:** implemented. The prod-ops agent publishes the completion events
-(`agents/epicprod_ops_agent.py`: `payload_log_ready`, `prodtask_submitted`); the
-internal browser pages hold the `EventSource` consumers
+(`agents/epicprod_ops_agent.py`: `payload_log_ready`, `prodtask_submitted`,
+`prodtask_submit_failed`, `prodtask_submit_unrecorded`,
+`panda_task_operation_done`); the internal browser pages hold the `EventSource`
+consumers
 (`src/monitor_app/viewdir/pandamon.py`, `src/pcs/templates/pcs/prod_task_compose.html`);
 and the swf-remote streaming proxy relays the stream on the external face
 (`../swf-remote/src/remote_app/monitor_client.py`, `StreamingHttpResponse`).

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
-                     Dataset, ProdConfig, ProdTask,
+                     Dataset, ProdConfig, ProdTask, PandaTasks,
                      Campaign, Questionnaire, ProdRequest)
 
 
@@ -77,6 +77,16 @@ class ProdTaskAdmin(admin.ModelAdmin):
                    'other_use', 'new_request')
     search_fields = ('name', 'description', 'requestor')
     readonly_fields = ('condor_command', 'panda_command', 'created_at', 'updated_at')
+
+
+@admin.register(PandaTasks)
+class PandaTasksAdmin(admin.ModelAdmin):
+    list_display = ('prod_task', 'try_number', 'jedi_task_id', 'task_name',
+                    'association_source', 'updated_at')
+    list_filter = ('association_source',)
+    search_fields = ('task_name', 'jedi_task_id', 'prod_task__name',
+                     'prod_task__dataset__composed_name')
+    readonly_fields = ('created_at', 'updated_at')
 
 
 @admin.register(Campaign)

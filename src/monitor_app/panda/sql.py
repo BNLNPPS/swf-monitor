@@ -245,13 +245,13 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
                 SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed,
                 SUM(CASE WHEN jobstatus = 'running'          THEN 1 ELSE 0 END) AS nrunning,
                 SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries,
-                SUM(CASE WHEN jobstatus = 'failed' AND attemptnr >= 3
+                SUM(CASE WHEN jobstatus = 'failed' AND attemptnr >= COALESCE(maxattempt, 3)
                                                              THEN 1 ELSE 0 END) AS nfinalfailed
             FROM (
-                SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsactive4"
+                SELECT jobstatus, attemptnr, maxattempt FROM "{PANDA_SCHEMA}"."jobsactive4"
                     WHERE jeditaskid = t.jeditaskid
                 UNION ALL
-                SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                SELECT jobstatus, attemptnr, maxattempt FROM "{PANDA_SCHEMA}"."jobsarchived4"
                     WHERE jeditaskid = t.jeditaskid
             ) j
         ) c ON TRUE

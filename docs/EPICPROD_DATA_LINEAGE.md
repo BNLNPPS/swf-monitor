@@ -195,9 +195,9 @@ doer.
 
 **Phase 4 — capture at source (PanDA data).** PanDA makes the production→Rucio
 connection in flight, so for PanDA-produced tasks the output DID is recorded at
-submission time (extending `record-submission`, which already writes
-`panda_task_id`) rather than reconstructed by a sweep. That DID is the PCS
-composed identity name itself (`group.EIC:…`) — PanDA production uses our
-composed names throughout, so there is no separate `epic:/RECO/…` reference and
-no cross-namespace match. The sweep stays a backfill tool for pre-PanDA
+submission time rather than reconstructed by a sweep. Each physical submission is
+recorded in `PandaTasks`; `ProdTask.panda_task_id` remains the current/preferred
+pointer. The first attempt uses the PCS composed identity name itself
+(`group.EIC:…`); retries and site races append `.tryN` so every concrete PanDA
+task has a unique Rucio namespace. The sweep stays a backfill tool for pre-PanDA
 campaigns, whose legacy DIDs PCS records and presents as found.

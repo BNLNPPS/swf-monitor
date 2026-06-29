@@ -1,6 +1,16 @@
 # PCS — Physics Configuration System
 
-PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production and subsequent reconstruction.
+PCS is the Physics Configuration System within **epicprod**, the ePIC automated
+production system. PCS manages the configuration and campaign records that
+epicprod uses to submit, monitor, retry, and account for production work through
+PanDA and Rucio.
+
+PCS is one subsystem, not the whole production system. The broader epicprod
+system includes the task catalog, PanDA monitor views, production operations
+agent, Rucio lineage/update flows, payload-log retrieval, alarms, system-status
+checks, and external access through the production web face. PCS supplies the
+structured physics/configuration layer for that system: tags, datasets,
+production configs, production tasks, and request/catalog linkage.
 
 **URL:** `/swf-monitor/pcs/`
 
@@ -193,9 +203,36 @@ group.EIC.26.02.0.epic_craterlake.p1141.e37.s1.r1.45to135deg
 
 The version segment is the detector version: it describes the conditions of the produced data. Campaign membership is bookkeeping for production operations and does not rename the dataset identity. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
 
-The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The task name is the dataset name without the `.bN` suffix.
+The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The logical task name is the dataset name without the `.bN` suffix.
 
 The detector-version identity and the sample variants below are extensions to the dataset model, defined here.
+
+### Composed-name Suffixes
+
+PCS separates the logical composed name from dynamic physical suffixes. The logical name is the stable PCS dataset/task identity. Physical PanDA and Rucio names may append suffixes so repeated submissions and Rucio block subdivisions have unique names.
+
+Known dynamic tokens:
+
+- `kN`: optional background-tag segment. It appears immediately after the `.pN.eN.sN.rN` tag run and is part of the logical PCS identity.
+- `.tryN`: terminal PanDA/JEDI attempt suffix. This is the physical-attempt naming feature that lets one logical campaign task produce multiple concrete PanDA tasks without output-name collision. Attempt 1 has no suffix; attempt 2 is `.try2`.
+- `.bN`: terminal Rucio block suffix. It is not part of the logical PCS identity or PanDA task name.
+
+The canonical physical order is:
+
+```
+logical[.tryN][.bN]
+```
+
+Examples:
+
+```
+logical             -> logical PCS identity, first PanDA attempt
+logical.b1          -> block 1 of the first attempt
+logical.try2        -> second PanDA attempt
+logical.try2.b1     -> block 1 of the second attempt
+```
+
+Interpretation strips registered terminal suffixes from right to left. Thus `logical.b1` and `logical.try2.b1` both resolve back to logical identity `logical`, with parsed block/attempt metadata. The implementation lives in `src/pcs/name_tokens.py`; new dynamic suffixes belong there first, then in this section, so name parsing does not fragment across services.
 
 ### Sample Variants
 
@@ -207,7 +244,7 @@ A tag composition that defines a variant list materializes as its variants, and 
 
 Generality is bounded: a variant is a single named sample with its parameters, not a set of independent dimensions the system multiplies out. Two production axes are expressed by naming each resulting sample, not by a composable key-and-value syntax in the name.
 
-**Parsing.** The name is read positionally, not by splitting on `.`. The tag run `.p<n>.e<n>.s<n>.r<n>` occurs once and anchors the name; a `.k<n>` segment follows when present; the remainder is the sample name, taken verbatim and permitted to contain periods (`ma_0.1`). In a Rucio DID the trailing `.b<n>` block suffix is stripped first. Two reserved-token rules keep the parse unambiguous: a sample name's first segment must not match `k<n>` (the background tag) and its last segment must not match `b<n>` (the block suffix). Discriminator values satisfy both.
+**Parsing.** The name is read positionally, not by splitting on `.`. The tag run `.p<n>.e<n>.s<n>.r<n>` occurs once and anchors the name; a `.k<n>` segment follows when present; the remainder is the sample name, taken verbatim and permitted to contain periods (`ma_0.1`). Registered terminal suffixes such as `.try<n>` and `.b<n>` are stripped first by the central suffix utility. Two reserved-token rules keep the parse unambiguous: a sample name's first segment must not match `k<n>` (the background tag) and its last segment must not match a terminal suffix token such as `try<n>` or `b<n>`. Discriminator values satisfy both.
 
 Within one tag composition a sample name is unique. Identity, the duplicate check, and the completion unit all key on the tags together with the sample name; that unit is what completes and triggers validation (see [Validation](EPICPROD_VALIDATION.md)).
 
@@ -263,7 +300,7 @@ A production config is a reusable template capturing everything needed to build 
 | `files_per_job` | `1` | Output files per job |
 | `corecount` | `1` | Cores per job |
 | `no_build` | `true` | Skip PanDA build step |
-| `skip_scout` | `true` | Skip scout jobs |
+| `skip_scout` | `true` | Skip PanDA scout jobs. Surfaced in the Prod Config UI as the positive **Scout Mode** toggle; unchecked writes `skip_scout=true`. New configs use the last saved toggle state from the user's database-backed JSON preferences; with no remembered value, scout mode defaults off. |
 | `exec_command` | `./run.sh` | Payload command (--exec) |
 | `log_rse` | `EIC-XRD-LOG` | Log-output RSE passed to the payload as `LOG_RSE`; stored in `ProdConfig.data` and surfaced as `Log RSE` |
 | `scope` | `group.EIC` | Rucio scope for submission |

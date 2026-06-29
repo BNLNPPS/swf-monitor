@@ -121,6 +121,10 @@
                             <div class="col-md-4"><label class="form-label">Events/Task</label>
                                 <input type="number" name="events_per_task" class="form-control form-control-sm"></div>
                         </div>
+                        <div class="form-check form-switch">
+                            <input type="checkbox" name="scout_mode" class="form-check-input" id="id_scout_mode">
+                            <label for="id_scout_mode" class="form-check-label">Scout Mode</label>
+                        </div>
                     </fieldset>
 
                     <fieldset class="mb-3"><legend class="h6">PanDA Overrides</legend>
@@ -151,7 +155,7 @@
                         <div class="mb-2"><label class="form-label">Additional Parameters (JSON)</label>
                             <textarea name="data" class="form-control form-control-sm" rows="6" style="font-family:monospace;"
                                 placeholder='{"transformation": "runGen-00-00-02", "processing_type": "epicproduction", "n_jobs": 1000}'></textarea>
-                            <small class="text-muted">Keys: workflow_mode, transformation, processing_type, prod_source_label, vo, n_jobs, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope</small></div>
+                            <small class="text-muted">Keys: workflow_mode, transformation, processing_type, prod_source_label, vo, n_jobs, events_per_file, files_per_job, corecount, no_build, skip_scout, exec_command, scope. Use the Scout Mode toggle for skip_scout.</small></div>
                     </fieldset>
 
                     <fieldset class="mb-3"><legend class="h6">Condor Template</legend>
@@ -168,6 +172,7 @@
     const allConfigs = {{ configs_json|safe }};
     const initialSelected = {{ selected_item_json|safe }};  // config name or null
     const currentUser = '{{ username }}';
+    const preferredScoutMode = {{ prod_config_scout_mode_json|default:"false"|safe }};
     let selectedId = null;
     let mode = 'view';
 
@@ -276,6 +281,7 @@
                             ${row('Hours/Job', c.target_hours_per_job)}
                             ${row('Events/Job', c.data && c.data.events_per_job)}
                             ${row('Events/Task', c.events_per_task)}
+                            ${boolRow('Scout Mode', c.data && Object.prototype.hasOwnProperty.call(c.data, 'skip_scout') ? !Boolean(c.data.skip_scout) : false)}
                         </table>
                     </div>
                 </div>
@@ -331,8 +337,16 @@
         const data = c && c.data ? {...c.data} : {};
         f('events_per_job').value = data.events_per_job || '';
         f('log_rse').value = data.log_rse || '';
+        if (c) {
+            f('scout_mode').checked = Object.prototype.hasOwnProperty.call(data, 'skip_scout')
+                ? !Boolean(data.skip_scout)
+                : false;
+        } else {
+            f('scout_mode').checked = Boolean(preferredScoutMode);
+        }
         delete data.events_per_job;
         delete data.log_rse;
+        delete data.skip_scout;
         f('panda_site').value = c ? c.panda_site : '';
         f('panda_queue').value = c ? c.panda_queue : '';
         f('panda_working_group').value = c ? c.panda_working_group : '';
@@ -434,8 +448,10 @@
         else delete data.events_per_job;
         if (payload.log_rse) data.log_rse = payload.log_rse;
         else delete data.log_rse;
+        data.skip_scout = !Boolean(payload.scout_mode);
         delete payload.events_per_job;
         delete payload.log_rse;
+        delete payload.scout_mode;
         payload.data = Object.keys(data).length ? data : {};
         const url = pk ? `/swf-monitor/pcs/api/prod-configs/${pk}/` : '/swf-monitor/pcs/api/prod-configs/';
         const method = pk ? 'PATCH' : 'POST';

@@ -95,13 +95,13 @@ def _pcs_owner_map(jeditaskids):
     if not ids:
         return {}
     try:
-        from pcs.models import ProdTask
+        from pcs.models import PandaTasks
         return {
-            int(panda_task_id): _canonical_user(created_by)
-            for panda_task_id, created_by in ProdTask.objects
-            .filter(panda_task_id__in=ids)
-            .values_list('panda_task_id', 'created_by')
-            if panda_task_id and created_by
+            int(jedi_task_id): _canonical_user(created_by)
+            for jedi_task_id, created_by in PandaTasks.objects
+            .filter(jedi_task_id__in=ids)
+            .values_list('jedi_task_id', 'prod_task__created_by')
+            if jedi_task_id and created_by
         }
     except Exception as e:
         logger.warning("_pcs_owner_map failed: %s", e)
@@ -113,31 +113,31 @@ def _pcs_taskids_for_owner(username):
     if not username:
         return [], []
     try:
-        from pcs.models import ProdTask
-        linked = ProdTask.objects.filter(panda_task_id__isnull=False)
+        from pcs.models import PandaTasks
+        linked = PandaTasks.objects.filter(jedi_task_id__isnull=False)
         if '%' in username:
             variants = [v.replace('%', '') for v in _user_filter_values(username)]
             owner_ids = set()
             for needle in variants:
                 owner_ids.update(
-                    int(panda_task_id)
-                    for panda_task_id in linked
-                    .filter(created_by__contains=needle)
-                    .values_list('panda_task_id', flat=True)
-                    if panda_task_id
+                    int(jedi_task_id)
+                    for jedi_task_id in linked
+                    .filter(prod_task__created_by__contains=needle)
+                    .values_list('jedi_task_id', flat=True)
+                    if jedi_task_id
                 )
         else:
             owner_ids = {
-                int(panda_task_id)
-                for panda_task_id in linked
-                .filter(created_by__in=_user_filter_values(username))
-                .values_list('panda_task_id', flat=True)
-                if panda_task_id
+                int(jedi_task_id)
+                for jedi_task_id in linked
+                .filter(prod_task__created_by__in=_user_filter_values(username))
+                .values_list('jedi_task_id', flat=True)
+                if jedi_task_id
             }
         other_ids = {
-            int(panda_task_id)
-            for panda_task_id in linked.values_list('panda_task_id', flat=True)
-            if panda_task_id and int(panda_task_id) not in owner_ids
+            int(jedi_task_id)
+            for jedi_task_id in linked.values_list('jedi_task_id', flat=True)
+            if jedi_task_id and int(jedi_task_id) not in owner_ids
         }
         return sorted(owner_ids), sorted(other_ids)
     except Exception as e:
@@ -642,11 +642,11 @@ def _get_task_job_counts(jeditaskids):
     - nrunning: count of job records with jobstatus='running' (subset of nactive).
     - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
       schema every retry creates a new job record, so this is the total
-      retry count for the task. The retry limit is 3.
+      retry count for the task.
     - nfinalfailed: count of job records with jobstatus='failed' AND
-      attemptnr >= 3. These are final failures — the job exhausted its
-      retry budget. Distinguishes true failures from transient-fail-then-
-      retry-succeeds, which matters for alarms (see goal-panda-alarms).
+      attemptnr >= maxattempt. These are final failures — the job exhausted
+      its retry budget. Distinguishes true failures from transient-fail-then-
+      retry-succeeds, which matters for alarms.
     """
     zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
                    'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0}
@@ -664,13 +664,13 @@ def _get_task_job_counts(jeditaskids):
         SELECT "jeditaskid", "jobstatus",
                COUNT(*) AS n,
                SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
-               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= 3 THEN 1 ELSE 0 END) AS nfinalfailed_part
+               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= COALESCE("maxattempt", 3) THEN 1 ELSE 0 END) AS nfinalfailed_part
         FROM (
-            SELECT "jeditaskid", "jobstatus", "attemptnr"
+            SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
                 FROM "{PANDA_SCHEMA}"."jobsactive4"
                 WHERE "jeditaskid" IN ({placeholders})
             UNION ALL
-            SELECT "jeditaskid", "jobstatus", "attemptnr"
+            SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
                 FROM "{PANDA_SCHEMA}"."jobsarchived4"
                 WHERE "jeditaskid" IN ({placeholders})
         ) combined
@@ -791,7 +791,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
 
     # Per-task job counts (nactive, nfinished, nfailed, nrunning, nretries,
     # nfinalfailed) — one extra query. computed_failurerate (all failures)
-    # and computed_finalfailurerate (attemptnr>=3 only — retry-exhausted)
+    # and computed_finalfailurerate (attemptnr>=maxattempt — retry-exhausted)
     # serve as usable substitutes for the native JEDI failurerate column,
     # which is NULL in this deployment. Alarms use the final-failure rate.
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,

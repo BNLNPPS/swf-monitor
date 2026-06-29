@@ -176,9 +176,26 @@ def _sync_expected_inventory(task_name, spec_path):
         _log(f"WARNING: expected inventory sync failed rc={p.returncode}")
 
 
+def _record_submission_failure(args, reason):
+    if not args.panda_tasks_id or not args.swf_monitor_url:
+        return
+    try:
+        _api_post_json(
+            args.swf_monitor_url,
+            "/pcs/api/prod-tasks/record-submission-failure/",
+            {"name": args.task_name},
+            {"panda_tasks_id": args.panda_tasks_id, "reason": reason},
+            args.token,
+            owner=args.owner,
+        )
+    except Exception as e:
+        _log(f"WARNING: could not record submission failure: {e}")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Submit a PCS ProdTask to PanDA (client-API EVGEN).")
     ap.add_argument("--task-name", required=True, help="ProdTask.name to submit")
+    ap.add_argument("--panda-tasks-id", help="Allocated PCS PandaTasks association id")
     ap.add_argument("--swf-monitor-url",
                     default=os.environ.get("SWF_MONITOR_URL", "").rstrip("/"),
                     help="swf-monitor base URL incl. /swf-monitor app path")
@@ -212,19 +229,25 @@ def main():
         return 2
 
     # 1. Fetch the EVGEN spec from PCS (single source of truth).
+    spec_query = {"name": args.task_name, "fmt": "evgen"}
+    if args.panda_tasks_id:
+        spec_query["panda_tasks_id"] = args.panda_tasks_id
     try:
         raw = _api_get(args.swf_monitor_url, "/pcs/api/prod-tasks/command/",
-                       {"name": args.task_name, "fmt": "evgen"}, args.token)
+                       spec_query, args.token)
     except Exception as e:
         _log(f"ERROR: could not fetch EVGEN spec for '{args.task_name}': {e}")
+        _record_submission_failure(args, f"could not fetch EVGEN spec: {e}")
         return 3
     try:
         spec = json.loads(raw)
     except ValueError:
         _log(f"ERROR: spec endpoint did not return JSON:\n{raw[:500]}")
+        _record_submission_failure(args, "spec endpoint did not return JSON")
         return 3
     if not spec.get('outDS') or not spec.get('csvRows'):
         _log(f"ERROR: incomplete EVGEN spec for '{args.task_name}': {raw[:500]}")
+        _record_submission_failure(args, "incomplete EVGEN spec")
         return 3
     if args.owner and not spec.get('userName'):
         spec['userName'] = args.owner
@@ -236,6 +259,7 @@ def main():
         workdir = _assemble_sandbox(spec, args.proxy, SUBMIT_TMP_ROOT)
     except Exception as e:
         _log(f"ERROR: could not assemble sandbox: {e}")
+        _record_submission_failure(args, f"could not assemble sandbox: {e}")
         return 3
     _log(f"sandbox: {workdir}")
 
@@ -251,18 +275,21 @@ def main():
                            text=True, timeout=args.timeout)
     except subprocess.TimeoutExpired:
         _log(f"ERROR: submission timed out after {args.timeout}s")
+        _record_submission_failure(args, f"submission timed out after {args.timeout}s")
         return 4
     out = (p.stdout or "") + (p.stderr or "")
     for line in out.splitlines():
         _log(f"  evgen-submit: {line}")
     if p.returncode != 0:
         _log(f"ERROR: kernel exited rc={p.returncode}")
+        _record_submission_failure(args, f"kernel exited rc={p.returncode}")
         return 5
 
     # 4. Parse the JEDI task ID.
     m = JEDITASKID_RE.search(out)
     if not m:
         _log("ERROR: submission succeeded but no jediTaskID in output")
+        _record_submission_failure(args, "submission succeeded but no jediTaskID in output")
         return 6
     jedi_task_id = int(m.group(1))
     _log(f"SUBMITTED {args.task_name} -> jediTaskID={jedi_task_id}")
@@ -271,8 +298,13 @@ def main():
     last_err = None
     for attempt in range(1, RECORD_ATTEMPTS + 1):
         try:
+            body = {"jedi_task_id": jedi_task_id}
+            if args.panda_tasks_id:
+                body["panda_tasks_id"] = args.panda_tasks_id
+            if spec.get("outDS"):
+                body["panda_task_name"] = spec["outDS"]
             _api_post_json(args.swf_monitor_url, "/pcs/api/prod-tasks/record-submission/",
-                           {"name": args.task_name}, {"jedi_task_id": jedi_task_id},
+                           {"name": args.task_name}, body,
                            args.token, owner=args.owner)
             _log(f"recorded jediTaskID={jedi_task_id} on ProdTask {args.task_name}")
             _sync_expected_inventory(args.task_name, os.path.join(workdir, "spec.json"))

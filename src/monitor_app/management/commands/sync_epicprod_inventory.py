@@ -47,9 +47,16 @@ class Command(BaseCommand):
         from pcs.models import ProdTask
         qs = ProdTask.objects.select_related('dataset', 'prod_config')
         if jeditaskid:
-            task = qs.filter(panda_task_id=jeditaskid).first()
+            from pcs.models import PandaTasks
+            assoc = (
+                PandaTasks.objects
+                .select_related('prod_task', 'prod_task__dataset', 'prod_task__prod_config')
+                .filter(jedi_task_id=jeditaskid)
+                .first()
+            )
+            task = assoc.prod_task if assoc else qs.filter(panda_task_id=jeditaskid).first()
             if not task:
-                raise CommandError(f'No PCS task records panda_task_id={jeditaskid}')
+                raise CommandError(f'No PCS task association records jediTaskID={jeditaskid}')
             return task
         task = qs.filter(name=name).first()
         if not task:

@@ -40,11 +40,34 @@ logger = logging.getLogger(__name__)
 
 def _pcs_task_for_jeditaskid(jeditaskid):
     try:
-        from pcs.models import ProdTask
+        from pcs.models import PandaTasks, ProdTask
+        row = (PandaTasks.objects
+               .select_related('prod_task', 'prod_task__dataset')
+               .filter(jedi_task_id=int(jeditaskid)).first())
+        if row:
+            return row.prod_task
         return (ProdTask.objects.select_related('dataset')
                 .filter(panda_task_id=int(jeditaskid)).first())
     except Exception:
         logger.exception("PCS lookup failed for PanDA task %s", jeditaskid)
+        return None
+
+
+def _pcs_task_for_panda_task(task):
+    pcs_task = _pcs_task_for_jeditaskid(task.get('jeditaskid'))
+    if pcs_task:
+        return pcs_task
+    try:
+        from pcs.services import reconcile_panda_task_association
+        pcs_task, _row, reason = reconcile_panda_task_association(task)
+        if pcs_task:
+            logger.info(
+                "PCS dynamic PanDA association: jediTaskID=%s task=%s reason=%s",
+                task.get('jeditaskid'), pcs_task.composed_name, reason)
+        return pcs_task
+    except Exception:
+        logger.exception("PCS dynamic association failed for PanDA task %s",
+                         task.get('jeditaskid'))
         return None
 
 
@@ -104,7 +127,7 @@ TASK_COLUMNS = [
     # it isn't running for ePIC task types), so this is the only signal shown.
     {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': True},
     # Final-failed: jobs that failed AND exhausted the retry budget
-    # (attemptnr >= 3). Subset of Failed. The rate derived from these is
+    # (attemptnr >= maxattempt). Subset of Failed. The rate derived from these is
     # what alarms trigger on — distinguishes true failures from
     # transient-fail-then-retry-succeeds.
     {'name': 'nfinalfailed', 'title': 'Final Failed', 'orderable': True},
@@ -458,7 +481,7 @@ def panda_job_detail(request, pandaid):
     if 'pandaserver-doma.cern.ch/trf/' in trf:
         job['transformation_view_url'] = _panda_view_text_url(trf)
     if job.get('jeditaskid'):
-        data['pcs_task'] = _pcs_task_for_jeditaskid(job['jeditaskid'])
+        data['pcs_task'] = _pcs_task_for_panda_task(data.get('task') or job)
     data['job_record_items'] = [
         {'name': key, 'value': '' if value is None else value}
         for key, value in sorted((data.get('job_record') or {}).items())
@@ -820,7 +843,7 @@ def panda_task_detail(request, jeditaskid):
     if isinstance(task, dict) and 'error' in task:
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
-    pcs_task = _pcs_task_for_jeditaskid(jeditaskid)
+    pcs_task = _pcs_task_for_panda_task(task)
 
     # Get jobs for this task
     jobs_data = list_jobs(taskid=int(jeditaskid), days=90, limit=200)

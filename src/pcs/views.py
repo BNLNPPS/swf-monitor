@@ -22,6 +22,7 @@ from django.db.models import Count, Max, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from monitor_app.models import UserPreference
 
 # ---------------------------------------------------------------------------
 # Auth / method-guard decorators that flash instead of silently redirecting.
@@ -58,6 +59,14 @@ from .models import (
     PRODTASK_STATUS_CHOICES,
 )
 from .serializers import _redact_contact
+from . import services
+
+PROD_CONFIG_SCOUT_MODE_PREF = 'prod_config_scout_mode'
+
+
+def _prod_config_scout_mode_pref(username):
+    return bool(UserPreference.get_prefs(username).get(PROD_CONFIG_SCOUT_MODE_PREF, False))
+
 
 CATALOG_TASK_LIST_CACHE_VERSION = 4
 CATALOG_BUILD_TIMING_ENABLED = False
@@ -1458,6 +1467,11 @@ def prod_configs_compose(request):
         'configs_json': json.dumps(configs_data),
         'selected_item_json': json.dumps(request.GET.get('selected') or None),
         'username': request.user.username if request.user.is_authenticated else '',
+        'prod_config_scout_mode_json': json.dumps(
+            _prod_config_scout_mode_pref(
+                request.user.username if request.user.is_authenticated else ''
+            )
+        ),
     }
     return render(request, 'pcs/prod_config_compose.html', context)
 
@@ -1525,7 +1539,13 @@ def prod_config_create(request):
             return redirect('pcs:prod_config_detail', pk=form.instance.pk)
     else:
         form = ProdConfigForm()
-    return render(request, 'pcs/prod_config_form.html', {'form': form})
+    return render(request, 'pcs/prod_config_form.html', {
+        'form': form,
+        'username': request.user.username if request.user.is_authenticated else '',
+        'prod_config_scout_mode_json': json.dumps(
+            _prod_config_scout_mode_pref(request.user.username)
+        ),
+    })
 
 
 @_login_required_flash
@@ -1539,7 +1559,15 @@ def prod_config_edit(request, pk):
             return redirect('pcs:prod_config_detail', pk=config.pk)
     else:
         form = ProdConfigForm(instance=config)
-    return render(request, 'pcs/prod_config_form.html', {'form': form, 'editing': True, 'config': config})
+    return render(request, 'pcs/prod_config_form.html', {
+        'form': form,
+        'editing': True,
+        'config': config,
+        'username': request.user.username if request.user.is_authenticated else '',
+        'prod_config_scout_mode_json': json.dumps(
+            _prod_config_scout_mode_pref(request.user.username)
+        ),
+    })
 
 
 # ── Production Tasks ─────────────────────────────────────────────
@@ -2244,7 +2272,7 @@ def prod_task_detail(request, name):
         task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
             'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-        ))
+        ).prefetch_related('panda_tasks'))
     except ProdTask.DoesNotExist:
         raise Http404(f"No task {name!r}")
     # Canonical task URL is the composed name; 301 a legacy/raw-name or stale
@@ -2264,6 +2292,7 @@ def prod_task_detail(request, name):
         'task_params_json': task_params_json,
         'task_params_error': task_params_error,
         'can_operate': can_operate,
+        'panda_tasks': services.panda_tasks_summary(task),
         'can_submit': can_operate and task.panda_task_id is None and task.status in ('draft', 'ready'),
         'can_reset_submission': can_operate and task.panda_task_id is not None,
     })
@@ -2308,7 +2337,7 @@ def prod_task_compose(request):
             ProdTask.objects.select_related(
                 'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
                 'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-            ).filter(campaign=campaign).order_by('-updated_at')
+            ).prefetch_related('panda_tasks').filter(campaign=campaign).order_by('-updated_at')
         )
     # Light task entries: EVGEN submission spec + cached commands omitted, hydrated on
     # open (prod_task_compose_task_detail). Readiness (cheap) is included so the
@@ -2328,6 +2357,7 @@ def prod_task_compose(request):
             # to show the PanDA-task link + the operator Reset control. Omitting it
             # left every submitted task with only the Copy button on page load.
             'panda_task_id': t.panda_task_id,
+            'panda_tasks': services.panda_tasks_summary(t),
             'dataset_id': t.dataset_id,
             'dataset_name': t.dataset.dataset_name,
             'prod_config_id': t.prod_config_id,

@@ -1,11 +1,13 @@
 # ePIC Production Task Catalog
 
-The ePIC Production Task Catalog is the PCS-backed catalog of production
-tasks for epicprod. It replaces the static GitHub/Jekyll dataset page with
-a campaign-aware view of production tasks. Campaigns are shown as tabs or
-tab-like sections ordered left to right in time: past campaigns, the
-current campaign, and the next campaign being prepared. The current and
-future campaign views are dynamic interfaces for campaign task management.
+The ePIC Production Task Catalog is an epicprod interface backed by PCS task and
+configuration records. epicprod is the ePIC automated production system; PCS is
+the configuration/catalog subsystem inside it. The catalog replaces the static
+GitHub/Jekyll dataset page with a campaign-aware view of production tasks.
+Campaigns are shown as tabs or tab-like sections ordered left to right in time:
+past campaigns, the current campaign, and the next campaign being prepared. The
+current and future campaign views are dynamic interfaces for campaign task
+management.
 
 The present static catalog is
 `eic/epic-prod/docs/_documentation/default_datasets.md`
@@ -28,8 +30,9 @@ This document implements the Dynamic Public Catalog described in
 `PCS_DATASET_REQUEST_WORKFLOW.md`.
 
 For submission, operators filter, review, select, and submit tasks from the
-catalog. Submission details are covered by `JEDI_INTEGRATION.md`.
-Inspection, cloning, and editing use the task compose view reached from the
+catalog. Submission is executed by epicprod's prod-ops agent and PanDA
+integration; submission details are covered by `JEDI_INTEGRATION.md`.
+Inspection, cloning, and editing use the PCS task compose view reached from the
 catalog.
 
 ## Scope
@@ -186,6 +189,26 @@ from existing tasks; the right panel is the focused task detail, with
 editable fields, controls, validation and status, cloning/copying, and
 submission-readiness actions.
 
+For submitted campaign tasks, the focused task detail includes a `PanDA Tasks`
+table. The table shows each associated physical PanDA/JEDI task, including the
+try number, JEDI task link, status snapshot, PanDA task name, output and log
+datasets, site, association source, and update time. Associations are created
+when PCS submits the task and can also be recorded dynamically from a PanDA task
+page when the PanDA task name matches exactly one campaign task.
+
+When a focused task has an associated JEDI task, the compose page shows a
+compact `PanDA Operations` row:
+
+- **Add Another Retry** increases the allowed attempts on the existing PanDA
+  task.
+- **Restart And Retry Failures** asks PanDA to retry failed work in the existing
+  task.
+- **Rerun Entire Task** submits a new physical task attempt with the next
+  `.tryN` output namespace.
+
+The first two actions operate on the existing JEDI task. The full rerun creates
+a new `PandaTasks` association and a new PanDA/Rucio physical name.
+
 The compose view left panel reuses the catalog task-list and filter component.
 In the compose view it omits the campaign tabs, indicates the campaign of the
 focused task, and uses a reduced column/control set appropriate for
@@ -200,6 +223,9 @@ questionnaire matches, and operator workflows should target the compose view wit
 `?tab=tasks&selected=<composed-task-name>`. Any standalone task route is a
 legacy/internal view and is not part of the exposed interface.
 
+Authentication preserves the page URL: logging in from the compose view returns
+to the same selected task rather than to the PCS home page.
+
 Supported catalog actions include submit, clone, archive, withdraw,
 priority update, readiness update, and BG-mixing matrix expansion. Actions
 apply either to a single task or to the current selected set.
@@ -210,7 +236,8 @@ dashboard links. Four feeds are relevant:
 
 - **PanDA Monitor** — task and job state, retry counts, site status, alarm
   signals (the `nfinalfailed`/`computed_finalfailurerate` family in
-  `monitor_app/panda/api.py`), plus the April 21 Production WG dashboard
+  `monitor_app/panda/api.py`; final failures are jobs with
+  `attemptnr >= maxattempt`), plus the April 21 Production WG dashboard
   requirement: "Develop dashboard that display usage across all resources
   in PanDA over time: How are we doing in terms of utilizing our
   allocations?" ([meeting notes](https://docs.google.com/document/d/1JA8GIQae30Ru62kgDN2pzqK90XBbQKz4LffXYbWNgIY/edit?tab=t.0#heading=h.y3evqgz3sc98)).

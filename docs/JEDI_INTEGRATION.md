@@ -2,9 +2,16 @@
 
 ## Overview
 
-PCS (Physics Configuration System) currently composes physics, event generation, simulation, and reconstruction tags into fully specified production tasks, then generates `prun` CLI commands and Condor submit scripts as text. The next step is to **submit tasks directly to JEDI via the PanDA Python API**, bypassing script generation entirely.
+epicprod is the ePIC automated production system. It combines the PCS
+configuration/catalog subsystem, PanDA monitoring views, the credentialed
+production operations agent, Rucio lineage flows, and production-status
+interfaces. PCS composes physics, event generation, simulation, reconstruction,
+and optional background tags into production tasks; the live epicprod submit path
+sends external-EVGEN tasks directly to JEDI via the PanDA Python API through the
+prod-ops agent.
 
-This document describes the integration design: how PCS task parameters map to JEDI's `taskParamMap`, the submission flow, and what infrastructure support is needed from PanDA.
+This document describes the integration design: how PCS task parameters map to
+JEDI's `taskParamMap`, the submission flow, and the current operational paths.
 
 **Approach:** Direct API submission. PCS owns the full task specification. JEDI's existing `GenTaskRefiner` handles the task — no custom server-side plugin required.
 
@@ -22,7 +29,7 @@ Submission chain: `submit_csv.sh` → `submit_panda_api.py` (`client.submit_task
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  PCS (swf-monitor)                              │
+│  epicprod / PCS configuration layer             │
 │                                                 │
 │  PhysicsTag ─┐                                  │
 │  EvgenTag   ─┼─► Dataset ─┐                     │
@@ -68,7 +75,7 @@ Submission chain: `submit_csv.sh` → `submit_panda_api.py` (`client.submit_task
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `taskName` | dataset composed identity name (`Dataset.build_dataset_name`, minus the `.bN` block suffix) | see [Output dataset and file naming](#output-dataset-and-file-naming) |
+| `taskName` | physical PanDA attempt name | first attempt uses the PCS composed identity; retries/site races append `.tryN`; see [Output dataset and file naming](#output-dataset-and-file-naming) |
 | `userName` | `task.created_by` | PCS user who created the task |
 | `vo` | `'eic'` | Virtual organization |
 | `workingGroup` | `config.panda_working_group` | e.g. `'EIC'` |
@@ -119,7 +126,7 @@ Submission chain: `submit_csv.sh` → `submit_panda_api.py` (`client.submit_task
 
 | JEDI Parameter | PCS Source | Notes |
 |---------------|-----------|-------|
-| `skipScout` | `config.data['skip_scout']` | Skip scout jobs if True |
+| `skipScout` | `config.data['skip_scout']` | Skip scout jobs if True; the Prod Config UI presents this as the positive **Scout Mode** toggle |
 | `disableAutoRetry` | `config.data` | Optional |
 | `useRucio` | `config.use_rucio` | Whether to register outputs in Rucio |
 
@@ -129,27 +136,48 @@ The output carries two naming conventions, applied at different levels.
 
 ### Output dataset (Rucio DID)
 
-The `taskName` of the taskParamMap (`build_task_params`), the `--outDS` of the
-prun command (`build_panda_command`), and the output and log dataset templates
-all use the dataset's **composed identity name** — the classification tags plus
-any sample-variant discriminator, defined in [PCS.md](PCS.md#datasets):
+The PCS task has two names:
+
+- the **logical campaign task identity**, the dataset's composed identity name —
+  classification tags plus any sample-variant discriminator, defined in
+  [PCS.md](PCS.md#datasets);
+- the **physical PanDA attempt name**, used as `taskName`/`outDS` for a concrete
+  JEDI submission.
+
+The first PanDA attempt uses the logical identity as its physical name:
 
     {scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}]
 
+Additional attempts append a reserved retry discriminator allocated by PCS before
+submission:
+
+    {scope}.{detector_version}.{detector_config}.{physics_tag}.{evgen_tag}.{simu_tag}.{reco_tag}[.{background_tag}][.{sample_name}].try2
+
+The suffix is `tryN`, not part of the logical task identity. It exists so
+resubmissions and site races have unique PanDA task names and unique Rucio output
+dataset names. `tryN` is a reserved final token and may not be used as a sample
+name segment. If a Rucio block suffix is present, the canonical physical form is
+`logical.try2.b1`; parsing strips terminal suffixes from the right so both
+`logical.b1` and `logical.try2.b1` resolve to the same logical PCS identity.
+The suffix rules are defined centrally in `src/pcs/name_tokens.py` and
+documented in [PCS.md](PCS.md#composed-name-suffixes).
+
 `{detector_version}` is the version of the detector/software conditions for the
 produced data. Campaign membership is production bookkeeping and does not rename
-the dataset identity. The task name is this name without the trailing `.bN`
-block suffix; the Rucio DID is the same name with the `{scope}:` prefix and the
-block suffix
-(`group.EIC:….r1.45to135deg.b1`).
+the dataset identity. The PanDA task name is this name without any trailing
+`.bN` block suffix; the Rucio DID is the same physical attempt name with the
+`{scope}:` prefix and the block suffix (`group.EIC:….r1.45to135deg.b1` or
+`group.EIC:….r1.45to135deg.try2.b1`).
 
-This composed name **is** the dataset identity. It supersedes the path-based RECO
-DID (`/RECO/<campaign>/<detector_config>/<suffix>`) built by `_output_dataset_name`
-(commit 6ea0d8e); that builder and the "path is the identity" convention are
-retired on the PanDA side. ePIC's slash paths remain in use only as Rucio
-references for external EVGEN inputs and for the data-lineage sweep (see
-[EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md)) — never to name PanDA
-outputs. Samples that share a tag composition — single-particle datasets
+The composed name is the **logical** dataset identity. Physical PanDA/Rucio
+attempt names are derived from it, with `.tryN` added only when uniqueness
+requires another concrete submission namespace. This supersedes the path-based
+RECO DID (`/RECO/<campaign>/<detector_config>/<suffix>`) built by
+`_output_dataset_name` (commit 6ea0d8e); that builder and the "path is the
+identity" convention are retired on the PanDA side. ePIC's slash paths remain in
+use only as Rucio references for external EVGEN inputs and for the data-lineage
+sweep (see [EPICPROD_DATA_LINEAGE.md](EPICPROD_DATA_LINEAGE.md)) — never to name
+PanDA outputs. Samples that share a tag composition — single-particle datasets
 differing only by polar-angle range — are told apart by the `{sample_name}`
 segment (`3to50deg`, `45to135deg`), so they no longer collide and need no
 path-based name.
@@ -390,7 +418,7 @@ per manifest row.
 
 ### Components
 
-- **`commands.build_evgen_task_params(task)`** (`?fmt=evgen`) — the
+- **`commands.build_evgen_task_params(task, panda_tasks=None)`** (`?fmt=evgen`) — the
   credential-free spec. It resolves the task's matched JLab Rucio EVGEN DID(s)
   (`Dataset.metadata['rucio']['matched']`, written by the EVGEN assimilation) to
   their files over the public `eicread` read, and emits one manifest row
@@ -398,8 +426,9 @@ per manifest row.
   below `EVGEN/` — the payload prepends `root://…/volatile/eic/EPIC/` to
   `EVGEN/<file>`. Rucio carries no per-file event count, so `nevents` is the
   configured per-job count (`events_per_job`) and there is one job per file.
-  `outDS` is the PCS composed task/dataset identity; under `noOutput` it is the
-  PanDA task name only.
+  `outDS` is the physical PanDA attempt name: the PCS composed identity for the
+  first try, or that identity plus `.tryN` for later tries; under `noOutput` it is
+  the PanDA task name only.
   Payload environment is derived from PCS as well: output flags and `OUT_RSE`
   come from `ProdConfig`, `LOG_RSE` comes from `ProdConfig.data['log_rse']`, and
   background-mixing fields (`SIGNAL_FREQ`, `SIGNAL_STATUS`, `TAG_PREFIX`,
@@ -422,7 +451,12 @@ per manifest row.
 - **`agents/epicprod_ops_agent.py`** — the `submit_evgen_task` handler and doer,
   deduped per task, emitting the same `prodtask_submitted` /
   `prodtask_submit_failed` / `prodtask_submit_unrecorded` SSE events as the prun
-  path, so the compose page needs no change.
+  path. The same agent handles `panda_task_operation` requests for native PanDA
+  retry operations on an existing JEDI task.
+- **`scripts/panda-task-operation.py`** — the credentialed doer for existing
+  PanDA tasks. It sources the local panda-client environment, sets
+  `PANDA_AUTH_VO=EIC.production`, calls `increase_attempt_nr` or `retry_task`,
+  and returns nonzero when the PanDA client reports a nonzero operation result.
 
 ### Output authentication
 
@@ -442,11 +476,14 @@ tier and the MCP server hold no credential.
 
 ### Commissioning defaults
 
-Scouts are off on this path by default (`skipScout`), so the walltime is used
-directly and the `noInput` pseudo-input HS06 brokerage pitfall is avoided; a
-config can re-enable them.
+Scouts are off on this path when `skip_scout=true`, so the walltime is used
+directly and the `noInput` pseudo-input HS06 brokerage pitfall is avoided. The
+Prod Config UI exposes this as **Scout Mode**: checked means scouts run, unchecked
+means `skip_scout=true`. New configs use the last saved toggle state from the
+user's database-backed JSON preferences; with no remembered value, scout mode
+starts off.
 
-## Implementation status (2026-06-16)
+## Implementation status (2026-06-29)
 
 The **live** Submit path is the **client-API EVGEN doer** (`submit_evgen_task`),
 described under [Client-API EVGEN submission](#client-api-evgen-submission). The
@@ -457,68 +494,36 @@ which produced the first managed submission (jediTaskID 36439, see
 `build_task_params` (the generation-only `taskParamMap`, `?fmt=jedi`) remains a
 preview: `noInput` with JEDI-managed outputs, without the `noOutput`, sandbox, and
 `multiStepExec` the production payload needs. The client-API path (`?fmt=evgen`)
-is the production form. Phase 2 (`pcs/submission.py`, in-process
-`insertTaskParams`) is not built. Phases 3-4 (status polling) remain design.
+is the production form.
 
-## Implementation Plan
+PCS records every physical PanDA submission in `PandaTasks`. Attempt 1 uses the
+logical campaign task identity; later full reruns use `.tryN` physical names.
+PanDA tasks submitted outside PCS can be linked dynamically when their PanDA task
+name exactly matches one PCS campaign task identity or physical attempt name.
 
-### Phase 1: build_task_params() (commands.py)
+The campaign task compose page is the PCS operator surface inside epicprod. It
+shows the `PanDA Tasks` table and these actions:
 
-Add a new function alongside the existing `build_condor_command()` and `build_panda_command()`:
+- **Submit to PanDA** for a task with no current PanDA task.
+- **Add Another Retry** for `increase_attempt_nr(jediTaskID, 1)` on an existing
+  task.
+- **Restart And Retry Failures** for `retry_task(jediTaskID,
+  new_parameters={})` on an existing task.
+- **Rerun Entire Task** for a new `.tryN` physical submission.
 
-```python
-def build_task_params(task):
-    """
-    Build a JEDI taskParamMap dict from a ProdTask.
+The monitor task and job pages provide PanDA state, job counts, final-failure
+rates, payload-log access, and links back to the associated campaign task.
 
-    Returns the dict that can be passed directly to
-    pandaclient.Client.insertTaskParams() for JEDI submission.
-    """
-```
+## Operator paths
 
-This function reads the same ProdTask → ProdConfig → Dataset → Tags chain but produces a dict instead of a CLI string. The `ProdTask.generate_commands()` method should also call this and store the result (JSON) for review before submission.
+Normal submission is from the campaign task compose page. The web tier queues the
+request to the prod-ops agent, and the agent performs the credentialed PanDA
+operation. Browser updates arrive through the SSE relay, with a bounded polling
+backstop for submission recording.
 
-### Phase 2: submit_to_jedi() (new module: pcs/submission.py)
-
-```python
-def submit_to_jedi(task):
-    """
-    Submit a ProdTask to JEDI via PanDA API.
-
-    Returns (status, jedi_task_id) on success.
-    Updates task.panda_task_id and task.status.
-    """
-```
-
-This calls `Client.insertTaskParams(task_params)` and handles the response. Authentication uses OIDC (`PANDA_AUTH=oidc`, `PANDA_AUTH_VO=eic`).
-
-### Phase 3: UI Integration
-
-- Add a "Submit to JEDI" button on the task compose view's focused-task panel,
-  alongside the generated submission artifact display.
-- Show the taskParamMap as formatted JSON for review before submission
-- After submission, display the JEDI task ID with link to ePIC production monitoring
-- Status tracking via `Client.getTaskStatus(jedi_task_id)`
-
-### Phase 4: Task Monitoring
-
-- Poll JEDI task status and update ProdTask.status accordingly
-- ePIC prod monitoring views for task and job info, and info via MCP tools
-- Surface errors via the existing PanDA MCP tools
-
-## Submitting from the CLI
-
-Today, `pcs-task-cmd` (documented in [PCS.md](PCS.md)) can emit the `taskParamMap` JSON for any task. Operators with a valid PanDA auth context (x509 proxy or OIDC token) can pipe it straight into `Client.insertTaskParams()`:
-
-```bash
-pcs-task-cmd <task_name> --format jedi | python -c '
-import json, sys
-from pandaclient import Client
-print(Client.insertTaskParams(json.load(sys.stdin)))
-'
-```
-
-This is the intended test-phase submission path. Server-side submission from swf-monitor is blocked on the OIDC service account listed below.
+`pcs-task-cmd` (documented in [PCS.md](PCS.md)) remains useful for inspecting
+generated artifacts and for manual debugging. It is not the normal production
+submit path.
 
 ## Infrastructure: What We Know
 
@@ -527,11 +532,14 @@ This is the intended test-phase submission path. Server-side submission from swf
 - **Auth**: OIDC with `PANDA_AUTH=oidc`, `PANDA_AUTH_VO=eic`
 - **Output**: Rucio integration available; `token='local'` / `destination='local'` for local staging
 
-## What PanDA Team Needs to Confirm
+## PanDA follow-up items
 
-1. **GenTaskRefiner registration** for `eic:managed` in `panda_jedi.cfg`
-2. **OIDC service account** setup for non-interactive programmatic submission from our production server
-3. **`transPath`** — is the GenTaskRefiner default TRF appropriate for containerized EIC jobs, or should we specify our own?
+1. **GenTaskRefiner registration** for `eic:managed` in `panda_jedi.cfg`.
+2. **Non-interactive production credential** for unattended operation. Current
+   production submissions run through the operator's cached PanDA client token on
+   the production host; a service credential remains an operations improvement,
+   not a blocker for the deployed path.
+3. **`transPath`** default policy for containerized EIC jobs.
 
 ## Key References
 
@@ -549,7 +557,7 @@ This is the intended test-phase submission path. Server-side submission from swf
 - `panda-client/pandaclient/panda_api.py` — `submit_task()` high-level API
 - `panda-client/pandaclient/Client.py:1304` — `insertTaskParams()` implementation
 
-### Working submitter — our reference and basis (eic/job_submission_condor)
+### Working submitter — reference basis (eic/job_submission_condor)
 Branch **`feature-add-panda-wrapper`** — Sakib Rahman's working EVGEN production submitter (see "Reference implementation" above):
 - [`scripts/submit_csv.sh`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_csv.sh#L107-L151)
 - [`scripts/submit_panda_api.py`](https://github.com/eic/job_submission_condor/blob/feature-add-panda-wrapper/scripts/submit_panda_api.py)
@@ -557,5 +565,5 @@ Branch **`feature-add-panda-wrapper`** — Sakib Rahman's working EVGEN producti
 
 ### PCS Source Code (swf-monitor)
 - `src/pcs/models.py` — ProdTask, ProdConfig, Dataset, tag models
-- `src/pcs/commands.py` — current command generation (to be extended)
+- `src/pcs/commands.py` — task parameter generation for PCS submission artifacts
 - `docs/PCS.md` — PCS documentation

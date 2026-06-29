@@ -37,6 +37,8 @@ Capabilities:
                        (delegates to scripts/import_evgen_rucio.py --apply).
   campaign_progress_refresh — rebuild current campaign progress data and its
                        rendered progress table cache.
+  panda_task_operation — run a PanDA-native operation on an existing JEDI task:
+                       increase allowed attempts or retry failed work.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -85,6 +87,8 @@ SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 # (manifest + env + dispatcher + JLab proxy) and submits noInput+noOutput.
 SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-evgen-task.py"
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
+PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
+PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
 # the per-task rematch — slow and network-bound, so generously bounded.
@@ -130,6 +134,7 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
+                   "panda_task_operation",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "sync_epicprod_inventory", "refresh_system_status",
@@ -336,6 +341,8 @@ class EpicProdOpsAgent(BaseAgent):
         agent's environment (SWF_MONITOR_URL, SWFMON_TOKEN, EVGEN_X509_PROXY)."""
         task_name = m["task_name"]
         cmd = [sys.executable, str(SUBMIT_EVGEN_SCRIPT), "--task-name", str(task_name)]
+        if m.get("panda_tasks_id"):
+            cmd += ["--panda-tasks-id", str(m["panda_tasks_id"])]
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
         self.logger.info(f"PRODOPS submit_evgen_task: {task_name}")
@@ -372,6 +379,76 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
+
+    def _handle_panda_task_operation(self, m):
+        """Run a PanDA-native operation on an existing JEDI task."""
+        operation = m.get("operation")
+        task_name = m.get("task_name")
+        jedi_task_id = m.get("jedi_task_id")
+        if operation not in ("increase_attempts", "retry_failures"):
+            self.logger.error(f"PRODOPS panda_task_operation: bad operation {operation!r}")
+            return
+        if not task_name or not jedi_task_id:
+            self.logger.error("PRODOPS panda_task_operation: missing task_name/jedi_task_id")
+            return
+        self.run_in_background(
+            self._do_panda_task_operation, m,
+            dedup_key=f"panda-op:{operation}:{jedi_task_id}",
+            label=f"panda_task_operation {operation} {jedi_task_id}")
+
+    def _do_panda_task_operation(self, m):
+        operation = m["operation"]
+        task_name = str(m["task_name"])
+        jedi_task_id = str(m["jedi_task_id"])
+        cmd = [
+            sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
+            "--operation", operation,
+            "--jedi-task-id", jedi_task_id,
+            "--timeout", str(PANDA_TASK_OPERATION_TIMEOUT),
+        ]
+        if operation == "increase_attempts":
+            cmd += ["--increase", str(m.get("increase") or 1)]
+        if operation == "retry_failures" and m.get("new_parameters"):
+            cmd += ["--new-parameters", json.dumps(m["new_parameters"])]
+
+        self.logger.info(
+            f"PRODOPS panda_task_operation: {operation} task={task_name} "
+            f"jediTaskID={jedi_task_id}")
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
+        except subprocess.TimeoutExpired:
+            reason = f'operation timed out after {PANDA_TASK_OPERATION_TIMEOUT}s'
+            self.logger.error(
+                f"PRODOPS panda_task_operation TIMEOUT: {operation} {jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': operation, 'ok': False, 'error': reason})
+            return
+
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  panda-task-operation: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  panda-task-operation: {line}")
+        if p.returncode == 0:
+            summary = (p.stdout or "").strip()
+            self.logger.info(
+                f"PRODOPS panda_task_operation done: {operation} {jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': operation, 'ok': True, 'summary': summary})
+        else:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(
+                f"PRODOPS panda_task_operation FAILED rc={p.returncode}: "
+                f"{operation} {jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': operation, 'ok': False, 'error': reason})
 
     def _handle_sync_epicprod_inventory(self, m):
         """Refresh one job/task inventory record on the worker pool."""

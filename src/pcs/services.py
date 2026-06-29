@@ -19,15 +19,22 @@ from datetime import datetime as _datetime
 from django.conf import settings as _settings
 from django.core.cache import cache as _cache
 from django.db import connections, transaction
+from django.db.models import Q
 from django.utils import timezone as _timezone
 from django.utils.dateparse import parse_datetime as _parse_datetime
 
 _log = _logging.getLogger(__name__)
 
 from .models import (
-    Dataset, ProdConfig, ProdTask,
+    Dataset, ProdConfig, ProdTask, PandaTasks,
     Campaign, Questionnaire, ProdRequest,
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
+)
+from .name_tokens import (
+    logical_name_from_physical_name,
+    panda_attempt_name,
+    panda_name_from_physical_name,
+    try_number_from_physical_name,
 )
 from .physics_match import derive_physics, derive_background, derive_evgen, single_particle_angle
 
@@ -146,6 +153,190 @@ def _progress_candidate_tasknames(task, output):
     return [n for i, n in enumerate(names) if n and n not in names[:i]]
 
 
+def panda_tasks_physical_name(task, try_number):
+    """Physical PanDA task/output name for one submission attempt."""
+    return panda_attempt_name(task.composed_name, try_number)
+
+
+def _log_dataset_name(task_name):
+    return f'{task_name}_log/'
+
+
+def panda_tasks_summary(task):
+    """Compact association history for API/UI payloads."""
+    rows = getattr(task, '_prefetched_objects_cache', {}).get('panda_tasks')
+    if rows is None:
+        rows = task.panda_tasks.all()
+    return [
+        {
+            'id': row.pk,
+            'try_number': row.try_number,
+            'jedi_task_id': row.jedi_task_id,
+            'task_name': row.task_name,
+            'out_ds': row.out_ds,
+            'log_ds': row.log_ds,
+            'site': row.site,
+            'status_snapshot': row.status_snapshot,
+            'association_source': row.association_source,
+            'match_reason': row.match_reason,
+            'current': bool(task.panda_task_id and row.jedi_task_id == task.panda_task_id),
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+            'updated_at': row.updated_at.isoformat() if row.updated_at else '',
+        }
+        for row in sorted(rows, key=lambda item: item.try_number)
+    ]
+
+
+def prodtask_allocate_panda_tasks(*, task, source='pcs_submit_request'):
+    """Create the next PandaTasks association row before submission."""
+    with transaction.atomic():
+        locked = ProdTask.objects.select_for_update().get(pk=task.pk)
+        last_try = (
+            PandaTasks.objects
+            .filter(prod_task=locked)
+            .order_by('-try_number')
+            .values_list('try_number', flat=True)
+            .first()
+        )
+        try_number = (last_try or 0) + 1
+        task_name = panda_tasks_physical_name(locked, try_number)
+        row = PandaTasks.objects.create(
+            prod_task=locked,
+            try_number=try_number,
+            task_name=task_name,
+            out_ds=task_name,
+            log_ds=_log_dataset_name(task_name),
+            association_source=source,
+            match_reason='allocated before PCS submission',
+        )
+    return row
+
+
+def _try_number_from_physical_name(logical_name, physical_name):
+    return try_number_from_physical_name(logical_name, physical_name)
+
+
+def _next_try_number(task):
+    last_try = (
+        PandaTasks.objects
+        .filter(prod_task=task)
+        .order_by('-try_number')
+        .values_list('try_number', flat=True)
+        .first()
+    )
+    return (last_try or 0) + 1
+
+
+def _match_prod_tasks_for_panda_name(panda_task_name):
+    """Return exact PCS task matches for a PanDA taskName.
+
+    No fuzzy matching: the physical name must reduce via registered suffix
+    parsing to the PCS composed identity, the legacy stored task name, or one
+    of the exact candidate names already used by campaign progress.
+    """
+    name = (panda_task_name or '').strip()
+    if not name:
+        return []
+    base = logical_name_from_physical_name(name)
+    direct = list(
+        ProdTask.objects
+        .select_related('dataset', 'prod_config')
+        .filter(Q(dataset__composed_name=base) | Q(name=base))
+    )
+    if direct:
+        return direct
+
+    matches = []
+    for task in (
+        ProdTask.objects
+        .select_related('dataset', 'prod_config')
+        .exclude(overrides__isnull=True)
+        .iterator()
+    ):
+        candidates = set()
+        for output in task.outputs or [{}]:
+            candidates.update(_progress_candidate_tasknames(task, output))
+        if name in candidates or base in candidates:
+            matches.append(task)
+    return matches
+
+
+def reconcile_panda_task_association(panda_task):
+    """Create a PandaTasks row for an externally discovered PanDA task.
+
+    Returns ``(ProdTask|None, PandaTasks|None, reason)``. Association is created
+    only on a single exact match; ambiguous or unmatched names are reported and
+    left untouched.
+    """
+    try:
+        jedi_task_id = int(panda_task.get('jeditaskid'))
+    except (TypeError, ValueError):
+        return None, None, 'missing jeditaskid'
+    task_name = panda_name_from_physical_name(panda_task.get('taskname') or '')
+    if not task_name:
+        return None, None, 'missing PanDA taskname'
+
+    row = (
+        PandaTasks.objects
+        .select_related('prod_task', 'prod_task__dataset', 'prod_task__prod_config')
+        .filter(jedi_task_id=jedi_task_id)
+        .first()
+    )
+    if row:
+        return row.prod_task, row, 'existing jediTaskID association'
+
+    matches = _match_prod_tasks_for_panda_name(task_name)
+    if not matches:
+        return None, None, f'no exact PCS match for PanDA taskname {task_name!r}'
+    if len(matches) > 1:
+        return None, None, f'ambiguous PCS match for PanDA taskname {task_name!r}'
+
+    task = matches[0]
+    try_number = _try_number_from_physical_name(task.composed_name, task_name)
+    if try_number is None:
+        try_number = _try_number_from_physical_name(task.name, task_name)
+    if try_number is None:
+        try_number = _next_try_number(task)
+
+    metadata = {
+        'panda_status': panda_task.get('status') or '',
+        'username': panda_task.get('username') or '',
+        'workinggroup': panda_task.get('workinggroup') or '',
+        'processingtype': panda_task.get('processingtype') or '',
+    }
+    with transaction.atomic():
+        row = PandaTasks.objects.select_for_update().filter(task_name=task_name).first()
+        if row and row.prod_task_id != task.pk:
+            return None, None, f'PanDA taskname {task_name!r} already associated elsewhere'
+        if row is None:
+            if PandaTasks.objects.filter(prod_task=task, try_number=try_number).exists():
+                try_number = _next_try_number(task)
+            row = PandaTasks.objects.create(
+                prod_task=task,
+                try_number=try_number,
+                task_name=task_name,
+                out_ds=task_name,
+                log_ds=_log_dataset_name(task_name),
+                jedi_task_id=jedi_task_id,
+                site=panda_task.get('site') or '',
+                status_snapshot=panda_task.get('status') or '',
+                association_source='dynamic_taskname_match',
+                match_reason=f'exact PanDA taskname match: {task_name}',
+                metadata=metadata,
+            )
+        elif row.jedi_task_id in (None, jedi_task_id):
+            row.jedi_task_id = jedi_task_id
+            row.status_snapshot = panda_task.get('status') or row.status_snapshot
+            row.metadata = {**(row.metadata or {}), **metadata}
+            row.save(update_fields=['jedi_task_id', 'status_snapshot', 'metadata', 'updated_at'])
+        else:
+            return None, None, (
+                f'PanDA taskname {task_name!r} already records jediTaskID '
+                f'{row.jedi_task_id}'
+            )
+    return task, row, 'created dynamic exact taskname association'
+
+
 def _panda_progress_summaries(task_ids, tasknames):
     """Return read-only PanDA task summaries keyed by JEDI id and task name."""
     ids = sorted({_to_int(tid) for tid in task_ids if _to_int(tid)})
@@ -230,10 +421,18 @@ def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
     tasks = list(
         ProdTask.objects
         .select_related('campaign', 'dataset', 'prod_config')
+        .prefetch_related('panda_tasks')
         .filter(campaign=campaign)
         .order_by('-updated_at')
     )
-    panda_ids = [t.panda_task_id for t in tasks if t.panda_task_id]
+    panda_ids = []
+    panda_ids_by_task = {}
+    for task in tasks:
+        ids = [row.jedi_task_id for row in task.panda_tasks.all() if row.jedi_task_id]
+        if task.panda_task_id and task.panda_task_id not in ids:
+            ids.insert(0, task.panda_task_id)
+        panda_ids_by_task[task.pk] = ids
+        panda_ids.extend(ids)
     taskname_candidates = []
     candidate_names_by_task_output = {}
     for task in tasks:
@@ -250,7 +449,11 @@ def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
         cfg = task.get_effective_config()
         data = cfg.get('data') or {}
         configured_jobs = _to_int(data.get('n_jobs'), 0) or None
-        direct_panda = panda_by_id.get(_to_int(task.panda_task_id))
+        direct_panda = None
+        for panda_id in panda_ids_by_task.get(task.pk, []):
+            direct_panda = panda_by_id.get(_to_int(panda_id))
+            if direct_panda:
+                break
         outputs = []
 
         for index, output in enumerate(task.outputs):
@@ -3061,29 +3264,19 @@ def rename_pcs_current_campaign(new_name, *, created_by='operator'):
     return set_pcs_campaign_lifecycle(new_name, 'current', created_by=created_by)
 
 
-def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
+def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted',
+                               panda_tasks_id=None, task_name=None):
     """
     Record outcome of a JEDI submission.
 
-    - **Idempotent on the jediTaskID.** Re-recording the SAME id is a no-op
-      success — a doer retry, or a manual re-record after an orphaned
-      submission whose record-back POST failed. A DIFFERENT id on an
-      already-recorded task is refused (409).
-    - Otherwise the task must be in status 'ready' (no record from draft).
+    ``ProdTask.panda_task_id`` is the current/preferred pointer. Full PanDA/JEDI
+    history lives in PandaTasks, so recording a different id is a new association,
+    not an overwrite error.
     """
     try:
         incoming = int(jedi_task_id)
     except (TypeError, ValueError):
         raise ServiceError('jedi_task_id must be an integer')
-
-    if task.panda_task_id is not None:
-        if task.panda_task_id == incoming:
-            return task          # already recorded this submission — idempotent
-        raise ServiceError(
-            f'Task already records panda_task_id={task.panda_task_id}, '
-            f'cannot overwrite with {incoming}.',
-            status=409,
-        )
 
     # Commissioning relaxation: recording a submission from a draft task is
     # allowed — the 'ready' freeze is not required. See
@@ -3094,9 +3287,69 @@ def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
         raise ServiceError(
             f'Invalid status. Choose from: {", ".join(sorted(valid))}'
         )
-    task.panda_task_id = incoming
-    task.status = new_status
-    task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+    with transaction.atomic():
+        locked = ProdTask.objects.select_for_update().get(pk=task.pk)
+        row = None
+        if panda_tasks_id:
+            row = PandaTasks.objects.select_for_update().filter(
+                pk=panda_tasks_id, prod_task=locked).first()
+            if row is None:
+                raise ServiceError(
+                    f'No PandaTasks association {panda_tasks_id} for this task.',
+                    status=404,
+                )
+        if row is None:
+            row = PandaTasks.objects.select_for_update().filter(
+                jedi_task_id=incoming).first()
+            if row and row.prod_task_id != locked.pk:
+                raise ServiceError(
+                    f'jediTaskID {incoming} is already associated with another task.',
+                    status=409,
+                )
+        if row is None and task_name:
+            row = PandaTasks.objects.select_for_update().filter(
+                prod_task=locked, task_name=task_name).first()
+        if row is None:
+            last_try = (
+                PandaTasks.objects
+                .filter(prod_task=locked)
+                .order_by('-try_number')
+                .values_list('try_number', flat=True)
+                .first()
+            )
+            try_number = (last_try or 0) + 1
+            physical = task_name or panda_tasks_physical_name(locked, try_number)
+            row = PandaTasks.objects.create(
+                prod_task=locked,
+                try_number=try_number,
+                task_name=physical,
+                out_ds=physical,
+                log_ds=_log_dataset_name(physical),
+                association_source='record_submission',
+                match_reason='created while recording JEDI submission',
+            )
+        if row.jedi_task_id and row.jedi_task_id != incoming:
+            raise ServiceError(
+                f'PandaTasks row already records jediTaskID {row.jedi_task_id}; '
+                f'cannot overwrite with {incoming}.',
+                status=409,
+            )
+        row.jedi_task_id = incoming
+        if not row.out_ds:
+            row.out_ds = row.task_name
+        if not row.log_ds:
+            row.log_ds = _log_dataset_name(row.task_name)
+        if not row.association_source:
+            row.association_source = 'record_submission'
+        row.save(update_fields=[
+            'jedi_task_id', 'out_ds', 'log_ds', 'association_source',
+            'updated_at',
+        ])
+        locked.panda_task_id = incoming
+        locked.status = new_status
+        locked.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+        task.panda_task_id = locked.panda_task_id
+        task.status = locked.status
     return task
 
 
@@ -3120,8 +3373,84 @@ def prodtask_submit_request(*, task):
     # noInput+noOutput, payload-staged EVGEN, self-registered RECO. The prun
     # doer ('submit_task', build_panda_command, submit-prod-task.py) is kept but
     # sidelined — not wired to the button. See docs/JEDI_INTEGRATION.md.
-    msg = {'msg_type': 'submit_evgen_task', 'namespace': 'prodops',
-           'task_name': task.name, 'owner': task.created_by}
+    panda_tasks = prodtask_allocate_panda_tasks(task=task)
+    msg = {
+        'msg_type': 'submit_evgen_task',
+        'namespace': 'prodops',
+        'task_name': task.name,
+        'panda_tasks_id': panda_tasks.pk,
+        'panda_task_name': panda_tasks.task_name,
+        'owner': task.created_by,
+    }
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        panda_tasks.delete()
+        raise ServiceError(f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        panda_tasks.delete()
+        raise ServiceError(
+            'Submission could not be queued (ops-agent queue unreachable).', status=503)
+    return task
+
+
+def _prodtask_associated_jedi_ids(task):
+    ids = []
+    if task.panda_task_id:
+        ids.append(int(task.panda_task_id))
+    try:
+        for jedi_task_id in task.panda_tasks.filter(jedi_task_id__isnull=False).values_list('jedi_task_id', flat=True):
+            if jedi_task_id and int(jedi_task_id) not in ids:
+                ids.append(int(jedi_task_id))
+    except Exception:
+        # Backward compatibility while old production rows only have
+        # ProdTask.panda_task_id.
+        pass
+    return ids
+
+
+def prodtask_panda_operation_request(*, task, operation, jedi_task_id=None,
+                                     increase=1, new_parameters=None,
+                                     created_by='operator'):
+    """Queue a PanDA-native operation for an associated existing JEDI task."""
+    if operation not in ('increase_attempts', 'retry_failures'):
+        raise ServiceError('operation must be increase_attempts or retry_failures')
+    ids = _prodtask_associated_jedi_ids(task)
+    if not ids:
+        raise ServiceError('Task has no associated PanDA/JEDI task.', status=409)
+    if jedi_task_id is None:
+        jedi_task_id = task.panda_task_id or ids[-1]
+    try:
+        jedi_task_id = int(jedi_task_id)
+    except (TypeError, ValueError):
+        raise ServiceError('jedi_task_id must be an integer')
+    if jedi_task_id not in ids:
+        raise ServiceError(
+            f'jediTaskID {jedi_task_id} is not associated with this campaign task.',
+            status=409,
+        )
+    try:
+        increase = int(increase or 1)
+    except (TypeError, ValueError):
+        raise ServiceError('increase must be an integer')
+    if increase < 1:
+        raise ServiceError('increase must be >= 1')
+    if new_parameters is not None and not isinstance(new_parameters, dict):
+        raise ServiceError('new_parameters must be a JSON object')
+
+    msg = {
+        'msg_type': 'panda_task_operation',
+        'namespace': 'prodops',
+        'task_name': task.name,
+        'composed_name': task.composed_name,
+        'jedi_task_id': jedi_task_id,
+        'operation': operation,
+        'increase': increase,
+        'new_parameters': new_parameters or {},
+        'created_by': created_by,
+    }
     from monitor_app.activemq_connection import ActiveMQConnectionManager
     try:
         triggered = ActiveMQConnectionManager().send_message(
@@ -3130,7 +3459,29 @@ def prodtask_submit_request(*, task):
         raise ServiceError(f'Could not reach the prod-ops agent queue: {e}', status=503)
     if not triggered:
         raise ServiceError(
-            'Submission could not be queued (ops-agent queue unreachable).', status=503)
+            'PanDA operation could not be queued (ops-agent queue unreachable).',
+            status=503,
+        )
+    return {'queued': True, 'operation': operation, 'jedi_task_id': jedi_task_id}
+
+
+def prodtask_rerun_entire_task_request(*, task):
+    """Queue a new full PanDA submission attempt for a previously submitted task."""
+    if task.panda_task_id is None:
+        raise ServiceError(
+            'Task has no recorded PanDA submission; use Submit to PanDA.', status=409)
+    old_panda_task_id = task.panda_task_id
+    old_status = task.status
+    task.panda_task_id = None
+    task.status = 'draft'
+    task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+    try:
+        prodtask_submit_request(task=task)
+    except Exception:
+        task.panda_task_id = old_panda_task_id
+        task.status = old_status
+        task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+        raise
     return task
 
 
@@ -3152,6 +3503,24 @@ def prodtask_reset_submission(*, task):
     task.status = 'draft'
     task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
     return task
+
+
+def prodtask_record_submission_failure(*, task, panda_tasks_id, reason):
+    """Mark a preallocated PandaTasks attempt that failed before JEDI id return."""
+    if not panda_tasks_id:
+        raise ServiceError('panda_tasks_id is required')
+    row = PandaTasks.objects.filter(pk=panda_tasks_id, prod_task=task).first()
+    if row is None:
+        raise ServiceError(
+            f'No PandaTasks association {panda_tasks_id} for this task.',
+            status=404,
+        )
+    meta = dict(row.metadata or {})
+    meta['submit_failure'] = reason or ''
+    row.status_snapshot = 'submit_failed'
+    row.metadata = meta
+    row.save(update_fields=['status_snapshot', 'metadata', 'updated_at'])
+    return row
 
 
 def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):

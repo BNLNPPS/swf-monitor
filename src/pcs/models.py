@@ -5,12 +5,12 @@ Tag lifecycle: draft (editable) → locked (immutable, usable in datasets).
 Tag numbering: physics tags = category.digit * 1000 + N; e/s/r tags increment from 1 via PersistentState.
 Datasets: composed from four tags (plus optional background), auto-named, with block management for Rucio's 100k file limit.
 """
-import re
-
 from django.db import models, transaction
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
 from django.utils.functional import cached_property
+
+from .name_tokens import sample_name_reserved_collision, reserved_sample_token_description
 
 
 TAG_STATUS_CHOICES = [
@@ -292,15 +292,13 @@ class Dataset(models.Model):
         # Draft tags are allowed on datasets during alpha — composition stays
         # editable so ops can fix tag meaning. Reproducibility locking is
         # enforced at submission prep, not here; tightened as we commission.
-        # Reserved-token rule (PCS.md §Sample Variants): the sample segment must
-        # not collide with the k-tag or block-suffix tokens that anchor the
-        # positional name parse — first segment != k<n>, last segment != b<n>.
-        if self.sample_name:
-            segs = self.sample_name.split('.')
-            if re.fullmatch(r'k\d+', segs[0]) or re.fullmatch(r'b\d+', segs[-1]):
-                raise ValidationError(
-                    f"sample_name {self.sample_name!r} collides with a reserved "
-                    f"token (first segment k<n> or last segment b<n>).")
+        # Reserved-token rule (PCS.md §Composed-name suffixes): the sample
+        # segment must not collide with optional tag or terminal suffix tokens
+        # that anchor positional parsing.
+        if sample_name_reserved_collision(self.sample_name):
+            raise ValidationError(
+                f"sample_name {self.sample_name!r} collides with a reserved "
+                f"token ({reserved_sample_token_description()}).")
 
     def save(self, *args, **kwargs):
         if not self.dataset_name:
@@ -866,6 +864,47 @@ class ProdTask(models.Model):
         from .commands import build_condor_command, build_panda_command
         self.condor_command = build_condor_command(self)
         self.panda_command = build_panda_command(self)
+
+
+class PandaTasks(models.Model):
+    """PanDA/JEDI task associations for one PCS production task.
+
+    The plural class name is intentional: this is the association/history record
+    for PanDA task attempts attached to a ProdTask, not a one-to-one peer model.
+    """
+    prod_task = models.ForeignKey(
+        ProdTask, on_delete=models.CASCADE, related_name='panda_tasks',
+    )
+    try_number = models.PositiveIntegerField(default=1)
+    jedi_task_id = models.BigIntegerField(null=True, blank=True, db_index=True)
+    task_name = models.CharField(max_length=300, unique=True)
+    out_ds = models.CharField(max_length=300, blank=True, default='')
+    log_ds = models.CharField(max_length=300, blank=True, default='')
+    site = models.CharField(max_length=100, blank=True, default='')
+    status_snapshot = models.CharField(max_length=50, blank=True, default='')
+    association_source = models.CharField(max_length=50, blank=True, default='')
+    match_reason = models.TextField(blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'pcs_panda_tasks'
+        ordering = ['prod_task', 'try_number']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['prod_task', 'try_number'],
+                name='pcs_panda_tasks_unique_try',
+            ),
+            models.UniqueConstraint(
+                fields=['jedi_task_id'],
+                condition=models.Q(jedi_task_id__isnull=False),
+                name='pcs_panda_tasks_unique_jedi_task',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.prod_task.composed_name} try{self.try_number}"
 
 
 def _allocate_simple_tag(state_key):

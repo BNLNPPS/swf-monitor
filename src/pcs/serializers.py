@@ -2,7 +2,7 @@ import re
 
 from rest_framework import serializers
 from .models import (PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
-                     Dataset, ProdConfig, ProdTask, Questionnaire)
+                     Dataset, ProdConfig, ProdTask, PandaTasks, Questionnaire)
 from .schemas import validate_parameters
 
 
@@ -144,6 +144,23 @@ class ProdConfigSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
 
+class PandaTasksSerializer(serializers.ModelSerializer):
+    current = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = PandaTasks
+        fields = [
+            'id', 'try_number', 'jedi_task_id', 'task_name', 'out_ds', 'log_ds',
+            'site', 'status_snapshot', 'association_source', 'match_reason',
+            'metadata', 'current', 'created_at', 'updated_at',
+        ]
+        read_only_fields = fields
+
+    def get_current(self, obj):
+        task = getattr(obj, 'prod_task', None)
+        return bool(task and task.panda_task_id and obj.jedi_task_id == task.panda_task_id)
+
+
 def _redact_contact(value):
     value = (value or '').strip()
     if not value:
@@ -193,6 +210,7 @@ class ProdTaskSerializer(serializers.ModelSerializer):
     input_dataset_dids = serializers.SerializerMethodField(read_only=True)
     output_dataset_dids = serializers.SerializerMethodField(read_only=True)
     intermediate_dataset_dids = serializers.SerializerMethodField(read_only=True)
+    panda_tasks = PandaTasksSerializer(many=True, read_only=True)
 
     class Meta:
         model = ProdTask
@@ -203,7 +221,7 @@ class ProdTaskSerializer(serializers.ModelSerializer):
             'csv_file', 'overrides',
             'input_dataset_dids', 'output_dataset_dids', 'intermediate_dataset_dids',
             'condor_command', 'panda_command',
-            'panda_task_id', 'condor_cluster_id',
+            'panda_task_id', 'panda_tasks', 'condor_cluster_id',
             'created_by', 'created_at', 'updated_at',
         ]
         read_only_fields = [
