@@ -90,7 +90,15 @@
                 {% for item in requested_resource_items %}
                 <tr>
                     <td style="width:12rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="overflow-wrap:anywhere;">{{ item.value|fmt_value }}</td>
+                    <td style="overflow-wrap:anywhere;">
+                        {% with href=item.value|url_href %}
+                        {% if href %}
+                        <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                        {% endwith %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -152,7 +160,15 @@
                 {% for item in task.job_parameters %}
                 <tr>
                     <td style="width:12rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="overflow-wrap:anywhere;">{{ item.value|fmt_value }}</td>
+                    <td style="overflow-wrap:anywhere;">
+                        {% with href=item.value|url_href %}
+                        {% if href %}
+                        <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                        {% endwith %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -240,7 +256,15 @@
                 {% for item in task_record_items %}
                 <tr>
                     <th style="width:18rem;">{{ item.name }}</th>
-                    <td style="word-break:break-all; max-width:60rem;">{{ item.value|fmt_value }}</td>
+                    <td style="word-break:break-all; max-width:60rem;">
+                        {% with href=item.value|url_href %}
+                        {% if href %}
+                        <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                        {% endwith %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>

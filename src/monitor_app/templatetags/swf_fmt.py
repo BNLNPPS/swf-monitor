@@ -28,7 +28,16 @@ _UNKNOWN_STATE_COLOR = '#6c757d'  # neutral gray fallback
 @register.filter(name='is_url')
 def is_url(value):
     """True for HTTP(S) URL strings."""
-    return str(value or '').startswith(('http://', 'https://'))
+    return str(value or '').strip().startswith(('http://', 'https://'))
+
+
+@register.filter(name='url_href')
+def url_href(value):
+    """Return a clean HTTP(S) href, or empty string for non-URLs."""
+    text = str(value or '').strip()
+    if text.startswith(('http://', 'https://')):
+        return text
+    return ''
 
 
 @register.filter(name='fmt_dt')
