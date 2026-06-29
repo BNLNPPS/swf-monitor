@@ -112,15 +112,18 @@
                     <form class="d-inline" method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
                         {% csrf_token %}
                         <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <select class="form-select form-select-sm d-inline-block w-auto" name="quality" onchange="this.form.submit()">
+                        <select class="form-select form-select-sm d-inline-block w-auto" name="quality">
                             <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
                             {% for choice in quality_choices %}
                             <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
                             {% endfor %}
                         </select>
+                        <input class="form-control form-control-sm d-inline-block w-auto ms-2" type="text" name="comment" value="{{ item.comment }}" placeholder="comment">
+                        <button class="btn btn-sm btn-outline-secondary ms-1" type="submit">Save</button>
                     </form>
                     {% else %}
                     {{ item.quality|default:"unreviewed" }}
+                    {% if item.comment %}<span class="ms-2">{{ item.comment }}</span>{% endif %}
                     {% endif %}
                 </td>
             </tr>

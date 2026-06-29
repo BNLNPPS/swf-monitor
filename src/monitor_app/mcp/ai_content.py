@@ -222,6 +222,7 @@ def _row_to_dict(row):
         'username': row.username,
         'ai': row.ai,
         'quality': data.get('quality') or '',
+        'comment': data.get('comment') or '',
         'assessment': row.assessment,
         'data': data,
         'created_at': row.created_at.isoformat() if row.created_at else None,
