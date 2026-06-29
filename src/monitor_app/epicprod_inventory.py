@@ -346,6 +346,7 @@ def diagnosis_from_log_texts(log_texts, job=None):
         'phase': phase,
         'failure_summary': failure_summary,
         'timeline': timeline,
+        'conflict': conflict,
         'guidance': (
             'Use phase/failure_summary as the production-facing diagnosis. '
             'This is parsed from payload logs and app inventory, and can be '
@@ -410,6 +411,7 @@ def sync_job_from_study_data(study_data):
     phase = diagnosis['phase']
     failure_summary = diagnosis['failure_summary']
     timeline = diagnosis['timeline']
+    conflict = diagnosis.get('conflict')
 
     data = {
         'panda': {
