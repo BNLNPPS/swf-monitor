@@ -235,12 +235,12 @@
     <div class="card mb-3">
         <div class="card-header"><strong>PanDA/JEDI task parameters</strong></div>
         <div class="card-body">
-            <table class="table table-sm table-bordered mb-0">
+            <table class="table table-sm table-bordered mb-0 w-auto">
                 <tbody>
                 {% for item in task_record_items %}
                 <tr>
                     <th style="width:18rem;">{{ item.name }}</th>
-                    <td style="word-break:break-all;">{{ item.value }}</td>
+                    <td style="word-break:break-all; max-width:60rem;">{{ item.value }}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
