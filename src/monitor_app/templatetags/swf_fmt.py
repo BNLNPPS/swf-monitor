@@ -16,6 +16,7 @@ from django.utils.safestring import mark_safe
 
 from monitor_app.panda.constants import TASK_STATE_COLORS, JOB_STATE_COLORS
 from monitor_app.state_descriptions import state_description as _state_description
+from monitor_app.ai_assessments import assessment_presentation
 
 register = template.Library()
 
@@ -193,6 +194,12 @@ def copy_btn(value):
         f'title="Copy {safe}" aria-label="Copy">'
         f'<i class="bi bi-clipboard"></i></button>'
     )
+
+
+@register.inclusion_tag('monitor_app/_ai_assessments.html', name='ai_assessment_panel')
+def ai_assessment_panel(data, title='AI Assessments'):
+    """Render append-only AI assessments from a model JSON field."""
+    return assessment_presentation(data, title=title)
 
 
 @register.filter(name='rucio_did_url')

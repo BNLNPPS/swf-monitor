@@ -369,6 +369,7 @@
             </div>
         </div>
         <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaigns</a>
+        <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">AI</a>
         <strong class="nav-label nav-panda-label">PanDA</strong>
         <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>

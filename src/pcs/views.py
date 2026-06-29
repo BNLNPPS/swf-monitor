@@ -23,6 +23,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from monitor_app.models import UserPreference
+from monitor_app.ai_assessments import ai_content_summary
 
 # ---------------------------------------------------------------------------
 # Auth / method-guard decorators that flash instead of silently redirecting.
@@ -2364,6 +2365,7 @@ def prod_task_compose(request):
             'prod_config_name': t.prod_config.name,
             'csv_file': t.csv_file,
             'overrides': t.overrides or {},
+            'ai_content': ai_content_summary(t.overrides or {}),
             'description': t.description,
             'created_by': t.created_by,
             'readiness': prodtask_readiness_problems(t),
@@ -2563,4 +2565,5 @@ def prod_task_compose_task_detail(request, name):
         'condor_command': task.condor_command,
         'panda_command': task.panda_command,
         'panda_tasks': services.panda_tasks_summary(task, include_live=True),
+        'ai_content': ai_content_summary(task.overrides or {}),
     })

@@ -531,6 +531,25 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 ---
 
+### AI Content
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `epicprod_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content for an epicprod object and link it from the target object JSON when the subject is known locally. |
+
+**Known subject types:**
+- `campaign_task`: campaign/production task, keyed by composed task name.
+- `panda_task`: local PanDA-task association, keyed by JEDI task id or task name.
+- `panda_job`: local production job record, keyed by pandaid.
+- `panda_queue`: PanDA site/queue record, keyed by queue name. A row with `queue_name == site` represents site-level content.
+
+**Behavior:**
+- AI content is append-only. Corrections and followups create new rows.
+- For known local subjects, the tool writes the central `AIContent` row and appends its id to the subject JSON field under `ai_content_ids`.
+- Future subject types can be added without changing existing content references.
+
+---
+
 ### PanDA Production Monitoring
 
 Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
@@ -693,10 +712,11 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
+| AI Content | `epicprod_register_ai_assessment` | 1 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **54** |
+| **Total** | | **55** |
 
 ---
 
@@ -858,6 +878,7 @@ swf-monitor/
 │   │   │   ├── system.py                   # System, agent, namespace tools
 │   │   │   ├── workflows.py               # Workflow, message, run, STF tools
 │   │   │   ├── ai_memory.py               # AI memory tools
+│   │   │   ├── ai_content.py              # AI assessment registration tools
 │   │   │   └── common.py                  # Shared utilities
 │   │   ├── panda/                          # PanDA Mattermost bot (MCP client)
 │   │   │   └── bot.py                      # Bot logic, MCPClient, Claude integration
@@ -875,7 +896,7 @@ swf-monitor/
 | File | Purpose |
 |------|---------|
 | `src/swf_monitor_project/mcp_asgi.py` | **ASGI entrypoint** - Starlette app hosting the FastMCP server, with `MCPRequestGuard` (bearer token, POST-only, `/health`) |
-| `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, common.py) |
+| `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, ai_content.py, common.py) |
 | `src/monitor_app/panda/bot.py` | **PanDA Mattermost bot** - MCP client using HTTP POST, Claude Haiku for responses |
 | `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
 | `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |

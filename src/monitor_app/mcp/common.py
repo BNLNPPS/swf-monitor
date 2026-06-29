@@ -239,6 +239,11 @@ def get_available_tools_list() -> list:
             "description": "Get recent dialogue history for session context",
             "parameters": ["username", "turns", "namespace"],
         },
+        {
+            "name": "epicprod_register_ai_assessment",
+            "description": "Register append-only AI assessment content for an epicprod object and link it from the target object's JSON ai_content_ids when it is a known local subject.",
+            "parameters": ["subject_type", "subject_key", "assessment", "username", "ai", "subject_label", "subject_url", "data"],
+        },
         # PanDA Monitor tools
         {
             "name": "panda_list_jobs",

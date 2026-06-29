@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}{{ task.composed_name }} - Prod Task - PCS{% endblock %}
 
@@ -49,6 +50,8 @@
     {% if task.description %}
     <p>{{ task.description }}</p>
     {% endif %}
+
+    {% ai_assessment_panel task.overrides %}
 
     <div class="row">
         <div class="col-md-6 mb-3">

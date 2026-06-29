@@ -341,6 +341,7 @@ COMMON QUERIES:
 - Link an input Dataset? → pcs_prodtask_link_input(task_name='...', did='group.EIC.evgen:...b1')
 - Mark a task ready for submission? → pcs_prodtask_set_status(task_name='...', status='ready')
 - Submission itself is not on MCP: operator runs `pcs-task-cmd <name> --submit` locally with their PanDA auth context.
+- Register an AI assessment on a production object? → epicprod_register_ai_assessment(subject_type='panda_task', subject_key='36565', assessment='...', username='...', ai='...')
 
 PCS (Physics Configuration System):
 PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are

@@ -53,6 +53,17 @@ def _pcs_task_for_jeditaskid(jeditaskid):
         return None
 
 
+def _panda_tasks_row_for_jeditaskid(jeditaskid):
+    try:
+        from pcs.models import PandaTasks
+        return (PandaTasks.objects
+                .select_related('prod_task')
+                .filter(jedi_task_id=int(jeditaskid)).first())
+    except Exception:
+        logger.exception("PandaTasks lookup failed for PanDA task %s", jeditaskid)
+        return None
+
+
 def _pcs_task_for_panda_task(task):
     pcs_task = _pcs_task_for_jeditaskid(task.get('jeditaskid'))
     if pcs_task:
@@ -844,6 +855,7 @@ def panda_task_detail(request, jeditaskid):
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
     pcs_task = _pcs_task_for_panda_task(task)
+    panda_tasks_row = _panda_tasks_row_for_jeditaskid(jeditaskid)
     transpath = task.get('transpath') or ''
     if transpath:
         if transpath.startswith(('http://', 'https://')):
@@ -887,6 +899,7 @@ def panda_task_detail(request, jeditaskid):
         'task': task,
         'jeditaskid': jeditaskid,
         'pcs_task': pcs_task,
+        'panda_tasks_metadata': (panda_tasks_row.metadata if panda_tasks_row else {}),
         'jobs': jobs,
         'job_summary': summary,
         'job_count': len(jobs),
@@ -1028,11 +1041,18 @@ def epic_queues_list(request):
 def epic_queue_detail(request, queue_name):
     """Full schedconfig for a single ePIC queue."""
     import json as json_mod
+    try:
+        from monitor_app.models import PandaQueue
+        panda_queue = PandaQueue.objects.filter(queue_name=queue_name).first()
+    except Exception:
+        logger.exception("PandaQueue lookup failed for %s", queue_name)
+        panda_queue = None
     result = get_queue(queue_name)
     if 'error' in result:
         return render(request, 'monitor_app/epic_queue_detail.html', {
             'error': result['error'],
             'queue_name': queue_name,
+            'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
         })
     config = result['queue']
 
@@ -1081,6 +1101,7 @@ def epic_queue_detail(request, queue_name):
 
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
+        'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),

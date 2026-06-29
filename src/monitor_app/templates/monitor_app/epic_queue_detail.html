@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}ePIC Queue: {{ queue_name }}{% endblock %}
 
@@ -14,6 +15,7 @@
 
     <h1>{{ queue_name }}</h1>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
+    {% ai_assessment_panel panda_queue_metadata %}
 
     {% if error %}
     <div class="alert alert-danger">{{ error }}</div>

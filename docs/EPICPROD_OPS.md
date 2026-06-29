@@ -142,6 +142,43 @@ they do not probe services from Apache requests. The production nav `System`
 item turns red when the cached aggregate is red or stale, so both
 `pandaserver02` and devcloud surface infrastructure trouble quickly.
 
+## AI assessments
+
+epicprod stores append-only AI assessments of production objects. The current
+supported subjects are campaign tasks, PanDA tasks, PanDA jobs, and PanDA
+sites/queues. Assessments appear on the corresponding object pages and in the
+production nav under **AI**, which lists all assessment content with counts by
+subject type.
+
+The persistent record is `AIContent`. It stores the assessed subject as a string
+type/key pair, display label, monitor URL, human or service username, AI/model
+identifier, Markdown assessment text, optional JSON metadata, and creation time.
+The subject object's own JSON field stores only `ai_content_ids`, so object
+pages can show their assessments without embedding the assessment text in task,
+job, or queue records. Assessment rows are not edited or deleted; corrections
+and followups are represented as additional rows.
+
+The canonical subject types for new assessments are:
+
+| Subject type | Key |
+|---|---|
+| `campaign_task` | PCS composed campaign task name |
+| `panda_task` | JEDI task id, or PanDA task name when no JEDI id is known |
+| `panda_job` | PanDA job id (`pandaid`) |
+| `panda_queue` | PanDA queue name; if the queue name equals the site name, the row represents the site as a whole |
+
+AI clients register assessments through MCP with
+`epicprod_register_ai_assessment`. The tool resolves known subjects, creates the
+`AIContent` row, and appends the new id to the subject JSON field in one
+transaction. This is the write path intended for Codex, the PanDA Mattermost bot,
+and later automated production assessors such as corun-ai. The public subject
+type names above are the MCP interface; implementation-specific model names are
+not part of that interface.
+
+Assessment text is rendered as Markdown in the UI and sanitized before display.
+The metadata row identifies who registered it, which AI/model produced it, and
+when it was created.
+
 ## Logs
 
 Two distinct artifacts:

@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Q
 from django.core.paginator import Paginator
 from rest_framework import viewsets, generics
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
@@ -15,7 +15,8 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent
+from .ai_assessments import ai_content_items
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
@@ -2881,10 +2882,8 @@ def update_panda_queues_from_github(request):
         with urllib.request.urlopen(github_url) as response:
             data = json.loads(response.read().decode())
         
-        # Clear existing data and reload
-        PandaQueue.objects.all().delete()
-        
         created_count = 0
+        updated_count = 0
         for queue_name, config in data.items():
             # Extract key fields from config
             site = config.get('site', '')
@@ -2895,18 +2894,23 @@ def update_panda_queues_from_github(request):
             if config.get('status') == 'offline':
                 status = 'offline'
             
-            # Create queue
-            PandaQueue.objects.create(
+            _queue, created = PandaQueue.objects.update_or_create(
                 queue_name=queue_name,
-                site=site,
-                queue_type=queue_type,
-                status=status,
-                config_data=config,
+                defaults={
+                    'site': site,
+                    'queue_type': queue_type,
+                    'status': status,
+                    'config_data': config,
+                },
             )
-            created_count += 1
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
         
         messages.success(request, 
-            f'Successfully updated {created_count} PanDA queues from GitHub<br>'
+            f'Successfully updated PanDA queues from GitHub '
+            f'({created_count} created, {updated_count} updated)<br>'
             f'<strong>Repository:</strong> {repo_location}<br>'
             f'<strong>File:</strong> {file_path}<br>'
             f'<strong>View on GitHub:</strong> <a href="{github_file_url}" target="_blank">Click here to see what was loaded</a>',
@@ -2994,6 +2998,47 @@ def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
     return render(request, 'monitor_app/prod_hub_workflow.html', pcs_hub_counts())
+
+
+def ai_content_list(request):
+    """Consolidated append-only AI content for epicprod."""
+    subject_type = (request.GET.get('subject_type') or '').strip()
+    q = (request.GET.get('q') or '').strip()
+    qs = AIContent.objects.all().order_by('-created_at')
+    if subject_type:
+        qs = qs.filter(subject_type=subject_type)
+    if q:
+        qs = qs.filter(
+            Q(subject_key__icontains=q)
+            | Q(subject_label__icontains=q)
+            | Q(assessment__icontains=q)
+            | Q(username__icontains=q)
+            | Q(ai__icontains=q)
+        )
+    paginator = Paginator(qs, 100)
+    page_obj = paginator.get_page(request.GET.get('page') or 1)
+    subject_types = (
+        AIContent.objects
+        .order_by('subject_type')
+        .values_list('subject_type', flat=True)
+        .distinct()
+    )
+    subject_counts = list(
+        AIContent.objects
+        .values('subject_type')
+        .annotate(count=Count('id'))
+        .order_by('subject_type')
+    )
+    total_count = sum(row['count'] for row in subject_counts)
+    return render(request, 'monitor_app/ai_content_list.html', {
+        'items': ai_content_items(page_obj.object_list),
+        'page_obj': page_obj,
+        'subject_types': subject_types,
+        'subject_counts': subject_counts,
+        'total_count': total_count,
+        'selected_subject_type': subject_type,
+        'q': q,
+    })
 
 
 def testbed_hub(request):

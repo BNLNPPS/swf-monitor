@@ -87,6 +87,10 @@
         </div>
     </div>
 
+    {% if epicprod_job %}
+    {% ai_assessment_panel epicprod_job.data %}
+    {% endif %}
+
     <!-- Files -->
     {% if display_files %}
     <div class="card mb-3">

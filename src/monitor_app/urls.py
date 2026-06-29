@@ -57,6 +57,7 @@ from .views import (
     update_rucio_endpoints_from_github,
     mcp_health,
     panda_hub, prod_hub, testbed_hub,
+    ai_content_list,
 )
 
 # Import PanDA database views from new dedicated module
@@ -227,6 +228,7 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
+    path('prod/ai/', ai_content_list, name='ai_content_list'),
     path('testbed/', testbed_hub, name='testbed_hub'),
 
     # PanDA Production Monitor

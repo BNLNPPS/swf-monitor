@@ -243,6 +243,75 @@
         const escaped = htmlEscape(s);
         return isUrl(s) ? `<a href="${escaped}" rel="noopener noreferrer">${escaped}</a>` : escaped;
     }
+    function inlineMarkdownHtml(text) {
+        return htmlEscape(text)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    }
+    function markdownHtml(text) {
+        const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+        let html = '';
+        let listOpen = false;
+        const closeList = () => {
+            if (listOpen) {
+                html += '</ul>';
+                listOpen = false;
+            }
+        };
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                closeList();
+                continue;
+            }
+            const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+            if (heading) {
+                closeList();
+                const level = heading[1].length + 2;
+                html += `<h${level}>${inlineMarkdownHtml(heading[2])}</h${level}>`;
+                continue;
+            }
+            const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+            if (bullet) {
+                if (!listOpen) {
+                    html += '<ul>';
+                    listOpen = true;
+                }
+                html += `<li>${inlineMarkdownHtml(bullet[1])}</li>`;
+                continue;
+            }
+            closeList();
+            html += `<p>${inlineMarkdownHtml(trimmed)}</p>`;
+        }
+        closeList();
+        return html;
+    }
+    function aiAssessmentsHtml(data) {
+        const items = Array.isArray(data) ? data : [];
+        const rows = items
+            .filter(item => item && String(item.assessment || '').trim())
+            .map((item, idx, arr) => {
+                const border = idx + 1 < arr.length ? ' mb-3 pb-3 border-bottom' : '';
+                return `<div class="${border}">
+                    <table class="table table-sm table-bordered mb-2">
+                        <tbody>
+                        <tr>
+                            <td><strong>Created</strong></td><td>${htmlEscape(item.created_at || '')}</td>
+                            <td><strong>User</strong></td><td>${htmlEscape(item.username || '')}</td>
+                            <td><strong>AI</strong></td><td>${htmlEscape(item.ai || '')}</td>
+                        </tr>
+                        <tr><td colspan="6"><div class="ai-assessment-text" style="overflow-wrap:anywhere;">${markdownHtml(item.assessment)}</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>`;
+            }).join('');
+        if (!rows) return '';
+        return `<div class="card mb-3">
+            <div class="card-header"><strong>AI Assessments</strong></div>
+            <div class="card-body">${rows}</div>
+        </div>`;
+    }
     function pandaStatusCellClass(status) {
         const value = status || '-';
         if (['failed', 'aborted', 'broken', 'submit_failed'].includes(value)) return 'failed_fill';
@@ -1003,6 +1072,7 @@
             : `<span class="badge bg-${statusColors[t.status]||'secondary'}">${htmlEscape(t.status)}</span>`;
 
         let html = `<p>${statusBadge}<span class="item-meta${statusBadge ? ' ms-2' : ''}">by ${htmlEscape(t.created_by)} | ${htmlEscape(t.updated_at)}</span></p>`;
+        html += aiAssessmentsHtml(t.ai_content || []);
         html += pandaTasksHtml(t);
         html += pandaOperationsHtml(t);
         if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {

@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}AI Content - epicprod{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>AI Content</h1>
+    </div>
+
+    <p>
+        AI assessments performed on PanDA tasks, jobs, and sites/queues are shown here.
+    </p>
+    <p class="text-muted">
+        {{ total_count }} total assessment{{ total_count|pluralize }}{% if subject_counts %}:
+        {% for row in subject_counts %}
+            {{ row.subject_type }} {{ row.count }}{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+        {% endif %}
+    </p>
+
+    <form method="get" class="row g-2 align-items-end mb-3">
+        <div class="col-md-3">
+            <label class="form-label mb-1" for="subject-type">Subject Type</label>
+            <select class="form-select form-select-sm" id="subject-type" name="subject_type">
+                <option value="">All</option>
+                {% for subject_type in subject_types %}
+                <option value="{{ subject_type }}" {% if subject_type == selected_subject_type %}selected{% endif %}>{{ subject_type }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-5">
+            <label class="form-label mb-1" for="q">Search</label>
+            <input class="form-control form-control-sm" id="q" name="q" value="{{ q }}">
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+            <a class="btn btn-sm btn-outline-secondary" href="{% url 'monitor_app:ai_content_list' %}">Clear</a>
+        </div>
+    </form>
+
+    {% if items %}
+    <table class="table table-sm table-bordered">
+        <tbody>
+        {% for item in items %}
+        <tr>
+            <td><strong>Created</strong></td>
+            <td>{{ item.created_display }}</td>
+            <td><strong>User</strong></td>
+            <td>{{ item.username }}</td>
+            <td><strong>AI</strong></td>
+            <td>{{ item.ai }}</td>
+        </tr>
+        <tr>
+            <td><strong>Subject</strong></td>
+            <td colspan="5">
+                {{ item.subject_type }}:
+                {% if item.subject_url %}
+                <a href="{{ item.subject_url }}">{{ item.subject_label|default:item.subject_key }}</a>
+                {% else %}
+                {{ item.subject_label|default:item.subject_key }}
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td colspan="6">
+                <div class="ai-assessment-text" style="overflow-wrap:anywhere;">{{ item.assessment_html }}</div>
+            </td>
+        </tr>
+        {% if not forloop.last %}
+        <tr><td colspan="6" style="height:.5rem;background:#f8f9fa;"></td></tr>
+        {% endif %}
+        {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page_obj.has_other_pages %}
+    <nav aria-label="AI content pages">
+        <span class="me-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_previous %}
+        <a class="btn btn-sm btn-outline-secondary" href="?page={{ page_obj.previous_page_number }}&subject_type={{ selected_subject_type|urlencode }}&q={{ q|urlencode }}">Previous</a>
+        {% endif %}
+        {% if page_obj.has_next %}
+        <a class="btn btn-sm btn-outline-secondary" href="?page={{ page_obj.next_page_number }}&subject_type={{ selected_subject_type|urlencode }}&q={{ q|urlencode }}">Next</a>
+        {% endif %}
+    </nav>
+    {% endif %}
+    {% else %}
+    <div class="text-muted">No AI content found.</div>
+    {% endif %}
+</div>
+{% endblock %}

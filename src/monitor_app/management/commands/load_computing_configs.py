@@ -49,7 +49,10 @@ class Command(BaseCommand):
         # Clear existing data if requested
         if options['clear']:
             self.stdout.write('Clearing existing data...')
-            PandaQueue.objects.all().delete()
+            for queue in PandaQueue.objects.all():
+                if (queue.metadata or {}).get('ai_content_ids'):
+                    continue
+                queue.delete()
             RucioEndpoint.objects.all().delete()
             self.stdout.write(self.style.SUCCESS('Existing data cleared'))
         

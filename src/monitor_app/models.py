@@ -741,6 +741,7 @@ class PandaQueue(models.Model):
     status = models.CharField(max_length=50, default='active')
     queue_type = models.CharField(max_length=50, blank=True)
     config_data = models.JSONField()
+    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -752,6 +753,41 @@ class PandaQueue(models.Model):
     
     def __str__(self):
         return self.queue_name
+
+    @property
+    def is_site_record(self):
+        return bool(self.queue_name and self.queue_name == self.site)
+
+
+class AIContent(models.Model):
+    """Append-only AI assessment content for production objects.
+
+    Subject references are string keys, not foreign keys, so AI content can
+    assess local rows, PanDA-native objects, queues/sites, Rucio objects, or
+    future production entities through one table.
+    """
+    subject_type = models.CharField(max_length=100, db_index=True)
+    subject_key = models.CharField(max_length=500, db_index=True)
+    subject_label = models.CharField(max_length=500, blank=True, default='')
+    subject_url = models.CharField(max_length=500, blank=True, default='')
+    username = models.CharField(max_length=100)
+    ai = models.CharField(max_length=100)
+    assessment = models.TextField()
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'swf_ai_content'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['subject_type', 'subject_key', '-created_at']),
+            models.Index(fields=['username', '-created_at']),
+        ]
+        verbose_name = 'AI Content'
+        verbose_name_plural = 'AI Content'
+
+    def __str__(self):
+        return f"{self.subject_type}:{self.subject_key} ({self.ai})"
 
 
 class RucioEndpoint(models.Model):
