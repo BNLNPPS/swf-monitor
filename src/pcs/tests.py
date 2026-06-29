@@ -323,6 +323,99 @@ class BuildTaskParamsTest(TestCase):
         self.assertEqual(env['TAG_PREFIX'], 'legacy/prefix')
         self.assertEqual(env['BG_FILES'], 'legacy.json')
 
+    @patch('pcs.services.fetch_jlab_rucio_did_files')
+    def test_evgen_try_rerun_adds_payload_tag_prefix(self, fetch_files):
+        fetch_files.return_value = [{'name': '/EVGEN/DIS/NC/sample/run1.hepmc3'}]
+        physics_tag = SimpleNamespace(
+            tag_label='p3001',
+            parameters={'beam_energy_electron': 10, 'beam_energy_hadron': 100},
+        )
+        dataset = SimpleNamespace(
+            scope='group.EIC',
+            detector_version='26.06.0',
+            detector_config='epic_craterlake',
+            physics_tag=physics_tag,
+            evgen_tag=SimpleNamespace(parameters={}),
+            background_tag_id=None,
+            background_tag=None,
+            composed_name='group.EIC.26.06.0.epic_craterlake.p3001.e1.s1.r1.sample',
+            build_dataset_name=lambda: 'unused',
+        )
+        task = SimpleNamespace(
+            composed_name=dataset.composed_name,
+            dataset=dataset,
+            inputs=[{'did': 'epic:/EVGEN/DIS/NC/sample'}],
+            created_by='wenaus',
+            get_effective_config=lambda: {
+                'panda_site': 'BNL_OSG_PanDA_1',
+                'panda_working_group': 'EIC',
+                'container_image': '/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:26.06.0-stable',
+                'target_hours_per_job': 2,
+                'copy_reco': True,
+                'copy_full': False,
+                'copy_log': True,
+                'use_rucio': True,
+                'bg_mixing': False,
+                'data': {'events_per_job': 100},
+            },
+        )
+        panda_tasks = SimpleNamespace(
+            try_number=2,
+            task_name=f'{dataset.composed_name}.try2',
+        )
+
+        env = build_evgen_task_params(task, panda_tasks=panda_tasks)['env']
+
+        self.assertEqual(env['TAG_PREFIX'], 'try2')
+
+    @patch('pcs.services.fetch_jlab_rucio_did_files')
+    def test_evgen_try_rerun_appends_to_existing_payload_tag_prefix(self, fetch_files):
+        fetch_files.return_value = [{'name': '/EVGEN/DIS/NC/sample/run1.hepmc3'}]
+        physics_tag = SimpleNamespace(
+            tag_label='p3001',
+            parameters={'beam_energy_electron': 10, 'beam_energy_hadron': 100},
+        )
+        evgen_tag = SimpleNamespace(
+            parameters={'bg_tag_prefix': 'legacy/prefix'},
+        )
+        dataset = SimpleNamespace(
+            scope='group.EIC',
+            detector_version='26.06.0',
+            detector_config='epic_craterlake',
+            physics_tag=physics_tag,
+            evgen_tag=evgen_tag,
+            background_tag_id=None,
+            background_tag=None,
+            composed_name='group.EIC.26.06.0.epic_craterlake.p3001.e1.s1.r1.sample',
+            build_dataset_name=lambda: 'unused',
+        )
+        task = SimpleNamespace(
+            composed_name=dataset.composed_name,
+            dataset=dataset,
+            inputs=[{'did': 'epic:/EVGEN/DIS/NC/sample'}],
+            created_by='wenaus',
+            get_effective_config=lambda: {
+                'panda_site': 'BNL_OSG_PanDA_1',
+                'panda_working_group': 'EIC',
+                'container_image': '/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:26.06.0-stable',
+                'target_hours_per_job': 2,
+                'copy_reco': True,
+                'copy_full': False,
+                'copy_log': True,
+                'use_rucio': True,
+                'bg_mixing': True,
+                'data': {'events_per_job': 100},
+            },
+        )
+        panda_tasks = SimpleNamespace(
+            try_number=3,
+            task_name=f'{dataset.composed_name}.try3',
+        )
+
+        env = build_evgen_task_params(task, panda_tasks=panda_tasks)['env']
+
+        self.assertEqual(env['TAG_PREFIX'], 'legacy/prefix/try3')
+
 
 class DatasetMetadataTest(TestCase):
     def test_external_evgen_metadata_helpers(self):

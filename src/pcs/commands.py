@@ -48,6 +48,16 @@ def _add_background_env(env, task, *, defaults=False):
         env['BG_FILES'] = bg_files
 
 
+def _add_try_env(env, panda_tasks):
+    """Disambiguate payload-managed Rucio output paths for full task reruns."""
+    try_number = int(getattr(panda_tasks, 'try_number', 0) or 0)
+    if try_number <= 1:
+        return
+    suffix = f'try{try_number}'
+    existing = str(env.get('TAG_PREFIX') or '').strip('/')
+    env['TAG_PREFIX'] = f'{existing}/{suffix}' if existing else suffix
+
+
 def build_condor_command(task):
     """
     Build the Condor submit_csv.sh command from a ProdTask.
@@ -575,6 +585,7 @@ def build_evgen_task_params(task, panda_tasks=None):
     # PanDA task/outDS name is attempt-specific when this is a retry or site race
     # (try2, try3, ...), carried by the PandaTasks association row.
     env = _evgen_env(task)
+    _add_try_env(env, panda_tasks)
     out_ds = (
         getattr(panda_tasks, 'task_name', '') or
         task.composed_name or ds.composed_name or ds.build_dataset_name()
