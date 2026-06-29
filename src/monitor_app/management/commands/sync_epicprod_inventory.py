@@ -1,5 +1,10 @@
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import OperationalError, ProgrammingError
 
@@ -9,6 +14,12 @@ from monitor_app.epicprod_inventory import (
     sync_job_from_study_data,
 )
 from monitor_app.panda.queries import study_job
+
+
+CACHE_PAYLOAD_LOG = (
+    Path(__file__).resolve().parents[4] / 'scripts' / 'cache-payload-log.py'
+)
+STUDY_FETCH_TIMEOUT = int(os.environ.get('EPICPROD_STUDY_FETCH_TIMEOUT', '150'))
 
 
 class Command(BaseCommand):
@@ -82,6 +93,8 @@ class Command(BaseCommand):
         data = study_job(pandaid)
         if 'error' in data:
             raise CommandError(data['error'])
+        if not dry_run:
+            self._cache_payload_log_before_study(pandaid, data)
         if dry_run:
             self.stdout.write(json.dumps(self._jsonable(data), indent=2))
             return
@@ -91,6 +104,45 @@ class Command(BaseCommand):
                 f'synced epicprod job {job.pandaid}: phase={job.phase or "(none)"}'
             )
         )
+
+    def _cache_payload_log_before_study(self, pandaid, data):
+        job = data.get('job') or {}
+        log_file = data.get('log_file') or {}
+        jeditaskid = job.get('jeditaskid')
+        scope = log_file.get('scope')
+        lfn = log_file.get('lfn')
+        if not (jeditaskid and scope and lfn):
+            return
+        cache_root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
+        done = os.path.join(cache_root, 'panda-logs', str(jeditaskid), str(pandaid), '.done')
+        if os.path.isfile(done):
+            return
+        cmd = [
+            sys.executable, str(CACHE_PAYLOAD_LOG),
+            '--scope', str(scope),
+            '--lfn', str(lfn),
+            '--jeditaskid', str(jeditaskid),
+            '--pandaid', str(pandaid),
+        ]
+        self.stdout.write(f'caching payload log before study: pandaid={pandaid}')
+        try:
+            p = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=STUDY_FETCH_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise CommandError(
+                f'payload log fetch timed out before study for pandaid={pandaid} '
+                f'after {STUDY_FETCH_TIMEOUT}s'
+            ) from exc
+        if p.returncode != 0:
+            stderr = (p.stderr or '').strip()
+            reason = stderr.splitlines()[-1] if stderr else f'rc={p.returncode}'
+            raise CommandError(
+                f'payload log fetch failed before study for pandaid={pandaid}: {reason}'
+            )
+        for line in (p.stderr or '').splitlines():
+            self.stdout.write(f'  cache-payload-log: {line}')
 
     @staticmethod
     def _jsonable(value):
