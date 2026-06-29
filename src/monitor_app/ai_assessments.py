@@ -195,8 +195,11 @@ def ai_content_for_json(data):
     if not ids:
         return []
     from .models import AIContent
-    by_id = {row.pk: row for row in AIContent.objects.filter(pk__in=ids)}
-    return [by_id[item_id] for item_id in ids if item_id in by_id]
+    return list(
+        AIContent.objects
+        .filter(pk__in=ids)
+        .order_by('-created_at', '-id')
+    )
 
 
 def assessment_presentation(data, *, title='AI Assessments'):
