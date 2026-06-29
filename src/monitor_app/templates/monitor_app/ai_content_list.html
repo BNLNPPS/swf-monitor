@@ -55,10 +55,10 @@
 
     {% if items %}
     {% for item in items %}
-    <div class="ai-assessment-entry mb-2">
+    <div class="ai-assessment-entry border border-dark border-3 mb-2">
     <table class="table table-sm mb-0">
         <tbody>
-            <tr class="ai-assessment-header">
+            <tr class="ai-assessment-header table-secondary">
                 <td><strong>Created:</strong> {{ item.created_display }}</td>
                 <td><strong>AI:</strong> {{ item.ai }}</td>
                 <td><strong>User:</strong> {{ item.username }}</td>
@@ -80,7 +80,7 @@
                     {% endif %}
                 </td>
             </tr>
-            <tr class="ai-assessment-header">
+            <tr class="ai-assessment-header table-secondary">
                 <td colspan="4">
                     <strong>Subject:</strong> {{ item.subject_type }}:
                     {% if item.subject_url %}

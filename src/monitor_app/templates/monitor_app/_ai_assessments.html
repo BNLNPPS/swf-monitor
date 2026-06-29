@@ -4,10 +4,10 @@
     <div class="card-body">
         {% for item in items %}
         <div{% if not forloop.last %} class="mb-2"{% endif %}>
-            <div class="ai-assessment-entry">
+            <div class="ai-assessment-entry border border-dark border-3">
             <table class="table table-sm mb-0">
                 <tbody>
-                <tr class="ai-assessment-header">
+                <tr class="ai-assessment-header table-secondary">
                     <td><strong>Created:</strong> {{ item.created_display|default:item.created_at }}</td>
                     <td><strong>AI:</strong> {{ item.ai }}</td>
                     <td><strong>User:</strong> {{ item.username }}</td>
