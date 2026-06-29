@@ -16,7 +16,7 @@ import os
 import hashlib
 from html import escape
 from datetime import datetime
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from ..utils import DataTablesProcessor
@@ -24,7 +24,7 @@ from ..panda import (
     get_activity, study_job, list_jobs,
     list_jobs_dt, list_tasks_dt,
     job_filter_counts, task_filter_counts,
-    get_task, error_summary, diagnose_jobs,
+    get_task, error_summary, diagnose_jobs, job_completion_details,
     list_queues, get_queue,
 )
 from ..panda.constants import (
@@ -844,11 +844,26 @@ def panda_task_detail(request, jeditaskid):
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
     pcs_task = _pcs_task_for_panda_task(task)
+    transpath = task.get('transpath') or ''
+    if transpath:
+        if transpath.startswith(('http://', 'https://')):
+            task['transformation_view_url'] = (
+                _panda_view_text_url(transpath)
+                if 'pandaserver-doma.cern.ch/trf/' in transpath else transpath
+            )
+        else:
+            task['transformation_view_url'] = _panda_view_text_url(
+                'https://pandaserver-doma.cern.ch/trf/user/'
+                + quote(transpath.strip('/'), safe='')
+            )
 
     # Get jobs for this task
     jobs_data = list_jobs(taskid=int(jeditaskid), days=90, limit=200)
     jobs = jobs_data.get('jobs', []) if not jobs_data.get('error') else []
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
+    completion_details = job_completion_details([job.get('pandaid') for job in jobs])
+    for job in jobs:
+        job.update(completion_details.get(job.get('pandaid'), {}))
     task_record = task.get('task_record') or {}
     task_record_items = [
         {'name': key, 'value': '' if value is None else value}

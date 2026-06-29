@@ -8,6 +8,7 @@ Used by MCP tools and Django views alike.
 from .queries import (
     list_jobs,
     diagnose_jobs,
+    job_completion_details,
     list_tasks,
     error_summary,
     get_activity,
@@ -25,6 +26,7 @@ from .queries import (
 __all__ = [
     'list_jobs',
     'diagnose_jobs',
+    'job_completion_details',
     'list_tasks',
     'error_summary',
     'get_activity',

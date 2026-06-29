@@ -379,6 +379,51 @@ def _bulk_destinationse(pandaids):
         return {}
 
 
+def job_completion_details(pandaids):
+    """Return lightweight completion/error details for visible jobs.
+
+    This reads only jobsactive4/jobsarchived4 columns. It deliberately does not
+    fetch files, harvester records, pilot logs, or run log analysis; the single
+    job detail page owns that deeper path.
+    """
+    ids = [int(pandaid) for pandaid in (pandaids or []) if pandaid]
+    if not ids:
+        return {}
+    fields = ['pandaid', 'attemptnr', 'maxattempt', *ERROR_FIELDS]
+    placeholders = ','.join(['%s'] * len(ids))
+    field_list = ', '.join(f'"{field}"' for field in fields)
+    sql = f"""
+        SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsactive4"
+            WHERE "pandaid" IN ({placeholders})
+        UNION ALL
+        SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "pandaid" IN ({placeholders})
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, ids + ids)
+            details = {}
+            for row in cursor.fetchall():
+                item = row_to_dict(row, fields)
+                errors = extract_errors(item)
+                attempt = item.get('attemptnr')
+                maxattempt = item.get('maxattempt') or 3
+                try:
+                    final_attempt = bool(attempt and int(attempt) >= int(maxattempt))
+                except (TypeError, ValueError):
+                    final_attempt = False
+                details[item['pandaid']] = {
+                    'attemptnr': attempt,
+                    'maxattempt': maxattempt,
+                    'final_attempt': final_attempt,
+                    'errors': errors,
+                }
+            return details
+    except Exception:
+        logger.exception("job_completion_details failed")
+        return {}
+
+
 def _stale_task_filter():
     """Exclude non-terminal tasks created more than STALE_TASK_DAYS ago."""
     cutoff = timezone.now() - timedelta(days=STALE_TASK_DAYS)

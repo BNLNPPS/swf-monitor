@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
 {% load swf_fmt humanize %}
 
-{% block title %}Task {{ jeditaskid }} - SWF Monitor{% endblock %}
+{% block title %}PanDA Task {{ jeditaskid }} - SWF Monitor{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Task {{ jeditaskid }}</h2>
+        <h2>PanDA Task {{ jeditaskid }}</h2>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
     </div>
 
@@ -33,7 +33,7 @@
                         {% endif %}
                         {% if task.workinggroup %}<tr><td><strong>Working Group</strong></td><td>{{ task.workinggroup }}</td></tr>{% endif %}
                         {% if task.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ task.processingtype }}</td></tr>{% endif %}
-                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{{ task.transpath }}</td></tr>{% endif %}
+                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{% if task.transformation_view_url %}<a href="{{ task.transformation_view_url }}" target="_blank" rel="noopener">{{ task.transpath }}</a>{% else %}{{ task.transpath }}{% endif %}</td></tr>{% endif %}
                     </table>
                 </div>
             </div>
@@ -179,10 +179,12 @@
                         <tr>
                             <th>PanDA ID</th>
                             <th>Status</th>
+                            <th>Error</th>
+                            <th>Attempt</th>
                             <th>Site</th>
                             <th>Created</th>
                             <th>Ended</th>
-                            <th>Cores</th>
+                            <th>Events</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -190,10 +192,27 @@
                     <tr>
                         <td><a href="{% url 'monitor_app:panda_job_detail' job.pandaid %}">{{ job.pandaid }}</a></td>
                         <td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td>
+                        <td style="overflow-wrap:anywhere;">
+                            {% if job.errors %}
+                                {% for err in job.errors %}
+                                <div><strong>{{ err.component }}</strong>:{{ err.code }}{% if err.diag %} {{ err.diag|truncatechars:120 }}{% endif %}</div>
+                                {% endfor %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if job.attemptnr %}
+                                {{ job.attemptnr }}/{{ job.maxattempt|default:"?" }}
+                                {% if job.final_attempt %}<span class="text-muted">(final)</span>{% endif %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
                         <td>{{ job.computingsite|default:"" }}</td>
                         <td>{{ job.creationtime|fmt_dt }}</td>
                         <td>{{ job.endtime|fmt_dt }}</td>
-                        <td>{{ job.corecount|default:"" }}</td>
+                        <td>{{ job.nevents|default:"" }}</td>
                     </tr>
                     {% endfor %}
                     </tbody>

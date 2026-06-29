@@ -124,7 +124,6 @@
                 <span id="submit-task-wrap" tabindex="0" style="display:none;">
                     <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
                 </span>
-                <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -276,43 +275,33 @@
             });
         }
         if (!rows.length) return '';
-        const currentRows = rows.filter(pt => pt.current).length;
         const rowHtml = rows.map(pt => {
             const jedi = pt.jedi_task_id
                 ? `<a href="/swf-monitor/panda/tasks/${pt.jedi_task_id}/">${pt.jedi_task_id}</a>`
                 : '<span class="pcs-ptask-muted">pending</span>';
             const current = pt.current ? ' <span class="pcs-ptask-muted">(current)</span>' : '';
             const attemptLabel = pandaAttemptLabel(pt, rows);
-            const when = pt.updated_at || pt.created_at || '';
+            const submittedAt = pt.created_at || '';
             const datasets = [
                 pt.out_ds ? `<div><strong>out:</strong> ${htmlEscape(pt.out_ds)}</div>` : '',
                 pt.log_ds ? `<div><strong>log:</strong> ${htmlEscape(pt.log_ds)}</div>` : '',
             ].filter(Boolean).join('');
-            const context = [
-                pt.site ? `<div><strong>site:</strong> ${htmlEscape(pt.site)}</div>` : '',
-                pt.association_source ? `<div><strong>source:</strong> ${htmlEscape(pt.association_source)}</div>` : '',
-                when ? `<div><strong>updated:</strong> ${htmlEscape(when)}</div>` : '',
-            ].filter(Boolean).join('');
-            const reason = pt.match_reason ? `<div class="pcs-ptask-muted">${htmlEscape(pt.match_reason)}</div>` : '';
             return `<tr>
                 <td>${htmlEscape(attemptLabel)}${current}</td>
                 <td>${jedi}</td>
                 <td class="${pandaStatusCellClass(pt.status_snapshot)}">${htmlEscape(pt.status_snapshot || '-')}</td>
                 <td class="pcs-ptask-name">${htmlEscape(pt.task_name || '')}</td>
                 <td class="pcs-ptask-datasets">${datasets || '<span class="pcs-ptask-muted">-</span>'}</td>
-                <td>${context || '<span class="pcs-ptask-muted">-</span>'}${reason}</td>
+                <td>${submittedAt ? htmlEscape(submittedAt) : '<span class="pcs-ptask-muted">-</span>'}</td>
             </tr>`;
         }).join('');
-        const countText = `${rows.length} PanDA task${rows.length === 1 ? '' : 's'}`;
-        const currentText = currentRows ? `${currentRows} current` : 'history';
         return `<section class="pcs-ptask-summary" aria-label="PanDA task activity">
             <div class="pcs-ptask-head">
                 <span>PanDA Tasks</span>
-                <span><span class="badge bg-secondary">${countText}</span> <span class="badge bg-info">${currentText}</span></span>
             </div>
             <div class="table-responsive">
                 <table class="table table-sm table-bordered pcs-ptask-table">
-                    <thead><tr><th>Attempt</th><th>JEDI task</th><th>Status</th><th>PanDA task name</th><th>Datasets</th><th>Context</th></tr></thead>
+                    <thead><tr><th>Attempt</th><th>PanDA task</th><th>Status</th><th>PanDA task name</th><th>Datasets</th><th>Submitted</th></tr></thead>
                     <tbody>${rowHtml}</tbody>
                 </table>
             </div>
@@ -340,7 +329,7 @@
         return `<div class="pcs-panda-ops" data-jedi-task-id="${htmlEscape(jediTaskId)}">
             <span class="pcs-panda-ops-label">PanDA Operations</span>
             <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="increase_attempts">Add Another Retry${currentMaxAttemptLabel(t, jediTaskId)}</button>
-            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="retry_failures">Restart And Retry Failures</button>
+            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="retry_failures">Restart Finished Task And Retry Failures</button>
             <button type="button" class="btn pcs-reset-submit-btn btn-sm pcs-panda-op" data-panda-op="rerun_entire_task">Rerun Entire Task</button>
         </div>`;
     }
@@ -453,7 +442,6 @@
     const btnLockTask = document.getElementById('btn-lock-task');
     const submitTaskWrap = document.getElementById('submit-task-wrap');
     const btnSubmitTask = document.getElementById('btn-submit-task');
-    const linkPandaTask = document.getElementById('link-panda-task');
     const btnResetTask = null;
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
@@ -488,7 +476,6 @@
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
         if (submitTaskWrap) submitTaskWrap.style.display = 'none';
-        if (linkPandaTask) linkPandaTask.style.display = 'none';
         composeTaskId = null; composeTaskName = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -504,7 +491,6 @@
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
         if (submitTaskWrap) submitTaskWrap.style.display = 'none';
-        if (linkPandaTask) linkPandaTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -578,7 +564,6 @@
             if (btnCopyTask) btnCopyTask.style.display = 'none';
             if (btnLockTask) btnLockTask.style.display = 'none';
             if (submitTaskWrap) submitTaskWrap.style.display = 'none';
-            if (linkPandaTask) linkPandaTask.style.display = 'none';
         }
         renderList();
         updateUrl();
@@ -831,11 +816,11 @@
     }
 
     // Dataset/config detail panels are read-only here — hide every task-only
-    // action (Submit/Lock/Edit/Copy/Delete/PanDA link/New) that a prior task
+    // action (Submit/Lock/Edit/Copy/Delete/New) that a prior task
     // view may have left visible. Submit-to-PanDA is task business, not dataset.
     function hideTaskActions() {
         [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
-         linkPandaTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
+         btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
     }
 
     // ── BROWSE: Show details ──
@@ -968,20 +953,13 @@
                 submitTaskWrap.style.display = 'none';
             }
         }
-        // PanDA task link once the agent has recorded the jediTaskID.
-        if (linkPandaTask) {
-            if (submitted) {
-                linkPandaTask.style.display = 'inline-block';
-                linkPandaTask.href = `/swf-monitor/panda/tasks/${t.panda_task_id}/`;
-                linkPandaTask.textContent = `PanDA Task ${t.panda_task_id}`;
-            } else {
-                linkPandaTask.style.display = 'none';
-            }
-        }
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
+        const hasPandaTasks = Array.isArray(t.panda_tasks) && t.panda_tasks.length > 0;
+        const statusBadge = (t.status === 'submitted' && hasPandaTasks)
+            ? ''
+            : `<span class="badge bg-${statusColors[t.status]||'secondary'}">${htmlEscape(t.status)}</span>`;
 
-        let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
-            <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
+        let html = `<p>${statusBadge}<span class="item-meta${statusBadge ? ' ms-2' : ''}">by ${htmlEscape(t.created_by)} | ${htmlEscape(t.updated_at)}</span></p>`;
         html += pandaTasksHtml(t);
         html += pandaOperationsHtml(t);
         if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
@@ -1252,11 +1230,11 @@
         if (op === 'increase_attempts') {
             suffix = 'panda-add-retry/';
             body.increase = 1;
-            confirmText = `Add one more allowed PanDA retry to JEDI task ${jediTaskId}?`;
+            confirmText = `Add one more allowed retry to PanDA task ${jediTaskId}?`;
         } else if (op === 'retry_failures') {
             suffix = 'panda-retry-failures/';
             body.new_parameters = {};
-            confirmText = `Ask PanDA to restart and retry failed work in JEDI task ${jediTaskId}?`;
+            confirmText = `Ask PanDA to restart and retry failed work in PanDA task ${jediTaskId}?`;
         } else if (op === 'rerun_entire_task') {
             suffix = 'rerun-entire-task/';
             confirmText = `Rerun the entire campaign task as a new PanDA task attempt? This creates a new output namespace.`;
@@ -1297,9 +1275,9 @@
         }
     });
 
-    // After submit, the agent records the jediTaskID asynchronously (usually
-    // seconds). Poll the task until panda_task_id appears so the PanDA link
-    // shows on its own — no manual refresh. Bounded so it can't poll forever.
+    // After submit, the agent records the PanDA task id asynchronously (usually
+    // seconds). Poll the task until panda_task_id appears so the PanDA Tasks
+    // table updates on its own. Bounded so it can't poll forever.
     let submitPollTimer = null;
     let pendingSubmitName = null;   // task awaiting a submit outcome; set on submit, cleared by the SSE handlers below
     function updateTaskFromApiData(taskId, data) {
@@ -1433,10 +1411,10 @@
                 closeSubmitOutcomeStream();
                 if (btnSubmitTask) {
                     btnSubmitTask.disabled = true;
-                    btnSubmitTask.textContent = `Submitted (jediTaskID ${d.jedi_task_id}) — recording failed`;
+                    btnSubmitTask.textContent = `Submitted (PanDA task ${d.jedi_task_id}) — recording failed`;
                 }
-                alert(`Submitted to PanDA as jediTaskID ${d.jedi_task_id}, but recording it on the task `
-                    + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this jediTaskID needs re-recording.`);
+                alert(`Submitted to PanDA as task ${d.jedi_task_id}, but recording it on the task `
+                    + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this PanDA task ID needs re-recording.`);
             }
         });
     }
