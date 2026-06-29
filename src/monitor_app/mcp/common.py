@@ -69,7 +69,8 @@ def _get_testbed_config_path() -> tuple:
 # IMPORTANT: When adding a new @mcp.tool(), you MUST also add it to the
 # hardcoded list below. This list is what LLMs see when discovering tools.
 #
-# Also update: server instructions in settings.py, docs/MCP.md
+# Also update: server instructions in settings.py, docs/MCP.md, and
+# docs/MCP_TOOL_REFERENCE.md.
 # -----------------------------------------------------------------------------
 
 def get_available_tools_list() -> list:
@@ -243,6 +244,11 @@ def get_available_tools_list() -> list:
             "name": "epicprod_register_ai_assessment",
             "description": "Register append-only AI assessment content for an epicprod object and link it from the target object's JSON ai_content_ids when it is a known local subject.",
             "parameters": ["subject_type", "subject_key", "assessment", "username", "ai", "subject_label", "subject_url", "data"],
+        },
+        {
+            "name": "epicprod_get_ai_content",
+            "description": "Retrieve append-only epicprod AI assessment rows by AIContent ids. Use the ids provided in a detail payload's ai_content.retrieval.arguments.ids.",
+            "parameters": ["ids"],
         },
         # PanDA Monitor tools
         {

@@ -1,701 +1,82 @@
 # Model Context Protocol (MCP) Integration
 
-## Overview
-
-The SWF Monitor implements the [Model Context Protocol](https://modelcontextprotocol.io/) (MCP), the open standard for LLM-system interaction. This enables natural language queries and control of the testbed via MCP-compatible LLMs.
-
-**Endpoint:** `/swf-monitor/mcp/`
-
-**Server:** FastMCP, from the official [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk) (`mcp`), hosted by a standalone Starlette ASGI app. (django-mcp-server was retired; see Architecture.)
-
-## Design Philosophy
-
-MCP tools are **data access primitives** with filtering capabilities. The LLM synthesizes, summarizes, and aggregates information from multiple tool calls. This approach:
-
-- Provides flexibility for unanticipated queries
-- Leverages LLM reasoning capabilities
-- Keeps tools simple and composable
-- Supports complex analysis through multiple calls
-
-**Date Range Convention:** All list tools support `start_time` and `end_time` parameters (ISO datetime strings). If omitted, tools default to a reasonable recent period.
-
-**Pagination Metadata:** All list tools return pagination metadata for LLM context management:
-- `items`: The returned records (limited to MAX_ITEMS per tool)
-- `total_count`: Total number of matching records in the database
-- `has_more`: Boolean indicating if there are more records beyond what was returned
-- `monitor_urls`: Links to the web UI for human review
-
-This helps LLMs understand when query results are truncated and whether to refine filters for better results.
-
-## Client Configuration
-
-### Claude Desktop
-
-For clients running on swf-testbed, add to `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "swf-monitor": {
-      "url": "http://127.0.0.1:8001/swf-monitor/mcp/",
-      "transport": "http"
-    }
-  }
-}
-```
-
-### Claude Code
-
-Add via `/mcp add` or create `.mcp.json` in project:
-
-```json
-{
-  "mcpServers": {
-    "swf-monitor": {
-      "type": "http",
-      "url": "http://127.0.0.1:8001/swf-monitor/mcp/"
-    }
-  }
-}
-```
-
-## Authentication
-
-The operational MCP clients on swf-testbed are local clients: Claude Code,
-the PanDA Mattermost bot, the testbed bot, scripts, and the watchdog. They use
-the loopback ASGI endpoint and do not require OAuth.
-
-The public Apache path still exists, but remote Claude.ai GET/SSE streaming is
-not an operational dependency and should not be treated as supported by the
-current deployment. If remote MCP access is reintroduced, require OAuth 2.1
-and revalidate the transport lifecycle under load before enabling it.
-
-**Configuration (production):**
-```bash
-# In .env or environment
-AUTH0_DOMAIN=your-tenant.us.auth0.com
-AUTH0_CLIENT_ID=your-client-id
-AUTH0_CLIENT_SECRET=your-client-secret
-AUTH0_API_IDENTIFIER=https://your-server/swf-monitor/mcp
-```
-
-Leave `AUTH0_DOMAIN` empty to disable OAuth. Do not expose unauthenticated
-remote MCP access.
-
----
-
-### Claude Code Settings Example
-
-Full `~/.claude/settings.json` with swf-monitor MCP server, permissions, and status line:
-
-```json
-{
-  "mcpServers": {
-    "swf-monitor": {
-      "type": "http",
-      "url": "http://127.0.0.1:8001/swf-monitor/mcp/"
-    }
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/statusline.sh"
-  },
-  "permissions": {
-    "allow": [
-      "Bash(ls:*)",
-      "Bash(wc:*)",
-      "Bash(grep:*)",
-      "mcp__swf-monitor__get_server_instructions",
-      "mcp__swf-monitor__swf_list_agents",
-      "mcp__swf-monitor__swf_get_agent",
-      "mcp__swf-monitor__swf_list_workflow_executions",
-      "mcp__swf-monitor__swf_get_workflow_execution",
-      "mcp__swf-monitor__swf_list_logs",
-      "mcp__swf-monitor__swf_get_system_state",
-      "WebSearch",
-      "WebFetch"
-    ],
-    "defaultMode": "default"
-  },
-  "alwaysThinkingEnabled": true
-}
-```
-
-**Status line script** (`~/.claude/statusline.sh`):
-
-```bash
-#!/bin/bash
-input=$(cat)
-MODEL=$(echo "$input" | jq -r '.model.display_name')
-USED=$(echo "$input" | jq -r '.context_window.used_percentage // 0')
-REMAINING=$(echo "$input" | jq -r '.context_window.remaining_percentage // 100')
-echo "[$MODEL] ${USED}% used | ${REMAINING}% remaining"
-```
-
----
-
-## Available Tools
-
-### Tool Discovery
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_available_tools` | - | List all available MCP tools with descriptions. Use to discover capabilities. |
-
----
-
-### System State
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_get_system_state` | `username` | Comprehensive system state for a user: context from testbed.toml, agent manager status, workflow runner readiness, agent counts, execution stats. |
-
-**Parameters:**
-- `username`: Optional. Username to get context for (reads their testbed.toml). If not provided, infers from SWF_HOME environment variable.
-
-**Returns:**
-- `timestamp`: Current server time
-- `user_context`: namespace, workflow defaults from user's testbed.toml
-- `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited)
-- `workflow_runner`: Status of healthy DAQ_Simulator that can accept swf_start_workflow
-- `ready_to_run`: Boolean - True if workflow_runner is healthy and can accept commands
-- `last_execution`: Most recent workflow execution for user's namespace
-- `errors_last_hour`: Count of ERROR logs in user's namespace
-- `agents`: Total, active, exited, healthy, unhealthy counts
-- `executions`: Running count, completed in last hour
-- `messages_last_10min`: Recent message count
-- `run_states`: Current fast processing run states
-- `persistent_state`: System-wide persistent state (next IDs, etc.)
-- `recent_events`: Last 10 system state events
-
----
-
-### Agents
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_agents` | `namespace`, `agent_type`, `status`, `execution_id`, `start_time`, `end_time` | List agents with filtering. **Excludes EXITED agents by default.** |
-| `swf_get_agent` | `name` (required) | Full details for a specific agent including metadata. |
-
-**`swf_list_agents` filters:**
-- `namespace`: Filter to agents in this namespace
-- `agent_type`: Filter by type (daqsim, data, processing, fastmon, workflow_runner, etc.)
-- `status`: Filter by status. Special values:
-  - `None` (default): Excludes EXITED agents
-  - `'EXITED'`: Show only exited agents
-  - `'all'`: Show all agents regardless of status
-  - `'OK'`, `'WARNING'`, `'ERROR'`: Filter to specific status
-- `execution_id`: Filter to agents that participated in this execution
-- `start_time`, `end_time`: Filter by heartbeat within date range
-
-**Returns per agent:**
-- `name`, `agent_type`, `status`, `operational_state`, `namespace`
-- `last_heartbeat` (ISO timestamp)
-- `workflow_enabled`, `total_stf_processed`
-
----
-
-### Namespaces
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_namespaces` | - | List all testbed namespaces with owners. |
-| `swf_get_namespace` | `namespace` (required), `start_time`, `end_time` | Details for a namespace including activity counts. |
-
-**`swf_get_namespace` returns:**
-- `name`, `owner`, `description`
-- `agent_count`: Agents registered in namespace
-- `execution_count`: Workflow executions (in date range if specified)
-- `message_count`: Messages (in date range if specified)
-- `active_users`: Users who ran executions (in date range if specified)
-
----
-
-### Workflow Definitions
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_workflow_definitions` | `workflow_type`, `created_by` | List available workflow definitions. |
-
-**Returns per definition:**
-- `workflow_name`, `version`, `workflow_type`
-- `description`, `created_by`, `created_at`
-- `execution_count`: Number of times executed
-
----
-
-### Workflow Executions
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_workflow_executions` | `namespace`, `status`, `executed_by`, `workflow_name`, `currently_running`, `start_time`, `end_time` | List workflow executions with filtering. |
-| `swf_get_workflow_execution` | `execution_id` (required) | Full details for a specific execution. |
-
-**`swf_list_workflow_executions` filters:**
-- `namespace`: Filter to executions in this namespace
-- `status`: Filter by status (pending, running, completed, failed, terminated)
-- `executed_by`: Filter by user who started the execution
-- `workflow_name`: Filter by workflow definition name
-- `currently_running`: If True, return all running executions (ignores date range). Use for "What's running?"
-- `start_time`, `end_time`: Filter by execution start time
-
-**Returns per execution:**
-- `execution_id`, `workflow_name`, `namespace`
-- `status`, `executed_by`
-- `start_time`, `end_time` (ISO timestamps)
-- `parameter_values`: Execution configuration
-
----
-
-### Messages
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_messages` | `namespace`, `execution_id`, `agent`, `message_type`, `start_time`, `end_time` | List workflow messages with filtering. |
-| `swf_send_message` | `message` (required), `message_type`, `metadata` | Send a message to the monitoring stream. |
-
-**Diagnostic use cases:**
-- Track workflow progress: `swf_list_messages(execution_id='stf_datataking-user-0044')`
-- See what an agent sent: `swf_list_messages(agent='daq_simulator-agent-user-123')`
-- Debug message flow: `swf_list_messages(namespace='torre1', start_time='2026-01-13T11:00:00')`
-- For workflow failures: use `swf_list_logs(level='ERROR')` instead
-
-**Common message types:** `run_imminent`, `start_run`, `stf_gen`, `end_run`, `pause_run`, `resume_run`
-
-**Filters:**
-- `namespace`: Filter to messages in this namespace
-- `execution_id`: Filter to messages for this execution
-- `agent`: Filter by sender agent name
-- `message_type`: Filter by type (stf_gen, start_run, etc.)
-- `start_time`, `end_time`: Filter by sent time (default: last 1 hour)
-
-**Returns per message (max 200):**
-- `message_type`, `sender_agent`, `namespace`
-- `sent_at` (ISO timestamp)
-- `execution_id`, `run_id`
-- `payload_summary`: Truncated message content
-
-**`swf_send_message` parameters:**
-- `message` (required): The message text to send
-- `message_type`: Type of message (default: 'announcement')
-  - `'test'`: Namespace is omitted (for pipeline testing)
-  - `'announcement'`, `'status'`, etc.: Uses configured namespace from testbed.toml
-- `metadata`: Optional dict of additional key-value data
-
-**`swf_send_message` behavior:**
-- Sender is automatically identified as `{username}-personal-agent`
-- Messages are sent to `/topic/epictopic` and captured by the monitor
-- Use for: testing the message pipeline, announcements to colleagues, or any broadcast purpose
-
-**Returns:**
-- `success`: Whether the message was sent
-- `sender`: The sender identifier (e.g., 'wenauseic-personal-agent')
-- `message_type`: The type of message sent
-- `namespace`: The namespace used (or null for test messages)
-- `content`: The message content
-
----
-
-### Runs
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_runs` | `start_time`, `end_time` | List simulation runs with timing and file counts. |
-| `swf_get_run` | `run_number` (required) | Full details for a specific run. |
-
-**`swf_list_runs` returns per run:**
-- `run_number`
-- `start_time`, `end_time`, `duration_seconds`
-- `stf_file_count`: Number of STF files in this run
-
-**`swf_get_run` returns:**
-- All fields above plus:
-- `run_conditions`: JSON metadata
-- `file_stats`: STF file counts by status (registered, processing, done, failed)
-
----
-
-### STF Files
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_stf_files` | `run_number`, `status`, `machine_state`, `start_time`, `end_time` | List STF files with filtering. |
-| `swf_get_stf_file` | `file_id` or `stf_filename` (one required) | Full details for a specific STF file. |
-
-**`swf_list_stf_files` filters:**
-- `run_number`: Filter to files from this run
-- `status`: Filter by processing status (registered, processing, processed, done, failed)
-- `machine_state`: Filter by detector state (physics, cosmics, etc.)
-- `start_time`, `end_time`: Filter by creation time
-
-**Returns per STF file:**
-- `file_id`, `stf_filename`, `run_number`
-- `status`, `machine_state`
-- `file_size_bytes`, `created_at`
-- `tf_file_count`: Number of TF files derived from this STF
-
-**`swf_get_stf_file` returns:**
-- All fields above plus:
-- `checksum`, `metadata`
-- `workflow_id`, `daq_state`, `daq_substate`, `workflow_status`
-
----
-
-### TF Slices (Fast Processing)
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_tf_slices` | `run_number`, `stf_filename`, `tf_filename`, `status`, `assigned_worker`, `start_time`, `end_time` | List TF slices for fast processing workflow. |
-| `swf_get_tf_slice` | `tf_filename`, `slice_id` (both required) | Full details for a specific TF slice. |
-
-**`swf_list_tf_slices` filters:**
-- `run_number`: Filter to slices from this run
-- `stf_filename`: Filter to slices from this STF file
-- `tf_filename`: Filter to slices from this TF sample
-- `status`: Filter by status (queued, processing, completed, failed)
-- `assigned_worker`: Filter by worker assignment
-- `start_time`, `end_time`: Filter by creation time
-
-**Returns per slice (max 200):**
-- `slice_id`, `tf_filename`, `stf_filename`, `run_number`
-- `tf_first`, `tf_last`, `tf_count` (TF range)
-- `status`, `assigned_worker`
-- `created_at`, `completed_at`
-
-**`swf_get_tf_slice` returns:**
-- All fields above plus:
-- `retries`, `assigned_at`
-- `metadata`
-
----
-
-### Logs
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_list_logs` | `app_name`, `instance_name`, `execution_id`, `level`, `search`, `start_time`, `end_time` | List log entries from all agents. |
-| `swf_get_log_entry` | `log_id` (required) | Full details for a specific log entry. |
-
-**Diagnostic use cases:**
-- Workflow logs: `swf_list_logs(execution_id='stf_datataking-user-0044')`
-- Debug a specific agent: `swf_list_logs(instance_name='daq_simulator-agent-user-123')`
-- Find all errors: `swf_list_logs(level='ERROR')`
-- Search for specific issues: `swf_list_logs(search='connection failed')`
-
-**`swf_list_logs` filters:**
-- `app_name`: Filter by application type (e.g., 'daq_simulator', 'data_agent')
-- `instance_name`: Filter by agent instance name
-- `execution_id`: Filter by workflow execution ID (e.g., 'stf_datataking-wenauseic-0044')
-- `level`: Minimum level threshold - returns this level and higher severity:
-  - `DEBUG` -> all logs
-  - `INFO` -> INFO, WARNING, ERROR, CRITICAL
-  - `WARNING` -> WARNING, ERROR, CRITICAL
-  - `ERROR` -> ERROR, CRITICAL
-  - `CRITICAL` -> CRITICAL only
-- `search`: Case-insensitive text search in message
-- `start_time`, `end_time`: Filter by timestamp (default: last 24 hours)
-
-**Returns per entry (max 200):**
-- `id`, `timestamp`, `app_name`, `instance_name`
-- `level`, `message`, `module`, `funcname`, `lineno`
-- `extra_data`: Additional context (execution_id, run_id, etc.)
-
----
-
-### Workflow Control
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_start_workflow` | `workflow_name`, `namespace`, `config`, `realtime`, `duration`, `stf_count`, `physics_period_count`, `physics_period_duration`, `stf_interval` | Start a workflow by sending command to DAQ Simulator agent. |
-| `swf_stop_workflow` | `execution_id` (required) | Stop a running workflow gracefully. |
-| `swf_end_execution` | `execution_id` (required) | Mark a stuck execution as terminated (database state change only). |
-
-**`swf_start_workflow` parameters:**
-
-All parameters are optional - defaults are read from the user's `testbed.toml`:
-- `workflow_name`: Name of workflow (default: from config, typically 'stf_datataking')
-- `namespace`: Testbed namespace (default: from config)
-- `config`: Workflow config name (default: from config, e.g., 'fast_processing_default')
-- `realtime`: Run in real-time mode (default: from config, typically True)
-- `duration`: Max duration in seconds (0 = run until complete)
-- `stf_count`: Number of STF files to generate (overrides config)
-- `physics_period_count`: Number of physics periods (overrides config)
-- `physics_period_duration`: Duration of each physics period in seconds (overrides config)
-- `stf_interval`: Interval between STF generation in seconds (overrides config)
-
-**Returns:** Success/failure status with execution details. Workflow runs asynchronously.
-
-**After starting — ACTIVELY POLL, do not sleep:**
-- Poll `swf_get_workflow_monitor(execution_id)` every 10-15s until completion
-- Report progress to user as it evolves
-- Check `swf_list_logs(level='ERROR')` after completion
-
-**`swf_stop_workflow`:** Sends a stop command to the DAQ Simulator agent. The workflow stops gracefully at the next checkpoint. Use `swf_list_workflow_executions(currently_running=True)` to find running execution IDs.
-
-**`swf_end_execution`:** Use to clean up stale or stuck executions that are still marked as 'running' in the database. This is a state change only - no agent message is sent.
-
----
-
-### Agent Process Management
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_kill_agent` | `name` (required) | Kill an agent process by sending SIGKILL to its PID. |
-
-**`swf_kill_agent` behavior:**
-- Looks up the agent by `instance_name`
-- Retrieves its `pid` and `hostname`
-- Sends SIGKILL if the agent is on the current host
-- Always marks the agent's status and operational_state as `EXITED`
-- Agent will no longer appear in default `swf_list_agents` results
-
-**Returns:**
-- `success`: Whether the operation completed
-- `killed`: Whether the process was actually killed (may be False if already dead or on different host)
-- `kill_error`: Error message if kill failed (permission denied, process not found, remote host)
-- `old_state`, `new_state`: State transition
-
----
-
-### User Agent Manager
-
-The User Agent Manager is a per-user daemon that enables MCP-driven testbed control. It listens for commands on a user-specific queue and manages supervisord-controlled agents.
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_check_agent_manager` | `username` | Check if a user's agent manager daemon is alive. |
-| `swf_get_testbed_status` | `username` | Comprehensive testbed status: agent manager, agents, running workflows, readiness. |
-| `swf_start_user_testbed` | `username`, `config_name` | Start a user's testbed via their agent manager. |
-| `swf_stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
-
-**`swf_check_agent_manager` returns:**
-- `alive`: True if agent manager has recent heartbeat (within 5 minutes)
-- `username`: The user being checked
-- `instance_name`: The agent manager's instance name (e.g., 'agent-manager-wenauseic')
-- `last_heartbeat`: When it last checked in
-- `operational_state`: Current state (READY, EXITED, etc.)
-- `control_queue`: The queue to send commands to (e.g., '/queue/agent_control.wenauseic')
-- `agents_running`: Whether testbed agents are currently running
-- `how_to_start`: Instructions if not alive
-
-**`swf_get_testbed_status` returns:**
-- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat
-- `agents`: List of workflow agents with running/stopped status
-- `summary`: Running and stopped agent counts
-- `running_workflows`: Count of currently executing workflows
-- `ready`: True when agent manager alive, agents running, and no workflow executing
-- `note`: Human-readable status summary
-
-**`swf_start_user_testbed`:**
-- Sends `start_testbed` command to the user's agent manager
-- Agent manager must be running first (use `swf_check_agent_manager` to verify)
-- `config_name`: Optional config name (e.g., 'fast_processing'). Uses default if not specified.
-- Agents start asynchronously - use `swf_list_agents` to verify
-
-**`swf_stop_user_testbed`:**
-- Sends `stop_testbed` command to the user's agent manager
-- If agent manager is not running, use `swf_kill_agent` to stop agents directly
-
-**Starting the agent manager:**
-```bash
-cd /data/<username>/github/swf-testbed
-source .venv/bin/activate && source ~/.env
-testbed agent-manager
-```
-
----
-
-### Workflow Monitoring
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `swf_get_workflow_monitor` | `execution_id` (required) | Get aggregated status and events for a workflow execution. |
-| `swf_list_workflow_monitors` | - | List recent executions that can be monitored. |
-
-**`swf_get_workflow_monitor` returns:**
-- `execution_id`: The execution being monitored
-- `status`: Current workflow status (running/completed/failed/terminated)
-- `phase`: Current phase (imminent/running/ended/unknown)
-- `run_id`: The run number for this execution
-- `stf_count`: Number of STF files generated
-- `events`: List of key events with timestamps (run_imminent, start_run, end_run)
-- `errors`: List of any errors encountered (from messages and logs)
-- `start_time`, `end_time`: Execution timestamps
-- `duration_seconds`: How long the workflow ran (if completed)
-
-This tool aggregates information from workflow messages and logs, providing a single-call summary of workflow progress without needing to poll multiple tools.
-
-**`swf_list_workflow_monitors` returns:**
-- List of executions from last 24 hours with: `execution_id`, `status`, `start_time`, `end_time`, `stf_count`
-- Use to pick an execution for detailed monitoring with `swf_get_workflow_monitor`
-
----
-
-### AI Content
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `epicprod_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content for an epicprod object and link it from the target object JSON when the subject is known locally. |
-
-**Known subject types:**
-- `campaign_task`: campaign/production task, keyed by composed task name.
-- `panda_task`: local PanDA-task association, keyed by JEDI task id or task name.
-- `panda_job`: local production job record, keyed by pandaid.
-- `panda_queue`: PanDA site/queue record, keyed by queue name. A row with `queue_name == site` represents site-level content.
-
-**Behavior:**
-- AI content is append-only. Corrections and followups create new rows.
-- For known local subjects, the tool writes the central `AIContent` row and appends its id to the subject JSON field under `ai_content_ids`.
-- Future subject types can be added without changing existing content references.
-
----
-
-### PanDA Production Monitoring
-
-Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `panda_get_activity` | `days`, `username`, `site`, `workinggroup` | Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first for "What is PanDA doing?" |
-| `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
-| `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
-| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 500 tasks). Cursor-based pagination via before_id. |
-| `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
-| `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
-| `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
-| `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
-| `panda_resource_usage` | `days`, `site`, `username`, `taskid` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
-| `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
-
-**`panda_get_activity`** — Pre-digested overview, no individual records:
-- `days`: Time window in days (default 1)
-- `username`: Filter by job owner / task owner (supports SQL LIKE with %)
-- `site`: Filter by computing site (supports SQL LIKE with %)
-- `workinggroup`: Filter tasks by working group (e.g. 'EIC')
-
-Returns:
-- `jobs`: `{total, by_status, by_user, by_site}` — each with status breakdown
-- `tasks`: `{total, by_status, by_user}` — each with status breakdown
-
-Use cases:
-- What's PanDA doing right now? `panda_get_activity()`
-- EIC activity this week? `panda_get_activity(days=7, workinggroup='EIC')`
-- Activity for a user? `panda_get_activity(username='Dmitrii Kalinkin')`
-
-**`panda_list_tasks` filters:**
-- `days`: Time window in days (default 7)
-- `status`: Task status (done, failed, running, ready, broken, aborted, pending, finished)
-- `username`: Task owner (supports SQL LIKE with %)
-- `taskname`: Task name (supports SQL LIKE with %)
-- `reqid`: Request ID
-- `workinggroup`: Experiment affiliation (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
-- `processingtype`: Processing type (e.g. 'epicproduction'). Supports SQL LIKE with %.
-- `taskid`: Specific JEDI task ID
-- `limit`: Max tasks to return (default 500)
-- `before_id`: Pagination cursor
-
-**Returns per task:**
-- `jeditaskid`, `taskname`, `status`, `username`
-- `creationdate`, `starttime`, `endtime`, `modificationtime`
-- `reqid`, `processingtype`, `transpath`
-- `progress`, `failurerate`, `errordialog`
-- `site`, `corecount`, `taskpriority`, `currentpriority`
-- `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
-- **`nactive`, `nfinished`, `nfailed`** — per-task job counts aggregated from `jobsactive4` + `jobsarchived4`, bucketed per `JOB_STATUS_CATEGORIES` in `panda/constants.py`. Cancelled and closed are deliberately excluded so alarm consumers see only what operators don't know.
-- **`nrunning`** — count of job records with `jobstatus='running'` (subset of `nactive`).
-- **`nretries`** — count of job records with `attemptnr > 1`. Every retry creates a new job record in the ePIC PanDA schema, so this is the total retry count for the task. Retry limit is 3.
-
-**Diagnostic use cases:**
-- Task overview: `panda_list_tasks(days=7)`
-- Failed tasks: `panda_list_tasks(status='failed')`
-- Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
-- EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
-- Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
-
-**`panda_error_summary` filters:**
-- `days`: Time window in days (default 10)
-- `username`: Filter by job owner (supports SQL LIKE with %)
-- `site`: Filter by computing site (supports SQL LIKE with %)
-- `taskid`: Filter by JEDI task ID
-- `error_source`: Filter to one component (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer)
-- `limit`: Max error patterns to return (default 20)
-
-**Returns per error pattern:**
-- `error_source`: Component name (pilot, executor, ddm, etc.)
-- `error_code`: Numeric error code
-- `error_diag`: Diagnostic message (truncated to 256 chars)
-- `count`: Number of affected jobs
-- `task_count`: Number of affected tasks
-- `users`: List of affected users
-- `sites`: List of affected sites
-
-**Diagnostic use cases:**
-- Top errors this week: `panda_error_summary(days=7)`
-- Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
-- Pilot errors only: `panda_error_summary(error_source='pilot')`
-- Errors for a specific task: `panda_error_summary(taskid=33824)`
-
-**`panda_study_job`** — Deep study of a single job:
-- `pandaid`: PanDA job ID (required)
-
-Returns:
-- `job`: Full record (~40 fields, nulls stripped) with structured `errors` list
-- `files`: All associated files from `filestable4` (log, output, input) with lfn, guid, scope, status
-- `log_urls`: Harvester log URLs — `pilot_stdout`, `pilot_stderr`, `batch_log` (require CILogon auth)
-- `log_file`: Log tarball metadata if registered (lfn, guid, scope for future rucio retrieval)
-- `harvester`: Condor worker details (workerid, status, error info)
-- `task`: Parent JEDI task context (name, status, error dialog)
-- `monitor_url`: Link to PanDA monitoring page
-
-Use cases:
-- Study a failed job: `panda_study_job(pandaid=130497)`
-- After `panda_diagnose_jobs` identifies failures, drill into specific jobs
-
----
-
-### PanDA Mattermost Bot
-
-The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers production-monitoring questions in Mattermost by selecting and calling tools across multiple MCP servers.
-
-**Architecture:**
-- Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
-- Holds connections to the local swf-monitor MCP (HTTP — the `swf_*`, `pcs_*`, `panda_*` tools) plus stdio-launched external servers: **LXR** (EIC code browser cross-reference), **uproot** (ROOT file analysis), **GitHub**, **Zenodo**, **XRootD**, **JLab-Rucio**, **BNL-Rucio**, and **corun/codoc**
-- The corun MCP server is a standalone stdio server that calls prod corun over REST (`CORUN_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; pandabot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun generation does not hold pandabot's single response lock. Tool surface and config detail: [corun-mcp-server](https://github.com/eic/corun-mcp-server) README.
-- On startup, if `CORUN_API_TOKEN` is configured, pandabot ensures a corun notification subscription exists. Corun sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#pandabot` Mattermost channel. There is no pandabot-side polling tracker. Callback payload schema: corun-ai `docs/job-system.md` § Job Notifications.
-- Registers in-process **epicdoc** tools (`epic_doc_search`, `epic_doc_contents`) backed by a ChromaDB vector store of ePIC docs — runs inside the bot process, not as a separate MCP server
-- **Bamboo** log analysis is used via the `panda_study_job` and `panda_harvester_workers` swf-monitor MCP tools, not as a separate MCP server
-- For JLab Rucio campaign dataset queries, the bot should search the `epic` scope first (for example `scope="epic", name="*26.04.1*", type="DATASET"`) and must not infer absence from a single empty scope or from an XRootD permission error
-- For Rucio dataset placement questions, replication rules are authoritative for managed RSE placement; replica/PFN listings may include transient staging endpoints and should not be summarized as persistent placement without checking rules
-- System prompt is externalized to a file and re-read per message, so prompt iteration doesn't require a bot restart
-- **3-tier tool awareness**: every tool is visible by name+one-liner in the system prompt so the LLM knows the full catalog; detailed schemas are fetched only for tools the LLM explicitly selects via `select_tools`; the bot preserves server and suggestion context across thread turns so follow-ups don't re-select from scratch
-- **Progressive tool loading via semantic similarity**: for each user question the bot embeds the question and ranks tools by server-prefixed cosine similarity, auto-truncating at a score cliff — the LLM sees a small, relevant set rather than all hundreds of tools
-- **DPID (Data Provenance ID) anti-fabrication**: for questions about specific jobs/tasks, the bot verifies the LLM cited a real DPID from tool output, strips the DPID from the user-facing reply, and warns if verification fails
-- Remembers recent Q&A exchanges (via `swf_record_ai_memory`) to improve responses over time. Memory is collective — the bot does not track or remember who asked what
-- `/panda` slash commands for direct queries without LLM involvement (status, errors, jobs/tasks by filter, site detail)
-- Server-side matplotlib plots rendered in Mattermost
-
-**Running:** `manage.py panda_bot`
-
-**Environment variables:**
-- `MATTERMOST_URL` (default: `chat.epic-eic.org`)
-- `MATTERMOST_TOKEN` (required)
-- `MATTERMOST_TEAM` (default: `main`)
-- `MATTERMOST_CHANNEL` (default: `pandabot`)
-- `MCP_URL` (default: `http://127.0.0.1:8001/swf-monitor/mcp/`)
-- `ANTHROPIC_API_KEY` (required, used by the Anthropic SDK)
-- `CORUN_BASE_URL` (optional, default: `https://epic-devcloud.org/doc`)
-- `CORUN_API_TOKEN` (optional; when set, enables the corun MCP server)
-- `CORUN_CALLBACK_URL` (optional, default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/`)
-- `CORUN_SUBSCRIPTION_NAME` (optional, default: `pandabot-swf-testbed`)
-
-**MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the local MCP endpoint. Each user question gets a fresh stateless request/response exchange.
-
----
-
-## Tool Summary
+SWF Monitor exposes a Model Context Protocol (MCP) server for LLM access to
+testbed state, PCS, epicprod, PanDA monitoring, and selected control actions.
+
+| Item | Value |
+|---|---|
+| Endpoint | `/swf-monitor/mcp/` |
+| Local URL | `http://127.0.0.1:8001/swf-monitor/mcp/` |
+| Server | FastMCP from the official `mcp` Python SDK |
+| ASGI entrypoint | `src/swf_monitor_project/mcp_asgi.py` |
+| Tool package | `src/monitor_app/mcp/` |
+
+## Related Documentation
+
+| Document | Contents |
+|---|---|
+| [MCP client setup](MCP_CLIENTS.md) | Claude Code and Claude Desktop configuration, bearer-token and OAuth notes, full settings example. |
+| [MCP tool reference](MCP_TOOL_REFERENCE.md) | Complete tool catalog, parameters, return fields, usage notes, and example prompts. |
+| [PanDA Mattermost bot](PANDA_BOT.md) | Bot architecture, tool loading, external MCP servers, environment variables, and transport behavior. |
+| [Production deployment](PRODUCTION_DEPLOYMENT.md) | ASGI worker deployment, Apache proxying, watchdog, and service operations. |
+
+## Operating Model
+
+MCP is operated on swf-testbed as stateless POST request/response MCP over HTTP.
+The useful tool surface is `initialize`, `tools/list`, and `tools/call`
+returning JSON responses. Local clients use the loopback ASGI endpoint. The
+public Apache path still exists, but remote Claude.ai GET/SSE streaming is not
+an operational dependency of the current deployment.
+
+The ASGI worker runs separately from the mod_wsgi Django site. This isolates MCP
+failures from the browser UI and REST API. `MCPRequestGuard` in
+`mcp_asgi.py` handles the transport and bearer-token gate: `/health` is open for
+the watchdog; other requests require POST plus `Authorization: Bearer
+<MCP_BEARER_TOKEN>`.
+
+OAuth 2.1/Auth0 wiring remains available for a future remote-access mode. Leave
+`AUTH0_DOMAIN` empty to disable OAuth. Remote MCP access must not be exposed
+without OAuth and a fresh transport-lifecycle validation.
+
+## Architecture Notes
+
+- `monitor_app.mcp.__init__` creates the shared `FastMCP` instance. Importing
+  the `monitor_app.mcp` package registers each decorated tool on that instance.
+- FastMCP owns tool registration and the streamable-HTTP app
+  (`mcp.streamable_http_app()`). `django-mcp-server` is no longer used.
+- `mcp_asgi.py` owns `mcp.session_manager.run()` for the ASGI process lifetime,
+  avoiding the per-request session-manager lifecycle that caused risk in the old
+  adapter path.
+- Starlette is used only as the ASGI host for FastMCP. It is present through the
+  `mcp` dependency, not as an application framework for swf-monitor.
+- `starlette>=1.2.1` is pinned to clear CVE-2026-48710. The request guard also
+  avoids the affected `request.url` path decision pattern: it checks the raw
+  ASGI path and bearer token.
+- Long-lived GET/SSE streaming is not used on swf-testbed. If it becomes needed,
+  implement it deliberately with a lifespan-managed
+  `StreamableHTTPSessionManager`.
+
+## Design
+
+MCP tools are data access primitives with filtering. The LLM composes multiple
+tool calls when a question needs synthesis or aggregation.
+
+List tools follow common conventions:
+
+- Time filters are ISO datetime strings named `start_time` and `end_time`.
+- Omitted time ranges default to a reasonable recent period for that tool.
+- Paginated list responses include `items`, `total_count`, `has_more`, and
+  `monitor_urls` where applicable.
+
+Tool docstrings are operational metadata. They are the primary text an LLM sees
+when deciding which tool to call and how to call it.
+
+## Tool Categories
+
+The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 
 | Category | Tools | Count |
-|----------|-------|-------|
+|---|---|---:|
 | Tool Discovery | `swf_list_available_tools`, `get_server_instructions` | 2 |
 | System State | `swf_get_system_state` | 1 |
 | Agents | `swf_list_agents`, `swf_get_agent` | 2 |
@@ -712,245 +93,35 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
-| AI Content | `epicprod_register_ai_assessment` | 1 |
+| AI Content | `epicprod_register_ai_assessment`, `epicprod_get_ai_content` | 2 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **55** |
+| **Total** | | **56** |
 
----
-
-## Quick Reference - Example Prompts
-
-          System Readiness
-          - "What's the state of the testbed?"
-          - "Am I ready to run a workflow?"
-          - "Is my agent manager running?"
-          - "Are there any errors in the system?"
-
-          Starting the Testbed
-          - "Start my testbed"
-          - "Start my testbed with the fast_processing config"
-          - "Check if my agents are running"
-
-          Running Workflows
-          - "Start a workflow"
-          - "Run a workflow with 5 STF files"
-          - "Start a workflow with 3 physics periods"
-          - "What's running right now?"
-
-          Monitoring
-          - "What's the status of my workflow?"
-          - "Show me the progress of execution stf_datataking-wenauseic-0045"
-          - "How many STF files have been generated?"
-          - "Are there any errors in my workflow?"
-
-          Stopping
-          - "Stop my running workflow"
-          - "Stop the testbed"
-
-          Troubleshooting
-          - "Why did my workflow fail?"
-          - "Show me the logs for the DAQ simulator"
-          - "What errors happened in the last hour?"
-          - "Kill the stuck daq_simulator agent"
-
-          Combined Operations
-          - "Start my testbed and run a workflow with 10 STF files"
-          - "Check if I'm ready to run, and if so, start a workflow"
-
----
-
-## Example Prompts - Detailed
-
-### What's Running?
-
-> "What's running in the testbed?"
-
-LLM calls `swf_list_workflow_executions(currently_running=True)` and summarizes the running executions by namespace and workflow type.
-
-> "What's the state of my running workflow?"
-
-LLM calls `get_workflow_monitor(execution_id='...')` for aggregated status, or `swf_list_workflow_executions(currently_running=True, namespace="user_namespace")`.
-
-### System Health
-
-> "What's the current state of the testbed?"
-
-LLM calls `swf_get_system_state(username='wenauseic')` and summarizes user context, agent health, running workflows, and system state.
-
-> "Am I ready to run a workflow?"
-
-LLM calls `swf_get_system_state(username='...')` and checks `ready_to_run` field. If False, explains what's missing (agent manager, workflow runner).
-
-### Starting and Stopping Workflows
-
-> "Start a workflow with 5 STF files"
-
-LLM calls `swf_start_workflow(stf_count=5)` - other parameters default from testbed.toml.
-
-> "Stop my running workflow"
-
-LLM calls `swf_list_workflow_executions(currently_running=True)` to find the execution_id, then `swf_stop_workflow(execution_id='...')`.
-
-### Error Discovery
-
-> "Are there any errors in the system?"
-
-LLM calls `swf_list_logs(level='ERROR')` to find error and critical log entries, then summarizes the issues found.
-
-> "Why did my workflow fail?"
-
-LLM calls:
-1. `swf_list_workflow_executions(status='failed', namespace="user_namespace")` - find failed executions
-2. `get_workflow_monitor(execution_id='...')` - get aggregated errors
-3. `swf_list_logs(execution_id='...', level='ERROR')` - detailed error logs
-
-### Activity Summary
-
-> "Summarize testbed activity for the past week."
-
-LLM makes multiple calls:
-1. `swf_list_workflow_executions(start_time="2026-01-06T00:00:00", end_time="2026-01-13T00:00:00")` - all executions
-2. `swf_list_agents()` - registered agents
-3. `swf_list_namespaces()` - active namespaces
-4. Synthesizes: "In the past week, 47 workflow executions ran across 3 namespaces..."
-
-### Investigating a Run
-
-> "Show me details about run 100042 and its STF files."
-
-LLM calls:
-1. `swf_get_run(run_number=100042)` - run details
-2. `list_stf_files(run_number=100042)` - associated STF files
-
-### Agent Troubleshooting
-
-> "The fast_processing agent seems unresponsive. What's happening?"
-
-LLM calls:
-1. `swf_get_agent(name="fast_processing-agent-wenauseic-123")` - agent status
-2. `swf_list_logs(instance_name="fast_processing-agent-wenauseic-123", level='WARNING')` - recent issues
-3. If needed: `kill_agent(name="...")` to terminate unresponsive agent
-
-### Managing User Testbed
-
-> "Start my testbed"
-
-LLM calls:
-1. `check_agent_manager(username='wenauseic')` - verify agent manager is running
-2. If alive: `start_user_testbed(username='wenauseic')`
-3. If not: Instructs user to run `testbed agent-manager`
-
-### Namespace Activity
-
-> "What's happening in namespace torre1 today?"
-
-LLM calls:
-1. `swf_get_namespace(namespace="torre1", start_time="2026-01-13T00:00:00")` - activity counts
-2. `swf_list_workflow_executions(namespace="torre1", start_time="2026-01-13T00:00:00")` - executions
-3. `swf_list_agents(namespace="torre1")` - agents
-
-### Fast Processing Status
-
-> "What's the status of TF slice processing for run 100042?"
-
-LLM calls:
-1. `list_tf_slices(run_number=100042)` - all slices
-2. Summarizes by status: "Run 100042 has 150 slices: 120 completed, 25 processing, 5 queued."
-
----
-
-## Technical Reference
-
-### File Locations
-
-The MCP service spans multiple files in the `swf-monitor` repository:
-
-```
-swf-monitor/
-├── docs/
-│   └── MCP.md                              # This documentation
-├── src/
-│   ├── monitor_app/
-│   │   ├── mcp/                            # MCP tool definitions (package)
-│   │   │   ├── __init__.py                 # Tool registration
-│   │   │   ├── system.py                   # System, agent, namespace tools
-│   │   │   ├── workflows.py               # Workflow, message, run, STF tools
-│   │   │   ├── ai_memory.py               # AI memory tools
-│   │   │   ├── ai_content.py              # AI assessment registration tools
-│   │   │   └── common.py                  # Shared utilities
-│   │   ├── panda/                          # PanDA Mattermost bot (MCP client)
-│   │   │   └── bot.py                      # Bot logic, MCPClient, Claude integration
-│   │   ├── management/commands/
-│   │   │   └── panda_bot.py                # `manage.py panda_bot` management command
-│   │   ├── auth0.py                        # JWT validation with Auth0 JWKS
-│   │   ├── middleware.py                   # MCPAuthMiddleware for OAuth
-│   │   └── views.py                        # OAuth protected resource metadata
-│   └── swf_monitor_project/
-│       ├── mcp_asgi.py                     # Standalone Starlette ASGI app: FastMCP host + MCPRequestGuard
-│       ├── settings.py                     # Server config, Auth0 settings
-│       └── urls.py                         # Route registration (/mcp/, /.well-known/)
-```
+## Implementation Files
 
 | File | Purpose |
-|------|---------|
-| `src/swf_monitor_project/mcp_asgi.py` | **ASGI entrypoint** - Starlette app hosting the FastMCP server, with `MCPRequestGuard` (bearer token, POST-only, `/health`) |
-| `src/monitor_app/mcp/` | **Tool definitions** - MCP tool package (system.py, workflows.py, ai_memory.py, ai_content.py, common.py) |
-| `src/monitor_app/panda/bot.py` | **PanDA Mattermost bot** - MCP client using HTTP POST, Claude Haiku for responses |
-| `src/monitor_app/auth0.py` | **Auth0 integration** - JWT validation, JWKS caching |
-| `src/monitor_app/middleware.py` | **Authentication middleware** - MCPAuthMiddleware for OAuth 2.1 |
-| `src/swf_monitor_project/settings.py` | **Server config** - MCP config, Auth0 settings |
-| `src/swf_monitor_project/urls.py` | **Route registration** - mounts MCP at `/mcp/`, OAuth metadata at `/.well-known/` |
-| `docs/MCP.md` | **Documentation** - this file |
+|---|---|
+| `src/swf_monitor_project/mcp_asgi.py` | Starlette ASGI app hosting FastMCP, with `MCPRequestGuard` and `/health`. |
+| `src/monitor_app/mcp/__init__.py` | Shared `FastMCP` instance and package-level tool registration. |
+| `src/monitor_app/mcp/common.py` | Discovery helpers, including `swf_list_available_tools`. |
+| `src/monitor_app/mcp/system.py` | System, agent, namespace, workflow-control, and monitoring tools. |
+| `src/monitor_app/mcp/workflows.py` | Workflow, message, run, STF, TF-slice, and log tools. |
+| `src/monitor_app/mcp/ai_memory.py` | AI memory tools. |
+| `src/monitor_app/mcp/ai_content.py` | epicprod AI-assessment tools. |
+| `src/monitor_app/mcp/pandamon.py` | PanDA production monitoring tools. |
+| `src/monitor_app/auth0.py` | JWT validation with Auth0 JWKS. |
+| `src/monitor_app/middleware.py` | OAuth-related MCP authentication middleware. |
+| `src/swf_monitor_project/settings.py` | MCP server name, instructions, bearer token, and optional Auth0 settings. |
 
-### Architecture
-
-The MCP server is a **FastMCP** instance (`mcp.server.fastmcp.FastMCP`, bundled in the official `mcp` Python SDK), shared across every `@mcp.tool()` in the `monitor_app.mcp` package. It is served by a standalone Starlette ASGI app (`swf_monitor_project/mcp_asgi.py`) under uvicorn on `127.0.0.1:8001`, separate from the mod_wsgi Django site so MCP failures stay isolated from the main app. Traffic is stateless POST JSON-RPC; Apache `ProxyPass` exposes `/swf-monitor/mcp/` for external callers while local clients use the loopback URL directly. See `swf-monitor-mcp-asgi.service` and the ProxyPass block in `apache-swf-monitor.conf`.
-
-- **FastMCP from the `mcp` SDK** owns tool registration and the streamable-HTTP app (`mcp.streamable_http_app()`). **django-mcp-server is no longer used** — it was fully retired in the FastMCP migration.
-- **Starlette** is the ASGI host for the FastMCP app. It enters the dependency tree **only** transitively through `mcp` (`pip show starlette` → `Required-by: mcp, sse-starlette`); there is no first-party Starlette feature use beyond `mcp_asgi.py`. Pinned **`starlette>=1.2.1`** to clear CVE-2026-48710 ("BadHost" Host-header auth bypass; fixed in 1.0.1). The auth guard is immune regardless: `MCPRequestGuard` decides on the raw ASGI `scope["path"]` plus a bearer token, never `request.url`, so the Host-header/`request.url` path divergence the CVE exploits cannot reach it.
-- **`mcp_asgi.py` lifespan** owns `mcp.session_manager.run()` for the whole process lifetime — the fix for the per-request session-manager lifecycle the old Django adapter had.
-- **MCPRequestGuard** (in `mcp_asgi.py`) is the auth/transport gate: `/health` is open for the watchdog; every other request requires `POST` + `Authorization: Bearer <MCP_BEARER_TOKEN>` (401/403/503 otherwise) and path normalization for the proxy prefix forms.
-- **Auth0 OAuth 2.1** remains wired for remote Claude.ai connections but is not an operational dependency (disabled when `AUTH0_DOMAIN` is unset); local clients use the bearer-token loopback path.
-
-### Tool Registration
-
-Tools are defined in `monitor_app/mcp/` using the `@mcp.tool()` decorator on async functions. Each function becomes an MCP tool that LLMs can discover and call.
-
-All tool modules share the one `FastMCP` instance created in `monitor_app/mcp/__init__.py` (`mcp = FastMCP(...)`) and imported as `from monitor_app.mcp import mcp`. Importing the package registers every decorated tool on that instance.
-
-**Tool docstrings are critical** - they are the only documentation the LLM sees when deciding which tool to use and how to call it.
-
-### Transport
-
-MCP is operated on swf-testbed as stateless POST request/response MCP over
-HTTP. The useful tool surface is `initialize`, `tools/list`, and `tools/call`
-returning JSON responses. Local swf-monitor clients use this POST-only path.
-
-Long-lived GET/SSE streaming is not an operational dependency on this host.
-The previous stateful streaming setup was unreliable: GET/SSE requests returned
-400 or 406 depending on headers, and the lifecycle used by the Django adapter
-created too much risk for uvicorn worker lockups. If streaming becomes useful
-later, it should be reimplemented as a deliberate ASGI app with a
-lifespan-managed `StreamableHTTPSessionManager`.
-
-The endpoint still runs under an ASGI worker (uvicorn) rather than mod_wsgi so
-MCP failures remain isolated from the main Django site.
-
-### Settings
+## Settings
 
 ```python
-# MCP server identity — single source of truth. Name is hardcoded by clients
-# (.mcp.json, mcp__swf-monitor__* permission strings) and must not change.
 MCP_SERVER_NAME = "swf-testbed"
-MCP_SERVER_INSTRUCTIONS = """..."""   # tool-catalog crib shown to the LLM
-
-# Bearer token enforced by MCPRequestGuard in mcp_asgi.py.
-# Empty default → 503 "MCP token not configured" until set at deploy time.
+MCP_SERVER_INSTRUCTIONS = """..."""
 MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
 
-# Auth0 OAuth 2.1 configuration (optional - leave AUTH0_DOMAIN empty to disable)
 AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
 AUTH0_CLIENT_ID = config("AUTH0_CLIENT_ID", default="")
 AUTH0_CLIENT_SECRET = config("AUTH0_CLIENT_SECRET", default="")
@@ -958,11 +129,16 @@ AUTH0_API_IDENTIFIER = config("AUTH0_API_IDENTIFIER", default="")
 AUTH0_ALGORITHMS = ["RS256"]
 ```
 
-### Adding New Tools
+`MCP_SERVER_NAME` is hardcoded by clients and permission strings. Do not rename
+it without updating client configuration and permissions.
+
+## Adding New Tools
+
+Tools are defined with `@mcp.tool()` in `src/monitor_app/mcp/`. Importing the
+package registers every decorated tool on the shared FastMCP instance.
 
 ```python
-# In monitor_app/mcp/system.py, workflows.py, or new file in the mcp/ package
-
+from asgiref.sync import sync_to_async
 from monitor_app.mcp import mcp
 
 @mcp.tool()
@@ -971,41 +147,32 @@ async def my_new_tool(param: str, start_time: str = None, end_time: str = None) 
     Tool description shown to the LLM.
 
     Args:
-        param: Parameter description
-        start_time: Optional ISO datetime for range start
-        end_time: Optional ISO datetime for range end
+        param: Parameter description.
+        start_time: Optional ISO datetime for range start.
+        end_time: Optional ISO datetime for range end.
 
     Returns:
-        Result description
+        Result description.
     """
-    from asgiref.sync import sync_to_async
-    from django.utils.dateparse import parse_datetime
-
     @sync_to_async
     def do_work():
-        queryset = MyModel.objects.all()
-
-        # Apply date range filter
-        if start_time:
-            queryset = queryset.filter(created_at__gte=parse_datetime(start_time))
-        if end_time:
-            queryset = queryset.filter(created_at__lte=parse_datetime(end_time))
-
-        return [{"field": obj.field} for obj in queryset]
+        return {"field": param}
 
     return await do_work()
 ```
 
-**IMPORTANT:** After adding a new `@mcp.tool()`, you MUST also:
-1. Add the tool to the hardcoded list in `swf_list_available_tools()` in `mcp/common.py`
-2. Update the server instructions in `settings.py` (`MCP_SERVER_INSTRUCTIONS`)
-3. Update this documentation (`docs/MCP.md`)
+After adding a new `@mcp.tool()`:
 
-The `list_available_tools()` hardcoded list is what LLMs see when discovering available tools - if your tool isn't in that list, LLMs won't know it exists.
+1. Add it to the hardcoded list in `swf_list_available_tools()` in
+   `src/monitor_app/mcp/common.py`.
+2. Update `MCP_SERVER_INSTRUCTIONS` in `src/swf_monitor_project/settings.py`.
+3. Update [MCP tool reference](MCP_TOOL_REFERENCE.md).
+4. Update the tool-category table in this file if the tool count or category
+   membership changes.
 
-### References
+## References
 
-- [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
-- [MCP Python SDK (FastMCP)](https://github.com/modelcontextprotocol/python-sdk)
-- [CVE-2026-48710 "BadHost"](https://github.com/advisories/GHSA-86qp-5c8j-p5mr) — Starlette Host-header auth bypass (fixed 1.0.1)
+- [MCP specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+- [MCP Python SDK](https://github.com/modelcontextprotocol/python-sdk)
+- [CVE-2026-48710 "BadHost"](https://github.com/advisories/GHSA-86qp-5c8j-p5mr)
 - [OAuth2 Provider](https://django-oauth-toolkit.readthedocs.io/)

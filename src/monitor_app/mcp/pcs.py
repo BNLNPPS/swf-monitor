@@ -5,6 +5,7 @@ Each tool registers with the MCP server and queries Django ORM via sync_to_async
 """
 
 from asgiref.sync import sync_to_async
+from monitor_app.ai_assessments import ai_content_retrieval_guidance
 from monitor_app.mcp import mcp
 
 
@@ -245,6 +246,8 @@ def _dataset_to_dict(ds, full=True):
 
 
 def _prodtask_to_dict(t, full=True):
+    from pcs import services
+
     out = {
         'composed_name': t.composed_name,
         'name': t.name,
@@ -268,6 +271,7 @@ def _prodtask_to_dict(t, full=True):
             'created_by': t.created_by,
             'created_at': t.created_at.isoformat() if t.created_at else None,
             'updated_at': t.updated_at.isoformat() if t.updated_at else None,
+            'ai_content': ai_content_retrieval_guidance(t.overrides or {}),
         })
     return out
 
@@ -527,8 +531,10 @@ async def pcs_prodtask_get(name: str) -> dict:
 
     Returns: composed_name (canonical identity), legacy name, status,
     panda_task_id, prod_config, description, overrides, csv_file (legacy),
-    the three dataset DID lists, and the derived
-    input_source_{kind,location,stage}.
+    the three dataset DID lists, derived input_source_{kind,location,stage},
+    and `ai_content`. If `ai_content.available` is true, retrieve the assessment
+    rows by calling `ai_content.retrieval.tool` with
+    `ai_content.retrieval.arguments`.
     """
     return await sync_to_async(_prodtask_get_sync)(name=name)
 

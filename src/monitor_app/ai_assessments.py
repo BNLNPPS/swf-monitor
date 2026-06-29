@@ -10,6 +10,7 @@ from .utils import format_datetime
 
 
 AI_CONTENT_IDS_KEY = 'ai_content_ids'
+AI_CONTENT_RETRIEVE_TOOL = 'epicprod_get_ai_content'
 _MARKDOWN_EXTENSIONS = ['extra', 'sane_lists']
 _ALLOWED_TAGS = set(bleach.sanitizer.ALLOWED_TAGS) | {
     'p', 'pre', 'code', 'br', 'hr',
@@ -106,6 +107,20 @@ def ai_content_summary(data):
             'subject_url': item['subject_url'],
         })
     return out
+
+
+def ai_content_retrieval_guidance(data):
+    """Return MCP retrieval guidance for AIContent ids in a JSON field."""
+    ids = ai_content_ids(data)
+    return {
+        'available': bool(ids),
+        'count': len(ids),
+        'ids': ids,
+        'retrieval': {
+            'tool': AI_CONTENT_RETRIEVE_TOOL,
+            'arguments': {'ids': ids},
+        } if ids else None,
+    }
 
 
 def ai_content_for_json(data):

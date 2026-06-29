@@ -42,7 +42,8 @@ pattern) and **`docs/SSE_PUSH.md`** (the browser push).
 - `JEDI_INTEGRATION.md` — PCS → JEDI/PanDA submission design.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `COMMISSIONING_RELAXATIONS.md` — alpha tag-lock/submission loosenings and exactly how to re-tighten each.
-- `API_REFERENCE.md`, `MCP.md` — REST and MCP surfaces.
+- `API_REFERENCE.md` — REST API surface.
+- `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and PanDA bot MCP client.
 
 ## Deploy
 

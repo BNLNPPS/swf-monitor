@@ -45,6 +45,8 @@ MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
+BOT_ASSESSMENT_USERNAME = 'bot'
+AI_MODEL = "claude-haiku-4-5-20251001"
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
@@ -844,6 +846,32 @@ class PandaBot:
         except Exception:
             logger.exception(f"Failed to record DPID:{dpid}")
 
+    @staticmethod
+    def _stamp_bot_assessment_origin(tool_name, arguments):
+        """Stamp bot-origin metadata before registering an AI assessment."""
+        if tool_name != 'epicprod_register_ai_assessment':
+            return arguments
+
+        stamped = dict(arguments or {})
+        raw_data = stamped.get('data')
+        data = dict(raw_data) if isinstance(raw_data, dict) else {}
+        existing_origin = data.get('origin')
+        origin = dict(existing_origin) if isinstance(existing_origin, dict) else {}
+        origin.update({
+            'type': 'bot',
+            'client': 'mattermost',
+            'harness': 'bot',
+            'model': AI_MODEL,
+        })
+        data['origin'] = origin
+        data['origin_type'] = 'bot'
+        data['origin_model'] = AI_MODEL
+
+        stamped['username'] = BOT_ASSESSMENT_USERNAME
+        stamped['ai'] = AI_MODEL
+        stamped['data'] = data
+        return stamped
+
     async def _setup_mcp(self):
         """Discover tools from all MCP servers (HTTP + stdio).
 
@@ -1571,7 +1599,7 @@ class PandaBot:
             for _round in range(MAX_TOOL_ROUNDS):
                 response = await self.claude.beta.messages.create(
                     # DO NOT change model without user approval
-                    model="claude-haiku-4-5-20251001",
+                    model=AI_MODEL,
                     max_tokens=4096,
                     cache_control={"type": "ephemeral"},
                     system=system_with_catalog,
@@ -1612,6 +1640,7 @@ class PandaBot:
                     if block.name not in ('select_tools', 'bot_manage_servers'):
                         tools_used.append(block.name)
                     try:
+                        tool_input = block.input
                         # Virtual tools handled by the bot itself
                         if block.name == 'select_tools':
                             loaded = []
@@ -1632,14 +1661,17 @@ class PandaBot:
                         elif block.name == 'epic_doc_contents':
                             result_text = await self._doc_handler.contents(block.input)
                         else:
+                            tool_input = self._stamp_bot_assessment_origin(
+                                block.name, tool_input
+                            )
                             # Route to the correct MCP server
                             if block.name in self._tool_router:
                                 mcp_name = self._tool_original_name.get(block.name, block.name)
                                 result = await self._tool_router[block.name].call_tool(
-                                    mcp_name, block.input
+                                    mcp_name, tool_input
                                 )
                             else:
-                                result = await mcp.call_tool(block.name, block.input)
+                                result = await mcp.call_tool(block.name, tool_input)
                             content = result.get("content", [])
                             result_text = ""
                             for item in content:
@@ -1648,7 +1680,7 @@ class PandaBot:
                         # Assign DPID and stamp the result
                         dpid = self._generate_dpid()
                         exchange_dpids.append(dpid)
-                        await self._record_dpid(dpid, block.name, block.input)
+                        await self._record_dpid(dpid, block.name, tool_input)
                         result_text = f"[DPID:{dpid}]\n{result_text}"
                         if len(result_text) > MAX_RESULT_LEN:
                             result_text = (

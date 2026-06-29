@@ -17,7 +17,7 @@ Module structure:
 - system.py: System state, agents, namespaces, logs, testbed management
 - workflows.py: Workflow definitions, executions, messages, runs, files, slices
 - ai_memory.py: AI dialogue recording and retrieval for session context
-- ai_content.py: AI assessment registration for production objects
+- ai_content.py: AI assessment registration and retrieval for production objects
 - pandamon.py: PanDA job monitoring and error diagnostics for ePIC production
 - pcs.py: PCS (Physics Configuration System) tag browsing and lookup
 """
@@ -103,6 +103,7 @@ from .ai_memory import (
 # AI Content tools
 from .ai_content import (
     epicprod_register_ai_assessment,
+    epicprod_get_ai_content,
 )
 
 # PanDA Monitor tools
@@ -186,6 +187,7 @@ __all__ = [
     'swf_get_ai_memory',
     # AI Content
     'epicprod_register_ai_assessment',
+    'epicprod_get_ai_content',
     # PanDA Monitor
     'panda_list_jobs',
     'panda_diagnose_jobs',

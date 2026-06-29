@@ -6,8 +6,48 @@ and delegates to the synchronous query function via sync_to_async.
 """
 
 from asgiref.sync import sync_to_async
+from monitor_app.ai_assessments import ai_content_retrieval_guidance
 from monitor_app.mcp import mcp
 from monitor_app.panda import queries
+
+
+def _ai_content_for_panda_task(jeditaskid):
+    if not jeditaskid:
+        return ai_content_retrieval_guidance({})
+    from pcs.models import PandaTasks
+    row = PandaTasks.objects.filter(jedi_task_id=jeditaskid).first()
+    return ai_content_retrieval_guidance(row.metadata if row else {})
+
+
+def _list_tasks_sync(**kwargs):
+    result = queries.list_tasks(**kwargs)
+    if result.get('error'):
+        return result
+    taskid = kwargs.get('taskid')
+    if taskid:
+        for task in result.get('tasks') or []:
+            task['ai_content'] = _ai_content_for_panda_task(task.get('jeditaskid'))
+    return result
+
+
+def _get_queue_sync(panda_queue):
+    result = queries.get_queue(panda_queue=panda_queue)
+    if result.get('error'):
+        return result
+    from monitor_app.models import PandaQueue
+    row = PandaQueue.objects.filter(queue_name=panda_queue).first()
+    result['ai_content'] = ai_content_retrieval_guidance(row.metadata if row else {})
+    return result
+
+
+def _study_job_sync(pandaid):
+    result = queries.study_job(pandaid=pandaid)
+    if result.get('error'):
+        return result
+    from monitor_app.models import EpicProdJob
+    row = EpicProdJob.objects.filter(pandaid=pandaid).first()
+    result['ai_content'] = ai_content_retrieval_guidance(row.data if row else {})
+    return result
 
 
 @mcp.tool()
@@ -150,8 +190,12 @@ async def panda_list_tasks(
             by software or by running site).
         pagination: {before_id, has_more, next_before_id} for incremental pulling.
         total_in_window: Total tasks matching filters in the time window.
+        When taskid is provided, matching task records also include
+        `ai_content`. If `ai_content.available` is true, retrieve assessment
+        rows by calling `ai_content.retrieval.tool` with
+        `ai_content.retrieval.arguments`.
     """
-    return await sync_to_async(queries.list_tasks)(
+    return await sync_to_async(_list_tasks_sync)(
         days=days, status=status, username=username, taskname=taskname,
         reqid=reqid, workinggroup=workinggroup, taskid=taskid,
         processingtype=processingtype, limit=limit, before_id=before_id,
@@ -277,8 +321,10 @@ async def panda_get_queue(
 
     Returns:
         queue: Full configuration dict with all parameters.
+        ai_content: Availability flag, ids, and exact retrieval tool/arguments
+            for append-only AI assessments linked to the local queue/site record.
     """
-    return await sync_to_async(queries.get_queue)(panda_queue=panda_queue)
+    return await sync_to_async(_get_queue_sync)(panda_queue=panda_queue)
 
 
 @mcp.tool()
@@ -347,8 +393,10 @@ async def panda_study_job(
         harvester: Condor worker details if available.
         task: Parent JEDI task context.
         monitor_url: Link to PanDA monitoring page.
+        ai_content: Availability flag, ids, and exact retrieval tool/arguments
+            for append-only AI assessments linked to the local job record.
     """
-    return await sync_to_async(queries.study_job)(pandaid=pandaid)
+    return await sync_to_async(_study_job_sync)(pandaid=pandaid)
 
 
 @mcp.tool()

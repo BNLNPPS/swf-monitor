@@ -342,6 +342,16 @@ COMMON QUERIES:
 - Mark a task ready for submission? → pcs_prodtask_set_status(task_name='...', status='ready')
 - Submission itself is not on MCP: operator runs `pcs-task-cmd <name> --submit` locally with their PanDA auth context.
 - Register an AI assessment on a production object? → epicprod_register_ai_assessment(subject_type='panda_task', subject_key='36565', assessment='...', username='...', ai='...')
+- Bot-created AI assessments? → the bot harness sets username='bot', ai=<exact model>, and data.origin with type='bot' and model=<exact model>.
+- Retrieve AI assessment rows? → Use the exact ai_content.retrieval block returned by detail tools, e.g. epicprod_get_ai_content(ids=[17, 23])
+
+AI CONTENT RETRIEVAL:
+Detail-style production tools such as pcs_prodtask_get, panda_study_job,
+panda_get_queue, and single-task panda_list_tasks(taskid=...) may return an
+ai_content block. If ai_content.available is true, call
+ai_content.retrieval.tool with ai_content.retrieval.arguments. Do not guess
+subject_type or subject_key when ids are supplied; the ids are the authoritative
+retrieval path.
 
 PCS (Physics Configuration System):
 PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are

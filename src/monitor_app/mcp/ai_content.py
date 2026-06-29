@@ -167,6 +167,8 @@ def _register_ai_assessment_sync(
         return {'success': False, 'error': 'data must be an object when provided'}
 
     payload_data = dict(data or {})
+    payload_data.setdefault('registered_via', 'mcp')
+    payload_data.setdefault('mcp_tool', 'epicprod_register_ai_assessment')
     try:
         resolved = _resolve_subject(canonical_type, subject_key, payload_data)
     except Exception as exc:
@@ -209,6 +211,54 @@ def _register_ai_assessment_sync(
     }
 
 
+def _row_to_dict(row):
+    return {
+        'id': row.pk,
+        'subject_type': row.subject_type,
+        'subject_key': row.subject_key,
+        'subject_label': row.subject_label,
+        'subject_url': row.subject_url,
+        'username': row.username,
+        'ai': row.ai,
+        'assessment': row.assessment,
+        'data': row.data or {},
+        'created_at': row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _get_ai_content_sync(ids):
+    if not isinstance(ids, list):
+        return {'success': False, 'error': 'ids must be a list of AIContent ids'}
+
+    ordered_ids = []
+    for raw in ids:
+        try:
+            item_id = int(raw)
+        except (TypeError, ValueError):
+            return {'success': False, 'error': f'invalid AIContent id: {raw!r}'}
+        if item_id <= 0:
+            return {'success': False, 'error': f'invalid AIContent id: {raw!r}'}
+        if item_id not in ordered_ids:
+            ordered_ids.append(item_id)
+
+    if not ordered_ids:
+        return {'success': False, 'error': 'ids must contain at least one id'}
+
+    from monitor_app.models import AIContent
+    rows = {
+        row.pk: row
+        for row in AIContent.objects.filter(pk__in=ordered_ids)
+    }
+    items = [_row_to_dict(rows[item_id]) for item_id in ordered_ids if item_id in rows]
+    missing_ids = [item_id for item_id in ordered_ids if item_id not in rows]
+    return {
+        'success': True,
+        'count': len(items),
+        'items': items,
+        'missing_ids': missing_ids,
+    }
+
+
 @mcp.tool()
 async def epicprod_register_ai_assessment(
     subject_type: str,
@@ -237,10 +287,14 @@ async def epicprod_register_ai_assessment(
             JEDI task id, pandaid, queue name, or site name.
         assessment: Markdown assessment text. It is stored append-only.
         username: Human account or service account creating the assessment.
-        ai: Model or agent identifier.
+            Bot harnesses should pass `bot`, not a mutable bot deployment name.
+        ai: Model or agent identifier. Bot harnesses should pass the exact
+            model used to generate the assessment.
         subject_label: Optional display label override.
         subject_url: Optional monitor URL override.
-        data: Optional structured metadata captured with the assessment.
+        data: Optional structured metadata captured with the assessment. The
+            server stamps `registered_via='mcp'` and
+            `mcp_tool='epicprod_register_ai_assessment'` on stored metadata.
 
     Returns:
         Success status, AIContent id, canonical subject reference, created_at,
@@ -256,3 +310,38 @@ async def epicprod_register_ai_assessment(
         subject_url=subject_url,
         data=data,
     )
+
+
+@mcp.tool()
+async def epicprod_get_ai_content(ids: list) -> dict:
+    """
+    Retrieve append-only epicprod AI assessment content by AIContent ids.
+
+    Detail tools that can have AI assessments return an `ai_content` block with
+    this exact retrieval instruction:
+
+        {
+          "available": true,
+          "count": 2,
+          "ids": [17, 23],
+          "retrieval": {
+            "tool": "epicprod_get_ai_content",
+            "arguments": {"ids": [17, 23]}
+          }
+        }
+
+    Use the supplied `ids` directly. Do not reconstruct subject_type or
+    subject_key from the parent object when a detail payload already includes
+    this retrieval block.
+
+    Args:
+        ids: List of AIContent integer ids from an MCP detail payload's
+            `ai_content.ids` or `ai_content.retrieval.arguments.ids`.
+
+    Returns:
+        success, count, items in requested id order, and missing_ids for any
+        ids that no longer resolve locally. Each item includes subject metadata,
+        username, ai/model identifier, Markdown assessment text, structured data,
+        and created_at.
+    """
+    return await sync_to_async(_get_ai_content_sync)(ids=ids)
