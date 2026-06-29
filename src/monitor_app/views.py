@@ -3004,7 +3004,9 @@ def panda_hub(request):
 def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
-    return render(request, 'monitor_app/prod_hub_workflow.html', pcs_hub_counts())
+    context = pcs_hub_counts()
+    context['ai_content_count'] = AIContent.objects.count()
+    return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
 def ai_content_list(request):

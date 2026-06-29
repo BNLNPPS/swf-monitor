@@ -206,7 +206,7 @@
 
         <section class="workflow-stage">
             <div class="workflow-stage-header">
-                <div class="workflow-stage-title">Campaign Progress</div>
+                <div class="workflow-stage-title">Production Campaigns</div>
             </div>
             <div class="workflow-stage-body">
                 <div class="workflow-link-row" title="Current campaign production progress">
@@ -215,6 +215,13 @@
                         <span class="badge bg-info">{{ prod_tasks_count }}</span>
                     </div>
                     <div class="workflow-link-desc">Current campaign task progress</div>
+                </div>
+                <div class="workflow-link-row" title="AI evaluations across epicprod">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:ai_content_list' %}" class="text-decoration-none">AI assessments</a></strong>
+                        <span class="badge bg-info">{{ ai_content_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">AI evaluations across epicprod</div>
                 </div>
             </div>
         </section>
