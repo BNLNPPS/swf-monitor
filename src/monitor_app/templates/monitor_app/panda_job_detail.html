@@ -30,6 +30,8 @@
                         <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }} {% copy_btn job.pandaid %}</td></tr>
                         {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td style="word-break:break-all;">{{ job.jobname }}</td></tr>{% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td></tr>
+                        {% if epicprod_job.phase %}<tr><td><strong>ePIC Phase</strong></td><td>{{ epicprod_job.phase }}</td></tr>{% endif %}
+                        {% if epicprod_job.failure_summary %}<tr><td><strong>ePIC Failure</strong></td><td class="text-danger" style="word-break:break-word;">{{ epicprod_job.failure_summary }}</td></tr>{% endif %}
                         {% if job.jobsubstatus %}<tr><td><strong>Substatus</strong></td><td>{{ job.jobsubstatus }}</td></tr>{% endif %}
                         {% if job.currentpriority or job.assignedpriority %}<tr><td><strong>Priority</strong></td><td>{{ job.currentpriority|default:job.assignedpriority }}{% if job.currentpriority and job.assignedpriority and job.currentpriority != job.assignedpriority %} (assigned: {{ job.assignedpriority }}){% endif %}</td></tr>{% endif %}
                         {% if job.produsername or job.vo %}

@@ -293,7 +293,7 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_study_job",
-            "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
+            "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context, and parsed ePIC production diagnosis.",
             "parameters": ["pandaid"],
         },
         {

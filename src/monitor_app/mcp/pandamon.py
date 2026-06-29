@@ -46,6 +46,19 @@ def _study_job_sync(pandaid):
         return result
     from monitor_app.models import EpicProdJob
     row = EpicProdJob.objects.filter(pandaid=pandaid).first()
+    result['epicprod_diagnosis'] = {
+        'available': bool(row),
+        'phase': row.phase if row else '',
+        'failure_summary': row.failure_summary if row else '',
+        'timeline': (row.data or {}).get('timeline') if row else [],
+        'last_refreshed_at': row.last_refreshed_at.isoformat() if row and row.last_refreshed_at else '',
+        'guidance': (
+            'Use phase/failure_summary as the production-facing diagnosis. '
+            'This is parsed from payload logs and app inventory, and can be '
+            'more specific than the top-level PanDA pilot error for '
+            'payload-managed input/output workflows.'
+        ),
+    }
     result['ai_content'] = ai_content_retrieval_guidance(row.data if row else {})
     return result
 
@@ -369,7 +382,8 @@ async def panda_study_job(
     pandaid: int,
 ) -> dict:
     """
-    Deep study of a single PanDA job — full record, files, errors, log URLs.
+    Deep study of a single PanDA job — full record, files, errors, log URLs,
+    and ePIC production diagnosis.
 
     Gathers everything available from the database for a single job:
     - Full job record with all error fields and resource usage
@@ -377,9 +391,16 @@ async def panda_study_job(
     - Harvester worker info with condor log URLs
     - Parent task context (name, status, error dialog)
     - Structured error extraction across all 7 components
+    - ePIC production diagnosis from app inventory, including parsed phase,
+      failure summary, and payload-log timeline when available
 
     Use this after panda_diagnose_jobs identifies a failed job you want to
-    understand in detail. Returns log URLs for manual inspection even when
+    understand in detail. Check `epicprod_diagnosis.available` first; when true,
+    prefer `epicprod_diagnosis.phase` and `failure_summary` for the
+    production-facing failure explanation before falling back to PanDA pilot
+    diagnostics. This matters for ePIC payload-managed data workflows where
+    JLab Rucio input/output failures are visible in payload logs rather than
+    PanDA-managed file tables. Returns log URLs for manual inspection even when
     programmatic log retrieval is not yet available.
 
     Args:
@@ -393,6 +414,9 @@ async def panda_study_job(
         harvester: Condor worker details if available.
         task: Parent JEDI task context.
         monitor_url: Link to PanDA monitoring page.
+        epicprod_diagnosis: {available, phase, failure_summary, timeline,
+            last_refreshed_at, guidance}. Use this for the production-facing
+            phase of failed ePIC jobs.
         ai_content: Availability flag, ids, and exact retrieval tool/arguments
             for append-only AI assessments linked to the local job record.
     """
