@@ -3145,8 +3145,6 @@ def ai_content_set_quality(request, content_id):
         data[AI_CONTENT_COMMENT_KEY] = comment
         row.data = data
         row.save(update_fields=['data'])
-        label = quality or 'unreviewed'
-        messages.success(request, f'AI assessment review set to {label}.')
 
     next_url = request.POST.get('next') or reverse('monitor_app:ai_content_list')
     if not url_has_allowed_host_and_scheme(

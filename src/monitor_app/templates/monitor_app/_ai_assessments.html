@@ -12,24 +12,7 @@
                     <td><strong>AI:</strong> {{ item.ai }}</td>
                     <td><strong>User:</strong> {{ item.username }}</td>
                     <td>
-                        <strong>Quality:</strong>
-                        {% if request.user.is_authenticated %}
-                        <form class="d-inline" method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
-                            {% csrf_token %}
-                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                            <select class="form-select form-select-sm d-inline-block w-auto" name="quality">
-                                <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
-                                {% for choice in quality_choices %}
-                                <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
-                                {% endfor %}
-                            </select>
-                            <input class="form-control form-control-sm d-inline-block w-auto ms-2" type="text" name="comment" value="{{ item.comment }}" placeholder="comment">
-                            <button class="btn btn-sm btn-outline-secondary ms-1" type="submit">Save</button>
-                        </form>
-                        {% else %}
-                        {{ item.quality|default:"unreviewed" }}
-                        {% if item.comment %}<span class="ms-2">{{ item.comment }}</span>{% endif %}
-                        {% endif %}
+                        <strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}
                     </td>
                 </tr>
                 <tr class="ai-assessment-header table-light">
@@ -42,6 +25,38 @@
                         {% endif %}
                         {% else %}
                         {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-4">{{ item.subject_name }}</span>{% endif %}
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr class="ai-assessment-header table-light">
+                    <td colspan="4">
+                        {% if request.user.is_authenticated %}
+                        <form method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                            <div class="row g-2 align-items-start">
+                                <div class="col-md-2">
+                                    <label class="form-label mb-1">Quality</label>
+                                    <select class="form-select form-select-sm" name="quality">
+                                        <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
+                                        {% for choice in quality_choices %}
+                                        <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-9">
+                                    <label class="form-label mb-1">Comment</label>
+                                    <textarea class="form-control form-control-sm" name="comment" rows="3">{{ item.comment }}</textarea>
+                                </div>
+                                <div class="col-md-1">
+                                    <label class="form-label mb-1">&nbsp;</label>
+                                    <button class="btn btn-sm btn-outline-secondary w-100" type="submit">Save</button>
+                                </div>
+                            </div>
+                        </form>
+                        {% elif item.comment %}
+                        <strong>Comment:</strong>
+                        <div class="mt-1" style="white-space: pre-wrap;">{{ item.comment }}</div>
                         {% endif %}
                     </td>
                 </tr>
