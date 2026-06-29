@@ -56,6 +56,19 @@ def fmt_dt(value):
     return str(value)
 
 
+@register.filter(name='fmt_value')
+def fmt_value(value):
+    """Format generic table values without changing ordinary strings."""
+    if isinstance(value, str) and 'T' in value:
+        try:
+            return fmt_dt(datetime.fromisoformat(value))
+        except (ValueError, TypeError):
+            return value
+    if isinstance(value, (datetime, date)):
+        return fmt_dt(value)
+    return value
+
+
 @register.filter(name='fmt_ago')
 def fmt_ago(value):
     """Format a datetime / ISO string as a compact relative age."""

@@ -293,7 +293,7 @@
                         {% if item.value|is_url %}
                         <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
                         {% else %}
-                        {{ item.value }}
+                        {{ item.value|fmt_value }}
                         {% endif %}
                     </td>
                 </tr>
@@ -317,7 +317,7 @@
                         {% if val|is_url %}
                         <a href="{{ val }}" target="_blank" rel="noopener">{{ val }}</a>
                         {% else %}
-                        {{ val }}
+                        {{ val|fmt_value }}
                         {% endif %}
                     </td>
                 </tr>
@@ -331,7 +331,7 @@
     <div class="card mb-3">
         <div class="card-header"><strong>All job parameters</strong></div>
         <div class="card-body">
-            <table class="table table-sm table-bordered mb-0">
+            <table class="table table-sm table-bordered mb-0 w-auto">
                 <tbody>
                 {% for item in job_record_items %}
                 <tr>
@@ -340,7 +340,7 @@
                         {% if item.value|is_url %}
                         <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
                         {% else %}
-                        {{ item.value }}
+                        {{ item.value|fmt_value }}
                         {% endif %}
                     </td>
                 </tr>
