@@ -50,10 +50,10 @@
                         {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime|fmt_dt }}</td></tr>{% endif %}
                         {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime|fmt_dt }}</td></tr>{% endif %}
                         {% if task.computed_progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.computed_progress }}% <span class="text-muted">(from job counts)</span></td></tr>{% endif %}
-                        <tr><td><strong>Active Jobs</strong></td><td class="running_fill">{{ task.nactive|default:0|intcomma }}</td></tr>
-                        <tr><td><strong>Finished Jobs</strong></td><td class="finished_fill">{{ task.nfinished|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Active Jobs</strong></td><td{% if task.nactive %} class="running_fill"{% endif %}>{{ task.nactive|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Finished Jobs</strong></td><td{% if task.nfinished %} class="finished_fill"{% endif %}>{{ task.nfinished|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Failed Jobs</strong></td><td{% if task.nfailed %} class="failed_fill"{% endif %}>{{ task.nfailed|default:0|intcomma }}</td></tr>
-                        <tr><td><strong>Running Jobs</strong></td><td class="running_fill">{{ task.nrunning|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Running Jobs</strong></td><td{% if task.nrunning %} class="running_fill"{% endif %}>{{ task.nrunning|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Retries</strong></td><td>{{ task.nretries|default:0|intcomma }} <span class="text-muted">(jobs with attemptnr&nbsp;&gt;&nbsp;1)</span></td></tr>
                         <tr><td><strong>Final Failed Jobs</strong></td><td{% if task.nfinalfailed %} class="failed_fill"{% endif %}>{{ task.nfinalfailed|default:0|intcomma }} <span class="text-muted">(retry-exhausted; attemptnr&nbsp;&ge;&nbsp;maxattempt)</span></td></tr>
                         {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts; cancelled excluded)</span></td></tr>{% endif %}

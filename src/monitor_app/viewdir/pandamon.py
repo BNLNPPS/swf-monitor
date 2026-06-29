@@ -455,13 +455,13 @@ def panda_tasks_datatable_ajax(request):
             _fmt_dt(task.get('creationdate')),
             _fmt_dt(task.get('modificationtime')),
             comp_pr_str,
-            _fill_cell(task.get('nactive', 0), 'running'),
-            _fill_cell(task.get('nfinished', 0), 'finished'),
-            _fill_cell(task.get('nfailed', 0), 'failed'),
-            _fill_cell(task.get('nrunning', 0), 'running'),
+            _fill_cell(task.get('nactive', 0), 'running') if task.get('nactive', 0) else 0,
+            _fill_cell(task.get('nfinished', 0), 'finished') if task.get('nfinished', 0) else 0,
+            _fill_cell(task.get('nfailed', 0), 'failed') if task.get('nfailed', 0) else 0,
+            _fill_cell(task.get('nrunning', 0), 'running') if task.get('nrunning', 0) else 0,
             task.get('nretries', 0),
             comp_fr_str,
-            _fill_cell(task.get('nfinalfailed', 0), 'failed'),
+            _fill_cell(task.get('nfinalfailed', 0), 'failed') if task.get('nfinalfailed', 0) else 0,
             comp_ffr_str,
         ])
 
