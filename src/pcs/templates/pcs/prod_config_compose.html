@@ -176,6 +176,15 @@
     let selectedId = null;
     let mode = 'view';
 
+    function htmlEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function configKeyOf(id) { return (allConfigs.find(x => x.id === id) || {}).name; }
     function configIdOf(key) { return (allConfigs.find(x => x.name === key) || {}).id; }
 
@@ -239,12 +248,13 @@
         const vc = document.getElementById('view-content');
         vc.style.display = 'block';
 
-        function row(label, val) { return `<tr><td style="width:40%"><strong>${label}</strong></td><td>${val || '-'}</td></tr>`; }
+        function row(label, val) { return `<tr><td style="width:40%"><strong>${htmlEscape(label)}</strong></td><td>${val || '-'}</td></tr>`; }
+        function text(value) { return value ? htmlEscape(value) : '-'; }
         function boolRow(label, val) { return row(label, val ? 'Yes' : 'No'); }
 
         let dataRows = '';
         if (c.data && Object.keys(c.data).length) {
-            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.' + k, `<code>${v}</code>`); });
+            Object.entries(c.data).forEach(([k,v]) => { dataRows += row('data.' + k, text(v)); });
         }
 
         vc.innerHTML = `
@@ -255,8 +265,8 @@
                         <h6>Background Mixing</h6>
                         <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
                             ${boolRow('Enabled', c.bg_mixing)}
-                            ${row('Cross Section', c.bg_cross_section)}
-                            ${row('EvtGen File', c.bg_evtgen_file ? `<code>${c.bg_evtgen_file}</code>` : '-')}
+                            ${row('Cross Section', text(c.bg_cross_section))}
+                            ${row('EvtGen File', text(c.bg_evtgen_file))}
                         </table>
                     </div>
                     <div class="col-md-6">
@@ -271,8 +281,8 @@
                     <div class="col-md-6">
                         <h6>Software Stack</h6>
                         <table class="table table-sm table-bordered mb-2" style="font-size:.82rem;">
-                            ${row('JUG_XL Tag', c.jug_xl_tag)}
-                            ${row('Container', c.container_image ? `<code>${c.container_image}</code>` : '-')}
+                            ${row('JUG_XL Tag', text(c.jug_xl_tag))}
+                            ${row('Container', text(c.container_image))}
                         </table>
                     </div>
                     <div class="col-md-6">

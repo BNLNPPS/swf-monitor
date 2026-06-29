@@ -117,7 +117,7 @@
                         <div class="mb-2"><label class="form-label" style="font-size:.82rem;"><strong>Description</strong></label>
                             <textarea id="ds-description" class="form-control form-control-sm" rows="2"></textarea></div>
                         <div class="mb-2"><label class="form-label" style="font-size:.82rem;"><strong>Name Preview</strong></label>
-                            <div id="name-preview" class="form-control form-control-sm bg-light" style="font-family:monospace;min-height:32px;"></div></div>
+                            <div id="name-preview" class="form-control form-control-sm bg-light" style="min-height:32px;"></div></div>
                     </div>
                 </div>
                 <div class="spec-section" data-section="physics_tag">
@@ -158,6 +158,15 @@
     let browseType = initialTab;
     let mode = 'browse';
     let selectedItemId = null;
+
+    function htmlEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
 
     // URL carries the stable name/label; internal lookups use integer id.
     function itemKeyOf(type, id) {
@@ -490,17 +499,20 @@
         const tagRows = [['Physics', ds.physics_tag], ['EvGen', ds.evgen_tag], ['Simu', ds.simu_tag], ['Reco', ds.reco_tag]];
         if (ds.background_tag) tagRows.push(['Background', ds.background_tag]);
         tagRows.forEach(([label, tag]) => {
-            const params = Object.entries(tag.parameters||{}).filter(([,v])=>v).map(([k,v])=>`<code>${k}</code>=${v}`).join(', ');
-            tagsHtml += `<tr><td>${label}</td><td><strong>${tag.label}</strong></td><td>${tag.description||''}</td><td style="font-size:.78rem;">${params}</td></tr>`;
+            const params = Object.entries(tag.parameters||{})
+                .filter(([,v])=>v)
+                .map(([k,v])=>`${htmlEscape(k)}=${htmlEscape(v)}`)
+                .join(', ');
+            tagsHtml += `<tr><td>${label}</td><td><strong>${htmlEscape(tag.label)}</strong></td><td>${htmlEscape(tag.description||'')}</td><td style="font-size:.78rem;">${params}</td></tr>`;
         });
         browseContent.innerHTML = `
             <table class="table table-sm table-bordered mb-3" style="font-size:.82rem;">
-                <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td><code>${dsComposedName(ds)}</code></td></tr>
-                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td><code>${ds.did}</code></td></tr>` : ''}
-                <tr><td><strong>Detector</strong></td><td>${ds.detector_version} / ${ds.detector_config}</td></tr>
-                <tr><td><strong>Blocks</strong></td><td>${ds.blocks}</td></tr>
-                <tr><td><strong>Created By</strong></td><td>${ds.created_by} | ${ds.created_at}</td></tr>
-                ${ds.description ? `<tr><td><strong>Description</strong></td><td>${ds.description}</td></tr>` : ''}
+                <tr><td style="width:30%"><strong>Name (tag-based)</strong></td><td>${htmlEscape(dsComposedName(ds))}</td></tr>
+                ${!isLegacyKey(ds) ? `<tr><td><strong>DID</strong></td><td>${htmlEscape(ds.did)}</td></tr>` : ''}
+                <tr><td><strong>Detector</strong></td><td>${htmlEscape(ds.detector_version)} / ${htmlEscape(ds.detector_config)}</td></tr>
+                <tr><td><strong>Blocks</strong></td><td>${htmlEscape(ds.blocks)}</td></tr>
+                <tr><td><strong>Created By</strong></td><td>${htmlEscape(ds.created_by)} | ${htmlEscape(ds.created_at)}</td></tr>
+                ${ds.description ? `<tr><td><strong>Description</strong></td><td>${htmlEscape(ds.description)}</td></tr>` : ''}
             </table>
             <h6>Tags</h6>
             <table class="table table-sm table-bordered" style="font-size:.82rem;">

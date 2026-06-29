@@ -244,16 +244,18 @@
         const escaped = htmlEscape(s);
         return isUrl(s) ? `<a href="${escaped}" rel="noopener noreferrer">${escaped}</a>` : escaped;
     }
-    function taskStatusBadge(status) {
-        const statusColors = {
-            draft:'secondary', ready:'primary', submitted:'info',
-            completed:'success', failed:'danger', past_output:'dark',
-            submit_failed:'danger',
-        };
+    function pandaStatusCellClass(status) {
         const value = status || '-';
-        return value === '-'
-            ? '<span class="pcs-ptask-muted">-</span>'
-            : `<span class="badge bg-${statusColors[value] || 'secondary'}">${htmlEscape(value)}</span>`;
+        if (['failed', 'aborted', 'broken', 'submit_failed'].includes(value)) return 'failed_fill';
+        if (['done', 'finished', 'completed'].includes(value)) return 'done_fill';
+        if (['running', 'active'].includes(value)) return 'running_fill';
+        if (['defined', 'pending', 'registered', 'scouting', 'submitted'].includes(value)) return 'warning_fill';
+        return 'paused_fill';
+    }
+    function pandaAttemptLabel(pt, rows) {
+        const n = Number(pt.try_number);
+        if (!Number.isFinite(n) || n <= 1) return rows.length > 1 ? 'base' : '';
+        return `try${n}`;
     }
     function pandaTasksHtml(t) {
         const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks.slice() : [];
@@ -279,11 +281,12 @@
             const jedi = pt.jedi_task_id
                 ? `<a href="/swf-monitor/panda/tasks/${pt.jedi_task_id}/">${pt.jedi_task_id}</a>`
                 : '<span class="pcs-ptask-muted">pending</span>';
-            const current = pt.current ? ' <span class="badge bg-info">current</span>' : '';
+            const current = pt.current ? ' <span class="pcs-ptask-muted">(current)</span>' : '';
+            const attemptLabel = pandaAttemptLabel(pt, rows);
             const when = pt.updated_at || pt.created_at || '';
             const datasets = [
-                pt.out_ds ? `<div><strong>out:</strong> <code>${htmlEscape(pt.out_ds)}</code></div>` : '',
-                pt.log_ds ? `<div><strong>log:</strong> <code>${htmlEscape(pt.log_ds)}</code></div>` : '',
+                pt.out_ds ? `<div><strong>out:</strong> ${htmlEscape(pt.out_ds)}</div>` : '',
+                pt.log_ds ? `<div><strong>log:</strong> ${htmlEscape(pt.log_ds)}</div>` : '',
             ].filter(Boolean).join('');
             const context = [
                 pt.site ? `<div><strong>site:</strong> ${htmlEscape(pt.site)}</div>` : '',
@@ -292,10 +295,10 @@
             ].filter(Boolean).join('');
             const reason = pt.match_reason ? `<div class="pcs-ptask-muted">${htmlEscape(pt.match_reason)}</div>` : '';
             return `<tr>
-                <td>try${htmlEscape(pt.try_number)}${current}</td>
+                <td>${htmlEscape(attemptLabel)}${current}</td>
                 <td>${jedi}</td>
-                <td>${taskStatusBadge(pt.status_snapshot)}</td>
-                <td class="pcs-ptask-name"><code>${htmlEscape(pt.task_name || '')}</code></td>
+                <td class="${pandaStatusCellClass(pt.status_snapshot)}">${htmlEscape(pt.status_snapshot || '-')}</td>
+                <td class="pcs-ptask-name">${htmlEscape(pt.task_name || '')}</td>
                 <td class="pcs-ptask-datasets">${datasets || '<span class="pcs-ptask-muted">-</span>'}</td>
                 <td>${context || '<span class="pcs-ptask-muted">-</span>'}${reason}</td>
             </tr>`;
@@ -309,7 +312,7 @@
             </div>
             <div class="table-responsive">
                 <table class="table table-sm table-bordered pcs-ptask-table">
-                    <thead><tr><th>Try</th><th>JEDI task</th><th>Status</th><th>PanDA task name</th><th>Datasets</th><th>Context</th></tr></thead>
+                    <thead><tr><th>Attempt</th><th>JEDI task</th><th>Status</th><th>PanDA task name</th><th>Datasets</th><th>Context</th></tr></thead>
                     <tbody>${rowHtml}</tbody>
                 </table>
             </div>
