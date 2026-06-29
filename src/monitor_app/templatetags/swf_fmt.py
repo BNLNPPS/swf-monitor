@@ -25,6 +25,12 @@ _EASTERN = ZoneInfo('America/New_York')
 _UNKNOWN_STATE_COLOR = '#6c757d'  # neutral gray fallback
 
 
+@register.filter(name='is_url')
+def is_url(value):
+    """True for HTTP(S) URL strings."""
+    return str(value or '').startswith(('http://', 'https://'))
+
+
 @register.filter(name='fmt_dt')
 def fmt_dt(value):
     """Format a datetime / ISO string as ``YYYYMMDD HH:MM:SS`` in Eastern.

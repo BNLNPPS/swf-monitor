@@ -289,7 +289,13 @@
                 {% for item in job_parameter_items %}
                 <tr>
                     <td style="width:16rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="word-break:break-word; overflow-wrap:anywhere;">{{ item.value }}</td>
+                    <td style="word-break:break-word; overflow-wrap:anywhere;">
+                        {% if item.value|is_url %}
+                        <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
+                        {% else %}
+                        {{ item.value }}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -305,7 +311,16 @@
         <div class="card-body">
             <table class="table table-sm mb-0">
                 {% for key, val in harvester.items %}
-                <tr><td><strong>{{ key }}</strong></td><td>{{ val }}</td></tr>
+                <tr>
+                    <td><strong>{{ key }}</strong></td>
+                    <td style="word-break:break-all;">
+                        {% if val|is_url %}
+                        <a href="{{ val }}" target="_blank" rel="noopener">{{ val }}</a>
+                        {% else %}
+                        {{ val }}
+                        {% endif %}
+                    </td>
+                </tr>
                 {% endfor %}
             </table>
         </div>
@@ -321,7 +336,13 @@
                 {% for item in job_record_items %}
                 <tr>
                     <th style="width:18rem;">{{ item.name }}</th>
-                    <td style="word-break:break-all;">{{ item.value }}</td>
+                    <td style="word-break:break-all;">
+                        {% if item.value|is_url %}
+                        <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
+                        {% else %}
+                        {{ item.value }}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
