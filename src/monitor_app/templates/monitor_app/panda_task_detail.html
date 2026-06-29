@@ -257,6 +257,9 @@
                 <tr>
                     <th style="width:18rem;">{{ item.name }}</th>
                     <td style="word-break:break-all; max-width:60rem;">
+                        {% if item.href %}
+                        <a href="{{ item.href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
                         {% with href=item.value|url_href %}
                         {% if href %}
                         <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
@@ -264,6 +267,7 @@
                         {{ item.value|fmt_value }}
                         {% endif %}
                         {% endwith %}
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

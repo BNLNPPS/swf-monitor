@@ -860,18 +860,24 @@ def panda_task_detail(request, jeditaskid):
                       {'error': task['error'], 'jeditaskid': jeditaskid})
     pcs_task = _pcs_task_for_panda_task(task)
     panda_tasks_row = _panda_tasks_row_for_jeditaskid(jeditaskid)
-    transpath = task.get('transpath') or ''
-    if transpath:
+
+    def _task_transformation_url(value):
+        transpath = (value or '').strip()
+        if not transpath:
+            return ''
         if transpath.startswith(('http://', 'https://')):
-            task['transformation_view_url'] = (
+            return (
                 _panda_view_text_url(transpath)
                 if 'pandaserver-doma.cern.ch/trf/' in transpath else transpath
             )
-        else:
-            task['transformation_view_url'] = _panda_view_text_url(
-                'https://pandaserver-doma.cern.ch/trf/user/'
-                + quote(transpath.strip('/'), safe='')
-            )
+        return _panda_view_text_url(
+            'https://pandaserver-doma.cern.ch/trf/user/'
+            + quote(transpath.strip('/'), safe='')
+        )
+
+    transpath = task.get('transpath') or ''
+    if transpath:
+        task['transformation_view_url'] = _task_transformation_url(transpath)
 
     # Get jobs for this task
     jobs_data = list_jobs(taskid=int(jeditaskid), days=90, limit=200)
@@ -893,7 +899,11 @@ def panda_task_detail(request, jeditaskid):
             job['epicprod_failure_summary'] = epicprod_job.failure_summary
     task_record = task.get('task_record') or {}
     task_record_items = [
-        {'name': key, 'value': '' if value is None else value}
+        {
+            'name': key,
+            'value': '' if value is None else value,
+            'href': _task_transformation_url(value) if key == 'transpath' else '',
+        }
         for key, value in sorted(task_record.items())
     ]
     requested_resource_items = [
