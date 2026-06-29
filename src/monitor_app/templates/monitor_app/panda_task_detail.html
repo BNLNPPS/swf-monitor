@@ -195,7 +195,9 @@
                         <td><a href="{% url 'monitor_app:panda_job_detail' job.pandaid %}">{{ job.pandaid }}</a></td>
                         <td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td>
                         <td style="overflow-wrap:anywhere;">
-                            {% if job.errors %}
+                            {% if job.epicprod_failure_summary %}
+                                <div><strong>ePIC {{ job.epicprod_phase|default:"diagnosis" }}</strong>: {{ job.epicprod_failure_summary|truncatechars:180 }}</div>
+                            {% elif job.errors %}
                                 {% for err in job.errors %}
                                 <div><strong>{{ err.component }}</strong>:{{ err.code }}{% if err.diag %} {{ err.diag|truncatechars:120 }}{% endif %}</div>
                                 {% endfor %}

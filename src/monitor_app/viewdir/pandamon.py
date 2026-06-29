@@ -878,8 +878,19 @@ def panda_task_detail(request, jeditaskid):
     jobs = jobs_data.get('jobs', []) if not jobs_data.get('error') else []
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
     completion_details = job_completion_details([job.get('pandaid') for job in jobs])
+    from ..models import EpicProdJob
+    epicprod_jobs = {
+        row.pandaid: row
+        for row in EpicProdJob.objects.filter(
+            pandaid__in=[job.get('pandaid') for job in jobs if job.get('pandaid')]
+        )
+    }
     for job in jobs:
         job.update(completion_details.get(job.get('pandaid'), {}))
+        epicprod_job = epicprod_jobs.get(job.get('pandaid'))
+        if epicprod_job and epicprod_job.failure_summary:
+            job['epicprod_phase'] = epicprod_job.phase
+            job['epicprod_failure_summary'] = epicprod_job.failure_summary
     task_record = task.get('task_record') or {}
     task_record_items = [
         {'name': key, 'value': '' if value is None else value}
