@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
 {% load swf_fmt %}
 
-{% block title %}AI Content - epicprod{% endblock %}
+{% block title %}AI Assessments - epicprod{% endblock %}
 
 {% block content %}
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1>AI Content</h1>
+        <h1>AI Assessments</h1>
     </div>
 
     <p>
@@ -24,16 +24,51 @@
         <div class="card-body py-2">
             <div class="filter-bar mb-2">
                 <strong>Subject Type:</strong>
-                <a href="?{% if q %}q={{ q|urlencode }}{% endif %}" class="filter-link {% if not selected_subject_type %}filter-active{% endif %}">All ({{ total_count }})</a>
+                <a href="{{ subject_all_url }}" class="filter-link {% if not selected_subject_type %}filter-active{% endif %}">All ({{ total_count }})</a>
                 {% for row in subject_counts %}
-                <a href="?subject_type={{ row.subject_type|urlencode }}{% if q %}&q={{ q|urlencode }}{% endif %}" class="filter-link {% if selected_subject_type == row.subject_type %}filter-active{% endif %}">{{ row.subject_type }} ({{ row.count }})</a>
+                <a href="{{ row.url }}" class="filter-link {% if selected_subject_type == row.subject_type %}filter-active{% endif %}">{{ row.subject_type }} ({{ row.count }})</a>
                 {% endfor %}
             </div>
-            {% if selected_subject_type %}
+            <div class="filter-bar mb-2">
+                <strong>Quality:</strong>
+                <a href="{{ quality_all_url }}" class="filter-link {% if not selected_quality %}filter-active{% endif %}">All</a>
+                {% for row in quality_rows %}
+                <a href="{{ row.url }}" class="filter-link {% if selected_quality == row.value %}filter-active{% endif %}">{{ row.label }} ({{ row.count }})</a>
+                {% endfor %}
+            </div>
+            <div class="filter-bar mb-2">
+                <strong>User:</strong>
+                <a href="{{ username_all_url }}" class="filter-link {% if not selected_username %}filter-active{% endif %}">All</a>
+                {% for row in username_counts %}
+                <a href="{{ row.url }}" class="filter-link {% if selected_username == row.username %}filter-active{% endif %}">{{ row.username }} ({{ row.count }})</a>
+                {% endfor %}
+            </div>
+            <div class="filter-bar mb-2">
+                <strong>AI:</strong>
+                <a href="{{ ai_all_url }}" class="filter-link {% if not selected_ai %}filter-active{% endif %}">All</a>
+                {% for row in ai_counts %}
+                <a href="{{ row.url }}" class="filter-link {% if selected_ai == row.ai %}filter-active{% endif %}">{{ row.ai }} ({{ row.count }})</a>
+                {% endfor %}
+            </div>
+            {% if selected_subject_type or selected_quality or selected_username or selected_ai %}
             <div class="small">
                 <strong>Active filters:</strong>
+                {% if selected_subject_type %}
                 <span class="badge bg-info me-1">Subject: {{ selected_subject_type }}</span>
-                <a href="?{% if q %}q={{ q|urlencode }}{% endif %}" class="btn btn-link btn-sm p-0 ms-1">clear subject</a>
+                <a href="{{ clear_subject_url }}" class="btn btn-link btn-sm p-0 me-2">clear subject</a>
+                {% endif %}
+                {% if selected_quality %}
+                <span class="badge bg-info me-1">Quality: {{ selected_quality }}</span>
+                <a href="{{ clear_quality_url }}" class="btn btn-link btn-sm p-0 me-2">clear quality</a>
+                {% endif %}
+                {% if selected_username %}
+                <span class="badge bg-info me-1">User: {{ selected_username }}</span>
+                <a href="{{ clear_username_url }}" class="btn btn-link btn-sm p-0 me-2">clear user</a>
+                {% endif %}
+                {% if selected_ai %}
+                <span class="badge bg-info me-1">AI: {{ selected_ai }}</span>
+                <a href="{{ clear_ai_url }}" class="btn btn-link btn-sm p-0 me-2">clear AI</a>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -42,6 +77,15 @@
     <form method="get" class="row g-2 align-items-end mb-3">
         {% if selected_subject_type %}
         <input type="hidden" name="subject_type" value="{{ selected_subject_type }}">
+        {% endif %}
+        {% if selected_quality %}
+        <input type="hidden" name="quality" value="{{ selected_quality }}">
+        {% endif %}
+        {% if selected_username %}
+        <input type="hidden" name="username" value="{{ selected_username }}">
+        {% endif %}
+        {% if selected_ai %}
+        <input type="hidden" name="ai" value="{{ selected_ai }}">
         {% endif %}
         <div class="col-md-6">
             <label class="form-label mb-1" for="q">Search</label>
@@ -55,10 +99,10 @@
 
     {% if items %}
     {% for item in items %}
-    <div class="ai-assessment-entry border border-dark border-3 mb-2">
+    <div class="ai-assessment-entry border border-secondary border-3 mb-2">
     <table class="table table-sm mb-0">
         <tbody>
-            <tr class="ai-assessment-header table-secondary">
+            <tr class="ai-assessment-header table-light">
                 <td><strong>Created:</strong> {{ item.created_display }}</td>
                 <td><strong>AI:</strong> {{ item.ai }}</td>
                 <td><strong>User:</strong> {{ item.username }}</td>
@@ -80,13 +124,16 @@
                     {% endif %}
                 </td>
             </tr>
-            <tr class="ai-assessment-header table-secondary">
+            <tr class="ai-assessment-header table-light">
                 <td colspan="4">
-                    <strong>Subject:</strong> {{ item.subject_type }}:
+                    <strong>Subject:</strong> {{ item.subject_kind }}:
                     {% if item.subject_url %}
-                    <a href="{{ item.subject_url }}">{{ item.subject_display }}</a>
+                    <a href="{{ item.subject_url }}">{{ item.subject_id }}</a>
+                    {% if item.subject_name and item.subject_name != item.subject_id %}
+                    <span class="ms-4"><a href="{{ item.subject_url }}">{{ item.subject_name }}</a></span>
+                    {% endif %}
                     {% else %}
-                    {{ item.subject_display }}
+                    {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-4">{{ item.subject_name }}</span>{% endif %}
                     {% endif %}
                 </td>
             </tr>
@@ -101,18 +148,18 @@
     {% endfor %}
 
     {% if page_obj.has_other_pages %}
-    <nav aria-label="AI content pages">
+    <nav aria-label="AI assessment pages">
         <span class="me-2">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
         {% if page_obj.has_previous %}
-        <a class="btn btn-sm btn-outline-secondary" href="?page={{ page_obj.previous_page_number }}&subject_type={{ selected_subject_type|urlencode }}&q={{ q|urlencode }}">Previous</a>
+        <a class="btn btn-sm btn-outline-secondary" href="?page={{ page_obj.previous_page_number }}{% if page_query %}&{{ page_query }}{% endif %}">Previous</a>
         {% endif %}
         {% if page_obj.has_next %}
-        <a class="btn btn-sm btn-outline-secondary" href="?page={{ page_obj.next_page_number }}&subject_type={{ selected_subject_type|urlencode }}&q={{ q|urlencode }}">Next</a>
+        <a class="btn btn-sm btn-outline-secondary" href="?page={{ page_obj.next_page_number }}{% if page_query %}&{{ page_query }}{% endif %}">Next</a>
         {% endif %}
     </nav>
     {% endif %}
     {% else %}
-    <div class="text-muted">No AI content found.</div>
+    <div class="text-muted">No AI assessments found.</div>
     {% endif %}
 </div>
 {% endblock %}

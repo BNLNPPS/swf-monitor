@@ -99,18 +99,18 @@ th {
     overflow-wrap: anywhere;
 }
 .ai-assessment-text h1 {
-    font-size: 1.25rem;
+    font-size: 1.1rem;
 }
 .ai-assessment-text h2 {
-    font-size: 1.15rem;
+    font-size: 1rem;
 }
 .ai-assessment-text h3 {
-    font-size: 1.05rem;
+    font-size: 0.95rem;
 }
 .ai-assessment-text h4,
 .ai-assessment-text h5,
 .ai-assessment-text h6 {
-    font-size: 1rem;
+    font-size: 0.95rem;
 }
 .ai-assessment-text h1,
 .ai-assessment-text h2,

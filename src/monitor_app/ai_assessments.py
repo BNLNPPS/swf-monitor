@@ -69,6 +69,26 @@ def _display_time(value):
     return value or ''
 
 
+def _panda_task_parts(subject_key, subject_label):
+    display_key = subject_key
+    display_label = subject_label
+    if subject_key and not str(subject_key).isdigit():
+        try:
+            from pcs.models import PandaTasks
+            row = (
+                PandaTasks.objects
+                .filter(task_name__in=[subject_key, subject_label])
+                .order_by('-jedi_task_id')
+                .first()
+            )
+            if row:
+                display_key = str(row.jedi_task_id or subject_key)
+                display_label = row.task_name or subject_label
+        except Exception:
+            pass
+    return str(display_key or '').strip(), str(display_label or '').strip()
+
+
 def ai_content_items(rows):
     """Normalize AIContent rows for display."""
     items = []
@@ -79,15 +99,31 @@ def ai_content_items(rows):
         subject_type = str(getattr(row, 'subject_type', '') or '').strip()
         subject_key = str(getattr(row, 'subject_key', '') or '').strip()
         subject_label = str(getattr(row, 'subject_label', '') or '').strip()
+        subject_kind = subject_type
+        subject_id = subject_key
+        subject_name = subject_label
         subject_display = subject_label or subject_key
         if subject_type == 'panda_task' and subject_key:
-            subject_display = f'PanDA task {subject_key}'
-            if subject_label and subject_label != subject_key:
-                subject_display = f'{subject_display}: {subject_label}'
+            subject_kind = 'PanDA task'
+            subject_id, subject_name = _panda_task_parts(subject_key, subject_label)
+            subject_display = f'{subject_kind} {subject_id}'
+            if subject_name and subject_name != subject_id:
+                subject_display = f'{subject_display}: {subject_name}'
         elif subject_type == 'panda_job' and subject_key:
+            subject_kind = 'PanDA job'
+            subject_id = subject_key
+            subject_name = subject_label
             subject_display = f'PanDA job {subject_key}'
             if subject_label and subject_key not in subject_label:
                 subject_display = f'{subject_display}: {subject_label}'
+        elif subject_type == 'campaign_task':
+            subject_kind = 'Campaign task'
+            subject_id = subject_key
+            subject_name = subject_label
+        elif subject_type == 'panda_queue':
+            subject_kind = 'PanDA queue'
+            subject_id = subject_key
+            subject_name = subject_label
         created_at = getattr(row, 'created_at', '')
         data = getattr(row, 'data', None) or {}
         quality = str(data.get(AI_CONTENT_QUALITY_KEY) or '').strip()
@@ -103,6 +139,9 @@ def ai_content_items(rows):
             'subject_type': subject_type,
             'subject_key': subject_key,
             'subject_label': subject_label,
+            'subject_kind': subject_kind,
+            'subject_id': subject_id,
+            'subject_name': subject_name,
             'subject_display': subject_display,
             'subject_url': str(getattr(row, 'subject_url', '') or '').strip(),
         })
@@ -123,6 +162,9 @@ def ai_content_summary(data):
             'subject_type': item['subject_type'],
             'subject_key': item['subject_key'],
             'subject_label': item['subject_label'],
+            'subject_kind': item['subject_kind'],
+            'subject_id': item['subject_id'],
+            'subject_name': item['subject_name'],
             'subject_display': item['subject_display'],
             'subject_url': item['subject_url'],
         })

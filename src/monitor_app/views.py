@@ -3009,10 +3009,24 @@ def prod_hub(request):
 def ai_content_list(request):
     """Consolidated append-only AI content for epicprod."""
     subject_type = (request.GET.get('subject_type') or '').strip()
+    quality = (request.GET.get('quality') or '').strip()
+    username = (request.GET.get('username') or '').strip()
+    ai = (request.GET.get('ai') or '').strip()
     q = (request.GET.get('q') or '').strip()
     qs = AIContent.objects.all().order_by('-created_at')
     if subject_type:
         qs = qs.filter(subject_type=subject_type)
+    if quality:
+        if quality == 'unreviewed':
+            qs = qs.filter(Q(data__quality='') | Q(data__quality__isnull=True))
+        elif quality in AI_CONTENT_QUALITY_VALUES:
+            qs = qs.filter(data__quality=quality)
+        else:
+            qs = qs.none()
+    if username:
+        qs = qs.filter(username=username)
+    if ai:
+        qs = qs.filter(ai=ai)
     if q:
         qs = qs.filter(
             Q(subject_key__icontains=q)
@@ -3023,21 +3037,91 @@ def ai_content_list(request):
         )
     paginator = Paginator(qs, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
+
+    def filter_url(**updates):
+        params = request.GET.copy()
+        params.pop('page', None)
+        for key, value in updates.items():
+            if value:
+                params[key] = value
+            else:
+                params.pop(key, None)
+        query = params.urlencode()
+        return f'?{query}' if query else '?'
+
     subject_counts = list(
         AIContent.objects
         .values('subject_type')
         .annotate(count=Count('id'))
         .order_by('subject_type')
     )
+    for row in subject_counts:
+        row['url'] = filter_url(subject_type=row['subject_type'])
+
+    quality_counts = {key: 0 for key in ('unreviewed',) + AI_CONTENT_QUALITY_VALUES}
+    for data in AIContent.objects.values_list('data', flat=True):
+        value = ''
+        if isinstance(data, dict):
+            value = str(data.get(AI_CONTENT_QUALITY_KEY) or '').strip()
+        if value in AI_CONTENT_QUALITY_VALUES:
+            quality_counts[value] += 1
+        else:
+            quality_counts['unreviewed'] += 1
+    quality_rows = [
+        {
+            'value': value,
+            'label': value,
+            'count': quality_counts[value],
+            'url': filter_url(quality=value),
+        }
+        for value in ('unreviewed',) + AI_CONTENT_QUALITY_VALUES
+    ]
+
+    username_counts = list(
+        AIContent.objects
+        .values('username')
+        .annotate(count=Count('id'))
+        .order_by('username')
+    )
+    for row in username_counts:
+        row['url'] = filter_url(username=row['username'])
+
+    ai_counts = list(
+        AIContent.objects
+        .values('ai')
+        .annotate(count=Count('id'))
+        .order_by('ai')
+    )
+    for row in ai_counts:
+        row['url'] = filter_url(ai=row['ai'])
+
     total_count = sum(row['count'] for row in subject_counts)
+    page_params = request.GET.copy()
+    page_params.pop('page', None)
     return render(request, 'monitor_app/ai_content_list.html', {
         'items': ai_content_items(page_obj.object_list),
         'page_obj': page_obj,
         'subject_counts': subject_counts,
+        'quality_rows': quality_rows,
+        'username_counts': username_counts,
+        'ai_counts': ai_counts,
         'total_count': total_count,
         'selected_subject_type': subject_type,
+        'selected_quality': quality,
+        'selected_username': username,
+        'selected_ai': ai,
         'q': q,
         'quality_choices': AI_CONTENT_QUALITY_VALUES,
+        'all_url': filter_url(subject_type='', quality='', username='', ai=''),
+        'subject_all_url': filter_url(subject_type=''),
+        'quality_all_url': filter_url(quality=''),
+        'username_all_url': filter_url(username=''),
+        'ai_all_url': filter_url(ai=''),
+        'clear_subject_url': filter_url(subject_type=''),
+        'clear_quality_url': filter_url(quality=''),
+        'clear_username_url': filter_url(username=''),
+        'clear_ai_url': filter_url(ai=''),
+        'page_query': page_params.urlencode(),
     })
 
 

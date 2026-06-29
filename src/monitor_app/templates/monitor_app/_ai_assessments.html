@@ -4,10 +4,10 @@
     <div class="card-body">
         {% for item in items %}
         <div{% if not forloop.last %} class="mb-2"{% endif %}>
-            <div class="ai-assessment-entry border border-dark border-3">
+            <div class="ai-assessment-entry border border-secondary border-3">
             <table class="table table-sm mb-0">
                 <tbody>
-                <tr class="ai-assessment-header table-secondary">
+                <tr class="ai-assessment-header table-light">
                     <td><strong>Created:</strong> {{ item.created_display|default:item.created_at }}</td>
                     <td><strong>AI:</strong> {{ item.ai }}</td>
                     <td><strong>User:</strong> {{ item.username }}</td>
@@ -26,6 +26,19 @@
                         </form>
                         {% else %}
                         {{ item.quality|default:"unreviewed" }}
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr class="ai-assessment-header table-light">
+                    <td colspan="4">
+                        <strong>Subject:</strong> {{ item.subject_kind }}:
+                        {% if item.subject_url %}
+                        <a href="{{ item.subject_url }}">{{ item.subject_id }}</a>
+                        {% if item.subject_name and item.subject_name != item.subject_id %}
+                        <span class="ms-4"><a href="{{ item.subject_url }}">{{ item.subject_name }}</a></span>
+                        {% endif %}
+                        {% else %}
+                        {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-4">{{ item.subject_name }}</span>{% endif %}
                         {% endif %}
                     </td>
                 </tr>
