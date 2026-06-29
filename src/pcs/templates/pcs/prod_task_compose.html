@@ -275,33 +275,34 @@
             });
         }
         if (!rows.length) return '';
+        const showAttempt = rows.some(pt => Number(pt.try_number) > 1);
         const rowHtml = rows.map(pt => {
             const jedi = pt.jedi_task_id
                 ? `<a href="/swf-monitor/panda/tasks/${pt.jedi_task_id}/">${pt.jedi_task_id}</a>`
                 : '<span class="pcs-ptask-muted">pending</span>';
             const current = pt.current ? ' <span class="pcs-ptask-muted">(current)</span>' : '';
             const attemptLabel = pandaAttemptLabel(pt, rows);
-            const submittedAt = pt.created_at || '';
+            const submittedAt = pt.created_at_display || pt.created_at || '';
             const datasets = [
-                pt.out_ds ? `<div><strong>out:</strong> ${htmlEscape(pt.out_ds)}</div>` : '',
-                pt.log_ds ? `<div><strong>log:</strong> ${htmlEscape(pt.log_ds)}</div>` : '',
+                pt.out_ds ? `<div>${htmlEscape(pt.out_ds)}</div>` : '',
             ].filter(Boolean).join('');
             return `<tr>
-                <td>${htmlEscape(attemptLabel)}${current}</td>
                 <td>${jedi}</td>
                 <td class="${pandaStatusCellClass(pt.status_snapshot)}">${htmlEscape(pt.status_snapshot || '-')}</td>
                 <td class="pcs-ptask-name">${htmlEscape(pt.task_name || '')}</td>
                 <td class="pcs-ptask-datasets">${datasets || '<span class="pcs-ptask-muted">-</span>'}</td>
                 <td>${submittedAt ? htmlEscape(submittedAt) : '<span class="pcs-ptask-muted">-</span>'}</td>
+                ${showAttempt ? `<td>${htmlEscape(attemptLabel)}${current}</td>` : ''}
             </tr>`;
         }).join('');
+        const attemptHead = showAttempt ? '<th>Attempt</th>' : '';
         return `<section class="pcs-ptask-summary" aria-label="PanDA task activity">
             <div class="pcs-ptask-head">
                 <span>PanDA Tasks</span>
             </div>
             <div class="table-responsive">
                 <table class="table table-sm table-bordered pcs-ptask-table">
-                    <thead><tr><th>Attempt</th><th>PanDA task</th><th>Status</th><th>PanDA task name</th><th>Datasets</th><th>Submitted</th></tr></thead>
+                    <thead><tr><th>PanDA task</th><th>Status</th><th>PanDA task name</th><th>Output Datasets</th><th>Submitted</th>${attemptHead}</tr></thead>
                     <tbody>${rowHtml}</tbody>
                 </table>
             </div>
@@ -316,6 +317,47 @@
         }
         return t.panda_task_id || null;
     }
+    function currentPandaTaskRow(t, jediTaskId) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
+        const idText = String(jediTaskId || '');
+        const current = rows.find(pt => pt.current && String(pt.jedi_task_id || '') === idText);
+        if (current) return current;
+        const matching = rows.find(pt => String(pt.jedi_task_id || '') === idText);
+        if (matching) return matching;
+        return t.panda_task_id ? {jedi_task_id: t.panda_task_id, status_snapshot: t.status || ''} : null;
+    }
+    function normalizedPandaStatus(row) {
+        return String((row && (row.status_snapshot || row.status)) || '').trim().toLowerCase();
+    }
+    function pandaOperationState(operation, row) {
+        const status = normalizedPandaStatus(row);
+        const activeStates = new Set([
+            'active', 'assigning', 'defined', 'pending', 'ready', 'registered',
+            'running', 'scouted', 'scouting', 'submitted', 'throttled', 'waiting',
+        ]);
+        const retryableTerminalStates = new Set([
+            'completed', 'done', 'exhausted', 'failed', 'finished',
+        ]);
+        if (!status) return {allowed: false, reason: 'PanDA task status is not known yet.'};
+        if (operation === 'increase_attempts') {
+            return activeStates.has(status)
+                ? {allowed: true, reason: ''}
+                : {allowed: false, reason: `Add retry is only for active PanDA tasks; current status is ${status}.`};
+        }
+        if (operation === 'retry_failures') {
+            return retryableTerminalStates.has(status)
+                ? {allowed: true, reason: ''}
+                : {allowed: false, reason: `Restart/retry failures is only for finished PanDA tasks; current status is ${status}.`};
+        }
+        return {allowed: true, reason: ''};
+    }
+    function pandaOperationButtonHtml(operation, label, row, extraText) {
+        const state = pandaOperationState(operation, row);
+        const btnClass = state.allowed ? 'btn-outline-primary' : 'btn-outline-secondary';
+        const disabled = state.allowed ? '' : ' disabled aria-disabled="true"';
+        const title = state.reason ? ` title="${htmlEscape(state.reason)}"` : '';
+        return `<button type="button" class="btn ${btnClass} btn-sm pcs-panda-op" data-panda-op="${operation}"${disabled}${title}>${label}${extraText || ''}</button>`;
+    }
     function currentMaxAttemptLabel(t, jediTaskId) {
         const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
         const row = rows.find(pt => String(pt.jedi_task_id || '') === String(jediTaskId || ''));
@@ -326,10 +368,11 @@
     function pandaOperationsHtml(t) {
         const jediTaskId = currentPandaJediTaskId(t);
         if (!currentUser || !jediTaskId) return '';
+        const row = currentPandaTaskRow(t, jediTaskId);
         return `<div class="pcs-panda-ops" data-jedi-task-id="${htmlEscape(jediTaskId)}">
             <span class="pcs-panda-ops-label">PanDA Operations</span>
-            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="increase_attempts">Add Another Retry${currentMaxAttemptLabel(t, jediTaskId)}</button>
-            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="retry_failures">Restart Finished Task And Retry Failures</button>
+            ${pandaOperationButtonHtml('increase_attempts', 'Add Another Retry', row, currentMaxAttemptLabel(t, jediTaskId))}
+            ${pandaOperationButtonHtml('retry_failures', 'Restart Finished Task And Retry Failures', row)}
             <button type="button" class="btn pcs-reset-submit-btn btn-sm pcs-panda-op" data-panda-op="rerun_entire_task">Rerun Entire Task</button>
         </div>`;
     }

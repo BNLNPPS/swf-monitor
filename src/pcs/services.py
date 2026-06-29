@@ -23,6 +23,8 @@ from django.db.models import Q
 from django.utils import timezone as _timezone
 from django.utils.dateparse import parse_datetime as _parse_datetime
 
+from monitor_app.utils import format_datetime
+
 _log = _logging.getLogger(__name__)
 
 from .models import (
@@ -217,7 +219,9 @@ def panda_tasks_summary(task, *, include_live=False):
             'metadata': metadata,
             'current': bool(task.panda_task_id and row.jedi_task_id == task.panda_task_id),
             'created_at': row.created_at.isoformat() if row.created_at else '',
+            'created_at_display': format_datetime(row.created_at) if row.created_at else '',
             'updated_at': row.updated_at.isoformat() if row.updated_at else '',
+            'updated_at_display': format_datetime(row.updated_at) if row.updated_at else '',
         })
     return summaries
 
