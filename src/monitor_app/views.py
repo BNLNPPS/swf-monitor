@@ -15,8 +15,14 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent
-from .ai_assessments import ai_content_items
+from .ai_assessments import (
+    AI_CONTENT_QUALITY_KEY,
+    AI_CONTENT_QUALITY_VALUES,
+    ai_content_items,
+)
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
@@ -3031,7 +3037,38 @@ def ai_content_list(request):
         'total_count': total_count,
         'selected_subject_type': subject_type,
         'q': q,
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
     })
+
+
+@login_required
+@require_POST
+def ai_content_set_quality(request, content_id):
+    """Set sideband quality metadata on one AIContent row."""
+    row = get_object_or_404(AIContent, pk=content_id)
+    quality = (request.POST.get('quality') or '').strip().lower()
+    if quality and quality not in AI_CONTENT_QUALITY_VALUES:
+        messages.error(request, 'Invalid AI assessment quality.')
+    else:
+        data = row.data or {}
+        if not isinstance(data, dict):
+            data = {}
+        else:
+            data = dict(data)
+        data[AI_CONTENT_QUALITY_KEY] = quality
+        row.data = data
+        row.save(update_fields=['data'])
+        label = quality or 'unreviewed'
+        messages.success(request, f'AI assessment quality set to {label}.')
+
+    next_url = request.POST.get('next') or reverse('monitor_app:ai_content_list')
+    if not url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        next_url = reverse('monitor_app:ai_content_list')
+    return redirect(next_url)
 
 
 def testbed_hub(request):

@@ -11,6 +11,8 @@ from .utils import format_datetime
 
 AI_CONTENT_IDS_KEY = 'ai_content_ids'
 AI_CONTENT_RETRIEVE_TOOL = 'epic_get_ai_content'
+AI_CONTENT_QUALITY_KEY = 'quality'
+AI_CONTENT_QUALITY_VALUES = ('wrong', 'poor', 'good')
 _MARKDOWN_EXTENSIONS = ['extra', 'sane_lists']
 _ALLOWED_TAGS = set(bleach.sanitizer.ALLOWED_TAGS) | {
     'p', 'pre', 'code', 'br', 'hr',
@@ -87,10 +89,13 @@ def ai_content_items(rows):
             if subject_label and subject_key not in subject_label:
                 subject_display = f'{subject_display}: {subject_label}'
         created_at = getattr(row, 'created_at', '')
+        data = getattr(row, 'data', None) or {}
+        quality = str(data.get(AI_CONTENT_QUALITY_KEY) or '').strip()
         items.append({
             'id': row.pk,
             'username': str(getattr(row, 'username', '') or '').strip(),
             'ai': str(getattr(row, 'ai', '') or '').strip(),
+            'quality': quality if quality in AI_CONTENT_QUALITY_VALUES else '',
             'assessment': assessment,
             'assessment_html': render_assessment_markdown(assessment),
             'created_at': created_at,
@@ -112,6 +117,7 @@ def ai_content_summary(data):
             'id': item['id'],
             'username': item['username'],
             'ai': item['ai'],
+            'quality': item['quality'],
             'assessment': item['assessment'],
             'created_at': item['created_display'] or str(item['created_at'] or ''),
             'subject_type': item['subject_type'],
@@ -155,6 +161,7 @@ def assessment_presentation(data, *, title='AI Assessments'):
         'items': items,
         'count': len(items),
         'has_assessments': bool(items),
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
     }
 
 
@@ -179,6 +186,8 @@ def create_ai_content(*, subject_type, subject_key, username, ai, assessment,
     pointer in the same transaction.
     """
     from .models import AIContent
+    payload_data = dict(data or {})
+    payload_data[AI_CONTENT_QUALITY_KEY] = ''
     with transaction.atomic():
         row = AIContent.objects.create(
             subject_type=subject_type,
@@ -188,7 +197,7 @@ def create_ai_content(*, subject_type, subject_key, username, ai, assessment,
             username=username,
             ai=ai,
             assessment=assessment,
-            data=data or {},
+            data=payload_data,
         )
         if target_obj is not None and target_json_field:
             append_ai_content_id(target_obj, target_json_field, row.pk)

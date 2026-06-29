@@ -196,10 +196,17 @@ def copy_btn(value):
     )
 
 
-@register.inclusion_tag('monitor_app/_ai_assessments.html', name='ai_assessment_panel')
-def ai_assessment_panel(data, title='AI Assessments'):
+@register.inclusion_tag(
+    'monitor_app/_ai_assessments.html',
+    name='ai_assessment_panel',
+    takes_context=True,
+)
+def ai_assessment_panel(context, data, title='AI Assessments'):
     """Render append-only AI assessments from a model JSON field."""
-    return assessment_presentation(data, title=title)
+    presentation = assessment_presentation(data, title=title)
+    presentation['request'] = context.get('request')
+    presentation['csrf_token'] = context.get('csrf_token')
+    return presentation
 
 
 @register.filter(name='rucio_did_url')

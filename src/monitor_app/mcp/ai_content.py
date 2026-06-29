@@ -212,6 +212,7 @@ def _register_ai_assessment_sync(
 
 
 def _row_to_dict(row):
+    data = row.data or {}
     return {
         'id': row.pk,
         'subject_type': row.subject_type,
@@ -220,8 +221,9 @@ def _row_to_dict(row):
         'subject_url': row.subject_url,
         'username': row.username,
         'ai': row.ai,
+        'quality': data.get('quality') or '',
         'assessment': row.assessment,
-        'data': row.data or {},
+        'data': data,
         'created_at': row.created_at.isoformat() if row.created_at else None,
     }
 

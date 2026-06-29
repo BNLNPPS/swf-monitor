@@ -158,6 +158,12 @@ pages can show their assessments without embedding the assessment text in task,
 job, or queue records. Assessment rows are not edited or deleted; corrections
 and followups are represented as additional rows.
 
+`AIContent.data` includes a `quality` string for sideband review metadata. The
+valid non-empty values are `wrong`, `poor`, and `good`; an empty string means no
+quality review has been recorded. Assessment submitters do not set this while
+creating their own assessment. AI content retrieval returns quality both as
+`quality` and inside `data.quality` when present.
+
 The canonical subject types for new assessments are:
 
 | Subject type | Key |

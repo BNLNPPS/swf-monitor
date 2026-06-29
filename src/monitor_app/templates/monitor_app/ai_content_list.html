@@ -62,9 +62,26 @@
                 <td><strong>Created:</strong> {{ item.created_display }}</td>
                 <td><strong>AI:</strong> {{ item.ai }}</td>
                 <td><strong>User:</strong> {{ item.username }}</td>
+                <td>
+                    <strong>Quality:</strong>
+                    {% if request.user.is_authenticated %}
+                    <form class="d-inline" method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select class="form-select form-select-sm d-inline-block w-auto" name="quality" onchange="this.form.submit()">
+                            <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
+                            {% for choice in quality_choices %}
+                            <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
+                            {% endfor %}
+                        </select>
+                    </form>
+                    {% else %}
+                    {{ item.quality|default:"unreviewed" }}
+                    {% endif %}
+                </td>
             </tr>
             <tr class="ai-assessment-header">
-                <td colspan="3">
+                <td colspan="4">
                     <strong>Subject:</strong> {{ item.subject_type }}:
                     {% if item.subject_url %}
                     <a href="{{ item.subject_url }}">{{ item.subject_display }}</a>
@@ -74,7 +91,7 @@
                 </td>
             </tr>
             <tr>
-                <td colspan="3">
+                <td colspan="4">
                     <div class="ai-assessment-text">{{ item.assessment_html }}</div>
                 </td>
             </tr>
