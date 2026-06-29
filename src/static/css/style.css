@@ -75,19 +75,25 @@ th {
     color: #0056b3;
 }
 
-.table.ai-assessment-entry {
-    border: 2px solid #495057;
-    border-collapse: collapse;
+.ai-assessment-entry {
+    border: 3px solid #343a40;
+    background: #fff;
 }
-.table.ai-assessment-entry td,
-.table.ai-assessment-entry th {
+.ai-assessment-entry .table {
+    border-collapse: collapse;
+    margin-bottom: 0;
+}
+.ai-assessment-entry .table td,
+.ai-assessment-entry .table th {
     border: 1px solid #d6d8db;
     padding: 0.35rem 0.5rem;
     vertical-align: top;
 }
-.table.ai-assessment-entry .ai-assessment-header td,
-.table.ai-assessment-entry .ai-assessment-header th {
-    background: #f1f3f5;
+.ai-assessment-entry .table .ai-assessment-header td,
+.ai-assessment-entry .table .ai-assessment-header th {
+    --bs-table-bg: #e9ecef;
+    --bs-table-accent-bg: #e9ecef;
+    background-color: #e9ecef !important;
 }
 .ai-assessment-text {
     overflow-wrap: anywhere;

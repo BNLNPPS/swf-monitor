@@ -55,7 +55,8 @@
 
     {% if items %}
     {% for item in items %}
-    <table class="table table-sm ai-assessment-entry mb-2">
+    <div class="ai-assessment-entry mb-2">
+    <table class="table table-sm mb-0">
         <tbody>
             <tr class="ai-assessment-header">
                 <td><strong>Created:</strong> {{ item.created_display }}</td>
@@ -79,6 +80,7 @@
             </tr>
         </tbody>
     </table>
+    </div>
     {% endfor %}
 
     {% if page_obj.has_other_pages %}

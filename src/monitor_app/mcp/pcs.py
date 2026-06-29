@@ -254,7 +254,7 @@ def _prodtask_to_dict(t, full=True):
         'status': t.status,
         'panda_task_id': t.panda_task_id,
         'panda_tasks': services.panda_tasks_summary(t),
-        'output_dataset_dids': [d.did for d in t.output_datasets],
+        'output_dataset_dids': [d.did for d in t.output_dataset_overrides],
         'input_dataset_dids':  [d.did for d in t.input_datasets],
         'intermediate_dataset_dids': [d.did for d in t.intermediate_datasets],
         'input_source_kind': t.input_source_kind,
