@@ -2292,9 +2292,9 @@ def prod_task_detail(request, name):
         'task_params_json': task_params_json,
         'task_params_error': task_params_error,
         'can_operate': can_operate,
-        'panda_tasks': services.panda_tasks_summary(task),
+        'panda_tasks': services.panda_tasks_summary(task, include_live=True),
         'can_submit': can_operate and task.panda_task_id is None and task.status in ('draft', 'ready'),
-        'can_reset_submission': can_operate and task.panda_task_id is not None,
+        'can_reset_submission': False,
     })
 
 
@@ -2547,7 +2547,8 @@ def prod_task_compose_task_detail(request, name):
     try:
         task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config'))
+            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+        ).prefetch_related('panda_tasks'))
     except ProdTask.DoesNotExist:
         raise Http404(f"No task {name!r}")
     try:
@@ -2561,4 +2562,5 @@ def prod_task_compose_task_detail(request, name):
         'task_params_error': task_params_error,
         'condor_command': task.condor_command,
         'panda_command': task.panda_command,
+        'panda_tasks': services.panda_tasks_summary(task, include_live=True),
     })

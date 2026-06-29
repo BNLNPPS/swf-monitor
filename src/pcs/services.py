@@ -162,29 +162,64 @@ def _log_dataset_name(task_name):
     return f'{task_name}_log/'
 
 
-def panda_tasks_summary(task):
-    """Compact association history for API/UI payloads."""
+def panda_tasks_summary(task, *, include_live=False):
+    """Compact association history for API/UI payloads.
+
+    The compose page ships many task summaries, so live PanDA enrichment is
+    opt-in. Use include_live=True only for focused task hydration or small
+    detail payloads.
+    """
     rows = getattr(task, '_prefetched_objects_cache', {}).get('panda_tasks')
     if rows is None:
         rows = task.panda_tasks.all()
-    return [
-        {
+    rows = list(rows)
+    live_by_id = {}
+    live_by_name = {}
+    if include_live:
+        ids = [row.jedi_task_id for row in rows if row.jedi_task_id]
+        names = [row.task_name for row in rows if row.task_name]
+        live_by_id, live_by_name, _ = _panda_progress_summaries(ids, names)
+
+    summaries = []
+    for row in sorted(rows, key=lambda item: item.try_number):
+        live = (
+            live_by_id.get(_to_int(row.jedi_task_id))
+            or live_by_name.get(row.task_name)
+            or {}
+        )
+        metadata = row.metadata or {}
+        maxattempt = live.get('maxattempt')
+        if maxattempt is None:
+            maxattempt = metadata.get('maxattempt') or metadata.get('panda_maxattempt')
+        if include_live and live:
+            updates = {
+                key: live.get(key)
+                for key in ('status', 'maxattempt', 'nactive', 'nfinished',
+                            'nfailed', 'nfinalfailed', 'nrunning', 'total_jobs',
+                            'terminal_jobs', 'processing_percent',
+                            'final_failure_rate')
+                if live.get(key) is not None
+            }
+            if updates:
+                metadata = {**metadata, **updates}
+        summaries.append({
             'id': row.pk,
             'try_number': row.try_number,
             'jedi_task_id': row.jedi_task_id,
             'task_name': row.task_name,
             'out_ds': row.out_ds,
             'log_ds': row.log_ds,
-            'site': row.site,
-            'status_snapshot': row.status_snapshot,
+            'site': live.get('site') or row.site,
+            'status_snapshot': live.get('status') or row.status_snapshot,
             'association_source': row.association_source,
             'match_reason': row.match_reason,
+            'maxattempt': maxattempt,
+            'metadata': metadata,
             'current': bool(task.panda_task_id and row.jedi_task_id == task.panda_task_id),
             'created_at': row.created_at.isoformat() if row.created_at else '',
             'updated_at': row.updated_at.isoformat() if row.updated_at else '',
-        }
-        for row in sorted(rows, key=lambda item: item.try_number)
-    ]
+        })
+    return summaries
 
 
 def prodtask_allocate_panda_tasks(*, task, source='pcs_submit_request'):
@@ -394,6 +429,7 @@ def _panda_progress_summaries(task_ids, tasknames):
             'nfailed': nfailed,
             'nfinalfailed': nfinalfailed,
             'nrunning': nrunning,
+            'maxattempt': c.get('maxattempt'),
             'total_jobs': total_jobs,
             'terminal_jobs': terminal_jobs,
             'processing_percent': (
@@ -3482,26 +3518,6 @@ def prodtask_rerun_entire_task_request(*, task):
         task.status = old_status
         task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
         raise
-    return task
-
-
-def prodtask_reset_submission(*, task):
-    """Clear a recorded submission so a task can be re-submitted: panda_task_id
-    → None and status → 'draft'. This is the recovery path when a submission
-    breaks or is aborted PanDA-side and the task is left pinned to a dead
-    jediTaskID — the submit gate (prodtask_submit_request) refuses while
-    panda_task_id is set, and PCS has no other way back to the buildable
-    lifecycle. Does NOT touch the PanDA task itself (none of our credentials
-    live in the web tier); it only detaches the dead reference so the next
-    submission can fire. The API gates
-    this to authenticated operators. Raises ServiceError if there is nothing to
-    reset. See docs/EPICPROD_OPS.md."""
-    if task.panda_task_id is None:
-        raise ServiceError(
-            'Nothing to reset — task has no recorded submission.', status=409)
-    task.panda_task_id = None
-    task.status = 'draft'
-    task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
     return task
 
 

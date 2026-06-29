@@ -632,7 +632,8 @@ def _compute_progress(nactive, nfinished, nfailed):
 
 def _get_task_job_counts(jeditaskids):
     """Return per-task job counts:
-    {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries, nfinalfailed}}.
+    {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries,
+    nfinalfailed, maxattempt}}.
 
     Aggregates over jobsactive4 + jobsarchived4 bucketed by JOB_STATUS_CATEGORIES.
     Cancelled and closed are deliberately not reported — alarms surface what
@@ -647,9 +648,11 @@ def _get_task_job_counts(jeditaskids):
       attemptnr >= maxattempt. These are final failures — the job exhausted
       its retry budget. Distinguishes true failures from transient-fail-then-
       retry-succeeds, which matters for alarms.
+    - maxattempt: maximum job-level maxattempt currently seen for the task.
     """
     zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
-                   'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0}
+                   'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0,
+                   'maxattempt': None}
     if not jeditaskids:
         return {}
 
@@ -664,7 +667,8 @@ def _get_task_job_counts(jeditaskids):
         SELECT "jeditaskid", "jobstatus",
                COUNT(*) AS n,
                SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
-               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= COALESCE("maxattempt", 3) THEN 1 ELSE 0 END) AS nfinalfailed_part
+               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= COALESCE("maxattempt", 3) THEN 1 ELSE 0 END) AS nfinalfailed_part,
+               MAX(COALESCE("maxattempt", 3)) AS maxattempt_part
         FROM (
             SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
                 FROM "{PANDA_SCHEMA}"."jobsactive4"
@@ -682,7 +686,7 @@ def _get_task_job_counts(jeditaskids):
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, params)
-            for tid, jobstatus, n, nretries_part, nfinalfailed_part in cursor.fetchall():
+            for tid, jobstatus, n, nretries_part, nfinalfailed_part, maxattempt_part in cursor.fetchall():
                 cat = status_to_cat.get(jobstatus)
                 if cat is not None:
                     counts[tid][f'n{cat}'] += n
@@ -691,6 +695,12 @@ def _get_task_job_counts(jeditaskids):
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
                 counts[tid]['nfinalfailed'] += nfinalfailed_part or 0
+                if maxattempt_part is not None:
+                    current = counts[tid].get('maxattempt')
+                    counts[tid]['maxattempt'] = max(
+                        current or 0,
+                        maxattempt_part,
+                    )
     except Exception as e:
         logger.error(f"_get_task_job_counts failed: {e}")
         # On failure, return zeros so caller still gets a consistent shape.

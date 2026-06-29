@@ -92,25 +92,15 @@ three operations:
 
 | Operation | When used | Effect |
 |---|---|---|
-| **Add Another Retry** | The PanDA task is still active and failures have exhausted the current attempt limit. | Queues `panda_api.increase_attempt_nr(jediTaskID, 1)` through the prod-ops agent. This increases the allowed attempts on the existing task. |
+| **Add Another Retry** | The PanDA task is still active and failures have exhausted the current attempt limit. | Queues `panda_api.increase_attempt_nr(jediTaskID, 1)` through the prod-ops agent. This increases the allowed attempts on the existing task; the UI shows the current job-level `nmax` when PanDA exposes it. |
 | **Restart And Retry Failures** | The PanDA task is finished or otherwise retryable in PanDA, and only failed work should be retried. | Queues `panda_api.retry_task(jediTaskID, new_parameters={})` through the prod-ops agent. PanDA retries failed work within the existing task. |
 | **Rerun Entire Task** | The full task should be submitted again as a new concrete production attempt. | Allocates the next `PandaTasks` row, appends `.tryN` to the physical PanDA task and output names, and submits a new task. This reruns all work. |
 
 The first two operations are native PanDA operations on an existing JEDI task.
 They do not create a new Rucio output namespace. The third operation is a new PCS
 submission attempt and therefore creates a new physical PanDA task name and Rucio
-namespace.
-
-The older recovery path remains available for broken or aborted submission
-recording:
-
-1. From the PanDA task page, follow the PCS task link back to the campaign task.
-2. Use **Reset submission**. This clears only the current pointer
-   (`panda_task_id → None`, `status → draft`); it does not delete the
-   `PandaTasks` history row and does not stop or delete the PanDA task.
-3. Adjust the task/config if needed and submit again. PCS allocates the next
-   `tryN` physical name before submission and records the returned JEDI id on
-   that association row.
+namespace. Recorded submission fields are production provenance and are not
+cleared by operator actions.
 
 PanDA tasks submitted outside PCS can still be associated: when a PanDA task page
 is opened, swf-monitor first looks in `PandaTasks`, then performs an exact

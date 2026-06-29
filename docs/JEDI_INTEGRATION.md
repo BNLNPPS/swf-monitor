@@ -506,7 +506,8 @@ shows the `PanDA Tasks` table and these actions:
 
 - **Submit to PanDA** for a task with no current PanDA task.
 - **Add Another Retry** for `increase_attempt_nr(jediTaskID, 1)` on an existing
-  task.
+  task; the focused campaign-task page shows `current nmax: N` when PanDA job
+  rows expose the current maximum attempt count.
 - **Restart And Retry Failures** for `retry_task(jediTaskID,
   new_parameters={})` on an existing task.
 - **Rerun Entire Task** for a new `.tryN` physical submission.

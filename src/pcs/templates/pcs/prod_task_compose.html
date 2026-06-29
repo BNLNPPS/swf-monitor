@@ -125,7 +125,6 @@
                     <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
                 </span>
                 <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
-                <button class="btn pcs-reset-submit-btn btn-sm" id="btn-reset-task" style="display:none;">Reset submission</button>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -325,12 +324,19 @@
         }
         return t.panda_task_id || null;
     }
+    function currentMaxAttemptLabel(t, jediTaskId) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
+        const row = rows.find(pt => String(pt.jedi_task_id || '') === String(jediTaskId || ''));
+        const raw = row ? (row.maxattempt || (row.metadata && row.metadata.maxattempt)) : null;
+        const nmax = Number(raw);
+        return Number.isFinite(nmax) && nmax > 0 ? ` (current nmax: ${nmax})` : '';
+    }
     function pandaOperationsHtml(t) {
         const jediTaskId = currentPandaJediTaskId(t);
         if (!currentUser || !jediTaskId) return '';
         return `<div class="pcs-panda-ops" data-jedi-task-id="${htmlEscape(jediTaskId)}">
             <span class="pcs-panda-ops-label">PanDA Operations</span>
-            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="increase_attempts">Add Another Retry</button>
+            <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="increase_attempts">Add Another Retry${currentMaxAttemptLabel(t, jediTaskId)}</button>
             <button type="button" class="btn btn-outline-primary btn-sm pcs-panda-op" data-panda-op="retry_failures">Restart And Retry Failures</button>
             <button type="button" class="btn pcs-reset-submit-btn btn-sm pcs-panda-op" data-panda-op="rerun_entire_task">Rerun Entire Task</button>
         </div>`;
@@ -414,6 +420,7 @@
                 if (d.task_params_error !== undefined) t.task_params_error = d.task_params_error;
                 if (d.condor_command !== undefined) t.condor_command = d.condor_command;
                 if (d.panda_command !== undefined) t.panda_command = d.panda_command;
+                if (d.panda_tasks !== undefined) t.panda_tasks = d.panda_tasks;
                 t._hydrated = true;
             }
         } catch (e) { /* leave light */ }
@@ -444,7 +451,7 @@
     const submitTaskWrap = document.getElementById('submit-task-wrap');
     const btnSubmitTask = document.getElementById('btn-submit-task');
     const linkPandaTask = document.getElementById('link-panda-task');
-    const btnResetTask = document.getElementById('btn-reset-task');
+    const btnResetTask = null;
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -825,7 +832,7 @@
     // view may have left visible. Submit-to-PanDA is task business, not dataset.
     function hideTaskActions() {
         [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
-         linkPandaTask, btnResetTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
+         linkPandaTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
     }
 
     // ── BROWSE: Show details ──
@@ -968,9 +975,6 @@
                 linkPandaTask.style.display = 'none';
             }
         }
-        // Reset submission — operator recovery for a task pinned to a dead
-        // jediTaskID; detaches the PanDA reference and returns it to draft.
-        if (btnResetTask) btnResetTask.style.display = (submitted && canOperate) ? 'inline-block' : 'none';
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
 
         let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
@@ -1228,24 +1232,6 @@
             alert(msg);
         }
     });
-    if (btnResetTask) btnResetTask.addEventListener('click', async () => {
-        const t = allTasks.find(x => x.id === selectedItemId);
-        if (!t) return;
-        if (!confirm(`Reset submission on "${t.name}"? This detaches PanDA Task ${t.panda_task_id} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.`)) return;
-        const resp = await fetch(taskApiUrl(t, 'reset-submission/'),
-            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
-        if (resp.ok) {
-            const updated = await resp.json();
-            updateTaskFromApiData(t.id, updated);
-            renderList();
-            showTaskDetail(t.id);   // stay in the panel; Submit returns, PanDA link + Reset vanish
-        } else {
-            let msg = `Reset failed (HTTP ${resp.status})`;
-            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
-            alert(msg);
-        }
-    });
-
     let pendingPandaOperation = null;
     browseContent.addEventListener('click', async e => {
         const btn = e.target.closest('[data-panda-op]');

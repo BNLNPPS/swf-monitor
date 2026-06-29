@@ -200,7 +200,8 @@ When a focused task has an associated JEDI task, the compose page shows a
 compact `PanDA Operations` row:
 
 - **Add Another Retry** increases the allowed attempts on the existing PanDA
-  task.
+  task; the button shows `current nmax: N` when PanDA job rows expose the
+  current maximum attempt count.
 - **Restart And Retry Failures** asks PanDA to retry failed work in the existing
   task.
 - **Rerun Entire Task** submits a new physical task attempt with the next

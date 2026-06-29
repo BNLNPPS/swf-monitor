@@ -463,21 +463,6 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             data['warnings'] = warnings
         return Response(data)
 
-    @action(detail=True, methods=['post'], url_path='reset-submission')
-    def reset_submission(self, request, name=None):
-        """Detach a broken/aborted submission so a task can be re-submitted:
-        panda_task_id → None, status → draft. Authenticated users may operate
-        production tasks; this is the recovery path for a task pinned to a dead
-        jediTaskID (the submit gate refuses while panda_task_id is set). Does
-        not touch PanDA — the web tier holds no credential. See
-        docs/EPICPROD_OPS.md."""
-        task = self.get_object()
-        try:
-            services.prodtask_reset_submission(task=task)
-        except ServiceError as e:
-            return Response({'detail': e.detail}, status=e.status)
-        return Response(self.get_serializer(task).data)
-
     @action(detail=True, methods=['post'], url_path='panda-add-retry')
     def panda_add_retry(self, request, name=None):
         """Ask PanDA to increase allowed attempts for an existing JEDI task."""
