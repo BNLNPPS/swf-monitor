@@ -102,8 +102,8 @@ from .ai_memory import (
 
 # AI Content tools
 from .ai_content import (
-    epicprod_register_ai_assessment,
-    epicprod_get_ai_content,
+    epic_register_ai_assessment,
+    epic_get_ai_content,
 )
 
 # PanDA Monitor tools
@@ -186,8 +186,8 @@ __all__ = [
     'swf_record_ai_memory',
     'swf_get_ai_memory',
     # AI Content
-    'epicprod_register_ai_assessment',
-    'epicprod_get_ai_content',
+    'epic_register_ai_assessment',
+    'epic_get_ai_content',
     # PanDA Monitor
     'panda_list_jobs',
     'panda_diagnose_jobs',

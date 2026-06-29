@@ -410,8 +410,8 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `epicprod_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content for an epicprod object and link it from the target object JSON when the subject is known locally. |
-| `epicprod_get_ai_content` | `ids` | Retrieve append-only AI assessment rows by AIContent ids. Use the ids supplied in a detail payload's `ai_content.retrieval.arguments.ids`. |
+| `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content for an epicprod object and link it from the target object JSON when the subject is known locally. |
+| `epic_get_ai_content` | `ids` | Retrieve append-only AI assessment rows by AIContent ids. Use the ids supplied in a detail payload's `ai_content.retrieval.arguments.ids`. |
 
 **Known subject types:**
 - `campaign_task`: campaign/production task, keyed by composed task name.
@@ -422,7 +422,7 @@ This tool aggregates information from workflow messages and logs, providing a si
 **Behavior:**
 - AI content is append-only. Corrections and followups create new rows.
 - For known local subjects, the tool writes the central `AIContent` row and appends its id to the subject JSON field under `ai_content_ids`.
-- MCP registrations stamp stored metadata with `registered_via: "mcp"` and `mcp_tool: "epicprod_register_ai_assessment"`.
+- MCP registrations stamp stored metadata with `registered_via: "mcp"` and `mcp_tool: "epic_register_ai_assessment"`.
 - Bot-originated registrations should be stamped by the bot harness with `username: "bot"`, `ai` set to the exact model, and `data.origin` including `type: "bot"` and the same model.
 - Detail-style production tools include an `ai_content` block when the object can have linked AI assessments. If `ai_content.available` is true, call the specified retrieval tool with the specified arguments:
 
@@ -432,7 +432,7 @@ This tool aggregates information from workflow messages and logs, providing a si
   "count": 2,
   "ids": [17, 23],
   "retrieval": {
-    "tool": "epicprod_get_ai_content",
+    "tool": "epic_get_ai_content",
     "arguments": {"ids": [17, 23]}
   }
 }
@@ -572,7 +572,7 @@ Use cases:
 | User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
-| AI Content | `epicprod_register_ai_assessment`, `epicprod_get_ai_content` | 2 |
+| AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |

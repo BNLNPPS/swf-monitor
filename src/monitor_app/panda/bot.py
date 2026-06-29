@@ -849,7 +849,7 @@ class PandaBot:
     @staticmethod
     def _stamp_bot_assessment_origin(tool_name, arguments):
         """Stamp bot-origin metadata before registering an AI assessment."""
-        if tool_name != 'epicprod_register_ai_assessment':
+        if tool_name != 'epic_register_ai_assessment':
             return arguments
 
         stamped = dict(arguments or {})

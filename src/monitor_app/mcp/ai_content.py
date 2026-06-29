@@ -168,7 +168,7 @@ def _register_ai_assessment_sync(
 
     payload_data = dict(data or {})
     payload_data.setdefault('registered_via', 'mcp')
-    payload_data.setdefault('mcp_tool', 'epicprod_register_ai_assessment')
+    payload_data.setdefault('mcp_tool', 'epic_register_ai_assessment')
     try:
         resolved = _resolve_subject(canonical_type, subject_key, payload_data)
     except Exception as exc:
@@ -260,7 +260,7 @@ def _get_ai_content_sync(ids):
 
 
 @mcp.tool()
-async def epicprod_register_ai_assessment(
+async def epic_register_ai_assessment(
     subject_type: str,
     subject_key: str,
     assessment: str,
@@ -294,7 +294,7 @@ async def epicprod_register_ai_assessment(
         subject_url: Optional monitor URL override.
         data: Optional structured metadata captured with the assessment. The
             server stamps `registered_via='mcp'` and
-            `mcp_tool='epicprod_register_ai_assessment'` on stored metadata.
+            `mcp_tool='epic_register_ai_assessment'` on stored metadata.
 
     Returns:
         Success status, AIContent id, canonical subject reference, created_at,
@@ -313,7 +313,7 @@ async def epicprod_register_ai_assessment(
 
 
 @mcp.tool()
-async def epicprod_get_ai_content(ids: list) -> dict:
+async def epic_get_ai_content(ids: list) -> dict:
     """
     Retrieve append-only epicprod AI assessment content by AIContent ids.
 
@@ -325,7 +325,7 @@ async def epicprod_get_ai_content(ids: list) -> dict:
           "count": 2,
           "ids": [17, 23],
           "retrieval": {
-            "tool": "epicprod_get_ai_content",
+            "tool": "epic_get_ai_content",
             "arguments": {"ids": [17, 23]}
           }
         }

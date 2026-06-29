@@ -10,7 +10,7 @@ from .utils import format_datetime
 
 
 AI_CONTENT_IDS_KEY = 'ai_content_ids'
-AI_CONTENT_RETRIEVE_TOOL = 'epicprod_get_ai_content'
+AI_CONTENT_RETRIEVE_TOOL = 'epic_get_ai_content'
 _MARKDOWN_EXTENSIONS = ['extra', 'sane_lists']
 _ALLOWED_TAGS = set(bleach.sanitizer.ALLOWED_TAGS) | {
     'p', 'pre', 'code', 'br', 'hr',

@@ -168,13 +168,13 @@ The canonical subject types for new assessments are:
 | `panda_queue` | PanDA queue name; if the queue name equals the site name, the row represents the site as a whole |
 
 AI clients register assessments through MCP with
-`epicprod_register_ai_assessment`. The tool resolves known subjects, creates the
+`epic_register_ai_assessment`. The tool resolves known subjects, creates the
 `AIContent` row, and appends the new id to the subject JSON field in one
 transaction. This is the write path intended for Codex, the PanDA Mattermost bot,
 and later automated production assessors such as corun-ai. The public subject
 type names above are the MCP interface; implementation-specific model names are
 not part of that interface. MCP registrations stamp metadata with
-`registered_via: "mcp"` and `mcp_tool: "epicprod_register_ai_assessment"`.
+`registered_via: "mcp"` and `mcp_tool: "epic_register_ai_assessment"`.
 When the Mattermost bot registers an assessment, its harness stamps
 `username: "bot"`, `ai` as the exact model used, and `data.origin` with
 `type: "bot"` plus the same model.
@@ -182,7 +182,7 @@ When the Mattermost bot registers an assessment, its harness stamps
 MCP detail tools that can return assessed subjects include an `ai_content`
 retrieval block. When `ai_content.available` is true, clients should call the
 tool and arguments supplied in that block, for example
-`epicprod_get_ai_content(ids=[17, 23])`. Clients should use those ids directly
+`epic_get_ai_content(ids=[17, 23])`. Clients should use those ids directly
 instead of reconstructing a subject type/key lookup from the parent object.
 
 Assessment text is rendered as Markdown in the UI and sanitized before display.
