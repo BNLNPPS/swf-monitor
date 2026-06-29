@@ -7,6 +7,7 @@ and delegates to the synchronous query function via sync_to_async.
 
 from asgiref.sync import sync_to_async
 from monitor_app.ai_assessments import ai_content_retrieval_guidance
+from monitor_app.epicprod_inventory import diagnosis_for_study_data
 from monitor_app.mcp import mcp
 from monitor_app.panda import queries
 
@@ -46,19 +47,7 @@ def _study_job_sync(pandaid):
         return result
     from monitor_app.models import EpicProdJob
     row = EpicProdJob.objects.filter(pandaid=pandaid).first()
-    result['epicprod_diagnosis'] = {
-        'available': bool(row),
-        'phase': row.phase if row else '',
-        'failure_summary': row.failure_summary if row else '',
-        'timeline': (row.data or {}).get('timeline') if row else [],
-        'last_refreshed_at': row.last_refreshed_at.isoformat() if row and row.last_refreshed_at else '',
-        'guidance': (
-            'Use phase/failure_summary as the production-facing diagnosis. '
-            'This is parsed from payload logs and app inventory, and can be '
-            'more specific than the top-level PanDA pilot error for '
-            'payload-managed input/output workflows.'
-        ),
-    }
+    result['epicprod_diagnosis'] = diagnosis_for_study_data(result, epicprod_job=row)
     result['ai_content'] = ai_content_retrieval_guidance(row.data if row else {})
     return result
 

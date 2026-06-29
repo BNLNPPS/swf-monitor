@@ -33,7 +33,11 @@ from ..panda.constants import (
 )
 from ..cell_fmt import fill_cell
 from ..activemq_connection import ActiveMQConnectionManager
-from ..epicprod_inventory import inventory_for_job_context
+from ..epicprod_inventory import (
+    cached_payload_log_parts,
+    diagnosis_for_study_data,
+    inventory_for_job_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +515,8 @@ def panda_job_detail(request, pandaid):
         if job.get(key) not in (None, '')
     ]
     data.update(inventory_for_job_context(data))
+    data['epicprod_diagnosis'] = diagnosis_for_study_data(
+        data, epicprod_job=data.get('epicprod_job'))
     return render(request, 'monitor_app/panda_job_detail.html', data)
 
 
@@ -522,10 +528,16 @@ def epicprod_job_refresh(request, pandaid):
         'namespace': 'prodops',
         'pandaid': str(pandaid),
     }
+    triggered = False
     try:
-        ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
     except Exception as e:
         logger.error("epicprod inventory refresh trigger failed for job %s: %s", pandaid, e)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        status = 202 if triggered else 502
+        return JsonResponse({'ok': triggered, 'queued': triggered, 'pandaid': pandaid},
+                            status=status)
     return redirect('monitor_app:panda_job_detail', pandaid=pandaid)
 
 
@@ -783,16 +795,8 @@ def panda_payload_log(request, pandaid):
     # is fully populated — never keyed on a single member (a log may lack stdout).
     if not force and os.path.isfile(os.path.join(jobdir, '.done')):
         parts = []
-        for name in ('payload.stdout', 'payload.stderr', 'pilotlog.txt', 'pandatracerlog.txt'):
-            path = os.path.join(jobdir, name)
-            if not os.path.isfile(path):
-                continue
-            try:
-                with open(path, 'r', errors='replace') as f:
-                    body = f.read()
-            except OSError as e:
-                body = f'(could not read {name}: {e})'
-            parts.append(f"===== {name} =====\n{body}\n")
+        for part in cached_payload_log_parts(jeditaskid, pandaid):
+            parts.append(f"===== {part['name']} =====\n{part['text']}\n")
         return HttpResponse(''.join(parts) or '(log cached but empty)\n',
                             content_type='text/plain; charset=utf-8')
 
