@@ -74,6 +74,18 @@ def ai_content_items(rows):
         assessment = str(getattr(row, 'assessment', '') or '').strip()
         if not assessment:
             continue
+        subject_type = str(getattr(row, 'subject_type', '') or '').strip()
+        subject_key = str(getattr(row, 'subject_key', '') or '').strip()
+        subject_label = str(getattr(row, 'subject_label', '') or '').strip()
+        subject_display = subject_label or subject_key
+        if subject_type == 'panda_task' and subject_key:
+            subject_display = f'PanDA task {subject_key}'
+            if subject_label and subject_label != subject_key:
+                subject_display = f'{subject_display}: {subject_label}'
+        elif subject_type == 'panda_job' and subject_key:
+            subject_display = f'PanDA job {subject_key}'
+            if subject_label and subject_key not in subject_label:
+                subject_display = f'{subject_display}: {subject_label}'
         created_at = getattr(row, 'created_at', '')
         items.append({
             'id': row.pk,
@@ -83,9 +95,10 @@ def ai_content_items(rows):
             'assessment_html': render_assessment_markdown(assessment),
             'created_at': created_at,
             'created_display': _display_time(created_at),
-            'subject_type': str(getattr(row, 'subject_type', '') or '').strip(),
-            'subject_key': str(getattr(row, 'subject_key', '') or '').strip(),
-            'subject_label': str(getattr(row, 'subject_label', '') or '').strip(),
+            'subject_type': subject_type,
+            'subject_key': subject_key,
+            'subject_label': subject_label,
+            'subject_display': subject_display,
             'subject_url': str(getattr(row, 'subject_url', '') or '').strip(),
         })
     return items
@@ -104,6 +117,7 @@ def ai_content_summary(data):
             'subject_type': item['subject_type'],
             'subject_key': item['subject_key'],
             'subject_label': item['subject_label'],
+            'subject_display': item['subject_display'],
             'subject_url': item['subject_url'],
         })
     return out

@@ -3,20 +3,17 @@
     <div class="card-header"><strong>{{ title }}</strong></div>
     <div class="card-body">
         {% for item in items %}
-        <div{% if not forloop.last %} class="mb-3 pb-3 border-bottom"{% endif %}>
-            <table class="table table-sm table-bordered mb-2">
+        <div{% if not forloop.last %} class="mb-2"{% endif %}>
+            <table class="table table-sm ai-assessment-entry mb-0">
                 <tbody>
-                <tr>
-                    <td><strong>Created</strong></td>
-                    <td>{{ item.created_display|default:item.created_at }}</td>
-                    <td><strong>User</strong></td>
-                    <td>{{ item.username }}</td>
-                    <td><strong>AI</strong></td>
-                    <td>{{ item.ai }}</td>
+                <tr class="ai-assessment-header">
+                    <td><strong>Created:</strong> {{ item.created_display|default:item.created_at }}</td>
+                    <td><strong>AI:</strong> {{ item.ai }}</td>
+                    <td><strong>User:</strong> {{ item.username }}</td>
                 </tr>
                 <tr>
-                    <td colspan="6">
-                        <div class="ai-assessment-text" style="overflow-wrap:anywhere;">{{ item.assessment_html }}</div>
+                    <td colspan="3">
+                        <div class="ai-assessment-text">{{ item.assessment_html }}</div>
                     </td>
                 </tr>
                 </tbody>

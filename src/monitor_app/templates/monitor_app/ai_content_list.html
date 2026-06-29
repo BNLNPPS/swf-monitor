@@ -20,17 +20,30 @@
         {% endif %}
     </p>
 
-    <form method="get" class="row g-2 align-items-end mb-3">
-        <div class="col-md-3">
-            <label class="form-label mb-1" for="subject-type">Subject Type</label>
-            <select class="form-select form-select-sm" id="subject-type" name="subject_type">
-                <option value="">All</option>
-                {% for subject_type in subject_types %}
-                <option value="{{ subject_type }}" {% if subject_type == selected_subject_type %}selected{% endif %}>{{ subject_type }}</option>
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="filter-bar mb-2">
+                <strong>Subject Type:</strong>
+                <a href="?{% if q %}q={{ q|urlencode }}{% endif %}" class="filter-link {% if not selected_subject_type %}filter-active{% endif %}">All ({{ total_count }})</a>
+                {% for row in subject_counts %}
+                <a href="?subject_type={{ row.subject_type|urlencode }}{% if q %}&q={{ q|urlencode }}{% endif %}" class="filter-link {% if selected_subject_type == row.subject_type %}filter-active{% endif %}">{{ row.subject_type }} ({{ row.count }})</a>
                 {% endfor %}
-            </select>
+            </div>
+            {% if selected_subject_type %}
+            <div class="small">
+                <strong>Active filters:</strong>
+                <span class="badge bg-info me-1">Subject: {{ selected_subject_type }}</span>
+                <a href="?{% if q %}q={{ q|urlencode }}{% endif %}" class="btn btn-link btn-sm p-0 ms-1">clear subject</a>
+            </div>
+            {% endif %}
         </div>
-        <div class="col-md-5">
+    </div>
+
+    <form method="get" class="row g-2 align-items-end mb-3">
+        {% if selected_subject_type %}
+        <input type="hidden" name="subject_type" value="{{ selected_subject_type }}">
+        {% endif %}
+        <div class="col-md-6">
             <label class="form-label mb-1" for="q">Search</label>
             <input class="form-control form-control-sm" id="q" name="q" value="{{ q }}">
         </div>
@@ -41,39 +54,32 @@
     </form>
 
     {% if items %}
-    <table class="table table-sm table-bordered">
+    {% for item in items %}
+    <table class="table table-sm ai-assessment-entry mb-2">
         <tbody>
-        {% for item in items %}
-        <tr>
-            <td><strong>Created</strong></td>
-            <td>{{ item.created_display }}</td>
-            <td><strong>User</strong></td>
-            <td>{{ item.username }}</td>
-            <td><strong>AI</strong></td>
-            <td>{{ item.ai }}</td>
-        </tr>
-        <tr>
-            <td><strong>Subject</strong></td>
-            <td colspan="5">
-                {{ item.subject_type }}:
-                {% if item.subject_url %}
-                <a href="{{ item.subject_url }}">{{ item.subject_label|default:item.subject_key }}</a>
-                {% else %}
-                {{ item.subject_label|default:item.subject_key }}
-                {% endif %}
-            </td>
-        </tr>
-        <tr>
-            <td colspan="6">
-                <div class="ai-assessment-text" style="overflow-wrap:anywhere;">{{ item.assessment_html }}</div>
-            </td>
-        </tr>
-        {% if not forloop.last %}
-        <tr><td colspan="6" style="height:.5rem;background:#f8f9fa;"></td></tr>
-        {% endif %}
-        {% endfor %}
+            <tr class="ai-assessment-header">
+                <td><strong>Created:</strong> {{ item.created_display }}</td>
+                <td><strong>AI:</strong> {{ item.ai }}</td>
+                <td><strong>User:</strong> {{ item.username }}</td>
+            </tr>
+            <tr class="ai-assessment-header">
+                <td colspan="3">
+                    <strong>Subject:</strong> {{ item.subject_type }}:
+                    {% if item.subject_url %}
+                    <a href="{{ item.subject_url }}">{{ item.subject_display }}</a>
+                    {% else %}
+                    {{ item.subject_display }}
+                    {% endif %}
+                </td>
+            </tr>
+            <tr>
+                <td colspan="3">
+                    <div class="ai-assessment-text">{{ item.assessment_html }}</div>
+                </td>
+            </tr>
         </tbody>
     </table>
+    {% endfor %}
 
     {% if page_obj.has_other_pages %}
     <nav aria-label="AI content pages">

@@ -3017,12 +3017,6 @@ def ai_content_list(request):
         )
     paginator = Paginator(qs, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
-    subject_types = (
-        AIContent.objects
-        .order_by('subject_type')
-        .values_list('subject_type', flat=True)
-        .distinct()
-    )
     subject_counts = list(
         AIContent.objects
         .values('subject_type')
@@ -3033,7 +3027,6 @@ def ai_content_list(request):
     return render(request, 'monitor_app/ai_content_list.html', {
         'items': ai_content_items(page_obj.object_list),
         'page_obj': page_obj,
-        'subject_types': subject_types,
         'subject_counts': subject_counts,
         'total_count': total_count,
         'selected_subject_type': subject_type,
