@@ -9,7 +9,7 @@
         <h1>AI Assessments</h1>
     </div>
     {% if is_tunnel %}
-    <p class="text-muted small mb-3" title="Available on pandaserver02">Available on pandaserver02</p>
+    <p class="text-muted small mb-3" title="Quality setting and comment entry are available on pandaserver02">Quality setting and comment entry are available on <a href="https://pandaserver02.sdcc.bnl.gov/swf-monitor/ai/assessments/">pandaserver02</a></p>
     {% endif %}
 
     <p>
@@ -135,7 +135,7 @@
                         <div class="row g-2 align-items-start">
                             <div class="col-md-2">
                                 <label class="form-label mb-1">Quality</label>
-                                <select class="form-select form-select-sm" name="quality"{% if is_tunnel %} disabled title="Available on pandaserver02"{% endif %}>
+                                <select class="form-select form-select-sm" name="quality"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>
                                     <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
                                     {% for choice in quality_choices %}
                                     <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
@@ -144,11 +144,11 @@
                             </div>
                             <div class="col-md-9">
                                 <label class="form-label mb-1">Comment</label>
-                                <textarea class="form-control form-control-sm{% if is_tunnel %} bg-light text-muted{% endif %}" name="comment" rows="3"{% if is_tunnel %} disabled title="Available on pandaserver02"{% endif %}>{{ item.comment }}</textarea>
+                                <textarea class="form-control form-control-sm{% if is_tunnel %} bg-light text-muted{% endif %}" name="comment" rows="3"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>{{ item.comment }}</textarea>
                             </div>
                             <div class="col-md-1">
                                 <label class="form-label mb-1">&nbsp;</label>
-                                <button class="btn btn-sm {% if is_tunnel %}btn-secondary disabled{% else %}btn-primary{% endif %} w-100" type="{% if is_tunnel %}button{% else %}submit{% endif %}"{% if is_tunnel %} disabled title="Available on pandaserver02"{% endif %}>Save</button>
+                                <button class="btn btn-sm {% if is_tunnel %}btn-secondary disabled{% else %}btn-primary{% endif %} w-100" type="{% if is_tunnel %}button{% else %}submit{% endif %}"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>Save</button>
                             </div>
                         </div>
                     </form>
