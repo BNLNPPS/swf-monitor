@@ -229,8 +229,8 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
-    path('prod/ai/', ai_content_list, name='ai_content_list'),
-    path('prod/ai/<int:content_id>/quality/', ai_content_set_quality, name='ai_content_set_quality'),
+    path('ai/assessments/', ai_content_list, name='ai_content_list'),
+    path('ai/assessments/<int:content_id>/quality/', ai_content_set_quality, name='ai_content_set_quality'),
     path('testbed/', testbed_hub, name='testbed_hub'),
 
     # PanDA Production Monitor
