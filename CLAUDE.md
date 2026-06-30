@@ -29,6 +29,17 @@ Worked examples: payload-log fetch and PanDA submit. Read before designing any
 production-ops feature: **`docs/EPICPROD_OPS_AGENT.md`** (the agent and the
 pattern) and **`docs/SSE_PUSH.md`** (the browser push).
 
+## swf-remote tunnel flag
+
+swf-monitor templates receive `is_tunnel` from
+`monitor_app.middleware.tunnel_context`. It is true for localhost requests from
+the swf-remote SSH tunnel and false for direct `pandaserver02` browser access.
+Use this flag for conditional template behavior that must differ on the external
+proxy face, such as disabling page-view POST controls that are only supported on
+`pandaserver02`. Do not infer tunnel/proxy mode from URL strings or implement
+HTML rewrites in `swf-remote` when `is_tunnel` can express the condition in the
+swf-monitor template.
+
 ## Doc index (`docs/`)
 
 - `EPICPROD_OPS_AGENT.md` — the credentialed ops agent; capability model + the pattern above.

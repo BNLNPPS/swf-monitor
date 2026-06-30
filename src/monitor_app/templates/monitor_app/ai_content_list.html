@@ -5,9 +5,12 @@
 
 {% block content %}
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex justify-content-between align-items-center {% if is_tunnel %}mb-1{% else %}mb-3{% endif %}">
         <h1>AI Assessments</h1>
     </div>
+    {% if is_tunnel %}
+    <p class="text-muted small mb-3" title="Available on pandaserver02">Available on pandaserver02</p>
+    {% endif %}
 
     <p>
         AI assessments performed on PanDA tasks, jobs, and sites/queues are shown here.
@@ -132,7 +135,7 @@
                         <div class="row g-2 align-items-start">
                             <div class="col-md-2">
                                 <label class="form-label mb-1">Quality</label>
-                                <select class="form-select form-select-sm" name="quality">
+                                <select class="form-select form-select-sm" name="quality"{% if is_tunnel %} disabled title="Available on pandaserver02"{% endif %}>
                                     <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
                                     {% for choice in quality_choices %}
                                     <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
@@ -141,11 +144,11 @@
                             </div>
                             <div class="col-md-9">
                                 <label class="form-label mb-1">Comment</label>
-                                <textarea class="form-control form-control-sm" name="comment" rows="3">{{ item.comment }}</textarea>
+                                <textarea class="form-control form-control-sm{% if is_tunnel %} bg-light text-muted{% endif %}" name="comment" rows="3"{% if is_tunnel %} disabled title="Available on pandaserver02"{% endif %}>{{ item.comment }}</textarea>
                             </div>
                             <div class="col-md-1">
                                 <label class="form-label mb-1">&nbsp;</label>
-                                <button class="btn btn-sm btn-outline-secondary w-100" type="submit">Save</button>
+                                <button class="btn btn-sm {% if is_tunnel %}btn-secondary disabled{% else %}btn-outline-secondary{% endif %} w-100" type="{% if is_tunnel %}button{% else %}submit{% endif %}"{% if is_tunnel %} disabled title="Available on pandaserver02"{% endif %}>Save</button>
                             </div>
                         </div>
                     </form>

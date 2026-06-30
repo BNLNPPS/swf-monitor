@@ -95,6 +95,21 @@ action:
 The supported write path is the `/pcs/api/` surface (per *Authentication*
 below); page-view POSTs through the proxy are not.
 
+## Conditional template behavior on the proxy
+
+swf-monitor exposes the template context flag `is_tunnel` for requests arriving
+through the swf-remote SSH tunnel. It is set by
+`monitor_app.middleware.tunnel_context`, which checks whether the upstream
+request reaches swf-monitor from localhost. Direct browser access on
+`pandaserver02` gets `is_tunnel = False`; proxied external access through
+swf-remote gets `is_tunnel = True`.
+
+Use `is_tunnel` in swf-monitor templates when a control or message must differ
+between the internal and external faces. Existing examples include hiding or
+disabling page-view write controls that are only supported on `pandaserver02`.
+Do not implement this class of behavior by matching URL strings or rewriting
+proxied HTML in swf-remote.
+
 ## Static assets
 
 CSS, JS, and images at `/swf-monitor/static/...` proxy through
