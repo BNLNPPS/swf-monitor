@@ -217,6 +217,65 @@ sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch infra/baseline-v19
 sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh tag v1.2.3
 ```
 
+### Lightweight UI/MCP Deploy
+
+For rapid development on UI and MCP changes, use `deploy-lightweight-ui-mcp.sh`
+instead of the full release deploy. This script updates the active release in
+place and recycles only the process that needs the new code.
+
+This follows the normal dev-area sync workflow: the source is the current
+`github/swf-monitor` checkout, and the target is the active
+`/opt/swf-monitor/current` release. It does not create a new release directory
+or move the `current` symlink.
+
+Use it for:
+
+- Django UI/view/template/form/helper changes under `src/monitor_app/`,
+  `src/pcs/`, `src/templates/`, or URL routing
+- MCP tool changes under `src/monitor_app/mcp/` and helper modules used by MCP
+- Static asset changes only when explicitly adding `--static`
+
+Do not use it for:
+
+- database migrations or model/schema changes requiring migrations
+- `requirements.txt`, `pyproject.toml`, virtualenv, or dependency changes
+- Apache config, systemd units, production env/config changes
+- ops-agent code, PanDA bot code, or testbed bot code
+- release/symlink changes where `/opt/swf-monitor/current` must move
+
+Typical commands from the repo checkout on `pandaserver02`:
+
+```bash
+# UI/templates/views only: sync code and touch wsgi.py
+sudo ./deploy-lightweight-ui-mcp.sh --ui
+
+# MCP tools only: sync code and restart only the MCP ASGI worker
+sudo ./deploy-lightweight-ui-mcp.sh --mcp
+
+# UI plus MCP changes
+sudo ./deploy-lightweight-ui-mcp.sh --ui --mcp
+
+# UI changes with CSS/JS/static asset updates
+sudo ./deploy-lightweight-ui-mcp.sh --ui --static
+
+# Inspect what would be copied and restarted
+./deploy-lightweight-ui-mcp.sh --ui --mcp --dry-run
+```
+
+Expected interruption:
+
+- `--ui`: near-zero to a few seconds. The script touches
+  `/opt/swf-monitor/current/src/swf_monitor_project/wsgi.py`, causing mod_wsgi
+  to reload the Django app on the next request without reloading Apache config.
+- `--mcp`: subsecond to a few seconds for MCP calls while
+  `swf-monitor-mcp-asgi.service` restarts. Normal web UI is not restarted for
+  MCP-only deploys.
+- no ops-agent or bot interruption.
+
+This is an active-release patch path, not a durable release record. Follow up
+with the standard full deploy when the branch is ready to become the production
+release baseline.
+
 ### What Happens During Deployment
 
 The deployment script automatically:
@@ -370,7 +429,7 @@ sudo journalctl -u swf-panda-bot.service -f
 ```
 
 `swf-panda-bot.service` can also launch the standalone corun MCP server when
-`CORUN_API_TOKEN` is present in `production.env`. The bot uses it to queue codoc
+`corun-ai_API_TOKEN` is present in `production.env`. The bot uses it to queue codoc
 generation jobs through prod corun and deliberately does not expose corun's
 long-polling `wait_for_job` tool. On startup, the bot registers or refreshes a
 corun notification subscription pointing at:
@@ -384,10 +443,10 @@ simple completion/failure/cancel notice to the configured Mattermost channel
 (`MATTERMOST_CHANNEL`, normally `pandabot`). Required/optional env vars:
 
 ```bash
-CORUN_BASE_URL=https://epic-devcloud.org/doc
-CORUN_API_TOKEN=<prod corun token>
-CORUN_CALLBACK_URL=https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
-CORUN_SUBSCRIPTION_NAME=pandabot-swf-testbed
+corun-ai_BASE_URL=https://epic-devcloud.org/doc
+corun-ai_API_TOKEN=<prod corun token>
+corun-ai_CALLBACK_URL=https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
+corun-ai_SUBSCRIPTION_NAME=pandabot-swf-testbed
 ```
 
 ### Application Logs

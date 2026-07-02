@@ -410,8 +410,8 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content for an epicprod object and link it from the target object JSON when the subject is known locally. |
-| `epic_get_ai_content` | `ids` | Retrieve append-only AI assessment rows by AIContent ids. Use the ids supplied in a detail payload's `ai_content.retrieval.arguments.ids`. |
+| `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content as a corun-ai Page and link it from the target object JSON when the subject is known locally. |
+| `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
 
 **Known subject types:**
 - `campaign_task`: campaign/production task, keyed by composed task name.
@@ -420,8 +420,10 @@ This tool aggregates information from workflow messages and logs, providing a si
 - `panda_queue`: PanDA site/queue record, keyed by queue name. A row with `queue_name == site` represents site-level content.
 
 **Behavior:**
-- AI content is append-only. Corrections and followups create new rows.
-- For known local subjects, the tool writes the central `AIContent` row and appends its id to the subject JSON field under `ai_content_ids`.
+- AI content is append-only. Corrections and followups create new entries.
+- New registrations write corun-ai Pages in section `epicprod.assessment` and append the Page group id to the subject JSON field under `corun_page_group_ids`.
+- corun-ai Page metadata includes `artifact_type: "ai_assessment"`, `source_system: "swf-monitor"`, and `ui_visible: false`; the visibility flag hides service-owned artifacts from codoc browse UI but does not block REST API access or direct URLs.
+- Legacy local `AIContent` rows remain readable through `ids` and old object pointers under `ai_content_ids`.
 - MCP registrations stamp stored metadata with `registered_via: "mcp"` and `mcp_tool: "epic_register_ai_assessment"`.
 - Bot-originated registrations should be stamped by the bot harness with `username: "bot"`, `ai` set to the exact model, and `data.origin` including `type: "bot"` and the same model.
 - Detail-style production tools include an `ai_content` block when the object can have linked AI assessments. If `ai_content.available` is true, call the specified retrieval tool with the specified arguments:
@@ -430,15 +432,18 @@ This tool aggregates information from workflow messages and logs, providing a si
 {
   "available": true,
   "count": 2,
-  "ids": [17, 23],
+  "ids": [],
+  "corun_page_group_ids": ["5f7539aa-4b08-4d9c-9a3f-c36ca2fd6721"],
   "retrieval": {
     "tool": "epic_get_ai_content",
-    "arguments": {"ids": [17, 23]}
+    "arguments": {
+      "corun_page_group_ids": ["5f7539aa-4b08-4d9c-9a3f-c36ca2fd6721"]
+    }
   }
 }
 ```
 
-- Use the supplied ids directly. Do not reconstruct `subject_type` or `subject_key` from the parent object when a detail payload already includes this retrieval block.
+- Use the supplied `ids` and/or `corun_page_group_ids` directly. Do not reconstruct `subject_type` or `subject_key` from the parent object when a detail payload already includes this retrieval block.
 - Future subject types can be added without changing existing content references.
 
 ---

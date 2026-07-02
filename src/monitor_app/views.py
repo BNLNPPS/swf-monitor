@@ -1,3 +1,5 @@
+from collections import Counter
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse
@@ -22,8 +24,11 @@ from .ai_assessments import (
     AI_CONTENT_COMMENT_KEY,
     AI_CONTENT_QUALITY_KEY,
     AI_CONTENT_QUALITY_VALUES,
+    CORUN_ASSESSMENT_SECTION,
     ai_content_items,
+    corun_page_items,
 )
+from .corun_client import CorunAPIError, CorunClient, corun_configured
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
@@ -3001,11 +3006,32 @@ def panda_hub(request):
     return render(request, 'monitor_app/panda_hub.html')
 
 
+def _corun_ai_assessment_count():
+    if not corun_configured():
+        return 0
+    try:
+        payload = CorunClient().list_pages(
+            section=CORUN_ASSESSMENT_SECTION,
+            artifact_type='ai_assessment',
+            source_system='swf-monitor',
+            limit=1,
+        )
+    except CorunAPIError as exc:
+        logger.warning('corun AI assessment count failed: %s', exc)
+        return 0
+    if isinstance(payload, dict):
+        try:
+            return int(payload.get('count') or 0)
+        except (TypeError, ValueError):
+            return len(payload.get('items') or [])
+    return len(payload or [])
+
+
 def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
     context = pcs_hub_counts()
-    context['ai_content_count'] = AIContent.objects.count()
+    context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
@@ -3016,29 +3042,64 @@ def ai_content_list(request):
     username = (request.GET.get('username') or '').strip()
     ai = (request.GET.get('ai') or '').strip()
     q = (request.GET.get('q') or '').strip()
-    qs = AIContent.objects.all().order_by('-created_at')
-    if subject_type:
-        qs = qs.filter(subject_type=subject_type)
-    if quality:
-        if quality == 'unreviewed':
-            qs = qs.filter(Q(data__quality='') | Q(data__quality__isnull=True))
-        elif quality in AI_CONTENT_QUALITY_VALUES:
-            qs = qs.filter(data__quality=quality)
-        else:
-            qs = qs.none()
-    if username:
-        qs = qs.filter(username=username)
-    if ai:
-        qs = qs.filter(ai=ai)
-    if q:
-        qs = qs.filter(
-            Q(subject_key__icontains=q)
-            | Q(subject_label__icontains=q)
-            | Q(assessment__icontains=q)
-            | Q(username__icontains=q)
-            | Q(ai__icontains=q)
-        )
-    paginator = Paginator(qs, 100)
+
+    legacy_items = ai_content_items(AIContent.objects.all().order_by('-created_at', '-id'))
+    corun_items = []
+    if corun_configured():
+        try:
+            payload = CorunClient().list_pages(
+                section=CORUN_ASSESSMENT_SECTION,
+                artifact_type='ai_assessment',
+                source_system='swf-monitor',
+                limit=500,
+            )
+            pages = payload.get('items', []) if isinstance(payload, dict) else payload
+            corun_items = corun_page_items(pages)
+        except CorunAPIError as exc:
+            logger.warning('corun AI assessment list failed: %s', exc)
+
+    all_items = legacy_items + corun_items
+
+    def item_matches(item):
+        if subject_type and item.get('subject_type') != subject_type:
+            return False
+        item_quality = item.get('quality') or ''
+        if quality:
+            if quality == 'unreviewed':
+                if item_quality:
+                    return False
+            elif quality in AI_CONTENT_QUALITY_VALUES:
+                if item_quality != quality:
+                    return False
+            else:
+                return False
+        if username and item.get('username') != username:
+            return False
+        if ai and item.get('ai') != ai:
+            return False
+        if q:
+            needle = q.lower()
+            haystack = ' '.join(str(item.get(key) or '') for key in (
+                'subject_key',
+                'subject_label',
+                'subject_display',
+                'assessment',
+                'username',
+                'ai',
+            )).lower()
+            if needle not in haystack:
+                return False
+        return True
+
+    def item_sort_key(item):
+        value = item.get('created_at')
+        if hasattr(value, 'isoformat'):
+            return value.isoformat()
+        return str(value or '')
+
+    filtered_items = [item for item in all_items if item_matches(item)]
+    filtered_items.sort(key=item_sort_key, reverse=True)
+    paginator = Paginator(filtered_items, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
 
     def filter_url(**updates):
@@ -3052,20 +3113,20 @@ def ai_content_list(request):
         query = params.urlencode()
         return f'?{query}' if query else '?'
 
-    subject_counts = list(
-        AIContent.objects
-        .values('subject_type')
-        .annotate(count=Count('id'))
-        .order_by('subject_type')
-    )
-    for row in subject_counts:
-        row['url'] = filter_url(subject_type=row['subject_type'])
+    subject_counter = Counter(item.get('subject_type') or '' for item in all_items)
+    subject_counts = [
+        {
+            'subject_type': key,
+            'count': subject_counter[key],
+            'url': filter_url(subject_type=key),
+        }
+        for key in sorted(subject_counter)
+        if key
+    ]
 
     quality_counts = {key: 0 for key in ('unreviewed',) + AI_CONTENT_QUALITY_VALUES}
-    for data in AIContent.objects.values_list('data', flat=True):
-        value = ''
-        if isinstance(data, dict):
-            value = str(data.get(AI_CONTENT_QUALITY_KEY) or '').strip()
+    for item in all_items:
+        value = str(item.get('quality') or '').strip()
         if value in AI_CONTENT_QUALITY_VALUES:
             quality_counts[value] += 1
         else:
@@ -3080,29 +3141,33 @@ def ai_content_list(request):
         for value in ('unreviewed',) + AI_CONTENT_QUALITY_VALUES
     ]
 
-    username_counts = list(
-        AIContent.objects
-        .values('username')
-        .annotate(count=Count('id'))
-        .order_by('username')
-    )
-    for row in username_counts:
-        row['url'] = filter_url(username=row['username'])
+    username_counter = Counter(item.get('username') or '' for item in all_items)
+    username_counts = [
+        {
+            'username': key,
+            'count': username_counter[key],
+            'url': filter_url(username=key),
+        }
+        for key in sorted(username_counter)
+        if key
+    ]
 
-    ai_counts = list(
-        AIContent.objects
-        .values('ai')
-        .annotate(count=Count('id'))
-        .order_by('ai')
-    )
-    for row in ai_counts:
-        row['url'] = filter_url(ai=row['ai'])
+    ai_counter = Counter(item.get('ai') or '' for item in all_items)
+    ai_counts = [
+        {
+            'ai': key,
+            'count': ai_counter[key],
+            'url': filter_url(ai=key),
+        }
+        for key in sorted(ai_counter)
+        if key
+    ]
 
-    total_count = sum(row['count'] for row in subject_counts)
+    total_count = len(all_items)
     page_params = request.GET.copy()
     page_params.pop('page', None)
     return render(request, 'monitor_app/ai_content_list.html', {
-        'items': ai_content_items(page_obj.object_list),
+        'items': page_obj.object_list,
         'page_obj': page_obj,
         'subject_counts': subject_counts,
         'quality_rows': quality_rows,

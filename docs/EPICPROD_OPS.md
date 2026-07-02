@@ -3,7 +3,8 @@
 This is operations documentation for submitting, monitoring, retrieving logs, etc. for official ePIC production using BNL PanDA on `pandaserver02.sdcc.bnl.gov`. This is the
 operations counterpart to the design docs: [PCS.md](PCS.md) (configuration),
 [JEDI_INTEGRATION.md](JEDI_INTEGRATION.md) (PCS→JEDI submission design),
-[EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md) (the task catalog), and
+[EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md) (the task catalog),
+[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md) (LLM operations), and
 [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) (deploying swf-monitor).
 
 The `prun` submission path described here is the foundation the automated
@@ -150,20 +151,56 @@ sites/queues. Assessments appear on the corresponding object pages and in the
 production nav under **AI**, which lists all assessment content with counts by
 subject type.
 
-The persistent record is `AIContent`. It stores the assessed subject as a string
-type/key pair, display label, monitor URL, human or service username, AI/model
-identifier, Markdown assessment text, optional JSON metadata, and creation time.
-The subject object's own JSON field stores only `ai_content_ids`, so object
-pages can show their assessments without embedding the assessment text in task,
-job, or queue records. Assessment rows are not edited or deleted; corrections
-and followups are represented as additional rows.
+The architecture for corun-ai-backed LLM operations and artifacts is documented in
+[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md). This section records
+the operational details of the current AI assessment path.
 
-`AIContent.data` includes sideband review metadata: `quality` and `comment`
-strings. The valid non-empty quality values are `wrong`, `poor`, and `good`; an
-empty quality string means no quality review has been recorded. Assessment
-submitters do not set these while creating their own assessment. AI content
-retrieval returns quality and comment both as top-level fields and inside
-`data.quality` / `data.comment` when present.
+The primary persistent record is now a corun-ai Page in section
+`epicprod.assessment`. `epic_register_ai_assessment` writes the Markdown
+assessment text as corun-ai Page content and stores subject metadata in
+`Page.data`, including `artifact_type: "ai_assessment"`,
+`source_system: "swf-monitor"`, `ui_visible: false`, subject type/key/label/url,
+username, and AI/model identifier. `ui_visible: false` hides these service-owned
+artifacts from corun-ai/codoc browse UI; it is not an access-control boundary, and
+the Pages remain available through the corun-ai REST API and direct URLs. The
+subject object's own JSON field stores only
+`corun_page_group_ids`, so object pages can show their assessments without
+embedding the assessment text in task, job, or queue records. Assessment entries
+are append-only; corrections and followups are represented as additional corun-ai
+Pages.
+
+Older local `AIContent` rows remain readable. They store the assessed subject as
+a string type/key pair, display label, monitor URL, human or service username,
+AI/model identifier, Markdown assessment text, optional JSON metadata, and
+creation time. The old subject JSON pointer is `ai_content_ids`.
+
+The legacy `AIContent` mechanism is temporary during migration only. After the
+corun-ai-backed path is validated and the backfill is complete, new writes should
+remain corun-ai-only and the old local mechanism should be removed or thoroughly
+disabled so operators and AI clients have one assessment system to reason
+about.
+
+Backfill existing local rows after deploying corun-ai credentials:
+
+```bash
+# inspect
+python src/manage.py backfill_ai_content_to_corun --dry-run
+
+# backfill all legacy AIContent rows into corun-ai and link subject pointers
+python src/manage.py backfill_ai_content_to_corun
+```
+
+The command is idempotent. It records the created Page group id in
+`AIContent.data.corun_page_group_id`, preserves legacy quality/comment metadata
+inside the corun-ai Page data, sets `ui_visible: false`, and appends the Page group
+id to the subject JSON field when the local subject can be resolved. It does not
+delete legacy rows.
+
+Review metadata uses `quality` and `comment` fields when present. The valid
+non-empty quality values are `wrong`, `poor`, and `good`; an empty quality
+string means no quality review has been recorded. AI content retrieval returns
+quality and comment as top-level fields and inside structured `data` when
+present.
 
 The canonical subject types for new assessments are:
 
@@ -176,11 +213,11 @@ The canonical subject types for new assessments are:
 
 AI clients register assessments through MCP with
 `epic_register_ai_assessment`. The tool resolves known subjects, creates the
-`AIContent` row, and appends the new id to the subject JSON field in one
-transaction. This is the write path intended for Codex, the PanDA Mattermost bot,
-and later automated production assessors such as corun-ai. The public subject
-type names above are the MCP interface; implementation-specific model names are
-not part of that interface. MCP registrations stamp metadata with
+corun-ai Page, and appends the new Page group id to the subject JSON field. This is
+the write path intended for Codex, the PanDA Mattermost bot, and automated
+production assessors. The public subject type names above are the MCP interface;
+implementation-specific model names are not part of that interface. MCP
+registrations stamp metadata with
 `registered_via: "mcp"` and `mcp_tool: "epic_register_ai_assessment"`.
 When the Mattermost bot registers an assessment, its harness stamps
 `username: "bot"`, `ai` as the exact model used, and `data.origin` with
@@ -189,8 +226,10 @@ When the Mattermost bot registers an assessment, its harness stamps
 MCP detail tools that can return assessed subjects include an `ai_content`
 retrieval block. When `ai_content.available` is true, clients should call the
 tool and arguments supplied in that block, for example
-`epic_get_ai_content(ids=[17, 23])`. Clients should use those ids directly
-instead of reconstructing a subject type/key lookup from the parent object.
+`epic_get_ai_content(corun_page_group_ids=["..."])`. Legacy detail payloads may
+also include `ids` for local `AIContent` rows. Clients should use the supplied
+arguments directly instead of reconstructing a subject type/key lookup from the
+parent object.
 
 Assessment text is rendered as Markdown in the UI and sanitized before display.
 The metadata row identifies who registered it, which AI/model produced it, and

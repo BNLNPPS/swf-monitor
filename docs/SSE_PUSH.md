@@ -33,6 +33,12 @@ relay infrastructure, and the events become a useful ops audit trail as enriched
 `WorkflowMessage`s. The event carries the identifying field (`pandaid` /
 `task_name`) so a waiting page can recognize its own result.
 
+corun-ai-backed LLM operations use the same browser notification mechanism with a
+different server-side source. corun-ai posts completion callbacks to swf-monitor,
+and swf-monitor emits the corresponding SSE event. The browser-side rule is the
+same short-lived `EventSource` pattern described below. See
+[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md).
+
 ## Relay — unchanged
 
 Listener consumes `/topic/epictopic` → enriches + persists → publishes to the

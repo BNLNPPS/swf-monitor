@@ -13,6 +13,9 @@ This is a design/planning doc, peer to [PCS.md](PCS.md),
 [PCS_DATASET_REQUEST_WORKFLOW.md](PCS_DATASET_REQUEST_WORKFLOW.md). Its
 operations counterpart — how to run, restart, and monitor the agent, and the
 concrete payload-log retrieval mechanics — is [EPICPROD_OPS.md](EPICPROD_OPS.md).
+corun-ai-backed LLM operations are described separately in
+[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md); this document is about
+credentialed production actions on `pandaserver02`.
 The agent is built on the testbed's `swf_common_lib.base_agent.BaseAgent`, so it
 inherits testbed agent management and monitor visibility like the other agents.
 

@@ -30,7 +30,7 @@
                 </tr>
                 <tr class="ai-assessment-header table-light">
                     <td colspan="4">
-                        {% if request.user.is_authenticated %}
+                        {% if request.user.is_authenticated and item.storage == 'legacy' %}
                         <form method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
                             {% csrf_token %}
                             <input type="hidden" name="next" value="{{ request.get_full_path }}">

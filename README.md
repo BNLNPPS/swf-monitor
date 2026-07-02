@@ -48,6 +48,7 @@ The application is built on Django infrastructure and comprises three main compo
 | **[MCP Tool Reference](docs/MCP_TOOL_REFERENCE.md)** | Full MCP tool catalog, parameters, returns, and example prompts | Tool integration |
 | **[MCP Client Setup](docs/MCP_CLIENTS.md)** | Claude Code and Claude Desktop MCP configuration | Local MCP clients |
 | **[PanDA Mattermost Bot](docs/PANDA_BOT.md)** | PanDA bot MCP-client architecture and runtime configuration | Production monitoring chat |
+| **[ePIC Production LLM Operations](docs/EPICPROD_LLM_OPERATIONS.md)** | corun-ai-backed LLM operations, artifacts, comments, and async browser notification | LLM operation architecture |
 | **[PCS](docs/PCS.md)** | Physics Configuration System — tags, datasets, production configuration | Production task configuration |
 | **[PCS Dataset Request Workflow](docs/PCS_DATASET_REQUEST_WORKFLOW.md)** | PCS-centered dataset request intake, external datasets, and public catalogue projection | Production planning workflow |
 | **[System Status](docs/SYSTEM_STATUS.md)** | Cached production/system health, ops-agent refresh, and red nav indicator | Operations monitoring |

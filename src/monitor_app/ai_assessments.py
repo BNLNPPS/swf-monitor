@@ -1,4 +1,4 @@
-"""Append-only AI assessment helpers for production objects."""
+"""AI assessment helpers for production objects."""
 from datetime import datetime
 
 import bleach
@@ -10,6 +10,8 @@ from .utils import format_datetime
 
 
 AI_CONTENT_IDS_KEY = 'ai_content_ids'
+CORUN_PAGE_GROUP_IDS_KEY = 'corun_page_group_ids'
+CORUN_ASSESSMENT_SECTION = 'epicprod.assessment'
 AI_CONTENT_RETRIEVE_TOOL = 'epic_get_ai_content'
 AI_CONTENT_QUALITY_KEY = 'quality'
 AI_CONTENT_QUALITY_VALUES = ('wrong', 'poor', 'good')
@@ -59,6 +61,18 @@ def ai_content_ids(data):
     return ids
 
 
+def corun_page_group_ids(data):
+    """Return ordered corun Page group UUID strings from a model JSON field."""
+    if not isinstance(data, dict):
+        return []
+    ids = []
+    for raw in data.get(CORUN_PAGE_GROUP_IDS_KEY) or []:
+        value = str(raw or '').strip()
+        if value and value not in ids:
+            ids.append(value)
+    return ids
+
+
 def _display_time(value):
     if isinstance(value, datetime):
         return format_datetime(value)
@@ -90,8 +104,65 @@ def _panda_task_parts(subject_key, subject_label):
     return str(display_key or '').strip(), str(display_label or '').strip()
 
 
+def _subject_parts(subject_type, subject_key, subject_label):
+    subject_kind = subject_type
+    subject_id = subject_key
+    subject_name = subject_label
+    subject_display = subject_label or subject_key
+    if subject_type == 'panda_task' and subject_key:
+        subject_kind = 'PanDA task'
+        subject_id, subject_name = _panda_task_parts(subject_key, subject_label)
+        subject_display = f'{subject_kind} {subject_id}'
+        if subject_name and subject_name != subject_id:
+            subject_display = f'{subject_display}: {subject_name}'
+    elif subject_type == 'panda_job' and subject_key:
+        subject_kind = 'PanDA job'
+        subject_id = subject_key
+        subject_name = subject_label
+        subject_display = f'PanDA job {subject_key}'
+        if subject_label and subject_key not in subject_label:
+            subject_display = f'{subject_display}: {subject_label}'
+    elif subject_type == 'campaign_task':
+        subject_kind = 'Campaign task'
+        subject_id = subject_key
+        subject_name = subject_label
+    elif subject_type == 'panda_queue':
+        subject_kind = 'PanDA queue'
+        subject_id = subject_key
+        subject_name = subject_label
+    return subject_kind, subject_id, subject_name, subject_display
+
+
+def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
+                     subject_type, subject_key, subject_label, subject_url,
+                     quality='', comment='', corun_page_group_id=''):
+    subject_kind, subject_id, subject_name, subject_display = _subject_parts(
+        subject_type, subject_key, subject_label)
+    return {
+        'id': item_id,
+        'storage': storage,
+        'corun_page_group_id': corun_page_group_id,
+        'username': username,
+        'ai': ai,
+        'quality': quality if quality in AI_CONTENT_QUALITY_VALUES else '',
+        'comment': comment,
+        'assessment': assessment,
+        'assessment_html': render_assessment_markdown(assessment),
+        'created_at': created_at,
+        'created_display': _display_time(created_at),
+        'subject_type': subject_type,
+        'subject_key': subject_key,
+        'subject_label': subject_label,
+        'subject_kind': subject_kind,
+        'subject_id': subject_id,
+        'subject_name': subject_name,
+        'subject_display': subject_display,
+        'subject_url': subject_url,
+    }
+
+
 def ai_content_items(rows):
-    """Normalize AIContent rows for display."""
+    """Normalize legacy AIContent rows for display."""
     items = []
     for row in rows:
         assessment = str(getattr(row, 'assessment', '') or '').strip()
@@ -100,63 +171,68 @@ def ai_content_items(rows):
         subject_type = str(getattr(row, 'subject_type', '') or '').strip()
         subject_key = str(getattr(row, 'subject_key', '') or '').strip()
         subject_label = str(getattr(row, 'subject_label', '') or '').strip()
-        subject_kind = subject_type
-        subject_id = subject_key
-        subject_name = subject_label
-        subject_display = subject_label or subject_key
-        if subject_type == 'panda_task' and subject_key:
-            subject_kind = 'PanDA task'
-            subject_id, subject_name = _panda_task_parts(subject_key, subject_label)
-            subject_display = f'{subject_kind} {subject_id}'
-            if subject_name and subject_name != subject_id:
-                subject_display = f'{subject_display}: {subject_name}'
-        elif subject_type == 'panda_job' and subject_key:
-            subject_kind = 'PanDA job'
-            subject_id = subject_key
-            subject_name = subject_label
-            subject_display = f'PanDA job {subject_key}'
-            if subject_label and subject_key not in subject_label:
-                subject_display = f'{subject_display}: {subject_label}'
-        elif subject_type == 'campaign_task':
-            subject_kind = 'Campaign task'
-            subject_id = subject_key
-            subject_name = subject_label
-        elif subject_type == 'panda_queue':
-            subject_kind = 'PanDA queue'
-            subject_id = subject_key
-            subject_name = subject_label
         created_at = getattr(row, 'created_at', '')
         data = getattr(row, 'data', None) or {}
         quality = str(data.get(AI_CONTENT_QUALITY_KEY) or '').strip()
         comment = str(data.get(AI_CONTENT_COMMENT_KEY) or '').strip()
-        items.append({
-            'id': row.pk,
-            'username': str(getattr(row, 'username', '') or '').strip(),
-            'ai': str(getattr(row, 'ai', '') or '').strip(),
-            'quality': quality if quality in AI_CONTENT_QUALITY_VALUES else '',
-            'comment': comment,
-            'assessment': assessment,
-            'assessment_html': render_assessment_markdown(assessment),
-            'created_at': created_at,
-            'created_display': _display_time(created_at),
-            'subject_type': subject_type,
-            'subject_key': subject_key,
-            'subject_label': subject_label,
-            'subject_kind': subject_kind,
-            'subject_id': subject_id,
-            'subject_name': subject_name,
-            'subject_display': subject_display,
-            'subject_url': str(getattr(row, 'subject_url', '') or '').strip(),
-        })
+        items.append(_assessment_item(
+            item_id=row.pk,
+            storage='legacy',
+            username=str(getattr(row, 'username', '') or '').strip(),
+            ai=str(getattr(row, 'ai', '') or '').strip(),
+            quality=quality,
+            comment=comment,
+            assessment=assessment,
+            created_at=created_at,
+            subject_type=subject_type,
+            subject_key=subject_key,
+            subject_label=subject_label,
+            subject_url=str(getattr(row, 'subject_url', '') or '').strip(),
+        ))
+    return items
+
+
+def corun_page_items(pages):
+    """Normalize corun Page API payloads for display."""
+    items = []
+    for page in pages or []:
+        if not isinstance(page, dict):
+            continue
+        data = page.get('data') if isinstance(page.get('data'), dict) else {}
+        assessment = str(page.get('content') or '').strip()
+        if not assessment:
+            continue
+        items.append(_assessment_item(
+            item_id='',
+            storage='corun',
+            corun_page_group_id=str(page.get('group_id') or ''),
+            username=str(
+                data.get('created_by_user')
+                or data.get('username')
+                or data.get('submitted_by')
+                or ''
+            ).strip(),
+            ai=str(data.get('ai') or data.get('model') or '').strip(),
+            quality=str(data.get(AI_CONTENT_QUALITY_KEY) or '').strip(),
+            comment=str(data.get(AI_CONTENT_COMMENT_KEY) or '').strip(),
+            assessment=assessment,
+            created_at=str(page.get('created_at') or ''),
+            subject_type=str(data.get('subject_type') or '').strip(),
+            subject_key=str(data.get('subject_key') or '').strip(),
+            subject_label=str(data.get('subject_label') or '').strip(),
+            subject_url=str(data.get('subject_url') or '').strip(),
+        ))
     return items
 
 
 def ai_content_summary(data):
     """JSON-serializable AIContent summaries for client-rendered pages."""
     out = []
-    for item in ai_content_items(ai_content_for_json(data)):
+    for item in ai_content_items(ai_content_for_json(data)) + corun_assessment_items_for_json(data):
         out.append({
             'id': item['id'],
+            'storage': item['storage'],
+            'corun_page_group_id': item['corun_page_group_id'],
             'username': item['username'],
             'ai': item['ai'],
             'quality': item['quality'],
@@ -176,16 +252,23 @@ def ai_content_summary(data):
 
 
 def ai_content_retrieval_guidance(data):
-    """Return MCP retrieval guidance for AIContent ids in a JSON field."""
+    """Return MCP retrieval guidance for assessment pointers in a JSON field."""
     ids = ai_content_ids(data)
+    page_group_ids = corun_page_group_ids(data)
+    args = {}
+    if ids:
+        args['ids'] = ids
+    if page_group_ids:
+        args['corun_page_group_ids'] = page_group_ids
     return {
-        'available': bool(ids),
-        'count': len(ids),
+        'available': bool(ids or page_group_ids),
+        'count': len(ids) + len(page_group_ids),
         'ids': ids,
+        'corun_page_group_ids': page_group_ids,
         'retrieval': {
             'tool': AI_CONTENT_RETRIEVE_TOOL,
-            'arguments': {'ids': ids},
-        } if ids else None,
+            'arguments': args,
+        } if args else None,
     }
 
 
@@ -202,9 +285,30 @@ def ai_content_for_json(data):
     )
 
 
+def corun_assessment_items_for_json(data):
+    """Fetch corun-backed assessment Pages pointed to by a model JSON field."""
+    page_group_ids = corun_page_group_ids(data)
+    if not page_group_ids:
+        return []
+    try:
+        from .corun_client import CorunAPIError, CorunClient, corun_configured
+        if not corun_configured():
+            return []
+        client = CorunClient()
+        pages = []
+        for page_group_id in page_group_ids:
+            try:
+                pages.append(client.get_page(page_group_id))
+            except CorunAPIError:
+                continue
+        return corun_page_items(pages)
+    except CorunAPIError:
+        return []
+
+
 def assessment_presentation(data, *, title='AI Assessments'):
-    """Return template-ready presentation data for ``ai_content_ids`` JSON."""
-    items = ai_content_items(ai_content_for_json(data))
+    """Return template-ready presentation data for assessment pointer JSON."""
+    items = ai_content_items(ai_content_for_json(data)) + corun_assessment_items_for_json(data)
     return {
         'title': title,
         'items': items,
@@ -221,6 +325,18 @@ def append_ai_content_id(target_obj, json_field, content_id):
     if int(content_id) not in ids:
         ids.append(int(content_id))
     data[AI_CONTENT_IDS_KEY] = ids
+    setattr(target_obj, json_field, data)
+    target_obj.save(update_fields=[json_field, 'updated_at'])
+
+
+def append_corun_page_group_id(target_obj, json_field, page_group_id):
+    """Append a corun Page group id to ``target_obj.<json_field>``."""
+    data = dict(getattr(target_obj, json_field) or {})
+    ids = corun_page_group_ids(data)
+    value = str(page_group_id or '').strip()
+    if value and value not in ids:
+        ids.append(value)
+    data[CORUN_PAGE_GROUP_IDS_KEY] = ids
     setattr(target_obj, json_field, data)
     target_obj.save(update_fields=[json_field, 'updated_at'])
 

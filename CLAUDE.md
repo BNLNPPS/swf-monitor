@@ -44,6 +44,7 @@ swf-monitor template.
 
 - `EPICPROD_OPS_AGENT.md` — the credentialed ops agent; capability model + the pattern above.
 - `EPICPROD_OPS.md` — ops runbook (submit, monitor, logs, systemd unit, cleaner-killer).
+- `EPICPROD_LLM_OPERATIONS.md` — corun-ai-backed LLM operations, artifacts, comments, and async completion.
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
