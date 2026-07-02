@@ -36,7 +36,6 @@
 
   <!-- browser -> monitor arrows -->
   <line x1="400" y1="130" x2="400" y2="210" stroke="#333" stroke-width="1.6" marker-end="url(#arrow)"/>
-  <text x="410" y="158" font-size="10" fill="#555">page view · /pcs/api/ trigger</text>
   <line x1="800" y1="130" x2="800" y2="150" stroke="#333" stroke-width="1.6" marker-end="url(#arrow)"/>
   <line x1="800" y1="200" x2="800" y2="210" stroke="#333" stroke-width="1.6" marker-end="url(#arrow)"/>
 
