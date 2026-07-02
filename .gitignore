@@ -218,3 +218,4 @@ chroma_db/
 
 # Generated diagram render previews; SVG files are the source artifacts.
 docs/epicprod_llm_ops_*.png
+docs/epicprod_system.png
