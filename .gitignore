@@ -216,6 +216,5 @@ ssl_key.pem
 chroma_db/
 .mcp.json
 
-# Generated diagram render previews; SVG files are the source artifacts.
-docs/epicprod_llm_ops_*.png
-docs/epicprod_system.png
+# Generated image previews; SVG files are the source artifacts for diagrams.
+*.png
