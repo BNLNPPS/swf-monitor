@@ -29,7 +29,6 @@
 
   <!-- portal (the web service) delivers each community's functionality -->
   <line x1="365" y1="210" x2="365" y2="118" stroke="#444" stroke-width="1.8" marker-end="url(#arrow)"/>
-  <text x="377" y="167" text-anchor="start" font-size="11" fill="#555">operate · review · approve</text>
   <line x1="995" y1="210" x2="995" y2="118" stroke="#444" stroke-width="1.8" marker-end="url(#arrow)"/>
 
   <!-- ============ Portal ============ -->
