@@ -215,3 +215,6 @@ ssl_key.pem
 # ChromaDB vector store (rebuilt by scripts/ingest_docs.py)
 chroma_db/
 .mcp.json
+
+# Generated diagram render previews; SVG files are the source artifacts.
+docs/epicprod_llm_ops_*.png
