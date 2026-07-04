@@ -12,6 +12,11 @@ PCS submission builds on: it establishes that an operator's identity can submit
 official `group.EIC` production tasks. The first official `EIC.production`
 submission through this path was validated 2026-06-01 (jediTaskID 36439).
 
+The operations model at a glance — the system tends itself, attention
+concentrates, and human decisions act through bounded, recorded controls:
+
+![The operations automation loop](ops_automation_loop.svg)
+
 ## Identity and client
 
 **EIC/production IAM subgroup.** Official production submission requires
