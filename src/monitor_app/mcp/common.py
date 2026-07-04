@@ -242,12 +242,12 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "epic_register_ai_assessment",
-            "description": "Register append-only AI assessment content as a CORUN Page for an epicprod object and link it from the target object's JSON corun_page_group_ids when it is a known local subject.",
+            "description": "Register append-only AI assessment content as a corun-ai Page for an epicprod object and link it from the target object's JSON corun_page_group_ids when it is a known local subject.",
             "parameters": ["subject_type", "subject_key", "assessment", "username", "ai", "subject_label", "subject_url", "data"],
         },
         {
             "name": "epic_get_ai_content",
-            "description": "Retrieve append-only epicprod AI assessment content by CORUN Page group ids and/or legacy AIContent ids. Use the arguments provided in a detail payload's ai_content.retrieval.arguments.",
+            "description": "Retrieve append-only epicprod AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments provided in a detail payload's ai_content.retrieval.arguments.",
             "parameters": ["ids", "corun_page_group_ids"],
         },
         # PanDA Monitor tools

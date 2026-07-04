@@ -1,4 +1,4 @@
-"""Small synchronous client for the corun REST API."""
+"""Small synchronous client for the corun-ai REST API."""
 
 import json
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class CorunAPIError(RuntimeError):
-    """Raised when corun cannot service a request."""
+    """Raised when corun-ai cannot service a request."""
 
     def __init__(self, message, *, status=None, payload=None):
         super().__init__(message)
@@ -33,7 +33,7 @@ def corun_configured():
 
 
 class CorunClient:
-    """Token-authenticated corun API client."""
+    """Token-authenticated corun-ai API client."""
 
     def __init__(self, *, base_url=None, token=None, timeout=15):
         self.base_url = (base_url or corun_base_url()).rstrip('/')
@@ -74,16 +74,16 @@ class CorunClient:
             parsed = _parse_json(raw)
             detail = parsed if parsed is not None else raw
             raise CorunAPIError(
-                f'corun API returned HTTP {exc.code}: {detail}',
+                f'corun-ai API returned HTTP {exc.code}: {detail}',
                 status=exc.code,
                 payload=parsed,
             ) from exc
         except URLError as exc:
-            raise CorunAPIError(f'corun API request failed: {exc.reason}') from exc
+            raise CorunAPIError(f'corun-ai API request failed: {exc.reason}') from exc
 
         parsed = _parse_json(raw)
         if parsed is None:
-            raise CorunAPIError('corun API returned non-JSON response')
+            raise CorunAPIError('corun-ai API returned non-JSON response')
         return parsed
 
     def create_page(self, *, section, content, title='', status='published',
@@ -122,5 +122,5 @@ def _parse_json(raw):
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        logger.debug('Non-JSON corun API response: %s', raw[:200])
+        logger.debug('Non-JSON corun-ai API response: %s', raw[:200])
         return None

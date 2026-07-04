@@ -43,6 +43,13 @@ proxy face, such as disabling page-view POST controls that are only supported on
 HTML rewrites in `swf-remote` when `is_tunnel` can express the condition in the
 swf-monitor template.
 
+## corun-ai naming
+
+The backing AI/document service is `corun-ai`. Do not write `CORUN` as a product
+or system name in prose, UI text, reports, MCP descriptions, logs, or commit
+messages. Existing compatibility names such as `CORUN_BASE_URL`,
+`CORUN_API_TOKEN`, and `corun_page_group_ids` are config/schema identifiers only.
+
 ## Doc index (`docs/`)
 
 - `EPICPROD_OPS_AGENT.md` — the credentialed ops agent; capability model + the pattern above.

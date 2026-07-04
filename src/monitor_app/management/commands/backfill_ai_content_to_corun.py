@@ -1,4 +1,4 @@
-"""Backfill legacy AIContent assessments into CORUN Pages."""
+"""Backfill legacy AIContent assessments into corun-ai Pages."""
 
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
@@ -18,13 +18,13 @@ CORUN_MAPPING_KEY = 'corun_page_group_id'
 
 
 class Command(BaseCommand):
-    help = 'Backfill legacy AIContent rows into CORUN Pages.'
+    help = 'Backfill legacy AIContent rows into corun-ai Pages.'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--dry-run',
             action='store_true',
-            help='Show what would be created/linked without writing CORUN or local DB changes.',
+            help='Show what would be created/linked without writing corun-ai or local DB changes.',
         )
         parser.add_argument(
             '--limit',
@@ -73,7 +73,7 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                'AIContent CORUN backfill: '
+                'AIContent corun-ai backfill: '
                 + ', '.join(f'{key}={value}' for key, value in stats.items())
             )
         )
@@ -84,14 +84,14 @@ class Command(BaseCommand):
         if page_group_id:
             linked = self._link_subject(row, page_group_id, dry_run=dry_run)
             self.stdout.write(
-                f'AIContent {row.pk}: already mapped to CORUN {page_group_id}'
+                f'AIContent {row.pk}: already mapped to corun-ai Page {page_group_id}'
                 + ('; linked subject pointer' if linked else '')
             )
             return 'linked' if linked else 'already_mapped'
 
         if dry_run:
             self.stdout.write(
-                f'AIContent {row.pk}: would create CORUN Page for '
+                f'AIContent {row.pk}: would create corun-ai Page for '
                 f'{row.subject_type}:{row.subject_key}'
             )
             return 'created'
@@ -110,7 +110,7 @@ class Command(BaseCommand):
         )
         page_group_id = str(page.get('group_id') or '')
         if not page_group_id:
-            raise CorunAPIError(f'corun Page response for AIContent {row.pk} had no group_id')
+            raise CorunAPIError(f'corun-ai Page response for AIContent {row.pk} had no group_id')
 
         updated_data = dict(data)
         updated_data[CORUN_MAPPING_KEY] = page_group_id
@@ -121,7 +121,7 @@ class Command(BaseCommand):
 
         linked = self._link_subject(row, page_group_id, dry_run=False)
         self.stdout.write(
-            f'AIContent {row.pk}: created CORUN {page_group_id}'
+            f'AIContent {row.pk}: created corun-ai Page {page_group_id}'
             + (' and linked subject pointer' if linked else '; subject not resolved')
         )
         return 'created' if linked else 'unresolved_subject'

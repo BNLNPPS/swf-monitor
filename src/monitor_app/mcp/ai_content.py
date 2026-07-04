@@ -191,7 +191,7 @@ def _register_ai_assessment_sync(
     if not corun_configured():
         return {
             'success': False,
-            'error': 'CORUN_BASE_URL and CORUN_API_TOKEN must be configured',
+            'error': 'corun-ai config CORUN_BASE_URL and CORUN_API_TOKEN must be configured',
             'subject_type': canonical_type,
             'subject_key': resolved['subject_key'],
         }
@@ -364,7 +364,7 @@ def _get_ai_content_sync(ids=None, corun_page_group_ids=None):
         if not corun_configured():
             return {
                 'success': False,
-                'error': 'CORUN_BASE_URL and CORUN_API_TOKEN must be configured',
+                'error': 'corun-ai config CORUN_BASE_URL and CORUN_API_TOKEN must be configured',
             }
         client = CorunClient()
         for page_group_id in ordered_corun_ids:
@@ -414,7 +414,7 @@ async def epic_register_ai_assessment(
         subject_type: Canonical subject type or alias.
         subject_key: Human-readable object key such as composed task name,
             JEDI task id, pandaid, queue name, or site name.
-        assessment: Markdown assessment text. It is stored as a CORUN Page.
+        assessment: Markdown assessment text. It is stored as a corun-ai Page.
         username: Human account or service account creating the assessment.
             Bot harnesses should pass `bot`, not a mutable bot deployment name.
         ai: Model or agent identifier. Bot harnesses should pass the exact
@@ -426,7 +426,7 @@ async def epic_register_ai_assessment(
             `mcp_tool='epic_register_ai_assessment'` on stored metadata.
 
     Returns:
-        Success status, CORUN Page ids, canonical subject reference, created_at,
+        Success status, corun-ai Page ids, canonical subject reference, created_at,
         and whether the target object JSON pointer was updated.
     """
     return await sync_to_async(_register_ai_assessment_sync)(
@@ -467,7 +467,7 @@ async def epic_get_ai_content(ids: list = None, corun_page_group_ids: list = Non
     Args:
         ids: Optional list of legacy AIContent integer ids from an MCP detail payload's
             `ai_content.ids` or `ai_content.retrieval.arguments.ids`.
-        corun_page_group_ids: Optional list of CORUN Page group ids from
+        corun_page_group_ids: Optional list of corun-ai Page group ids from
             `ai_content.corun_page_group_ids` or
             `ai_content.retrieval.arguments.corun_page_group_ids`.
 

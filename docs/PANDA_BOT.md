@@ -9,9 +9,9 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 
 **Architecture:**
 - Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
-- Holds connections to the local swf-monitor MCP (HTTP — the `swf_*`, `pcs_*`, `panda_*` tools) plus stdio-launched external servers: **LXR** (EIC code browser cross-reference), **uproot** (ROOT file analysis), **GitHub**, **Zenodo**, **XRootD**, **JLab-Rucio**, **BNL-Rucio**, and **corun/codoc**
-- The corun MCP server is a standalone stdio server that calls prod corun over REST (`corun-ai_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; pandabot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun generation does not hold pandabot's single response lock. Tool surface and config detail: [corun-mcp-server](https://github.com/eic/corun-mcp-server) README.
-- On startup, if `corun-ai_API_TOKEN` is configured, pandabot ensures a corun notification subscription exists. Corun sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#pandabot` Mattermost channel. There is no pandabot-side polling tracker. Callback payload schema: corun-ai `docs/job-system.md` § Job Notifications.
+- Holds connections to the local swf-monitor MCP (HTTP — the `swf_*`, `pcs_*`, `panda_*` tools) plus stdio-launched external servers: **LXR** (EIC code browser cross-reference), **uproot** (ROOT file analysis), **GitHub**, **Zenodo**, **XRootD**, **JLab-Rucio**, **BNL-Rucio**, and **corun-ai/codoc**
+- The corun-ai MCP server is a standalone stdio server that calls prod corun-ai over REST (`CORUN_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; pandabot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun-ai generation does not hold pandabot's single response lock. Tool surface and config detail: [corun-mcp-server](https://github.com/eic/corun-mcp-server) README.
+- On startup, if `CORUN_API_TOKEN` is configured, pandabot ensures a corun-ai notification subscription exists. corun-ai sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#pandabot` Mattermost channel. There is no pandabot-side polling tracker. Callback payload schema: corun-ai `docs/job-system.md` § Job Notifications.
 - Registers in-process **epicdoc** tools (`epic_doc_search`, `epic_doc_contents`) backed by a ChromaDB vector store of ePIC docs — runs inside the bot process, not as a separate MCP server
 - **Bamboo** log analysis is used via the `panda_study_job` and `panda_harvester_workers` swf-monitor MCP tools, not as a separate MCP server
 - For JLab Rucio campaign dataset queries, the bot should search the `epic` scope first (for example `scope="epic", name="*26.04.1*", type="DATASET"`) and must not infer absence from a single empty scope or from an XRootD permission error
@@ -34,9 +34,9 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 - `MATTERMOST_CHANNEL` (default: `pandabot`)
 - `MCP_URL` (default: `http://127.0.0.1:8001/swf-monitor/mcp/`)
 - `ANTHROPIC_API_KEY` (required, used by the Anthropic SDK)
-- `corun-ai_BASE_URL` (optional, default: `https://epic-devcloud.org/doc`)
-- `corun-ai_API_TOKEN` (optional; when set, enables the corun MCP server)
-- `corun-ai_CALLBACK_URL` (optional, default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/`)
-- `corun-ai_SUBSCRIPTION_NAME` (optional, default: `pandabot-swf-testbed`)
+- `CORUN_BASE_URL` (optional, default: `https://epic-devcloud.org/doc`)
+- `CORUN_API_TOKEN` (optional; when set, enables the corun-ai MCP server)
+- `CORUN_CALLBACK_URL` (optional, default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/`)
+- `CORUN_SUBSCRIPTION_NAME` (optional, default: `pandabot-swf-testbed`)
 
 **MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the local MCP endpoint. Each user question gets a fresh stateless request/response exchange.

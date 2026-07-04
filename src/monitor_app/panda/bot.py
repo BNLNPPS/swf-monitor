@@ -961,7 +961,7 @@ class PandaBot:
 
         if not CORUN_CALLBACK_URL.startswith('https://'):
             logger.warning(
-                "Skipping corun subscription: CORUN_CALLBACK_URL must be https"
+                "Skipping corun-ai subscription: CORUN_CALLBACK_URL must be https"
             )
             return
 
@@ -1010,7 +1010,7 @@ class PandaBot:
                         )
                     else:
                         logger.info(
-                            "Corun notification subscription %s already active",
+                            "corun-ai notification subscription %s already active",
                             CORUN_SUBSCRIPTION_NAME,
                         )
                 else:
