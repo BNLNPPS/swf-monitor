@@ -2,6 +2,10 @@
 
 **Monitoring and information service for the ePIC streaming workflow testbed.**
 
+swf-monitor is a core component of the ePIC Workflow Management System (WFMS). The official system-level
+documentation is at <https://epic-wfms-docs.readthedocs.io>; this repository's `docs/` carry the implementation
+detail beneath it.
+
 ## System Overview
 
 The application is built on Django infrastructure and comprises three main components, real-time messaging, and PostgreSQL backend.

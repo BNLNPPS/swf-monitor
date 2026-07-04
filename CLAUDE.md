@@ -5,7 +5,10 @@ ePIC production-operations agent, for the ePIC streaming-workflow testbed. Part 
 the SWF core (coordinated branches with `swf-testbed` and `swf-common-lib`).
 Shared workspace rules — doc-first, git policy, environment — live in the
 workspace `../CLAUDE.md`. This file is the repo's doc index and the one pattern
-every designer/implementer should hold in mind.
+every designer/implementer should hold in mind. The official system-level
+documentation for the whole WFMS is <https://epic-wfms-docs.readthedocs.io>
+(workspace repo `epic-wfms-docs/`); this repo's docs carry the implementation
+detail beneath it.
 
 The workspace rule "Stay Within Scope Without Stopping" is mandatory here:
 do not overreach beyond the requested change, and do not respond to a scope
