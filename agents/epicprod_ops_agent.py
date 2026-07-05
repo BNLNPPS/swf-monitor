@@ -60,10 +60,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests
+
 from swf_common_lib.base_agent import BaseAgent
 
 # Anycast control queue: one consumer handles each request exactly once.
 OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
+
+# Monitor REST base for the epicprod action stream (same endpoint the shared
+# REST log handler posts to).
+MONITOR_HTTP_URL = os.environ.get("SWF_MONITOR_HTTP_URL", "http://localhost:8002")
+ACTION_LOG_TIMEOUT = int(os.environ.get("EPICPROD_ACTION_LOG_TIMEOUT", "5"))
 
 # Managed scratch/cache root (shared with the doer and the web view).
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
@@ -148,6 +155,7 @@ class EpicProdOpsAgent(BaseAgent):
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
         self._campaign_progress_last_start = 0
+        self._action_log_session = requests.Session()
         self._system_status_thread = threading.Thread(
             target=self._system_status_periodic_loop,
             name="system-status-refresh",
@@ -197,6 +205,8 @@ class EpicProdOpsAgent(BaseAgent):
         Distinct from `systemctl stop`, the host-level back door."""
         self.logger.warning(
             f"PRODOPS: deliberate shutdown requested by {m.get('sender', '?')}")
+        self._log_action('agent_shutdown', username=str(m.get('sender') or ''),
+                         live_default=True, level=logging.WARNING)
         self._deliberate = True
         os.kill(self.pid, signal.SIGTERM)   # reuse BaseAgent's graceful unwind
 
@@ -226,12 +236,16 @@ class EpicProdOpsAgent(BaseAgent):
         if m.get("force"):           # operator override: re-fetch even if cached
             cmd.append("--force")
         self.logger.info(f"PRODOPS fetch_payload_log: pandaid={m['pandaid']} task={m['jeditaskid']}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=FETCH_TIMEOUT)
         except subprocess.TimeoutExpired:
             self.logger.error(
                 f"PRODOPS fetch_payload_log TIMEOUT after {FETCH_TIMEOUT}s pandaid={m['pandaid']}")
             self._mark_error(jobdir, f"fetch timed out after {FETCH_TIMEOUT}s")
+            self._log_action('payload_log_fetch', t0, outcome='timeout',
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
             return
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  cache-payload-log: {line}")
@@ -241,7 +255,13 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(
                 f"PRODOPS fetch_payload_log FAILED rc={p.returncode} pandaid={m['pandaid']}")
             self._mark_error(jobdir, reason)
+            self._log_action('payload_log_fetch', t0, outcome='error',
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
         else:
+            self._log_action('payload_log_fetch', t0,
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             jeditaskid=str(m['jeditaskid']))
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
             # Push completion to the browser via the SSE relay (rides the topic
             # the monitor consumes; the page matches on pandaid). See docs/SSE_PUSH.md.
@@ -278,6 +298,7 @@ class EpicProdOpsAgent(BaseAgent):
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
         self.logger.info(f"PRODOPS submit_task: {task_name}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -286,6 +307,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
                 'reason': f'submission timed out after {SUBMIT_TIMEOUT}s'})
+            self._log_action('task_submit', t0, outcome='timeout',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR)
             return
         stderr = p.stderr or ""
         for line in stderr.splitlines():
@@ -300,6 +325,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submitted',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id})
+            self._log_action('task_submit', t0,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, jedi_task_id=jedi_task_id)
         elif p.returncode == 7 and jedi_task_id:
             # Submitted to PanDA, but the record-back POST failed after retries —
             # an orphan. Surface the id; the task stays ready/unrecorded and
@@ -310,11 +339,20 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
                 'jedi_task_id': jedi_task_id, 'reason': reason})
+            self._log_action('task_submit', t0, outcome='unrecorded',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR,
+                             jedi_task_id=jedi_task_id)
         else:
             self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
+            self._log_action('task_submit', t0, outcome='error',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR)
 
     def _handle_submit_evgen_task(self, m):
         """Validate, then run the client-API EVGEN submission on the worker
@@ -346,6 +384,7 @@ class EpicProdOpsAgent(BaseAgent):
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
         self.logger.info(f"PRODOPS submit_evgen_task: {task_name}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_EVGEN_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -353,6 +392,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
                 'reason': f'submission timed out after {SUBMIT_EVGEN_TIMEOUT}s'})
+            self._log_action('evgen_task_submit', t0, outcome='timeout',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR)
             return
         stderr = p.stderr or ""
         for line in stderr.splitlines():
@@ -365,6 +408,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submitted',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id})
+            self._log_action('evgen_task_submit', t0,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, jedi_task_id=jedi_task_id)
         elif p.returncode == 7 and jedi_task_id:
             # Submitted, but the record-back POST failed after retries — an
             # orphan; surface the id (record-submission is idempotent).
@@ -374,11 +421,20 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
                 'jedi_task_id': jedi_task_id, 'reason': reason})
+            self._log_action('evgen_task_submit', t0, outcome='unrecorded',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR,
+                             jedi_task_id=jedi_task_id)
         else:
             self.logger.error(f"PRODOPS submit_evgen_task FAILED rc={p.returncode}: {task_name}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
+            self._log_action('evgen_task_submit', t0, outcome='error',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR)
 
     def _handle_panda_task_operation(self, m):
         """Run a PanDA-native operation on an existing JEDI task."""
@@ -414,6 +470,7 @@ class EpicProdOpsAgent(BaseAgent):
         self.logger.info(
             f"PRODOPS panda_task_operation: {operation} task={task_name} "
             f"jediTaskID={jedi_task_id}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
@@ -425,6 +482,11 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'panda_task_operation_done',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
                 'operation': operation, 'ok': False, 'error': reason})
+            self._log_action('panda_task_operation', t0, outcome='timeout',
+                             subject_type='panda_task', subject_key=jedi_task_id,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR,
+                             operation=operation, task_name=task_name)
             return
 
         for line in (p.stdout or "").splitlines():
@@ -439,6 +501,11 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'panda_task_operation_done',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
                 'operation': operation, 'ok': True, 'summary': summary})
+            self._log_action('panda_task_operation', t0,
+                             subject_type='panda_task', subject_key=jedi_task_id,
+                             username=str(m.get('owner') or ''),
+                             live_default=True,
+                             operation=operation, task_name=task_name)
         else:
             stderr = (p.stderr or "").strip()
             reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
@@ -449,6 +516,11 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'panda_task_operation_done',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
                 'operation': operation, 'ok': False, 'error': reason})
+            self._log_action('panda_task_operation', t0, outcome='error',
+                             subject_type='panda_task', subject_key=jedi_task_id,
+                             username=str(m.get('owner') or ''),
+                             live_default=True, level=logging.ERROR,
+                             operation=operation, task_name=task_name)
 
     def _handle_sync_epicprod_inventory(self, m):
         """Refresh one job/task inventory record on the worker pool."""
@@ -479,6 +551,13 @@ class EpicProdOpsAgent(BaseAgent):
         else:
             cmd += ["--prod-task", str(m["task_name"])]
         self.logger.info(f"PRODOPS sync_epicprod_inventory: {' '.join(cmd)}")
+        if m.get('pandaid'):
+            subj_type, subj_key = 'panda_job', str(m['pandaid'])
+        elif m.get('jeditaskid'):
+            subj_type, subj_key = 'panda_task', str(m['jeditaskid'])
+        else:
+            subj_type, subj_key = 'campaign_task', str(m['task_name'])
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=INVENTORY_TIMEOUT)
@@ -489,6 +568,9 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'epicprod_inventory_ready', 'ok': False,
                 'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
                 'task_name': m.get('task_name'), 'error': reason})
+            self._log_action('inventory_sync', t0, outcome='timeout',
+                             subject_type=subj_type, subject_key=subj_key,
+                             level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  sync-epicprod-inventory: {line}")
@@ -506,6 +588,10 @@ class EpicProdOpsAgent(BaseAgent):
             'msg_type': 'epicprod_inventory_ready', 'ok': ok,
             'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
             'task_name': m.get('task_name'), 'error': reason})
+        self._log_action('inventory_sync', t0,
+                         outcome='ok' if ok else 'error',
+                         subject_type=subj_type, subject_key=subj_key,
+                         level=logging.INFO if ok else logging.ERROR)
 
     def _handle_refresh_system_status(self, m):
         """Refresh cached system status rows through the shared doer."""
@@ -525,6 +611,7 @@ class EpicProdOpsAgent(BaseAgent):
         for name in selected:
             cmd += ["--only", str(name)]
         self.logger.info(f"PRODOPS refresh_system_status: {' '.join(cmd)}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=SYSTEM_STATUS_TIMEOUT)
@@ -533,6 +620,9 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(f"PRODOPS refresh_system_status TIMEOUT: {reason}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'system_status_ready', 'ok': False, 'error': reason})
+            self._log_action('system_status_refresh', t0, outcome='timeout',
+                             level=logging.ERROR,
+                             source=str(m.get('source') or 'ops_agent'))
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  refresh-system-status: {line}")
@@ -548,6 +638,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info("PRODOPS refresh_system_status done")
         self.send_message('/topic/epictopic', {
             'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
+        self._log_action('system_status_refresh', t0,
+                         outcome='ok' if ok else 'error',
+                         level=logging.INFO if ok else logging.ERROR,
+                         source=str(m.get('source') or 'ops_agent'))
 
     def _system_status_periodic_loop(self):
         """Keep cached system knowledge fresh without page-load probes."""
@@ -577,6 +671,7 @@ class EpicProdOpsAgent(BaseAgent):
         so the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
         cmd = [sys.executable, str(RUCIO_SNAPSHOT_SCRIPT)]
         self.logger.info("PRODOPS rucio_snapshot_update: refreshing current/last snapshot")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=RUCIO_SNAPSHOT_TIMEOUT)
@@ -586,6 +681,9 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False,
                 'error': f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s'})
+            self._log_action('rucio_sweep', t0, outcome='timeout',
+                             username=str(m.get('requested_by') or ''),
+                             live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  rucio-snapshot-update: {line}")
@@ -597,10 +695,16 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(f"PRODOPS rucio_snapshot_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False, 'error': reason})
+            self._log_action('rucio_sweep', t0, outcome='error',
+                             username=str(m.get('requested_by') or ''),
+                             live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS rucio_snapshot_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
+            self._log_action('rucio_sweep', t0,
+                             username=str(m.get('requested_by') or ''),
+                             live_default=True)
 
     def _handle_evgen_rucio_update(self, m):
         """Assimilate the JLab Rucio EVGEN inventory off the receiver thread — a
@@ -615,6 +719,7 @@ class EpicProdOpsAgent(BaseAgent):
         AND failure so the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
         cmd = [sys.executable, str(EVGEN_RUCIO_SCRIPT), "--apply"]
         self.logger.info("PRODOPS evgen_rucio_update: assimilating JLab Rucio EVGEN")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=EVGEN_RUCIO_TIMEOUT)
@@ -624,6 +729,9 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False,
                 'error': f'timed out after {EVGEN_RUCIO_TIMEOUT}s'})
+            self._log_action('evgen_sweep', t0, outcome='timeout',
+                             username=str(m.get('requested_by') or ''),
+                             live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  import-evgen-rucio: {line}")
@@ -635,10 +743,16 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(f"PRODOPS evgen_rucio_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False, 'error': reason})
+            self._log_action('evgen_sweep', t0, outcome='error',
+                             username=str(m.get('requested_by') or ''),
+                             live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS evgen_rucio_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': True})
+            self._log_action('evgen_sweep', t0,
+                             username=str(m.get('requested_by') or ''),
+                             live_default=True)
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
@@ -655,6 +769,7 @@ class EpicProdOpsAgent(BaseAgent):
         source = m.get('source', '')
         cmd = [sys.executable, str(CATALOG_IMPORT_SCRIPT), source]
         self.logger.info(f"PRODOPS catalog_import: importing {source}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=CATALOG_IMPORT_TIMEOUT)
@@ -664,6 +779,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': f'timed out after {CATALOG_IMPORT_TIMEOUT}s'})
+            self._log_action('catalog_import', t0, outcome='timeout',
+                             live_default=True, level=logging.ERROR, source=source)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  pcs-catalog-import: {line}")
@@ -676,12 +793,17 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': reason})
+            self._log_action('catalog_import', t0, outcome='error',
+                             live_default=True, level=logging.ERROR, source=source)
         else:
             summary = (p.stdout or "").strip().splitlines()
             self.logger.info(f"PRODOPS catalog_import {source} done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': True,
                 'summary': summary[-1] if summary else ''})
+            self._log_action('catalog_import', t0,
+                             live_default=True, source=source,
+                             summary=(summary[-1] if summary else ''))
 
     def _handle_questionnaire_match_update(self, m):
         """Rebuild task-local questionnaire-match caches off the receiver
@@ -698,6 +820,7 @@ class EpicProdOpsAgent(BaseAgent):
             "--updated-by", str(created_by),
         ]
         self.logger.info("PRODOPS questionnaire_match_update: rebuilding cache")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=QUESTIONNAIRE_MATCH_TIMEOUT)
@@ -708,6 +831,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'questionnaire_match_ready', 'ok': False,
                 'error': f'timed out after {QUESTIONNAIRE_MATCH_TIMEOUT}s'})
+            self._log_action('questionnaire_match', t0, outcome='timeout',
+                             username=str(created_by), level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  update-questionnaire-matches: {line}")
@@ -721,12 +846,15 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'questionnaire_match_ready', 'ok': False,
                 'error': reason})
+            self._log_action('questionnaire_match', t0, outcome='error',
+                             username=str(created_by), level=logging.ERROR)
         else:
             summary = (p.stdout or "").strip()
             self.logger.info("PRODOPS questionnaire_match_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'questionnaire_match_ready', 'ok': True,
                 'summary': summary})
+            self._log_action('questionnaire_match', t0, username=str(created_by))
 
     def _handle_campaign_progress_refresh(self, m):
         """Rebuild current campaign progress data + progress table cache."""
@@ -747,6 +875,7 @@ class EpicProdOpsAgent(BaseAgent):
             "--generated-by", str(created_by),
         ]
         self.logger.info("PRODOPS campaign_progress_refresh: rebuilding progress cache")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=CAMPAIGN_PROGRESS_TIMEOUT)
@@ -757,6 +886,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'campaign_progress_ready', 'ok': False,
                 'error': f'timed out after {CAMPAIGN_PROGRESS_TIMEOUT}s'})
+            self._log_action('progress_refresh', t0, outcome='timeout',
+                             username=str(created_by), level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  refresh-campaign-progress: {line}")
@@ -770,12 +901,73 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'campaign_progress_ready', 'ok': False,
                 'error': reason})
+            self._log_action('progress_refresh', t0, outcome='error',
+                             username=str(created_by), level=logging.ERROR)
         else:
             summary = (p.stdout or "").strip()
             self.logger.info("PRODOPS campaign_progress_refresh done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'campaign_progress_ready', 'ok': True,
                 'summary': summary})
+            self._log_action('progress_refresh', t0, username=str(created_by))
+
+    # -- action stream --------------------------------------------------------
+
+    def _log_action(self, action, t0=None, *, outcome='ok', subject_type='',
+                    subject_key='', username='', live_default=False,
+                    message='', level=logging.INFO, **counts):
+        """Record one action in the epicprod action stream (AppLog via REST).
+
+        The ops agent is out-of-process, so this posts the same record shape
+        monitor_app.epicprod_logging.log_epicprod_action writes via the ORM:
+        app_name='epicprod', instance 'ops-agent', structured extra_data with
+        the call site's live_default RECOMMENDATION for the epic-live stream
+        (the effective decision is the SysConfig policy). Pass the doer start
+        time as t0 and the measured duration_ms is recorded — every sweep and
+        timed operation reports its execution time to the log. Never raises;
+        a failed post is logged and the action proceeds.
+        """
+        extra = {
+            'action': str(action),
+            'outcome': str(outcome),
+            'live_default': bool(live_default),
+        }
+        if subject_type:
+            extra['subject_type'] = str(subject_type)
+        if subject_key:
+            extra['subject_key'] = str(subject_key)
+        if username:
+            extra['username'] = str(username)
+        if t0 is not None:
+            extra['duration_ms'] = int((time.monotonic() - t0) * 1000)
+        for key, value in counts.items():
+            if key not in ('action', 'subject_type', 'subject_key', 'username',
+                           'outcome', 'duration_ms', 'live_default'):
+                extra[key] = value
+        if not message:
+            subject = f"{subject_type}:{subject_key}" if subject_key else ''
+            message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
+        try:
+            resp = self._action_log_session.post(
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/logs/",
+                json={
+                    'app_name': 'epicprod',
+                    'instance_name': 'ops-agent',
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'level': int(level),
+                    'levelname': logging.getLevelName(int(level)),
+                    'message': message,
+                    'module': 'epicprod_ops_agent',
+                    'funcname': str(action),
+                    'lineno': 0,
+                    'process': os.getpid(),
+                    'thread': threading.get_ident(),
+                    'extra_data': extra,
+                },
+                timeout=ACTION_LOG_TIMEOUT)
+            resp.raise_for_status()
+        except Exception as e:
+            self.logger.warning(f"PRODOPS action log post failed ({action}): {e}")
 
     # -- helpers -------------------------------------------------------------
 
