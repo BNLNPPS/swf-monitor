@@ -5,7 +5,7 @@ state-changing or operationally significant action — a catalog button press,
 an MCP action tool, an ops-agent handler, a sweep, a submission, a report
 generation — records one row here, regardless of which process performed it.
 Process and infrastructure logs stay under their own app names; this stream
-answers "who did what to what, and how did it go", and is the primary corpus
+answers "what happened, and how did it go", and is the primary corpus
 for LLM assessment and reporting.
 
 ``instance_name`` names the component performing the action: 'web',

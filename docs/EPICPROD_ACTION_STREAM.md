@@ -2,7 +2,7 @@
 
 The action stream is the structured record of everything epicprod does: one
 record per production action — submissions, task operations, sweeps, imports,
-configuration edits, assessments — capturing who did what to what, the
+configuration edits, assessments — capturing the action, its subject, the
 outcome, and the measured duration. It is the raw material for the live view,
 for the coming digests and alarms, and for LLM assessment and reporting: the
 corpus AI reasons over when it answers "what happened".
@@ -114,7 +114,7 @@ Rules of the road:
    `reason=` and exposes it in both the record and the message.
 4. Requester identity travels in the message (`created_by`, `owner`,
    `requested_by`) and is recorded at execution. Anonymous open-face requests
-   record an empty username, which is itself information.
+   record an empty username.
 5. The logging call never raises; a failed write is logged and the action
    proceeds.
 
