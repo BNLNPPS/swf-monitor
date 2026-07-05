@@ -96,6 +96,9 @@ def main(argv: list[str] | None = None) -> int:
 
     client = Client(cfg.engine.service_base_url,
                     timeout=cfg.engine.request_timeout)
+    # Detectors may query monitor tables directly (e.g. the epicprod action
+    # stream in swf_applog) through the engine's own connection.
+    client.db_conn = conn
 
     # Load ALL non-archived alarm configs. Per-alarm `data.enabled` gates
     # ONLY the email side — detection, event creation, active/clear,
