@@ -66,7 +66,7 @@ filter every channel uses. Current and planned channels:
 | channel | filter | status |
 |---|---|---|
 | Logs page live view | live, all sublevels | operating |
-| Mattermost `epicprod-live` | live, `normal`+ | planned (channel name held in SysConfig — renameable without deploy) |
+| Mattermost `#epicprod-live` | live, `normal`+ | operating (publisher below) |
 | Hourly/daily email digest | live, `high` (+ ERROR) | planned |
 | RSS | live, `normal`+ | planned |
 
@@ -128,6 +128,20 @@ at `/logs/live-policy/` lists every known action with its declared sublevel,
 live default, current override, and effective state — overrides editable in
 place when signed in, each save itself logged (`live_policy_edit`).
 
+**Mattermost.** The `#epicprod-live` channel is fed by the publisher
+(`manage.py publish_epicprod_live`, systemd unit `swf-epicprod-live`) — a
+polling tailer that posts one compact message per live event: timestamp,
+action, subject, component, outcome, failure reason, duration, and a link
+to the log record. It posts under the DISpatcher bot token; the bot skips
+its own posts, so events never wake it. To follow up on an event, @mention
+DISpatcher in a thread under the event post — the post carries everything
+the bot needs to pull the full record and drill into the subject. The
+publisher re-reads its SysConfig knobs every cycle (`epicprod_live_channel`,
+`epicprod_live_min_sublevel`, `epicprod_live_poll_seconds`), so channel
+rename, verbosity threshold, and cadence are UI adjustments, no deploy. A
+per-cycle post cap (20) guards against floods; overflow is posted as a
+counted summary line, never silently dropped.
+
 **LLMs and bots.** `epicprod_list_actions` is the purpose-built MCP tool —
 prefer `summarize=True` (counts by action with ok/error split and duration
 statistics) for reporting and assessment; filters on action, instance,
@@ -156,9 +170,10 @@ catalog-freshness timestamp. Measured 2026-07-05: csv 8 s, association sweep
 ## SysConfig
 
 `SysConfig` (`swf_sys_config`) is the single-record JSON document of
-operator-set configuration — live policy overrides, channel settings, sweep
-knobs (`questionnaire_csv_url`) — viewable and editable at the bottom of the
-System page. It is distinct from `PersistentState`, which is
+operator-set configuration — live policy overrides, channel settings
+(`epicprod_live_channel`, `epicprod_live_min_sublevel`,
+`epicprod_live_poll_seconds`), sweep knobs (`questionnaire_csv_url`) —
+viewable and editable at the bottom of the System page. It is distinct from `PersistentState`, which is
 machine-maintained state (counters, run numbers) and not for human editing.
 All system configuration lives in the database and is adjustable through the
 UI without deploys; SysConfig edits are themselves live actions in the stream.

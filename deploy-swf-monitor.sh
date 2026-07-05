@@ -268,6 +268,7 @@ fi
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
 PANDA_BOT_CHANGED=false
 TESTBED_BOT_CHANGED=false
+LIVE_PUBLISHER_CHANGED=false
 
 if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
     if [ -z "$PREV_RELEASE" ]; then
@@ -290,6 +291,18 @@ if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
     elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/testbed_bot.py" \
                     "$RELEASE_DIR/src/monitor_app/management/commands/testbed_bot.py" >/dev/null 2>&1; then
         TESTBED_BOT_CHANGED=true
+    fi
+fi
+
+if systemctl is-enabled swf-epicprod-live.service >/dev/null 2>&1; then
+    if [ -z "$PREV_RELEASE" ]; then
+        LIVE_PUBLISHER_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/publish_epicprod_live.py" \
+                    "$RELEASE_DIR/src/monitor_app/management/commands/publish_epicprod_live.py" >/dev/null 2>&1; then
+        LIVE_PUBLISHER_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/epicprod_logging.py" \
+                    "$RELEASE_DIR/src/monitor_app/epicprod_logging.py" >/dev/null 2>&1; then
+        LIVE_PUBLISHER_CHANGED=true
     fi
 fi
 
@@ -319,6 +332,13 @@ if [ "$TESTBED_BOT_CHANGED" = true ]; then
     systemctl restart swf-testbed-bot.service
 else
     log "Bot code unchanged — skipping Testbed bot restart"
+fi
+
+if [ "$LIVE_PUBLISHER_CHANGED" = true ]; then
+    log "Publisher code changed — restarting epicprod-live publisher..."
+    systemctl restart swf-epicprod-live.service
+else
+    log "Publisher code unchanged — skipping epicprod-live publisher restart"
 fi
 
 # Cleanup old releases (keep last 5)
