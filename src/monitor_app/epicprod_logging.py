@@ -86,6 +86,10 @@ ACTION_DEFAULTS = {
     'live_policy_edit': {'sublevel': 'high', 'live': True},
     'assessment_register': {'sublevel': 'normal', 'live': True},
     'assessment_link': {'sublevel': 'low', 'live': False},
+    'task_set_status': {'sublevel': 'normal', 'live': True},
+    'task_intake': {'sublevel': 'normal', 'live': True},
+    'dataset_intake': {'sublevel': 'normal', 'live': True},
+    'task_link_input': {'sublevel': 'low', 'live': False},
 }
 
 RESERVED_KEYS = ('action', 'subject_type', 'subject_key', 'username',
