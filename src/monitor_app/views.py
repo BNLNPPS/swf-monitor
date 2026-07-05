@@ -2969,6 +2969,12 @@ def update_panda_queues_from_github(request):
             else:
                 updated_count += 1
         
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'queues_update',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True,
+            created=created_count, updated=updated_count)
         messages.success(request, 
             f'Successfully updated PanDA queues from GitHub '
             f'({created_count} created, {updated_count} updated)<br>'
@@ -3036,6 +3042,11 @@ def update_rucio_endpoints_from_github(request):
             )
             created_count += 1
         
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'endpoints_update',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True, created=created_count)
         messages.success(request, 
             f'Successfully updated {created_count} Rucio endpoints from GitHub<br>'
             f'<strong>Repository:</strong> {repo_location}<br>'
@@ -3261,6 +3272,13 @@ def ai_content_set_quality(request, content_id):
         data[AI_CONTENT_COMMENT_KEY] = comment
         row.data = data
         row.save(update_fields=['data'])
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'assessment_quality_set',
+            subject_type=row.subject_type or '', subject_key=row.subject_key or '',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True,
+            quality=quality, content_id=content_id)
 
     next_url = request.POST.get('next') or reverse('monitor_app:ai_content_list')
     if not url_has_allowed_host_and_scheme(

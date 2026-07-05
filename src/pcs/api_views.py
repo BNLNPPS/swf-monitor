@@ -41,6 +41,7 @@ from .serializers import (
 )
 from .schemas import validate_parameters, get_tag_model
 from . import services
+from monitor_app.epicprod_logging import log_epicprod_action
 from .services import ServiceError
 
 
@@ -609,6 +610,11 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         if not created:
             self.check_object_permissions(request, task)
+        log_epicprod_action(
+            'web', 'task_intake',
+            subject_type='campaign_task', subject_key=task.composed_name,
+            username=request.user.username,
+            sublevel='normal', live_default=True, created=created)
         http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(self.get_serializer(task).data, status=http_status)
 

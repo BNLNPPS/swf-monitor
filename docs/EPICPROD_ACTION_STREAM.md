@@ -63,7 +63,7 @@ filter every channel uses. Current and planned channels:
 | channel | filter | status |
 |---|---|---|
 | Logs page live view | live, all sublevels | operating |
-| Mattermost #epic-live | live, `normal`+ | planned |
+| Mattermost `epicprod-live` | live, `normal`+ | planned (channel name held in SysConfig — renameable without deploy) |
 | Hourly/daily email digest | live, `high` (+ ERROR) | planned |
 | RSS | live, `normal`+ | planned |
 

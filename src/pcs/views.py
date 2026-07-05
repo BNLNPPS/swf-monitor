@@ -24,6 +24,7 @@ from django.utils.dateparse import parse_datetime
 
 from monitor_app.models import UserPreference
 from monitor_app.ai_assessments import ai_content_summary
+from monitor_app.epicprod_logging import log_epicprod_action
 
 # ---------------------------------------------------------------------------
 # Auth / method-guard decorators that flash instead of silently redirecting.
@@ -673,6 +674,11 @@ def questionnaire_match_add(request, pk):
     questionnaire.data = data
     questionnaire.save(update_fields=['data', 'updated_at'])
     messages.success(request, f'Matched request #{pk} to {_task_display_name(task)}.')
+    log_epicprod_action(
+        'web', 'questionnaire_match_add',
+        subject_type='campaign_task', subject_key=task.composed_name,
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True, questionnaire=pk)
     return redirect('pcs:questionnaire_detail', pk=pk)
 
 
@@ -694,6 +700,11 @@ def questionnaire_match_remove(request, pk, task_id):
     removed = before - len(data['prod_matches'])
     if removed:
         messages.success(request, f'Removed {removed} production match.')
+        log_epicprod_action(
+            'web', 'questionnaire_match_remove',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True,
+            questionnaire=pk, task_id=task_id)
     else:
         messages.warning(request, 'No matching production task link was present.')
     return redirect('pcs:questionnaire_detail', pk=pk)
@@ -733,6 +744,12 @@ def questionnaire_import(request):
         f'Questionnaire import: {summary["created"]} new, '
         f'{summary["updated"]} updated, {summary["unchanged"]} unchanged.'
     )
+    log_epicprod_action(
+        'web', 'questionnaire_import',
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True,
+        created=summary['created'], updated=summary['updated'],
+        unchanged=summary['unchanged'])
     return redirect(reverse('pcs:questionnaires_list'))
 
 
@@ -750,6 +767,11 @@ def physics_category_create(request):
         if form.is_valid():
             form.save()
             messages.success(request, f"Category {form.instance.digit}: {form.instance.name} created.")
+            log_epicprod_action(
+                'web', 'category_create',
+                subject_key=f'{form.instance.digit} {form.instance.name}',
+                username=getattr(request.user, 'username', ''),
+                sublevel='normal', live_default=True)
             return redirect('pcs:physics_categories_list')
     else:
         form = PhysicsCategoryForm()
@@ -917,6 +939,9 @@ def tag_create(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
+            log_epicprod_action(
+                'web', 'tag_create', subject_key=tag.tag_label,
+                username=getattr(request.user, 'username', ''))
             compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
             return redirect(f'{compose_url}?selected={urlquote(tag.tag_label)}')
     else:
@@ -971,6 +996,9 @@ def tag_compose(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
+            log_epicprod_action(
+                'web', 'tag_create', subject_key=tag.tag_label,
+                username=getattr(request.user, 'username', ''))
             compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
             return redirect(f'{compose_url}?selected={urlquote(tag.tag_label)}')
     else:
@@ -1104,6 +1132,10 @@ def tag_delete(request, tag_type, tag_number):
     label = tag.tag_label
     tag.delete()
     messages.success(request, f"Tag {label} deleted.")
+    log_epicprod_action(
+        'web', 'tag_delete', subject_key=label,
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True)
     return redirect('pcs:tag_compose', tag_type=tag_type)
 
 
@@ -1123,6 +1155,10 @@ def tag_lock(request, tag_type, tag_number):
         tag.status = 'locked'
         tag.save(update_fields=['status', 'updated_at'])
         messages.success(request, f"Tag {tag.tag_label} locked. It can now be used in datasets.")
+        log_epicprod_action(
+            'web', 'tag_lock', subject_key=tag.tag_label,
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True)
     return redirect(selected_url)
 
 
@@ -1154,6 +1190,9 @@ def tag_edit(request, tag_type, tag_number):
                 tag.category = form.cleaned_data['category']
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} updated.")
+            log_epicprod_action(
+                'web', 'tag_edit', subject_key=tag.tag_label,
+                username=getattr(request.user, 'username', ''))
             return redirect(selected_url)
     else:
         initial = {
@@ -1200,6 +1239,10 @@ def datasets_compose(request):
             )
             ds.save()
             messages.success(request, f"Dataset created: {ds.did}")
+            log_epicprod_action(
+                'web', 'dataset_create', subject_key=ds.composed_name or ds.dataset_name,
+                username=getattr(request.user, 'username', ''),
+                sublevel='normal', live_default=True)
             return redirect(f"{reverse('pcs:datasets_compose')}?selected={urlquote(ds.dataset_name)}")
 
     qs = Dataset.objects.filter(block_num=1).select_related(
@@ -1381,6 +1424,10 @@ def dataset_create(request):
             )
             ds.save()
             messages.success(request, f"Dataset created: {ds.did}")
+            log_epicprod_action(
+                'web', 'dataset_create', subject_key=ds.composed_name or ds.dataset_name,
+                username=getattr(request.user, 'username', ''),
+                sublevel='normal', live_default=True)
             return redirect('pcs:dataset_detail', pk=ds.pk)
     else:
         form = DatasetForm()
@@ -1414,6 +1461,9 @@ def dataset_add_block(request, pk):
         created_by=request.user.username if request.user.is_authenticated else 'unknown',
     )
     messages.success(request, f"Block {new_block_num} added: {new_block.did}")
+    log_epicprod_action(
+        'web', 'dataset_block_add', subject_key=new_block.did,
+        username=getattr(request.user, 'username', ''))
     return redirect('pcs:dataset_detail', pk=dataset.pk)
 
 
@@ -1431,6 +1481,10 @@ def prod_configs_compose(request):
         if form.is_valid():
             pc = form.save()
             messages.success(request, f"Config '{pc.name}' {'updated' if editing_pk else 'created'}.")
+            log_epicprod_action(
+                'web', 'config_edit' if editing_pk else 'config_create',
+                subject_key=pc.name,
+                username=getattr(request.user, 'username', ''))
             return redirect(f"{reverse('pcs:prod_configs_compose')}?selected={urlquote(pc.name)}")
 
     qs = ProdConfig.objects.order_by('-updated_at')
@@ -1537,6 +1591,9 @@ def prod_config_create(request):
         if form.is_valid():
             form.save()
             messages.success(request, f"Production config '{form.instance.name}' created.")
+            log_epicprod_action(
+                'web', 'config_create', subject_key=form.instance.name,
+                username=getattr(request.user, 'username', ''))
             return redirect('pcs:prod_config_detail', pk=form.instance.pk)
     else:
         form = ProdConfigForm()
@@ -1557,6 +1614,9 @@ def prod_config_edit(request, pk):
         if form.is_valid():
             form.save()
             messages.success(request, f"Production config '{config.name}' updated.")
+            log_epicprod_action(
+                'web', 'config_edit', subject_key=config.name,
+                username=getattr(request.user, 'username', ''))
             return redirect('pcs:prod_config_detail', pk=config.pk)
     else:
         form = ProdConfigForm(instance=config)
@@ -1635,6 +1695,11 @@ def pcs_catalog_set_current(request):
     if not result.get('changed'):
         messages.info(request, f"PCS current campaign already {target}.")
         return redirect(reverse('pcs:pcs_catalog'))
+    log_epicprod_action(
+        'web', 'campaign_set_current',
+        subject_type='campaign', subject_key=result['name'],
+        username=getattr(request.user, 'username', '') or 'operator',
+        sublevel='high', live_default=True, previous=result.get('old_name', ''))
     # Pull the snapshot for the new current as part of the same click —
     # operator already consented by clicking 'Make current'; no point
     # making them hunt for 'Update from Rucio' next.
@@ -1676,6 +1741,11 @@ def pcs_catalog_set_last(request):
     except ServiceError as e:
         messages.error(request, f'Make last failed: {e}')
         return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=last')
+    log_epicprod_action(
+        'web', 'campaign_set_last',
+        subject_type='campaign', subject_key=result['name'],
+        username=getattr(request.user, 'username', '') or 'operator',
+        sublevel='high', live_default=True)
     try:
         snap = import_jlab_rucio_current_snapshot(
             campaign_name=target,
@@ -2499,6 +2569,11 @@ def prod_task_delete(request, name):
         return redirect('pcs:prod_task_detail', name=task.composed_name)
     task.delete()
     messages.success(request, f"Task '{task.composed_name}' deleted.")
+    log_epicprod_action(
+        'web', 'task_delete', subject_type='campaign_task',
+        subject_key=task.composed_name,
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True)
     return redirect('pcs:prod_tasks_list')
 
 
