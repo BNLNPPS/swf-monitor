@@ -24,6 +24,7 @@ def _item(log):
         'subject_key': extra.get('subject_key') or '',
         'username': extra.get('username') or '',
         'outcome': extra.get('outcome') or '',
+        'reason': extra.get('reason') or '',
         'duration_ms': extra.get('duration_ms'),
         'sublevel': extra.get('sublevel') or '',
         'live_default': bool(extra.get('live_default')),
@@ -32,7 +33,8 @@ def _item(log):
     counts = {
         key: value for key, value in extra.items()
         if key not in ('action', 'subject_type', 'subject_key', 'username',
-                       'outcome', 'duration_ms', 'sublevel', 'live_default')
+                       'outcome', 'reason', 'duration_ms', 'sublevel',
+                       'live_default')
     }
     if counts:
         known['counts'] = counts

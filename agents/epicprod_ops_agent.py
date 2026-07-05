@@ -258,6 +258,7 @@ class EpicProdOpsAgent(BaseAgent):
                 f"PRODOPS fetch_payload_log TIMEOUT after {FETCH_TIMEOUT}s pandaid={m['pandaid']}")
             self._mark_error(jobdir, f"fetch timed out after {FETCH_TIMEOUT}s")
             self._log_action('payload_log_fetch', t0, outcome='timeout',
+                             reason=f'timed out after {FETCH_TIMEOUT}s',
                              subject_type='panda_job', subject_key=str(m['pandaid']),
                              username=str(m.get('requested_by') or ''),
                              level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
@@ -271,6 +272,7 @@ class EpicProdOpsAgent(BaseAgent):
                 f"PRODOPS fetch_payload_log FAILED rc={p.returncode} pandaid={m['pandaid']}")
             self._mark_error(jobdir, reason)
             self._log_action('payload_log_fetch', t0, outcome='error',
+                             reason=reason,
                              subject_type='panda_job', subject_key=str(m['pandaid']),
                              username=str(m.get('requested_by') or ''),
                              level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
@@ -325,6 +327,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
                 'reason': f'submission timed out after {SUBMIT_TIMEOUT}s'})
             self._log_action('task_submit', t0, outcome='timeout',
+                             reason=f'timed out after {SUBMIT_TIMEOUT}s',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
@@ -357,6 +360,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
                 'jedi_task_id': jedi_task_id, 'reason': reason})
             self._log_action('task_submit', t0, outcome='unrecorded',
+                             reason=reason,
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
@@ -367,6 +371,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
             self._log_action('task_submit', t0, outcome='error',
+                             reason=reason,
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
@@ -410,6 +415,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
                 'reason': f'submission timed out after {SUBMIT_EVGEN_TIMEOUT}s'})
             self._log_action('evgen_task_submit', t0, outcome='timeout',
+                             reason=f'timed out after {SUBMIT_EVGEN_TIMEOUT}s',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
@@ -439,6 +445,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
                 'jedi_task_id': jedi_task_id, 'reason': reason})
             self._log_action('evgen_task_submit', t0, outcome='unrecorded',
+                             reason=reason,
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
@@ -449,6 +456,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
             self._log_action('evgen_task_submit', t0, outcome='error',
+                             reason=reason,
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
@@ -500,6 +508,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
                 'operation': operation, 'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='timeout',
+                             reason=reason,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
@@ -534,6 +543,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
                 'operation': operation, 'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='error',
+                             reason=reason,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
@@ -586,6 +596,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
                 'task_name': m.get('task_name'), 'error': reason})
             self._log_action('inventory_sync', t0, outcome='timeout',
+                             reason=reason,
                              subject_type=subj_type, subject_key=subj_key,
                              level=logging.ERROR)
             return
@@ -607,6 +618,7 @@ class EpicProdOpsAgent(BaseAgent):
             'task_name': m.get('task_name'), 'error': reason})
         self._log_action('inventory_sync', t0,
                          outcome='ok' if ok else 'error',
+                         reason=reason,
                          subject_type=subj_type, subject_key=subj_key,
                          level=logging.INFO if ok else logging.ERROR)
 
@@ -638,6 +650,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'system_status_ready', 'ok': False, 'error': reason})
             self._log_action('system_status_refresh', t0, outcome='timeout',
+                             reason=reason,
                              level=logging.ERROR,
                              source=str(m.get('source') or 'ops_agent'))
             return
@@ -657,6 +670,7 @@ class EpicProdOpsAgent(BaseAgent):
             'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
         self._log_action('system_status_refresh', t0,
                          outcome='ok' if ok else 'error',
+                         reason=reason,
                          level=logging.INFO if ok else logging.ERROR,
                          source=str(m.get('source') or 'ops_agent'))
 
@@ -696,6 +710,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(
                 f"PRODOPS association_sweep TIMEOUT after {ASSOCIATION_SWEEP_TIMEOUT}s")
             self._log_action('association_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {ASSOCIATION_SWEEP_TIMEOUT}s',
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              level=logging.ERROR, days=days)
@@ -706,8 +721,11 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  sweep-panda-associations: {line}")
         summary = (p.stdout or "").strip().splitlines()
         if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
             self.logger.error(f"PRODOPS association_sweep FAILED rc={p.returncode}")
             self._log_action('association_sweep', t0, outcome='error',
+                             reason=reason,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              level=logging.ERROR, days=days)
@@ -738,6 +756,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(
                 f"PRODOPS questionnaire_import TIMEOUT after {QUESTIONNAIRE_IMPORT_TIMEOUT}s")
             self._log_action('questionnaire_import', t0, outcome='timeout',
+                             reason=f'timed out after {QUESTIONNAIRE_IMPORT_TIMEOUT}s',
                              username=created_by, sublevel='normal',
                              live_default=True, level=logging.ERROR)
             return
@@ -747,8 +766,11 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  import-questionnaires: {line}")
         out = (p.stdout or "").strip()
         if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
             self.logger.error(f"PRODOPS questionnaire_import FAILED rc={p.returncode}")
             self._log_action('questionnaire_import', t0, outcome='error',
+                             reason=reason,
                              username=created_by, sublevel='normal',
                              live_default=True, level=logging.ERROR)
         elif out.startswith('SKIPPED'):
@@ -796,6 +818,7 @@ class EpicProdOpsAgent(BaseAgent):
         self._log_action(
             'catalog_sync', t0,
             outcome='ok' if not failed else 'error',
+            reason=('step(s) raised: ' + ', '.join(failed)) if failed else '',
             username=created_by,
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
@@ -826,6 +849,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'rucio_snapshot_ready', 'ok': False,
                 'error': f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s'})
             self._log_action('rucio_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s',
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
             return
@@ -840,6 +864,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False, 'error': reason})
             self._log_action('rucio_sweep', t0, outcome='error',
+                             reason=reason,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
         else:
@@ -874,6 +899,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'evgen_rucio_ready', 'ok': False,
                 'error': f'timed out after {EVGEN_RUCIO_TIMEOUT}s'})
             self._log_action('evgen_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {EVGEN_RUCIO_TIMEOUT}s',
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
             return
@@ -888,6 +914,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False, 'error': reason})
             self._log_action('evgen_sweep', t0, outcome='error',
+                             reason=reason,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR)
         else:
@@ -924,6 +951,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': f'timed out after {CATALOG_IMPORT_TIMEOUT}s'})
             self._log_action('catalog_import', t0, outcome='timeout',
+                             reason=f'timed out after {CATALOG_IMPORT_TIMEOUT}s',
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR, source=source)
             return
@@ -939,6 +967,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': reason})
             self._log_action('catalog_import', t0, outcome='error',
+                             reason=reason,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR, source=source)
         else:
@@ -979,6 +1008,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'questionnaire_match_ready', 'ok': False,
                 'error': f'timed out after {QUESTIONNAIRE_MATCH_TIMEOUT}s'})
             self._log_action('questionnaire_match', t0, outcome='timeout',
+                             reason=f'timed out after {QUESTIONNAIRE_MATCH_TIMEOUT}s',
                              username=str(created_by), level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
@@ -994,6 +1024,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'questionnaire_match_ready', 'ok': False,
                 'error': reason})
             self._log_action('questionnaire_match', t0, outcome='error',
+                             reason=reason,
                              username=str(created_by), level=logging.ERROR)
         else:
             summary = (p.stdout or "").strip()
@@ -1034,6 +1065,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'campaign_progress_ready', 'ok': False,
                 'error': f'timed out after {CAMPAIGN_PROGRESS_TIMEOUT}s'})
             self._log_action('progress_refresh', t0, outcome='timeout',
+                             reason=f'timed out after {CAMPAIGN_PROGRESS_TIMEOUT}s',
                              username=str(created_by), level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
@@ -1049,6 +1081,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'campaign_progress_ready', 'ok': False,
                 'error': reason})
             self._log_action('progress_refresh', t0, outcome='error',
+                             reason=reason,
                              username=str(created_by), level=logging.ERROR)
         else:
             summary = (p.stdout or "").strip()
@@ -1062,8 +1095,8 @@ class EpicProdOpsAgent(BaseAgent):
 
     def _log_action(self, action, t0=None, *, outcome='ok', subject_type='',
                     subject_key='', username='', sublevel='low',
-                    live_default=False, message='', level=logging.INFO,
-                    **counts):
+                    live_default=False, message='', reason='',
+                    level=logging.INFO, **counts):
         """Record one action in the epicprod action stream (AppLog via REST).
 
         The ops agent is out-of-process, so this posts the same record shape
@@ -1074,8 +1107,11 @@ class EpicProdOpsAgent(BaseAgent):
         live_default RECOMMENDATION for the live stream (effective decision =
         SysConfig live override over the default). Pass the doer start time
         as t0 and the measured duration_ms is recorded — every sweep and
-        timed operation reports its execution time to the log. Never raises;
-        a failed post is logged and the action proceeds.
+        timed operation reports its execution time to the log. Every non-ok
+        outcome passes reason — the short failure cause (last stderr line,
+        rc, or timeout note); it is stored in extra_data and appended to the
+        message, so the why is exposed everywhere the record is read.
+        Never raises; a failed post is logged and the action proceeds.
         """
         extra = {
             'action': str(action),
@@ -1091,13 +1127,18 @@ class EpicProdOpsAgent(BaseAgent):
             extra['username'] = str(username)
         if t0 is not None:
             extra['duration_ms'] = int((time.monotonic() - t0) * 1000)
+        if reason:
+            extra['reason'] = str(reason)[:300]
         for key, value in counts.items():
             if key not in ('action', 'subject_type', 'subject_key', 'username',
-                           'outcome', 'duration_ms', 'sublevel', 'live_default'):
+                           'outcome', 'duration_ms', 'sublevel', 'live_default',
+                           'reason'):
                 extra[key] = value
         if not message:
             subject = f"{subject_type}:{subject_key}" if subject_key else ''
             message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
+        if reason:
+            message = f"{message} — {str(reason)[:300]}"
         try:
             resp = self._action_log_session.post(
                 f"{MONITOR_HTTP_URL.rstrip('/')}/api/logs/",

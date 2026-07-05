@@ -7,6 +7,8 @@ outcome, and the measured duration. It is the raw material for the live view,
 for the coming digests and alarms, and for LLM assessment and reporting: the
 corpus AI reasons over when it answers "what happened".
 
+![The epicprod action stream](epicprod_action_stream.svg)
+
 Companion docs: [EPICPROD_OPS_AGENT.md](EPICPROD_OPS_AGENT.md) (the agent
 whose handlers emit most records), [EPICPROD_OPS.md](EPICPROD_OPS.md) (the
 nightly catalog-sync runbook entry). The system-level description lives in the
@@ -28,6 +30,7 @@ Structured fields live in `extra_data`. Reserved keys:
 | `subject_type` / `subject_key` | acted-on object (assessment subject types where applicable) |
 | `username` | human or service account driving the action |
 | `outcome` | `ok`, `error`, `timeout`, `skipped`, `unrecorded` |
+| `reason` | short failure cause, required on every non-ok outcome (last stderr line, `rc=N`, or timeout note); also appended to the message text |
 | `duration_ms` | measured execution time — required in spirit for sweeps and timed operations |
 | `sublevel` | declared verbosity class (below) |
 | `live_default` | declared live-stream recommendation (below) |
@@ -105,8 +108,10 @@ Rules of the road:
    page reads. It MUST mirror the call sites.
 2. Timed operations pass the start time; every sweep reports its execution
    time to the log.
-3. Failed outcomes log at `level=logging.ERROR` — the no-silent-failures
-   precept applies to the action stream first.
+3. Failed outcomes log at `level=logging.ERROR` and carry `reason` — an
+   `outcome: error` with no why is itself a silent failure. The web and MCP
+   tiers put the cause in the message text; the agent's `_log_action` takes
+   `reason=` and exposes it in both the record and the message.
 4. Requester identity travels in the message (`created_by`, `owner`,
    `requested_by`) and is recorded at execution. Anonymous open-face requests
    record an empty username, which is itself information.
