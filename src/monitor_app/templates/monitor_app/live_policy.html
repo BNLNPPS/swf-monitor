@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Live Stream Policy{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2>Live Stream Policy</h2>
+    <p><em>Sublevel</em> is the event's declared verbosity class — which humans it reaches
+       (high: everyone, including digests and email; normal: live-page watchers; low: verbose
+       viewers only). It is set in the event's code and changed by changing the event.
+       <em>Live</em> is a separate category — "interesting to some humans, now": each event
+       declares a live default, and the <em>override</em> (stored in
+       <a href="{% url 'monitor_app:system_status' %}">SysConfig</a>) is the runtime attention
+       knob that wins when set. The
+       <a href="{% url 'monitor_app:log_list' %}?live=1">live stream view</a> shows the events
+       whose effective state is live.</p>
+
+    <form method="post" action="{% url 'monitor_app:live_policy' %}">
+        {% csrf_token %}
+        <table class="table table-sm table-striped w-auto align-middle">
+            <thead>
+                <tr><th>Action</th><th>Sublevel</th><th>Live default</th><th>Override</th><th>Effective</th></tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td><code>{{ row.action }}</code></td>
+                    <td>{{ row.sublevel }}</td>
+                    <td>{{ row.live_default|yesno:"live,quiet" }}</td>
+                    <td>
+                        {% if user.is_authenticated %}
+                        <select name="policy_{{ row.action }}" class="form-select form-select-sm">
+                            <option value="default" {% if row.state == 'default' %}selected{% endif %}>default</option>
+                            <option value="live" {% if row.state == 'live' %}selected{% endif %}>live</option>
+                            <option value="quiet" {% if row.state == 'quiet' %}selected{% endif %}>quiet</option>
+                        </select>
+                        {% else %}
+                        {{ row.state }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if row.effective %}bg-success{% else %}bg-secondary{% endif %}">
+                            {{ row.effective|yesno:"live,quiet" }}</span>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% if user.is_authenticated %}
+        <button class="btn btn-sm btn-primary" type="submit">Save policy</button>
+        {% else %}
+        <p class="text-muted small">Sign in to edit.</p>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

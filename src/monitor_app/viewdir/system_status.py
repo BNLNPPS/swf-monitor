@@ -50,6 +50,7 @@ def sysconfig_save(request):
     log_epicprod_action(
         'web', 'sysconfig_edit',
         username=request.user.username,
+        sublevel='high',
         live_default=True,
         keys=sorted(parsed.keys()),
     )

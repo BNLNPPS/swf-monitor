@@ -276,8 +276,10 @@ via `_log_action()` — a REST-posting twin of
 `monitor_app.epicprod_logging.log_epicprod_action`. Records carry the action
 id, subject, requesting username where the message provides one, outcome
 (`ok`/`error`/`timeout`/`unrecorded`), measured `duration_ms` around the doer
-subprocess (every sweep reports its execution time), and the `live_default`
-recommendation for the epic-live stream (effective threshold set by the
-SysConfig `epicprod_live_policy` registry). Retrieval: `epicprod_list_actions`
+subprocess (every sweep reports its execution time), the declared `sublevel`
+(verbosity class: which humans the event reaches; changed by changing the
+event), and the `live_default` recommendation for the live stream (effective
+decision = the SysConfig `epicprod_live_policy` override, the runtime
+attention knob on the live-policy page). Retrieval: `epicprod_list_actions`
 MCP tool, the Logs page (`?app_name=epicprod`, or the Live stream toggle),
 `swf_list_logs(app_name='epicprod')`.

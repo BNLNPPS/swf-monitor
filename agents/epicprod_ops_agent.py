@@ -206,7 +206,7 @@ class EpicProdOpsAgent(BaseAgent):
         self.logger.warning(
             f"PRODOPS: deliberate shutdown requested by {m.get('sender', '?')}")
         self._log_action('agent_shutdown', username=str(m.get('sender') or ''),
-                         live_default=True, level=logging.WARNING)
+                         sublevel='high', live_default=True, level=logging.WARNING)
         self._deliberate = True
         os.kill(self.pid, signal.SIGTERM)   # reuse BaseAgent's graceful unwind
 
@@ -245,6 +245,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._mark_error(jobdir, f"fetch timed out after {FETCH_TIMEOUT}s")
             self._log_action('payload_log_fetch', t0, outcome='timeout',
                              subject_type='panda_job', subject_key=str(m['pandaid']),
+                             username=str(m.get('requested_by') or ''),
                              level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
             return
         for line in (p.stderr or "").splitlines():
@@ -257,10 +258,12 @@ class EpicProdOpsAgent(BaseAgent):
             self._mark_error(jobdir, reason)
             self._log_action('payload_log_fetch', t0, outcome='error',
                              subject_type='panda_job', subject_key=str(m['pandaid']),
+                             username=str(m.get('requested_by') or ''),
                              level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
         else:
             self._log_action('payload_log_fetch', t0,
                              subject_type='panda_job', subject_key=str(m['pandaid']),
+                             username=str(m.get('requested_by') or ''),
                              jeditaskid=str(m['jeditaskid']))
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
             # Push completion to the browser via the SSE relay (rides the topic
@@ -310,7 +313,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('task_submit', t0, outcome='timeout',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR)
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         stderr = p.stderr or ""
         for line in stderr.splitlines():
@@ -328,7 +331,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('task_submit', t0,
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, jedi_task_id=jedi_task_id)
+                             sublevel='high', live_default=True, jedi_task_id=jedi_task_id)
         elif p.returncode == 7 and jedi_task_id:
             # Submitted to PanDA, but the record-back POST failed after retries —
             # an orphan. Surface the id; the task stays ready/unrecorded and
@@ -342,7 +345,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('task_submit', t0, outcome='unrecorded',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR,
+                             sublevel='high', live_default=True, level=logging.ERROR,
                              jedi_task_id=jedi_task_id)
         else:
             self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
@@ -352,7 +355,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('task_submit', t0, outcome='error',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR)
+                             sublevel='high', live_default=True, level=logging.ERROR)
 
     def _handle_submit_evgen_task(self, m):
         """Validate, then run the client-API EVGEN submission on the worker
@@ -395,7 +398,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('evgen_task_submit', t0, outcome='timeout',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR)
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         stderr = p.stderr or ""
         for line in stderr.splitlines():
@@ -411,7 +414,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('evgen_task_submit', t0,
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, jedi_task_id=jedi_task_id)
+                             sublevel='high', live_default=True, jedi_task_id=jedi_task_id)
         elif p.returncode == 7 and jedi_task_id:
             # Submitted, but the record-back POST failed after retries — an
             # orphan; surface the id (record-submission is idempotent).
@@ -424,7 +427,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('evgen_task_submit', t0, outcome='unrecorded',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR,
+                             sublevel='high', live_default=True, level=logging.ERROR,
                              jedi_task_id=jedi_task_id)
         else:
             self.logger.error(f"PRODOPS submit_evgen_task FAILED rc={p.returncode}: {task_name}")
@@ -434,7 +437,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('evgen_task_submit', t0, outcome='error',
                              subject_type='campaign_task', subject_key=task_name,
                              username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR)
+                             sublevel='high', live_default=True, level=logging.ERROR)
 
     def _handle_panda_task_operation(self, m):
         """Run a PanDA-native operation on an existing JEDI task."""
@@ -484,8 +487,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'operation': operation, 'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='timeout',
                              subject_type='panda_task', subject_key=jedi_task_id,
-                             username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR,
                              operation=operation, task_name=task_name)
             return
 
@@ -503,8 +506,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'operation': operation, 'ok': True, 'summary': summary})
             self._log_action('panda_task_operation', t0,
                              subject_type='panda_task', subject_key=jedi_task_id,
-                             username=str(m.get('owner') or ''),
-                             live_default=True,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
                              operation=operation, task_name=task_name)
         else:
             stderr = (p.stderr or "").strip()
@@ -518,8 +521,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'operation': operation, 'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='error',
                              subject_type='panda_task', subject_key=jedi_task_id,
-                             username=str(m.get('owner') or ''),
-                             live_default=True, level=logging.ERROR,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR,
                              operation=operation, task_name=task_name)
 
     def _handle_sync_epicprod_inventory(self, m):
@@ -682,8 +685,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'rucio_snapshot_ready', 'ok': False,
                 'error': f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s'})
             self._log_action('rucio_sweep', t0, outcome='timeout',
-                             username=str(m.get('requested_by') or ''),
-                             live_default=True, level=logging.ERROR)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  rucio-snapshot-update: {line}")
@@ -696,15 +699,15 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False, 'error': reason})
             self._log_action('rucio_sweep', t0, outcome='error',
-                             username=str(m.get('requested_by') or ''),
-                             live_default=True, level=logging.ERROR)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS rucio_snapshot_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
             self._log_action('rucio_sweep', t0,
-                             username=str(m.get('requested_by') or ''),
-                             live_default=True)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True)
 
     def _handle_evgen_rucio_update(self, m):
         """Assimilate the JLab Rucio EVGEN inventory off the receiver thread — a
@@ -730,8 +733,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'evgen_rucio_ready', 'ok': False,
                 'error': f'timed out after {EVGEN_RUCIO_TIMEOUT}s'})
             self._log_action('evgen_sweep', t0, outcome='timeout',
-                             username=str(m.get('requested_by') or ''),
-                             live_default=True, level=logging.ERROR)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  import-evgen-rucio: {line}")
@@ -744,15 +747,15 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False, 'error': reason})
             self._log_action('evgen_sweep', t0, outcome='error',
-                             username=str(m.get('requested_by') or ''),
-                             live_default=True, level=logging.ERROR)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS evgen_rucio_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': True})
             self._log_action('evgen_sweep', t0,
-                             username=str(m.get('requested_by') or ''),
-                             live_default=True)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True)
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
@@ -780,7 +783,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': f'timed out after {CATALOG_IMPORT_TIMEOUT}s'})
             self._log_action('catalog_import', t0, outcome='timeout',
-                             live_default=True, level=logging.ERROR, source=source)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR, source=source)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  pcs-catalog-import: {line}")
@@ -794,7 +798,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': reason})
             self._log_action('catalog_import', t0, outcome='error',
-                             live_default=True, level=logging.ERROR, source=source)
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR, source=source)
         else:
             summary = (p.stdout or "").strip().splitlines()
             self.logger.info(f"PRODOPS catalog_import {source} done")
@@ -802,7 +807,8 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': True,
                 'summary': summary[-1] if summary else ''})
             self._log_action('catalog_import', t0,
-                             live_default=True, source=source,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, source=source,
                              summary=(summary[-1] if summary else ''))
 
     def _handle_questionnaire_match_update(self, m):
@@ -914,22 +920,26 @@ class EpicProdOpsAgent(BaseAgent):
     # -- action stream --------------------------------------------------------
 
     def _log_action(self, action, t0=None, *, outcome='ok', subject_type='',
-                    subject_key='', username='', live_default=False,
-                    message='', level=logging.INFO, **counts):
+                    subject_key='', username='', sublevel='low',
+                    live_default=False, message='', level=logging.INFO,
+                    **counts):
         """Record one action in the epicprod action stream (AppLog via REST).
 
         The ops agent is out-of-process, so this posts the same record shape
         monitor_app.epicprod_logging.log_epicprod_action writes via the ORM:
         app_name='epicprod', instance 'ops-agent', structured extra_data with
-        the call site's live_default RECOMMENDATION for the epic-live stream
-        (the effective decision is the SysConfig policy). Pass the doer start
-        time as t0 and the measured duration_ms is recorded — every sweep and
+        the event's declared sublevel (verbosity class: which humans it
+        reaches; authoritative, changed by changing the event) and its
+        live_default RECOMMENDATION for the live stream (effective decision =
+        SysConfig live override over the default). Pass the doer start time
+        as t0 and the measured duration_ms is recorded — every sweep and
         timed operation reports its execution time to the log. Never raises;
         a failed post is logged and the action proceeds.
         """
         extra = {
             'action': str(action),
             'outcome': str(outcome),
+            'sublevel': str(sublevel),
             'live_default': bool(live_default),
         }
         if subject_type:
@@ -942,7 +952,7 @@ class EpicProdOpsAgent(BaseAgent):
             extra['duration_ms'] = int((time.monotonic() - t0) * 1000)
         for key, value in counts.items():
             if key not in ('action', 'subject_type', 'subject_key', 'username',
-                           'outcome', 'duration_ms', 'live_default'):
+                           'outcome', 'duration_ms', 'sublevel', 'live_default'):
                 extra[key] = value
         if not message:
             subject = f"{subject_type}:{subject_key}" if subject_key else ''

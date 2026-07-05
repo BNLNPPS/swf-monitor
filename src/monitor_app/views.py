@@ -565,6 +565,48 @@ def log_list(request):
     return render(request, 'monitor_app/log_list_dynamic.html', context)
 
 
+def live_policy(request):
+    """Live-stream policy: every known epicprod action with its call-site
+    default, any SysConfig override, and the effective state — editable."""
+    from django.contrib import messages
+    from .epicprod_logging import (get_live_policy, live_policy_rows,
+                                   log_epicprod_action, set_live_policy_entry)
+
+    if request.method == 'POST':
+        if not request.user.is_authenticated:
+            messages.error(request, 'Sign in to edit the live policy.')
+            return redirect('monitor_app:live_policy')
+        current = get_live_policy()
+        value_map = {'default': None, 'live': True, 'quiet': False}
+        changes = {}
+        for key, raw in request.POST.items():
+            if not key.startswith('policy_') or raw not in value_map:
+                continue
+            action = key[len('policy_'):]
+            new = value_map[raw]
+            if new != current.get(action):
+                set_live_policy_entry(action, new, username=request.user.username)
+                changes[action] = raw
+        if changes:
+            log_epicprod_action(
+                'web', 'live_policy_edit',
+                username=request.user.username,
+                sublevel='high',
+                live_default=True,
+                changes=changes,
+            )
+            messages.success(
+                request,
+                'Live policy updated: '
+                + ', '.join(f'{a} → {v}' for a, v in sorted(changes.items())))
+        else:
+            messages.info(request, 'No live policy changes.')
+        return redirect('monitor_app:live_policy')
+
+    return render(request, 'monitor_app/live_policy.html',
+                  {'rows': live_policy_rows()})
+
+
 def log_detail(request, log_id):
     """Display details for a specific log entry."""
     log = get_object_or_404(AppLog, id=log_id)

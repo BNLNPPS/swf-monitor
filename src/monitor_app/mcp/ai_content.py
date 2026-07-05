@@ -259,6 +259,8 @@ def _register_ai_assessment_sync(
             subject_key=resolved['subject_key'],
             username=username_value,
             outcome='error',
+            sublevel='normal',
+            live_default=True,
             level=logging.ERROR,
             message=f'assessment registration failed: {exc}',
         )
@@ -282,6 +284,8 @@ def _register_ai_assessment_sync(
         subject_key=resolved['subject_key'],
         username=username_value,
         outcome='ok',
+        sublevel='normal',
+        live_default=True,
         linked=linked,
         corun_page_group_id=page_group_id,
     )

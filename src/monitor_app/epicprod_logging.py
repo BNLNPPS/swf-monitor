@@ -26,13 +26,23 @@ Retrieval: the ``epicprod_list_actions`` MCP tool (filtered and summarized),
 ``swf_list_logs(app_name='epicprod')`` (raw), and the Logs UI filtered on
 app_name.
 
-Live stream: each action record carries ``live_default`` — the call site's
-RECOMMENDATION for whether the action is above threshold for the epic-live
-stream. It is a default, not the decision: the effective threshold is the
-``epicprod_live_policy`` override registry in PersistentState (all system
-state in the DB), adjustable without touching call sites. ``live_stream_q()``
-applies policy-over-default and is the one filter every live channel uses,
-starting with the Logs page live view.
+Publication axes (log level is separate and keeps its universal meaning):
+
+``sublevel`` — the event's declared verbosity class (high | normal | low),
+set at the call site, AUTHORITATIVE: changing it means changing the event.
+It says which humans an event reaches — high reaches everyone including
+email/digest audiences, normal reaches live-page watchers, low reaches only
+the deliberately verbose viewer.
+
+``live_default`` — the event's declared RECOMMENDATION for the live stream,
+a special category: "interesting to some humans, now". The effective live
+decision is the ``epicprod_live_policy`` override registry in SysConfig
+(runtime attention knob, flipped on the live-policy page) over the default.
+
+A channel = its verbosity setting applied to live events:
+``live_stream_q(min_sublevel=...)`` is the one filter every channel uses —
+the deep live view takes all live events; an email digest takes live events
+at sublevel high.
 """
 
 import logging
@@ -47,14 +57,45 @@ EPICPROD_APP_NAME = 'epicprod'
 
 LIVE_POLICY_STATE_KEY = 'epicprod_live_policy'
 
+SUBLEVEL_VALUES = ('high', 'normal', 'low')
+SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
+
+# Catalog of known actions and their call-site declarations. This MUST mirror
+# the call sites (records carry the authoritative stamp; filters read the
+# record) — it exists so the live-policy page can show every known action
+# before/without records, and so new actions are declared in one greppable
+# place. sublevel: high = reaches everyone (news, digests), normal =
+# live-page watchers, low = verbose viewers only. live: the declared
+# live-stream recommendation, overridable at runtime.
+ACTION_DEFAULTS = {
+    # ops agent
+    'task_submit': {'sublevel': 'high', 'live': True},
+    'evgen_task_submit': {'sublevel': 'high', 'live': True},
+    'panda_task_operation': {'sublevel': 'high', 'live': True},
+    'rucio_sweep': {'sublevel': 'high', 'live': True},
+    'evgen_sweep': {'sublevel': 'high', 'live': True},
+    'catalog_import': {'sublevel': 'high', 'live': True},
+    'agent_shutdown': {'sublevel': 'high', 'live': True},
+    'payload_log_fetch': {'sublevel': 'low', 'live': False},
+    'inventory_sync': {'sublevel': 'low', 'live': False},
+    'system_status_refresh': {'sublevel': 'low', 'live': False},
+    'questionnaire_match': {'sublevel': 'low', 'live': False},
+    'progress_refresh': {'sublevel': 'low', 'live': False},
+    # web and MCP
+    'sysconfig_edit': {'sublevel': 'high', 'live': True},
+    'live_policy_edit': {'sublevel': 'high', 'live': True},
+    'assessment_register': {'sublevel': 'normal', 'live': True},
+    'assessment_link': {'sublevel': 'low', 'live': False},
+}
+
 RESERVED_KEYS = ('action', 'subject_type', 'subject_key', 'username',
-                 'outcome', 'duration_ms', 'live_default')
+                 'outcome', 'duration_ms', 'sublevel', 'live_default')
 
 
 def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
                         username='', outcome='ok', duration_ms=None,
-                        live_default=False, message='', level=logging.INFO,
-                        **counts):
+                        sublevel='low', live_default=False, message='',
+                        level=logging.INFO, **counts):
     """Record one epicprod action in the AppLog action stream.
 
     Never raises: a failure to record is logged to the module logger and the
@@ -72,11 +113,14 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
         outcome: 'ok' or 'error' (conventional; free-form refinements allowed).
         duration_ms: measured execution time; required in spirit for sweeps
             and other timed operations.
-        live_default: the call site's RECOMMENDATION for the epic-live
-            stream — True if this action is, by default, above threshold for
-            live publication (production news: submissions, completions,
-            failures); False for routine mechanics. The effective decision is
-            policy-over-default via the epicprod_live_policy registry.
+        sublevel: the event's declared verbosity class — 'high' (reaches
+            everyone: news, digests, email), 'normal' (live-page watchers),
+            'low' (verbose viewers only). AUTHORITATIVE: change it by
+            changing the event, not at runtime.
+        live_default: the event's declared RECOMMENDATION for the live
+            stream ("interesting to some humans, now"). The effective live
+            decision is the epicprod_live_policy override (runtime attention
+            knob) over this default.
         message: optional human-readable one-liner; composed if omitted.
         level: python logging level; use logging.ERROR for failed actions.
         **counts: numeric counts worth recording (rows_added=..., etc.);
@@ -87,9 +131,14 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
     """
     from .models import AppLog
 
+    if sublevel not in SUBLEVEL_VALUES:
+        logger.warning('epicprod action %s: unknown sublevel %r, using low',
+                       action, sublevel)
+        sublevel = 'low'
     extra = {
         'action': str(action),
         'outcome': str(outcome),
+        'sublevel': sublevel,
         'live_default': bool(live_default),
     }
     if subject_type:
@@ -135,13 +184,14 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
 
 
 def get_live_policy():
-    """Return the live-threshold override registry: {action_id: bool}.
+    """Return the live override registry: {action_id: bool}.
 
     Stored under LIVE_POLICY_STATE_KEY in SysConfig (system configuration
-    lives in the DB, adjustable via the System page). An action absent from
-    the registry follows its records' live_default recommendation. Reads
-    defensively: a missing table (pre-migration) yields an empty policy with
-    a logged warning rather than breaking the caller.
+    lives in the DB, adjustable via the live-policy page). The runtime
+    attention knob: an action absent from the registry follows its records'
+    live_default recommendation. Reads defensively: a missing table
+    (pre-migration) yields an empty policy with a logged warning rather than
+    breaking the caller.
     """
     from .models import SysConfig
 
@@ -150,11 +200,13 @@ def get_live_policy():
     except Exception as exc:
         logger.warning('live policy read failed (empty policy used): %s', exc)
         return {}
-    return {str(k): bool(v) for k, v in policy.items()} if isinstance(policy, dict) else {}
+    if not isinstance(policy, dict):
+        return {}
+    return {str(k): bool(v) for k, v in policy.items()}
 
 
 def set_live_policy_entry(action, value, username=''):
-    """Set (True/False) or clear (None) the live-threshold override for an action."""
+    """Set (True/False) or clear (None) an action's live override."""
     from .models import SysConfig
 
     policy = get_live_policy()
@@ -167,13 +219,57 @@ def set_live_policy_entry(action, value, username=''):
     return policy
 
 
-def live_stream_q():
-    """Q filter selecting action records above the live threshold.
+def live_policy_rows():
+    """Rows for the live-policy page: every known action with its declared
+    sublevel and live default, any live override, and the effective state.
 
-    Policy-over-default: actions forced on by the registry are included
-    regardless of their records' live_default; actions forced off are
-    excluded; everything else follows live_default. The single source of
-    live-stream semantics for every channel (Logs page live view first).
+    Known = the ACTION_DEFAULTS catalog plus any action observed in the
+    stream (the newest record supplies declarations for actions not yet in
+    the catalog).
+    """
+    from .models import AppLog
+
+    policy = get_live_policy()
+    declarations = {k: dict(v) for k, v in ACTION_DEFAULTS.items()}
+    observed = (AppLog.objects.filter(app_name=EPICPROD_APP_NAME)
+                .exclude(extra_data__action__isnull=True)
+                .values_list('extra_data__action', flat=True)
+                .distinct())
+    for action in observed:
+        if action and action not in declarations:
+            latest = (AppLog.objects.filter(app_name=EPICPROD_APP_NAME,
+                                            extra_data__action=action)
+                      .order_by('-id').first())
+            extra = latest.extra_data if latest and isinstance(latest.extra_data, dict) else {}
+            stamped = extra.get('sublevel')
+            declarations[action] = {
+                'sublevel': stamped if stamped in SUBLEVEL_VALUES else 'low',
+                'live': bool(extra.get('live_default')),
+            }
+
+    rows = []
+    for action in sorted(declarations):
+        decl = declarations[action]
+        override = policy.get(action)
+        effective = override if override is not None else decl['live']
+        rows.append({
+            'action': action,
+            'sublevel': decl['sublevel'],
+            'live_default': decl['live'],
+            'state': 'default' if override is None else ('live' if override else 'quiet'),
+            'effective': bool(effective),
+        })
+    return rows
+
+
+def live_stream_q(min_sublevel=None):
+    """Q filter selecting live action records, optionally verbosity-gated.
+
+    Live = the runtime override (epicprod_live_policy) over the record's
+    declared live_default. A channel applies its verbosity setting through
+    min_sublevel: the deep live view passes None (all live events); an email
+    digest passes 'high'. The single source of stream semantics for every
+    channel.
     """
     from django.db.models import Q
 
@@ -186,4 +282,8 @@ def live_stream_q():
         q &= ~Q(extra_data__action__in=force_off)
     if force_on:
         q |= Q(extra_data__action__in=force_on)
+    if min_sublevel in SUBLEVEL_VALUES:
+        min_rank = SUBLEVEL_ORDER[min_sublevel]
+        ge_values = [v for v in SUBLEVEL_VALUES if SUBLEVEL_ORDER[v] >= min_rank]
+        q &= Q(extra_data__sublevel__in=ge_values)
     return Q(app_name=EPICPROD_APP_NAME) & q

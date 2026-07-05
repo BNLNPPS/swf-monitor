@@ -6,7 +6,8 @@
         <input type="checkbox" id="live-toggle" {% if live_mode %}checked{% endif %}>
         Live stream
     </label>
-    <span class="text-muted" style="margin-left: 0.75em;">epicprod actions above the live threshold · auto-refreshes every 30 s</span>
+    <span class="text-muted" style="margin-left: 0.75em;">epicprod actions above the live threshold · auto-refreshes every 30 s ·
+        <a href="{% url 'monitor_app:live_policy' %}">live policy</a></span>
 </div>
 {% endblock %}
 

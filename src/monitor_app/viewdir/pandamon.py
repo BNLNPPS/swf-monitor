@@ -822,7 +822,9 @@ def panda_payload_log(request, pandaid):
     # caller must address it explicitly.
     msg = {'msg_type': 'fetch_payload_log', 'namespace': 'prodops',
            'scope': scope, 'lfn': lfn,
-           'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid)}
+           'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid),
+           'requested_by': (request.user.username
+                            if request.user.is_authenticated else '')}
     if force:
         msg['force'] = True
     try:
