@@ -40,11 +40,24 @@ def main(argv=None):
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--url', help='Link-readable Google Sheet CSV export URL')
     group.add_argument('--file', help='Local CSV file')
+    group.add_argument('--from-sysconfig', action='store_true',
+                       help="read the CSV URL from SysConfig key "
+                            "'questionnaire_csv_url' (nightly sweep mode); "
+                            "exits 0 with a notice when the key is unset")
     parser.add_argument('--created-by', default='questionnaire_import')
     parser.add_argument('--timeout', type=int, default=30)
     args = parser.parse_args(argv)
 
     from pcs.services import questionnaire_intake_csv, ServiceError
+
+    if args.from_sysconfig:
+        from monitor_app.models import SysConfig
+        args.url = str(SysConfig.get_config().get('questionnaire_csv_url') or '')
+        if not args.url:
+            # Not an error: the sweep runs before the knob is set. The agent
+            # records outcome 'skipped' from this marker line.
+            print('SKIPPED: SysConfig questionnaire_csv_url is not set')
+            return 0
 
     try:
         csv_text, source_url = _read_input(args)

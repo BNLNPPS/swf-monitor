@@ -75,10 +75,13 @@ ACTION_DEFAULTS = {
     'rucio_sweep': {'sublevel': 'high', 'live': True},
     'evgen_sweep': {'sublevel': 'high', 'live': True},
     'catalog_import': {'sublevel': 'high', 'live': True},
+    'association_sweep': {'sublevel': 'high', 'live': True},
+    'catalog_sync': {'sublevel': 'high', 'live': True},
     'agent_shutdown': {'sublevel': 'high', 'live': True},
     'payload_log_fetch': {'sublevel': 'low', 'live': False},
     'inventory_sync': {'sublevel': 'low', 'live': False},
     'system_status_refresh': {'sublevel': 'low', 'live': False},
+    'questionnaire_import': {'sublevel': 'normal', 'live': True},
     'questionnaire_match': {'sublevel': 'low', 'live': False},
     'progress_refresh': {'sublevel': 'low', 'live': False},
     # web and MCP

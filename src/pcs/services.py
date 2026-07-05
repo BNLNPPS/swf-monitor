@@ -300,6 +300,102 @@ def _match_prod_tasks_for_panda_name(panda_task_name):
     return matches
 
 
+def intake_direct_panda_task(panda_task, *, created_by='association_sweep'):
+    """Auto-intake a directly submitted group.EIC production task.
+
+    Commissioning/migration policy: everything lands in the catalog, whatever
+    the submission path. For a PanDA task whose name has no PCS match, this
+    creates the catalog structure the same way past-campaign assimilation
+    does — Campaign from the version segment (lifecycle classified against
+    the current campaign), Dataset from the name with the physics tag derived
+    from the descriptive remainder (anchor tags elsewhere), anchor ProdConfig,
+    and a ProdTask in status 'submitted' — then the normal association
+    reconciler links the PanDA task to it.
+
+    Returns ``(ProdTask|None, reason)``.
+    """
+    task_name = panda_name_from_physical_name(panda_task.get('taskname') or '')
+    if not task_name.startswith('group.EIC.'):
+        return None, 'not a group.EIC production taskname'
+    parts = task_name.split('.')
+    # group . EIC . <det_version: N.N.N> . <det_config> . <remainder...>
+    if len(parts) < 8:
+        return None, f'taskname too short to parse: {task_name!r}'
+    det_version = '.'.join(parts[2:5])
+    det_config = parts[5]
+    remainder = '.'.join(parts[6:])
+    if not _re.fullmatch(r'\d+\.\d+\.\d+', det_version) or not remainder:
+        return None, f'unparseable taskname: {task_name!r}'
+
+    physics, evgen, simu, reco, cfg, _ = _ensure_csvimport_anchors()
+    current_camp = Campaign.objects.filter(lifecycle='current').first()
+    current_v = _version_tuple(current_camp.name) if current_camp else None
+    lc = 'future' if (current_v is not None
+                      and _version_tuple(det_version) > current_v) else 'past'
+
+    with transaction.atomic():
+        campaign, _created = Campaign.objects.get_or_create(
+            name=det_version,
+            defaults={'lifecycle': lc,
+                      'description': f'Auto-created on intake of direct PanDA '
+                                     f'submissions for {det_version}',
+                      'created_by': created_by},
+        )
+
+        beam = ''
+        beam_match = _re.search(r'\.(\d+x\d+)(\.|$)', remainder)
+        if beam_match:
+            beam = beam_match.group(1)
+        derived = derive_physics(remainder.replace('.', '/'), beam=beam)
+        row_physics_tag = physics
+        if derived is None:
+            pass  # unresolved physics stays on the placeholder anchor
+        elif derived.get('process') in ('BEAMGAS', 'SYNRAD'):
+            row_physics_tag = _no_signal_physics_tag()
+        else:
+            row_physics_tag, _ = find_or_create_physics_tag(
+                derived, created_by=created_by)
+
+        did = f'group.EIC:{task_name}'
+        dataset, _ds_created = Dataset.objects.get_or_create(
+            did=did,
+            defaults={
+                'dataset_name': task_name,
+                'scope': 'group.EIC',
+                'detector_version': det_version,
+                'detector_config': det_config,
+                'campaign': campaign,
+                'physics_tag': row_physics_tag,
+                'evgen_tag': evgen,
+                'simu_tag': simu,
+                'reco_tag': reco,
+                'description': 'Auto-intake of direct PanDA submission',
+                'metadata': {
+                    'source': {'kind': 'panda_taskname', 'location': task_name},
+                    'direct_intake': {
+                        'jeditaskid': panda_task.get('jeditaskid'),
+                        'username': panda_task.get('username') or '',
+                    },
+                },
+                'created_by': created_by,
+            },
+        )
+
+        task, _t_created = ProdTask.objects.get_or_create(
+            name=task_name,
+            defaults={
+                'status': 'submitted',
+                'dataset': dataset,
+                'prod_config': cfg,
+                'campaign': campaign,
+                'description': (f'Auto-intake of direct PanDA submission '
+                                f'jediTaskID={panda_task.get("jeditaskid")}'),
+                'created_by': created_by,
+            },
+        )
+    return task, 'intaken'
+
+
 def reconcile_panda_task_association(panda_task):
     """Create a PandaTasks row for an externally discovered PanDA task.
 

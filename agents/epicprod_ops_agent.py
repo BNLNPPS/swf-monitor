@@ -43,6 +43,12 @@ Capabilities:
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
                        agents, and external monitor endpoints.
+  association_sweep  — batch-associate recent PanDA tasks with PCS campaign
+                       tasks (manage.py sweep_panda_associations).
+  catalog_sync       — the nightly composite: association sweep, Rucio
+                       snapshot, EVGEN assimilation, questionnaire match,
+                       progress refresh, in order; logs the chain summary
+                       that serves as the catalog-freshness timestamp.
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -105,6 +111,8 @@ CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pc
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
 QUESTIONNAIRE_MATCH_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_MATCH_TIMEOUT", "300"))
+QUESTIONNAIRE_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "import-questionnaires.py"
+QUESTIONNAIRE_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_IMPORT_TIMEOUT", "120"))
 CAMPAIGN_PROGRESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-campaign-progress.py"
 CAMPAIGN_PROGRESS_TIMEOUT = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_TIMEOUT", "300"))
 CAMPAIGN_PROGRESS_MIN_INTERVAL = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_MIN_INTERVAL", "300"))
@@ -118,6 +126,11 @@ EVGEN_RUCIO_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_RUCIO_TIMEOUT", "900"))
 # evidence and writes monitor-side EpicProdJob/EpicProdFile rows.
 MANAGE_PY = Path(__file__).resolve().parent.parent / "src" / "manage.py"
 INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_INVENTORY_TIMEOUT", "180"))
+
+# Association sweep: batch counterpart of the lazy per-view reconciliation —
+# pulls directly submitted PanDA tasks into the catalog (management command).
+ASSOCIATION_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_ASSOCIATION_SWEEP_TIMEOUT", "600"))
+ASSOCIATION_SWEEP_DAYS = int(os.environ.get("EPICPROD_ASSOCIATION_SWEEP_DAYS", "14"))
 
 # System status refresh doer: cached monitor/system rows, intentionally a
 # standalone script rather than a Django management command.
@@ -144,6 +157,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "panda_task_operation",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
+                   "association_sweep", "catalog_sync", "questionnaire_import",
                    "sync_epicprod_inventory", "refresh_system_status",
                    "health_ping", "shutdown"}
 
@@ -659,6 +673,133 @@ class EpicProdOpsAgent(BaseAgent):
                 dedup_key="refresh_system_status",
                 label="refresh_system_status periodic")
             time.sleep(SYSTEM_STATUS_INTERVAL)
+
+    def _handle_association_sweep(self, m):
+        """Batch-associate recent PanDA tasks with PCS campaign tasks."""
+        self.run_in_background(
+            self._do_association_sweep, m,
+            dedup_key="association_sweep", label="association_sweep")
+
+    def _do_association_sweep(self, m):
+        """Run the sweep_panda_associations management command. No SSE push —
+        nothing in the browser waits on this; the action stream carries the
+        outcome, counts, and duration."""
+        days = int(m.get('days') or ASSOCIATION_SWEEP_DAYS)
+        cmd = [sys.executable, str(MANAGE_PY), "sweep_panda_associations",
+               "--days", str(days)]
+        self.logger.info(f"PRODOPS association_sweep: days={days}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ASSOCIATION_SWEEP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS association_sweep TIMEOUT after {ASSOCIATION_SWEEP_TIMEOUT}s")
+            self._log_action('association_sweep', t0, outcome='timeout',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, days=days)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  sweep-panda-associations: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  sweep-panda-associations: {line}")
+        summary = (p.stdout or "").strip().splitlines()
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS association_sweep FAILED rc={p.returncode}")
+            self._log_action('association_sweep', t0, outcome='error',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, days=days)
+        else:
+            self.logger.info("PRODOPS association_sweep done")
+            self._log_action('association_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, days=days,
+                             summary=(summary[-1] if summary else ''))
+
+    def _handle_questionnaire_import(self, m):
+        """Import new production-request form responses (nightly sweep mode:
+        CSV URL from SysConfig 'questionnaire_csv_url')."""
+        self.run_in_background(
+            self._do_questionnaire_import, m,
+            dedup_key="questionnaire_import", label="questionnaire_import")
+
+    def _do_questionnaire_import(self, m):
+        created_by = str(m.get('created_by') or 'questionnaire_import')
+        cmd = [sys.executable, str(QUESTIONNAIRE_IMPORT_SCRIPT),
+               "--from-sysconfig", "--created-by", created_by]
+        self.logger.info("PRODOPS questionnaire_import: importing form responses")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=QUESTIONNAIRE_IMPORT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS questionnaire_import TIMEOUT after {QUESTIONNAIRE_IMPORT_TIMEOUT}s")
+            self._log_action('questionnaire_import', t0, outcome='timeout',
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  import-questionnaires: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  import-questionnaires: {line}")
+        out = (p.stdout or "").strip()
+        if p.returncode != 0:
+            self.logger.error(f"PRODOPS questionnaire_import FAILED rc={p.returncode}")
+            self._log_action('questionnaire_import', t0, outcome='error',
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+        elif out.startswith('SKIPPED'):
+            self.logger.info("PRODOPS questionnaire_import skipped (no URL configured)")
+            self._log_action('questionnaire_import', t0, outcome='skipped',
+                             username=created_by, message=out)
+        else:
+            self.logger.info("PRODOPS questionnaire_import done")
+            self._log_action('questionnaire_import', t0,
+                             username=created_by, sublevel='normal',
+                             live_default=True,
+                             summary=(out.splitlines()[-1] if out else ''))
+
+    def _handle_catalog_sync(self, m):
+        """Nightly composite catalog sync: association sweep, Rucio snapshot,
+        EVGEN assimilation, questionnaire match, progress refresh — in
+        dependency order."""
+        self.run_in_background(
+            self._do_catalog_sync, m,
+            dedup_key="catalog_sync", label="catalog_sync")
+
+    def _do_catalog_sync(self, m):
+        """Run the sync steps sequentially. Each step logs its own action
+        record with outcome and duration; this logs the chain summary — the
+        catalog-freshness timestamp the alarm system watches."""
+        created_by = str(m.get('created_by') or 'catalog_sync')
+        t0 = time.monotonic()
+        steps = [
+            ('catalog_import_csv',
+             lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
+            ('questionnaire_import', self._do_questionnaire_import),
+            ('association_sweep', self._do_association_sweep),
+            ('rucio_snapshot_update', self._do_rucio_snapshot_update),
+            ('evgen_rucio_update', self._do_evgen_rucio_update),
+            ('questionnaire_match_update', self._do_questionnaire_match_update),
+            ('campaign_progress_refresh', self._do_campaign_progress_refresh),
+        ]
+        failed = []
+        for name, step in steps:
+            try:
+                step(dict(m, created_by=created_by))
+            except Exception as e:
+                failed.append(name)
+                self.logger.error(f"PRODOPS catalog_sync step {name} raised: {e}")
+        self._log_action(
+            'catalog_sync', t0,
+            outcome='ok' if not failed else 'error',
+            username=created_by,
+            sublevel='high', live_default=True,
+            level=logging.INFO if not failed else logging.ERROR,
+            steps=len(steps), raised=failed)
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
