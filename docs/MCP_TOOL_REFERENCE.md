@@ -412,12 +412,14 @@ This tool aggregates information from workflow messages and logs, providing a si
 |------|------------|-------------|
 | `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content as a corun-ai Page and link it from the target object JSON when the subject is known locally. |
 | `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
+| `epicprod_list_actions` | `action`, `instance`, `subject_type`, `subject_key`, `username`, `outcome`, `start_time`, `end_time`, `summarize`, `limit`, `offset` | Query the epicprod action stream (structured production-action records with outcome and duration). Prefer `summarize=True` for reporting: counts by action with ok/error split and duration statistics. See [EPICPROD_ACTION_STREAM.md](EPICPROD_ACTION_STREAM.md). |
 
 **Known subject types:**
 - `campaign_task`: campaign/production task, keyed by composed task name.
 - `panda_task`: local PanDA-task association, keyed by JEDI task id or task name.
 - `panda_job`: local production job record, keyed by pandaid.
 - `panda_queue`: PanDA site/queue record, keyed by queue name. A row with `queue_name == site` represents site-level content.
+- `campaign`: production campaign, keyed by campaign name (e.g. `26.05.0`); the natural subject for campaign-level reports. Links into the campaign's `data` JSON.
 
 **Behavior:**
 - AI content is append-only. Corrections and followups create new entries.

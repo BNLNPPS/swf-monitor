@@ -335,3 +335,25 @@ The PCS catalog additionally renders system state (the `Status` column),
 the originating CSV `Issue` URL (appended next to the description), a
 bulk-selection checkbox, and the live filter / sort bar. None of these
 are present on the canonical page.
+
+## 10. Adopted Tasks — Auto-Intake of Direct Submissions
+
+The campaign-task flow (request → PCS composition → campaign task → submit)
+is the target; during commissioning and migration, production also reaches
+PanDA directly. The nightly association sweep
+([EPICPROD_ACTION_STREAM.md](EPICPROD_ACTION_STREAM.md), runbook in
+[EPICPROD_OPS.md](EPICPROD_OPS.md#nightly-catalog-sync)) guarantees the
+catalog stays complete either way: it reads recent EIC tasks from the PanDA
+task database, associates any that match existing catalog identities, and
+auto-intakes unmatched `group.EIC.*` production names —
+`pcs.services.intake_direct_panda_task` creates the Campaign (from the
+version segment, lifecycle classified against the current campaign), a
+Dataset carrying a derived physics tag (anchor tags elsewhere), and a
+ProdTask in status `submitted`, then the normal reconciler links the PanDA
+task.
+
+Adopted tasks are marked (`created_by='association_sweep'`, auto-intake
+description) and carry only what a task name yields: no request linkage, no
+real generator/simulation/reconstruction configuration. Born-vs-adopted is
+therefore the standing migration metric — adopted counts belong in reports
+and trend to zero as production moves onto the campaign-task flow.

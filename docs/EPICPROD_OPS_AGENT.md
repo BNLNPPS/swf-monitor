@@ -261,12 +261,16 @@ Running, restarting, monitoring, the systemd unit, the cleaner-killer cron
 payload-log retrieval mechanics are in [EPICPROD_OPS.md](EPICPROD_OPS.md). This
 doc does not duplicate them.
 
-**Status (2026-06-02):** deployed and live on `pandaserver02`. Handlers
-`fetch_payload_log`, `submit_task`, `rucio_snapshot_update`, `health_ping`, and
-`shutdown` are implemented and the `submit_task` path reuses the operator's
-cached production token. Async handler execution is implemented (a `BaseAgent`
-worker pool, opt-in `run_in_background`); the three work handlers enqueue their
-doers through it.
+**Status (2026-07-05):** deployed and live on `pandaserver02`. Handlers:
+`fetch_payload_log`, `submit_task`, `submit_evgen_task`,
+`panda_task_operation`, `rucio_snapshot_update`, `evgen_rucio_update`,
+`catalog_import`, `questionnaire_import`, `questionnaire_match_update`,
+`campaign_progress_refresh`, `association_sweep` (with auto-intake of direct
+group.EIC submissions), `catalog_sync` (the nightly composite chain, cron
+02:15), `sync_epicprod_inventory`, `refresh_system_status`, `health_ping`,
+`shutdown`. All work handlers run their doers on the `run_in_background`
+worker pool and record structured action records — see
+[EPICPROD_ACTION_STREAM.md](EPICPROD_ACTION_STREAM.md).
 
 ## Action-stream logging
 
