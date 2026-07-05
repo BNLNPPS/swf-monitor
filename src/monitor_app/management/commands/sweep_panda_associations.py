@@ -25,16 +25,46 @@ class Command(BaseCommand):
                                  'unmatched group.EIC production tasknames')
 
     def handle(self, *args, **opts):
-        from monitor_app.panda.queries import list_tasks
+        from datetime import timedelta
+
+        from django.db import connections
+        from django.utils import timezone
+
+        from monitor_app.panda.constants import PANDA_SCHEMA
         from pcs.services import (intake_direct_panda_task,
                                   reconcile_panda_task_association)
 
-        result = list_tasks(days=opts['days'], workinggroup='EIC',
-                            limit=opts['limit'])
-        tasks = result.get('tasks', []) if isinstance(result, dict) else result
+        # Lean query: only the fields the reconciler and intake read. The
+        # general list_tasks() augments every task with per-task job counts,
+        # which this sweep never uses and which blow the time budget at
+        # backfill windows.
+        cutoff = timezone.now() - timedelta(days=opts['days'])
+        fields = ['jeditaskid', 'taskname', 'status', 'site', 'username',
+                  'workinggroup', 'processingtype']
+        field_list = ', '.join('"%s"' % f for f in fields)
+        with connections['panda'].cursor() as cur:
+            cur.execute(
+                f'SELECT {field_list} '
+                f'FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+                f'WHERE COALESCE("modificationtime", "creationdate") >= %s '
+                f'AND "workinggroup" = %s '
+                f'ORDER BY "jeditaskid" DESC LIMIT %s',
+                [cutoff, 'EIC', opts['limit']])
+            tasks = [dict(zip(fields, row)) for row in cur.fetchall()]
 
-        checked = new = existing = unmatched = intaken = 0
+        from pcs.models import PandaTasks
+
+        checked = new = existing = unmatched = intaken = skipped = 0
         for panda_task in tasks:
+            # Non-production names (user.*, testbed fastproc) can never match
+            # a PCS composed name — skip the expensive matching unless an
+            # association already exists to refresh.
+            taskname = str(panda_task.get('taskname') or '')
+            if not taskname.startswith('group.'):
+                jedi = panda_task.get('jeditaskid')
+                if not PandaTasks.objects.filter(jedi_task_id=jedi).exists():
+                    skipped += 1
+                    continue
             pcs_task, row, reason = reconcile_panda_task_association(panda_task)
             checked += 1
             if row is None and not opts['no_intake']:
@@ -65,4 +95,5 @@ class Command(BaseCommand):
         # action stream.
         self.stdout.write(
             f"checked={checked} new={new} existing={existing} "
-            f"intaken={intaken} unmatched={unmatched} days={opts['days']}")
+            f"intaken={intaken} unmatched={unmatched} skipped={skipped} "
+            f"days={opts['days']}")

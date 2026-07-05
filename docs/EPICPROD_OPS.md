@@ -427,3 +427,20 @@ deployed path. Remaining: the activity health chip, and the matching
 
 Auto-notify the operator the moment the agent finishes, removing the manual
 refresh.
+
+## Nightly catalog sync
+
+A `wenauseic` cron enqueues `catalog_sync` for the ops agent nightly at 02:15:
+
+```
+15 2 * * * bash -lc 'source ~/.env && /opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/enqueue-ops-message.py catalog_sync --created-by nightly_cron' >> /opt/swf-monitor/shared/logs/catalog-sync-cron.log 2>&1
+```
+
+The chain runs csv import → questionnaire import → association sweep with
+auto-intake of direct group.EIC submissions → Rucio output snapshot → EVGEN
+assimilation → questionnaire match → progress refresh, in order. Each step
+and the chain summary log to the epicprod action stream (Logs page,
+app_name=epicprod) with measured durations; questionnaire import reads its
+CSV URL from SysConfig `questionnaire_csv_url` and records `skipped` when
+unset. Manual full run: the same enqueue command with any `--created-by`;
+association backfill: `--extra days=30`.
