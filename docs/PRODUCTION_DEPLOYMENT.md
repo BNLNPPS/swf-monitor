@@ -44,7 +44,7 @@ python /eic/u/wenauseic/github/swf-testbed/report_system_status.py
 - **ActiveMQ**: Message broker (system-managed via artemis.service)
 - **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
 - **Mattermost bots**: `swf-panda-bot.service` (DISpatcher) and `swf-testbed-bot.service` — Claude-backed chatbots for `#dispatcher` and `#testbed-bot` channels
-- **epicprod-live publisher**: `swf-epicprod-live.service` — tails the epicprod action stream and posts live events to `#epicprod-live` (see EPICPROD_ACTION_STREAM.md)
+- **epicprod-live publisher**: `swf-epicprod-live.service` — tails the epicprod action stream and posts live events to `#epicprod-live` as the `epicprod` bot account (`EPICPROD_LIVE_TOKEN` in production.env; see EPICPROD_ACTION_STREAM.md)
 - **Release Management**: Automated deployment with Apache-conf sync and ASGI-worker recycle
 
 ## Prerequisites

@@ -47,9 +47,10 @@ memory), the `pandabot_active_threads` state key, `CORUN_SUBSCRIPTION_NAME`
 default `pandabot-swf-testbed`, and the `swf-panda-bot.service` systemd unit.
 
 **#epicprod-live:** the bot is a passive member of the live action-stream
-channel. The publisher (`publish_epicprod_live`) posts events under the bot's
-own token, which the bot skips — it engages only when @mentioned, typically in
-a thread under an event post, and follows up from the record link and subject
-carried in the post (recipe in the system prompt).
+channel. The publisher (`publish_epicprod_live`) posts events as the dedicated
+`epicprod` bot account; plain channel posts never wake DISpatcher — it engages
+only when @mentioned, typically in a thread under an event post, and follows up
+from the record link and subject carried in the post (recipe in the system
+prompt).
 
 **MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the local MCP endpoint. Each user question gets a fresh stateless request/response exchange.

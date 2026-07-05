@@ -132,8 +132,9 @@ place when signed in, each save itself logged (`live_policy_edit`).
 (`manage.py publish_epicprod_live`, systemd unit `swf-epicprod-live`) — a
 polling tailer that posts one compact message per live event: timestamp,
 action, subject, component, outcome, failure reason, duration, and a link
-to the log record. It posts under the DISpatcher bot token; the bot skips
-its own posts, so events never wake it. To follow up on an event, @mention
+to the log record. It posts as the dedicated `epicprod` bot account
+(`EPICPROD_LIVE_TOKEN`, falling back to the DISpatcher token until set);
+plain channel posts never wake DISpatcher. To follow up on an event, @mention
 DISpatcher in a thread under the event post — the post carries everything
 the bot needs to pull the full record and drill into the subject. The
 publisher re-reads its SysConfig knobs every cycle (`epicprod_live_channel`,

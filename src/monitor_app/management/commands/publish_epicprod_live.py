@@ -3,8 +3,9 @@
 The publisher is a polling tailer over the action stream: every cycle it
 selects new records passing the live filter (`live_stream_q`), posts one
 compact Mattermost message per event, and advances a high-water mark in
-PersistentState. It posts under the DISpatcher bot token — the bot skips
-its own posts, so events reach the channel without waking the bot; people
+PersistentState. It posts as the dedicated 'epicprod' bot account
+(EPICPROD_LIVE_TOKEN; falls back to the DISpatcher token) — plain channel
+posts never wake DISpatcher, so events flow without bot involvement; people
 follow up by @mentioning DISpatcher in a thread under an event post, and
 the post carries what the bot needs to drill in (action, subject, outcome,
 reason, record link).
@@ -29,7 +30,10 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 MM_URL = os.environ.get('MATTERMOST_URL', 'chat.epic-eic.org')
-MM_TOKEN = os.environ.get('MATTERMOST_TOKEN', '')
+# Post as the dedicated 'epicprod' identity; fall back to the DISpatcher bot
+# token (posts then carry the DISpatcher face) until EPICPROD_LIVE_TOKEN is set.
+MM_TOKEN = (os.environ.get('EPICPROD_LIVE_TOKEN')
+            or os.environ.get('MATTERMOST_TOKEN', ''))
 MM_TEAM = os.environ.get('MATTERMOST_TEAM', 'main')
 # Open-face link base so event links work for the whole collaboration.
 LINK_BASE = os.environ.get('EPICPROD_LIVE_LINK_BASE',
@@ -48,11 +52,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         if not MM_TOKEN:
-            self.stderr.write("MATTERMOST_TOKEN not set; cannot publish")
+            self.stderr.write("EPICPROD_LIVE_TOKEN/MATTERMOST_TOKEN not set; cannot publish")
             raise SystemExit(2)
         self.session = requests.Session()
         self.session.headers['Authorization'] = f'Bearer {MM_TOKEN}'
         self.base = f'https://{MM_URL}/api/v4'
+        me = self._get('/users/me')
+        self.user_id = me['id']
+        logger.info("posting as @%s", me.get('username'))
         self.team_id = self._get(f'/teams/name/{MM_TEAM}')['id']
         self.channel_name = ''
         self.channel_id = ''
@@ -86,6 +93,13 @@ class Command(BaseCommand):
             self.channel_id = self._get(
                 f'/teams/{self.team_id}/channels/name/{channel}')['id']
             self.channel_name = channel
+            try:                               # self-join (idempotent, public channel)
+                self.session.post(
+                    f'{self.base}/channels/{self.channel_id}/members',
+                    json={'user_id': self.user_id},
+                    timeout=HTTP_TIMEOUT).raise_for_status()
+            except Exception:
+                logger.warning("could not self-join #%s", channel)
             logger.info("publishing to #%s (%s)", channel, self.channel_id)
 
         last_id = self._get_high_water()
