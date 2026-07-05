@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 600" font-family="Arial, Helvetica, sans-serif" font-size="15">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="1" dy="2" stdDeviation="1.5" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1060" height="600" fill="#ffffff"/>
+
+  <text x="530" y="42" text-anchor="middle" font-size="22" font-weight="bold" fill="#333">The epicprod Action Stream</text>
+  <text x="530" y="68" text-anchor="middle" font-size="15" fill="#555">every production action becomes a record — one stream feeds every way of watching</text>
+
+  <!-- Sources -->
+  <rect x="30" y="202" width="240" height="80" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" filter="url(#shadow)"/>
+  <text x="150" y="228" text-anchor="middle" font-size="16" font-weight="bold" fill="#0d47a1">Web portal</text>
+  <text x="150" y="249" text-anchor="middle" font-size="14" fill="#333">people acting on the catalog,</text>
+  <text x="150" y="267" text-anchor="middle" font-size="14" fill="#333">tasks, and configuration</text>
+
+  <rect x="30" y="302" width="240" height="80" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" filter="url(#shadow)"/>
+  <text x="150" y="328" text-anchor="middle" font-size="16" font-weight="bold" fill="#0d47a1">Production ops agent</text>
+  <text x="150" y="349" text-anchor="middle" font-size="14" fill="#333">submissions, sweeps, the</text>
+  <text x="150" y="367" text-anchor="middle" font-size="14" fill="#333">nightly catalog sync</text>
+
+  <rect x="30" y="402" width="240" height="80" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" filter="url(#shadow)"/>
+  <text x="150" y="434" text-anchor="middle" font-size="16" font-weight="bold" fill="#0d47a1">AI assistants</text>
+  <text x="150" y="456" text-anchor="middle" font-size="14" fill="#333">bot and LLM actions (MCP)</text>
+
+  <line x1="270" y1="242" x2="336" y2="242" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="270" y1="342" x2="336" y2="342" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="270" y1="442" x2="336" y2="442" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- The stream -->
+  <rect x="340" y="202" width="330" height="280" rx="10" fill="#fff3e0" stroke="#bf360c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="505" y="230" text-anchor="middle" font-size="17" font-weight="bold" fill="#bf360c">The action stream</text>
+  <text x="505" y="254" text-anchor="middle" font-size="14" fill="#333">one record per action —</text>
+  <text x="505" y="272" text-anchor="middle" font-size="14" fill="#333">who did what to what,</text>
+  <text x="505" y="290" text-anchor="middle" font-size="14" fill="#333">the outcome, how long it took</text>
+
+  <rect x="356" y="304" width="298" height="50" rx="6" fill="#ffffff" stroke="#bf360c" stroke-width="1.5"/>
+  <text x="505" y="324" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">verbosity — high / normal / low</text>
+  <text x="505" y="343" text-anchor="middle" font-size="14" fill="#555">declared by the event itself</text>
+
+  <rect x="356" y="364" width="298" height="50" rx="6" fill="#ffffff" stroke="#bf360c" stroke-width="1.5"/>
+  <text x="505" y="384" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">live — worth seeing now</text>
+  <text x="505" y="403" text-anchor="middle" font-size="14" fill="#555">operator can override per action</text>
+
+  <text x="505" y="446" text-anchor="middle" font-size="14" fill="#555">in the system database with all swf logs</text>
+
+  <!-- Gathering bus -->
+  <line x1="670" y1="342" x2="707" y2="342" stroke="#444" stroke-width="2"/>
+  <line x1="707" y1="158" x2="707" y2="526" stroke="#444" stroke-width="2"/>
+  <line x1="707" y1="158" x2="741" y2="158" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="707" y1="226" x2="741" y2="226" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="707" y1="294" x2="741" y2="294" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="707" y1="390" x2="741" y2="390" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="707" y1="458" x2="741" y2="458" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="707" y1="526" x2="741" y2="526" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- People channels -->
+  <text x="745" y="122" font-size="15" font-weight="bold" fill="#555">people</text>
+
+  <rect x="745" y="130" width="285" height="56" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="887" y="152" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">Live view on the Logs page</text>
+  <text x="887" y="172" text-anchor="middle" font-size="14" fill="#333">auto-refresh every 30 s — running</text>
+
+  <rect x="745" y="198" width="285" height="56" rx="8" fill="#ffffff" stroke="#388e3c" stroke-width="2" stroke-dasharray="6 3"/>
+  <text x="887" y="220" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">#epicprod-live on Mattermost</text>
+  <text x="887" y="240" text-anchor="middle" font-size="14" fill="#333">push channel — next</text>
+
+  <rect x="745" y="266" width="285" height="56" rx="8" fill="#ffffff" stroke="#388e3c" stroke-width="2" stroke-dasharray="6 3"/>
+  <text x="887" y="288" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">Digest email</text>
+  <text x="887" y="308" text-anchor="middle" font-size="14" fill="#333">hourly or daily — planned</text>
+
+  <!-- Machinery channels -->
+  <text x="745" y="354" font-size="15" font-weight="bold" fill="#555">machinery</text>
+
+  <rect x="745" y="362" width="285" height="56" rx="8" fill="#ede7f6" stroke="#5e35b1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="887" y="384" text-anchor="middle" font-size="15" font-weight="bold" fill="#4527a0">Alarms</text>
+  <text x="887" y="404" text-anchor="middle" font-size="14" fill="#333">stale sync, fetch spikes — running</text>
+
+  <rect x="745" y="430" width="285" height="56" rx="8" fill="#ffffff" stroke="#5e35b1" stroke-width="2" stroke-dasharray="6 3"/>
+  <text x="887" y="452" text-anchor="middle" font-size="15" font-weight="bold" fill="#4527a0">Automated reports</text>
+  <text x="887" y="472" text-anchor="middle" font-size="14" fill="#333">daily and weekly — next</text>
+
+  <rect x="745" y="498" width="285" height="56" rx="8" fill="#ede7f6" stroke="#5e35b1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="887" y="520" text-anchor="middle" font-size="15" font-weight="bold" fill="#4527a0">AI assessment (via MCP tools)</text>
+  <text x="887" y="540" text-anchor="middle" font-size="14" fill="#333">bot and LLM retrieval — running</text>
+</svg>
