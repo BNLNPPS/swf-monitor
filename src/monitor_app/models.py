@@ -565,11 +565,64 @@ class SystemStateEvent(models.Model):
         return f"Event {self.event_id} - {self.event_type} at {self.timestamp}"
 
 
+class SysConfig(models.Model):
+    """
+    Human-set system configuration as one JSON document.
+
+    Distinct from PersistentState, which is machine-maintained state
+    (counters, run numbers): SysConfig holds operator-adjustable knobs —
+    live-stream policy, sweep cadences, report settings — viewable and
+    editable on the System page. All system configuration lives here, in
+    the database, adjustable through the UI without deploys.
+    """
+    id = models.AutoField(primary_key=True)  # single record, id=1
+    config_data = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True, default='')
+
+    class Meta:
+        db_table = 'swf_sys_config'
+
+    @classmethod
+    def get_config(cls):
+        """Get the complete configuration JSON object."""
+        obj, _ = cls.objects.get_or_create(id=1, defaults={'config_data': {}})
+        return obj.config_data
+
+    @classmethod
+    def update_config(cls, updates, username=''):
+        """Merge updates into the configuration (top-level key merge)."""
+        from django.db import transaction
+        with transaction.atomic():
+            obj, _ = cls.objects.select_for_update().get_or_create(
+                id=1, defaults={'config_data': {}})
+            obj.config_data.update(updates)
+            if username:
+                obj.updated_by = username
+            obj.save()
+            return obj.config_data
+
+    @classmethod
+    def replace_config(cls, config, username=''):
+        """Replace the whole configuration document (System page editor)."""
+        from django.db import transaction
+        if not isinstance(config, dict):
+            raise ValueError('SysConfig document must be a JSON object')
+        with transaction.atomic():
+            obj, _ = cls.objects.select_for_update().get_or_create(
+                id=1, defaults={'config_data': {}})
+            obj.config_data = config
+            if username:
+                obj.updated_by = username
+            obj.save()
+            return obj.config_data
+
+
 class PersistentState(models.Model):
     """
     Persistent state store with stable schema - just stores JSON.
     Never modify this schema - it must remain stable across all deployments.
-    
+
     Single record stores all persistent state as JSON blob.
     Use get_state() and update_state() methods to access nested data.
     """

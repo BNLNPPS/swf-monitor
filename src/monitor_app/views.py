@@ -560,6 +560,7 @@ def log_list(request):
         'selected_app': app_name,
         'selected_username': username,
         'selected_levelname': levelname,
+        'live_mode': request.GET.get('live') == '1',
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
 
@@ -592,6 +593,12 @@ def logs_datatable_ajax(request):
     if username:
         queryset = queryset.filter(instance_name__regex=rf'-{username}-\d+$')
     filters['username'] = username
+
+    # Live stream mode: epicprod actions above the live threshold
+    # (live_default recommendation, overridden by the SysConfig policy).
+    if request.GET.get('live') == '1':
+        from .epicprod_logging import live_stream_q
+        queryset = queryset.filter(live_stream_q())
 
     # Handle time range filters
     start_time = request.GET.get('start_time')

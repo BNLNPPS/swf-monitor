@@ -1,10 +1,21 @@
 {% extends "monitor_app/_datatable_dynamic_base.html" %}
 
+{% block extra_filters %}
+<div class="mb-2">
+    <label style="font-weight: 600; cursor: pointer;">
+        <input type="checkbox" id="live-toggle" {% if live_mode %}checked{% endif %}>
+        Live stream
+    </label>
+    <span class="text-muted" style="margin-left: 0.75em;">epicprod actions above the live threshold · auto-refreshes every 30 s</span>
+</div>
+{% endblock %}
+
 {% block initial_filters %}
 {
     app_name: '{{ selected_app|default:"" }}',
     username: '{{ selected_username|default:"" }}',
-    levelname: '{{ selected_levelname|default:"" }}'
+    levelname: '{{ selected_levelname|default:"" }}',
+    live: '{% if live_mode %}1{% endif %}'
 }
 {% endblock %}
 
@@ -32,6 +43,10 @@ if (currentFilters.levelname) {
     badges.push(`<span class="badge bg-info me-1">Level: ${currentFilters.levelname}</span>`);
 }
 
+if (currentFilters.live === '1') {
+    badges.push('<span class="badge bg-success me-1">Live stream</span>');
+}
+
 if (badges.length > 0) {
     $('#filter-badges').html(badges.join('&nbsp;&nbsp;'));
     $('#active-filters').show();
@@ -44,4 +59,28 @@ $('.filter-link').removeClass('filter-active');
 $('.filter-link[data-filter="app_name"][data-value="' + currentFilters.app_name + '"]').addClass('filter-active');
 $('.filter-link[data-filter="username"][data-value="' + currentFilters.username + '"]').addClass('filter-active');
 $('.filter-link[data-filter="levelname"][data-value="' + currentFilters.levelname + '"]').addClass('filter-active');
+{% endblock %}
+
+{% block extra_scripts %}
+let liveTimer = null;
+
+function startLiveTimer() {
+    if (!liveTimer) {
+        liveTimer = setInterval(function() { table.ajax.reload(null, false); }, 30000);
+    }
+}
+
+function setLiveMode(on) {
+    currentFilters.live = on ? '1' : '';
+    if (!on && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+    if (on) startLiveTimer();
+    const url = new URL(window.location);
+    if (on) { url.searchParams.set('live', '1'); } else { url.searchParams.delete('live'); }
+    window.history.replaceState({}, '', url);
+    updateActiveFiltersDisplay();
+    table.ajax.reload();
+}
+
+$('#live-toggle').on('change', function() { setLiveMode(this.checked); });
+if ($('#live-toggle').is(':checked')) { startLiveTimer(); }
 {% endblock %}

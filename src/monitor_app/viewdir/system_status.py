@@ -15,10 +15,46 @@ logger = logging.getLogger(__name__)
 
 
 def system_status_page(request):
+    from ..models import SysConfig
+
+    try:
+        sysconfig_json = json.dumps(SysConfig.get_config(), indent=2, sort_keys=True)
+    except Exception as exc:
+        logger.warning('sysconfig read failed on system page: %s', exc)
+        sysconfig_json = '{}'
     return render(request, 'monitor_app/system_status.html', {
         'groups': grouped_current_status(),
         'summary': status_summary(),
+        'sysconfig_json': sysconfig_json,
     })
+
+
+@require_POST
+def sysconfig_save(request):
+    """Replace the SysConfig document from the System page editor."""
+    from ..epicprod_logging import log_epicprod_action
+    from ..models import SysConfig
+
+    if not request.user.is_authenticated:
+        messages.error(request, 'Sign in to edit the system configuration.')
+        return redirect('monitor_app:system_status')
+    raw = request.POST.get('config_json') or ''
+    try:
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError('top level must be a JSON object')
+    except (ValueError, TypeError) as exc:
+        messages.error(request, f'SysConfig not saved — invalid JSON: {exc}')
+        return redirect('monitor_app:system_status')
+    SysConfig.replace_config(parsed, username=request.user.username)
+    log_epicprod_action(
+        'web', 'sysconfig_edit',
+        username=request.user.username,
+        live_default=True,
+        keys=sorted(parsed.keys()),
+    )
+    messages.success(request, 'System configuration saved.')
+    return redirect('monitor_app:system_status')
 
 
 def system_status_json(request):

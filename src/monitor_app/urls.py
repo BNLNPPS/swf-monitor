@@ -93,6 +93,7 @@ from .viewdir.pandamon import (
 )
 
 from .viewdir.system_status import (
+    sysconfig_save,
     system_status_json,
     system_status_page,
     system_status_refresh,
@@ -209,6 +210,7 @@ urlpatterns = [
     path('system/', system_status_page, name='system_status_root'),
     path('system/status.json', system_status_json, name='system_status_json_root'),
     path('system/refresh/', system_status_refresh, name='system_status_refresh_root'),
+    path('system/sysconfig/', sysconfig_save, name='sysconfig_save'),
     
     # PanDA Queues
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),

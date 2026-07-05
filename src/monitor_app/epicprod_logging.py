@@ -25,6 +25,14 @@ same app_name and field conventions.
 Retrieval: the ``epicprod_list_actions`` MCP tool (filtered and summarized),
 ``swf_list_logs(app_name='epicprod')`` (raw), and the Logs UI filtered on
 app_name.
+
+Live stream: each action record carries ``live_default`` — the call site's
+RECOMMENDATION for whether the action is above threshold for the epic-live
+stream. It is a default, not the decision: the effective threshold is the
+``epicprod_live_policy`` override registry in PersistentState (all system
+state in the DB), adjustable without touching call sites. ``live_stream_q()``
+applies policy-over-default and is the one filter every live channel uses,
+starting with the Logs page live view.
 """
 
 import logging
@@ -37,13 +45,16 @@ logger = logging.getLogger(__name__)
 
 EPICPROD_APP_NAME = 'epicprod'
 
+LIVE_POLICY_STATE_KEY = 'epicprod_live_policy'
+
 RESERVED_KEYS = ('action', 'subject_type', 'subject_key', 'username',
-                 'outcome', 'duration_ms')
+                 'outcome', 'duration_ms', 'live_default')
 
 
 def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
                         username='', outcome='ok', duration_ms=None,
-                        message='', level=logging.INFO, **counts):
+                        live_default=False, message='', level=logging.INFO,
+                        **counts):
     """Record one epicprod action in the AppLog action stream.
 
     Never raises: a failure to record is logged to the module logger and the
@@ -61,6 +72,11 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
         outcome: 'ok' or 'error' (conventional; free-form refinements allowed).
         duration_ms: measured execution time; required in spirit for sweeps
             and other timed operations.
+        live_default: the call site's RECOMMENDATION for the epic-live
+            stream — True if this action is, by default, above threshold for
+            live publication (production news: submissions, completions,
+            failures); False for routine mechanics. The effective decision is
+            policy-over-default via the epicprod_live_policy registry.
         message: optional human-readable one-liner; composed if omitted.
         level: python logging level; use logging.ERROR for failed actions.
         **counts: numeric counts worth recording (rows_added=..., etc.);
@@ -74,6 +90,7 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
     extra = {
         'action': str(action),
         'outcome': str(outcome),
+        'live_default': bool(live_default),
     }
     if subject_type:
         extra['subject_type'] = str(subject_type)
@@ -115,3 +132,58 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
         logger.exception('epicprod action log write failed: %s %s',
                          instance, action)
         return None
+
+
+def get_live_policy():
+    """Return the live-threshold override registry: {action_id: bool}.
+
+    Stored under LIVE_POLICY_STATE_KEY in SysConfig (system configuration
+    lives in the DB, adjustable via the System page). An action absent from
+    the registry follows its records' live_default recommendation. Reads
+    defensively: a missing table (pre-migration) yields an empty policy with
+    a logged warning rather than breaking the caller.
+    """
+    from .models import SysConfig
+
+    try:
+        policy = SysConfig.get_config().get(LIVE_POLICY_STATE_KEY) or {}
+    except Exception as exc:
+        logger.warning('live policy read failed (empty policy used): %s', exc)
+        return {}
+    return {str(k): bool(v) for k, v in policy.items()} if isinstance(policy, dict) else {}
+
+
+def set_live_policy_entry(action, value, username=''):
+    """Set (True/False) or clear (None) the live-threshold override for an action."""
+    from .models import SysConfig
+
+    policy = get_live_policy()
+    key = str(action)
+    if value is None:
+        policy.pop(key, None)
+    else:
+        policy[key] = bool(value)
+    SysConfig.update_config({LIVE_POLICY_STATE_KEY: policy}, username=username)
+    return policy
+
+
+def live_stream_q():
+    """Q filter selecting action records above the live threshold.
+
+    Policy-over-default: actions forced on by the registry are included
+    regardless of their records' live_default; actions forced off are
+    excluded; everything else follows live_default. The single source of
+    live-stream semantics for every channel (Logs page live view first).
+    """
+    from django.db.models import Q
+
+    policy = get_live_policy()
+    force_on = [a for a, v in policy.items() if v]
+    force_off = [a for a, v in policy.items() if not v]
+
+    q = Q(extra_data__live_default=True)
+    if force_off:
+        q &= ~Q(extra_data__action__in=force_off)
+    if force_on:
+        q |= Q(extra_data__action__in=force_on)
+    return Q(app_name=EPICPROD_APP_NAME) & q

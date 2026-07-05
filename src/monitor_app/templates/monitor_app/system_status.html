@@ -103,6 +103,25 @@
             </div>
         </section>
     {% endfor %}
+
+    <section class="mt-4">
+        <h4>System Configuration</h4>
+        <p class="text-muted small mb-2">Operator-set configuration (SysConfig), one JSON document in the database:
+            live-stream policy, sweep and report settings. Machine-maintained state lives separately in PersistentState.</p>
+        <pre class="small bg-light border rounded p-3" id="sysconfig-view">{{ sysconfig_json }}</pre>
+        {% if user.is_authenticated %}
+        <button class="btn btn-sm btn-outline-secondary" type="button"
+                data-bs-toggle="collapse" data-bs-target="#sysconfig-editor"
+                aria-expanded="false" aria-controls="sysconfig-editor">Edit</button>
+        <div class="collapse mt-2" id="sysconfig-editor">
+            <form method="post" action="{% url 'monitor_app:sysconfig_save' %}">
+                {% csrf_token %}
+                <textarea class="form-control font-monospace small" name="config_json" rows="12">{{ sysconfig_json }}</textarea>
+                <button class="btn btn-sm btn-primary mt-2" type="submit">Save configuration</button>
+            </form>
+        </div>
+        {% endif %}
+    </section>
 </div>
 <script>
 (function() {
