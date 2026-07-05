@@ -1226,6 +1226,32 @@ class PandaBot:
             logger.exception("Failed to fetch thread")
             return None
 
+    async def _build_channel_context(self, channel_id, limit=12):
+        """Recent posts of the channel where the bot was @mentioned.
+
+        A top-level mention in a foreign channel (e.g. #epicprod-live)
+        usually refers to what is on screen — the recent posts are the
+        referent, so they ride into context like a thread would.
+        """
+        try:
+            result = await asyncio.to_thread(
+                self.driver.posts.get_posts_for_channel, channel_id,
+                params={'per_page': limit},
+            )
+            posts = result.get('posts', {})
+            order = result.get('order', [])   # newest first
+            lines = []
+            for pid in reversed(order):
+                p = posts.get(pid)
+                if not p or not p.get('message', '').strip():
+                    continue
+                username = await self._resolve_mm_username(p['user_id'])
+                lines.append(f"{username}: {p['message'].strip()}")
+            return "\n".join(lines) if lines else None
+        except Exception:
+            logger.exception("Failed to fetch channel history")
+            return None
+
     def start(self):
         """Connect to Mattermost and start listening."""
         logger.info(f"Connecting to {self.mm_url}...")
@@ -1352,16 +1378,24 @@ class PandaBot:
         logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
         direct_addressed = is_dm or is_mention
+        # A top-level mention outside the home channel refers to what's on
+        # screen there — pull that channel's recent posts into context.
+        context_channel = (
+            post_channel
+            if is_mention and not is_dm and not is_our_channel and not root_id
+            else None
+        )
         asyncio.create_task(
             self._respond(
                 tagged_message, post_channel, post_id, root_id,
                 direct_addressed=direct_addressed,
+                context_channel=context_channel,
             )
         )
 
     async def _respond(
         self, tagged_message, reply_channel, post_id, root_id,
-        direct_addressed=False,
+        direct_addressed=False, context_channel=None,
     ):
         """Process any message — channel, DM, or mention.
 
@@ -1371,7 +1405,9 @@ class PandaBot:
         async with self._respond_lock:
             try:
                 messages = await self._load_recent_dialog()
-                reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
+                reply, dpid_verified, tool_meta = await self._process_message(
+                    messages, tagged_message, root_id,
+                    context_channel=context_channel)
                 reply = self._clean_reply_boilerplate(reply)
                 reply, force_thread_reply = self._extract_thread_reply_directive(reply)
                 if (
@@ -1548,7 +1584,8 @@ class PandaBot:
         except Exception:
             logger.exception("Failed to post reply")
 
-    async def _process_message(self, messages, message_text, root_id):
+    async def _process_message(self, messages, message_text, root_id,
+                               context_channel=None):
         """Run the Claude conversation loop for one user message.
 
         Returns (reply_text, dpid_verified).  dpid_verified is True only when
@@ -1563,6 +1600,14 @@ class PandaBot:
                 user_content = (
                     f"[Thread conversation so far:\n{thread_context}\n]\n"
                     f"New reply: {message_text}"
+                )
+        elif context_channel:
+            channel_context = await self._build_channel_context(context_channel)
+            if channel_context:
+                thread_context = channel_context
+                user_content = (
+                    f"[Recent channel history:\n{channel_context}\n]\n"
+                    f"New message: {message_text}"
                 )
 
         messages.append({"role": "user", "content": user_content})

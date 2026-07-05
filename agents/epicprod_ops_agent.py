@@ -112,6 +112,8 @@ CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
 QUESTIONNAIRE_MATCH_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_MATCH_TIMEOUT", "300"))
 QUESTIONNAIRE_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "import-questionnaires.py"
+QUESTIONNAIRE_AUTOMATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "match-questionnaires.py"
+QUESTIONNAIRE_AUTOMATCH_TIMEOUT = int(os.environ.get("EPICPROD_AUTOMATCH_TIMEOUT", "1800"))
 QUESTIONNAIRE_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_IMPORT_TIMEOUT", "120"))
 CAMPAIGN_PROGRESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-campaign-progress.py"
 CAMPAIGN_PROGRESS_TIMEOUT = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_TIMEOUT", "300"))
@@ -158,6 +160,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "association_sweep", "catalog_sync", "questionnaire_import",
+                   "questionnaire_automatch",
                    "sync_epicprod_inventory", "refresh_system_status",
                    "health_ping", "shutdown"}
 
@@ -784,6 +787,48 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=True,
                              summary=(out.splitlines()[-1] if out else ''))
 
+    def _handle_questionnaire_automatch(self, m):
+        """LLM-assisted matching of questionnaires to catalog tasks."""
+        self.run_in_background(
+            self._do_questionnaire_automatch, m,
+            dedup_key="questionnaire_automatch", label="questionnaire_automatch")
+
+    def _do_questionnaire_automatch(self, m):
+        created_by = str(m.get('created_by') or 'automatch')
+        cmd = [sys.executable, str(QUESTIONNAIRE_AUTOMATCH_SCRIPT),
+               "--created-by", created_by]
+        if m.get('all'):
+            cmd.append("--all")
+        self.logger.info("PRODOPS questionnaire_automatch: matching requests to tasks")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=QUESTIONNAIRE_AUTOMATCH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS questionnaire_automatch TIMEOUT after {QUESTIONNAIRE_AUTOMATCH_TIMEOUT}s")
+            self._log_action('questionnaire_automatch', t0, outcome='timeout',
+                             reason=f'timed out after {QUESTIONNAIRE_AUTOMATCH_TIMEOUT}s',
+                             username=created_by, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  match-questionnaires: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  match-questionnaires: {line}")
+        out = (p.stdout or "").strip()
+        if p.returncode != 0:
+            stderr = (p.stderr or "").strip()
+            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            self.logger.error(f"PRODOPS questionnaire_automatch FAILED rc={p.returncode}")
+            self._log_action('questionnaire_automatch', t0, outcome='error',
+                             reason=reason,
+                             username=created_by, level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS questionnaire_automatch done")
+            self._log_action('questionnaire_automatch', t0,
+                             username=created_by,
+                             summary=(out.splitlines()[-1] if out else ''))
+
     def _handle_catalog_sync(self, m):
         """Nightly composite catalog sync: association sweep, Rucio snapshot,
         EVGEN assimilation, questionnaire match, progress refresh — in
@@ -805,6 +850,7 @@ class EpicProdOpsAgent(BaseAgent):
             ('association_sweep', self._do_association_sweep),
             ('rucio_snapshot_update', self._do_rucio_snapshot_update),
             ('evgen_rucio_update', self._do_evgen_rucio_update),
+            ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
         ]

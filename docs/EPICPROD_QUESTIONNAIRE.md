@@ -150,6 +150,33 @@ input, and is sanitized when rendered.
 6. Denormalization of selected fields onto `ProdRequest` as query needs arise.
    Data-flow and entity diagrams once the implementation exists.
 
+## Automated matching
+
+Matching a request to the production tasks that realize it is a standing
+process, not a one-shot: `scripts/match-questionnaires.py`, run by the ops
+agent as the `questionnaire_automatch` step of the nightly catalog sync (and
+on demand). The request side is free text; the task side is composed names —
+an LLM (env `EPICPROD_MATCHER_MODEL`) proposes matches and deterministic
+guards keep them safe:
+
+- proposed names must resolve against the actual catalog (unresolvable
+  proposals are counted and dropped);
+- existing matches are never modified and matched pairs are never
+  re-proposed — the matcher is strictly additive;
+- confidence gates status: high/medium land as `accepted` (counted in the
+  catalog, removable on the request page), `low` lands as `suggested`
+  (visible on the request page, never counted).
+
+Every new match logs a `questionnaire_match_found` action-stream event
+(normal, live) carrying the request id, confidence, and the one-line reason —
+new matches surface in the live channels as they are found, and a wrong one
+is one click to remove (itself a live event). The scan set is unmatched
+requests always, plus everything whenever the task catalog has grown since
+the last run (new tasks are new candidates; the high-water task id lives in
+PersistentState). `Questionnaire.data['prod_matches']` remains the editable
+source of truth; the task-side cache rebuild
+(`rebuild_questionnaire_match_cache`) runs after any additions.
+
 ## Related
 
 - [PCS_DATASET_REQUEST_WORKFLOW.md](PCS_DATASET_REQUEST_WORKFLOW.md) — the request and task records and the shared intake surface.

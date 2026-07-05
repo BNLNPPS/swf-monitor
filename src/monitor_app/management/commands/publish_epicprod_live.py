@@ -145,6 +145,9 @@ class Command(BaseCommand):
             parts.append(f"⚠️ **{outcome.upper()}**")
         if reason:
             parts.append(reason)
+        summary = str(extra.get('summary') or '')
+        if summary:
+            parts.append(summary)
         if isinstance(dur, (int, float)):
             parts.append(f"{dur / 1000:.1f} s")
         parts.append(f"[record]({LINK_BASE}/logs/{row.id}/)")

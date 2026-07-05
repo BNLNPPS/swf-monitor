@@ -162,7 +162,9 @@ tasks) is the standing migration metric.
 The nightly `catalog_sync` (cron 02:15 → `enqueue-ops-message.py` → ops
 agent) chains: csv catalog import → questionnaire import → association sweep
 with auto-intake of direct group.EIC submissions → Rucio output snapshot →
-EVGEN assimilation → questionnaire match → progress refresh. Each step logs
+EVGEN assimilation → questionnaire automatch (new matches are live
+`questionnaire_match_found` events) → questionnaire match cache → progress
+refresh. Each step logs
 its own record with duration; the chain logs a summary record — the
 catalog-freshness timestamp. Measured 2026-07-05: csv 8 s, association sweep
 2.3 s (14-day window), Rucio snapshot 36 s, EVGEN 16 s, match 2 s, progress

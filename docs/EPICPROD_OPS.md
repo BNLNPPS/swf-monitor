@@ -438,7 +438,9 @@ A `wenauseic` cron enqueues `catalog_sync` for the ops agent nightly at 02:15:
 
 The chain runs csv import → questionnaire import → association sweep with
 auto-intake of direct group.EIC submissions → Rucio output snapshot → EVGEN
-assimilation → questionnaire match → progress refresh, in order. Each step
+assimilation → questionnaire automatch (LLM matching of requests to tasks,
+EPICPROD_QUESTIONNAIRE.md) → questionnaire match cache → progress refresh,
+in order. Each step
 and the chain summary log to the epicprod action stream (Logs page,
 app_name=epicprod) with measured durations; questionnaire import reads its
 CSV URL from SysConfig `questionnaire_csv_url` and records `skipped` when

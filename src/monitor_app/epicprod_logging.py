@@ -82,6 +82,8 @@ ACTION_DEFAULTS = {
     'inventory_sync': {'sublevel': 'low', 'live': False},
     'system_status_refresh': {'sublevel': 'low', 'live': False},
     'questionnaire_import': {'sublevel': 'normal', 'live': True},
+    'questionnaire_automatch': {'sublevel': 'low', 'live': False},
+    'questionnaire_match_found': {'sublevel': 'normal', 'live': True},
     'questionnaire_match': {'sublevel': 'low', 'live': False},
     'progress_refresh': {'sublevel': 'low', 'live': False},
     # web and MCP
