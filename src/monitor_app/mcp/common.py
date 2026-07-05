@@ -250,6 +250,11 @@ def get_available_tools_list() -> list:
             "description": "Retrieve append-only epicprod AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments provided in a detail payload's ai_content.retrieval.arguments.",
             "parameters": ["ids", "corun_page_group_ids"],
         },
+        {
+            "name": "epicprod_list_actions",
+            "description": "Query the epicprod action stream: structured records of production actions (sweeps, submissions, assessments) with who/what/outcome/duration. summarize=True gives counts and duration stats — prefer it for reporting.",
+            "parameters": ["action", "instance", "subject_type", "subject_key", "username", "outcome", "start_time", "end_time", "summarize", "limit", "offset"],
+        },
         # PanDA Monitor tools
         {
             "name": "panda_list_jobs",

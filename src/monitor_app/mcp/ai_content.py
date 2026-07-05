@@ -12,6 +12,7 @@ from monitor_app.ai_assessments import (
     corun_page_items,
 )
 from monitor_app.corun_client import CorunAPIError, CorunClient, corun_configured
+from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
 from monitor_app.mcp.common import _monitor_url
 
@@ -252,6 +253,15 @@ def _register_ai_assessment_sync(
             'corun AI assessment creation failed: type=%s key=%s error=%s',
             canonical_type, resolved['subject_key'], exc,
         )
+        log_epicprod_action(
+            'mcp', 'assessment_register',
+            subject_type=canonical_type,
+            subject_key=resolved['subject_key'],
+            username=username_value,
+            outcome='error',
+            level=logging.ERROR,
+            message=f'assessment registration failed: {exc}',
+        )
         return {
             'success': False,
             'error': str(exc),
@@ -266,6 +276,15 @@ def _register_ai_assessment_sync(
             resolved['target_json_field'],
             page_group_id,
         )
+    log_epicprod_action(
+        'mcp', 'assessment_register',
+        subject_type=canonical_type,
+        subject_key=resolved['subject_key'],
+        username=username_value,
+        outcome='ok',
+        linked=linked,
+        corun_page_group_id=page_group_id,
+    )
     return {
         'success': True,
         'storage': 'corun',

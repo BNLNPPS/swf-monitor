@@ -18,6 +18,7 @@ Module structure:
 - workflows.py: Workflow definitions, executions, messages, runs, files, slices
 - ai_memory.py: AI dialogue recording and retrieval for session context
 - ai_content.py: AI assessment registration and retrieval for production objects
+- epicprod_actions.py: epicprod action-stream retrieval (structured action log)
 - pandamon.py: PanDA job monitoring and error diagnostics for ePIC production
 - pcs.py: PCS (Physics Configuration System) tag browsing and lookup
 """
@@ -104,6 +105,11 @@ from .ai_memory import (
 from .ai_content import (
     epic_register_ai_assessment,
     epic_get_ai_content,
+)
+
+# epicprod action-stream tools
+from .epicprod_actions import (
+    epicprod_list_actions,
 )
 
 # PanDA Monitor tools
