@@ -38,6 +38,8 @@ SUBJECT_TYPE_ALIASES = {
     'queue': 'panda_queue',
     'site': 'panda_queue',
     'monitor.panda_queue': 'panda_queue',
+    'campaign': 'campaign',
+    'pcs.campaign': 'campaign',
 }
 
 
@@ -133,6 +135,22 @@ def _resolve_panda_queue(subject_key, data):
     }
 
 
+def _resolve_campaign(subject_key):
+    from pcs.models import Campaign
+
+    campaign = Campaign.objects.get(name=str(subject_key).strip())
+    return {
+        'target_obj': campaign,
+        'target_json_field': 'data',
+        'subject_key': campaign.name,
+        'subject_label': f'Campaign {campaign.name}',
+        'subject_url': _url(
+            'pcs:pcs_catalog',
+            query={'lifecycle': campaign.lifecycle},
+        ),
+    }
+
+
 def _resolve_subject(subject_type, subject_key, data):
     if subject_type == 'campaign_task':
         return _resolve_prod_task(subject_key)
@@ -142,6 +160,8 @@ def _resolve_subject(subject_type, subject_key, data):
         return _resolve_epicprod_job(subject_key)
     if subject_type == 'panda_queue':
         return _resolve_panda_queue(subject_key, data)
+    if subject_type == 'campaign':
+        return _resolve_campaign(subject_key)
     return {
         'target_obj': None,
         'target_json_field': '',
@@ -409,6 +429,8 @@ async def epic_register_ai_assessment(
       - panda_job: local production job record, keyed by pandaid
       - panda_queue: PanDA site/queue record, keyed by queue name; if
         the key is a site name, queue_name == site represents site-level content
+      - campaign: production campaign, keyed by campaign name (e.g. 26.05.0);
+        the natural subject for campaign-level reports and assessments
 
     Args:
         subject_type: Canonical subject type or alias.
