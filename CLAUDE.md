@@ -66,7 +66,7 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `COMMISSIONING_RELAXATIONS.md` — alpha tag-lock/submission loosenings and exactly how to re-tighten each.
 - `API_REFERENCE.md` — REST API surface.
-- `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and PanDA bot MCP client.
+- `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
 
 ## Deploy
 

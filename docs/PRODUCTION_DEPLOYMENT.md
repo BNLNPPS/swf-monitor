@@ -43,7 +43,7 @@ python /eic/u/wenauseic/github/swf-testbed/report_system_status.py
 - **PostgreSQL**: Production database (system-managed)
 - **ActiveMQ**: Message broker (system-managed via artemis.service)
 - **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
-- **Mattermost bots**: `swf-panda-bot.service` and `swf-testbed-bot.service` — Claude-backed chatbots for `#pandabot` and `#testbed-bot` channels
+- **Mattermost bots**: `swf-panda-bot.service` (DISpatcher) and `swf-testbed-bot.service` — Claude-backed chatbots for `#dispatcher` and `#testbed-bot` channels
 - **Release Management**: Automated deployment with Apache-conf sync and ASGI-worker recycle
 
 ## Prerequisites
@@ -240,7 +240,7 @@ Do not use it for:
 - database migrations or model/schema changes requiring migrations
 - `requirements.txt`, `pyproject.toml`, virtualenv, or dependency changes
 - Apache config, systemd units, production env/config changes
-- ops-agent code, PanDA bot code, or testbed bot code
+- ops-agent code, DISpatcher bot code, or testbed bot code
 - release/symlink changes where `/opt/swf-monitor/current` must move
 
 Typical commands from the repo checkout on `pandaserver02`:
@@ -440,7 +440,7 @@ https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
 
 corun-ai posts terminal job notices to that endpoint, and swf-monitor posts a
 simple completion/failure/cancel notice to the configured Mattermost channel
-(`MATTERMOST_CHANNEL`, normally `pandabot`). Required/optional env vars:
+(`MATTERMOST_CHANNEL`, normally `dispatcher`). Required/optional env vars:
 
 ```bash
 CORUN_BASE_URL=https://epic-devcloud.org/doc

@@ -127,7 +127,7 @@
   <text x="515" y="702" text-anchor="middle" font-size="13" fill="#555">tasks · jobs · retries · site status</text>
 
   <rect x="655" y="660" width="230" height="60" rx="6" fill="#f8bbd0" stroke="#ad1457" stroke-width="1.4" filter="url(#shadow)"/>
-  <text x="770" y="682" text-anchor="middle" font-weight="bold" font-size="15">PandaBot · Mattermost</text>
+  <text x="770" y="682" text-anchor="middle" font-weight="bold" font-size="15">DISpatcher · Mattermost</text>
   <text x="770" y="702" text-anchor="middle" font-size="13" fill="#555">user AI dialog channel</text>
 
   <rect x="910" y="660" width="230" height="60" rx="6" fill="#f8bbd0" stroke="#ad1457" stroke-width="1.4" filter="url(#shadow)"/>

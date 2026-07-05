@@ -2233,7 +2233,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
 # task row without waiting for the upstream nightly rebuild.
 #
 # Credentials are the public read-only eicread/eicread account
-# (matches the PandaBot jlab-rucio MCP config). Override via env.
+# (matches the DISpatcher jlab-rucio MCP config). Override via env.
 # ---------------------------------------------------------------------------
 
 JLAB_RUCIO_URL      = '/'.join(['https://rucio-server.jlab.org:443'])

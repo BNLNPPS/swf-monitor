@@ -1,4 +1,4 @@
-"""corun job notification callback endpoint for PanDA bot Mattermost notices."""
+"""corun job notification callback endpoint for DISpatcher Mattermost notices."""
 
 import json
 import logging
@@ -85,7 +85,7 @@ def _message_from_payload(payload):
 @csrf_exempt
 @require_POST
 def corun_callback(request):
-    """Receive corun terminal-job callbacks and post them to the pandabot channel."""
+    """Receive corun terminal-job callbacks and post them to the bot channel."""
     try:
         if int(request.META.get('CONTENT_LENGTH') or 0) > 8192:
             return JsonResponse({'error': 'payload too large'}, status=413)
@@ -109,7 +109,7 @@ def corun_callback(request):
         driver.login()
         team = driver.teams.get_team_by_name(config('MATTERMOST_TEAM', default='main'))
         channel = driver.channels.get_channel_by_name(
-            team['id'], config('MATTERMOST_CHANNEL', default='pandabot')
+            team['id'], config('MATTERMOST_CHANNEL', default='dispatcher')
         )
         driver.posts.create_post(options={
             'channel_id': channel['id'],

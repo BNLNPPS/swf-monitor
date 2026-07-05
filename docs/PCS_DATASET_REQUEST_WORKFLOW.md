@@ -11,7 +11,7 @@ PCS should be the authoritative record for production
 requests, which take form as
 task specifications composed from dataset, tag, and production configuration specs.
 The tasks are also the source of record for downstream production state as
-production progresses. Mattermost/pandabot is a two-way conversational
+production progresses. Mattermost/DISpatcher is a two-way conversational
 interface between users and PCS. The `eic/epic-prod` issue/PR/Jekyll workflow is
 the public catalogue projection of production plans as expressed in PCS data,
 with PCS the source of truth.
@@ -27,7 +27,7 @@ future mode where EVGEN is run as an internal production stage.
 Sakib has described and prototyped this public intake path:
 
 1. A requester submits a dataset request through a GitHub issue template or,
-   later, through Mattermost/PanDAbot as dialog front end to issue creation.
+   later, through Mattermost/DISpatcher as dialog front end to issue creation.
 2. A GitHub Action triggered by the issue creation appends a row to `eic/epic-prod`:
    `docs/_data/datasets.csv`.
 3. A pull request is opened for review.
@@ -78,7 +78,7 @@ surfaces over that layer: each is a thin adapter that turns wire-format input
 (HTTP body or MCP args) into a service call and the service result back into
 wire-format output.
 
-- **Bots trigger; they do not mediate.** PanDAbot receives a Mattermost
+- **Bots trigger; they do not mediate.** DISpatcher receives a Mattermost
   event, then calls a PCS MCP tool. Bots do not embed PCS logic. Intake
   decisions, validation, and persistence live in the service layer.
 - **Web UI uses REST.** PCS web pages call PCS REST for reads and writes;
@@ -320,7 +320,7 @@ Once PCS is integrated with the ePIC phonebook and COmanage, role assertions gat
    (`datasets/intake/`, `prod-tasks/intake/`, `link-input/`, the
    lifecycle gates on `set-status/` and `record-submission/`).
    Expose each as a peer MCP tool calling the same service function,
-   so PanDAbot and other MCP clients drive intake, status transitions,
+   so DISpatcher and other MCP clients drive intake, status transitions,
    comment append, catalogue-row preview, and PCS-driven GitHub issue
    creation through the shared service layer rather than constructing
    REST queries.

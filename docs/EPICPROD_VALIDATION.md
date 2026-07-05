@@ -72,7 +72,7 @@ control. The assessment itself — its inputs, execution, and history and benchm
 comparison — is described in
 [argus-ai.md](https://github.com/BNLNPPS/corun-ai/blob/master/docs/argus-ai.md).
 
-An assessment can also be triggered by user request via PanDAbot, which passes the
+An assessment can also be triggered by user request via DISpatcher, which passes the
 request to argus-ai through corun-ai's MCP service and returns a natural-language
 assessment of the validation.
 
@@ -82,7 +82,7 @@ benchmark — independent of the per-unit availability signal.
 ## Delivery
 
 When an assessment completes, argus-ai delivers the result to the destinations
-registered for that request: Mattermost via PanDAbot, and any registered REST
+registered for that request: Mattermost via DISpatcher, and any registered REST
 endpoints. The requestor is recorded.
 
 ## Validation track

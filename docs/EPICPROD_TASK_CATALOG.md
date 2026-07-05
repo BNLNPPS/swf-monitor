@@ -252,7 +252,7 @@ dashboard links. Four feeds are relevant:
   campaign's scope.
 - **swf-monitor** — PCS and campaign-level state owned by this app.
 - **corun-ai** — AI-driven monitoring and diagnostics; callbacks already
-  wired via `monitor_app/panda/corun_callback.py` to the PandaBot Mattermost
+  wired via `monitor_app/panda/corun_callback.py` to the DISpatcher Mattermost
   channel.
 
 Feed implementation remains in the source subsystems.

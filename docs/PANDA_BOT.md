@@ -1,17 +1,18 @@
-# PanDA Mattermost Bot
+# DISpatcher Mattermost Bot
 
-The PanDA Mattermost bot is an MCP client for production monitoring questions.
+DISpatcher (formerly the PanDA bot) is the ePIC production Mattermost bot, an MCP
+client for production monitoring questions.
 The SWF Monitor MCP server overview is [MCP.md](MCP.md), client setup is
 [MCP_CLIENTS.md](MCP_CLIENTS.md), and the tool catalog is
 [MCP_TOOL_REFERENCE.md](MCP_TOOL_REFERENCE.md).
 
-The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers production-monitoring questions in Mattermost by selecting and calling tools across multiple MCP servers.
+DISpatcher (`monitor_app/panda/bot.py`) is an MCP **client**. It answers production-monitoring questions in Mattermost by selecting and calling tools across multiple MCP servers.
 
 **Architecture:**
 - Listens on a Mattermost channel via WebSocket (`mattermostdriver`)
 - Holds connections to the local swf-monitor MCP (HTTP — the `swf_*`, `pcs_*`, `panda_*` tools) plus stdio-launched external servers: **LXR** (EIC code browser cross-reference), **uproot** (ROOT file analysis), **GitHub**, **Zenodo**, **XRootD**, **JLab-Rucio**, **BNL-Rucio**, and **corun-ai/codoc**
-- The corun-ai MCP server is a standalone stdio server that calls prod corun-ai over REST (`CORUN_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; pandabot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun-ai generation does not hold pandabot's single response lock. Tool surface and config detail: [corun-mcp-server](https://github.com/eic/corun-mcp-server) README.
-- On startup, if `CORUN_API_TOKEN` is configured, pandabot ensures a corun-ai notification subscription exists. corun-ai sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#pandabot` Mattermost channel. There is no pandabot-side polling tracker. Callback payload schema: corun-ai `docs/job-system.md` § Job Notifications.
+- The corun-ai MCP server is a standalone stdio server that calls prod corun-ai over REST (`CORUN_BASE_URL + /api/v1/...`). It queues generation jobs asynchronously; the bot exposes submit/generate/status/page tools but deliberately does not expose the long-polling `wait_for_job` tool, so a long corun-ai generation does not hold the bot's single response lock. Tool surface and config detail: [corun-mcp-server](https://github.com/eic/corun-mcp-server) README.
+- On startup, if `CORUN_API_TOKEN` is configured, the bot ensures a corun-ai notification subscription exists. corun-ai sends terminal job callbacks to `/swf-monitor/api/corun-callback/`; swf-monitor posts simple completion/failure/cancel notices to the fixed `#dispatcher` Mattermost channel. There is no bot-side polling tracker. Callback payload schema: corun-ai `docs/job-system.md` § Job Notifications.
 - Registers in-process **epicdoc** tools (`epic_doc_search`, `epic_doc_contents`) backed by a ChromaDB vector store of ePIC docs — runs inside the bot process, not as a separate MCP server
 - **Bamboo** log analysis is used via the `panda_study_job` and `panda_harvester_workers` swf-monitor MCP tools, not as a separate MCP server
 - For JLab Rucio campaign dataset queries, the bot should search the `epic` scope first (for example `scope="epic", name="*26.04.1*", type="DATASET"`) and must not infer absence from a single empty scope or from an XRootD permission error
@@ -31,12 +32,18 @@ The PanDA bot (`monitor_app/panda/bot.py`) is an MCP **client**. It answers prod
 - `MATTERMOST_URL` (default: `chat.epic-eic.org`)
 - `MATTERMOST_TOKEN` (required)
 - `MATTERMOST_TEAM` (default: `main`)
-- `MATTERMOST_CHANNEL` (default: `pandabot`)
+- `MATTERMOST_CHANNEL` (default: `dispatcher`)
 - `MCP_URL` (default: `http://127.0.0.1:8001/swf-monitor/mcp/`)
 - `ANTHROPIC_API_KEY` (required, used by the Anthropic SDK)
 - `CORUN_BASE_URL` (optional, default: `https://epic-devcloud.org/doc`)
 - `CORUN_API_TOKEN` (optional; when set, enables the corun-ai MCP server)
 - `CORUN_CALLBACK_URL` (optional, default: `https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/`)
 - `CORUN_SUBSCRIPTION_NAME` (optional, default: `pandabot-swf-testbed`)
+
+**Naming:** Renamed from PanDA bot to the ePIC-chosen DISpatcher (bot account
+`@dispatcher`, channel `#dispatcher`) on 2026-07-05. Internal identifiers keep
+the historical name for state continuity: `MEMORY_USERNAME='pandabot'` (AI
+memory), the `pandabot_active_threads` state key, `CORUN_SUBSCRIPTION_NAME`
+default `pandabot-swf-testbed`, and the `swf-panda-bot.service` systemd unit.
 
 **MCP transport:** The bot uses a minimal HTTP POST client (`MCPClient`) that sends JSON-RPC requests to the local MCP endpoint. Each user question gets a fresh stateless request/response exchange.

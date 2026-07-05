@@ -322,7 +322,7 @@ PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution an
 
 - [JEDI Integration Design](JEDI_INTEGRATION.md) — architecture, field mapping, implementation plan
 - [JEDI ePIC Proposal](JEDI_EPIC_PROPOSAL.md) — technical proposal for PanDA team review
-- [Dataset Request Workflow](PCS_DATASET_REQUEST_WORKFLOW.md) — PCS-centered plan for Mattermost/PanDAbot dataset request intake, external datasets, public catalogue projection, and future EVGEN workflow stages
+- [Dataset Request Workflow](PCS_DATASET_REQUEST_WORKFLOW.md) — PCS-centered plan for Mattermost/DISpatcher dataset request intake, external datasets, public catalogue projection, and future EVGEN workflow stages
 
 ## MCP Tools
 

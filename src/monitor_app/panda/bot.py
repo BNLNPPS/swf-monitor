@@ -434,7 +434,7 @@ def _load_system_preamble():
         with open(SYSTEM_PROMPT_FILE) as f:
             return f.read()
     except FileNotFoundError:
-        return "You are the PanDA bot for the ePIC experiment."
+        return "You are DISpatcher, the ePIC production monitoring bot."
 
 
 class MCPClient:
@@ -656,7 +656,7 @@ class PandaBot:
         self.mm_url = os.environ.get('MATTERMOST_URL', 'chat.epic-eic.org')
         self.mm_token = os.environ['MATTERMOST_TOKEN']
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
-        self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
+        self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'dispatcher')
         self.mcp_url = MCP_URL
         self.mcp_bearer_token = MCP_BEARER_TOKEN
 
@@ -977,7 +977,7 @@ class PandaBot:
             'status': 'active',
             'data': {
                 'client': 'swf-monitor-pandabot',
-                'channel': os.environ.get('MATTERMOST_CHANNEL', 'pandabot'),
+                'channel': os.environ.get('MATTERMOST_CHANNEL', 'dispatcher'),
             },
         }
 
@@ -1379,7 +1379,7 @@ class PandaBot:
                     and self._is_silent_reply(reply)
                 ):
                     logger.info(
-                        "PanDA bot chose silence; not posting reply marker: %r",
+                        "DISpatcher chose silence; not posting reply marker: %r",
                         reply,
                     )
                     return
@@ -1393,7 +1393,7 @@ class PandaBot:
                 # Record inside lock so the next load sees this exchange
                 await self._record_exchange(tagged_message, reply, post_id, root_id)
             except Exception:
-                logger.exception("PanDA bot response task failed")
+                logger.exception("DISpatcher response task failed")
                 reply = (
                     "Sorry, I hit an internal error while processing this "
                     "message. The exception was logged."
