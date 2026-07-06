@@ -155,9 +155,14 @@ input, and is sanitized when rendered.
 Matching a request to the production tasks that realize it is a standing
 process, not a one-shot: `scripts/match-questionnaires.py`, run by the ops
 agent as the `questionnaire_automatch` step of the nightly catalog sync (and
-on demand). The request side is free text; the task side is composed names —
-an LLM (env `EPICPROD_MATCHER_MODEL`) proposes matches and deterministic
-guards keep them safe:
+on demand). The request side is free text; the task side is composed names
+built from tag codes. The delegate model (env `EPICPROD_MATCHER_MODEL`,
+default Opus 4.8) is handed the complete tag map inline — every
+physics/evgen/simu/reco tag with its actual content — plus the task catalog
+and a batch of requests per call, under a hard rule that tag codes are
+opaque sequential ids whose numerals mean nothing (the first run, given
+names only, matched on digit coincidences). Deterministic guards keep the
+proposals safe:
 
 - proposed names must resolve against the actual catalog (unresolvable
   proposals are counted and dropped);
