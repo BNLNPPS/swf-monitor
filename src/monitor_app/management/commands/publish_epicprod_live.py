@@ -11,7 +11,7 @@ the post carries what the bot needs to drill in (action, subject, outcome,
 reason, record link).
 
 Operator knobs live in SysConfig and are re-read every cycle, so channel
-rename, verbosity threshold, and cadence changes need no deploy:
+rename, importance threshold, and cadence changes need no deploy:
   epicprod_live_channel        (default 'epicprod-live')
   epicprod_live_min_sublevel   (default 'normal')
   epicprod_live_poll_seconds   (default 30)

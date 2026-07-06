@@ -5,9 +5,11 @@
 {% block content %}
 <div class="container-fluid mt-4">
     <h2>Live Stream Policy</h2>
-    <p><em>Sublevel</em> is the event's declared verbosity class — which humans it reaches
-       (high: everyone, including digests and email; normal: live-page watchers; low: verbose
-       viewers only). It is set in the event's code and changed by changing the event.
+    <p><em>Importance</em> (stored as <em>sublevel</em> on the record) is which humans an
+       event reaches (high: everyone, including digests and email; normal: live-page
+       watchers; low: deliberately verbose viewers only). Channels select live events at
+       or above an importance threshold. It is set in the event's code and changed by
+       changing the event.
        <em>Live</em> is a separate category — "interesting to some humans, now": each event
        declares a live default, and the <em>override</em> (stored in
        <a href="{% url 'monitor_app:system_status' %}">SysConfig</a>) is the runtime attention
@@ -19,12 +21,12 @@
         {% csrf_token %}
         <table class="table table-sm table-striped w-auto align-middle">
             <thead>
-                <tr><th>Action</th><th>Description</th><th>Sublevel</th><th>Live default</th><th>Override</th><th>Effective</th></tr>
+                <tr><th>Action</th><th>Description</th><th>Importance</th><th>Live default</th><th>Override</th><th>Effective</th></tr>
             </thead>
             <tbody>
             {% for row in rows %}
                 <tr>
-                    <td><code>{{ row.action }}</code></td>
+                    <td><strong>{{ row.action }}</strong></td>
                     <td style="max-width: 40em;">{{ row.description }}</td>
                     <td>{{ row.sublevel }}</td>
                     <td>{{ row.live_default|yesno:"live,quiet" }}</td>

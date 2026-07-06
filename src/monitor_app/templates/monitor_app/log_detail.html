@@ -25,7 +25,7 @@
                     {% if action_description %}
                     <tr>
                         <th>Action</th>
-                        <td><code>{{ log.extra_data.action }}</code> — {{ action_description }}</td>
+                        <td><strong>{{ log.extra_data.action }}</strong> — {{ action_description }}</td>
                     </tr>
                     {% endif %}
                     <tr>
@@ -35,7 +35,11 @@
                     <tr>
                         <th>Instance</th>
                         <td>
+                            {% if agent_exists %}
                             <a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>
+                            {% else %}
+                            {{ log.instance_name }}
+                            {% endif %}
                             (<a href="{% url 'monitor_app:log_list' %}?instance_name={{ log.instance_name }}">logs</a>)
                         </td>
                     </tr>

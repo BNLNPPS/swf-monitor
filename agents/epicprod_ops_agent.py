@@ -1136,7 +1136,7 @@ class EpicProdOpsAgent(BaseAgent):
         The ops agent is out-of-process, so this posts the same record shape
         monitor_app.epicprod_logging.log_epicprod_action writes via the ORM:
         app_name='epicprod', instance 'ops-agent', structured extra_data with
-        the event's declared sublevel (verbosity class: which humans it
+        the event's declared sublevel (importance: which humans it
         reaches; authoritative, changed by changing the event) and its
         live_default RECOMMENDATION for the live stream (effective decision =
         SysConfig live override over the default). Pass the doer start time

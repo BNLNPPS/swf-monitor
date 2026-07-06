@@ -538,6 +538,7 @@ def log_list(request):
         {'name': 'app_name', 'title': 'App Name', 'orderable': True},
         {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
         {'name': 'levelname', 'title': 'Level', 'orderable': True},
+        {'name': 'sublevel', 'title': 'Importance', 'orderable': False},
         {'name': 'message', 'title': 'Message', 'orderable': False},
         {'name': 'module', 'title': 'Module', 'orderable': True},
         {'name': 'funcname', 'title': 'Function', 'orderable': True},
@@ -545,14 +546,17 @@ def log_list(request):
 
     # Filter field definitions for dynamic filtering
     filter_fields = [
-        {'name': 'app_name', 'label': 'Applications', 'type': 'select'},
-        {'name': 'username', 'label': 'Users', 'type': 'select'},
-        {'name': 'levelname', 'label': 'Levels', 'type': 'select'},
+        {'name': 'app_name', 'label': 'App Name', 'type': 'select'},
+        {'name': 'instance_name', 'label': 'Instance Name', 'type': 'select'},
+        {'name': 'username', 'label': 'User', 'type': 'select'},
+        {'name': 'levelname', 'label': 'Level', 'type': 'select'},
+        {'name': 'sublevel', 'label': 'Importance threshold', 'type': 'select'},
+        {'name': 'module', 'label': 'Module', 'type': 'select'},
     ]
 
     context = {
         'table_title': 'Log List',
-        'table_description': 'View and search application logs with dynamic filtering by source, user, and level.',
+        'table_description': 'View and search application logs with dynamic filtering by source, instance, user, level, importance, and module.',
         'ajax_url': reverse('monitor_app:logs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:log_filter_counts'),
         'columns': columns,
@@ -560,6 +564,9 @@ def log_list(request):
         'selected_app': app_name,
         'selected_username': username,
         'selected_levelname': levelname,
+        'selected_instance': request.GET.get('instance_name'),
+        'selected_sublevel': request.GET.get('sublevel'),
+        'selected_module': request.GET.get('module'),
         'live_mode': request.GET.get('live') == '1',
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
@@ -614,8 +621,13 @@ def log_detail(request, log_id):
     action_desc = ''
     if log.app_name == EPICPROD_APP_NAME and isinstance(log.extra_data, dict):
         action_desc = action_description(log.extra_data.get('action', ''))
+    # Action-stream instance names ('web', 'ops-agent', 'mcp') are component
+    # labels, not registry names — only link to a real registered agent.
+    agent_exists = SystemAgent.objects.filter(
+        instance_name=log.instance_name).exists()
     return render(request, 'monitor_app/log_detail.html',
-                  {'log': log, 'action_description': action_desc})
+                  {'log': log, 'action_description': action_desc,
+                   'agent_exists': agent_exists})
 
 
 def logs_datatable_ajax(request):
@@ -627,12 +639,12 @@ def logs_datatable_ajax(request):
     from django.utils.dateparse import parse_datetime
 
     # Initialize DataTables processor
-    columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
+    columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'sublevel', 'message', 'module', 'funcname']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
 
-    # Build base queryset and apply standard filters (app_name, levelname)
+    # Build base queryset and apply standard filters
     queryset = AppLog.objects.all()
-    filters = get_filter_params(request, ['app_name', 'levelname'])
+    filters = get_filter_params(request, ['app_name', 'levelname', 'instance_name', 'module'])
     queryset = apply_filters(queryset, filters)
 
     # Handle username filter (username is segment before trailing numeric ID)
@@ -640,6 +652,17 @@ def logs_datatable_ajax(request):
     if username:
         queryset = queryset.filter(instance_name__regex=rf'-{username}-\d+$')
     filters['username'] = username
+
+    # Importance threshold (action-stream sublevel field, in extra_data):
+    # ≥ semantics, the same way every channel consumes it — selecting
+    # 'normal' shows normal and high
+    sublevel = request.GET.get('sublevel')
+    if sublevel:
+        from .epicprod_logging import SUBLEVEL_ORDER, SUBLEVEL_VALUES
+        if sublevel in SUBLEVEL_ORDER:
+            at_or_above = [v for v in SUBLEVEL_VALUES
+                           if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]]
+            queryset = queryset.filter(extra_data__sublevel__in=at_or_above)
 
     # Live stream mode: epicprod actions above the live threshold
     # (live_default recommendation, overridden by the SysConfig policy).
@@ -690,11 +713,14 @@ def logs_datatable_ajax(request):
         # Truncate message if too long
         message = log.message[:200] + '...' if len(log.message) > 200 else log.message
         func_display = f"{log.funcname}:{log.lineno}"
+        sublevel_display = (log.extra_data or {}).get('sublevel', '') \
+            if isinstance(log.extra_data, dict) else ''
 
         from .cell_fmt import fill_cell
         data.append([
             timestamp_link, app_name_link, instance_name_display,
-            fill_cell(level_text, log.levelname), message, log.module, func_display
+            fill_cell(level_text, log.levelname), sublevel_display,
+            message, log.module, func_display
         ])
 
     return dt.create_response(data, records_total, records_filtered)
@@ -705,22 +731,58 @@ def get_log_filter_counts(request):
     AJAX endpoint that returns dynamic filter options with counts.
     Only shows options that have >0 matches in the current filtered dataset.
     """
-    from .utils import get_filter_counts, get_filter_params
+    from .utils import apply_filters, get_filter_counts, get_filter_params
     from django.db.models import Count
     import re
 
     # Get current filters for actual model fields only
-    current_filters = get_filter_params(request, ['app_name', 'levelname'])
+    current_filters = get_filter_params(
+        request, ['app_name', 'levelname', 'instance_name', 'module'])
     username = request.GET.get('username')
+    sublevel = request.GET.get('sublevel')
 
-    # Build base queryset with username filter applied if set
+    # Build base queryset with username/threshold filters applied if set
+    from .epicprod_logging import SUBLEVEL_ORDER, SUBLEVEL_VALUES
     base_queryset = AppLog.objects.all()
     if username:
         base_queryset = base_queryset.filter(instance_name__regex=rf'-{username}-\d+$')
+    if sublevel in SUBLEVEL_ORDER:
+        base_queryset = base_queryset.filter(extra_data__sublevel__in=[
+            v for v in SUBLEVEL_VALUES
+            if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]])
 
-    # Use standard utility for app_name and levelname counts
-    # NOTE: current_filters only contains model fields, not username
-    filter_counts = get_filter_counts(base_queryset, ['app_name', 'levelname'], current_filters)
+    # Use standard utility for the model-field counts
+    # NOTE: current_filters only contains model fields, not username/sublevel
+    filter_counts = get_filter_counts(
+        base_queryset, ['app_name', 'levelname', 'instance_name', 'module'],
+        current_filters)
+    # Instance names are high-cardinality — offer the top 25 by count; the
+    # list recomputes against the active filters, so it narrows as they bind.
+    filter_counts['instance_name'] = filter_counts['instance_name'][:25]
+
+    # Importance-threshold counts (action-stream sublevel field, in
+    # extra_data): apply the other filters, never the threshold itself.
+    # Cumulative — each option counts events at or above it, matching the
+    # ≥ filter semantics (normal shows normal and high).
+    qs_for_sublevel = AppLog.objects.all()
+    if username:
+        qs_for_sublevel = qs_for_sublevel.filter(
+            instance_name__regex=rf'-{username}-\d+$')
+    qs_for_sublevel = apply_filters(qs_for_sublevel, current_filters)
+    per_class = {
+        item['extra_data__sublevel']: item['count']
+        for item in (qs_for_sublevel
+                     .filter(extra_data__sublevel__in=SUBLEVEL_VALUES)
+                     .values('extra_data__sublevel')
+                     .annotate(count=Count('id')))
+    }
+    threshold_counts = []
+    running = 0
+    for v in SUBLEVEL_VALUES:  # ordered high → low
+        running += per_class.get(v, 0)
+        if running:
+            threshold_counts.append((v, running))
+    filter_counts['sublevel'] = threshold_counts
 
     # Extract usernames from instance_name (segment before trailing numeric ID)
     username_pattern = re.compile(r'-([^-]+)-\d+$')
@@ -743,8 +805,9 @@ def get_log_filter_counts(request):
     # Convert to sorted list of tuples (matching expected format)
     filter_counts['username'] = sorted(username_counts.items(), key=lambda x: (-x[1], x[0]))
 
-    # Add username to current_filters for UI state (after utility call, not before)
+    # Add username/sublevel to current_filters for UI state (after utility call)
     current_filters['username'] = username
+    current_filters['sublevel'] = sublevel
 
     return JsonResponse({
         'filter_counts': filter_counts,

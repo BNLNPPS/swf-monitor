@@ -32,7 +32,7 @@ Structured fields live in `extra_data`. Reserved keys:
 | `outcome` | `ok`, `error`, `timeout`, `skipped`, `unrecorded` |
 | `reason` | short failure cause, required on every non-ok outcome (last stderr line, `rc=N`, or timeout note); also appended to the message text |
 | `duration_ms` | measured execution time — required in spirit for sweeps and timed operations |
-| `sublevel` | declared verbosity class (below) |
+| `sublevel` | declared importance (below) |
 | `live_default` | declared live-stream recommendation (below) |
 
 Any additional keys are free counts and context (`rows_added=…`,
@@ -42,9 +42,10 @@ Any additional keys are free counts and context (`rows_added=…`,
 
 Two independent axes govern publication; neither touches log level.
 
-**`sublevel`** — the event's verbosity class, declared at the call site,
+**`sublevel`** — the event's importance, declared at the call site,
 AUTHORITATIVE: changing it means changing the event, in code, in git. It says
-*which humans* an event reaches:
+*which humans* an event reaches (the UI presents it as **Importance**, and
+filters on it as an at-or-above **importance threshold**):
 
 - `high` — everyone, including digest and email audiences (submissions,
   sweeps, failures, configuration changes)
@@ -59,7 +60,7 @@ without a deploy. The two axes are genuinely independent: a low-sublevel
 action can be temporarily fascinating (force it live while you watch), and a
 high-sublevel bulk operation can be force-quieted while it floods through.
 
-A **channel** is a verbosity setting applied to live events:
+A **channel** is an importance threshold applied to live events:
 `live_stream_q(min_sublevel)` in `monitor_app/epicprod_logging.py` is the one
 filter every channel uses. Current and planned channels:
 
@@ -144,7 +145,7 @@ DISpatcher in a thread under the event post — the post carries everything
 the bot needs to pull the full record and drill into the subject. The
 publisher re-reads its SysConfig knobs every cycle (`epicprod_live_channel`,
 `epicprod_live_min_sublevel`, `epicprod_live_poll_seconds`), so channel
-rename, verbosity threshold, and cadence are UI adjustments, no deploy. A
+rename, importance threshold, and cadence are UI adjustments, no deploy. A
 per-cycle post cap (20) guards against floods; overflow is posted as a
 counted summary line, never silently dropped.
 

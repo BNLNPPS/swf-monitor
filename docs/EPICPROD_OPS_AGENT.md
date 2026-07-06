@@ -281,7 +281,7 @@ via `_log_action()` — a REST-posting twin of
 id, subject, requesting username where the message provides one, outcome
 (`ok`/`error`/`timeout`/`unrecorded`), measured `duration_ms` around the doer
 subprocess (every sweep reports its execution time), the declared `sublevel`
-(verbosity class: which humans the event reaches; changed by changing the
+(importance: which humans the event reaches; changed by changing the
 event), and the `live_default` recommendation for the live stream (effective
 decision = the SysConfig `epicprod_live_policy` override, the runtime
 attention knob on the live-policy page). Retrieval: `epicprod_list_actions`

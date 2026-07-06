@@ -4,18 +4,26 @@
 <div class="mb-2">
     <label style="font-weight: 600; cursor: pointer;">
         <input type="checkbox" id="live-toggle" {% if live_mode %}checked{% endif %}>
-        Live stream
+        Show live stream
     </label>
-    <span class="text-muted" style="margin-left: 0.75em;">epicprod actions above the live threshold · auto-refreshes every 30 s ·
-        <a href="{% url 'monitor_app:live_policy' %}">live policy</a></span>
+    <span class="text-muted" style="margin-left: 0.75em;">epicprod actions above the live threshold · auto-refreshes every 30 s</span>
+</div>
+<div class="alert alert-info py-2 mb-2">
+    Which actions appear in the live stream is governed by the
+    <a href="{% url 'monitor_app:live_policy' %}"><strong>Live Stream Policy</strong></a>
+    — the catalog of every production action with what it is, its importance,
+    and a per-action live/quiet override adjustable at runtime.
 </div>
 {% endblock %}
 
 {% block initial_filters %}
 {
     app_name: '{{ selected_app|default:"" }}',
+    instance_name: '{{ selected_instance|default:"" }}',
     username: '{{ selected_username|default:"" }}',
     levelname: '{{ selected_levelname|default:"" }}',
+    sublevel: '{{ selected_sublevel|default:"" }}',
+    module: '{{ selected_module|default:"" }}',
     live: '{% if live_mode %}1{% endif %}'
 }
 {% endblock %}
@@ -39,9 +47,21 @@ if (filterText) {
     badges.push(`<span class="badge bg-info me-1">${filterText}</span>`);
 }
 
+if (currentFilters.instance_name) {
+    badges.push(`<span class="badge bg-info me-1">Instance: ${currentFilters.instance_name}</span>`);
+}
+
 // Add level filter if active
 if (currentFilters.levelname) {
     badges.push(`<span class="badge bg-info me-1">Level: ${currentFilters.levelname}</span>`);
+}
+
+if (currentFilters.sublevel) {
+    badges.push(`<span class="badge bg-info me-1">Importance &ge; ${currentFilters.sublevel}</span>`);
+}
+
+if (currentFilters.module) {
+    badges.push(`<span class="badge bg-info me-1">Module: ${currentFilters.module}</span>`);
 }
 
 if (currentFilters.live === '1') {
@@ -58,8 +78,11 @@ if (badges.length > 0) {
 // Update filter link active states
 $('.filter-link').removeClass('filter-active');
 $('.filter-link[data-filter="app_name"][data-value="' + currentFilters.app_name + '"]').addClass('filter-active');
+$('.filter-link[data-filter="instance_name"][data-value="' + currentFilters.instance_name + '"]').addClass('filter-active');
 $('.filter-link[data-filter="username"][data-value="' + currentFilters.username + '"]').addClass('filter-active');
 $('.filter-link[data-filter="levelname"][data-value="' + currentFilters.levelname + '"]').addClass('filter-active');
+$('.filter-link[data-filter="sublevel"][data-value="' + currentFilters.sublevel + '"]').addClass('filter-active');
+$('.filter-link[data-filter="module"][data-value="' + currentFilters.module + '"]').addClass('filter-active');
 {% endblock %}
 
 {% block extra_scripts %}

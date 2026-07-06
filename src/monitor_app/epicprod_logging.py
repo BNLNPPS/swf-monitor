@@ -28,7 +28,7 @@ app_name.
 
 Publication axes (log level is separate and keeps its universal meaning):
 
-``sublevel`` — the event's declared verbosity class (high | normal | low),
+``sublevel`` — the event's declared importance (high | normal | low),
 set at the call site, AUTHORITATIVE: changing it means changing the event.
 It says which humans an event reaches — high reaches everyone including
 email/digest audiences, normal reaches live-page watchers, low reaches only
@@ -39,10 +39,10 @@ a special category: "interesting to some humans, now". The effective live
 decision is the ``epicprod_live_policy`` override registry in SysConfig
 (runtime attention knob, flipped on the live-policy page) over the default.
 
-A channel = its verbosity setting applied to live events:
+A channel = its importance threshold applied to live events:
 ``live_stream_q(min_sublevel=...)`` is the one filter every channel uses —
 the deep live view takes all live events; an email digest takes live events
-at sublevel high.
+at importance high.
 """
 
 import logging
@@ -320,7 +320,7 @@ def log_epicprod_action(instance, action, *, subject_type='', subject_key='',
         outcome: 'ok' or 'error' (conventional; free-form refinements allowed).
         duration_ms: measured execution time; required in spirit for sweeps
             and other timed operations.
-        sublevel: the event's declared verbosity class — 'high' (reaches
+        sublevel: the event's declared importance — 'high' (reaches
             everyone: news, digests, email), 'normal' (live-page watchers),
             'low' (verbose viewers only). AUTHORITATIVE: change it by
             changing the event, not at runtime.
@@ -471,10 +471,10 @@ def live_policy_rows():
 
 
 def live_stream_q(min_sublevel=None):
-    """Q filter selecting live action records, optionally verbosity-gated.
+    """Q filter selecting live action records, optionally importance-gated.
 
     Live = the runtime override (epicprod_live_policy) over the record's
-    declared live_default. A channel applies its verbosity setting through
+    declared live_default. A channel applies its importance threshold through
     min_sublevel: the deep live view passes None (all live events); an email
     digest passes 'high'. The single source of stream semantics for every
     channel.
