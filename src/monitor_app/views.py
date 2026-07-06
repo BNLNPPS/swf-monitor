@@ -45,6 +45,7 @@ from django.utils import timezone
 from django.conf import settings as django_settings
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -537,6 +538,7 @@ def log_list(request):
         {'name': 'timestamp', 'title': 'Timestamp', 'orderable': True},
         {'name': 'app_name', 'title': 'App Name', 'orderable': True},
         {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
+        {'name': 'username', 'title': 'User', 'orderable': False},
         {'name': 'levelname', 'title': 'Level', 'orderable': True},
         {'name': 'sublevel', 'title': 'Importance', 'orderable': False},
         {'name': 'message', 'title': 'Message', 'orderable': False},
@@ -639,7 +641,7 @@ def logs_datatable_ajax(request):
     from django.utils.dateparse import parse_datetime
 
     # Initialize DataTables processor
-    columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'sublevel', 'message', 'module', 'funcname']
+    columns = ['timestamp', 'app_name', 'instance_name', 'username', 'levelname', 'sublevel', 'message', 'module', 'funcname']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
 
     # Build base queryset and apply standard filters
@@ -647,10 +649,14 @@ def logs_datatable_ajax(request):
     filters = get_filter_params(request, ['app_name', 'levelname', 'instance_name', 'module'])
     queryset = apply_filters(queryset, filters)
 
-    # Handle username filter (username is segment before trailing numeric ID)
+    # Handle username filter — a user appears either as the segment before
+    # the trailing numeric ID of a testbed-agent instance name, or as the
+    # requester recorded on an action-stream record (extra_data.username)
     username = request.GET.get('username')
     if username:
-        queryset = queryset.filter(instance_name__regex=rf'-{username}-\d+$')
+        queryset = queryset.filter(
+            Q(instance_name__regex=rf'-{username}-\d+$')
+            | Q(extra_data__username=username))
     filters['username'] = username
 
     # Importance threshold (action-stream sublevel field, in extra_data):
@@ -713,14 +719,18 @@ def logs_datatable_ajax(request):
         # Truncate message if too long
         message = log.message[:200] + '...' if len(log.message) > 200 else log.message
         func_display = f"{log.funcname}:{log.lineno}"
-        sublevel_display = (log.extra_data or {}).get('sublevel', '') \
-            if isinstance(log.extra_data, dict) else ''
+        extra = log.extra_data if isinstance(log.extra_data, dict) else {}
+        sublevel_display = extra.get('sublevel', '')
+        username_display = extra.get('username', '')
+        if not username_display:
+            m = re.search(r'-([^-]+)-\d+$', log.instance_name or '')
+            username_display = m.group(1) if m else ''
 
         from .cell_fmt import fill_cell
         data.append([
             timestamp_link, app_name_link, instance_name_display,
-            fill_cell(level_text, log.levelname), sublevel_display,
-            message, log.module, func_display
+            username_display, fill_cell(level_text, log.levelname),
+            sublevel_display, message, log.module, func_display
         ])
 
     return dt.create_response(data, records_total, records_filtered)
@@ -743,13 +753,16 @@ def get_log_filter_counts(request):
 
     # Build base queryset with username/threshold filters applied if set
     from .epicprod_logging import SUBLEVEL_ORDER, SUBLEVEL_VALUES
+    at_or_above = ([v for v in SUBLEVEL_VALUES
+                    if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]]
+                   if sublevel in SUBLEVEL_ORDER else None)
     base_queryset = AppLog.objects.all()
     if username:
-        base_queryset = base_queryset.filter(instance_name__regex=rf'-{username}-\d+$')
-    if sublevel in SUBLEVEL_ORDER:
-        base_queryset = base_queryset.filter(extra_data__sublevel__in=[
-            v for v in SUBLEVEL_VALUES
-            if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]])
+        base_queryset = base_queryset.filter(
+            Q(instance_name__regex=rf'-{username}-\d+$')
+            | Q(extra_data__username=username))
+    if at_or_above:
+        base_queryset = base_queryset.filter(extra_data__sublevel__in=at_or_above)
 
     # Use standard utility for the model-field counts
     # NOTE: current_filters only contains model fields, not username/sublevel
@@ -784,23 +797,30 @@ def get_log_filter_counts(request):
             threshold_counts.append((v, running))
     filter_counts['sublevel'] = threshold_counts
 
-    # Extract usernames from instance_name (segment before trailing numeric ID)
+    # Username counts: apply every other filter, never the username itself.
+    # A user appears either parsed from a testbed-agent instance name or as
+    # the requester on an action-stream record (extra_data.username) — the
+    # two sources are disjoint (action instances are 'ops-agent'/'web'/'mcp',
+    # which never match the agent pattern).
     username_pattern = re.compile(r'-([^-]+)-\d+$')
+    qs_for_username = apply_filters(AppLog.objects.all(), current_filters)
+    if at_or_above:
+        qs_for_username = qs_for_username.filter(
+            extra_data__sublevel__in=at_or_above)
 
-    # Build queryset for username counts (apply app_name and levelname filters)
-    qs_for_username = AppLog.objects.all()
-    if current_filters.get('app_name'):
-        qs_for_username = qs_for_username.filter(app_name=current_filters['app_name'])
-    if current_filters.get('levelname'):
-        qs_for_username = qs_for_username.filter(levelname=current_filters['levelname'])
-
-    # Count usernames extracted from instance_name
     username_counts = {}
     for item in qs_for_username.values('instance_name').annotate(count=Count('id')):
         match = username_pattern.search(item['instance_name'])
         if match:
             uname = match.group(1)
             username_counts[uname] = username_counts.get(uname, 0) + item['count']
+    for item in (qs_for_username
+                 .exclude(extra_data__username__isnull=True)
+                 .exclude(extra_data__username='')
+                 .values('extra_data__username')
+                 .annotate(count=Count('id'))):
+        uname = item['extra_data__username']
+        username_counts[uname] = username_counts.get(uname, 0) + item['count']
 
     # Convert to sorted list of tuples (matching expected format)
     filter_counts['username'] = sorted(username_counts.items(), key=lambda x: (-x[1], x[0]))
