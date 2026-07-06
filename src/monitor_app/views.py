@@ -609,8 +609,13 @@ def live_policy(request):
 
 def log_detail(request, log_id):
     """Display details for a specific log entry."""
+    from .epicprod_logging import EPICPROD_APP_NAME, action_description
     log = get_object_or_404(AppLog, id=log_id)
-    return render(request, 'monitor_app/log_detail.html', {'log': log})
+    action_desc = ''
+    if log.app_name == EPICPROD_APP_NAME and isinstance(log.extra_data, dict):
+        action_desc = action_description(log.extra_data.get('action', ''))
+    return render(request, 'monitor_app/log_detail.html',
+                  {'log': log, 'action_description': action_desc})
 
 
 def logs_datatable_ajax(request):

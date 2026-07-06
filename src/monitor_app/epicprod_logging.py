@@ -66,54 +66,234 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # before/without records, and so new actions are declared in one greppable
 # place. sublevel: high = reaches everyone (news, digests), normal =
 # live-page watchers, low = verbose viewers only. live: the declared
-# live-stream recommendation, overridable at runtime.
+# live-stream recommendation, overridable at runtime. description: the
+# plain-English one-liner answering "what is this action" — rendered on the
+# log entry page and the live-policy page, so a stream reader is never left
+# guessing what an event was.
 ACTION_DEFAULTS = {
     # ops agent
-    'task_submit': {'sublevel': 'high', 'live': True},
-    'evgen_task_submit': {'sublevel': 'high', 'live': True},
-    'panda_task_operation': {'sublevel': 'high', 'live': True},
-    'rucio_sweep': {'sublevel': 'high', 'live': True},
-    'evgen_sweep': {'sublevel': 'high', 'live': True},
-    'catalog_import': {'sublevel': 'high', 'live': True},
-    'association_sweep': {'sublevel': 'high', 'live': True},
-    'catalog_sync': {'sublevel': 'high', 'live': True},
-    'agent_shutdown': {'sublevel': 'high', 'live': True},
-    'payload_log_fetch': {'sublevel': 'low', 'live': False},
-    'inventory_sync': {'sublevel': 'low', 'live': False},
-    'system_status_refresh': {'sublevel': 'low', 'live': False},
-    'questionnaire_import': {'sublevel': 'normal', 'live': True},
-    'questionnaire_automatch': {'sublevel': 'low', 'live': False},
-    'questionnaire_match_found': {'sublevel': 'normal', 'live': True},
-    'questionnaire_match': {'sublevel': 'low', 'live': False},
-    'progress_refresh': {'sublevel': 'low', 'live': False},
+    'task_submit': {
+        'sublevel': 'high', 'live': True,
+        'description': "Submit a campaign task to PanDA through the prun doer "
+                       "under the production credential and record the "
+                       "returned JEDI task id.",
+    },
+    'evgen_task_submit': {
+        'sublevel': 'high', 'live': True,
+        'description': "Submit an external-EVGEN campaign task to PanDA/JEDI "
+                       "via the client API: build the task parameters, "
+                       "assemble and upload the sandbox, record the JEDI "
+                       "task id.",
+    },
+    'panda_task_operation': {
+        'sublevel': 'high', 'live': True,
+        'description': "Run a native PanDA operation on an existing JEDI "
+                       "task: raise the allowed attempt count or retry "
+                       "failed work.",
+    },
+    'rucio_sweep': {
+        'sublevel': 'high', 'live': True,
+        'description': "Refresh the JLab Rucio output snapshot for the "
+                       "current (and last) campaign and rematch produced "
+                       "RECO/FULL datasets onto each task's recorded outputs.",
+    },
+    'evgen_sweep': {
+        'sublevel': 'high', 'live': True,
+        'description': "Assimilate the JLab Rucio EVGEN input inventory "
+                       "(epic:/EVGEN/*) and resolve each catalog request to "
+                       "the registered input dataset(s) that realize it.",
+    },
+    'catalog_import': {
+        'sublevel': 'high', 'live': True,
+        'description': "Import the production CSV manifest catalog: create "
+                       "or update campaign task records from the source rows.",
+    },
+    'association_sweep': {
+        'sublevel': 'high', 'live': True,
+        'description': "Associate recent PanDA tasks with campaign tasks; "
+                       "unmatched direct group.EIC submissions are "
+                       "auto-intaken as adopted tasks.",
+    },
+    'catalog_sync': {
+        'sublevel': 'high', 'live': True,
+        'description': "Nightly composite chain (cron 02:15): csv import, "
+                       "questionnaire import, association sweep, Rucio output "
+                       "snapshot, EVGEN assimilation, questionnaire "
+                       "automatch, match cache, progress refresh. This "
+                       "record is the catalog-freshness timestamp.",
+    },
+    'agent_shutdown': {
+        'sublevel': 'high', 'live': True,
+        'description': "Deliberate stop of the production ops agent via the "
+                       "message-bus back door; systemd leaves it stopped.",
+    },
+    'payload_log_fetch': {
+        'sublevel': 'low', 'live': False,
+        'description': "Fetch one PanDA job's payload log tarball from Rucio "
+                       "over xrootd and extract it into the shared cache for "
+                       "the job page.",
+    },
+    'inventory_sync': {
+        'sublevel': 'low', 'live': False,
+        'description': "Refresh the monitor's ePIC production job/file "
+                       "inventory and parsed failure diagnosis for a PanDA "
+                       "job.",
+    },
+    'system_status_refresh': {
+        'sublevel': 'low', 'live': False,
+        'description': "Periodic refresh of the cached System page status "
+                       "rows for services, agents, and external monitor "
+                       "endpoints.",
+    },
+    'questionnaire_import': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Import the PWG/DSC production-request questionnaire "
+                       "CSV: create or update request records.",
+    },
+    'questionnaire_automatch': {
+        'sublevel': 'low', 'live': False,
+        'description': "LLM matching of production requests to catalog tasks "
+                       "using the full tag map; each new match logs its own "
+                       "questionnaire_match_found event.",
+    },
+    'questionnaire_match_found': {
+        'sublevel': 'normal', 'live': True,
+        'description': "One new request-to-task match from the automatch, "
+                       "with confidence and reason; high/medium confidence "
+                       "lands accepted, low lands suggested.",
+    },
+    'questionnaire_match': {
+        'sublevel': 'low', 'live': False,
+        'description': "Rebuild the questionnaire-to-task match cache read "
+                       "by request and task pages.",
+    },
+    'progress_refresh': {
+        'sublevel': 'low', 'live': False,
+        'description': "Rebuild current-campaign progress data and its "
+                       "rendered progress table cache.",
+    },
     # web and MCP
-    'sysconfig_edit': {'sublevel': 'high', 'live': True},
-    'live_policy_edit': {'sublevel': 'high', 'live': True},
-    'assessment_register': {'sublevel': 'normal', 'live': True},
-    'assessment_link': {'sublevel': 'low', 'live': False},
-    'task_set_status': {'sublevel': 'normal', 'live': True},
-    'task_intake': {'sublevel': 'normal', 'live': True},
-    'dataset_intake': {'sublevel': 'normal', 'live': True},
-    'task_link_input': {'sublevel': 'low', 'live': False},
+    'sysconfig_edit': {
+        'sublevel': 'high', 'live': True,
+        'description': "Operator edit of the SysConfig system-configuration "
+                       "document on the System page.",
+    },
+    'live_policy_edit': {
+        'sublevel': 'high', 'live': True,
+        'description': "Operator change to an action's live-stream override "
+                       "on the live-policy page.",
+    },
+    'assessment_register': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Register an AI assessment of a production object "
+                       "(campaign task, PanDA task, job, or queue).",
+    },
+    'assessment_link': {
+        'sublevel': 'low', 'live': False,
+        'description': "Link an existing AI assessment to a production "
+                       "object's record.",
+    },
+    'task_set_status': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Campaign task lifecycle transition (draft, ready, "
+                       "submitted, completed, failed) with rule enforcement.",
+    },
+    'task_intake': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Idempotent intake of a production request into a "
+                       "draft campaign task.",
+    },
+    'dataset_intake': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Idempotent find-or-create of a dataset from a source "
+                       "location such as a CSV manifest.",
+    },
+    'task_link_input': {
+        'sublevel': 'low', 'live': False,
+        'description': "Link an existing dataset as a campaign task's input "
+                       "by DID.",
+    },
     # web entity lifecycle and operator actions
-    'campaign_set_current': {'sublevel': 'high', 'live': True},
-    'campaign_set_last': {'sublevel': 'high', 'live': True},
-    'questionnaire_match_add': {'sublevel': 'normal', 'live': True},
-    'questionnaire_match_remove': {'sublevel': 'normal', 'live': True},
-    'category_create': {'sublevel': 'normal', 'live': True},
-    'tag_create': {'sublevel': 'low', 'live': False},
-    'tag_edit': {'sublevel': 'low', 'live': False},
-    'tag_lock': {'sublevel': 'normal', 'live': True},
-    'tag_delete': {'sublevel': 'normal', 'live': True},
-    'dataset_create': {'sublevel': 'normal', 'live': True},
-    'dataset_block_add': {'sublevel': 'low', 'live': False},
-    'config_create': {'sublevel': 'low', 'live': False},
-    'config_edit': {'sublevel': 'low', 'live': False},
-    'task_delete': {'sublevel': 'normal', 'live': True},
-    'assessment_quality_set': {'sublevel': 'normal', 'live': True},
-    'queues_update': {'sublevel': 'normal', 'live': True},
-    'endpoints_update': {'sublevel': 'normal', 'live': True},
+    'campaign_set_current': {
+        'sublevel': 'high', 'live': True,
+        'description': "Operator designation of the current campaign.",
+    },
+    'campaign_set_last': {
+        'sublevel': 'high', 'live': True,
+        'description': "Operator designation of the last (previous) campaign.",
+    },
+    'questionnaire_match_add': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Operator addition of a request-to-task match on the "
+                       "request page.",
+    },
+    'questionnaire_match_remove': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Operator removal of a request-to-task match.",
+    },
+    'category_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Create a physics tag category.",
+    },
+    'tag_create': {
+        'sublevel': 'low', 'live': False,
+        'description': "Create a configuration tag (physics, evgen, simu, "
+                       "reco, or background).",
+    },
+    'tag_edit': {
+        'sublevel': 'low', 'live': False,
+        'description': "Edit a draft configuration tag.",
+    },
+    'tag_lock': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Lock a configuration tag — a permanent, one-way "
+                       "transition to immutability.",
+    },
+    'tag_delete': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Delete a draft configuration tag.",
+    },
+    'dataset_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Create a dataset: a composed tag identity plus any "
+                       "sample-variant discriminator.",
+    },
+    'dataset_block_add': {
+        'sublevel': 'low', 'live': False,
+        'description': "Add the next Rucio block (.bN) to a dataset.",
+    },
+    'config_create': {
+        'sublevel': 'low', 'live': False,
+        'description': "Create a production config template.",
+    },
+    'config_edit': {
+        'sublevel': 'low', 'live': False,
+        'description': "Edit a production config template.",
+    },
+    'task_delete': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Delete a campaign task.",
+    },
+    'assessment_quality_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Operator quality review (good, poor, wrong) recorded "
+                       "on an AI assessment.",
+    },
+    'queues_update': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Update PanDA queue records from the GitHub source.",
+    },
+    'endpoints_update': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Update Rucio storage endpoint records from the "
+                       "GitHub source.",
+    },
 }
+
+
+def action_description(action):
+    """Plain-English one-liner for a known action id, or ''."""
+    return (ACTION_DEFAULTS.get(str(action)) or {}).get('description', '')
 
 RESERVED_KEYS = ('action', 'subject_type', 'subject_key', 'username',
                  'outcome', 'duration_ms', 'sublevel', 'live_default')
@@ -281,6 +461,7 @@ def live_policy_rows():
         effective = override if override is not None else decl['live']
         rows.append({
             'action': action,
+            'description': decl.get('description', ''),
             'sublevel': decl['sublevel'],
             'live_default': decl['live'],
             'state': 'default' if override is None else ('live' if override else 'quiet'),

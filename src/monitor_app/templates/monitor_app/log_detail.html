@@ -22,6 +22,12 @@
                         <th>Level</th>
                         <td class="{{ log.levelname|state_class }}" title="{{ log.levelname|state_title }}">{{ log.levelname }}</td>
                     </tr>
+                    {% if action_description %}
+                    <tr>
+                        <th>Action</th>
+                        <td><code>{{ log.extra_data.action }}</code> — {{ action_description }}</td>
+                    </tr>
+                    {% endif %}
                     <tr>
                         <th>Application</th>
                         <td><a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name }}">{{ log.app_name }}</a></td>

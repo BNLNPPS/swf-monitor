@@ -105,7 +105,10 @@ Rules of the road:
 
 1. Declare every new action in `ACTION_DEFAULTS`
    (`monitor_app/epicprod_logging.py`) — the greppable catalog the live-policy
-   page reads. It MUST mirror the call sites.
+   page reads. It MUST mirror the call sites. Every declaration carries a
+   plain-English `description` — the one-liner answering "what is this
+   action", rendered on the log entry page and the live-policy page so a
+   stream reader is never left guessing what an event was.
 2. Timed operations pass the start time; every sweep reports its execution
    time to the log.
 3. Failed outcomes log at `level=logging.ERROR` and carry `reason` — an
@@ -122,7 +125,9 @@ Rules of the road:
 
 **Operators.** The Logs page (`/logs/`, Logs in the epicprod nav, pre-filtered
 `?app_name=epicprod`) is the first live channel: the *Live stream* toggle
-(`?live=1`) shows live events with 30-second auto-refresh. The
+(`?live=1`) shows live events with 30-second auto-refresh. Each record's log
+entry page embeds the action's catalog description, so what an `evgen_sweep`
+or `catalog_sync` *is* reads directly off the record. The
 [live-policy page](../src/monitor_app/templates/monitor_app/live_policy.html)
 at `/logs/live-policy/` lists every known action with its declared sublevel,
 live default, current override, and effective state — overrides editable in

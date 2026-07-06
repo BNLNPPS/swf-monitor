@@ -19,12 +19,13 @@
         {% csrf_token %}
         <table class="table table-sm table-striped w-auto align-middle">
             <thead>
-                <tr><th>Action</th><th>Sublevel</th><th>Live default</th><th>Override</th><th>Effective</th></tr>
+                <tr><th>Action</th><th>Description</th><th>Sublevel</th><th>Live default</th><th>Override</th><th>Effective</th></tr>
             </thead>
             <tbody>
             {% for row in rows %}
                 <tr>
                     <td><code>{{ row.action }}</code></td>
+                    <td style="max-width: 40em;">{{ row.description }}</td>
                     <td>{{ row.sublevel }}</td>
                     <td>{{ row.live_default|yesno:"live,quiet" }}</td>
                     <td>

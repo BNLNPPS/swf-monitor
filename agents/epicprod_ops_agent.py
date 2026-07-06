@@ -269,8 +269,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  cache-payload-log: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(
                 f"PRODOPS fetch_payload_log FAILED rc={p.returncode} pandaid={m['pandaid']}")
             self._mark_error(jobdir, reason)
@@ -339,7 +338,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in stderr.splitlines():
             self.logger.info(f"  submit-prod-task: {line}")
         jedi_task_id = (p.stdout or '').strip()
-        reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+        reason = self._derive_reason(p)
         # Every outcome emits an event over the SSE relay (docs/SSE_PUSH.md) so the
         # compose page is never left polling a submission that already resolved.
         if p.returncode == 0 and jedi_task_id:
@@ -427,7 +426,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in stderr.splitlines():
             self.logger.info(f"  submit-evgen-task: {line}")
         jedi_task_id = (p.stdout or '').strip()
-        reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+        reason = self._derive_reason(p)
         if p.returncode == 0 and jedi_task_id:
             self.logger.info(
                 f"PRODOPS submit_evgen_task done: {task_name} -> jediTaskID={jedi_task_id}")
@@ -536,8 +535,7 @@ class EpicProdOpsAgent(BaseAgent):
                              sublevel='high', live_default=True,
                              operation=operation, task_name=task_name)
         else:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(
                 f"PRODOPS panda_task_operation FAILED rc={p.returncode}: "
                 f"{operation} {jedi_task_id}")
@@ -610,8 +608,7 @@ class EpicProdOpsAgent(BaseAgent):
         ok = p.returncode == 0
         reason = ''
         if not ok:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS sync_epicprod_inventory FAILED rc={p.returncode}")
         else:
             self.logger.info("PRODOPS sync_epicprod_inventory done")
@@ -664,8 +661,7 @@ class EpicProdOpsAgent(BaseAgent):
         ok = p.returncode == 0
         reason = ''
         if not ok:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS refresh_system_status FAILED rc={p.returncode}")
         else:
             self.logger.info("PRODOPS refresh_system_status done")
@@ -724,8 +720,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  sweep-panda-associations: {line}")
         summary = (p.stdout or "").strip().splitlines()
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS association_sweep FAILED rc={p.returncode}")
             self._log_action('association_sweep', t0, outcome='error',
                              reason=reason,
@@ -769,8 +764,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  import-questionnaires: {line}")
         out = (p.stdout or "").strip()
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS questionnaire_import FAILED rc={p.returncode}")
             self._log_action('questionnaire_import', t0, outcome='error',
                              reason=reason,
@@ -817,8 +811,7 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  match-questionnaires: {line}")
         out = (p.stdout or "").strip()
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS questionnaire_automatch FAILED rc={p.returncode}")
             self._log_action('questionnaire_automatch', t0, outcome='error',
                              reason=reason,
@@ -904,8 +897,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  rucio-snapshot-update: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS rucio_snapshot_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False, 'error': reason})
@@ -954,8 +946,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  import-evgen-rucio: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS evgen_rucio_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False, 'error': reason})
@@ -1006,8 +997,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  pcs-catalog-import: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS catalog_import {source} FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
@@ -1062,8 +1052,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  update-questionnaire-matches: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(
                 f"PRODOPS questionnaire_match_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
@@ -1119,8 +1108,7 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  refresh-campaign-progress: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(
                 f"PRODOPS campaign_progress_refresh FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
@@ -1208,6 +1196,31 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.warning(f"PRODOPS action log post failed ({action}): {e}")
 
     # -- helpers -------------------------------------------------------------
+
+    @staticmethod
+    def _derive_reason(p):
+        """Short failure cause from a finished doer subprocess.
+
+        A negative returncode means the doer was killed by a signal (an agent
+        restart SIGTERMs in-flight doers) and its stderr cannot explain that.
+        Otherwise prefer the last stderr line that states an error over
+        trailing bootstrap/INFO noise, then the last line, then the bare rc.
+        """
+        if p.returncode < 0:
+            try:
+                signame = signal.Signals(-p.returncode).name
+            except ValueError:
+                signame = str(-p.returncode)
+            return f"killed by signal {signame}"
+        stderr = (p.stderr or "").strip()
+        if not stderr:
+            return f"rc={p.returncode}"
+        lines = stderr.splitlines()
+        for line in reversed(lines):
+            if any(tok in line for tok in ('ERROR', 'CRITICAL', 'FATAL',
+                                           'Error:', 'Exception')):
+                return line.strip()
+        return lines[-1].strip()
 
     def _mark_error(self, jobdir, reason):
         """Record a failed fetch in the cache dir (attempt count + reason) so the
