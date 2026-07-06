@@ -590,6 +590,27 @@ class SysConfig(models.Model):
         return obj.config_data
 
     @classmethod
+    def get_setting(cls, key, default=None):
+        """Read one setting; a missing key is seeded with the default.
+
+        SysConfig sets things: a knob in use may never hide behind a code
+        default. The first read of an unset key writes the default into the
+        document — visible on the System page, recorded in the action
+        stream — and returns it.
+        """
+        config = cls.get_config()
+        if key in config:
+            return config[key]
+        cls.update_config({key: default}, username='autoseed')
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'sysconfig_edit', username='autoseed',
+            sublevel='high', live_default=True,
+            message=f'sysconfig_edit ok — autoseeded {key}={default!r} '
+                    f'(first read of unset key)')
+        return default
+
+    @classmethod
     def update_config(cls, updates, username=''):
         """Merge updates into the configuration (top-level key merge)."""
         from django.db import transaction

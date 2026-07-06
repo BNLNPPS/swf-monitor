@@ -403,7 +403,7 @@ def get_live_policy():
     from .models import SysConfig
 
     try:
-        policy = SysConfig.get_config().get(LIVE_POLICY_STATE_KEY) or {}
+        policy = SysConfig.get_setting(LIVE_POLICY_STATE_KEY, {}) or {}
     except Exception as exc:
         logger.warning('live policy read failed (empty policy used): %s', exc)
         return {}

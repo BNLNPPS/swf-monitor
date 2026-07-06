@@ -80,14 +80,31 @@ class Command(BaseCommand):
             SUBLEVEL_VALUES, live_stream_q)
         from monitor_app.models import AppLog, SysConfig
 
-        config = SysConfig.get_config() or {}
-        channel = str(config.get('epicprod_live_channel')
-                      or DEFAULT_CHANNEL)
-        min_sublevel = str(config.get('epicprod_live_min_sublevel')
-                           or DEFAULT_MIN_SUBLEVEL)
+        # get_setting seeds a missing key into the SysConfig document — the
+        # knobs in use are always visible on the System page, never hidden
+        # behind a code default. An explicitly set but unusable value is a
+        # failure and is logged, never silently replaced.
+        channel = str(SysConfig.get_setting(
+            'epicprod_live_channel', DEFAULT_CHANNEL) or '')
+        if not channel:
+            logger.warning("epicprod_live_channel is blank in SysConfig; "
+                           "using default %r", DEFAULT_CHANNEL)
+            channel = DEFAULT_CHANNEL
+        min_sublevel = str(SysConfig.get_setting(
+            'epicprod_live_min_sublevel', DEFAULT_MIN_SUBLEVEL) or '')
         if min_sublevel not in SUBLEVEL_VALUES:
+            logger.warning("epicprod_live_min_sublevel %r is not one of %s; "
+                           "using default %r", min_sublevel,
+                           list(SUBLEVEL_VALUES), DEFAULT_MIN_SUBLEVEL)
             min_sublevel = DEFAULT_MIN_SUBLEVEL
-        poll = config.get('epicprod_live_poll_seconds') or DEFAULT_POLL_SECONDS
+        poll = SysConfig.get_setting(
+            'epicprod_live_poll_seconds', DEFAULT_POLL_SECONDS)
+        try:
+            poll = int(poll)
+        except (TypeError, ValueError):
+            logger.warning("epicprod_live_poll_seconds %r is not an integer; "
+                           "using default %r", poll, DEFAULT_POLL_SECONDS)
+            poll = DEFAULT_POLL_SECONDS
 
         if channel != self.channel_name:      # first cycle or painless rename
             self.channel_id = self._get(

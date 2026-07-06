@@ -182,7 +182,17 @@ catalog-freshness timestamp. Measured 2026-07-05: csv 8 s, association sweep
 operator-set configuration — live policy overrides, channel settings
 (`epicprod_live_channel`, `epicprod_live_min_sublevel`,
 `epicprod_live_poll_seconds`), sweep knobs (`questionnaire_csv_url`) —
-viewable and editable at the bottom of the System page. It is distinct from `PersistentState`, which is
+viewable and editable at the bottom of the System page. Convention: no
+hidden knobs — every key a component reads from SysConfig is present in the
+document, at its code default when never overridden, so the System page is
+the complete inventory of what is adjustable. The construct
+`get_config().get(key, default)` is forbidden: an unset value silently
+becoming a hidden code default is a silent failure. Reads go through
+`SysConfig.get_setting(key, default)`, which seeds a missing key into the
+document (logged as a `sysconfig_edit` action) and returns it; an explicitly
+set but unusable value is logged by the reader, never silently replaced. The live policy additionally carries an explicit
+`endpoints_update: live` override, although live is that action's default,
+as the worked example of an override entry. It is distinct from `PersistentState`, which is
 machine-maintained state (counters, run numbers) and not for human editing.
 All system configuration lives in the database and is adjustable through the
 UI without deploys; SysConfig edits are themselves live actions in the stream.
