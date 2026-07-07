@@ -87,6 +87,8 @@ $('.filter-link[data-filter="module"][data-value="' + currentFilters.module + '"
 
 {% block extra_scripts %}
 let liveTimer = null;
+const normalTitle = 'Log List';
+const liveTitle = 'Log List - epic-live feed';
 
 function startLiveTimer() {
     if (!liveTimer) {
@@ -98,6 +100,8 @@ function setLiveMode(on) {
     currentFilters.live = on ? '1' : '';
     if (!on && liveTimer) { clearInterval(liveTimer); liveTimer = null; }
     if (on) startLiveTimer();
+    $('h2').first().text(on ? liveTitle : normalTitle);
+    document.title = on ? liveTitle : normalTitle;
     const url = new URL(window.location);
     if (on) { url.searchParams.set('live', '1'); } else { url.searchParams.delete('live'); }
     window.history.replaceState({}, '', url);

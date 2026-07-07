@@ -556,8 +556,9 @@ def log_list(request):
         {'name': 'module', 'label': 'Module', 'type': 'select'},
     ]
 
+    live_mode = request.GET.get('live') == '1'
     context = {
-        'table_title': 'Log List',
+        'table_title': 'Log List - epic-live feed' if live_mode else 'Log List',
         'table_description': 'View and search application logs with dynamic filtering by source, instance, user, level, importance, and module.',
         'ajax_url': reverse('monitor_app:logs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:log_filter_counts'),
@@ -569,7 +570,7 @@ def log_list(request):
         'selected_instance': request.GET.get('instance_name'),
         'selected_sublevel': request.GET.get('sublevel'),
         'selected_module': request.GET.get('module'),
-        'live_mode': request.GET.get('live') == '1',
+        'live_mode': live_mode,
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
 
