@@ -159,13 +159,20 @@ on demand). The request side is free text; the task side is composed names
 built from tag codes. The delegate model (env `EPICPROD_MATCHER_MODEL`,
 default Opus 4.8) is handed the complete tag map inline — every
 physics/evgen/simu/reco tag with its actual content — plus the task catalog
-and a batch of requests per call, under a hard rule that tag codes are
+and a batch of requests per call, under two hard rules: tag codes are
 opaque sequential ids whose numerals mean nothing (the first run, given
-names only, matched on digit coincidences). Deterministic guards keep the
-proposals safe:
+names only, matched on digit coincidences), and beam energies and species
+must match exactly — 9x100 never matches 10x100, the nearest beam is never
+proposed (an early run accepted cross-beam matches at high confidence).
+Deterministic guards keep the proposals safe:
 
 - proposed names must resolve against the actual catalog (unresolvable
   proposals are counted and dropped);
+- beam exactness is enforced in code, not just in the prompt: the model
+  states the request's beams per match, the task's beams come from its
+  physics tag, and any inequality drops the proposal (`beam_rejected`); a
+  proposal whose beams cannot be verified (request states none, or the tag
+  carries none) can land only as `suggested`, never `accepted`;
 - existing matches are never modified and matched pairs are never
   re-proposed — the matcher is strictly additive;
 - confidence gates status: high/medium land as `accepted` (counted in the
@@ -175,12 +182,18 @@ proposals safe:
 Every new match logs a `questionnaire_match_found` action-stream event
 (normal, live) carrying the request id, confidence, and the one-line reason —
 new matches surface in the live channels as they are found, and a wrong one
-is one click to remove (itself a live event). The scan set is unmatched
-requests always, plus everything whenever the task catalog has grown since
-the last run (new tasks are new candidates; the high-water task id lives in
-PersistentState). `Questionnaire.data['prod_matches']` remains the editable
-source of truth; the task-side cache rebuild
-(`rebuild_questionnaire_match_cache`) runs after any additions.
+is one click to remove (itself a live event). Rescanning is event-driven,
+never habitual: an LLM re-asked an unchanged question answers with variance,
+not information — noise in the live stream and wasted tokens. Each
+questionnaire carries a stamp of what it was last scanned against
+(`data['automatch_scan']`: prompt version, task-catalog high-water id,
+request content hash) and is asked again only when one of those inputs
+changed — the request was edited, the catalog grew, or the matcher prompt
+was revised (a `PROMPT_VERSION` bump earns every questionnaire one
+deliberate re-pass). A night with no changes makes no LLM call and emits no
+events. `Questionnaire.data['prod_matches']` remains the editable source of
+truth; the task-side cache rebuild (`rebuild_questionnaire_match_cache`)
+runs after any additions.
 
 ## Related
 
