@@ -28,7 +28,7 @@ from monitor_app.utils import format_datetime
 _log = _logging.getLogger(__name__)
 
 from .models import (
-    Dataset, ProdConfig, ProdTask, PandaTasks,
+    Dataset, ProdConfig, ProdTask, PandaTasks, Proposal,
     Campaign, Questionnaire, ProdRequest,
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
 )
@@ -2920,7 +2920,7 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
         extra['proposal_scan_version'] = origin.get('scan_version')
         extra['proposal_batch_id'] = str(origin.get('batch_id') or '')
         extra['proposed_at'] = str(origin.get('proposed_at') or '')
-    log_epicprod_action(
+    log_id = log_epicprod_action(
         'web', 'dataset_propagation_set',
         subject_type='dataset' if len(changed) == 1 else '',
         subject_key=changed[0] if len(changed) == 1 else '',
@@ -2931,12 +2931,25 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
         **extra,
     )
     return {'changed': changed, 'unchanged': unchanged, 'unknown': unknown,
-            'state': state}
+            'state': state, 'log_id': log_id}
 
 
 def _proposal_input_hash(payload, comment):
     blob = _json.dumps({'payload': payload, 'comment': comment}, sort_keys=True)
     return _hashlib.sha1(blob.encode()).hexdigest()
+
+
+def _clear_proposal_projection(name):
+    """Remove the render projection from the record a proposal targeted."""
+    head = (Dataset.objects
+            .filter(composed_name=name).order_by('block_num').first())
+    if head is None:
+        return
+    metadata = dict(head.metadata or {})
+    if 'proposal' in metadata:
+        metadata.pop('proposal', None)
+        head.metadata = metadata
+        head.save(update_fields=['metadata'])
 
 
 def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
@@ -2946,15 +2959,16 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
     (EPICPROD_PROPOSALS.md).
 
     Validates exactly as ``dataset_propagation_set`` does — an unexecutable
-    proposal is refused at birth. Each named identity gets a
-    ``metadata['proposal']`` block on its block-1 row carrying the frozen
-    payload, the required comment, the proposer identity, and ``prev_state``
-    (the staleness anchor for approval-time revalidation). Skips, all
-    counted and returned: unknown names, no-ops (already in the target
-    state), and identities whose denial memory matches this proposal's
-    input hash (a denied proposal never returns until its inputs change).
-    An existing pending proposal is overwritten (re-proposal refreshes it).
-    One ``dataset_proposal_created`` action-stream event per call.
+    proposal is refused at birth. The canonical record is a ``Proposal``
+    ledger row (frozen payload, required comment, proposer identity,
+    ``precondition.prev_state`` staleness anchor); the target's block-1 row
+    carries a render projection in ``metadata['proposal']``, written here
+    and cleared by decision or withdrawal. Skips, all counted and returned:
+    unknown names, no-ops (already in the target state), and identities
+    with a denied ledger row matching this proposal's input hash (a denied
+    proposal never returns until its inputs change). An existing pending
+    proposal is superseded (withdrawn) by the fresh one — the heartbeat
+    refresh. One ``dataset_proposal_created`` action-stream event per call.
     """
     from monitor_app.epicprod_logging import log_epicprod_action
 
@@ -2973,7 +2987,7 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
 
     payload = {'state': state, 'replaced_by': replaced_by}
     input_hash = _proposal_input_hash(payload, comment)
-    now = _timezone.now().isoformat()
+    now = _timezone.now()
     proposed, noop, denied, unknown = [], [], [], []
     with transaction.atomic():
         for name in names:
@@ -2986,12 +3000,32 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
                     not replaced_by or head.replaced_by == replaced_by):
                 noop.append(name)
                 continue
-            metadata = dict(head.metadata or {})
-            denial = metadata.get('proposal_denied') or {}
-            if denial.get('input_hash') == input_hash:
+            if Proposal.objects.filter(
+                    action='propagation', subject_key=name,
+                    status='denied', input_hash=input_hash).exists():
                 denied.append(name)
                 continue
+            # Heartbeat refresh: a fresh proposal supersedes the pending one.
+            Proposal.objects.filter(
+                action='propagation', subject_key=name,
+                status='proposed').update(status='withdrawn', decided_at=now)
+            row = Proposal.objects.create(
+                action='propagation',
+                subject_type='dataset',
+                subject_key=name,
+                payload=payload,
+                comment=comment,
+                proposer=proposer or '',
+                scan_version=scan_version,
+                batch_id=batch_id or '',
+                executor='service',
+                precondition={'prev_state': head.propagation},
+                input_hash=input_hash,
+                created_by=created_by or '',
+            )
+            metadata = dict(head.metadata or {})
             metadata['proposal'] = {
+                'id': row.id,
                 'action': 'propagation',
                 'payload': payload,
                 'comment': comment,
@@ -2999,8 +3033,7 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
                 'scan_version': scan_version,
                 'batch_id': batch_id or '',
                 'prev_state': head.propagation,
-                'proposed_at': now,
-                'input_hash': input_hash,
+                'proposed_at': now.isoformat(),
             }
             head.metadata = metadata
             head.save(update_fields=['metadata'])
@@ -3022,99 +3055,121 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
 
 
 def dataset_proposal_decide(composed_names, decision, *, decided_by='',
-                            filter_state=''):
+                            quality='', filter_state='', proposal_ids=None):
     """Approve or deny pending AI proposals (EPICPROD_PROPOSALS.md).
 
-    Approval revalidates each proposal against current state
-    (``prev_state`` anchor): a record that moved since the proposal saw it
-    is skipped-stale and its proposal withdrawn, never re-interpreted.
-    Valid approvals execute through ``dataset_propagation_set`` — the
-    identical call an operator makes by hand — grouped by identical
-    (state, replaced_by, comment) so a family batch is one call and one
-    origin-stamped event; the approving human is ``changed_by``. Denial
-    records the proposal's input hash in the record's denial memory and
-    withdraws it; one ``dataset_proposal_denied`` event per call.
+    Selection by dataset composed names (the catalog and compose surfaces)
+    and/or by ledger row ids (the proposals queue page). Approval
+    revalidates each proposal against current state (the
+    ``precondition.prev_state`` anchor): a record that moved since the
+    proposal saw it is marked stale and withdrawn from the record, never
+    re-interpreted. Valid approvals execute through
+    ``dataset_propagation_set`` — the identical call an operator makes by
+    hand — grouped by identical (state, replaced_by, comment) so a family
+    batch is one call and one origin-stamped event; the approving human is
+    ``changed_by`` and the executed ledger rows record the event's log id.
+    Denial marks the ledger row (denial memory is the ledger); one
+    ``dataset_proposal_denied`` event per call. ``quality`` optionally tags
+    the decision with the shared review vocabulary (wrong | poor | ok |
+    good) — 'wrong' is the one-tap miscalibration signal that weighs
+    against the proposer's track record.
     """
     from monitor_app.epicprod_logging import log_epicprod_action
 
     decision = (decision or '').strip()
+    quality = (quality or '').strip()
     names = [n.strip() for n in (composed_names or []) if n and n.strip()]
+    ids = [int(i) for i in (proposal_ids or [])]
     if decision not in ('approve', 'deny'):
         raise ServiceError(f"decision must be 'approve' or 'deny'; "
                            f"got {decision!r}")
-    if not names:
-        raise ServiceError('no dataset names supplied')
+    if quality and quality not in dict(Proposal.QUALITY_CHOICES):
+        raise ServiceError(
+            f"quality must be one of "
+            f"{', '.join(dict(Proposal.QUALITY_CHOICES))}; got {quality!r}")
+    if not names and not ids:
+        raise ServiceError('no dataset names or proposal ids supplied')
     if not decided_by:
         raise ServiceError('an authenticated decider is required')
 
-    now = _timezone.now().isoformat()
-    no_proposal, stale, denied, approved = [], [], [], []
+    pending = Proposal.objects.filter(action='propagation', status='proposed')
+    selector = Q()
+    if names:
+        selector |= Q(subject_key__in=names)
+    if ids:
+        selector |= Q(pk__in=ids)
+    rows = list(pending.filter(selector))
+    found_names = {r.subject_key for r in rows}
+    no_proposal = [n for n in names if n not in found_names]
+
+    now = _timezone.now()
+    stale, denied, approved = [], [], []
     groups = {}
     with transaction.atomic():
-        for name in names:
+        for row in rows:
             head = (Dataset.objects
-                    .filter(composed_name=name).order_by('block_num').first())
-            proposal = (head.metadata or {}).get('proposal') if head else None
-            if not proposal or proposal.get('action') != 'propagation':
-                no_proposal.append(name)
-                continue
-            metadata = dict(head.metadata)
-            if head.propagation != proposal.get('prev_state'):
-                metadata.pop('proposal', None)
-                head.metadata = metadata
-                head.save(update_fields=['metadata'])
-                stale.append(name)
+                    .filter(composed_name=row.subject_key)
+                    .order_by('block_num').first())
+            current = head.propagation if head else None
+            if current != (row.precondition or {}).get('prev_state'):
+                row.status = 'stale'
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'decided_by', 'decided_at'])
+                _clear_proposal_projection(row.subject_key)
+                stale.append(row.subject_key)
                 continue
             if decision == 'deny':
-                metadata.pop('proposal', None)
-                metadata['proposal_denied'] = {
-                    'input_hash': proposal.get('input_hash', ''),
-                    'denied_by': decided_by,
-                    'denied_at': now,
-                }
-                head.metadata = metadata
-                head.save(update_fields=['metadata'])
-                denied.append(name)
+                row.status = 'denied'
+                row.quality = quality
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'quality', 'decided_by',
+                                        'decided_at'])
+                _clear_proposal_projection(row.subject_key)
+                denied.append(row.subject_key)
                 continue
-            payload = proposal.get('payload') or {}
+            payload = row.payload or {}
             key = (payload.get('state', ''), payload.get('replaced_by', ''),
-                   proposal.get('comment', ''))
-            groups.setdefault(key, {'names': [], 'origin': {
-                'proposer': proposal.get('proposer', ''),
-                'scan_version': proposal.get('scan_version'),
-                'batch_id': proposal.get('batch_id', ''),
-                'proposed_at': proposal.get('proposed_at', ''),
-            }})['names'].append(name)
+                   row.comment)
+            groups.setdefault(key, {'rows': [], 'origin': {
+                'proposer': row.proposer,
+                'scan_version': row.scan_version,
+                'batch_id': row.batch_id,
+                'proposed_at': row.created_at.isoformat(),
+            }})['rows'].append(row)
 
     for (state, replaced_by, comment), group in groups.items():
+        group_names = [r.subject_key for r in group['rows']]
         result = dataset_propagation_set(
-            group['names'], state, comment, replaced_by=replaced_by,
+            group_names, state, comment, replaced_by=replaced_by,
             changed_by=decided_by, filter_state=filter_state,
             origin=group['origin'])
         executed = set(result['changed']) | set(result['unchanged'])
         with transaction.atomic():
-            for name in group['names']:
-                if name not in executed:
+            for row in group['rows']:
+                if row.subject_key not in executed:
                     continue
-                head = (Dataset.objects
-                        .filter(composed_name=name)
-                        .order_by('block_num').first())
-                if head is None:
-                    continue
-                metadata = dict(head.metadata or {})
-                metadata.pop('proposal', None)
-                head.metadata = metadata
-                head.save(update_fields=['metadata'])
-                approved.append(name)
+                row.status = 'executed'
+                row.quality = quality
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.executed_log_id = result.get('log_id')
+                row.save(update_fields=['status', 'quality', 'decided_by',
+                                        'decided_at', 'executed_log_id'])
+                _clear_proposal_projection(row.subject_key)
+                approved.append(row.subject_key)
 
     if decision == 'deny':
         log_epicprod_action(
             'web', 'dataset_proposal_denied',
             username=decided_by,
             sublevel='normal', live_default=True,
-            message=f'AI proposal denied on {len(denied)} dataset(s)',
+            message=(f'AI proposal denied on {len(denied)} dataset(s)'
+                     + (f' [{quality}]' if quality else '')),
             denied=len(denied), stale=len(stale),
             no_proposal=len(no_proposal),
+            **({'quality': quality} if quality else {}),
         )
     return {'approved': approved, 'denied': denied, 'stale': stale,
             'no_proposal': no_proposal}
@@ -3127,16 +3182,17 @@ def dataset_proposal_withdraw(*, batch_id=None, created_by=''):
     never silent."""
     from monitor_app.epicprod_logging import log_epicprod_action
 
+    now = _timezone.now()
     withdrawn = 0
     with transaction.atomic():
-        qs = Dataset.objects.filter(metadata__has_key='proposal')
+        qs = Proposal.objects.filter(action='propagation', status='proposed')
         if batch_id:
-            qs = qs.filter(metadata__proposal__batch_id=batch_id)
-        for head in qs:
-            metadata = dict(head.metadata or {})
-            metadata.pop('proposal', None)
-            head.metadata = metadata
-            head.save(update_fields=['metadata'])
+            qs = qs.filter(batch_id=batch_id)
+        for row in qs:
+            row.status = 'withdrawn'
+            row.decided_at = now
+            row.save(update_fields=['status', 'decided_at'])
+            _clear_proposal_projection(row.subject_key)
             withdrawn += 1
     log_epicprod_action(
         'web', 'dataset_proposal_expired',

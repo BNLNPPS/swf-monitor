@@ -3179,8 +3179,11 @@ def _corun_ai_assessment_count():
 def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
+    from pcs.models import Proposal
     context = pcs_hub_counts()
     context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
+    context['ai_proposals_pending_count'] = Proposal.objects.filter(
+        status='proposed').count()
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 

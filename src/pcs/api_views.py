@@ -278,20 +278,27 @@ class DatasetViewSet(viewsets.ModelViewSet):
     def proposal_decide(self, request):
         """Approve or deny pending AI proposals.
 
-        Body: ``names``, ``decision`` ('approve' | 'deny'), ``filter``
-        (optional audit record of the selecting filter). Approval
-        revalidates and executes through the propagation service with the
-        approving human as changed_by and the origin stamp on the event.
+        Body: ``names`` and/or ``ids`` (ledger row ids), ``decision``
+        ('approve' | 'deny'), ``quality`` (optional review tag: wrong |
+        poor | ok | good), ``filter`` (optional audit record of the
+        selecting filter). Approval revalidates and executes through the
+        propagation service with the approving human as changed_by and the
+        origin stamp on the event.
         """
         try:
             result = services.dataset_proposal_decide(
                 request.data.get('names') or [],
                 request.data.get('decision'),
                 decided_by=request.user.username,
+                quality=request.data.get('quality', ''),
                 filter_state=request.data.get('filter', ''),
+                proposal_ids=request.data.get('ids') or [],
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
+        except (TypeError, ValueError):
+            return Response({'detail': 'ids must be integers'},
+                            status=status.HTTP_400_BAD_REQUEST)
         return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='propagation')

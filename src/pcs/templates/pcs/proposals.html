@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}AI Proposals - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.pcs-props-table td, .pcs-props-table th { vertical-align: top; }
+.pcs-props-filter a { margin-right: .8em; text-decoration: none; }
+.pcs-props-filter a.active { font-weight: 700; text-decoration: underline; }
+.pcs-props-comment { max-width: 34em; }
+.pcs-props-stats td, .pcs-props-stats th { padding: .15rem .6rem; }
+</style>
+
+<div class="container-fluid mt-3">
+  <h1 class="ai-attr-text">AI Proposals</h1>
+  <p class="text-muted">
+    AI-proposed actions pending human review, and the decided ledger.
+    Approval executes the frozen payload deterministically through the same
+    service an operator uses; denial is recorded and the proposal is not
+    re-proposed until its inputs change. See docs/EPICPROD_PROPOSALS.md.
+  </p>
+
+  <div class="pcs-props-filter mb-2">
+    <strong>Status:</strong>
+    {% for f in status_facets %}
+      <a href="?status={{ f.status }}" class="{% if status_filter == f.status %}active{% endif %}">{{ f.status }} ({{ f.count }})</a>
+    {% endfor %}
+    <a href="?status=all" class="{% if status_filter == 'all' %}active{% endif %}">all</a>
+    {% if action_filter or proposer_filter or batch_filter %}
+      <span class="text-muted">&middot; filtered:
+        {% if action_filter %}action={{ action_filter }}{% endif %}
+        {% if proposer_filter %}proposer={{ proposer_filter }}{% endif %}
+        {% if batch_filter %}batch={{ batch_filter }}{% endif %}
+        <a href="?status={{ status_filter }}">clear</a></span>
+    {% endif %}
+  </div>
+
+  {% if shown_count < total_count %}
+    <div class="text-muted mb-2">Showing newest {{ shown_count }} of {{ total_count }} — narrow the filter for the rest.</div>
+  {% endif %}
+
+  {% if status_filter == 'proposed' and user.is_authenticated and rows %}
+  <div class="mb-2 d-flex align-items-center gap-2">
+    {% csrf_token %}
+    <span class="text-muted"><span id="props-count">0</span> selected</span>
+    <button type="button" id="props-approve" class="btn btn-sm ai-attr" disabled>Approve</button>
+    <button type="button" id="props-deny" class="btn btn-sm ai-attr" disabled>Deny</button>
+    <button type="button" id="props-deny-wrong" class="btn btn-sm ai-attr" disabled
+            title="Deny and flag the proposal as wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
+  </div>
+  {% endif %}
+
+  <table class="table table-sm pcs-props-table">
+    <thead>
+      <tr>
+        {% if status_filter == 'proposed' and user.is_authenticated %}<th style="width:1.5em"><input type="checkbox" id="props-selectall"></th>{% endif %}
+        <th>Proposed</th><th>Action</th><th>Subject</th><th>Change</th>
+        <th>Confidence</th><th class="pcs-props-comment">Comment</th>
+        <th>Proposer</th><th>Batch</th><th>Status</th><th>Decision</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr>
+        {% if status_filter == 'proposed' and user.is_authenticated %}<td><input type="checkbox" class="props-cb" value="{{ p.id }}"></td>{% endif %}
+        <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
+        <td class="small">{{ p.action }}</td>
+        <td class="small"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
+          {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}</td>
+        <td class="small">{{ p.precondition.prev_state|default:"" }} &rarr; {{ p.payload.state|default:"" }}{% if p.payload.replaced_by %}<div class="text-muted">replaced by {{ p.payload.replaced_by }}</div>{% endif %}</td>
+        <td class="small">{{ p.confidence|default:"—" }}</td>
+        <td class="small pcs-props-comment">{{ p.comment }}</td>
+        <td class="small ai-attr-text">{{ p.proposer|default:"—" }}</td>
+        <td class="small">{{ p.batch_id|default:"—" }}</td>
+        <td class="small">{{ p.status }}</td>
+        <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% if p.quality %} <span class="badge {% if p.quality == 'wrong' %}bg-danger{% elif p.quality == 'poor' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ p.quality }}</span>{% endif %}{% else %}—{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="11" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if proposer_stats %}
+  <h5 class="mt-4">Proposer track records</h5>
+  <table class="table table-sm pcs-props-stats" style="max-width:46em">
+    <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Denied</th><th>Wrong</th></tr></thead>
+    <tbody>
+      {% for s in proposer_stats %}
+      <tr><td class="ai-attr-text">{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const cbs = document.querySelectorAll('.props-cb');
+  const selectAll = document.getElementById('props-selectall');
+  const count = document.getElementById('props-count');
+  const buttons = ['props-approve', 'props-deny', 'props-deny-wrong']
+    .map(id => document.getElementById(id)).filter(Boolean);
+  if (!buttons.length) return;
+  function refresh() {
+    const n = Array.from(cbs).filter(c => c.checked).length;
+    if (count) count.textContent = n;
+    buttons.forEach(b => b.disabled = (n === 0));
+  }
+  if (selectAll) selectAll.addEventListener('change', () => {
+    cbs.forEach(c => c.checked = selectAll.checked); refresh();
+  });
+  cbs.forEach(c => c.addEventListener('change', refresh));
+
+  async function decide(decision, quality) {
+    const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
+    if (!ids.length) return;
+    const verb = decision === 'approve' ? 'Approve and execute'
+               : (quality === 'wrong' ? 'Deny as wrong' : 'Deny');
+    if (!confirm(`${verb} ${ids.length} AI proposal(s)?`)) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/proposal-decide/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ ids: ids, decision: decision, quality: quality || '',
+                               filter: window.location.search }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [];
+      if (decision === 'approve') parts.push(`${j.approved.length} approved and executed`);
+      else parts.push(`${j.denied.length} denied`);
+      if (j.stale.length) parts.push(`${j.stale.length} stale (record changed since proposed)`);
+      alert('AI proposals: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Proposal decision failed: ' + err.message);
+    }
+  }
+  document.getElementById('props-approve').addEventListener('click', () => decide('approve', ''));
+  document.getElementById('props-deny').addEventListener('click', () => decide('deny', ''));
+  document.getElementById('props-deny-wrong').addEventListener('click', () => decide('deny', 'wrong'));
+})();
+</script>
+{% endblock %}
