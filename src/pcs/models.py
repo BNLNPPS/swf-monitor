@@ -221,6 +221,22 @@ class Dataset(models.Model):
     # physics parameter, so it is not a tag; it composes into the dataset name
     # after the tag run. Empty when the tags alone are a unique identity.
     sample_name = models.CharField(max_length=120, blank=True, default='')
+    # Cross-campaign propagation disposition of THIS campaign edition of the
+    # sample. The composed identity is campaign-specific through its version
+    # segment; the version-less tag composition + sample name is the family.
+    # Consumed at next-campaign creation: 'continue' editions mint successor
+    # editions, 'hold' stays in the catalog without next-campaign production,
+    # 'final' produces this campaign and ends the family. Operators (or an
+    # operator approving an AI proposal) flip states; ingest never does.
+    PROPAGATION_CHOICES = [
+        ('continue', 'continue'), ('hold', 'hold'), ('final', 'final'),
+    ]
+    propagation = models.CharField(
+        max_length=16, choices=PROPAGATION_CHOICES, default='continue')
+    # Composed name of the successor family when a retirement has a designated
+    # replacement (campaign-level changes such as an energy migration). A name
+    # reference, not an FK: the successor may not be materialized yet.
+    replaced_by = models.CharField(max_length=255, blank=True, default='')
     block_num = models.PositiveIntegerField(default=1)
     blocks = models.PositiveIntegerField(default=1)
     did = models.CharField(max_length=300, unique=True)

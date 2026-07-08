@@ -2044,12 +2044,20 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     archive).
 
     For each parsed dataset we get-or-create:
-      - Campaign(name='{STAGE}/{version}', lifecycle='past')
+      - Campaign(name='{version}') — one campaign row per version, bare-named;
+        both stages fold onto it, with per-stage totals under
+        ``data['past_summary'][stage]``. Lifecycle is classified only on
+        create (newer than current -> 'future', else 'past'); an existing
+        campaign's lifecycle is never changed by ingest — lifecycle
+        transitions are operator actions.
       - Dataset(did=PCS internal DID, dataset_name='past.{STAGE}.{ver}.{slug}'),
         with the epic-prod Rucio DID stored in metadata['source']['location']
         and the per-RSE breakdown in metadata['past_output'].
       - ProdTask(name='past.{STAGE}.{ver}.{slug}', status='past_output',
-        linked to the Dataset, anchor ProdConfig, and Campaign).
+        linked to the Dataset, anchor ProdConfig, and Campaign), carrying the
+        produced dataset as a unified ``overrides['outputs']`` entry
+        (EPICPROD_DATA_LINEAGE.md schema — never the legacy ``past_output``
+        block).
 
     Idempotency key: (STAGE, version, epic_prod_did). Re-running refreshes
     file_count / data_size / rse breakdown but leaves any operator-touched
@@ -2083,30 +2091,27 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     with transaction.atomic():
         for stage, versions in versions_by_stage.items():
             for version in versions:
-                campaign_name = f'{stage}/{version}'
+                campaign_name = version
                 index_path = _os.path.join(epic_prod_path, 'docs', stage, version, 'index.md')
                 try:
                     with open(index_path) as f:
                         text = f.read()
                 except OSError as e:
-                    summary['errors'].append(f'{campaign_name}: {e}')
+                    summary['errors'].append(f'{stage}/{version}: {e}')
                     continue
 
-                # A produced release newer than the current campaign is a
-                # FUTURE release, not past — classify by version so the lifecycle
-                # self-corrects on every import and as current advances.
+                # Lifecycle is classified on create only: a produced release
+                # newer than the current campaign starts as 'future', anything
+                # else as 'past'. An existing campaign's lifecycle is operator
+                # state and is never changed by ingest.
                 lc = 'future' if (current_v is not None
                                   and _version_tuple(version) > current_v) else 'past'
                 campaign, _ = Campaign.objects.get_or_create(
                     name=campaign_name,
                     defaults={'lifecycle': lc,
-                              'description': f'{stage} campaign {version} '
-                                             f'(epic-prod {index_path})',
+                              'description': f'Campaign {version} (epic-prod ingest)',
                               'created_by': created_by},
                 )
-                if campaign.lifecycle != lc:
-                    campaign.lifecycle = lc
-                    campaign.save(update_fields=['lifecycle'])
                 summary['campaigns'] += 1
 
                 campaign_files = 0
@@ -2145,7 +2150,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                     row_physics_tag = physics
                     if derived is None:
                         summary['errors'].append(
-                            f'{campaign_name}: DID {epic_did!r} physics unresolved; '
+                            f'{stage}/{version}: DID {epic_did!r} physics unresolved; '
                             f'left on placeholder {physics.tag_label}')
                     elif derived.get('process') in ('BEAMGAS', 'SYNRAD'):
                         row_physics_tag = _no_signal_physics_tag()
@@ -2180,12 +2185,30 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         ds.physics_tag = row_physics_tag
                         ds.save()
 
+                    # Unified produced-output entry (ProdTask.outputs schema);
+                    # the legacy past_output block stays in Dataset.metadata
+                    # only, never in task overrides.
+                    outputs_entry = {
+                        'did': epic_did,
+                        'stage': stage,
+                        'version': version,
+                        'filters': metadata['past_output']['filters'],
+                        'rses': [{'rse': r.get('name'),
+                                  'files': r.get('files'),
+                                  'total': r.get('total'),
+                                  'complete': r.get('status') == 'complete'}
+                                 for r in (block['rses'] or [])],
+                        'file_count': block['file_count'],
+                        'bytes': block['data_size_bytes'],
+                        'complete': block['complete'],
+                        'checked_at': _timezone.now().isoformat(),
+                    }
                     task_defaults = dict(
                         description='',
                         dataset=ds,
                         prod_config=cfg,
                         campaign=campaign,
-                        overrides={'past_output': metadata['past_output']},
+                        overrides={'outputs': [outputs_entry]},
                         created_by=created_by,
                     )
                     existing = ProdTask.objects.filter(name=pcs_name).first()
@@ -2195,6 +2218,8 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                             if k == 'overrides':
                                 merged = dict(existing.overrides or {})
                                 merged.update(v)
+                                # Re-import heals any legacy-shaped row.
+                                merged.pop('past_output', None)
                                 v = merged
                             setattr(existing, k, v)
                         if not preserve_status:
@@ -2209,15 +2234,18 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                     campaign_files += block['file_count']
                     campaign_bytes += block['data_size_bytes']
 
-                campaign.data = {
-                    **(campaign.data or {}),
-                    'past_summary': {
-                        'file_count': campaign_files,
-                        'data_size_bytes': campaign_bytes,
-                        'stage': stage,
-                        'version': version,
-                    },
+                # Stage-keyed totals: one campaign row spans both stages, so
+                # each stage pass writes only its own entry.
+                data = dict(campaign.data or {})
+                past_summary = data.get('past_summary')
+                if not isinstance(past_summary, dict) or 'file_count' in past_summary:
+                    past_summary = {}
+                past_summary[stage] = {
+                    'file_count': campaign_files,
+                    'data_size_bytes': campaign_bytes,
                 }
+                data['past_summary'] = past_summary
+                campaign.data = data
                 campaign.save(update_fields=['data', 'updated_at'])
 
     return summary

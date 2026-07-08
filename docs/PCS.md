@@ -203,6 +203,13 @@ group.EIC.26.02.0.epic_craterlake.p1141.e37.s1.r1.45to135deg
 
 The version segment is the detector version: it describes the conditions of the produced data. Campaign membership is bookkeeping for production operations and does not rename the dataset identity. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
 
+Because the version segment is part of the identity, each campaign's edition of a sample is its own dataset row; the version-less tag composition plus sample name is the cross-campaign **family**, which needs no entity of its own. Two dataset fields plan the family's future across campaigns:
+
+- `propagation` — this edition's disposition, consumed at next-campaign creation: `continue` (default; mints the successor edition), `hold` (stays in the catalog, no next-campaign production), `final` (produced this campaign, then the family ends). Operators flip states, sometimes by approving an AI proposal; ingest never does.
+- `replaced_by` — composed-name reference to the successor family when a retirement has a designated replacement (campaign-level changes such as an energy migration). A name reference, not a foreign key: the successor may not be materialized yet.
+
+A family retired in campaign N is one whose N edition is `final`; a family new in N has no N−1 edition. The campaign-over-campaign delta (continued / held / retired / replaced / new) is computed from these fields and feeds the campaign narrative and generated summaries ([EPICPROD_NARRATIVES.md](EPICPROD_NARRATIVES.md)).
+
 The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The logical task name is the dataset name without the `.bN` suffix.
 
 The detector-version identity and the sample variants below are extensions to the dataset model, defined here.

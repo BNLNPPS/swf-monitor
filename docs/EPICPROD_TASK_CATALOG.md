@@ -166,6 +166,11 @@ flowing left to right: past campaigns, current campaign, and next campaign.
 Tab/header color uses ergonomic pastels: grey for past campaigns, green for
 the current campaign, and blue for future campaigns.
 
+Campaign identity is one bare-named campaign row per version (`26.06.0`);
+production stage is carried on each row's produced-output record, not in the
+campaign name. The Past view lists every version with produced-output rows,
+whatever lifecycle slot its campaign occupies.
+
 Past campaign sections are frozen archives of completed production tasks.
 The current campaign contains active production tasks and the status needed
 for follow-up: submission path, task status, output state, monitoring

@@ -59,6 +59,7 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
+- `EPICPROD_NARRATIVES.md` — campaign narrative documents: classes, naming, draft→locked lifecycle, corun-ai home.
 - `EPICPROD_QUESTIONNAIRE.md` — ingest the PWG/DSC production-request Google Form into a PCS Questionnaire entity; public browser, request linkage.
 - `EPICPROD_DATA_LINEAGE.md` — gather produced-dataset Rucio refs onto the catalog; reference + xrootd access.
 - `EPICPROD_EVGEN_INPUTS.md` — assimilate JLab Rucio EVGEN inputs onto the catalog; the request↔Rucio input matcher and its (un)match gaps.

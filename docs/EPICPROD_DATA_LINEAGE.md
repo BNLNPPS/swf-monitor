@@ -137,7 +137,10 @@ same interim convention that already holds `input_dataset_dids` and the
 The same schema serves current and past campaigns — today's current is
 tomorrow's past, with no reshape on transition. `migrate_outputs_schema()`
 (standalone `scripts/migrate_outputs_schema.py`) folded the legacy `past_output`
-block and the old `csv_import.output` rollup onto it.
+block and the old `csv_import.output` rollup onto it, and the epic-prod
+past-campaign ingest writes this schema directly (one bare-named campaign per
+version, per-stage totals in `data['past_summary'][stage]`), so legacy-shaped
+task overrides are no longer produced.
 
 ## Architecture
 

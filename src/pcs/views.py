@@ -1986,13 +1986,8 @@ def pcs_catalog(request):
         detail_fn=lambda value: f'{sum(len(v) for v in value.values())} campaigns',
     )
     def _tab_detail(key, camps):
-        # Future campaigns are stage-prefixed (RECO/26.06.0); show the bare
-        # version so the tab reads "Future · 26.06.0", mirroring Current.
         if key == 'past':
             return ''
-        if key == 'future':
-            return ', '.join(sorted(
-                {c.name.split('/', 1)[1] for c in camps if '/' in c.name}))
         return ', '.join(c.name for c in camps)
     lifecycle_tabs = [
         {'key': 'past',    'label': 'Past',    'color': 'secondary',
@@ -2021,14 +2016,24 @@ def pcs_catalog(request):
     # plot above the table — a hybrid of Past's row model and Current's
     # snapshot view.
     if active_lifecycle in ('past', 'last', 'future'):
-        # Future and Past share the release-table view; each lists its own
-        # lifecycle's produced releases (Last pins to a past version, below).
-        past_campaigns = list(
-            campaigns_by_lifecycle['future' if active_lifecycle == 'future' else 'past'])
-        # Time flows left to right; releases ordered ASC.
-        release_versions = sorted(
-            {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
+        # Campaigns are bare-named (one row per version). Releases in this
+        # view = versions that actually carry past-output rows, independent
+        # of the lifecycle slot the campaign occupies — the current campaign
+        # legitimately holds the ingested record of its pre-PanDA production.
+        # The Future tab lists only future-slot campaigns' produced rows.
+        rows_by_campaign = dict(
+            ProdTask.objects
+            .filter(status='past_output')
+            .values_list('campaign__name')
+            .annotate(Count('id'))
         )
+        if active_lifecycle == 'future':
+            future_names = {c.name for c in campaigns_by_lifecycle['future']}
+            producing_names = {n for n in rows_by_campaign if n in future_names}
+        else:
+            producing_names = set(rows_by_campaign)
+        # Time flows left to right; releases ordered ASC.
+        release_versions = sorted(producing_names)
         def _version_year(v):
             head = v.split('.', 1)[0]
             return ('20' + head) if head.isdigit() and len(head) == 2 else ''
@@ -2044,9 +2049,8 @@ def pcs_catalog(request):
 
         if active_lifecycle == 'last':
             # Pin release to the Last campaign's version; no nav. The
-            # Last Campaign carries its version directly as its name
-            # (e.g. '26.04.1'); past campaigns for the same version are
-            # named 'FULL/26.04.1' and 'RECO/26.04.1'.
+            # campaign name is the bare version ('26.04.1') and carries
+            # both stages' rows.
             last_camps = campaigns_by_lifecycle['last']
             active_release = last_camps[0].name if last_camps else ''
         else:
@@ -2065,60 +2069,55 @@ def pcs_catalog(request):
         requested_stage = (request.GET.get('stage') or '').strip().upper()
         active_stage = requested_stage if requested_stage in ('FULL', 'RECO') else ''
 
-        def in_release(c):
-            if active_release == 'all':
-                return True
-            if active_release.startswith('all_'):
-                year = active_release[4:]
-                versions = releases_by_year.get(year, [])
-                return any(c.name.endswith('/' + v) for v in versions)
-            return c.name.endswith('/' + active_release)
-        release_campaigns = [c for c in past_campaigns if in_release(c)]
+        if active_release == 'all':
+            wanted_versions = set(release_versions)
+        elif active_release.startswith('all_'):
+            wanted_versions = set(releases_by_year.get(active_release[4:], []))
+        else:
+            wanted_versions = {active_release}
+        selected_names = {n for n in producing_names if n in wanted_versions}
+        selected_campaigns = list(Campaign.objects.filter(name__in=selected_names))
 
-        def in_stage(c, s):
-            return c.name.startswith(s + '/')
-        selected_campaigns = [c for c in release_campaigns
-                              if not active_stage or in_stage(c, active_stage)]
-
-        # Stage-facet counts: number of past_output rows under each stage
-        # in the active release.
-        per_campaign_count = dict(
+        # Stage-facet counts from each row's produced-output stage
+        # (outputs[0].stage — one entry per past-output row).
+        stage_rows = (
             ProdTask.objects
-            .filter(campaign__in=release_campaigns, status='past_output')
-            .values_list('campaign__name')
+            .filter(campaign__name__in=selected_names, status='past_output')
+            .values_list('overrides__outputs__0__stage')
             .annotate(Count('id'))
         )
-        def count_for(stage):
-            return sum(n for name, n in per_campaign_count.items()
-                       if name.startswith(stage + '/'))
-        stage_counts = {
-            'all':  sum(per_campaign_count.values()),
-            'FULL': count_for('FULL'),
-            'RECO': count_for('RECO'),
-        }
+        stage_counts = {'all': 0, 'FULL': 0, 'RECO': 0}
+        for stage_value, n in stage_rows:
+            stage_counts['all'] += n
+            if stage_value in ('FULL', 'RECO'):
+                stage_counts[stage_value] += n
 
-        past_tasks = list(
+        past_tasks_qs = (
             ProdTask.objects
             .select_related(
                 'campaign', 'dataset', 'dataset__physics_tag',
                 'dataset__evgen_tag', 'dataset__simu_tag',
                 'dataset__reco_tag', 'dataset__background_tag',
             )
-            .filter(campaign__in=selected_campaigns, status='past_output')
+            .filter(campaign__name__in=selected_names, status='past_output')
             .order_by('campaign__name', 'dataset__dataset_name')
         )
-        past_tasks = _annotate_task_questionnaire_matches(past_tasks)
-        selected_campaign_data = dict(
-            Campaign.objects
-            .filter(pk__in=[c.pk for c in selected_campaigns])
-            .values_list('pk', 'data')
-        )
-        agg_files = sum((selected_campaign_data.get(c.pk) or {})
-                        .get('past_summary', {}).get('file_count', 0)
-                        for c in selected_campaigns)
-        agg_size = sum((selected_campaign_data.get(c.pk) or {})
-                       .get('past_summary', {}).get('data_size_bytes', 0)
-                       for c in selected_campaigns)
+        if active_stage:
+            past_tasks_qs = past_tasks_qs.filter(
+                overrides__outputs__0__stage=active_stage)
+        past_tasks = _annotate_task_questionnaire_matches(list(past_tasks_qs))
+
+        # Aggregates from the stage-keyed past_summary, respecting the
+        # stage filter.
+        def _summary_total(campaign, key):
+            past_summary = (campaign.data or {}).get('past_summary') or {}
+            if not isinstance(past_summary, dict):
+                return 0
+            stages = [active_stage] if active_stage else list(past_summary)
+            return sum((past_summary.get(s) or {}).get(key, 0)
+                       for s in stages if isinstance(past_summary.get(s), dict))
+        agg_files = sum(_summary_total(c, 'file_count') for c in selected_campaigns)
+        agg_size = sum(_summary_total(c, 'data_size_bytes') for c in selected_campaigns)
 
         # Year groups for the template's per-year nav blocks.
         release_year_groups = [
