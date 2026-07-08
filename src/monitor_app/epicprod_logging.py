@@ -213,6 +213,13 @@ ACTION_DEFAULTS = {
         'description': "Link an existing dataset as a campaign task's input "
                        "by DID.",
     },
+    'dataset_propagation_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Operator change of dataset propagation disposition "
+                       "(continue, hold, final) with required comment; one "
+                       "event per single or bulk action, carrying the "
+                       "changed count and the selecting filter.",
+    },
     # web entity lifecycle and operator actions
     'campaign_set_current': {
         'sublevel': 'high', 'live': True,

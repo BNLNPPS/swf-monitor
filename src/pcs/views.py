@@ -2238,7 +2238,13 @@ def pcs_catalog(request):
         _requestor_options,
         detail_fn=lambda value: f'{len(value)} options',
     )
+    propagation_last_comment = ''
+    if request.user.is_authenticated:
+        from monitor_app.models import UserPreference
+        propagation_last_comment = UserPreference.get_prefs(
+            request.user.username).get('propagation_last_comment', '')
     context = {
+        'propagation_last_comment': propagation_last_comment,
         'tasks': [],
         'show_tabs': True,
         'columns_mode': 'full',

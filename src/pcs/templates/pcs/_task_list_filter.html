@@ -17,6 +17,11 @@
 .pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
 
+/* Propagation disposition badges — shown only when not 'continue'. */
+.pcs-prop-badge { font-weight: 600; padding: 0 .45em; border-radius: .5em; margin-left: .4em; }
+.pcs-prop-hold  { background-color: #ffe9b0; color: #6b4e00; }
+.pcs-prop-final { background-color: #f6c8c8; color: #7a1212; }
+
 /* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
 .pwg-edt            { background-color: #d0e8ff !important; }
 .pwg-inclusive      { background-color: #d4f4d4 !important; }
@@ -284,6 +289,7 @@ Context expected:
           {% if t.campaign %}
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
               &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
+              {% if t.dataset and t.dataset.propagation != 'continue' %}<span class="pcs-prop-badge pcs-prop-{{ t.dataset.propagation }}">{{ t.dataset.propagation }}</span>{% endif %}
             </div>
           {% endif %}
           <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ ds_path }}</a></div>
@@ -417,8 +423,31 @@ Context expected:
     <button type="button" class="btn btn-outline-secondary" data-bulk="withdraw" disabled>Withdraw</button>
     <button type="button" class="btn btn-outline-secondary" data-bulk="clone" disabled>Clone</button>
     <button type="button" class="btn btn-outline-secondary" data-bulk="priority" disabled>Set priority…</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="propagation" disabled>Propagation…</button>
   </div>
   <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
+</div>
+
+<div id="pcs-prop-panel" class="mt-2 p-2 border rounded" style="display:none; max-width:60em">
+  {% csrf_token %}
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <strong>Propagation</strong>
+    <span class="text-muted">(<span id="pcs-prop-count">0</span> selected)</span>
+    <select id="pcs-prop-state" class="form-select" style="width:auto">
+      <option value="continue">continue</option>
+      <option value="hold">hold</option>
+      <option value="final">final</option>
+    </select>
+    <input id="pcs-prop-replaced-by" class="form-control" style="width:26em"
+           placeholder="replaced by (composed name, optional)">
+  </div>
+  <div class="d-flex align-items-start gap-2 mt-2">
+    <textarea id="pcs-prop-comment" class="form-control" rows="2"
+              placeholder="Comment (required) — the why, with its source">{{ propagation_last_comment }}</textarea>
+    <button type="button" id="pcs-prop-apply" class="btn btn-primary">Apply</button>
+    <button type="button" id="pcs-prop-cancel" class="btn btn-outline-secondary">Cancel</button>
+  </div>
+  <div id="pcs-prop-result" class="mt-1" style="color:#b02a37"></div>
 </div>
 
 <script>
@@ -671,14 +700,65 @@ Context expected:
     });
   }
   allCbs.forEach(c => c.addEventListener('change', refresh));
+  const propPanel = document.getElementById('pcs-prop-panel');
   bulkButtons.forEach(b => {
     b.addEventListener('click', () => {
       const action = b.dataset.bulk;
       const ids = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
+      if (action === 'propagation' && propPanel) {
+        document.getElementById('pcs-prop-count').textContent = ids.length;
+        propPanel.style.display = '';
+        propPanel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        return;
+      }
       alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
     });
   });
   refresh();
+
+  /* Propagation flip — one POST, one action-stream event, whatever the
+     selection size. Comment is required; the server remembers it as this
+     user's next default. */
+  (function () {
+    if (!propPanel) return;
+    const applyBtn = document.getElementById('pcs-prop-apply');
+    const cancelBtn = document.getElementById('pcs-prop-cancel');
+    const resultEl = document.getElementById('pcs-prop-result');
+    cancelBtn.addEventListener('click', () => {
+      propPanel.style.display = 'none';
+      resultEl.textContent = '';
+    });
+    applyBtn.addEventListener('click', async () => {
+      const names = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
+      const state = document.getElementById('pcs-prop-state').value;
+      const comment = document.getElementById('pcs-prop-comment').value.trim();
+      const replacedBy = document.getElementById('pcs-prop-replaced-by').value.trim();
+      if (!names.length) { resultEl.textContent = 'No tasks selected.'; return; }
+      if (!comment) { resultEl.textContent = 'A comment is required.'; return; }
+      if (!confirm(`Set propagation to "${state}" on ${names.length} dataset(s)?`)) return;
+      applyBtn.disabled = true;
+      const token = propPanel.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/propagation/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ names: names, state: state, comment: comment,
+                                 replaced_by: replacedBy,
+                                 filter: window.location.search }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || 'request failed');
+        alert(`Propagation set to "${state}" on ${j.changed.length} dataset(s)`
+              + (j.unchanged.length ? `, ${j.unchanged.length} already there` : '')
+              + (j.unknown.length ? `, ${j.unknown.length} unknown: ${j.unknown.join(', ')}` : '')
+              + '.');
+        window.location.reload();
+      } catch (err) {
+        applyBtn.disabled = false;
+        resultEl.textContent = 'Failed: ' + err.message;
+      }
+    });
+  })();
 
   /* Paired-row sort. */
   const table = document.querySelector('table.pcs-tlf-list');

@@ -250,6 +250,30 @@ class DatasetViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(new_block).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['post'], url_path='propagation')
+    def propagation(self, request):
+        """Single or bulk propagation flip with required comment.
+
+        Body: ``names`` (list of composed names), ``state``
+        (continue|hold|final), ``comment`` (required), ``replaced_by``
+        (optional), ``filter`` (optional — the selecting filter querystring,
+        recorded for audit). Thin wrapper over
+        ``services.dataset_propagation_set``; one action-stream event per
+        call.
+        """
+        try:
+            result = services.dataset_propagation_set(
+                request.data.get('names') or [],
+                request.data.get('state'),
+                request.data.get('comment'),
+                replaced_by=request.data.get('replaced_by', ''),
+                changed_by=request.user.username,
+                filter_state=request.data.get('filter', ''),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_200_OK)
+
 
 class ProdConfigViewSet(viewsets.ModelViewSet):
     """Production configuration templates. Owner-only edit; anyone can create."""

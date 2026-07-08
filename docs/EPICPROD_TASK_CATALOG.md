@@ -233,7 +233,9 @@ Authentication preserves the page URL: logging in from the compose view returns
 to the same selected task rather than to the PCS home page.
 
 Supported catalog actions include submit, clone, archive, withdraw,
-priority update, readiness update, and BG-mixing matrix expansion. Actions
+priority update, readiness update, propagation disposition update
+(continue / hold / final with required comment — see
+[PCS.md](PCS.md#datasets)), and BG-mixing matrix expansion. Actions
 apply either to a single task or to the current selected set.
 
 The Current Campaign view shows the production status needed for action,

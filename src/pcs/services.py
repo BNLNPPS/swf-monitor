@@ -2818,6 +2818,107 @@ def migrate_outputs_schema(*, apply=False):
     return summary
 
 
+PROPAGATION_STATES = ('continue', 'hold', 'final')
+
+
+def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
+                            changed_by='', filter_state=''):
+    """Set the cross-campaign propagation disposition on dataset editions.
+
+    One call = one operator action, single or bulk. Every named composed
+    identity gets the state (and the optional ``replaced_by`` successor
+    reference), with one append-only history entry recorded on the
+    identity's block-1 row under ``metadata['propagation']['history']`` —
+    state, previous, comment (required: the why and its source travel
+    together), changed_by, changed_at. The ``propagation`` column mirrors
+    the newest entry on every block row.
+
+    Exactly one ``dataset_propagation_set`` action-stream event is logged
+    per call, carrying the changed count, the comment, and the selecting
+    filter — never one event per dataset. The comment is remembered as the
+    caller's next default (UserPreference ``propagation_last_comment``).
+
+    Unknown names and no-op flips are counted and returned, never silently
+    dropped. Raises ServiceError on an invalid state or an empty comment.
+    """
+    from monitor_app.epicprod_logging import log_epicprod_action
+    from monitor_app.models import UserPreference
+
+    state = (state or '').strip()
+    comment = (comment or '').strip()
+    replaced_by = (replaced_by or '').strip()
+    names = [n.strip() for n in (composed_names or []) if n and n.strip()]
+    if state not in PROPAGATION_STATES:
+        raise ServiceError(
+            f'propagation state must be one of '
+            f'{", ".join(PROPAGATION_STATES)}; got {state!r}')
+    if not comment:
+        raise ServiceError('comment is required on every propagation change')
+    if not names:
+        raise ServiceError('no dataset names supplied')
+
+    changed, unchanged, unknown = [], [], []
+    now = _timezone.now().isoformat()
+    with transaction.atomic():
+        for name in names:
+            rows = list(Dataset.objects
+                        .filter(composed_name=name).order_by('block_num'))
+            if not rows:
+                unknown.append(name)
+                continue
+            head = rows[0]
+            if head.propagation == state and (
+                    not replaced_by or head.replaced_by == replaced_by):
+                unchanged.append(name)
+                continue
+            entry = {
+                'state': state,
+                'previous': head.propagation,
+                'comment': comment,
+                'changed_by': changed_by or '',
+                'changed_at': now,
+            }
+            if replaced_by:
+                entry['replaced_by'] = replaced_by
+            metadata = dict(head.metadata or {})
+            propagation_block = dict(metadata.get('propagation') or {})
+            history = list(propagation_block.get('history') or [])
+            history.append(entry)
+            propagation_block['history'] = history
+            metadata['propagation'] = propagation_block
+            head.metadata = metadata
+            for row in rows:
+                row.propagation = state
+                if replaced_by:
+                    row.replaced_by = replaced_by
+            head.save(update_fields=['propagation', 'replaced_by', 'metadata'])
+            for row in rows[1:]:
+                row.save(update_fields=['propagation', 'replaced_by'])
+            changed.append(name)
+
+    if changed_by:
+        UserPreference.set_pref(changed_by, 'propagation_last_comment', comment)
+
+    extra = {'changed': len(changed), 'unchanged': len(unchanged),
+             'unknown': len(unknown), 'state': state, 'comment': comment}
+    if replaced_by:
+        extra['replaced_by'] = replaced_by
+    if filter_state:
+        extra['filter'] = filter_state
+    log_epicprod_action(
+        'web', 'dataset_propagation_set',
+        subject_type='dataset' if len(changed) == 1 else '',
+        subject_key=changed[0] if len(changed) == 1 else '',
+        username=changed_by,
+        sublevel='normal', live_default=True,
+        message=(f'propagation -> {state} on {len(changed)} dataset(s): '
+                 f'{comment}'),
+        **extra,
+    )
+    return {'changed': changed, 'unchanged': unchanged, 'unknown': unknown,
+            'state': state}
+
+
 def summarize_rucio_timeline(snapshot, *, bin_hours=12):
     """Build a per-bin cumulative arrival timeline from a Rucio snapshot.
 
