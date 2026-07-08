@@ -153,7 +153,12 @@ counted summary line, never silently dropped.
 prefer `summarize=True` (counts by action with ok/error split and duration
 statistics) for reporting and assessment; filters on action, instance,
 subject, username, outcome, and time window for drill-down. `swf_list_logs
-(app_name='epicprod')` returns raw records. Tool ergonomics are sized for the
+(app_name='epicprod')` returns raw records. Raw listings apply an importance
+floor of `normal` by default so routine low-importance mechanics do not
+drown the real actions; the excluded records are reported as a count
+(`excluded_below_floor`), the floor lifts automatically for
+action/subject/outcome drill-downs and summaries, and `min_sublevel` sets it
+explicitly. Tool ergonomics are sized for the
 smallest consumer (the bot runs a small model): summarize-first, prescriptive
 docstrings.
 

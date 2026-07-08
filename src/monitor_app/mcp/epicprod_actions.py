@@ -12,6 +12,20 @@ from monitor_app.mcp.common import _parse_time, _default_start_time, _monitor_ur
 # reported via truncated=True so summaries are never silently partial.
 SUMMARIZE_MAX_ROWS = 5000
 
+# Importance ordering for the sublevel floor (EPICPROD_ACTION_STREAM.md).
+SUBLEVEL_ORDER = ('low', 'normal', 'high')
+
+
+def _apply_sublevel_floor(qs, floor):
+    # 'normal' excludes only declared-low records, so records without a
+    # sublevel pass through rather than vanish; 'high' requires the
+    # declaration.
+    if floor == 'normal':
+        return qs.exclude(extra_data__sublevel='low')
+    if floor == 'high':
+        return qs.filter(extra_data__sublevel='high')
+    return qs
+
 
 def _item(log):
     extra = log.extra_data if isinstance(log.extra_data, dict) else {}
@@ -42,8 +56,16 @@ def _item(log):
 
 
 def _list_actions_sync(action, instance, subject_type, subject_key, username,
-                       outcome, start_time, end_time, summarize, limit, offset):
+                       outcome, start_time, end_time, min_sublevel, summarize,
+                       limit, offset):
     from monitor_app.models import AppLog
+
+    if min_sublevel is not None and min_sublevel not in SUBLEVEL_ORDER:
+        return {
+            'success': False,
+            'error': f"min_sublevel must be one of {', '.join(SUBLEVEL_ORDER)}; "
+                     f"got {min_sublevel!r}",
+        }
 
     qs = AppLog.objects.filter(app_name=EPICPROD_APP_NAME).order_by('-timestamp')
     if action:
@@ -65,10 +87,30 @@ def _list_actions_sync(action, instance, subject_type, subject_key, username,
     if end:
         qs = qs.filter(timestamp__lte=end)
 
-    total_count = qs.count()
+    # Importance floor: broad raw listings default to 'normal' so routine
+    # low-importance mechanics never drown the real actions; a drill-down
+    # on action/subject_key/outcome, and summarize (which aggregates), see
+    # everything unless a floor is passed explicitly.
+    if min_sublevel is None:
+        broad_listing = not summarize and not action and not subject_key and not outcome
+        effective_floor = 'normal' if broad_listing else 'low'
+    else:
+        effective_floor = min_sublevel
+
+    if effective_floor == 'low':
+        total_count = qs.count()
+        excluded_below_floor = 0
+    else:
+        pre_floor_count = qs.count()
+        qs = _apply_sublevel_floor(qs, effective_floor)
+        total_count = qs.count()
+        excluded_below_floor = pre_floor_count - total_count
+
     result = {
         'success': True,
         'total_count': total_count,
+        'min_sublevel': effective_floor,
+        'excluded_below_floor': excluded_below_floor,
         'window_start': start.isoformat(),
         'window_end': end.isoformat() if end else None,
         'monitor_urls': [
@@ -143,6 +185,7 @@ async def epicprod_list_actions(
     outcome: str = None,
     start_time: str = None,
     end_time: str = None,
+    min_sublevel: str = None,
     summarize: bool = False,
     limit: int = 50,
     offset: int = 0,
@@ -158,6 +201,15 @@ async def epicprod_list_actions(
     - Any failed actions today?         epicprod_list_actions(outcome='error')
     - History of one task:              epicprod_list_actions(subject_key='<composed task name>')
     - What has the ops agent done?      epicprod_list_actions(instance='ops-agent')
+    - Include routine mechanics too:    epicprod_list_actions(min_sublevel='low')
+
+    Raw listings apply an importance floor of 'normal' by default, so
+    high-volume low-importance mechanics (e.g. the 5-minute
+    system_status_refresh) never drown the real actions; what the floor
+    excluded is counted in excluded_below_floor, never silently dropped.
+    The floor lifts automatically when action, subject_key, or outcome is
+    specified (a drill-down must not return a misleading empty set) and for
+    summarize=True (aggregation collapses volume into counts).
 
     summarize=True answers "what ran and how did it go" directly: counts by
     action with ok/error split and duration statistics (avg/max/min ms), and
@@ -181,15 +233,20 @@ async def epicprod_list_actions(
         outcome: 'ok' or 'error'.
         start_time: ISO timestamp or relative like '-24h', '-7d'.
         end_time: ISO timestamp; open-ended if omitted.
+        min_sublevel: Importance floor ('low' < 'normal' < 'high'); records
+            below it are excluded and counted in excluded_below_floor. Pass
+            explicitly to override the default described above in either
+            direction.
         summarize: Return aggregate counts and duration stats instead of items.
         limit: Max items when listing (default 50, cap 200).
         offset: Pagination offset when listing.
 
     Returns:
-        total_count and window always; with summarize=True a summary block
-        (by_action with ok/error and duration_ms stats, by_instance) and a
-        truncated flag; otherwise items (promoted structured fields plus any
-        recorded counts), limit/offset/has_more.
+        total_count, the effective min_sublevel, excluded_below_floor, and
+        window always; with summarize=True a summary block (by_action with
+        ok/error and duration_ms stats, by_instance) and a truncated flag;
+        otherwise items (promoted structured fields plus any recorded
+        counts), limit/offset/has_more.
     """
     return await sync_to_async(_list_actions_sync)(
         action=action,
@@ -200,6 +257,7 @@ async def epicprod_list_actions(
         outcome=outcome,
         start_time=start_time,
         end_time=end_time,
+        min_sublevel=min_sublevel,
         summarize=summarize,
         limit=limit,
         offset=offset,
