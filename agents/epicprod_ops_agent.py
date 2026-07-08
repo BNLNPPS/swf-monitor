@@ -264,6 +264,7 @@ class EpicProdOpsAgent(BaseAgent):
                              reason=f'timed out after {FETCH_TIMEOUT}s',
                              subject_type='panda_job', subject_key=str(m['pandaid']),
                              username=str(m.get('requested_by') or ''),
+                             sublevel='normal',
                              level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
             return
         for line in (p.stderr or "").splitlines():
@@ -277,11 +278,13 @@ class EpicProdOpsAgent(BaseAgent):
                              reason=reason,
                              subject_type='panda_job', subject_key=str(m['pandaid']),
                              username=str(m.get('requested_by') or ''),
+                             sublevel='normal',
                              level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
         else:
             self._log_action('payload_log_fetch', t0,
                              subject_type='panda_job', subject_key=str(m['pandaid']),
                              username=str(m.get('requested_by') or ''),
+                             sublevel='normal',
                              jeditaskid=str(m['jeditaskid']))
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
             # Push completion to the browser via the SSE relay (rides the topic
@@ -803,7 +806,8 @@ class EpicProdOpsAgent(BaseAgent):
                 f"PRODOPS questionnaire_automatch TIMEOUT after {QUESTIONNAIRE_AUTOMATCH_TIMEOUT}s")
             self._log_action('questionnaire_automatch', t0, outcome='timeout',
                              reason=f'timed out after {QUESTIONNAIRE_AUTOMATCH_TIMEOUT}s',
-                             username=created_by, level=logging.ERROR)
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  match-questionnaires: {line}")
@@ -815,11 +819,13 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(f"PRODOPS questionnaire_automatch FAILED rc={p.returncode}")
             self._log_action('questionnaire_automatch', t0, outcome='error',
                              reason=reason,
-                             username=created_by, level=logging.ERROR)
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS questionnaire_automatch done")
             self._log_action('questionnaire_automatch', t0,
-                             username=created_by,
+                             username=created_by, sublevel='normal',
+                             live_default=True,
                              summary=(out.splitlines()[-1] if out else ''))
 
     def _handle_catalog_sync(self, m):

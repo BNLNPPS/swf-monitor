@@ -128,7 +128,7 @@ ACTION_DEFAULTS = {
                        "message-bus back door; systemd leaves it stopped.",
     },
     'payload_log_fetch': {
-        'sublevel': 'low', 'live': False,
+        'sublevel': 'normal', 'live': False,
         'description': "Fetch one PanDA job's payload log tarball from Rucio "
                        "over xrootd and extract it into the shared cache for "
                        "the job page.",
@@ -151,7 +151,7 @@ ACTION_DEFAULTS = {
                        "CSV: create or update request records.",
     },
     'questionnaire_automatch': {
-        'sublevel': 'low', 'live': False,
+        'sublevel': 'normal', 'live': True,
         'description': "LLM matching of production requests to catalog tasks "
                        "using the full tag map; each new match logs its own "
                        "questionnaire_match_found event.",
