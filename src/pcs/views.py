@@ -2441,6 +2441,9 @@ def prod_task_compose(request):
             'csv_file': t.csv_file,
             'overrides': t.overrides or {},
             'ai_content': ai_content_summary(t.overrides or {}),
+            'propagation': t.dataset.propagation if t.dataset_id else '',
+            'proposal': ((t.dataset.metadata or {}).get('proposal')
+                         if t.dataset_id else None),
             'description': t.description,
             'created_by': t.created_by,
             'readiness': prodtask_readiness_problems(t),

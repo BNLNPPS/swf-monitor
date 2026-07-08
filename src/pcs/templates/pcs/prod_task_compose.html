@@ -1020,6 +1020,52 @@
             <div class="item-meta">Created by ${c.created_by} | ${c.updated_at}</div>`;
     }
 
+    function proposalHtml(t) {
+        // Pending AI proposal (EPICPROD_PROPOSALS.md) — same record the
+        // catalog list renders, so list<->detail review cannot fork. Approve
+        // and Deny act through the same decide endpoint as the bulk bar.
+        const p = t.proposal;
+        if (!p || !p.payload) return '';
+        const name = htmlEscape(taskComposedName(t));
+        const buttons = currentUser
+            ? `<span class="ms-2"><button type="button" class="btn btn-sm ai-attr" data-proposal-decide="approve" data-task-name="${name}">Approve</button>`
+              + `<button type="button" class="btn btn-sm ai-attr ms-1" data-proposal-decide="deny" data-task-name="${name}">Deny</button></span>`
+            : '';
+        const replaced = p.payload.replaced_by
+            ? `, replaced by ${htmlEscape(p.payload.replaced_by)}` : '';
+        return `<div class="mb-2 p-2 ai-attr" style="display:block">
+            <strong>AI proposal:</strong> campaign propagation ${htmlEscape(p.prev_state || '')} &rarr; ${htmlEscape(p.payload.state || '')}${replaced}
+            ${buttons}
+            <div class="mt-1">${htmlEscape(p.comment || '')}</div>
+            <div class="item-meta">proposed by ${htmlEscape(p.proposer || 'AI')} ${htmlEscape(String(p.proposed_at || '').slice(0, 10))}</div>
+        </div>`;
+    }
+
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-proposal-decide]');
+        if (!btn) return;
+        const decision = btn.dataset.proposalDecide;
+        const name = btn.dataset.taskName;
+        const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
+        if (!confirm(`${verb} the AI proposal on ${name}?`)) return;
+        btn.disabled = true;
+        try {
+            const r = await fetch('/swf-monitor/pcs/api/datasets/proposal-decide/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                body: JSON.stringify({ names: [name], decision: decision }),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.detail || 'request failed');
+            if (j.stale.length) alert('The record changed since this was proposed — the proposal was withdrawn without executing.');
+            else if (j.no_proposal.length) alert('No pending proposal found on this task.');
+            window.location.reload();
+        } catch (err) {
+            btn.disabled = false;
+            alert('Proposal decision failed: ' + err.message);
+        }
+    });
+
     function showTaskDetail(id) {
         const t = allTasks.find(x => x.id === id);
         if (!t) return;
@@ -1072,6 +1118,7 @@
             : `<span class="badge bg-${statusColors[t.status]||'secondary'}">${htmlEscape(t.status)}</span>`;
 
         let html = `<p>${statusBadge}<span class="item-meta${statusBadge ? ' ms-2' : ''}">by ${htmlEscape(t.created_by)} | ${htmlEscape(t.updated_at)}</span></p>`;
+        html += proposalHtml(t);
         html += aiAssessmentsHtml(t.ai_content || []);
         html += pandaTasksHtml(t);
         html += pandaOperationsHtml(t);
