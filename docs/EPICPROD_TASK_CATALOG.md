@@ -267,9 +267,9 @@ Feed implementation remains in the source subsystems.
 ## 7. Filters and Selection
 
 Catalog filters cover the fields used to find task sets: campaign stage,
-campaign, requestor, physics tags, priority, Use flags, status, readiness,
-submission path, input source, BG-mixing state, output state, and linked
-request.
+campaign, requestor, physics tags, priority, Use flags, status, propagation
+disposition, readiness, submission path, input source, BG-mixing state,
+output state, and linked request.
 
 Filters are displayed in a shared layout that works in both the full-page
 catalog and the compose view. In the full-page catalog, filters sit above the

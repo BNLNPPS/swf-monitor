@@ -218,7 +218,25 @@ ACTION_DEFAULTS = {
         'description': "Operator change of dataset propagation disposition "
                        "(continue, hold, final) with required comment; one "
                        "event per single or bulk action, carrying the "
-                       "changed count and the selecting filter.",
+                       "changed count and the selecting filter. Carries an "
+                       "origin stamp when executing an approved AI proposal.",
+    },
+    'dataset_proposal_created': {
+        'sublevel': 'normal', 'live': True,
+        'description': "AI proposal of a dataset propagation change, pending "
+                       "human review; one event per propose call with the "
+                       "proposed count and batch.",
+    },
+    'dataset_proposal_denied': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Human denial of pending AI proposals; denial memory "
+                       "prevents re-proposal until the proposer's inputs "
+                       "change.",
+    },
+    'dataset_proposal_expired': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Withdrawal of pending AI proposals (recurring-scan "
+                       "heartbeat refresh or operator clear), with count.",
     },
     # web entity lifecycle and operator actions
     'campaign_set_current': {

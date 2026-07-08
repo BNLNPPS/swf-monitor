@@ -22,6 +22,12 @@
 .pcs-prop-hold  { background-color: #ffe9b0; color: #6b4e00; }
 .pcs-prop-final { background-color: #f6c8c8; color: #7a1212; }
 
+/* Gentle required-comment prompt inside the propagation panel. */
+.pcs-prop-need { background-color: #fff7e0; border: 1px solid #e6c96a; color: #5b4a12;
+                 border-radius: .5em; padding: .4em .7em; font-weight: 600; }
+.pcs-prop-comment-attn { border-color: #e6c96a !important;
+                         box-shadow: 0 0 0 .2rem rgba(230, 201, 106, .35); }
+
 /* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
 .pwg-edt            { background-color: #d0e8ff !important; }
 .pwg-inclusive      { background-color: #d4f4d4 !important; }
@@ -127,6 +133,11 @@ Context expected:
     <span id="pcs-tlf-status-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Campaign propagation:</span>
+    <a href="#" data-filter="propagation" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-propagation-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Requestor:</span>
     <a href="#" data-filter="requestor" data-value="" class="filter-link filter-active">All</a>
     <span id="pcs-tlf-requestor-opts"></span>
@@ -196,6 +207,10 @@ Context expected:
     <a href="#" data-toggle="incomplete_input" class="filter-link">incomplete (<span data-count="incomplete_input">0</span>)</a>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label ai-attr-text">AI:</span>
+    <a href="#" data-toggle="ai_proposed" class="filter-link ai-attr-text">proposed (<span data-count="ai_proposed">0</span>)</a>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Flags:</span>
     <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
     <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
@@ -247,6 +262,8 @@ Context expected:
       <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
           data-task-id="{{ t.pk }}"
           data-status="{{ t.status|default:'' }}"
+          data-propagation="{{ t.dataset.propagation|default:'' }}"
+          data-ai-proposed="{% if t.dataset.metadata.proposal %}1{% else %}0{% endif %}"
           data-requestor="{{ t.requestor|default:'' }}"
           data-submission-path="{% if t.prod_config.data.submission_path == 'panda' %}panda{% else %}condor{% endif %}"
           data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
@@ -290,6 +307,7 @@ Context expected:
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
               &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
               {% if t.dataset and t.dataset.propagation != 'continue' %}<span class="pcs-prop-badge pcs-prop-{{ t.dataset.propagation }}">{{ t.dataset.propagation }}</span>{% endif %}
+              {% with prop=t.dataset.metadata.proposal %}{% if prop %}<span class="ai-attr" title="{{ prop.comment }} — proposed by {{ prop.proposer }} {{ prop.proposed_at|slice:":10" }}">AI: {{ prop.prev_state }} &rarr; {{ prop.payload.state }}</span>{% endif %}{% endwith %}
             </div>
           {% endif %}
           <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ ds_path }}</a></div>
@@ -423,7 +441,9 @@ Context expected:
     <button type="button" class="btn btn-outline-secondary" data-bulk="withdraw" disabled>Withdraw</button>
     <button type="button" class="btn btn-outline-secondary" data-bulk="clone" disabled>Clone</button>
     <button type="button" class="btn btn-outline-secondary" data-bulk="priority" disabled>Set priority…</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="propagation" disabled>Propagation…</button>
+    <button type="button" class="btn btn-outline-secondary" data-bulk="propagation" disabled>Campaign propagation…</button>
+    <button type="button" class="btn ai-attr" data-bulk="ai_approve" disabled>Approve AI</button>
+    <button type="button" class="btn ai-attr" data-bulk="ai_deny" disabled>Deny AI</button>
   </div>
   <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
 </div>
@@ -431,7 +451,7 @@ Context expected:
 <div id="pcs-prop-panel" class="mt-2 p-2 border rounded" style="display:none; max-width:60em">
   {% csrf_token %}
   <div class="d-flex align-items-center gap-2 flex-wrap">
-    <strong>Propagation</strong>
+    <strong>Campaign propagation</strong>
     <span class="text-muted">(<span id="pcs-prop-count">0</span> selected)</span>
     <select id="pcs-prop-state" class="form-select" style="width:auto">
       <option value="continue">continue</option>
@@ -440,6 +460,9 @@ Context expected:
     </select>
     <input id="pcs-prop-replaced-by" class="form-control" style="width:26em"
            placeholder="replaced by (composed name, optional)">
+  </div>
+  <div id="pcs-prop-need-comment" class="pcs-prop-need mt-2" style="display:none">
+    A comment is required — a sentence on why, with its source. Enter completes the change.
   </div>
   <div class="d-flex align-items-start gap-2 mt-2">
     <textarea id="pcs-prop-comment" class="form-control" rows="2"
@@ -458,12 +481,13 @@ Context expected:
      state of the other filters. Initial state comes from URL query params
      so the catalog stays bookmarkable. */
 
-  const STR = ['status','requestor','evgen','submission_path','priority','nevents',
+  const STR = ['status','propagation','requestor','evgen','submission_path','priority','nevents',
                'detector','beam','physics','q2','species','energy'];
   const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background',
                 'has_output','no_output','incomplete_output','has_simu','has_reco',
-                'has_input','no_input','incomplete_input'];
-  const DS = { status:'status', requestor:'requestor', evgen:'evgen',
+                'has_input','no_input','incomplete_input','ai_proposed'];
+  const DS = { status:'status', propagation:'propagation',
+               requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
                priority:'priority', nevents:'nevents',
                detector:'detector', beam:'beam', physics:'physics',
@@ -475,7 +499,8 @@ Context expected:
                incomplete_output:'incompleteOutput',
                has_simu:'hasSimu', has_reco:'hasReco',
                has_input:'hasInput', no_input:'noInput',
-               incomplete_input:'incompleteInput' };
+               incomplete_input:'incompleteInput',
+               ai_proposed:'aiProposed' };
 
   // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
   function energyMeV(s) {
@@ -495,6 +520,7 @@ Context expected:
   const state = {
     q: (initial.get('q') || '').trim(),
     status: initial.get('status') || '',
+    propagation: initial.get('propagation') || '',
     requestor: initial.get('requestor') || '',
     evgen: initial.get('evgen') || '',
     submission_path: initial.get('submission_path') || '',
@@ -519,6 +545,7 @@ Context expected:
     has_input: initial.get('has_input') === '1',
     no_input: initial.get('no_input') === '1',
     incomplete_input: initial.get('incomplete_input') === '1',
+    ai_proposed: initial.get('ai_proposed') === '1',
     sort: initial.get('sort') || '',
     dir: initial.get('dir') === 'desc' ? 'desc' : (initial.get('dir') === 'asc' ? 'asc' : ''),
   };
@@ -547,12 +574,12 @@ Context expected:
     // Faceted counts: for each str filter, count rows that match all OTHER
     // filters, bucketed by the row's own value of that filter. Boolean
     // filters count rows that would still match if that boolean were ON.
-    const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{},
+    const strCounts = { status:{}, propagation:{}, requestor:{}, evgen:{}, submission_path:{},
                         priority:{}, nevents:{},
                         detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
     const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0,
                          has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0,
-                         has_input:0, no_input:0, incomplete_input:0 };
+                         has_input:0, no_input:0, incomplete_input:0, ai_proposed:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
         if (rowMatches(tr, k)) {
@@ -572,6 +599,10 @@ Context expected:
         if (k === 'energy') {
           const ea = energyMeV(a[0]), eb = energyMeV(b[0]);
           if (ea !== null && eb !== null) return ea - eb;
+        }
+        if (k === 'propagation') {
+          const order = {continue: 0, hold: 1, final: 2};
+          if (a[0] in order && b[0] in order) return order[a[0]] - order[b[0]];
         }
         // Numeric sort when both values parse as numbers, otherwise alphabetic.
         const na = parseFloat(a[0]), nb = parseFloat(b[0]);
@@ -598,11 +629,11 @@ Context expected:
   function syncUrl() {
     const u = new URL(window.location.href);
     const p = u.searchParams;
-    ['q','status','requestor','evgen','submission_path','priority','nevents',
+    ['q','status','propagation','requestor','evgen','submission_path','priority','nevents',
      'detector','beam','physics','q2','species','energy',
      'new_request','pre_tdr_use','early_science_use','other_use','background',
      'has_output','no_output','incomplete_output','has_simu','has_reco',
-     'has_input','no_input','incomplete_input',
+     'has_input','no_input','incomplete_input','ai_proposed',
      'sort','dir'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
@@ -711,10 +742,44 @@ Context expected:
         propPanel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
         return;
       }
+      if (action === 'ai_approve' || action === 'ai_deny') {
+        decideProposals(action === 'ai_approve' ? 'approve' : 'deny', ids);
+        return;
+      }
       alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
     });
   });
   refresh();
+
+  /* AI proposal decision — approve executes deterministically through the
+     propagation service with the approving human as changed_by; deny
+     records denial memory. One event per decision, not per dataset. */
+  async function decideProposals(decision, names) {
+    if (!names.length) return;
+    const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
+    if (!confirm(`${verb} AI proposals on ${names.length} selected dataset(s)? `
+                 + 'Rows without a pending proposal are skipped and reported.')) return;
+    const token = propPanel ? propPanel.querySelector('[name=csrfmiddlewaretoken]').value : '';
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/proposal-decide/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ names: names, decision: decision,
+                               filter: window.location.search }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [];
+      if (decision === 'approve') parts.push(`${j.approved.length} approved and executed`);
+      else parts.push(`${j.denied.length} denied`);
+      if (j.stale.length) parts.push(`${j.stale.length} stale (withdrawn — record changed since proposed)`);
+      if (j.no_proposal.length) parts.push(`${j.no_proposal.length} had no pending proposal`);
+      alert('AI proposals: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Proposal decision failed: ' + err.message);
+    }
+  }
 
   /* Propagation flip — one POST, one action-stream event, whatever the
      selection size. Comment is required; the server remembers it as this
@@ -724,17 +789,40 @@ Context expected:
     const applyBtn = document.getElementById('pcs-prop-apply');
     const cancelBtn = document.getElementById('pcs-prop-cancel');
     const resultEl = document.getElementById('pcs-prop-result');
+    const commentEl = document.getElementById('pcs-prop-comment');
+    const needEl = document.getElementById('pcs-prop-need-comment');
+    function needComment() {
+      needEl.style.display = '';
+      commentEl.classList.add('pcs-prop-comment-attn');
+      commentEl.focus();
+    }
+    function commentSettled() {
+      needEl.style.display = 'none';
+      commentEl.classList.remove('pcs-prop-comment-attn');
+    }
+    commentEl.addEventListener('input', () => {
+      if (commentEl.value.trim()) commentSettled();
+    });
+    // Enter completes the change (Shift+Enter for a newline).
+    commentEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        applyBtn.click();
+      }
+    });
     cancelBtn.addEventListener('click', () => {
       propPanel.style.display = 'none';
       resultEl.textContent = '';
+      commentSettled();
     });
     applyBtn.addEventListener('click', async () => {
       const names = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
       const state = document.getElementById('pcs-prop-state').value;
-      const comment = document.getElementById('pcs-prop-comment').value.trim();
+      const comment = commentEl.value.trim();
       const replacedBy = document.getElementById('pcs-prop-replaced-by').value.trim();
       if (!names.length) { resultEl.textContent = 'No tasks selected.'; return; }
-      if (!comment) { resultEl.textContent = 'A comment is required.'; return; }
+      if (!comment) { needComment(); return; }
+      commentSettled();
       if (!confirm(`Set propagation to "${state}" on ${names.length} dataset(s)?`)) return;
       applyBtn.disabled = true;
       const token = propPanel.querySelector('[name=csrfmiddlewaretoken]').value;
@@ -755,7 +843,8 @@ Context expected:
         window.location.reload();
       } catch (err) {
         applyBtn.disabled = false;
-        resultEl.textContent = 'Failed: ' + err.message;
+        if (/comment is required/i.test(err.message)) { needComment(); }
+        else { resultEl.textContent = 'Failed: ' + err.message; }
       }
     });
   })();

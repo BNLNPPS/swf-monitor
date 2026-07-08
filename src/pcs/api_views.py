@@ -250,6 +250,50 @@ class DatasetViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(new_block).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['post'], url_path='propose')
+    def propose(self, request):
+        """Create AI propagation proposals (EPICPROD_PROPOSALS.md).
+
+        Body: ``names``, ``state``, ``comment`` (required), ``replaced_by``,
+        ``proposer``, ``scan_version``, ``batch_id``. The propose verb is
+        the only mutation surface AI clients get; execution requires a
+        human decision through ``proposal-decide``.
+        """
+        try:
+            result = services.dataset_proposal_create(
+                request.data.get('names') or [],
+                request.data.get('state'),
+                request.data.get('comment'),
+                replaced_by=request.data.get('replaced_by', ''),
+                proposer=request.data.get('proposer', ''),
+                scan_version=request.data.get('scan_version', 1),
+                batch_id=request.data.get('batch_id', ''),
+                created_by=request.user.username,
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='proposal-decide')
+    def proposal_decide(self, request):
+        """Approve or deny pending AI proposals.
+
+        Body: ``names``, ``decision`` ('approve' | 'deny'), ``filter``
+        (optional audit record of the selecting filter). Approval
+        revalidates and executes through the propagation service with the
+        approving human as changed_by and the origin stamp on the event.
+        """
+        try:
+            result = services.dataset_proposal_decide(
+                request.data.get('names') or [],
+                request.data.get('decision'),
+                decided_by=request.user.username,
+                filter_state=request.data.get('filter', ''),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['post'], url_path='propagation')
     def propagation(self, request):
         """Single or bulk propagation flip with required comment.

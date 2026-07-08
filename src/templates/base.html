@@ -219,6 +219,28 @@
       }
       .copy-btn:hover { color: #0d6efd; }
       .copy-btn.copied { color: #198754; }
+      /* AI presence — the universal convention for material attributable to
+         the AI (proposals, recommendation filters, AI-authored blocks):
+         dark purple ink on light purple ground. Tune the system-wide AI
+         look here and nowhere else. */
+      :root {
+        --ai-fg: #4a1d7a;
+        --ai-bg: #f0e8fa;
+        --ai-border: #c9b3e8;
+      }
+      .ai-attr {
+        color: var(--ai-fg);
+        background-color: var(--ai-bg);
+        border: 1px solid var(--ai-border);
+        border-radius: .5em;
+        padding: 0 .45em;
+        font-weight: 600;
+      }
+      .ai-attr-text { color: var(--ai-fg); font-weight: 600; }
+      button.ai-attr:hover, a.ai-attr:hover {
+        background-color: var(--ai-fg); color: #fff;
+        border-color: var(--ai-fg);
+      }
     </style>
 </head>
 <body>
