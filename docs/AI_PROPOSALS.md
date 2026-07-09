@@ -51,7 +51,7 @@ executed action-stream log id).
 Status vocabulary: `proposed → executed | denied | withdrawn | stale`, with
 `approved_pending_execution` reserved for asynchronous executors. **Terminal
 rows are retained** — the AI proposal list is where AI-proposed activity
-and its decisions stay visible: the queue (pending), the decided history,
+and its decisions stay visible: the queue (pending), the decision history,
 per-proposer track records, and the standing metric of what fraction of
 production mutations originate with AI. Operators can delete list rows
 (test or noise entries), logged with counts — a cleanup verb, never a
@@ -84,7 +84,7 @@ whoever drafted them.
 - **The compose detail**: the same proposal block with the same controls —
   the record is server-side, so list and detail cannot fork.
 - **The proposals page** (`/ai/proposals/`, on the production home under
-  AI assessments): the pending queue and the decided history, filterable by
+  AI assessments): the pending queue and the decision history, filterable by
   status, action, proposer, and batch, with bulk decide and per-proposer
   track records.
 

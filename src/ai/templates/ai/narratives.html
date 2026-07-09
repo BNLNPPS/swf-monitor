@@ -52,14 +52,14 @@
   {% endif %}
 
   {% if general_entries %}
-  <h5 class="text-muted">General</h5>
+  <h3 class="text-muted">General</h3>
   {% for e in general_entries %}
     {% include "ai/_narrative_entry.html" %}
   {% endfor %}
   {% endif %}
 
   {% if campaign_entries %}
-  <h5 class="text-muted mt-3">Campaigns</h5>
+  <h3 class="text-muted mt-3">Campaigns</h3>
   {% for e in campaign_entries %}
     {% include "ai/_narrative_entry.html" %}
   {% endfor %}

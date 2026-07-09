@@ -8,7 +8,7 @@ from .models import Proposal
 def ai_proposals(request):
     """The AI proposal list (AI_PROPOSALS.md).
 
-    Pending proposals for review, decided history, and per-proposer track
+    Pending proposals for review, decision history, and per-proposer track
     records. Read-open — visible-but-inert; decisions require sign-in and
     act through the same proposal-decide service as the catalog and
     compose surfaces.
@@ -113,10 +113,15 @@ def _narrative_entry_from_page(page, client, *, with_versions=False,
     if with_comments:
         try:
             for c in client.list_comments(group_id) or []:
+                # The signed-in swf-monitor user is stamped in data.author
+                # at post time; corun's own author field is the API token's
+                # account, not the human.
+                stamped = (c.get('data') or {}).get('author', '')
+                fallback = c.get('author')
+                if isinstance(fallback, dict):
+                    fallback = fallback.get('username', '')
                 entry['comments'].append({
-                    'author': ((c.get('author') or {}).get('username')
-                               if isinstance(c.get('author'), dict)
-                               else c.get('author')) or '',
+                    'author': stamped or fallback or '',
                     'date': (c.get('created_at') or '')[:16].replace('T', ' '),
                     'content': c.get('content') or '',
                 })

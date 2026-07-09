@@ -14,7 +14,7 @@
 <div class="container-fluid mt-3">
   <h1><span class="ai-attr-text">AI Proposals</span></h1>
   <p class="text-muted">
-    AI-proposed actions pending human review, and the decided history.
+    AI-proposed actions pending human review, and the decision history.
     Approval executes the frozen payload deterministically through the same
     service an operator uses; denial is recorded and the proposal is not
     re-proposed until its inputs change. See docs/AI_PROPOSALS.md.
@@ -48,7 +48,7 @@
     <button type="button" id="props-deny-wrong" class="btn btn-sm btn-secondary" disabled
             title="Deny and score the proposal wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
     <button type="button" id="props-delete" class="btn btn-sm btn-danger" disabled
-            title="Remove the selected rows from the AI proposal list — decided history included, permanent">Delete</button>
+            title="Remove the selected rows from the AI proposal list — decision history included, permanent">Delete</button>
   </div>
   {% endif %}
 

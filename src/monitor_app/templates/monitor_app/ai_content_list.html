@@ -4,6 +4,17 @@
 {% block title %}AI Assessments - epicprod{% endblock %}
 
 {% block content %}
+<style>
+.ai-assessment-entry summary { list-style: none; cursor: pointer;
+                               padding: .5rem .8rem; display: flex;
+                               align-items: baseline; gap: 1.2em;
+                               flex-wrap: wrap;
+                               background: var(--bs-light, #f8f9fa); }
+.ai-assessment-entry summary::-webkit-details-marker { display: none; }
+.ai-assessment-entry summary::before { content: '\25B8'; font-size: 1.1em;
+                                       transition: transform .15s ease-in-out; }
+.ai-assessment-entry[open] summary::before { transform: rotate(90deg); }
+</style>
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center {% if is_tunnel %}mb-1{% else %}mb-3{% endif %}">
         <h1><span class="ai-attr-text">AI Assessments</span></h1>
@@ -101,31 +112,29 @@
     </form>
 
     {% if items %}
+    <div class="mb-2">
+        <button type="button" id="assess-open-all" class="btn btn-sm btn-secondary">Open all</button>
+        <button type="button" id="assess-close-all" class="btn btn-sm btn-secondary">Close all</button>
+    </div>
     {% for item in items %}
-    <div class="ai-assessment-entry border border-secondary border-3 mb-2">
+    <details class="ai-assessment-entry border border-secondary border-3 mb-2">
+    <summary>
+        <span>
+            <strong>{{ item.subject_kind }}:</strong>
+            {% if item.subject_url %}
+            <a href="{{ item.subject_url }}">{{ item.subject_id }}</a>
+            {% if item.subject_name and item.subject_name != item.subject_id %}
+            <a href="{{ item.subject_url }}" class="ms-3">{{ item.subject_name }}</a>
+            {% endif %}
+            {% else %}
+            {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-3">{{ item.subject_name }}</span>{% endif %}
+            {% endif %}
+        </span>
+        <span><strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}</span>
+        <span class="text-muted">{{ item.ai }} &middot; {{ item.username }} &middot; {{ item.created_display }}</span>
+    </summary>
     <table class="table table-sm mb-0">
         <tbody>
-            <tr class="ai-assessment-header table-light">
-                <td><strong>Created:</strong> {{ item.created_display }}</td>
-                <td><strong>AI:</strong> {{ item.ai }}</td>
-                <td><strong>User:</strong> {{ item.username }}</td>
-                <td>
-                    <strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}
-                </td>
-            </tr>
-            <tr class="ai-assessment-header table-light">
-                <td colspan="4">
-                    <strong>Subject:</strong> {{ item.subject_kind }}:
-                    {% if item.subject_url %}
-                    <a href="{{ item.subject_url }}">{{ item.subject_id }}</a>
-                    {% if item.subject_name and item.subject_name != item.subject_id %}
-                    <span class="ms-4"><a href="{{ item.subject_url }}">{{ item.subject_name }}</a></span>
-                    {% endif %}
-                    {% else %}
-                    {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-4">{{ item.subject_name }}</span>{% endif %}
-                    {% endif %}
-                </td>
-            </tr>
             <tr class="ai-assessment-header table-light">
                 <td colspan="4">
                     {% if request.user.is_authenticated and item.storage == 'legacy' %}
@@ -165,7 +174,7 @@
             </tr>
         </tbody>
     </table>
-    </div>
+    </details>
     {% endfor %}
 
     {% if page_obj.has_other_pages %}
@@ -183,4 +192,13 @@
     <div class="text-muted">No AI assessments found.</div>
     {% endif %}
 </div>
+<script>
+(function () {
+  const all = () => document.querySelectorAll('details.ai-assessment-entry');
+  const openAll = document.getElementById('assess-open-all');
+  const closeAll = document.getElementById('assess-close-all');
+  if (openAll) openAll.addEventListener('click', () => all().forEach(d => d.open = true));
+  if (closeAll) closeAll.addEventListener('click', () => all().forEach(d => d.open = false));
+})();
+</script>
 {% endblock %}

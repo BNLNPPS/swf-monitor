@@ -413,11 +413,18 @@
             <button class="dropbtn{% if active_nav.campaigns %} nav-active{% endif %}">Campaigns</button>
             <div class="dropdown-content">
                 <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaign Catalog</a>
+                <a href="{% url 'pcs:pcs_catalog' %}?lifecycle=current&amp;view=progress">Campaign Progress</a>
                 <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
                 <a href="{% url 'monitor_app:ai_content_list' %}?subject_type=campaign_task,campaign">Campaign Assessments</a>
             </div>
         </div>
-        <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">AI</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.ai_content %} nav-active{% endif %}">AI</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">Assessments</a>
+                <a href="{% url 'ai:ai_proposals' %}">Proposals</a>
+            </div>
+        </div>
         <strong class="nav-label nav-panda-label">PanDA</strong>
         <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
