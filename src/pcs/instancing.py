@@ -44,13 +44,23 @@ def plan_campaign_instancing(source_campaign, target_campaign):
     Classes, each item carrying its configuration key and edition names:
 
     - ``merge``  — continuing configuration whose target edition the
-      ingest already observed: the working context attaches to the
-      existing edition.
+      ingest already observed and whose task still awaits adoption: the
+      working context attaches to the existing edition.
+    - ``aligned`` — continuing configuration whose target edition exists
+      with a working task already: instancing has nothing to do.
     - ``mint``   — continuing configuration with no target edition yet:
       a new edition is created.
     - ``hold``   — held in the catalog, no target production.
     - ``final``  — produced its last campaign; ``replaced_by`` carried
       when a successor is designated.
+    - ``no_context`` — continuing configuration whose source edition has
+      no working task to carry request context from; instancing cannot
+      act, curation supplies the context.
+    - ``name_collision`` — the edition this configuration would mint is
+      named identically to an existing target edition of a *different*
+      resolved configuration: the anchor-tag ambiguity (one tag label
+      covering several generators). Tag refinement resolves it; minting
+      would corrupt identity, so it is excluded and listed.
     - ``unresolved`` — the configuration identity could not be resolved
       (the curation pool); acting on it risks duplication, so it is
       excluded from action and listed.
@@ -65,10 +75,31 @@ def plan_campaign_instancing(source_campaign, target_campaign):
     """
     source_groups = group_editions(_campaign_heads(source_campaign))
     target_groups = group_editions(_campaign_heads(target_campaign))
+    # Adoption state is identity-level: one identity carries one working
+    # task (composed-name-as-identity), and a multi-row identity's
+    # sibling tasks remain output records. An identity is awaiting
+    # adoption only while NO working task exists for it.
+    target_working = set(
+        ProdTask.objects.filter(campaign__name=target_campaign)
+        .exclude(status='past_output')
+        .values_list('dataset__composed_name', flat=True))
+    awaiting_adoption = set(
+        ProdTask.objects.filter(campaign__name=target_campaign,
+                                status='past_output')
+        .values_list('dataset__composed_name', flat=True)) - target_working
+    source_with_context = set(
+        ProdTask.objects.filter(campaign__name=source_campaign)
+        .exclude(status='past_output')
+        .values_list('dataset__composed_name', flat=True))
+
+    target_names = {d.composed_name
+                    for g in target_groups.values()
+                    for d, _ in g['editions']}
 
     plan = {'source_campaign': source_campaign,
             'target_campaign': target_campaign,
-            'merge': [], 'mint': [], 'hold': [], 'final': [],
+            'merge': [], 'aligned': [], 'mint': [], 'no_context': [],
+            'name_collision': [], 'hold': [], 'final': [],
             'unresolved': [], 'conflict': [], 'target_only': []}
 
     for key, group in source_groups.items():
@@ -96,12 +127,27 @@ def plan_campaign_instancing(source_campaign, target_campaign):
                 item['replaced_by'] = replaced
             plan['final'].append(item)
             continue
+        has_context = any(name in source_with_context
+                          for name in item['source_editions'])
         if key in target_groups:
-            item['target_editions'] = [
-                d.composed_name for d, _ in target_groups[key]['editions']]
-            plan['merge'].append(item)
+            names = [d.composed_name
+                     for d, _ in target_groups[key]['editions']]
+            item['target_editions'] = names
+            if not any(name in awaiting_adoption for name in names):
+                plan['aligned'].append(item)
+            elif has_context:
+                plan['merge'].append(item)
+            else:
+                plan['no_context'].append(item)
+        elif has_context:
+            expected = _minted_name(editions[0][0], target_campaign)
+            if expected in target_names:
+                item['collides_with'] = expected
+                plan['name_collision'].append(item)
+            else:
+                plan['mint'].append(item)
         else:
-            plan['mint'].append(item)
+            plan['no_context'].append(item)
 
     for key, group in target_groups.items():
         if key not in source_groups:
@@ -112,9 +158,27 @@ def plan_campaign_instancing(source_campaign, target_campaign):
             })
 
     plan['summary'] = {cls: len(plan[cls]) for cls in
-                       ('merge', 'mint', 'hold', 'final', 'unresolved',
+                       ('merge', 'aligned', 'mint', 'no_context',
+                        'name_collision', 'hold', 'final', 'unresolved',
                         'conflict', 'target_only')}
     return plan
+
+
+def _minted_name(source_head, target_version):
+    """The name a minted target edition would carry — the builder run
+    over the source head's composition with the target version segment
+    (transient instance; build_dataset_name stays the single authority)."""
+    return Dataset(
+        scope=source_head.scope,
+        detector_version=target_version,
+        detector_config=source_head.detector_config,
+        physics_tag=source_head.physics_tag,
+        evgen_tag=source_head.evgen_tag,
+        simu_tag=source_head.simu_tag,
+        reco_tag=source_head.reco_tag,
+        background_tag=source_head.background_tag,
+        sample_name=source_head.sample_name,
+    ).build_dataset_name()
 
 
 def _source_task(dataset):
@@ -122,6 +186,16 @@ def _source_task(dataset):
     return (ProdTask.objects.filter(dataset__composed_name=dataset)
             .exclude(status='past_output')
             .select_related('prod_config').order_by('pk').first())
+
+
+def _source_task_for(item):
+    """The first working task across the configuration's source editions
+    — the same any-edition rule the plan classifies with."""
+    for name in item['source_editions']:
+        task = _source_task(name)
+        if task is not None:
+            return task
+    return None
 
 
 def _carry_context(source_task, target_task):
@@ -168,12 +242,21 @@ def execute_campaign_instancing(source_campaign, target_campaign, *,
 
     with transaction.atomic():
         for item in plan['merge']:
-            source_task = _source_task(item['source_editions'][0])
+            source_task = _source_task_for(item)
             if source_task is None:
                 skipped_no_task.append(item['source_editions'][0])
                 continue
             for name in item['target_editions']:
-                task = (ProdTask.objects.filter(dataset__composed_name=name)
+                # One working task per identity: adopt the first output
+                # record; a multi-row identity's siblings remain output
+                # records, and an identity already carrying a working
+                # task is never re-adopted (rename would collide).
+                if ProdTask.objects.filter(dataset__composed_name=name)\
+                        .exclude(status='past_output').exists():
+                    continue
+                task = (ProdTask.objects
+                        .filter(dataset__composed_name=name,
+                                status='past_output')
                         .order_by('pk').first())
                 if task is None:
                     skipped_no_task.append(name)
@@ -189,7 +272,7 @@ def execute_campaign_instancing(source_campaign, target_campaign, *,
                            .filter(composed_name=item['source_editions'][0])
                            .order_by('block_num', 'pk')
                            .select_related().first())
-            source_task = _source_task(item['source_editions'][0])
+            source_task = _source_task_for(item)
             if source_head is None or source_task is None:
                 skipped_no_task.append(item['source_editions'][0])
                 continue
