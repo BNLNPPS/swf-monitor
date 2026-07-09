@@ -394,6 +394,7 @@
         {# ── Production mode ── #}
         <span class="nav-mode nav-production">
         <a href="{% url 'pcs:questionnaires_list' %}" class="{% if active_nav.requests %}nav-active{% endif %}">Requests</a>
+        <a href="{% url 'pcs:pcs_request_composer' %}" class="{% if active_nav.request_composer %}nav-active{% endif %}">Request Production</a>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.pcs %} nav-active{% endif %}">PCS</button>
             <div class="dropdown-content">

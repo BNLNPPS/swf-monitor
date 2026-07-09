@@ -298,6 +298,33 @@ needed for the interim model):
 `public_catalog_row_key`, `public_catalog_page_url`,
 `public_catalog_commit_sha`.
 
+## Request Composer
+
+The request composer (`/pcs/request/`) is the native intake surface on the
+path to replacing the Google Form, which serves as its guide rather than its
+specification. A requester describes the physics in plain terms — process,
+beams, species, Q², generator, sample variant, event count, working group,
+intended use, optional input location and configuration repository — and the
+page shows, live, the physics configurations the system already has that
+match: what they are, where they were produced, and how much. "Use this"
+bases the request on an existing configuration, recording the same
+physics-configuration anchor the CSV import writes, so a composed request
+projects onto campaign editions exactly like an imported one. The mapping is
+deterministic throughout: form fields land in the request's filter block and
+columns; no inference intervenes.
+
+Submission is a `/pcs/api/` POST (external-safe through the swf-remote
+proxy) gated by login; the page itself is readable by anyone, with the
+submit control visible but inactive for visitors. Each submission is an
+action-stream event.
+
+The composer is also the first "my epicprod" surface: the signed-in user's
+past requests are shown as the starting point for the next one ("start from
+this"), and their working group and contact are remembered in per-user
+preferences. The same identity surface is where user-level analysis support
+enters later — the system that knows a user's physics and runs their bulk
+production is positioned to run their analysis over it as well.
+
 ## Dynamic Public Catalog
 
 The present GitHub/Jekyll public catalog webpage provides a static snapshot of production requests, but does not offer dynamic modification: cloning of established requests into new campaigns, modification of requests and injection into campaigns, adjustment of priorities, withdrawal of requests, and other changes, all of them based on authenticated users with particular production system rights.

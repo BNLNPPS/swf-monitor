@@ -14,6 +14,7 @@ import json as _json
 import logging as _logging
 import os as _os
 import re as _re
+import uuid as _uuid
 from datetime import datetime as _datetime
 
 from django.conf import settings as _settings
@@ -2001,6 +2002,99 @@ def pc_request_projection(datasets):
         if matched:
             projection[name] = matched
     return projection
+
+
+def prodrequest_compose(*, requestor, created_by, description='',
+                        nevents=None, process='', beam='', species='',
+                        q2='', generator='', generator_version='',
+                        sample='', pc_anchor='', simu_path='', contact='',
+                        repository='', pre_tdr_use=False,
+                        early_science_use=False, other_use_text=''):
+    """Create a production request from the request composer.
+
+    The mapping is deterministic: the composer's physics axes land in
+    ``data['filters']`` (the semantic identity block requests resolve
+    by), and adopting an existing configuration sets
+    ``data['physics_config_anchor']`` — the same binding the CSV import
+    writes, so a composed request projects onto editions exactly like
+    an imported one. Production-team triage fields are left for the
+    production team.
+    """
+    requestor = (requestor or '').strip().upper()
+    if not requestor:
+        raise ServiceError('A working group (requestor) is required.')
+    description = (description or '').strip()
+    process = (process or '').strip()
+    if not description and not process:
+        raise ServiceError(
+            'Describe the physics: pick a process or write a description.')
+    if nevents not in (None, ''):
+        try:
+            nevents = int(nevents)
+        except (TypeError, ValueError):
+            raise ServiceError('Event count must be a number.')
+        if nevents < 0:
+            raise ServiceError('Event count must be positive.')
+    else:
+        nevents = None
+    pc_anchor = (pc_anchor or '').strip()
+    if pc_anchor and not Dataset.objects.filter(
+            composed_name=pc_anchor).exists():
+        raise ServiceError(
+            f'Adopted configuration {pc_anchor!r} names no known dataset.')
+
+    filters = {
+        'process': process,
+        'beam': (beam or '').strip(),
+        'species': (species or '').strip(),
+        'q2': (q2 or '').strip(),
+        'generator': (generator or '').strip(),
+        'sample': (sample or '').strip(),
+    }
+    data = {
+        'composer': True,
+        'filters': filters,
+    }
+    if pc_anchor:
+        data['physics_config_anchor'] = pc_anchor
+    if contact:
+        data['contact'] = (contact or '').strip()
+    if repository:
+        data['repository'] = (repository or '').strip()
+    if other_use_text:
+        data['other_use_text'] = (other_use_text or '').strip()
+    gen_config = ' '.join(
+        part for part in ((generator or '').strip(),
+                          (generator_version or '').strip()) if part)
+
+    request_row = ProdRequest.objects.create(
+        requestor=requestor,
+        description=description,
+        nevents=nevents,
+        gen_config=gen_config,
+        simu_path=(simu_path or '').strip(),
+        pre_tdr_use=bool(pre_tdr_use),
+        early_science_use=bool(early_science_use),
+        other_use=bool((other_use_text or '').strip()),
+        new_request=True,
+        status='new',
+        source_row=f'composer:{_uuid.uuid4().hex[:12]}',
+        data=data,
+        created_by=created_by or 'request_composer',
+    )
+    from monitor_app.epicprod_logging import log_epicprod_action
+    log_epicprod_action(
+        'web', 'prodrequest_compose',
+        subject_type='prod_request', subject_key=str(request_row.pk),
+        username=created_by, sublevel='normal', live_default=True,
+        requestor=requestor, pc_anchor=pc_anchor or '')
+    return {
+        'id': request_row.pk,
+        'requestor': requestor,
+        'pc_anchor': pc_anchor,
+        'nevents': nevents,
+        'status': request_row.status,
+    }
 
 
 # ---------------------------------------------------------------------------

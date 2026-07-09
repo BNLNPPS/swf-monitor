@@ -2369,6 +2369,90 @@ def pcs_physics_configs(request):
     })
 
 
+def pcs_request_composer(request):
+    """The request composer — a friendly front door for asking for
+    production, and the first 'my epicprod' surface: the signed-in
+    user's past requests and remembered defaults guide the next one.
+    The mapping to PCS is deterministic (axes → the request's filter
+    block; adopting an existing configuration sets the same anchor the
+    CSV import writes). Read-open; submission is login-gated.
+    """
+    from .physics_config import group_editions
+    select = ('physics_tag', 'evgen_tag', 'background_tag', 'campaign')
+    heads = list(Dataset.objects.select_related(*select)
+                 .order_by('composed_name', 'block_num', 'pk')
+                 .distinct('composed_name'))
+    groups = group_editions(heads)
+    produced = {
+        row['composed_name']: row['files'] or 0
+        for row in Dataset.objects.values('composed_name')
+        .annotate(files=Sum('file_count'))
+    }
+    configs = []
+    for key, group in groups.items():
+        head, detail = group['editions'][0]
+        params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
+        evgen = detail['evgen']
+        be = str(params.get('beam_energy_electron', '') or '')
+        bh = str(params.get('beam_energy_hadron', '') or '')
+        be = '' if be.upper() == 'N/A' else be
+        bh = '' if bh.upper() == 'N/A' else bh
+        configs.append({
+            'process': params.get('process', ''),
+            'beam': f'{be}x{bh}' if be and bh else (be or bh),
+            'species': params.get('beam_species', ''),
+            'q2': params.get('q2_range', ''),
+            'generator': (evgen[0] if evgen else ''),
+            'gen_version': (evgen[1] if evgen else ''),
+            'sample': detail['sample'],
+            'physics': head.physics_tag.tag_label if head.physics_tag else '',
+            'anchor': head.composed_name,
+            'campaigns': sorted(group['campaigns']),
+            'files': sum(produced.get(d.composed_name, 0)
+                         for d, _ in group['editions']),
+        })
+    configs.sort(key=lambda c: (c['process'], c['beam'], c['q2']))
+
+    def _options(field):
+        return sorted({c[field] for c in configs if c[field]})
+
+    username = getattr(request.user, 'username', '') or ''
+    prefs = UserPreference.get_prefs(username) if username else {}
+    my_requests = []
+    if username:
+        for row in (ProdRequest.objects.filter(created_by=username)
+                    .order_by('-created_at')[:10]):
+            filters = (row.data or {}).get('filters') or {}
+            my_requests.append({
+                'id': row.pk,
+                'created': row.created_at.strftime('%Y-%m-%d'),
+                'requestor': row.requestor,
+                'status': row.status,
+                'nevents': row.nevents,
+                'description': row.description,
+                'filters': filters,
+                'anchor': (row.data or {}).get('physics_config_anchor', ''),
+            })
+    default_requestor = (prefs.get('composer_requestor', '')
+                         or (my_requests[0]['requestor'] if my_requests else ''))
+    default_contact = (prefs.get('composer_contact', '')
+                       or (getattr(request.user, 'email', '') or ''))
+
+    return render(request, 'pcs/request_composer.html', {
+        'configs_json': json.dumps(configs),
+        'process_options': _options('process'),
+        'beam_options': _options('beam'),
+        'species_options': _options('species'),
+        'q2_options': _options('q2'),
+        'generator_options': _options('generator'),
+        'requestor_options': _requestor_options(),
+        'my_requests': my_requests,
+        'my_requests_json': json.dumps(my_requests),
+        'default_requestor': default_requestor,
+        'default_contact': default_contact,
+    })
+
+
 def pcs_edition_data(request, name):
     """Rucio data per campaign for one physics configuration: reached
     from any of its editions, the page resolves the configuration and

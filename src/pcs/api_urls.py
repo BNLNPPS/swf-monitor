@@ -4,6 +4,7 @@ from .api_views import (
     PhysicsCategoryViewSet, PhysicsTagViewSet,
     EvgenTagViewSet, SimuTagViewSet, RecoTagViewSet, BackgroundTagViewSet,
     DatasetViewSet, ProdConfigViewSet, ProdTaskViewSet, QuestionnaireViewSet,
+    prod_request_compose,
 )
 
 router = DefaultRouter()
@@ -19,5 +20,7 @@ router.register(r'prod-configs', ProdConfigViewSet, basename='prod-config')
 router.register(r'prod-tasks', ProdTaskViewSet, basename='prod-task')
 
 urlpatterns = [
+    path('prod-requests/compose/', prod_request_compose,
+         name='prod_request_compose'),
     path('', include(router.urls)),
 ]

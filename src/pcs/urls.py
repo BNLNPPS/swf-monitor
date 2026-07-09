@@ -21,6 +21,7 @@ urlpatterns = [
     path('catalog/instancing-execute/', views.pcs_catalog_instancing_execute, name='pcs_catalog_instancing_execute'),
     path('physics/', views.pcs_physics_configs, name='pcs_physics_configs'),
     path('data/<str:name>/', views.pcs_edition_data, name='pcs_edition_data'),
+    path('request/', views.pcs_request_composer, name='pcs_request_composer'),
     path('catalog/set-last/', views.pcs_catalog_set_last, name='pcs_catalog_set_last'),
 
     # Questionnaire intake

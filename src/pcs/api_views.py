@@ -10,8 +10,10 @@ Dataset creation requires all four tags to be locked. created_by set from authen
 from rest_framework import viewsets, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from monitor_app.middleware import TunnelAuthentication
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS, BasePermission
+from rest_framework.decorators import (action, api_view,
+    authentication_classes, permission_classes)
+from rest_framework.permissions import (IsAuthenticated,
+    IsAuthenticatedOrReadOnly, SAFE_METHODS, BasePermission)
 
 
 class IsOwnerOrReadOnly(BasePermission):
@@ -708,3 +710,42 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
+
+
+@api_view(['POST'])
+@authentication_classes([TunnelAuthentication, SessionAuthentication,
+                         TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def prod_request_compose(request):
+    """Create a production request from the request composer page.
+
+    External-safe trigger: a /pcs/api/ POST returning JSON, so it works
+    identically through the swf-remote proxy (EXTERNAL_ACCESS.md). The
+    requester's working group is remembered in their per-user
+    preferences for next time.
+    """
+    username = getattr(request.user, 'username', '') or ''
+    fields = {
+        key: request.data.get(key) or ''
+        for key in ('requestor', 'description', 'process', 'beam',
+                    'species', 'q2', 'generator', 'generator_version',
+                    'sample', 'pc_anchor', 'simu_path', 'contact',
+                    'repository', 'other_use_text')
+    }
+    try:
+        result = services.prodrequest_compose(
+            created_by=username,
+            nevents=request.data.get('nevents'),
+            pre_tdr_use=bool(request.data.get('pre_tdr_use')),
+            early_science_use=bool(request.data.get('early_science_use')),
+            **fields,
+        )
+    except ServiceError as e:
+        return Response({'detail': e.detail}, status=e.status)
+    from monitor_app.models import UserPreference
+    UserPreference.set_pref(username, 'composer_requestor',
+                            result['requestor'])
+    if fields['contact']:
+        UserPreference.set_pref(username, 'composer_contact',
+                                fields['contact'])
+    return Response(result, status=status.HTTP_201_CREATED)
