@@ -226,7 +226,8 @@
       :root {
         --ai-fg: #5b21b6;
         --ai-bg: #f8f4fe;
-        --ai-border: #d5c4f2;
+        /* Lavender ground always wears a 1px border in the ink color. */
+        --ai-border: var(--ai-fg);
       }
       .ai-attr {
         color: var(--ai-fg);
@@ -239,10 +240,14 @@
       /* Purple ink always sits on lavender ground — the universal pairing. */
       .ai-attr-text {
         color: var(--ai-fg); background-color: var(--ai-bg);
+        border: 1px solid var(--ai-border);
         border-radius: .35em; padding: 0 .3em; font-weight: 600;
       }
       /* Lavender fill for AI-owned containers (home-page boxes, panels). */
-      .ai-fill { background-color: var(--ai-bg); }
+      .ai-fill {
+        background-color: var(--ai-bg);
+        border: 1px solid var(--ai-border) !important;
+      }
       button.ai-attr:hover, a.ai-attr:hover {
         background-color: var(--ai-fg); color: #fff;
         border-color: var(--ai-fg);
