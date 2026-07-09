@@ -560,6 +560,29 @@ sudo chmod -R 755 /opt/swf-monitor/shared/static/
 
 ## Monitoring and Maintenance
 
+### Database Backups
+
+`scripts/backup-swfdb.sh` dumps the system database nightly (wenauseic
+cron, 01:30) to `/data/swf-shared/db-backups/` — compressed pg_dump
+custom format, one file per day. Every run verifies the fresh dump's
+table of contents and size before accepting it, then ages out old
+dumps: nightlies after 14 days, first-of-month dumps after 400 days.
+Credentials are parsed (never bash-sourced) from the deploy
+EnvironmentFile. One line per run lands in `backup.log`, ERROR-prefixed
+on failure; `cron.log` catches anything outside the script.
+
+Restore:
+
+```bash
+pg_restore -h <DB_HOST> -U <DB_USER> -d swfdb --clean --if-exists \
+    /data/swf-shared/db-backups/swfdb-<YYYYMMDD>.dump
+```
+
+The dumps share the `/data` volume with PGDATA (`/data/pgsql`), so they
+protect against logical loss — a bad migration, table deletion,
+corruption — not against loss of the volume itself. Host-level and
+off-host protection is SDCC's layer.
+
 ### Regular Maintenance
 
 1. **Monitor disk space** in `/opt/swf-monitor/releases/` (automatic cleanup keeps 5 releases)
