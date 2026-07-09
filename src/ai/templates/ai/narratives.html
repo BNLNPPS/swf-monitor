@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Campaign Narratives - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.narrative-entry { border: 1px solid #cfd8e3; border-radius: 6px;
+                   padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+                   max-width: 62em; }
+.narrative-head { display: flex; align-items: baseline; gap: .8em;
+                  flex-wrap: wrap; margin-bottom: .5rem; }
+.narrative-status-draft { background-color: #ffe9b0; color: #6b4e00;
+                          border-radius: .4em; padding: 0 .5em;
+                          font-weight: 600; }
+.narrative-status-published { background-color: #d4f4d4; color: #1c5c2e;
+                              border-radius: .4em; padding: 0 .5em;
+                              font-weight: 600; }
+.narrative-body h1 { font-size: 1.35rem; }
+.narrative-body h2 { font-size: 1.15rem; }
+</style>
+
+<div class="container-fluid mt-3">
+  <h1>Campaign Narratives</h1>
+  <p class="text-muted" style="max-width: 62em">
+    The narrative documents production assessment reasons against: the
+    general series (standing context) and the per-campaign series (purpose,
+    content, evolution). Drafts are working documents under iteration;
+    published revisions are immutable. See docs/EPICPROD_NARRATIVES.md.
+  </p>
+
+  {% if error %}
+    <div class="border rounded p-2 mb-3" style="max-width: 62em; background-color:#fff3f3; color:#7a1212">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  {% for e in entries %}
+  <div class="narrative-entry">
+    <div class="narrative-head">
+      <h4 class="mb-0">{{ e.title }}</h4>
+      <span class="narrative-status-{{ e.status }}">{{ e.status }}</span>
+      <span class="text-muted">{{ e.updated|slice:":10" }}</span>
+    </div>
+    <div class="narrative-body">{{ e.html }}</div>
+  </div>
+  {% empty %}
+    {% if not error %}
+    <div class="text-muted">No narrative entries yet.</div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

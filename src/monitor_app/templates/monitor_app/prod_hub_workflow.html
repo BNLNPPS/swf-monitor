@@ -216,17 +216,24 @@
                     </div>
                     <div class="workflow-link-desc">Current campaign progress, past and future campaigns</div>
                 </div>
-                <div class="workflow-link-row ai-fill" title="AI evaluations across epicprod">
+                <div class="workflow-link-row" title="Campaign narrative documents: purpose, content, and evolution of production campaigns">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'ai:ai_narratives' %}" class="text-decoration-none">Campaign Narratives</a></strong>
+                        <span class="badge bg-info">{{ campaign_narratives_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">Campaign narrative documents: purpose, content, evolution</div>
+                </div>
+                <div class="workflow-link-row" title="AI evaluations across epicprod">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'monitor_app:ai_content_list' %}" class="text-decoration-none ai-attr-text">AI assessments</a></strong>
-                        <span class="badge ai-attr">{{ ai_content_count }}</span>
+                        <span class="badge bg-info">{{ ai_content_count }}</span>
                     </div>
                     <div class="workflow-link-desc">AI evaluations across epicprod</div>
                 </div>
-                <div class="workflow-link-row ai-fill" title="AI-proposed actions pending human review, and the decided history">
+                <div class="workflow-link-row" title="AI-proposed actions pending human review, and the decided history">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'ai:ai_proposals' %}" class="text-decoration-none ai-attr-text">AI proposals</a></strong>
-                        <span class="badge ai-attr">{{ ai_proposals_pending_count }}</span>
+                        <span class="badge bg-info">{{ ai_proposals_pending_count }}</span>
                     </div>
                     <div class="workflow-link-desc">AI-proposed actions pending review, and the decided history</div>
                 </div>

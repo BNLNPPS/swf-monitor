@@ -64,3 +64,45 @@ def ai_proposals(request):
         'status_facets': status_facets,
         'proposer_stats': proposer_stats,
     })
+
+
+def ai_narratives(request):
+    """Campaign narratives (EPICPROD_NARRATIVES.md), rendered from corun-ai.
+
+    The general series and per-campaign series, newest first, drafts
+    labeled. Read-open; a corun-ai failure renders as an error message,
+    never an empty page.
+    """
+    from .assessments import render_assessment_markdown
+    from .corun_client import CorunAPIError, CorunClient, corun_configured
+
+    entries, error = [], ''
+    if not corun_configured():
+        error = 'corun-ai is not configured on this deployment.'
+    else:
+        try:
+            payload = CorunClient().list_pages(
+                section='epicprod.narrative',
+                artifact_type='campaign_narrative',
+                limit=100,
+            )
+            if isinstance(payload, dict):
+                items = payload.get('results') or payload.get('items') or []
+            else:
+                items = payload or []
+            for page in items:
+                data = page.get('data') or {}
+                entries.append({
+                    'title': page.get('title') or data.get('name', ''),
+                    'status': page.get('status', ''),
+                    'updated': (page.get('updated_at')
+                                or page.get('created_at') or ''),
+                    'html': render_assessment_markdown(
+                        page.get('content') or ''),
+                    'group_id': page.get('group_id') or page.get('id'),
+                })
+            entries.sort(key=lambda e: e['updated'], reverse=True)
+        except CorunAPIError as exc:
+            error = f'corun-ai retrieval failed: {exc}'
+    return render(request, 'ai/narratives.html',
+                  {'entries': entries, 'error': error})

@@ -3176,6 +3176,26 @@ def _corun_ai_assessment_count():
     return len(payload or [])
 
 
+def _corun_narrative_count():
+    if not corun_configured():
+        return 0
+    try:
+        payload = CorunClient().list_pages(
+            section='epicprod.narrative',
+            artifact_type='campaign_narrative',
+            limit=1,
+        )
+    except CorunAPIError as exc:
+        logger.warning('corun narrative count failed: %s', exc)
+        return 0
+    if isinstance(payload, dict):
+        try:
+            return int(payload.get('count') or 0)
+        except (TypeError, ValueError):
+            return 0
+    return len(payload or [])
+
+
 def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
@@ -3184,6 +3204,7 @@ def prod_hub(request):
     context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
     context['ai_proposals_pending_count'] = Proposal.objects.filter(
         status='proposed').count()
+    context['campaign_narratives_count'] = _corun_narrative_count()
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
