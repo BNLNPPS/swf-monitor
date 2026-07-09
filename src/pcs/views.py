@@ -866,6 +866,10 @@ def questionnaire_match_add(request, pk):
         'task_id': task.pk,
         'task_name': _task_display_name(task),
         'legacy_name': task.name,
+        # The match binds to the physics configuration through this
+        # name reference; the cache rebuild projects it onto every
+        # edition of the same physics (CAMPAIGN_CONTINUUM.md).
+        'pc_anchor': task.composed_name if task.dataset_id else '',
         'confidence': confidence,
         'status': 'accepted',
         'reason': reason,

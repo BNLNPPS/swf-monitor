@@ -817,8 +817,20 @@ def rebuild_questionnaire_match_cache(*, updated_by='questionnaire_match'):
     Catalog and compose views read the inverse cache from
     ``ProdTask.overrides['questionnaire_matches']`` so page rendering never
     scans every questionnaire.
+
+    Matches bind to physics configurations (CAMPAIGN_CONTINUUM.md —
+    requests over physics configurations): each accepted match carries
+    ``pc_anchor``, the composed name of the matched task's dataset,
+    self-healed here on every rebuild; the cache attaches the match to
+    every task whose dataset resolves to the same configuration, so a
+    match recorded against one campaign's edition is inherited by every
+    other edition of the same physics without re-matching. Unresolved
+    configurations key uniquely and never fan out.
     """
-    tasks = list(ProdTask.objects.select_related('dataset').all())
+    from .physics_config import physics_config_key
+    tasks = list(ProdTask.objects.select_related(
+        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+        'dataset__background_tag').all())
     by_id = {task.pk: task for task in tasks}
     by_name = {}
     for task in tasks:
@@ -827,12 +839,26 @@ def rebuild_questionnaire_match_cache(*, updated_by='questionnaire_match'):
         if task.composed_name:
             by_name[task.composed_name] = task
 
+    # Configuration resolution: one key per composed identity, and the
+    # task pks realizing each configuration across campaigns.
+    key_by_name = {}
+    task_pks_by_key = {}
+    for task in tasks:
+        if not task.dataset_id:
+            continue
+        name = task.composed_name
+        if name not in key_by_name:
+            key_by_name[name] = physics_config_key(task.dataset)['key']
+        task_pks_by_key.setdefault(key_by_name[name], set()).add(task.pk)
+
     matches_by_task = {}
     questionnaire_count = 0
     accepted_count = 0
     unresolved_count = 0
+    changed_questionnaires = []
     for questionnaire in Questionnaire.objects.all().only('id', 'data'):
         questionnaire_count += 1
+        anchors_healed = False
         for match in (questionnaire.data or {}).get('prod_matches') or []:
             if not isinstance(match, dict):
                 continue
@@ -852,12 +878,30 @@ def rebuild_questionnaire_match_cache(*, updated_by='questionnaire_match'):
             if task is None:
                 unresolved_count += 1
                 continue
-            matches_by_task.setdefault(task.pk, []).append({
+            anchor = task.composed_name if task.dataset_id else ''
+            if anchor and match.get('pc_anchor') != anchor:
+                match['pc_anchor'] = anchor
+                anchors_healed = True
+            entry = {
                 'questionnaire_id': questionnaire.pk,
                 'confidence': match.get('confidence') or '',
                 'reason': match.get('reason') or '',
                 'matched_at': match.get('matched_at') or '',
-            })
+            }
+            target_pks = {task.pk}
+            key = key_by_name.get(anchor)
+            if key is not None:
+                target_pks.update(task_pks_by_key.get(key, ()))
+            for target_pk in target_pks:
+                bucket = matches_by_task.setdefault(target_pk, [])
+                if not any(e['questionnaire_id'] == questionnaire.pk
+                           for e in bucket):
+                    bucket.append(entry)
+        if anchors_healed:
+            changed_questionnaires.append(questionnaire)
+    if changed_questionnaires:
+        Questionnaire.objects.bulk_update(
+            changed_questionnaires, ['data'], batch_size=200)
 
     now = _timezone.now()
     changed = []
@@ -886,6 +930,7 @@ def rebuild_questionnaire_match_cache(*, updated_by='questionnaire_match'):
         'resolved_matches': sum(len(v) for v in matches_by_task.values()),
         'unresolved_matches': unresolved_count,
         'tasks_updated': len(changed),
+        'anchors_healed': len(changed_questionnaires),
     }
 
 

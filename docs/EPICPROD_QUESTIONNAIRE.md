@@ -106,6 +106,16 @@ data itself remains on the request/questionnaire record and is not copied onto
 `ProdTask`, at least until matches are validated enough to treat them as
 authoritative task metadata.
 
+A match binds to the physics configuration, not to one campaign's task
+(CAMPAIGN_CONTINUUM.md — requests over physics configurations). Each accepted
+match record carries `pc_anchor`, the composed name of the matched task's
+dataset — written at match time and self-healed on every cache rebuild — and
+the task-local cache (`ProdTask.overrides['questionnaire_matches']`) attaches
+the match to every task whose dataset resolves to the same configuration. A
+match recorded against one campaign's edition is therefore inherited by every
+other edition of the same physics, including editions minted later, without
+re-matching. Unresolved configurations key uniquely and never fan out.
+
 ## Access and contact handling
 
 The Questionnaire browser is readable by the collaboration without a login, on
