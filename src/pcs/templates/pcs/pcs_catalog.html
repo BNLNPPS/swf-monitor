@@ -91,28 +91,28 @@
     {% if user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline" id="csv-update-form">
       {% csrf_token %}
-      <button type="submit" id="csv-update-btn" class="btn btn-sm btn-outline-primary"
+      <button type="submit" id="csv-update-btn" class="btn btn-sm btn-primary"
               title="Re-import eic/epic-prod/docs/_data/datasets.csv into the catalog (runs in the prod-ops agent; updates live when done)">
         Update from CSV
       </button>
     </form>
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline" id="rucio-update-form">
       {% csrf_token %}
-      <button type="submit" id="rucio-update-btn" class="btn btn-sm btn-outline-primary"
+      <button type="submit" id="rucio-update-btn" class="btn btn-sm btn-primary"
               title="Refresh the JLab Rucio output snapshot (runs in the prod-ops agent; updates live when done)">
         Update from Rucio
       </button>
     </form>
     <form method="post" action="{% url 'pcs:pcs_catalog_evgen_update' %}" class="ms-2 d-inline" id="evgen-update-form">
       {% csrf_token %}
-      <button type="submit" id="evgen-update-btn" class="btn btn-sm btn-outline-primary"
+      <button type="submit" id="evgen-update-btn" class="btn btn-sm btn-primary"
               title="Assimilate the JLab Rucio EVGEN inventory and resolve it onto the catalog (runs in the prod-ops agent; updates live when done)">
         Update EVGEN from Rucio
       </button>
     </form>
     <form method="post" action="{% url 'pcs:pcs_catalog_questionnaire_match_update' %}" class="ms-2 d-inline" id="questionnaire-match-update-form">
       {% csrf_token %}
-      <button type="submit" id="questionnaire-match-update-btn" class="btn btn-sm btn-outline-primary"
+      <button type="submit" id="questionnaire-match-update-btn" class="btn btn-sm btn-primary"
               title="Rebuild task-local questionnaire request links (runs in the prod-ops agent; updates live when done)">
         Update request links
       </button>
@@ -445,7 +445,7 @@
             <form method="post" action="{% url 'pcs:pcs_catalog_set_current' %}" class="d-inline">
               {% csrf_token %}
               <input type="hidden" name="name" value="{{ r.version }}">
-              <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2 ms-1"
+              <button type="submit" class="btn btn-sm btn-success py-0 px-2 ms-1"
                       title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
                       onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
             </form>
@@ -473,7 +473,7 @@
     {% if user.is_authenticated and not is_tunnel %}
     <form method="post" action="{% url 'pcs:pcs_catalog_progress_refresh' %}" class="d-inline" id="progress-refresh-form">
       {% csrf_token %}
-      <button type="submit" id="progress-refresh-btn" class="btn btn-sm btn-outline-primary py-0 px-2"
+      <button type="submit" id="progress-refresh-btn" class="btn btn-sm btn-primary py-0 px-2"
               title="Refresh progress">
         Refresh
       </button>
@@ -499,7 +499,7 @@
           data-refresh-message="Refreshing.">
       {% csrf_token %}
       <input type="hidden" name="view" value="catalog">
-      <button type="submit" class="btn btn-sm btn-outline-primary py-0 px-2"
+      <button type="submit" class="btn btn-sm btn-primary py-0 px-2"
               title="Refresh table">
         Refresh
       </button>

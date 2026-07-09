@@ -7,7 +7,7 @@
 
   <div class="d-flex align-items-center mb-2 flex-wrap gap-2">
     <h2 class="mb-0 me-2">Rucio Dataset</h2>
-    <a href="{% url 'pcs:pcs_catalog' %}" class="btn btn-sm btn-outline-secondary">&larr; Catalog</a>
+    <a href="{% url 'pcs:pcs_catalog' %}" class="btn btn-sm btn-secondary">&larr; Catalog</a>
     {% if r %}{% copy_btn did %}{% endif %}
   </div>
 
@@ -80,7 +80,7 @@
   {# ---- File list (on demand — can be thousands) ---- #}
   <h4>Files</h4>
   <div id="rucio-files">
-    <button id="load-files" class="btn btn-sm btn-outline-primary">
+    <button id="load-files" class="btn btn-sm btn-primary">
       Load file list{% if r.file_count %} ({{ r.file_count }} files){% endif %}
     </button>
     <span id="files-status" class="ms-2 text-secondary"></span>

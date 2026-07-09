@@ -424,7 +424,7 @@
     }
     function pandaOperationButtonHtml(operation, label, row, extraText) {
         const state = pandaOperationState(operation, row);
-        const btnClass = state.allowed ? 'btn-outline-primary' : 'btn-outline-secondary';
+        const btnClass = state.allowed ? 'btn-success' : 'btn-secondary';
         const disabled = state.allowed ? '' : ' disabled aria-disabled="true"';
         const title = state.reason ? ` title="${htmlEscape(state.reason)}"` : '';
         return `<button type="button" class="btn ${btnClass} btn-sm pcs-panda-op" data-panda-op="${operation}"${disabled}${title}>${label}${extraText || ''}</button>`;

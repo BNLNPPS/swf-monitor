@@ -40,7 +40,7 @@
       <span class="pcs-tlf-label">Search:</span>
       <input type="search" id="pcs-qf-q" class="form-control form-control-sm"
              style="width:24em;" placeholder="request / contact / repo...">
-      <button type="button" id="pcs-qf-clear" class="btn btn-sm btn-outline-secondary"
+      <button type="button" id="pcs-qf-clear" class="btn btn-sm btn-secondary"
               title="Clear all filters">Clear</button>
     </div>
     <div class="pcs-tlf-bar-row">
@@ -112,7 +112,7 @@
 	            <div><a href="{% url 'pcs:questionnaire_detail' pk=q.pk %}">Request #{{ q.pk }}</a></div>
 	            <div class="text-muted small">{{ q.submitted_at|fmt_dt }}</div>
 	            {% if user.is_authenticated %}
-	              <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
+	              <button type="button" class="btn btn-sm btn-secondary mt-2"
 	                      data-bs-toggle="modal" data-bs-target="#questionnaire-raw-{{ q.id }}">
                 Raw
               </button>
