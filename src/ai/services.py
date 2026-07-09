@@ -304,34 +304,45 @@ def proposal_decide(composed_names, decision, *, decided_by='',
             'no_proposal': no_proposal}
 
 
-def proposal_undo(proposal_ids, *, undone_by=''):
+def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
     """Undo executed AI proposals — the computed compensating action
     (AI_PROPOSALS.md).
 
-    Each selected executed proposal is compensated through the identical
-    executor: the prior state (and prior ``replaced_by``) captured in the
-    precondition at propose time is restored, with a templated comment
-    naming the proposal, ``origin: undo`` provenance carrying the proposal
-    id, and the undoing human as ``changed_by`` — a new history entry,
-    never erasure. Guarded like decide: if the record has moved past the
+    Selection mirrors decide: by dataset composed names (the catalog and
+    compose surfaces) and/or by proposal-list row ids. Each selected
+    executed proposal is compensated through the identical executor: the
+    prior state (and prior ``replaced_by``) captured in the precondition
+    at propose time is restored, with a templated comment naming the
+    proposal, ``origin: undo`` provenance carrying the proposal id, and
+    the undoing human as ``changed_by`` — a new history entry, never
+    erasure. Guarded like decide: if the record has moved past the
     executed payload, the undo offer has expired and the row is skipped
     (counted, never silent). The undone proposal returns to ``proposed``
     — pending again, decision fields cleared, render projection restored
     — while the execution and undo events carry the record; the row keeps
     a trace of its most recent undo.
     """
+    names = [n.strip() for n in (composed_names or []) if n and n.strip()]
     ids = [int(i) for i in (proposal_ids or [])]
-    if not ids:
-        raise ServiceError('no proposal ids supplied')
+    if not names and not ids:
+        raise ServiceError('no dataset names or proposal ids supplied')
     if not undone_by:
         raise ServiceError('an authenticated undoer is required')
 
+    selector = Q()
+    if names:
+        selector |= Q(subject_key__in=names)
+    if ids:
+        selector |= Q(pk__in=ids)
+    rows = list(Proposal.objects.filter(status='executed').filter(selector))
+    found_names = {r.subject_key for r in rows}
+    found_ids = {r.pk for r in rows}
+    no_proposal = [n for n in names if n not in found_names]
+    not_executed = [i for i in ids if i not in found_ids]
+
     now = _timezone.now()
-    undone, moved, not_executed = [], [], []
-    for row in Proposal.objects.filter(pk__in=ids):
-        if row.status != 'executed':
-            not_executed.append(row.pk)
-            continue
+    undone, moved = [], []
+    for row in rows:
         head = (Dataset.objects
                 .filter(composed_name=row.subject_key)
                 .order_by('block_num', 'pk').first())
@@ -371,7 +382,8 @@ def proposal_undo(proposal_ids, *, undone_by=''):
         if restored_head is not None:
             _write_proposal_projection(row, restored_head)
         undone.append(row.subject_key)
-    return {'undone': undone, 'moved': moved, 'not_executed': not_executed}
+    return {'undone': undone, 'moved': moved, 'not_executed': not_executed,
+            'no_proposal': no_proposal}
 
 
 def proposal_delete(proposal_ids, *, deleted_by=''):

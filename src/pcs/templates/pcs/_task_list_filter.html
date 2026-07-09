@@ -209,6 +209,7 @@ Context expected:
   <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label ai-attr-text">AI:</span>
     <a href="#" data-toggle="ai_proposed" class="filter-link ai-attr-text">proposed (<span data-count="ai_proposed">0</span>)</a>
+    <a href="#" data-toggle="ai_executed" class="filter-link ai-attr-text">executed (<span data-count="ai_executed">0</span>)</a>
   </div>
   <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Flags:</span>
@@ -264,6 +265,7 @@ Context expected:
           data-status="{{ t.status|default:'' }}"
           data-propagation="{{ t.dataset.propagation|default:'' }}"
           data-ai-proposed="{% if t.dataset.metadata.proposal %}1{% else %}0{% endif %}"
+          data-ai-executed="{% if t.dataset.composed_name in ai_executed_names %}1{% else %}0{% endif %}"
           data-requestor="{{ t.requestor|default:'' }}"
           data-submission-path="{% if t.prod_config.data.submission_path == 'panda' %}panda{% else %}condor{% endif %}"
           data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
@@ -308,6 +310,7 @@ Context expected:
               &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
               {% if t.dataset and t.dataset.propagation != 'continue' %}<span class="pcs-prop-badge pcs-prop-{{ t.dataset.propagation }}">{{ t.dataset.propagation }}</span>{% endif %}
               {% with prop=t.dataset.metadata.proposal %}{% if prop %}<span class="ai-attr" title="{{ prop.comment }} — proposed by {{ prop.proposer }} {{ prop.proposed_at|slice:":10" }}">AI: {{ prop.prev_state }} &rarr; {{ prop.payload.state }}</span>{% endif %}{% endwith %}
+              {% if t.dataset.composed_name in ai_executed_names %}<span class="ai-attr" title="An executed AI proposal stands on this dataset — select it and Undo AI to reverse, or see the AI proposal list">AI: executed</span>{% endif %}
             </div>
           {% endif %}
           <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ ds_path }}</a></div>
@@ -444,7 +447,17 @@ Context expected:
     <button type="button" class="btn btn-secondary" data-bulk="propagation" disabled>Campaign propagation…</button>
     <button type="button" class="btn btn-success" data-bulk="ai_approve" disabled>Approve AI</button>
     <button type="button" class="btn btn-secondary" data-bulk="ai_deny" disabled>Deny AI</button>
+    <button type="button" class="btn btn-dark-green" data-bulk="ai_undo" disabled
+            title="Undo executed AI proposals on the selected datasets — restores the pre-approval state and returns the proposals to pending; the events remain on the record">Undo AI</button>
   </div>
+  <select id="pcs-ai-quality" class="form-select form-select-sm ms-1" style="width:auto"
+          title="Optional quality tag recorded with an AI proposal decision (worst to best; 'wrong' marks the proposal miscalibrated and counts against the proposer's track record)">
+    <option value="">quality&hellip;</option>
+    <option value="wrong">wrong</option>
+    <option value="poor">poor</option>
+    <option value="ok">ok</option>
+    <option value="good">good</option>
+  </select>
   <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
 </div>
 
@@ -485,7 +498,7 @@ Context expected:
                'detector','beam','physics','q2','species','energy'];
   const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background',
                 'has_output','no_output','incomplete_output','has_simu','has_reco',
-                'has_input','no_input','incomplete_input','ai_proposed'];
+                'has_input','no_input','incomplete_input','ai_proposed','ai_executed'];
   const DS = { status:'status', propagation:'propagation',
                requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
@@ -500,7 +513,7 @@ Context expected:
                has_simu:'hasSimu', has_reco:'hasReco',
                has_input:'hasInput', no_input:'noInput',
                incomplete_input:'incompleteInput',
-               ai_proposed:'aiProposed' };
+               ai_proposed:'aiProposed', ai_executed:'aiExecuted' };
 
   // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
   function energyMeV(s) {
@@ -546,6 +559,7 @@ Context expected:
     no_input: initial.get('no_input') === '1',
     incomplete_input: initial.get('incomplete_input') === '1',
     ai_proposed: initial.get('ai_proposed') === '1',
+    ai_executed: initial.get('ai_executed') === '1',
     sort: initial.get('sort') || '',
     dir: initial.get('dir') === 'desc' ? 'desc' : (initial.get('dir') === 'asc' ? 'asc' : ''),
   };
@@ -579,7 +593,7 @@ Context expected:
                         detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
     const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0,
                          has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0,
-                         has_input:0, no_input:0, incomplete_input:0, ai_proposed:0 };
+                         has_input:0, no_input:0, incomplete_input:0, ai_proposed:0, ai_executed:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
         if (rowMatches(tr, k)) {
@@ -633,7 +647,7 @@ Context expected:
      'detector','beam','physics','q2','species','energy',
      'new_request','pre_tdr_use','early_science_use','other_use','background',
      'has_output','no_output','incomplete_output','has_simu','has_reco',
-     'has_input','no_input','incomplete_input','ai_proposed',
+     'has_input','no_input','incomplete_input','ai_proposed','ai_executed',
      'sort','dir'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
@@ -746,6 +760,10 @@ Context expected:
         decideProposals(action === 'ai_approve' ? 'approve' : 'deny', ids);
         return;
       }
+      if (action === 'ai_undo') {
+        undoProposals(ids);
+        return;
+      }
       alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
     });
   });
@@ -756,15 +774,17 @@ Context expected:
      records denial memory. One event per decision, not per dataset. */
   async function decideProposals(decision, names) {
     if (!names.length) return;
+    const quality = (document.getElementById('pcs-ai-quality') || {value:''}).value;
     const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
-    if (!confirm(`${verb} AI proposals on ${names.length} selected dataset(s)? `
+    const qnote = quality ? ` (quality: ${quality})` : '';
+    if (!confirm(`${verb} AI proposals on ${names.length} selected dataset(s)${qnote}? `
                  + 'Rows without a pending proposal are skipped and reported.')) return;
     const token = propPanel ? propPanel.querySelector('[name=csrfmiddlewaretoken]').value : '';
     try {
       const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-        body: JSON.stringify({ names: names, decision: decision,
+        body: JSON.stringify({ names: names, decision: decision, quality: quality,
                                filter: window.location.search }),
       });
       const j = await r.json().catch(() => ({}));
@@ -778,6 +798,32 @@ Context expected:
       window.location.reload();
     } catch (err) {
       alert('Proposal decision failed: ' + err.message);
+    }
+  }
+
+  /* Undo executed AI proposals — the compensating action restores the
+     pre-approval state and returns the proposals to pending. */
+  async function undoProposals(names) {
+    if (!names.length) return;
+    if (!confirm(`Undo executed AI proposals on ${names.length} selected dataset(s)? `
+                 + 'Restores the pre-approval state and returns the proposals to pending; '
+                 + 'rows without an executed proposal are skipped and reported.')) return;
+    const token = propPanel ? propPanel.querySelector('[name=csrfmiddlewaretoken]').value : '';
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/undo/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ names: names }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [`${j.undone.length} undone`];
+      if (j.moved.length) parts.push(`${j.moved.length} expired (record changed since execution)`);
+      if (j.no_proposal.length) parts.push(`${j.no_proposal.length} had no executed proposal`);
+      alert('AI proposal undo: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Undo failed: ' + err.message);
     }
   }
 

@@ -76,15 +76,16 @@ class ProposalUndoView(_AiApiView):
     def post(self, request):
         """Undo executed AI proposals — the compensating action.
 
-        Body: ``ids``. Restores the prior state captured at propose time
-        through the same executor, origin-stamped ``undo``; expired offers
-        (record moved on) are counted in ``moved``, never silently
-        skipped.
+        Body: ``names`` and/or ``ids`` (selection mirrors decide).
+        Restores the prior state captured at propose time through the
+        same executor, origin-stamped ``undo``; expired offers (record
+        moved on) are counted in ``moved``, never silently skipped.
         """
         try:
             result = services.proposal_undo(
-                request.data.get('ids') or [],
+                request.data.get('names') or [],
                 undone_by=request.user.username,
+                proposal_ids=request.data.get('ids') or [],
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)

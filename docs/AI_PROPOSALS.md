@@ -129,9 +129,12 @@ assessments are inherently AI products and are marked; artifacts of a
 kind humans equally produce — narratives, documents, code — dress plain,
 whoever drafted them.
 
-- **The catalog list**: an AI-proposed filter isolates recommended rows;
-  each carries a badge with the proposed transition; Approve AI / Deny AI in
-  the bulk bar act on the selection.
+- **The catalog list** — the origin surface, a first-class decision site:
+  proposals sit purple-marked in the working material. AI filters isolate
+  proposed and executed rows; pending rows badge the proposed transition
+  and executed rows carry an executed mark; Approve AI / Deny AI / Undo AI
+  in the bulk bar act on the selection, with the quality selector recorded
+  on the decision.
 - **The compose detail**: the same proposal block with the same controls —
   the record is server-side, so list and detail cannot fork.
 - **The proposals page** (`/ai/proposals/`, on the production home under

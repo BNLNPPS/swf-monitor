@@ -250,8 +250,17 @@ def _catalog_cache_dt(value):
 
 
 def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot):
+    from ai.models import Proposal
+
     task_meta = ProdTask.objects.filter(campaign=campaign).aggregate(
         count=Count('id'), updated=Max('updated_at'))
+    # AI proposal activity changes the rendered rows (pending badges and
+    # filters, executed marks) without touching any ProdTask, so it is
+    # part of the signature: creation adds rows, decide stamps
+    # decided_at, undo stamps undone_at.
+    proposal_meta = Proposal.objects.aggregate(
+        count=Count('id'), created=Max('created_at'),
+        decided=Max('decided_at'), undone=Max('undone_at'))
     return {
         'version': CATALOG_TASK_LIST_CACHE_VERSION,
         'view': catalog_view,
@@ -259,11 +268,24 @@ def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot
         'campaign_name': campaign.name,
         'task_count': task_meta['count'] or 0,
         'task_updated_at': _catalog_cache_dt(task_meta['updated']),
+        'proposal_count': proposal_meta['count'] or 0,
+        'proposal_created_at': _catalog_cache_dt(proposal_meta['created']),
+        'proposal_decided_at': _catalog_cache_dt(proposal_meta['decided']),
+        'proposal_undone_at': _catalog_cache_dt(proposal_meta['undone']),
         'progress_generated_at': (
             (progress_snapshot or {}).get('generated_at') or ''
             if catalog_view == 'progress' else ''
         ),
     }
+
+
+def _executed_proposal_names():
+    """Composed names carrying an executed AI proposal — the catalog's
+    'AI: executed' filter reads this (pending proposals ride the render
+    projection instead)."""
+    from ai.models import Proposal
+    return set(Proposal.objects.filter(status='executed')
+               .values_list('subject_key', flat=True))
 
 
 def _catalog_table_cache_key(campaign_id, catalog_view, signature):
@@ -381,6 +403,7 @@ def _cached_current_task_list_html(campaign, catalog_view, context, progress_sna
                 'catalog_view': catalog_view,
                 'columns_mode': 'full',
                 'status_choices': PRODTASK_STATUS_CHOICES,
+                'ai_executed_names': _executed_proposal_names(),
             },
         ),
         detail_fn=lambda value: f'{len(value)} html bytes',
@@ -413,6 +436,7 @@ def rebuild_current_task_list_html_cache(campaign, catalog_view='catalog', progr
             'catalog_view': catalog_view,
             'columns_mode': 'full',
             'status_choices': PRODTASK_STATUS_CHOICES,
+            'ai_executed_names': _executed_proposal_names(),
         },
     )
     entry = {
@@ -2246,6 +2270,7 @@ def pcs_catalog(request):
     context = {
         'propagation_last_comment': propagation_last_comment,
         'tasks': [],
+        'ai_executed_names': _executed_proposal_names(),
         'show_tabs': True,
         'columns_mode': 'full',
         'catalog_view': catalog_view,
@@ -2554,6 +2579,7 @@ def prod_task_compose(request):
         'username': request.user.username if request.user.is_authenticated else '',
         # Left-panel task-list context (consumed by the list partial):
         'tasks': campaign_tasks,
+        'ai_executed_names': _executed_proposal_names(),
         'focused_task_id': focused_task.id if focused_task else None,
         'focused_campaign': campaign,
         'filters': {},
