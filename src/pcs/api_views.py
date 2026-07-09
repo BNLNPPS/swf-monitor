@@ -729,15 +729,13 @@ def prod_request_compose(request):
         key: request.data.get(key) or ''
         for key in ('requestor', 'description', 'process', 'beam',
                     'species', 'q2', 'generator', 'generator_version',
-                    'sample', 'pc_anchor', 'simu_path', 'contact',
-                    'repository', 'other_use_text')
+                    'sample', 'pc_anchor', 'simu_path', 'contact_name',
+                    'contact_email', 'repository', 'intended_use')
     }
     try:
         result = services.prodrequest_compose(
             created_by=username,
             nevents=request.data.get('nevents'),
-            pre_tdr_use=bool(request.data.get('pre_tdr_use')),
-            early_science_use=bool(request.data.get('early_science_use')),
             **fields,
         )
     except ServiceError as e:
@@ -745,7 +743,8 @@ def prod_request_compose(request):
     from monitor_app.models import UserPreference
     UserPreference.set_pref(username, 'composer_requestor',
                             result['requestor'])
-    if fields['contact']:
-        UserPreference.set_pref(username, 'composer_contact',
-                                fields['contact'])
+    UserPreference.set_pref(username, 'composer_contact_name',
+                            fields['contact_name'])
+    UserPreference.set_pref(username, 'composer_contact_email',
+                            fields['contact_email'])
     return Response(result, status=status.HTTP_201_CREATED)

@@ -306,7 +306,8 @@ specification. A requester describes the physics in plain terms — process,
 beams, species, Q², generator, sample variant, event count, working group,
 intended use, optional input location and configuration repository — and the
 page shows, live, the physics configurations the system already has that
-match: what they are, where they were produced, and how much. "Use this"
+match: what they are, where they were produced, and how much. Contact name
+and email are required, prefilled for signed-in users. "Use this"
 bases the request on an existing configuration, recording the same
 physics-configuration anchor the CSV import writes, so a composed request
 projects onto campaign editions exactly like an imported one. The mapping is

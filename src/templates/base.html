@@ -393,8 +393,14 @@
 
         {# ── Production mode ── #}
         <span class="nav-mode nav-production">
-        <a href="{% url 'pcs:questionnaires_list' %}" class="{% if active_nav.requests %}nav-active{% endif %}">Requests</a>
-        <a href="{% url 'pcs:pcs_request_composer' %}" class="{% if active_nav.request_composer %}nav-active{% endif %}">Request Production</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
+            <div class="dropdown-content">
+                <a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener">Google request form</a>
+                <a href="{% url 'pcs:pcs_request_composer' %}">Request Production</a>
+                <a href="{% url 'pcs:questionnaires_list' %}">Request list</a>
+            </div>
+        </div>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.pcs %} nav-active{% endif %}">PCS</button>
             <div class="dropdown-content">

@@ -2007,9 +2007,9 @@ def pc_request_projection(datasets):
 def prodrequest_compose(*, requestor, created_by, description='',
                         nevents=None, process='', beam='', species='',
                         q2='', generator='', generator_version='',
-                        sample='', pc_anchor='', simu_path='', contact='',
-                        repository='', pre_tdr_use=False,
-                        early_science_use=False, other_use_text=''):
+                        sample='', pc_anchor='', simu_path='',
+                        contact_name='', contact_email='',
+                        repository='', intended_use=''):
     """Create a production request from the request composer.
 
     The mapping is deterministic: the composer's physics axes land in
@@ -2023,6 +2023,12 @@ def prodrequest_compose(*, requestor, created_by, description='',
     requestor = (requestor or '').strip().upper()
     if not requestor:
         raise ServiceError('A working group (requestor) is required.')
+    contact_name = (contact_name or '').strip()
+    contact_email = (contact_email or '').strip()
+    if not contact_name or not contact_email:
+        raise ServiceError('Contact name and email are required.')
+    if '@' not in contact_email:
+        raise ServiceError('Contact email does not look like an email address.')
     description = (description or '').strip()
     process = (process or '').strip()
     if not description and not process:
@@ -2057,12 +2063,12 @@ def prodrequest_compose(*, requestor, created_by, description='',
     }
     if pc_anchor:
         data['physics_config_anchor'] = pc_anchor
-    if contact:
-        data['contact'] = (contact or '').strip()
+    data['contact_name'] = contact_name
+    data['contact_email'] = contact_email
     if repository:
         data['repository'] = (repository or '').strip()
-    if other_use_text:
-        data['other_use_text'] = (other_use_text or '').strip()
+    if intended_use:
+        data['intended_use'] = (intended_use or '').strip()
     gen_config = ' '.join(
         part for part in ((generator or '').strip(),
                           (generator_version or '').strip()) if part)
@@ -2073,9 +2079,6 @@ def prodrequest_compose(*, requestor, created_by, description='',
         nevents=nevents,
         gen_config=gen_config,
         simu_path=(simu_path or '').strip(),
-        pre_tdr_use=bool(pre_tdr_use),
-        early_science_use=bool(early_science_use),
-        other_use=bool((other_use_text or '').strip()),
         new_request=True,
         status='new',
         source_row=f'composer:{_uuid.uuid4().hex[:12]}',

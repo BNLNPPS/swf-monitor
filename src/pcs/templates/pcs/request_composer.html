@@ -89,11 +89,12 @@
           </div>
           <div class="col-md-4">
             <label for="rc-genver">Generator version <span class="text-muted">(optional)</span></label>
-            <input id="rc-genver" class="form-control" placeholder="8.316-1.0">
+            <input id="rc-genver" class="form-control">
           </div>
           <div class="col-md-6">
             <label for="rc-sample">Sample variant <span class="text-muted">(optional)</span></label>
-            <input id="rc-sample" class="form-control" placeholder="angular range, mass point, …">
+            <input id="rc-sample" class="form-control" list="rc-sample-opts" placeholder="angular range, mass point, …">
+            <datalist id="rc-sample-opts">{% for o in sample_options %}<option value="{{ o }}">{% endfor %}</datalist>
           </div>
           <div class="col-md-6">
             <label for="rc-nevents">How many events?</label>
@@ -102,28 +103,25 @@
           </div>
           <div class="col-md-4">
             <label for="rc-requestor">Working group</label>
-            <select id="rc-requestor" class="form-select">
-              <option value="">choose…</option>
-              {% for o in requestor_options %}
-              <option value="{{ o }}" {% if o == default_requestor %}selected{% endif %}>{{ o }}</option>
-              {% endfor %}
-            </select>
+            <input id="rc-requestor" class="form-control" list="rc-requestor-opts"
+                   value="{{ default_requestor }}" placeholder="pick or type your own">
+            <datalist id="rc-requestor-opts">{% for o in requestor_options %}<option value="{{ o }}">{% endfor %}</datalist>
           </div>
-          <div class="col-md-8">
-            <label for="rc-contact">Contact <span class="text-muted">(optional)</span></label>
-            <input id="rc-contact" class="form-control" value="{{ default_contact }}" placeholder="you@institution.edu">
+          <div class="col-md-4">
+            <label for="rc-contact-name">Your name</label>
+            <input id="rc-contact-name" class="form-control" value="{{ default_contact_name }}" required>
+          </div>
+          <div class="col-md-4">
+            <label for="rc-contact-email">Email</label>
+            <input id="rc-contact-email" class="form-control" type="email" value="{{ default_contact_email }}" placeholder="physicist@epic.org" required>
           </div>
           <div class="col-12">
-            <label>Intended use</label>
-            <div>
-              <label class="me-3 fw-normal"><input type="checkbox" id="rc-pretdr"> possible pre-TDR use</label>
-              <label class="me-3 fw-normal"><input type="checkbox" id="rc-es"> early science</label>
-              <input id="rc-otheruse" class="form-control d-inline-block mt-1" style="max-width: 24em" placeholder="other use — say what">
-            </div>
+            <label for="rc-intended">Intended use <span class="text-muted">(optional)</span></label>
+            <input id="rc-intended" class="form-control" placeholder="pre-TDR studies, early science, detector performance, …">
           </div>
           <div class="col-12">
             <label for="rc-simupath">Input files, if they already exist <span class="text-muted">(optional)</span></label>
-            <input id="rc-simupath" class="form-control" placeholder="path, URL, or Rucio dataset of your generator-level files">
+            <input id="rc-simupath" class="form-control" placeholder="Rucio dataset preferred; a path or URL works too">
           </div>
           <div class="col-12">
             <label for="rc-repository">Configuration repository <span class="text-muted">(optional)</span></label>
@@ -132,7 +130,7 @@
           <div class="col-12">
             <label for="rc-description">Anything else we should know?</label>
             <textarea id="rc-description" class="form-control" rows="3"
-                      placeholder="Purpose, timescale, special settings — plain words are perfect."></textarea>
+                      placeholder="Purpose, timescale, special settings."></textarea>
           </div>
         </div>
 
@@ -197,11 +195,20 @@
     };
   }
 
+  function norm(s) {
+    return String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function axisMatch(config_value, typed) {
+    const c = norm(config_value), t = norm(typed);
+    if (!c || !t) return false;
+    return c.includes(t) || t.includes(c);
+  }
+
   function matches(axes) {
     const filled = fields.filter(f => axes[f]);
     if (!filled.length) return [];
-    return configs.filter(c => filled.every(f =>
-      (c[f] || '').toLowerCase().startsWith(axes[f].toLowerCase())));
+    return configs.filter(c => filled.every(f => axisMatch(c[f], axes[f])));
   }
 
   function renderMatches() {
@@ -282,9 +289,15 @@
   if (submit) submit.addEventListener('click', async () => {
     const status = el('rc-status');
     const axes = currentAxes();
+    if (!el('rc-contact-name').value.trim() || !el('rc-contact-email').value.trim()) {
+      status.textContent = 'Please give your name and email so the production team can reach you.';
+      submit.disabled = false;
+      return;
+    }
     const body = {
       requestor: el('rc-requestor').value,
-      contact: el('rc-contact').value.trim(),
+      contact_name: el('rc-contact-name').value.trim(),
+      contact_email: el('rc-contact-email').value.trim(),
       description: el('rc-description').value.trim(),
       nevents: parseEvents(el('rc-nevents').value),
       process: axes.process, beam: axes.beam, species: axes.species,
@@ -293,9 +306,7 @@
       sample: el('rc-sample').value.trim(),
       simu_path: el('rc-simupath').value.trim(),
       repository: el('rc-repository').value.trim(),
-      pre_tdr_use: el('rc-pretdr').checked,
-      early_science_use: el('rc-es').checked,
-      other_use_text: el('rc-otheruse').value.trim(),
+      intended_use: el('rc-intended').value.trim(),
       pc_anchor: adoptedAnchor,
     };
     status.textContent = 'Submitting…';

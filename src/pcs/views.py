@@ -2435,8 +2435,12 @@ def pcs_request_composer(request):
             })
     default_requestor = (prefs.get('composer_requestor', '')
                          or (my_requests[0]['requestor'] if my_requests else ''))
-    default_contact = (prefs.get('composer_contact', '')
-                       or (getattr(request.user, 'email', '') or ''))
+    full_name = ''
+    if username:
+        full_name = (request.user.get_full_name() or '').strip()
+    default_contact_name = prefs.get('composer_contact_name', '') or full_name
+    default_contact_email = (prefs.get('composer_contact_email', '')
+                             or (getattr(request.user, 'email', '') or ''))
 
     return render(request, 'pcs/request_composer.html', {
         'configs_json': json.dumps(configs),
@@ -2445,11 +2449,13 @@ def pcs_request_composer(request):
         'species_options': _options('species'),
         'q2_options': _options('q2'),
         'generator_options': _options('generator'),
+        'sample_options': _options('sample'),
         'requestor_options': _requestor_options(),
         'my_requests': my_requests,
         'my_requests_json': json.dumps(my_requests),
         'default_requestor': default_requestor,
-        'default_contact': default_contact,
+        'default_contact_name': default_contact_name,
+        'default_contact_email': default_contact_email,
     })
 
 
