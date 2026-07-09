@@ -30,7 +30,7 @@ def _proposal_input_hash(payload, comment):
 def _clear_proposal_projection(name):
     """Remove the render projection from the record a proposal targeted."""
     head = (Dataset.objects
-            .filter(composed_name=name).order_by('block_num').first())
+            .filter(composed_name=name).order_by('block_num', 'pk').first())
     if head is None:
         return
     metadata = dict(head.metadata or {})
@@ -48,8 +48,10 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
     Validates exactly as ``dataset_propagation_set`` does — an unexecutable
     proposal is refused at birth. The canonical record is a Proposal row
     (frozen payload, required comment, proposer identity,
-    ``precondition.prev_state`` staleness anchor); the target's block-1 row
-    carries a render projection in ``metadata['proposal']``, written here
+    ``precondition.prev_state`` staleness anchor); the target's head row
+    (first by block then pk, the same deterministic head every propagation
+    writer uses) carries a render projection in ``metadata['proposal']``,
+    written here
     and cleared by decision or withdrawal. Skips, all counted and returned:
     unknown names, no-ops (already in the target state), and identities
     with a denied proposal-list row matching this proposal's input hash (a
@@ -80,7 +82,7 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
     with transaction.atomic():
         for name in names:
             head = (Dataset.objects
-                    .filter(composed_name=name).order_by('block_num').first())
+                    .filter(composed_name=name).order_by('block_num', 'pk').first())
             if head is None:
                 unknown.append(name)
                 continue
@@ -199,7 +201,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         for row in rows:
             head = (Dataset.objects
                     .filter(composed_name=row.subject_key)
-                    .order_by('block_num').first())
+                    .order_by('block_num', 'pk').first())
             pre = row.precondition or {}
             current = head.propagation if head else None
             record_moved = current != pre.get('prev_state')
@@ -298,7 +300,7 @@ def proposal_undo(proposal_ids, *, undone_by=''):
             continue
         head = (Dataset.objects
                 .filter(composed_name=row.subject_key)
-                .order_by('block_num').first())
+                .order_by('block_num', 'pk').first())
         payload = row.payload or {}
         pre = row.precondition or {}
         # The undo offer expires when the record moves past the payload.

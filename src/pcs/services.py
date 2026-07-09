@@ -2829,7 +2829,9 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
     One call = one operator action, single or bulk. Every named composed
     identity gets the state (and the optional ``replaced_by`` successor
     reference), with one append-only history entry recorded on the
-    identity's block-1 row under ``metadata['propagation']['history']`` —
+    identity's head row — deterministically the first by (block, pk), since
+    past-campaign identities carry several physical rows on one block —
+    under ``metadata['propagation']['history']``;
     state, previous, comment (required: the why and its source travel
     together), changed_by, changed_at. The ``propagation`` column mirrors
     the newest entry on every block row.
@@ -2879,7 +2881,8 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
     with transaction.atomic():
         for name in names:
             rows = list(Dataset.objects
-                        .filter(composed_name=name).order_by('block_num'))
+                        .filter(composed_name=name)
+                        .order_by('block_num', 'pk'))
             if not rows:
                 unknown.append(name)
                 continue
