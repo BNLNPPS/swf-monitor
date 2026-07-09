@@ -66,7 +66,7 @@
   <table class="table table-sm table-striped pcs-pc-table dataTable">
     <thead>
       <tr>
-        <th class="pcs-pc-sort sorting_asc">Physics</th>
+        <th class="pcs-pc-sort sorting_asc">Physics &amp; #requests</th>
         <th class="pcs-pc-sort sorting">Process</th>
         <th class="pcs-pc-sort sorting">Beam</th>
         <th class="pcs-pc-sort sorting">Q²</th>
@@ -100,14 +100,12 @@
         {% for e in r.cells %}
         <td class="pcs-pc-cell small" data-sort-val="{% if e %}{{ e.files|default:0 }}{% else %}-1{% endif %}">
           {% if e %}
-            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ e.name|urlencode }}"
-               title="{{ e.name }}{% if e.n_datasets > 1 %} — {{ e.n_datasets }} datasets{% endif %}" style="text-decoration:none">
-              {% if e.files %}<span class="pcs-pc-files">&#10003; {{ e.files }} f</span> <span class="text-muted">{{ e.size|filesizeformat }}</span>
-              {% else %}<span class="pcs-pc-status">{{ e.status|default:"—" }}</span>{% endif %}
-            </a>
+            {% if e.files %}<span class="pcs-pc-files" title="{{ e.name }}{% if e.n_datasets > 1 %} — {{ e.n_datasets }} datasets{% endif %}">&#10003; {{ e.files }} f</span> <span class="text-muted">{{ e.size|filesizeformat }}</span>
+            {% else %}<span class="pcs-pc-status" title="{{ e.name }}">{{ e.status|default:"—" }}</span>{% endif %}
             {% if e.propagation == 'hold' %}<span class="pcs-pc-hold" title="disposition: hold">H</span>{% endif %}
             {% if e.propagation == 'final' %}<span class="pcs-pc-final" title="disposition: final{% if e.replaced_by %} — replaced by {{ e.replaced_by }}{% endif %}">F</span>{% endif %}
             {% if e.proposal %}<a class="ai-attr" href="{% url 'ai:ai_proposals' %}?subject={{ e.name|urlencode }}" title="pending AI proposal — click to review" style="text-decoration:none">AI</a>{% endif %}
+            <span class="small">{% if e.files %}<a href="{% url 'pcs:pcs_edition_data' e.name %}" title="the edition's datasets, DIDs, replicas">data</a> &middot; {% endif %}<a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ e.name|urlencode }}" title="the catalog task">task</a></span>
           {% else %}
             <span class="text-muted">·</span>
           {% endif %}

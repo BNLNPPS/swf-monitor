@@ -204,6 +204,7 @@
     const csrfToken   = '{{ csrf_token }}';
     const QUESTIONNAIRE_LIST_URL = "../../questionnaires/";
     const RUCIO_DID_URL = "../../rucio/";
+    const EDITION_DATA_URL = "../../data/";
 
     // ── Tag-based naming: the new system's names enter the world here ──
     // The dataset's human-facing identity is its tag-composed name
@@ -1151,7 +1152,8 @@
                        `${o.complete === false ? ' <span style="color:#dc3545">(incomplete)</span>' : ''}` +
                        `${rses ? ' · ' + htmlEscape(rses) : ''}</div>`;
             }).join('');
-            html += `<div class="mb-2"><strong>Produced data</strong>${outRows}</div>`;
+            const editionLink = `<a class="small ms-2" href="${EDITION_DATA_URL}${encodeURIComponent(taskComposedName(t))}/" title="the edition's datasets, DIDs, replicas">edition data</a>`;
+            html += `<div class="mb-2"><strong>Produced data</strong>${editionLink}${outRows}</div>`;
         }
 
         // Submit-readiness. Empty list means the task can produce a submission spec.

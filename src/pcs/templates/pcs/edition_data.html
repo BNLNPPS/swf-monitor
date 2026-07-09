@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% load swf_fmt %}
+
+{% block title %}Edition Data - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.pcs-ed-table td, .pcs-ed-table th { vertical-align: top; }
+.pcs-ed-rse-bad { color: #dc3545; }
+</style>
+
+<div class="container-fluid mt-3">
+  <h1 style="font-size: 1.4rem">Edition data</h1>
+  <div class="mb-1"><strong>{{ name }}</strong></div>
+  <div class="mb-2">
+    <span class="pcs-pc-files" style="color:#1e7e34">{{ total_files }} files &middot; {{ total_bytes|filesizeformat }}</span>
+    across {{ items|length }} dataset{{ items|length|pluralize }}
+    <a class="btn btn-sm btn-outline-secondary ms-3"
+       href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ name|urlencode }}">Catalog task</a>
+    <a class="btn btn-sm btn-outline-secondary ms-1"
+       href="{% url 'pcs:pcs_physics_configs' %}">Physics configurations</a>
+  </div>
+
+  <table class="table table-sm table-striped pcs-ed-table">
+    <thead>
+      <tr><th>Campaign</th><th>Stage</th><th>Rucio dataset</th>
+          <th>Files</th><th>Size</th><th>Replicas</th></tr>
+    </thead>
+    <tbody>
+      {% for i in items %}
+      <tr>
+        <td>{{ i.campaign }}</td>
+        <td>{{ i.stage|default:"—" }}</td>
+        <td>
+          {% if i.did %}
+          <a href="{% url 'pcs:rucio_did_detail' i.did_scope i.did_name %}"
+             title="live Rucio detail — metadata, replicas, files">{{ i.did }}</a>
+          {% else %}
+          <span class="text-muted" title="PCS-internal name; no Rucio DID recorded">{{ i.internal }}</span>
+          {% endif %}
+        </td>
+        <td>{{ i.files }}</td>
+        <td>{{ i.size|filesizeformat }}</td>
+        <td class="small">
+          {% for r in i.rses %}
+          <div>{{ r.name }}: {{ r.files }}/{{ r.total }}{% if r.status != 'complete' %} <span class="pcs-ed-rse-bad">({{ r.status }})</span>{% endif %}</div>
+          {% empty %}<span class="text-muted">—</span>{% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="small text-muted" style="max-width: 62em">
+    The Rucio dataset link opens the live detail page — Rucio metadata,
+    per-RSE replicas, and the file listing — read directly from JLab Rucio.
+  </p>
+</div>
+{% endblock %}

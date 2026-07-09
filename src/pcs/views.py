@@ -2278,6 +2278,63 @@ def pcs_physics_configs(request):
     })
 
 
+def pcs_edition_data(request, name):
+    """One edition's data: the physical datasets realizing a composed
+    identity — real Rucio DIDs (linked to the live detail page), files,
+    volume, per-RSE replica status. The physics-configuration view's
+    produced cells land here: navigate to data, then act via the catalog
+    cross-link. Read-open.
+
+    Past/ingested rows carry their real Rucio DID in
+    ``metadata.source.location`` (the ``did`` column is the PCS-internal
+    name); PanDA-produced rows carry it in ``did``. Both shapes render;
+    a row with no real DID shows its internal name unlinked.
+    """
+    rows = list(Dataset.objects.filter(composed_name=name)
+                .select_related('campaign').order_by('block_num', 'pk'))
+    if not rows:
+        raise Http404(f'No dataset identity {name!r}')
+
+    items = []
+    total_files = 0
+    total_bytes = 0
+    for dataset in rows:
+        metadata = dataset.metadata or {}
+        location = (metadata.get('source') or {}).get('location', '')
+        did = ''
+        if ':' in location and '/' not in location.split(':', 1)[0]:
+            did = location
+        elif (dataset.did or '').startswith('group.EIC:group.EIC'):
+            did = dataset.did
+        scope, _, did_name = did.partition(':')
+        past = metadata.get('past_output') or {}
+        items.append({
+            'campaign': dataset.campaign.name if dataset.campaign_id else '',
+            'stage': (past.get('stage')
+                      or str(metadata.get('stage', '')).upper()),
+            'did': did,
+            'did_scope': scope,
+            'did_name': did_name.lstrip('/'),
+            'internal': dataset.did,
+            'files': dataset.file_count or 0,
+            'size': dataset.data_size or 0,
+            'rses': past.get('rses') or [],
+            'source': location,
+        })
+        total_files += dataset.file_count or 0
+        total_bytes += dataset.data_size or 0
+
+    task = (ProdTask.objects.filter(dataset__composed_name=name)
+            .exclude(status='past_output').order_by('pk').first())
+    return render(request, 'pcs/edition_data.html', {
+        'name': name,
+        'items': items,
+        'total_files': total_files,
+        'total_bytes': total_bytes,
+        'task_name': task.name if task else name,
+    })
+
+
 @_login_required_flash
 def pcs_catalog_promote_current(request):
     """POST handler for the producing tab's 'Make <campaign> current'
