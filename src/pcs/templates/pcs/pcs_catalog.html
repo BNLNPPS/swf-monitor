@@ -413,6 +413,23 @@
   </div>
   {% endif %}
 
+  {% if active_lifecycle == 'current' %}
+  <div class="small mb-2">
+    <span><strong>Last activity:</strong> {{ current_last_activity|default:"none recorded" }}</span>
+    {% if user.is_authenticated %}
+    {% for offer in promote_offers %}
+    <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="d-inline ms-3">
+      {% csrf_token %}
+      <input type="hidden" name="name" value="{{ offer.name }}">
+      <button type="submit" class="btn btn-sm btn-success"
+              onclick="return confirm('Make {{ offer.name }} current? {{ offer.note }}');">
+        Make {{ offer.name }} current</button>
+    </form>
+    {% endfor %}
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if rucio_detected and rucio_detected.0.version != rucio_current_name and active_lifecycle == 'current' %}
     {# Current tab and current is stale: selector to switch. #}
     <div class="border rounded p-2 mb-3 small bg-light">

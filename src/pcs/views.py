@@ -324,6 +324,44 @@ def _next_campaign_hint():
     return {'name': name, **hints[name]}
 
 
+def _campaign_last_activity(campaign):
+    """The most recent Rucio arrival known for a campaign, as a display
+    string: the arrivals sweep's record when present, else the last
+    cumulative increase in the campaign's Rucio timeline (kept for
+    current/last campaigns), else ''."""
+    import datetime as _dt
+
+    arrivals = (campaign.data or {}).get('arrivals') or {}
+    value = arrivals.get('last_arrival_at') or ''
+    if value:
+        try:
+            return (_dt.datetime.fromisoformat(value)
+                    .strftime('%Y-%m-%d %H:%M UTC'))
+        except ValueError:
+            pass
+    from .services import load_rucio_timeline
+    timeline = load_rucio_timeline(campaign.name) or {}
+    dates = timeline.get('dates') or []
+    best = ''
+    for key in ('reco', 'simu'):
+        cum = (timeline.get(key) or {}).get('cum_files') or []
+        for i in range(1, min(len(cum), len(dates))):
+            if cum[i] > cum[i - 1] and dates[i] > best:
+                best = dates[i]
+    return best.replace('T', ' ') if best else ''
+
+
+def _promote_cascade_note(campaigns_by_lifecycle, target_name):
+    """Human line stating what the promote rotation will do."""
+    steps = [f'{c.name} becomes last'
+             for c in campaigns_by_lifecycle['current']
+             if c.name != target_name]
+    steps += [f'{c.name} becomes past'
+              for c in campaigns_by_lifecycle['last']
+              if c.name != target_name]
+    return ('; '.join(steps) + '.') if steps else ''
+
+
 def _campaigns_with_inflow():
     """Campaigns with fresh Rucio arrivals — the derived 'producing'
     status (EPICPROD_DATA_LINEAGE.md): an arrivals block recorded within
@@ -2145,19 +2183,24 @@ def pcs_catalog(request):
         _tab('current', 'Current', 'success'),
     ]
     # Derived producing tabs: campaigns with fresh Rucio inflow, whatever
-    # their stored lifecycle — current by the data's definition.
+    # their stored lifecycle — current by the data's definition, so they
+    # dress like Current.
     for camp, arrivals in inflow:
         lifecycle_tabs.append({
             'key': 'producing',
-            'label': f'{camp.name} · producing',
-            'color': 'warning',
+            'label': 'Producing',
+            'color': 'success',
             'campaigns': [camp],
-            'detail': f"{arrivals.get('files', 0)} new file(s)",
+            'detail': camp.name,
             'url': f'?lifecycle=producing&campaign={camp.name}',
             'active': (active_lifecycle == 'producing'
                        and producing_campaign_name == camp.name),
         })
-    lifecycle_tabs.append(_tab('future', 'Future', 'primary'))
+    next_hint = _next_campaign_hint()
+    future_tab = _tab('future', 'Future', 'primary')
+    if next_hint and not future_tab['detail']:
+        future_tab['detail'] = next_hint['name']
+    lifecycle_tabs.append(future_tab)
 
     # Past lifecycle: per-release view of output datasets. Each release
     # is one SW version (e.g. 26.04.1) covering up to two stages
@@ -2312,23 +2355,25 @@ def pcs_catalog(request):
 
         producing_arrivals = None
         promote_cascade_note = ''
+        producing_last_activity = ''
         if active_lifecycle == 'producing':
             producing_arrivals = dict(next(
                 (arr for camp, arr in inflow
                  if camp.name == producing_campaign_name), {}))
-            steps = []
-            for cur in campaigns_by_lifecycle['current']:
-                steps.append(f'{cur.name} becomes last')
-            for last in campaigns_by_lifecycle['last']:
-                steps.append(f'{last.name} becomes past')
-            promote_cascade_note = ('; '.join(steps) + '.') if steps else ''
+            promote_cascade_note = _promote_cascade_note(
+                campaigns_by_lifecycle, producing_campaign_name)
+            producing_camp = Campaign.objects.filter(
+                name=producing_campaign_name).first()
+            if producing_camp is not None:
+                producing_last_activity = _campaign_last_activity(producing_camp)
 
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
-            'next_campaign_hint': (_next_campaign_hint()
+            'next_campaign_hint': (next_hint
                                    if active_lifecycle == 'future' else None),
             'producing_campaign': producing_campaign_name,
             'producing_arrivals': producing_arrivals,
+            'producing_last_activity': producing_last_activity,
             'promote_cascade_note': promote_cascade_note,
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
@@ -2432,10 +2477,19 @@ def pcs_catalog(request):
         from monitor_app.models import UserPreference
         propagation_last_comment = UserPreference.get_prefs(
             request.user.username).get('propagation_last_comment', '')
+    current_camp = (campaigns_by_lifecycle['current'][0]
+                    if campaigns_by_lifecycle['current'] else None)
     context = {
         'propagation_last_comment': propagation_last_comment,
         'tasks': [],
         'ai_executed_names': _executed_proposal_names(),
+        'current_last_activity': (_campaign_last_activity(current_camp)
+                                  if current_camp else ''),
+        'promote_offers': [
+            {'name': camp.name,
+             'note': _promote_cascade_note(campaigns_by_lifecycle, camp.name)}
+            for camp, _ in inflow
+        ],
         'show_tabs': True,
         'columns_mode': 'full',
         'catalog_view': catalog_view,
