@@ -184,11 +184,11 @@ class BackgroundTag(models.Model):
 
 class Proposal(models.Model):
     """AI (or rule-based) proposal of a concrete action, pending or decided —
-    the canonical proposal ledger (EPICPROD_PROPOSALS.md).
+    the canonical record behind the AI proposal list (EPICPROD_PROPOSALS.md).
 
     A proposal is a frozen executable payload: the action identifier plus
     the exact validated arguments of the call it wants. Terminal rows are
-    retained forever — the ledger is where all AI-proposed activity and its
+    retained — the AI proposal list is where AI-proposed activity and its
     human decisions remain visible and queryable (per-proposer track
     records, approval and wrong-rates). Records the proposal targets carry a
     render projection in their metadata, written and cleared by the same

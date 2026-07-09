@@ -30,7 +30,7 @@ AI surfaces get only the *propose* verb; the decide path demands an
 authenticated human. This is the credential-boundary pattern applied to
 authority: the AI surface holds no mutation right, structurally.
 
-## The ledger: the Proposal table is canonical
+## The AI proposal list: the Proposal table is canonical
 
 Every proposal is a `Proposal` row (`pcs_proposal`): action, subject
 (type + key, `counterpart_key` for relation subjects such as a
@@ -43,17 +43,19 @@ executed action-stream log id).
 
 Status vocabulary: `proposed → executed | denied | withdrawn | stale`, with
 `approved_pending_execution` reserved for asynchronous executors. **Terminal
-rows are retained forever** — the ledger is where all AI-proposed activity
-and its decisions stay visible: the queue (pending), the audit trail
-(decided), per-proposer track records, and the standing metric of what
-fraction of production mutations originate with AI.
+rows are retained** — the AI proposal list is where AI-proposed activity
+and its decisions stay visible: the queue (pending), the decided history,
+per-proposer track records, and the standing metric of what fraction of
+production mutations originate with AI. Operators can delete list rows
+(test or noise entries), logged with counts — a cleanup verb, never a
+decision verb.
 
 Records a proposal targets carry a **render projection** in their metadata
 (`Dataset.metadata['proposal']`), written and cleared in the same
 transactions by the same services — so the catalog badges, filters, and
 compose detail render without joins while the table holds truth. Denial
-memory is a ledger query (denied row with the same subject and input hash),
-not record state.
+memory is a proposal-list query (denied row with the same subject and input
+hash), not record state.
 
 ## Review surfaces
 
@@ -69,9 +71,9 @@ ink on light purple ground, defined once (`--ai-fg`, `--ai-bg`,
 - **The compose detail**: the same proposal block with the same controls —
   the record is server-side, so list and detail cannot fork.
 - **The proposals page** (`/pcs/proposals/`, on the production home under
-  AI assessments): the queue (pending, default) and the decided ledger,
-  filterable by status, action, proposer, and batch, with bulk decide and
-  per-proposer track records.
+  AI assessments): the pending queue and the decided history, filterable by
+  status, action, proposer, and batch, with bulk decide and per-proposer
+  track records.
 
 A decision optionally carries a **quality tag** from the shared review
 vocabulary (`wrong | poor | ok | good` — the same scale as AI assessments).
@@ -114,7 +116,7 @@ frame plus the model's one-line reason.
 
 **Weakest-consumer design.** The propose surface is one flat call with
 deterministic validation, so a small-model proposer is merely less useful,
-never dangerous — its worst case is a denied proposal. The ledger's
+never dangerous — its worst case is a denied proposal. The proposal list's
 per-proposer approval and wrong-rates make proposal rights earnable and
 revocable by data: a proposer whose wrong-rate climbs gets its proposing
 switched off. LLM *readers* of proposal state (bots, assessors) get a

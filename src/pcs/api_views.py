@@ -278,7 +278,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
     def proposal_decide(self, request):
         """Approve or deny pending AI proposals.
 
-        Body: ``names`` and/or ``ids`` (ledger row ids), ``decision``
+        Body: ``names`` and/or ``ids`` (AI proposal list row ids), ``decision``
         ('approve' | 'deny'), ``quality`` (optional review tag: wrong |
         poor | ok | good), ``filter`` (optional audit record of the
         selecting filter). Approval revalidates and executes through the
@@ -293,6 +293,21 @@ class DatasetViewSet(viewsets.ModelViewSet):
                 quality=request.data.get('quality', ''),
                 filter_state=request.data.get('filter', ''),
                 proposal_ids=request.data.get('ids') or [],
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        except (TypeError, ValueError):
+            return Response({'detail': 'ids must be integers'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='proposal-delete')
+    def proposal_delete(self, request):
+        """Delete AI proposal list rows (operator housekeeping). Body: ids."""
+        try:
+            result = services.dataset_proposal_delete(
+                request.data.get('ids') or [],
+                deleted_by=request.user.username,
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)

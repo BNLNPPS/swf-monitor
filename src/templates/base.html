@@ -224,9 +224,9 @@
          dark purple ink on light purple ground. Tune the system-wide AI
          look here and nowhere else. */
       :root {
-        --ai-fg: #4a1d7a;
-        --ai-bg: #f0e8fa;
-        --ai-border: #c9b3e8;
+        --ai-fg: #5b21b6;
+        --ai-bg: #f3ecff;
+        --ai-border: #c9b3f0;
       }
       .ai-attr {
         color: var(--ai-fg);
@@ -236,7 +236,13 @@
         padding: 0 .45em;
         font-weight: 600;
       }
-      .ai-attr-text { color: var(--ai-fg); font-weight: 600; }
+      /* Purple ink always sits on lavender ground — the universal pairing. */
+      .ai-attr-text {
+        color: var(--ai-fg); background-color: var(--ai-bg);
+        border-radius: .35em; padding: 0 .3em; font-weight: 600;
+      }
+      /* Lavender fill for AI-owned containers (home-page boxes, panels). */
+      .ai-fill { background-color: var(--ai-bg); }
       button.ai-attr:hover, a.ai-attr:hover {
         background-color: var(--ai-fg); color: #fff;
         border-color: var(--ai-fg);

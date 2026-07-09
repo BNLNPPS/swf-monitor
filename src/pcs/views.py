@@ -2653,16 +2653,16 @@ def prod_task_compose_task_detail(request, name):
 
 
 def pcs_proposals(request):
-    """AI proposals queue and ledger (EPICPROD_PROPOSALS.md).
+    """The AI proposal list (EPICPROD_PROPOSALS.md).
 
     Pending proposals for review (default filter), decided rows as the
-    audit ledger, and per-proposer track records. Read-open —
+    decided history, and per-proposer track records. Read-open —
     visible-but-inert; decisions require sign-in and act through the same
     proposal-decide service as the catalog and compose surfaces.
     """
     from .models import Proposal
 
-    status_filter = (request.GET.get('status') or 'proposed').strip()
+    status_filter = (request.GET.get('status') or 'all').strip()
     action_filter = (request.GET.get('action') or '').strip()
     proposer_filter = (request.GET.get('proposer') or '').strip()
     batch_filter = (request.GET.get('batch') or '').strip()
@@ -2690,11 +2690,11 @@ def pcs_proposals(request):
     ]
 
     proposer_stats = []
-    for proposer in (Proposal.objects.order_by()
+    for proposer in (Proposal.objects.exclude(proposer='').order_by()
                      .values_list('proposer', flat=True).distinct()):
         base = Proposal.objects.filter(proposer=proposer)
         proposer_stats.append({
-            'proposer': proposer or '(none)',
+            'proposer': proposer,
             'total': base.count(),
             'pending': base.filter(status='proposed').count(),
             'executed': base.filter(status='executed').count(),

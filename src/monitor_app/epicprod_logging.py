@@ -238,6 +238,12 @@ ACTION_DEFAULTS = {
         'description': "Withdrawal of pending AI proposals (recurring-scan "
                        "heartbeat refresh or operator clear), with count.",
     },
+    'dataset_proposal_deleted': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Operator deletion of AI proposal list rows — "
+                       "housekeeping for test or noise rows; removes audit "
+                       "rows, logged with count.",
+    },
     # web entity lifecycle and operator actions
     'campaign_set_current': {
         'sublevel': 'high', 'live': True,

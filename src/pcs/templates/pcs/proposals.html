@@ -12,9 +12,9 @@
 </style>
 
 <div class="container-fluid mt-3">
-  <h1 class="ai-attr-text">AI Proposals</h1>
+  <h1><span class="ai-attr-text">AI Proposals</span></h1>
   <p class="text-muted">
-    AI-proposed actions pending human review, and the decided ledger.
+    AI-proposed actions pending human review, and the decided history.
     Approval executes the frozen payload deterministically through the same
     service an operator uses; denial is recorded and the proposal is not
     re-proposed until its inputs change. See docs/EPICPROD_PROPOSALS.md.
@@ -22,10 +22,10 @@
 
   <div class="pcs-props-filter mb-2">
     <strong>Status:</strong>
+    <a href="?status=all" class="{% if status_filter == 'all' %}active{% endif %}">All</a>
     {% for f in status_facets %}
       <a href="?status={{ f.status }}" class="{% if status_filter == f.status %}active{% endif %}">{{ f.status }} ({{ f.count }})</a>
     {% endfor %}
-    <a href="?status=all" class="{% if status_filter == 'all' %}active{% endif %}">all</a>
     {% if action_filter or proposer_filter or batch_filter %}
       <span class="text-muted">&middot; filtered:
         {% if action_filter %}action={{ action_filter }}{% endif %}
@@ -39,44 +39,47 @@
     <div class="text-muted mb-2">Showing newest {{ shown_count }} of {{ total_count }} — narrow the filter for the rest.</div>
   {% endif %}
 
-  {% if status_filter == 'proposed' and user.is_authenticated and rows %}
+  {% if user.is_authenticated %}
   <div class="mb-2 d-flex align-items-center gap-2">
     {% csrf_token %}
     <span class="text-muted"><span id="props-count">0</span> selected</span>
     <button type="button" id="props-approve" class="btn btn-sm ai-attr" disabled>Approve</button>
     <button type="button" id="props-deny" class="btn btn-sm ai-attr" disabled>Deny</button>
     <button type="button" id="props-deny-wrong" class="btn btn-sm ai-attr" disabled
-            title="Deny and flag the proposal as wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
+            title="Deny and score the proposal wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
   </div>
   {% endif %}
 
   <table class="table table-sm pcs-props-table">
     <thead>
       <tr>
-        {% if status_filter == 'proposed' and user.is_authenticated %}<th style="width:1.5em"><input type="checkbox" id="props-selectall"></th>{% endif %}
-        <th>Proposed</th><th>Action</th><th>Subject</th><th>Change</th>
+        {% if user.is_authenticated %}<th style="width:1.5em"><input type="checkbox" id="props-selectall" title="Select all pending"></th>{% endif %}
+        <th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
         <th>Confidence</th><th class="pcs-props-comment">Comment</th>
-        <th>Proposer</th><th>Batch</th><th>Status</th><th>Decision</th>
+        <th>Status</th><th>Decision</th><th>Quality</th>
+        <th>Proposer</th><th>Batch</th>{% if user.is_authenticated %}<th style="width:2em"></th>{% endif %}
       </tr>
     </thead>
     <tbody>
       {% for p in rows %}
       <tr>
-        {% if status_filter == 'proposed' and user.is_authenticated %}<td><input type="checkbox" class="props-cb" value="{{ p.id }}"></td>{% endif %}
+        {% if user.is_authenticated %}<td>{% if p.status == 'proposed' %}<input type="checkbox" class="props-cb" value="{{ p.id }}">{% endif %}</td>{% endif %}
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
-        <td class="small">{{ p.action }}</td>
+        <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>
+        <td class="small">{{ p.precondition.prev_state|default:"" }} &rarr; {{ p.payload.state|default:"" }}{% if p.payload.replaced_by %}<div class="text-muted">replaced by {{ p.payload.replaced_by }}</div>{% endif %}</td>
         <td class="small"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
           {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}</td>
-        <td class="small">{{ p.precondition.prev_state|default:"" }} &rarr; {{ p.payload.state|default:"" }}{% if p.payload.replaced_by %}<div class="text-muted">replaced by {{ p.payload.replaced_by }}</div>{% endif %}</td>
         <td class="small">{{ p.confidence|default:"—" }}</td>
         <td class="small pcs-props-comment">{{ p.comment }}</td>
-        <td class="small ai-attr-text">{{ p.proposer|default:"—" }}</td>
-        <td class="small">{{ p.batch_id|default:"—" }}</td>
         <td class="small">{{ p.status }}</td>
-        <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% if p.quality %} <span class="badge {% if p.quality == 'wrong' %}bg-danger{% elif p.quality == 'poor' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ p.quality }}</span>{% endif %}{% else %}—{% endif %}</td>
+        <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% else %}—{% endif %}</td>
+        <td class="small">{{ p.quality|default:"—" }}</td>
+        <td class="small"><span class="ai-attr-text">{{ p.proposer|default:"—" }}</span></td>
+        <td class="small">{{ p.batch_id|default:"—" }}</td>
+        {% if user.is_authenticated %}<td class="small text-end"><button type="button" class="btn btn-sm btn-link text-danger p-0 props-del" data-id="{{ p.id }}" title="Delete this row from the AI proposal list">&#10005;</button></td>{% endif %}
       </tr>
       {% empty %}
-      <tr><td colspan="11" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
+      <tr><td colspan="13" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -87,7 +90,7 @@
     <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Denied</th><th>Wrong</th></tr></thead>
     <tbody>
       {% for s in proposer_stats %}
-      <tr><td class="ai-attr-text">{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
+      <tr><td><span class="ai-attr-text">{{ s.proposer }}</span></td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -141,6 +144,25 @@
   document.getElementById('props-approve').addEventListener('click', () => decide('approve', ''));
   document.getElementById('props-deny').addEventListener('click', () => decide('deny', ''));
   document.getElementById('props-deny-wrong').addEventListener('click', () => decide('deny', 'wrong'));
+
+  document.querySelectorAll('.props-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this row from the AI proposal list? This removes its history entry.')) return;
+      const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/proposal-delete/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ ids: [parseInt(btn.dataset.id, 10)] }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || 'request failed');
+        window.location.reload();
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
+      }
+    });
+  });
 })();
 </script>
 {% endblock %}

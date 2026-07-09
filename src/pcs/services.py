@@ -2960,12 +2960,12 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
 
     Validates exactly as ``dataset_propagation_set`` does — an unexecutable
     proposal is refused at birth. The canonical record is a ``Proposal``
-    ledger row (frozen payload, required comment, proposer identity,
+    AI proposal list row (frozen payload, required comment, proposer identity,
     ``precondition.prev_state`` staleness anchor); the target's block-1 row
     carries a render projection in ``metadata['proposal']``, written here
     and cleared by decision or withdrawal. Skips, all counted and returned:
     unknown names, no-ops (already in the target state), and identities
-    with a denied ledger row matching this proposal's input hash (a denied
+    with a denied proposal list row matching this proposal's input hash (a denied
     proposal never returns until its inputs change). An existing pending
     proposal is superseded (withdrawn) by the fresh one — the heartbeat
     refresh. One ``dataset_proposal_created`` action-stream event per call.
@@ -3059,7 +3059,7 @@ def dataset_proposal_decide(composed_names, decision, *, decided_by='',
     """Approve or deny pending AI proposals (EPICPROD_PROPOSALS.md).
 
     Selection by dataset composed names (the catalog and compose surfaces)
-    and/or by ledger row ids (the proposals queue page). Approval
+    and/or by proposal list row ids (the AI proposal list page). Approval
     revalidates each proposal against current state (the
     ``precondition.prev_state`` anchor): a record that moved since the
     proposal saw it is marked stale and withdrawn from the record, never
@@ -3067,8 +3067,8 @@ def dataset_proposal_decide(composed_names, decision, *, decided_by='',
     ``dataset_propagation_set`` — the identical call an operator makes by
     hand — grouped by identical (state, replaced_by, comment) so a family
     batch is one call and one origin-stamped event; the approving human is
-    ``changed_by`` and the executed ledger rows record the event's log id.
-    Denial marks the ledger row (denial memory is the ledger); one
+    ``changed_by`` and the executed proposal rows record the event's log id.
+    Denial marks the proposal row (denial memory is the proposal list); one
     ``dataset_proposal_denied`` event per call. ``quality`` optionally tags
     the decision with the shared review vocabulary (wrong | poor | ok |
     good) — 'wrong' is the one-tap miscalibration signal that weighs
@@ -3173,6 +3173,35 @@ def dataset_proposal_decide(composed_names, decision, *, decided_by='',
         )
     return {'approved': approved, 'denied': denied, 'stale': stale,
             'no_proposal': no_proposal}
+
+
+def dataset_proposal_delete(proposal_ids, *, deleted_by=''):
+    """Operator deletion of AI proposal list rows — housekeeping for test
+    or noise entries that would confuse readers. Human-only and logged; a
+    pending row also clears its render projection. This removes decided
+    history, so it is a cleanup verb, never a decision verb."""
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    ids = [int(i) for i in (proposal_ids or [])]
+    if not ids:
+        raise ServiceError('no proposal ids supplied')
+    if not deleted_by:
+        raise ServiceError('an authenticated deleter is required')
+    deleted = 0
+    with transaction.atomic():
+        for row in Proposal.objects.filter(pk__in=ids):
+            if row.status == 'proposed':
+                _clear_proposal_projection(row.subject_key)
+            row.delete()
+            deleted += 1
+    log_epicprod_action(
+        'web', 'dataset_proposal_deleted',
+        username=deleted_by,
+        sublevel='normal', live_default=False,
+        message=f'{deleted} AI proposal list row(s) deleted',
+        deleted=deleted,
+    )
+    return {'deleted': deleted}
 
 
 def dataset_proposal_withdraw(*, batch_id=None, created_by=''):
