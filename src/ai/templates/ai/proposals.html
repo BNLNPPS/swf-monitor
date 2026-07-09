@@ -32,6 +32,12 @@
     </div>
     {% endif %}
     {% endfor %}
+    {% if subject_filter %}
+    <div class="mb-1">
+      <strong>Subject:</strong> {{ subject_filter }}
+      <a href="{{ subject_clear_url }}" class="ms-2">clear</a>
+    </div>
+    {% endif %}
   </div>
 
   {% if shown_count < total_count %}

@@ -168,6 +168,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "association_sweep", "catalog_sync", "questionnaire_import",
                    "questionnaire_automatch",
                    "sync_epicprod_inventory", "refresh_system_status",
+                   "rucio_arrivals_sweep", "epic_prod_past_import",
                    "health_ping", "shutdown"}
 
     def __init__(self):

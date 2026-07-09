@@ -324,6 +324,36 @@ def _next_campaign_hint():
     return {'name': name, **hints[name]}
 
 
+def _campaigns_with_inflow():
+    """Campaigns with fresh Rucio arrivals — the derived 'producing'
+    status (EPICPROD_DATA_LINEAGE.md): an arrivals block recorded within
+    SysConfig ``campaign_producing_window_days`` (default 3, covering
+    missed sweep nights). Current-labeled campaigns are excluded — the
+    Current tab already is their surface. Returns [(campaign, arrivals),
+    ...] sorted by name; purely derived, no stored lifecycle involved.
+    """
+    import datetime as _dt
+
+    from monitor_app.models import SysConfig
+    days = SysConfig.get_setting('campaign_producing_window_days', 3)
+    try:
+        window = _dt.timedelta(days=float(days))
+    except (TypeError, ValueError):
+        window = _dt.timedelta(days=3)
+    cutoff = timezone.now() - window
+    out = []
+    for camp in Campaign.objects.exclude(lifecycle='current'):
+        arrivals = (camp.data or {}).get('arrivals') or {}
+        try:
+            last = _dt.datetime.fromisoformat(
+                arrivals.get('last_arrival_at', ''))
+        except (TypeError, ValueError):
+            continue
+        if last >= cutoff:
+            out.append((camp, arrivals))
+    return sorted(out, key=lambda pair: pair[0].name)
+
+
 def _catalog_table_cache_key(campaign_id, catalog_view, signature):
     payload = json.dumps(signature, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()
@@ -1981,6 +2011,54 @@ def rucio_did_files(request, scope, name):
 
 
 @_login_required_flash
+def pcs_catalog_promote_current(request):
+    """POST handler for the producing tab's 'Make <campaign> current'
+    button — the lifecycle rotation, one atomic operator action: the
+    named campaign becomes current, the incumbent current becomes last,
+    the incumbent last becomes past. Detection is automatic (the derived
+    producing status); the transition is always this human click.
+    """
+    from django.db import transaction
+
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Make current')
+    name = (request.POST.get('name') or '').strip()
+    target = Campaign.objects.filter(name=name).first()
+    if target is None:
+        messages.error(request, f'No campaign named {name!r}.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    if target.lifecycle == 'current':
+        messages.info(request, f'{name} is already current.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    moves = []
+    with transaction.atomic():
+        for camp in Campaign.objects.filter(lifecycle='last').exclude(pk=target.pk):
+            camp.lifecycle = 'past'
+            camp.save(update_fields=['lifecycle', 'updated_at'])
+            moves.append(f'{camp.name} -> past')
+        for camp in Campaign.objects.filter(lifecycle='current').exclude(pk=target.pk):
+            camp.lifecycle = 'last'
+            camp.save(update_fields=['lifecycle', 'updated_at'])
+            moves.append(f'{camp.name} -> last')
+        target.lifecycle = 'current'
+        target.save(update_fields=['lifecycle', 'updated_at'])
+        moves.append(f'{name} -> current')
+    summary = '; '.join(reversed(moves))
+    log_epicprod_action(
+        'web', 'campaign_promoted',
+        subject_type='campaign', subject_key=name,
+        username=getattr(request.user, 'username', '') or '',
+        sublevel='high', live_default=True,
+        message=f'campaign lifecycle rotation: {summary}')
+    messages.success(request, f'Campaign rotation: {summary}')
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
 def pcs_catalog_past_update(request):
     """POST handler for the 'Update from epic-prod' button on the Past tab.
 
@@ -2024,8 +2102,14 @@ def pcs_catalog(request):
     build_start = time.perf_counter() if CATALOG_BUILD_TIMING_ENABLED else None
     timings = [] if CATALOG_BUILD_TIMING_ENABLED else None
     filters = _timed(timings, 'parse filters', lambda: _parse_catalog_filters(request))
+    inflow = _campaigns_with_inflow()
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
-    if active_lifecycle not in LIFECYCLE_KEYS:
+    producing_campaign_name = ''
+    if active_lifecycle == 'producing':
+        producing_campaign_name = (request.GET.get('campaign') or '').strip()
+        if not Campaign.objects.filter(name=producing_campaign_name).exists():
+            active_lifecycle, producing_campaign_name = 'current', ''
+    elif active_lifecycle not in LIFECYCLE_KEYS:
         active_lifecycle = 'current'
     catalog_view = (request.GET.get('view') or 'catalog').strip()
     if active_lifecycle != 'current' or catalog_view not in ('catalog', 'progress'):
@@ -2049,20 +2133,31 @@ def pcs_catalog(request):
         if key == 'past':
             return ''
         return ', '.join(c.name for c in camps)
+    def _tab(key, label, color):
+        return {'key': key, 'label': label, 'color': color,
+                'campaigns': campaigns_by_lifecycle[key],
+                'detail': _tab_detail(key, campaigns_by_lifecycle[key]),
+                'url': f'?lifecycle={key}',
+                'active': active_lifecycle == key}
     lifecycle_tabs = [
-        {'key': 'past',    'label': 'Past',    'color': 'secondary',
-         'campaigns': campaigns_by_lifecycle['past'],
-         'detail': _tab_detail('past', campaigns_by_lifecycle['past'])},
-        {'key': 'last',    'label': 'Last',    'color': 'last-green',
-         'campaigns': campaigns_by_lifecycle['last'],
-         'detail': _tab_detail('last', campaigns_by_lifecycle['last'])},
-        {'key': 'current', 'label': 'Current', 'color': 'success',
-         'campaigns': campaigns_by_lifecycle['current'],
-         'detail': _tab_detail('current', campaigns_by_lifecycle['current'])},
-        {'key': 'future',  'label': 'Future',  'color': 'primary',
-         'campaigns': campaigns_by_lifecycle['future'],
-         'detail': _tab_detail('future', campaigns_by_lifecycle['future'])},
+        _tab('past', 'Past', 'secondary'),
+        _tab('last', 'Last', 'last-green'),
+        _tab('current', 'Current', 'success'),
     ]
+    # Derived producing tabs: campaigns with fresh Rucio inflow, whatever
+    # their stored lifecycle — current by the data's definition.
+    for camp, arrivals in inflow:
+        lifecycle_tabs.append({
+            'key': 'producing',
+            'label': f'{camp.name} · producing',
+            'color': 'warning',
+            'campaigns': [camp],
+            'detail': f"{arrivals.get('files', 0)} new file(s)",
+            'url': f'?lifecycle=producing&campaign={camp.name}',
+            'active': (active_lifecycle == 'producing'
+                       and producing_campaign_name == camp.name),
+        })
+    lifecycle_tabs.append(_tab('future', 'Future', 'primary'))
 
     # Past lifecycle: per-release view of output datasets. Each release
     # is one SW version (e.g. 26.04.1) covering up to two stages
@@ -2075,7 +2170,7 @@ def pcs_catalog(request):
     # Last campaign's name (e.g. 26.04.1) and adds the Rucio timeline
     # plot above the table — a hybrid of Past's row model and Current's
     # snapshot view.
-    if active_lifecycle in ('past', 'last', 'future'):
+    if active_lifecycle in ('past', 'last', 'future', 'producing'):
         # Campaigns are bare-named (one row per version). Releases in this
         # view = versions that actually carry past-output rows, independent
         # of the lifecycle slot the campaign occupies — the current campaign
@@ -2113,6 +2208,9 @@ def pcs_catalog(request):
             # both stages' rows.
             last_camps = campaigns_by_lifecycle['last']
             active_release = last_camps[0].name if last_camps else ''
+        elif active_lifecycle == 'producing':
+            # Pin release to the producing campaign the tab names.
+            active_release = producing_campaign_name
         else:
             requested_release = (request.GET.get('release') or '').strip()
             if requested_release == 'all':
@@ -2212,10 +2310,26 @@ def pcs_catalog(request):
                 rucio_detected = _campaign_data(cur).get('detected_releases', []) if cur else []
                 rucio_current_name = cur.name if cur else ''
 
+        producing_arrivals = None
+        promote_cascade_note = ''
+        if active_lifecycle == 'producing':
+            producing_arrivals = dict(next(
+                (arr for camp, arr in inflow
+                 if camp.name == producing_campaign_name), {}))
+            steps = []
+            for cur in campaigns_by_lifecycle['current']:
+                steps.append(f'{cur.name} becomes last')
+            for last in campaigns_by_lifecycle['last']:
+                steps.append(f'{last.name} becomes past')
+            promote_cascade_note = ('; '.join(steps) + '.') if steps else ''
+
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
             'next_campaign_hint': (_next_campaign_hint()
                                    if active_lifecycle == 'future' else None),
+            'producing_campaign': producing_campaign_name,
+            'producing_arrivals': producing_arrivals,
+            'promote_cascade_note': promote_cascade_note,
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
             'release_versions': release_versions,

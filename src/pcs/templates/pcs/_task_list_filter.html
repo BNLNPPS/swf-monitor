@@ -309,8 +309,8 @@ Context expected:
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
               &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
               {% if t.dataset and t.dataset.propagation != 'continue' %}<span class="pcs-prop-badge pcs-prop-{{ t.dataset.propagation }}">{{ t.dataset.propagation }}</span>{% endif %}
-              {% with prop=t.dataset.metadata.proposal %}{% if prop %}<span class="ai-attr" title="{{ prop.comment }} — proposed by {{ prop.proposer }} {{ prop.proposed_at|slice:":10" }}">AI: {{ prop.prev_state }} &rarr; {{ prop.payload.state }}</span>{% endif %}{% endwith %}
-              {% if t.dataset.composed_name in ai_executed_names %}<span class="ai-attr" title="An executed AI proposal stands on this dataset — select it and Undo AI to reverse, or see the AI proposal list">AI: executed</span>{% endif %}
+              {% with prop=t.dataset.metadata.proposal %}{% if prop %}<a class="ai-attr" style="text-decoration:none" href="{% url 'ai:ai_proposals' %}?subject={{ t.dataset.composed_name|urlencode }}" title="{{ prop.comment }} — proposed by {{ prop.proposer }} {{ prop.proposed_at|slice:":10" }}. Click to review and decide on the AI proposal list.">AI: {{ prop.prev_state }} &rarr; {{ prop.payload.state }}</a>{% endif %}{% endwith %}
+              {% if t.dataset.composed_name in ai_executed_names %}<a class="ai-attr" style="text-decoration:none" href="{% url 'ai:ai_proposals' %}?subject={{ t.dataset.composed_name|urlencode }}" title="An executed AI proposal stands on this dataset — click to see it on the AI proposal list, where it can be undone">AI: executed</a>{% endif %}
             </div>
           {% endif %}
           <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ ds_path }}</a></div>

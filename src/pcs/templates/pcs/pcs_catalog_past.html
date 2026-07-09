@@ -100,12 +100,33 @@
   {% if show_tabs %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
     {% for tab in lifecycle_tabs %}
-      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
-         href="?lifecycle={{ tab.key }}">
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if tab.active %} active{% endif %}"
+         href="{{ tab.url }}">
         {{ tab.label }}{% if tab.detail %} <span class="text-muted">·</span> {{ tab.detail }}{% endif %}
       </a>
     {% endfor %}
   </div>
+  {% endif %}
+
+  {% if active_lifecycle == 'producing' %}
+    <div class="border rounded p-2 mb-3" style="max-width: 62em">
+      <div>
+        <strong>{{ producing_campaign }} is producing</strong>{% if producing_arrivals %} &mdash;
+        {{ producing_arrivals.files }} new file{{ producing_arrivals.files|pluralize }} in JLab Rucio
+        since {{ producing_arrivals.window_start|slice:":16" }} (as of the last arrivals sweep){% endif %}.
+        Its recorded content below tracks the nightly ingest.
+      </div>
+      {% if user.is_authenticated %}
+      <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="mt-2 d-inline">
+        {% csrf_token %}
+        <input type="hidden" name="name" value="{{ producing_campaign }}">
+        <button type="submit" class="btn btn-sm btn-success"
+                onclick="return confirm('Make {{ producing_campaign }} current? {{ promote_cascade_note }}');">
+          Make {{ producing_campaign }} current</button>
+      </form>
+      <span class="text-muted small ms-2">{{ promote_cascade_note }}</span>
+      {% endif %}
+    </div>
   {% endif %}
 
   {% if active_lifecycle == 'last' and not rucio_unmatched_campaign and rucio_detected %}

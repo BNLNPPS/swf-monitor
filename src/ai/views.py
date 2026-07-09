@@ -25,12 +25,14 @@ def ai_proposals(request):
 
     filters = {key: (request.GET.get(key) or '').strip()
                for key in ('status', 'action', 'change', 'decision',
-                           'quality', 'proposer', 'batch')}
+                           'quality', 'proposer', 'batch', 'subject')}
     status_filter = filters['status'] or 'all'
 
     qs = Proposal.objects.all()
     if status_filter != 'all':
         qs = qs.filter(status=status_filter)
+    if filters['subject']:
+        qs = qs.filter(subject_key=filters['subject'])
     if filters['action']:
         qs = qs.filter(action=filters['action'])
     if filters['change'] and ':' in filters['change']:
@@ -126,6 +128,8 @@ def ai_proposals(request):
         'total_count': total_count,
         'shown_count': len(rows),
         'facet_rows': facet_rows,
+        'subject_filter': filters['subject'],
+        'subject_clear_url': url_with(subject=''),
         'proposer_stats': proposer_stats,
     })
 

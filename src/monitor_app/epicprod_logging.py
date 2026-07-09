@@ -97,6 +97,13 @@ ACTION_DEFAULTS = {
                        "current (and last) campaign and rematch produced "
                        "RECO/FULL datasets onto each task's recorded outputs.",
     },
+    'campaign_promoted': {
+        'sublevel': 'high', 'live': True,
+        'description': "Operator-clicked campaign lifecycle rotation: the "
+                       "named (producing) campaign becomes current, the "
+                       "incumbent current becomes last, the incumbent last "
+                       "becomes past.",
+    },
     'past_import': {
         'sublevel': 'high', 'live': True,
         'description': "Pull the eic/epic-prod bookkeeping clone and re-run "

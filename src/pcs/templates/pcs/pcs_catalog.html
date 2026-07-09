@@ -405,8 +405,8 @@
   {% if show_tabs and catalog_view != 'progress' %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
     {% for tab in lifecycle_tabs %}
-      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
-         href="?lifecycle={{ tab.key }}">
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if tab.active %} active{% endif %}"
+         href="{{ tab.url }}">
         {{ tab.label }}{% if tab.detail %} <span class="text-muted">·</span> {{ tab.detail }}{% endif %}
       </a>
     {% endfor %}
