@@ -101,11 +101,15 @@
             <input id="rc-nevents" class="form-control" placeholder="10M or 10000000">
             <div class="form-text">Rough is fine; "M" for millions works.</div>
           </div>
-          <div class="col-md-4">
-            <label for="rc-requestor">Working group</label>
-            <input id="rc-requestor" class="form-control" list="rc-requestor-opts"
-                   value="{{ default_requestor }}" placeholder="pick or type your own">
-            <datalist id="rc-requestor-opts">{% for o in requestor_options %}<option value="{{ o }}">{% endfor %}</datalist>
+          <div class="col-md-2">
+            <label for="rc-pwg">PWG <span class="text-muted">(optional)</span></label>
+            <input id="rc-pwg" class="form-control" list="rc-pwg-opts" value="{{ default_pwg }}">
+            <datalist id="rc-pwg-opts">{% for o in pwg_options %}<option value="{{ o }}">{% endfor %}</datalist>
+          </div>
+          <div class="col-md-2">
+            <label for="rc-dsc">DSC <span class="text-muted">(optional)</span></label>
+            <input id="rc-dsc" class="form-control" list="rc-dsc-opts" value="{{ default_dsc }}">
+            <datalist id="rc-dsc-opts">{% for o in dsc_options %}<option value="{{ o }}">{% endfor %}</datalist>
           </div>
           <div class="col-md-4">
             <label for="rc-contact-name">Your name</label>
@@ -295,7 +299,8 @@
       return;
     }
     const body = {
-      requestor: el('rc-requestor').value,
+      pwg: el('rc-pwg').value.trim(),
+      dsc: el('rc-dsc').value.trim(),
       contact_name: el('rc-contact-name').value.trim(),
       contact_email: el('rc-contact-email').value.trim(),
       description: el('rc-description').value.trim(),
@@ -321,7 +326,7 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.detail || 'request failed');
       status.textContent = '';
-      el('rc-success-detail').innerHTML = `Request <strong>req#${j.id}</strong> for ${esc(j.requestor)}`
+      el('rc-success-detail').innerHTML = `Request <strong>req#${j.id}</strong>${j.requestor ? ' for ' + esc(j.requestor) : ''}`
         + (j.pc_anchor ? `, based on <a href="${dataPageUrl(j.pc_anchor)}">${esc(j.pc_anchor)}</a>.` : ', recorded as new physics.');
       el('rc-success').style.display = '';
     } catch (err) {

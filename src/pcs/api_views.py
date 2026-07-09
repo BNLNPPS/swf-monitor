@@ -727,7 +727,7 @@ def prod_request_compose(request):
     username = getattr(request.user, 'username', '') or ''
     fields = {
         key: request.data.get(key) or ''
-        for key in ('requestor', 'description', 'process', 'beam',
+        for key in ('pwg', 'dsc', 'description', 'process', 'beam',
                     'species', 'q2', 'generator', 'generator_version',
                     'sample', 'pc_anchor', 'simu_path', 'contact_name',
                     'contact_email', 'repository', 'intended_use')
@@ -741,8 +741,10 @@ def prod_request_compose(request):
     except ServiceError as e:
         return Response({'detail': e.detail}, status=e.status)
     from monitor_app.models import UserPreference
-    UserPreference.set_pref(username, 'composer_requestor',
-                            result['requestor'])
+    if fields['pwg']:
+        UserPreference.set_pref(username, 'composer_pwg', fields['pwg'])
+    if fields['dsc']:
+        UserPreference.set_pref(username, 'composer_dsc', fields['dsc'])
     UserPreference.set_pref(username, 'composer_contact_name',
                             fields['contact_name'])
     UserPreference.set_pref(username, 'composer_contact_email',

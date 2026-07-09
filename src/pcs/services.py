@@ -2004,7 +2004,7 @@ def pc_request_projection(datasets):
     return projection
 
 
-def prodrequest_compose(*, requestor, created_by, description='',
+def prodrequest_compose(*, created_by, pwg='', dsc='', description='',
                         nevents=None, process='', beam='', species='',
                         q2='', generator='', generator_version='',
                         sample='', pc_anchor='', simu_path='',
@@ -2020,9 +2020,9 @@ def prodrequest_compose(*, requestor, created_by, description='',
     an imported one. Production-team triage fields are left for the
     production team.
     """
-    requestor = (requestor or '').strip().upper()
-    if not requestor:
-        raise ServiceError('A working group (requestor) is required.')
+    pwg = (pwg or '').strip().upper()
+    dsc = (dsc or '').strip().upper()
+    requestor = pwg or dsc
     contact_name = (contact_name or '').strip()
     contact_email = (contact_email or '').strip()
     if not contact_name or not contact_email:
@@ -2061,6 +2061,10 @@ def prodrequest_compose(*, requestor, created_by, description='',
         'composer': True,
         'filters': filters,
     }
+    if pwg:
+        data['pwg'] = pwg
+    if dsc:
+        data['dsc'] = dsc
     if pc_anchor:
         data['physics_config_anchor'] = pc_anchor
     data['contact_name'] = contact_name

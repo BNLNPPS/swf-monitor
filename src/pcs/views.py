@@ -2433,8 +2433,11 @@ def pcs_request_composer(request):
                 'filters': filters,
                 'anchor': (row.data or {}).get('physics_config_anchor', ''),
             })
-    default_requestor = (prefs.get('composer_requestor', '')
-                         or (my_requests[0]['requestor'] if my_requests else ''))
+    requestors = _requestor_options()
+    dsc_options = [r for r in requestors if 'DSC' in r.upper()]
+    pwg_options = [r for r in requestors if 'DSC' not in r.upper()]
+    default_pwg = prefs.get('composer_pwg', '')
+    default_dsc = prefs.get('composer_dsc', '')
     full_name = ''
     if username:
         full_name = (request.user.get_full_name() or '').strip()
@@ -2450,10 +2453,12 @@ def pcs_request_composer(request):
         'q2_options': _options('q2'),
         'generator_options': _options('generator'),
         'sample_options': _options('sample'),
-        'requestor_options': _requestor_options(),
+        'pwg_options': pwg_options,
+        'dsc_options': dsc_options,
+        'default_pwg': default_pwg,
+        'default_dsc': default_dsc,
         'my_requests': my_requests,
         'my_requests_json': json.dumps(my_requests),
-        'default_requestor': default_requestor,
         'default_contact_name': default_contact_name,
         'default_contact_email': default_contact_email,
     })

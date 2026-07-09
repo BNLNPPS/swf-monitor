@@ -303,8 +303,9 @@ needed for the interim model):
 The request composer (`/pcs/request/`) is the native intake surface on the
 path to replacing the Google Form, which serves as its guide rather than its
 specification. A requester describes the physics in plain terms — process,
-beams, species, Q², generator, sample variant, event count, working group,
-intended use, optional input location and configuration repository — and the
+beams, species, Q², generator, sample variant, event count, PWG and/or DSC
+(distinct fields, each optional), intended use, optional input location and
+configuration repository — and the
 page shows, live, the physics configurations the system already has that
 match: what they are, where they were produced, and how much. Contact name
 and email are required, prefilled for signed-in users. "Use this"
