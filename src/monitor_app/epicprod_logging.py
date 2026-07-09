@@ -121,6 +121,15 @@ ACTION_DEFAULTS = {
                        "production content current with what the "
                        "production team publishes.",
     },
+    'rucio_reconcile': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Firsthand reconciliation of a producing "
+                       "campaign's catalog records against its fetched "
+                       "Rucio snapshot: known DIDs updated, unknown DIDs "
+                       "resolved to physics configurations and attached "
+                       "to existing editions or created, unresolved left "
+                       "to curation.",
+    },
     'rucio_arrivals': {
         'sublevel': 'normal', 'live': True,
         'description': "New files landed in JLab Rucio since the last "

@@ -187,6 +187,20 @@ naming a campaign with no catalog row are reported in the event, never
 dropped — an unknown arrival is the first signal of a new campaign
 appearing.
 
+**Firsthand reconciliation** *(implemented — `pcs/reconcile.py`)* — a
+producing campaign's catalog records track Rucio directly, with no
+dependency on the epic-prod bookkeeping cadence. After each snapshot fetch
+of a producing campaign (outside current/last, whose outputs attach through
+the request match and CSV heritage respectively),
+`reconcile_campaign_from_rucio` applies three rules: a known DID
+(``metadata.source.location``) refreshes its row's counts, volume, per-RSE
+status, and the matching task outputs entry; an unknown DID resolves to a
+physics configuration first — matching an existing edition, it joins that
+identity as a physical sibling row and its outputs land on the edition's
+task, never duplicating the edition; only a configuration with no edition
+creates one, past-ingest style. Unresolved physics is reported, never
+created. One `rucio_reconcile` event per campaign per run.
+
 **Reference** *(future, building on the gathered links)* — a catalog read over the stored links, no credential: the existing
 filter set (`EPICPROD_TASK_CATALOG.md` §7) collects the tasks' `outputs`
 DIDs across the filtered set. Dataset-level reference is a pure read of the cached

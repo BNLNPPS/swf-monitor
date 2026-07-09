@@ -3253,6 +3253,19 @@ def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
                 campaign_name=camp.name, created_by=created_by))
         except Exception as e:                                # noqa: BLE001
             out['errors'].append(f'{camp.lifecycle} {camp.name}: {e}')
+            continue
+        if camp.lifecycle not in ('current', 'last'):
+            # Producing campaigns reconcile firsthand from the snapshot
+            # just fetched (CAMPAIGN_CONTINUUM.md; pcs/reconcile.py) —
+            # current attaches outputs through the request match, last
+            # keeps its CSV heritage, so neither is reconciled here.
+            try:
+                from .reconcile import reconcile_campaign_from_rucio
+                out['summaries'].append(
+                    reconcile_campaign_from_rucio(
+                        camp.name, created_by=created_by))
+            except Exception as e:                            # noqa: BLE001
+                out['errors'].append(f'reconcile {camp.name}: {e}')
     return out
 
 
