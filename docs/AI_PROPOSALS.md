@@ -86,24 +86,24 @@ of AI pages, so the color registers as "this is AI" without saturating.
 
 A decision optionally carries a **quality tag** from the shared review
 vocabulary (`wrong | poor | ok | good` — the same scale as AI assessments).
-`Deny — wrong` is the one-tap miscalibration signal: it records the
-ridiculousness judgment instead of leaving it as operator frustration, and
-it weighs against the proposer's track record. Plain deny means the
-proposal was sane and the judgment went against it.
+`Deny — wrong` records a miscalibrated proposal and weighs against the
+proposer's track record; plain deny records a sound proposal decided
+against.
 
 Execution events and history entries are **origin-stamped**
 (`origin: ai_proposal`, proposer, scan version, batch, proposed-at)
 alongside the approving `username`, so every mutation is classifiable as
 human-originated or AI-proposed/human-approved.
 
-## Lifecycle: the heartbeat, not timers
+## Lifecycle: the scan heartbeat
 
-Recurring proposers refresh rather than expire: each scan withdraws its
-unacted proposals and re-derives from current inputs — what still holds
+Recurring proposers refresh their pending proposals: each scan withdraws
+its unacted proposals and re-derives from current inputs — what still holds
 returns freshly validated, what no longer holds does not return, new
-findings appear. Pending staleness is bounded by the scan cadence, nothing
-important evaporates unlooked-at, and denial is the only stop (a denied
-input hash is never re-proposed until the proposer's inputs change).
+findings appear. Pending staleness is bounded by the scan cadence, an
+unreviewed proposal returns at each scan until decided, and denial is the
+only stop (a denied input hash is never re-proposed until the proposer's
+inputs change).
 Withdrawals are logged and counted, never silent. One-shot proposal sets
 persist until decided; revalidation on touch covers their staleness.
 Per-action-type proposing is switchable off in SysConfig.
@@ -124,8 +124,8 @@ type. The questionnaire automatch is the worked hybrid example: structured
 frame plus the model's one-line reason.
 
 **Weakest-consumer design.** The propose surface is one flat call with
-deterministic validation, so a small-model proposer is merely less useful,
-never dangerous — its worst case is a denied proposal. The proposal list's
+deterministic validation, so a small-model proposer's worst case is a
+denied proposal. The proposal list's
 per-proposer approval and wrong-rates make proposal rights earnable and
 revocable by data: a proposer whose wrong-rate climbs gets its proposing
 switched off. LLM *readers* of proposal state (bots, assessors) get a
@@ -134,7 +134,7 @@ docstring.
 
 ## Ceremony proportional to stakes
 
-Review friction must match irreversibility, both ways:
+Review friction matches irreversibility, in both directions:
 
 - **Undoable** actions (catalog state: propagation, tags, matches) approve
   in one tap, and the system can offer **Undo** — a computed compensating
@@ -145,8 +145,8 @@ Review friction must match irreversibility, both ways:
   killed or superseded by `.tryN`, not unsubmitted) offer the named
   mitigation, labeled honestly: it does not restore the prior world.
 - **Irreversible-by-design** actions (locking a tag, publishing a
-  narrative revision) wear the label proudly — their immutability is the
-  guarantee other things stand on — and get ceremony: dry-run preview
+  narrative revision) are labeled as such — their immutability is a
+  guarantee other records depend on — and get ceremony: dry-run preview
   before approve.
 
 Every approve control states its undo story. Reversibility class is
@@ -156,8 +156,8 @@ defaults.
 **Dry run** is the trust instrument for consequential and composite
 actions: execute the frozen payload with writes off and show the concrete
 before→after; approve then executes what was just shown. Dry runs write
-nothing, so they are open to everyone — visible-but-inert becomes
-visible-and-explorable. Composite executors (campaign creation) must be
+nothing, so they are open to all readers, not only approvers. Composite
+executors (campaign creation) must be
 dry-runnable; a composite proposal's review surface is its dry run, diffed
 against the preview frozen at propose time — staleness made visible at a
 scale a single `prev_state` anchor cannot guard.
