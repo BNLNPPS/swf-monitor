@@ -33,6 +33,7 @@ def main(argv):
         if source == 'csv':
             s = import_default_datasets_csv(created_by='prodops_agent')
             print(f"csv: {s['created']} new, {s['updated']} updated, "
+                  f"{s['requests_created']} new / {s['requests_updated']} updated requests, "
                   f"{len(s['errors'])} errors (of {s['rows']} rows)")
         elif source == 'epic-prod':
             s = import_epic_prod_past_campaigns(created_by='prodops_agent')

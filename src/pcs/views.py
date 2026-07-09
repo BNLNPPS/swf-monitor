@@ -1810,6 +1810,8 @@ def pcs_catalog_csv_update(request):
         return redirect(reverse('pcs:pcs_catalog'))
     msg = (f'CSV import: {summary["created"]} new, '
            f'{summary["updated"]} updated, '
+           f'{summary["requests_created"]} new / '
+           f'{summary["requests_updated"]} updated requests, '
            f'{len(summary["errors"])} errors '
            f'(of {summary["rows"]} rows)')
     if summary['errors']:
@@ -2774,14 +2776,16 @@ def pcs_catalog(request):
 
         producing_arrivals = None
         promote_cascade_note = ''
-        producing_last_activity = ''
         producing_task_mix = None
         producing_table_html = None
         instancing = None
         # Unified-view convergence: last and single-release past render
         # the same curated table as Current; multi-campaign aggregates
         # ('all', year spans) keep the outputs table, their genuine role.
+        tab_last_activity = ''
         if active_lifecycle == 'last' and campaigns_by_lifecycle['last']:
+            tab_last_activity = _campaign_last_activity(
+                campaigns_by_lifecycle['last'][0])
             producing_table_html, _, _ = _cached_current_task_list_html(
                 campaigns_by_lifecycle['last'][0], 'catalog', {}, None,
                 timings=timings, rebuild_on_miss=True)
@@ -2803,7 +2807,7 @@ def pcs_catalog(request):
             producing_camp = Campaign.objects.filter(
                 name=producing_campaign_name).first()
             if producing_camp is not None:
-                producing_last_activity = _campaign_last_activity(producing_camp)
+                tab_last_activity = _campaign_last_activity(producing_camp)
             producing_task_mix = dict(
                 ProdTask.objects.filter(campaign__name=producing_campaign_name)
                 .values_list('status').annotate(Count('id')))
@@ -2865,7 +2869,7 @@ def pcs_catalog(request):
                                    if active_lifecycle == 'future' else None),
             'producing_campaign': producing_campaign_name,
             'producing_arrivals': producing_arrivals,
-            'producing_last_activity': producing_last_activity,
+            'tab_last_activity': tab_last_activity,
             'producing_task_mix': producing_task_mix,
             'task_list_html': producing_table_html,
             'promote_cascade_note': promote_cascade_note,

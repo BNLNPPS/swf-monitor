@@ -110,13 +110,29 @@
   </div>
   {% endif %}
 
+  {% if active_lifecycle == 'producing' or active_lifecycle == 'last' %}
+  {# The symmetric tab strip (Current has the same one): Last activity under the tabs, promotion after it where rotation applies. #}
+  <div class="small mb-2">
+    <span><strong>Last activity:</strong> {{ tab_last_activity|fmt_dt|default:"none recorded" }}</span>
+    {% if active_lifecycle == 'producing' and user.is_authenticated %}
+    <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="d-inline ms-3">
+      {% csrf_token %}
+      <input type="hidden" name="name" value="{{ producing_campaign }}">
+      <button type="submit" class="btn btn-sm btn-success"
+              onclick="return confirm('Make {{ producing_campaign }} current? {{ promote_cascade_note }}');">
+        Make {{ producing_campaign }} current</button>
+    </form>
+    <span class="text-muted">{{ promote_cascade_note }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {% if active_lifecycle == 'producing' %}
     <div class="border rounded p-2 mb-3" style="max-width: 62em">
       <div>
         <strong>{{ producing_campaign }} is producing</strong>{% if producing_arrivals %} &mdash;
         {{ producing_arrivals.files }} new file{{ producing_arrivals.files|pluralize }} in JLab Rucio
         since {{ producing_arrivals.window_start|fmt_dt }} (as of the last arrivals sweep){% endif %}.
-        <strong>Last activity:</strong> {{ producing_last_activity|fmt_dt|default:"none recorded" }}.
       </div>
       {% if producing_task_mix %}
       <div class="small mt-1">
@@ -125,16 +141,6 @@
         <span class="text-muted">— all listed in the table below, the same
           curated view as the Current tab (CAMPAIGN_CONTINUUM.md).</span>
       </div>
-      {% endif %}
-      {% if user.is_authenticated %}
-      <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="mt-2 d-inline">
-        {% csrf_token %}
-        <input type="hidden" name="name" value="{{ producing_campaign }}">
-        <button type="submit" class="btn btn-sm btn-success"
-                onclick="return confirm('Make {{ producing_campaign }} current? {{ promote_cascade_note }}');">
-          Make {{ producing_campaign }} current</button>
-      </form>
-      <span class="text-muted small ms-2">{{ promote_cascade_note }}</span>
       {% endif %}
     </div>
 
