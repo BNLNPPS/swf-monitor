@@ -11,4 +11,5 @@ jobs:
     uses: BNLNPPS/swf-testbed/.github/workflows/integration-test.yml@main
     with:
       swf_testbed_ref: main
+      swf_monitor_repo: ${{ github.repository }}
       swf_monitor_ref: ${{ github.sha }}
