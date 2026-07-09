@@ -113,6 +113,11 @@
         <button class="btn btn-sm btn-outline-secondary" type="button"
                 data-bs-toggle="collapse" data-bs-target="#sysconfig-editor"
                 aria-expanded="false" aria-controls="sysconfig-editor">Edit</button>
+        {% else %}
+        <button class="btn btn-sm btn-outline-secondary" type="button" disabled
+                title="Edit the operator-set system configuration — sign in to use">Edit</button>
+        {% endif %}
+        {% if user.is_authenticated %}
         <div class="collapse mt-2" id="sysconfig-editor">
             <form method="post" action="{% url 'monitor_app:sysconfig_save' %}">
                 {% csrf_token %}

@@ -17,13 +17,11 @@
       {% empty %}
       <div class="text-muted">No comments yet.</div>
       {% endfor %}
-      {% if user.is_authenticated %}
       <div class="mt-2">
-        <textarea class="form-control narrative-comment-text" rows="2"
-                  placeholder="Comment — corrections, elaborations, questions"></textarea>
-        <button type="button" class="btn btn-primary btn-sm mt-1" data-narr-comment="{{ e.group_id }}">Post</button>
+        <textarea class="form-control narrative-comment-text" rows="2" {% if not user.is_authenticated %}disabled{% endif %}
+                  placeholder="Comment — corrections, elaborations, questions{% if not user.is_authenticated %} (sign in to post){% endif %}"></textarea>
+        <button type="button" class="btn btn-primary btn-sm mt-1" {% if user.is_authenticated %}data-narr-comment="{{ e.group_id }}"{% else %}disabled title="Post a comment on this narrative — sign in to use"{% endif %}>Post</button>
       </div>
-      {% endif %}
     </div>
   </div>
 </details>

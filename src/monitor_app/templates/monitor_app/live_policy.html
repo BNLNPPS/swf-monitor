@@ -52,7 +52,8 @@
         {% if user.is_authenticated %}
         <button class="btn btn-sm btn-primary" type="submit">Save policy</button>
         {% else %}
-        <p class="text-muted small">Sign in to edit.</p>
+        <button class="btn btn-sm btn-primary" type="button" disabled
+                title="Save the live-stream policy overrides — sign in to use">Save policy</button>
         {% endif %}
     </form>
 </div>

@@ -65,11 +65,7 @@
     </div>
   </div>
 
-  {% if is_tunnel %}
-  <p class="small text-muted fst-italic mb-4" style="max-width: 58rem;">
-    CSV import is available from pandaserver02.
-  </p>
-  {% elif user.is_authenticated %}
+  {% if not is_tunnel and user.is_authenticated %}
   <div class="mb-3 p-2 border rounded bg-light" style="max-width: 42rem;">
     <form method="post" action="{% url 'pcs:questionnaire_import' %}" class="row g-2 align-items-end">
       {% csrf_token %}
@@ -83,6 +79,20 @@
         <button class="btn btn-primary" type="submit">Import</button>
       </div>
     </form>
+  </div>
+  {% else %}
+  <div class="mb-3 p-2 border rounded bg-light" style="max-width: 42rem;">
+    <div class="row g-2 align-items-end">
+      <div class="col">
+        <label class="form-label small mb-1" for="csv-url">Import questionnaire CSV from URL</label>
+        <input id="csv-url" type="url" class="form-control" disabled
+               placeholder="https://docs.google.com/spreadsheets/.../export?format=csv">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary" type="button" disabled
+                title="Import the production-request form responses — operator action; sign in on pandaserver02">Import</button>
+      </div>
+    </div>
   </div>
   {% endif %}
 

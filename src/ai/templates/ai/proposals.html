@@ -44,13 +44,16 @@
     <div class="text-muted mb-2">Showing newest {{ shown_count }} of {{ total_count }} — narrow the filter for the rest.</div>
   {% endif %}
 
-  {% if user.is_authenticated %}
+  {# Look, don't touch: the decision bar renders for every viewer; controls activate only in an operator session. #}
   <div class="mb-2 d-flex align-items-center gap-2">
     {% csrf_token %}
     <span class="text-muted"><span id="props-count">0</span> selected</span>
-    <button type="button" id="props-approve" class="btn btn-sm btn-success" disabled>Approve</button>
-    <button type="button" id="props-deny" class="btn btn-sm btn-secondary" disabled>Deny</button>
+    <button type="button" id="props-approve" class="btn btn-sm btn-success" disabled
+            title="Approve and execute the selected proposals — deterministic execution through the same service an operator uses{% if not user.is_authenticated %}; sign in to use{% endif %}">Approve</button>
+    <button type="button" id="props-deny" class="btn btn-sm btn-secondary" disabled
+            title="Deny the selected proposals — recorded, not re-proposed until inputs change{% if not user.is_authenticated %}; sign in to use{% endif %}">Deny</button>
     <select id="props-quality" class="form-select form-select-sm" style="width:auto"
+            {% if not user.is_authenticated %}disabled{% endif %}
             title="Optional quality tag recorded with the decision (worst to best; 'wrong' marks the proposal miscalibrated and counts against the proposer's track record)">
       <option value="">quality&hellip;</option>
       <option value="wrong">wrong</option>
@@ -60,16 +63,15 @@
     </select>
     <span class="text-muted small me-4">Quality choice is recorded with the decision.</span>
     <button type="button" id="props-undo" class="btn btn-sm btn-dark-green" disabled
-            title="Undo the selected executed proposals — restores the pre-approval state through the same service and returns the proposal to pending; the execution and undo events remain on the record. The offer expires if the record has changed since execution.">Undo</button>
+            title="Undo the selected executed proposals — restores the pre-approval state through the same service and returns the proposal to pending; the execution and undo events remain on the record. The offer expires if the record has changed since execution.{% if not user.is_authenticated %} Sign in to use.{% endif %}">Undo</button>
     <button type="button" id="props-delete" class="btn btn-sm btn-danger" disabled
-            title="Remove the selected rows from the AI proposal list — decision history included, permanent">Delete</button>
+            title="Remove the selected rows from the AI proposal list — decision history included, permanent{% if not user.is_authenticated %}; sign in to use{% endif %}">Delete</button>
   </div>
-  {% endif %}
 
   <table class="table table-sm pcs-props-table">
     <thead>
       <tr>
-        {% if user.is_authenticated %}<th style="width:1.5em"><input type="checkbox" id="props-selectall" title="Select all pending"></th>{% endif %}
+        <th style="width:1.5em"><input type="checkbox" id="props-selectall" {% if not user.is_authenticated %}disabled{% endif %} title="Select all pending{% if not user.is_authenticated %} — sign in to select{% endif %}"></th>
         <th>Ref</th><th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
         <th class="pcs-props-comment">Comment</th>
         <th>Status</th><th>Decision</th><th>Quality</th>
@@ -79,7 +81,7 @@
     <tbody>
       {% for p in rows %}
       <tr>
-        {% if user.is_authenticated %}<td><input type="checkbox" class="props-cb" value="{{ p.id }}"></td>{% endif %}
+        <td><input type="checkbox" class="props-cb" value="{{ p.id }}" {% if not user.is_authenticated %}disabled title="Sign in to select"{% endif %}></td>
         <td class="small"><strong>{{ p.ref }}</strong></td>
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
         <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>

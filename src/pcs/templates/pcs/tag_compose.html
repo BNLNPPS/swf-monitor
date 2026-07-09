@@ -131,9 +131,8 @@
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
                 <h5 style="margin:0">{{ schema.label }} Tags</h5>
-                {% if user.is_authenticated %}
-                <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag">New Tag</button>
-                {% endif %}
+                <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag"
+                        {% if not user.is_authenticated %}disabled title="Compose a new tag — sign in to use"{% endif %}>New Tag</button>
             </div>
             <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
             <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem; align-self:flex-start;">
@@ -161,10 +160,10 @@
                 <h4 id="view-title">Select a tag</h4>
                 <div class="btn-group">
                     <span id="view-status-badge"></span>
-                    {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
-                    {% endif %}
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-edit-tag" style="display:none"
+                            {% if not user.is_authenticated %}disabled title="Edit your own draft tag — sign in to use"{% endif %}>Edit</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-copy-tag" style="display:none"
+                            {% if not user.is_authenticated %}disabled title="Copy this tag into a new draft — sign in to use"{% endif %}>Copy</button>
                     <button type="button" class="btn btn-success btn-sm" id="btn-lock-tag" style="display:none" onclick="lockTag()">Lock</button>
                     <button type="button" class="btn btn-danger btn-sm" id="btn-delete-tag" style="display:none" onclick="deleteTag()">Delete</button>
                 </div>
@@ -206,9 +205,8 @@
                     <input type="text" id="id_created_by" class="form-control" value="{{ username }}" readonly disabled>
                 </div>
                 <div class="params-header">Parameters
-                    {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-manage-params">Edit parameter fields</button>
-                    {% endif %}
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-manage-params"
+                            {% if not user.is_authenticated %}disabled title="Edit the tag type's parameter field definitions — sign in to use"{% endif %}>Edit parameter fields</button>
                 </div>
                 {% for field in form %}
                     {% if field.name|slice:":6" == "param_" %}
