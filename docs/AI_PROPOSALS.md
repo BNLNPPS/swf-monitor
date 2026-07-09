@@ -73,9 +73,10 @@ on lavender ground, defined once (`--ai-fg`, `--ai-bg`, `--ai-border`,
 `.ai-attr` / `.ai-attr-text` / `.ai-fill`) in the base template. Used with
 restraint: it marks AI material embedded in non-AI surfaces and the titles
 of AI pages, so the color registers as "this is AI" without saturating.
-The marker follows the AI's standing voice — proposals and assessments —
-not authorship: human-adopted artifacts such as published narratives are
-informational records and dress plain, whoever drafted them.
+The marker follows artifact kind, not authorship: proposals and
+assessments are inherently AI products and are marked; artifacts of a
+kind humans equally produce — narratives, documents, code — dress plain,
+whoever drafted them.
 
 - **The catalog list**: an AI-proposed filter isolates recommended rows;
   each carries a badge with the proposed transition; Approve AI / Deny AI in
