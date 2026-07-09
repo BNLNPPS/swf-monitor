@@ -2089,13 +2089,18 @@ def pcs_physics_configs(request):
     groups = group_editions(heads)
 
     # One working task per identity decides the edition's state; sibling
-    # output records don't override it.
+    # output records don't override it. Matched requests ride along.
     task_status = {}
-    for name, status in (ProdTask.objects
-                         .filter(campaign__name__in=campaigns)
-                         .values_list('dataset__composed_name', 'status')):
+    task_requests = {}
+    for name, status, overrides in (
+            ProdTask.objects.filter(campaign__name__in=campaigns)
+            .values_list('dataset__composed_name', 'status', 'overrides')):
         if name not in task_status or task_status[name] == 'past_output':
             task_status[name] = status
+        for match in (overrides or {}).get('questionnaire_matches') or []:
+            qid = match.get('questionnaire_id') if isinstance(match, dict) else None
+            if isinstance(qid, int) or str(qid).isdigit():
+                task_requests.setdefault(name, set()).add(int(qid))
 
     # Produced data per identity, summed over ALL its physical rows —
     # the head row alone undercounts multi-row identities.
@@ -2118,24 +2123,34 @@ def pcs_physics_configs(request):
         head, detail = group['editions'][0]
         params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
         evgen = detail['evgen']
-        generator = evgen[0] if evgen else '(unresolved)'
-        gen_display = (' '.join(part for part in evgen[:2] if part)
-                       + (' noRad' if evgen and evgen[2] == 'off' else '')
-                       + (' Rad' if evgen and evgen[2] == 'on' else '')
-                       ) if evgen else '(unresolved)'
-        beam = (f"{params.get('beam_energy_electron', '')}x"
-                f"{params.get('beam_energy_hadron', '')}").strip('x')
+        generator = evgen[0] if evgen else ''
+        species = params.get('beam_species', '')
+        gen_display = ((' '.join(part for part in evgen[:2] if part)
+                        + (f' {species}' if species else '')
+                        + (' noRad' if evgen[2] == 'off' else '')
+                        + (' Rad' if evgen[2] == 'on' else ''))
+                       if evgen else '')
+        be = str(params.get('beam_energy_electron', '') or '')
+        bh = str(params.get('beam_energy_hadron', '') or '')
+        if be.upper() == 'N/A':
+            be = ''
+        if bh.upper() == 'N/A':
+            bh = ''
+        beam = f'{be}x{bh}' if be and bh else (be or bh)
         row = {
             'physics': head.physics_tag.tag_label if head.physics_tag else '',
             'process': params.get('process', ''),
             'beam': beam,
-            'species': params.get('beam_species', ''),
+            'species': species,
             'q2': params.get('q2_range', ''),
             'generator': generator,
             'gen_display': gen_display,
             'sample': detail['sample'],
             'editions': {},
         }
+        row['requests'] = sorted(set().union(*(
+            task_requests.get(d.composed_name, set())
+            for d, _ in group['editions'])))
         for dataset, edition_detail in group['editions']:
             camp = dataset.campaign.name if dataset.campaign_id else ''
             data = produced.get(dataset.composed_name) or {}
@@ -2168,6 +2183,11 @@ def pcs_physics_configs(request):
         rows = [r for r in rows
                 if r['cells'][produced_index]
                 and r['cells'][produced_index]['files']]
+    matched = (request.GET.get('matched') or '').strip()
+    if matched == 'matched':
+        rows = [r for r in rows if r['requests']]
+    elif matched == 'unmatched':
+        rows = [r for r in rows if not r['requests']]
 
     # Per-campaign fulfillment totals over the filtered set — the
     # dataset/file/volume picture the view exists to surface.
@@ -2214,6 +2234,20 @@ def pcs_physics_configs(request):
                   if r['cells'][i] and r['cells'][i]['files'])
         for i, camp in enumerate(campaigns)
     }
+    matched_count = sum(1 for r in rows_all if r['requests'])
+    facet_rows.append(('Request', {
+        'param': 'matched',
+        'items': [
+            {'value': 'matched', 'count': matched_count,
+             'url': url_with(matched='matched'),
+             'active': matched == 'matched'},
+            {'value': 'unmatched', 'count': len(rows_all) - matched_count,
+             'url': url_with(matched='unmatched'),
+             'active': matched == 'unmatched'},
+        ],
+        'all_url': url_with(matched=''),
+        'all_active': not matched,
+    }))
     facet_rows.append(('Has data', {
         'param': 'produced',
         'items': [{'value': camp, 'count': n,

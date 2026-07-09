@@ -203,6 +203,7 @@
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
     const QUESTIONNAIRE_LIST_URL = "../../questionnaires/";
+    const RUCIO_DID_URL = "../../rucio/";
 
     // ── Tag-based naming: the new system's names enter the world here ──
     // The dataset's human-facing identity is its tag-composed name
@@ -1129,6 +1130,30 @@
             }).join(', ');
             html += `<div class="mb-2">${requestLinks}</div>`;
         }
+        // Produced data: the task's recorded outputs (unified schema),
+        // each DID linking to the live Rucio detail page.
+        const outs = (t.overrides && Array.isArray(t.overrides.outputs)) ? t.overrides.outputs : [];
+        if (outs.length) {
+            const fmtVol = b => b >= 1e12 ? (b / 1e12).toFixed(2) + ' TB' : (b / 1e9).toFixed(1) + ' GB';
+            const outRows = outs.map(o => {
+                const did = o.did || '';
+                const cut = did.indexOf(':');
+                const sc = cut > 0 ? did.slice(0, cut) : '';
+                const nm = (cut > 0 ? did.slice(cut + 1) : did).replace(/^\/+/, '');
+                const link = did ? `<a href="${RUCIO_DID_URL}${encodeURIComponent(sc)}/${nm}/" title="live Rucio detail">${htmlEscape(did)}</a>` : '';
+                const stage = o.stage === 'FULL' ? 'Simu' : (o.stage === 'RECO' ? 'Reco' : htmlEscape(o.stage || ''));
+                let rses = '';
+                if (Array.isArray(o.rses)) rses = o.rses.map(r => r.rse || '').filter(Boolean).join(', ');
+                else if (o.rses && typeof o.rses === 'object') rses = Object.keys(o.rses).join(', ');
+                const files = (o.file_count !== undefined && o.file_count !== null) ? o.file_count : '?';
+                const vol = o.bytes ? fmtVol(o.bytes) : '';
+                return `<div class="small">${stage}: ${link} — ${files} files${vol ? ' · ' + vol : ''}` +
+                       `${o.complete === false ? ' <span style="color:#dc3545">(incomplete)</span>' : ''}` +
+                       `${rses ? ' · ' + htmlEscape(rses) : ''}</div>`;
+            }).join('');
+            html += `<div class="mb-2"><strong>Produced data</strong>${outRows}</div>`;
+        }
+
         // Submit-readiness. Empty list means the task can produce a submission spec.
         if ((t.status === 'draft' || t.status === 'ready') && Array.isArray(readinessProblems)) {
             html += readinessProblems.length
