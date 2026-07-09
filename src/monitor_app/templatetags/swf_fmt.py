@@ -16,7 +16,7 @@ from django.utils.safestring import mark_safe
 
 from monitor_app.panda.constants import TASK_STATE_COLORS, JOB_STATE_COLORS
 from monitor_app.state_descriptions import state_description as _state_description
-from monitor_app.ai_assessments import assessment_presentation
+from ai.assessments import assessment_presentation
 
 register = template.Library()
 

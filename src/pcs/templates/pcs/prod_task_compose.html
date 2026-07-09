@@ -1050,7 +1050,7 @@
         if (!confirm(`${verb} the AI proposal on ${name}?`)) return;
         btn.disabled = true;
         try {
-            const r = await fetch('/swf-monitor/pcs/api/datasets/proposal-decide/', {
+            const r = await fetch('/swf-monitor/ai/api/proposals/decide/', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
                 body: JSON.stringify({ names: [name], decision: decision }),

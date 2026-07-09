@@ -6,7 +6,7 @@ import markdown
 from django.db import transaction
 from django.utils.safestring import mark_safe
 
-from .utils import format_datetime
+from monitor_app.utils import format_datetime
 
 
 AI_CONTENT_IDS_KEY = 'ai_content_ids'
@@ -279,7 +279,7 @@ def ai_content_for_json(data):
     ids = ai_content_ids(data)
     if not ids:
         return []
-    from .models import AIContent
+    from monitor_app.models import AIContent
     return list(
         AIContent.objects
         .filter(pk__in=ids)
@@ -293,7 +293,7 @@ def corun_assessment_items_for_json(data):
     if not page_group_ids:
         return []
     try:
-        from .corun_client import CorunAPIError, CorunClient, corun_configured
+        from ai.corun_client import CorunAPIError, CorunClient, corun_configured
         if not corun_configured():
             return []
         client = CorunClient()
@@ -352,7 +352,7 @@ def create_ai_content(*, subject_type, subject_key, username, ai, assessment,
     If a local object is supplied, its JSON field gets an ``ai_content_ids``
     pointer in the same transaction.
     """
-    from .models import AIContent
+    from monitor_app.models import AIContent
     payload_data = dict(data or {})
     payload_data[AI_CONTENT_QUALITY_KEY] = ''
     payload_data[AI_CONTENT_COMMENT_KEY] = ''

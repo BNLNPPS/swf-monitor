@@ -20,7 +20,7 @@ from django.core.exceptions import PermissionDenied
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent
-from .ai_assessments import (
+from ai.assessments import (
     AI_CONTENT_COMMENT_KEY,
     AI_CONTENT_QUALITY_KEY,
     AI_CONTENT_QUALITY_VALUES,
@@ -28,7 +28,7 @@ from .ai_assessments import (
     ai_content_items,
     corun_page_items,
 )
-from .corun_client import CorunAPIError, CorunClient, corun_configured
+from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
@@ -3179,7 +3179,7 @@ def _corun_ai_assessment_count():
 def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
-    from pcs.models import Proposal
+    from ai.models import Proposal
     context = pcs_hub_counts()
     context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
     context['ai_proposals_pending_count'] = Proposal.objects.filter(

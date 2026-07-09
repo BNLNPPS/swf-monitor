@@ -761,7 +761,7 @@ Context expected:
                  + 'Rows without a pending proposal are skipped and reported.')) return;
     const token = propPanel ? propPanel.querySelector('[name=csrfmiddlewaretoken]').value : '';
     try {
-      const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/proposal-decide/', {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
         body: JSON.stringify({ names: names, decision: decision,

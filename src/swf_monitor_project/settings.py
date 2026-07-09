@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.humanize",  # intcomma / filesizeformat / naturaltime for swf_fmt
     "pcs",  # Physics Configuration System
+    "ai",  # AI proposals and human-in-the-loop automation
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "django_dbml",  # For schema diagram generation
     # Third-party apps

@@ -3,14 +3,14 @@
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from monitor_app.ai_assessments import (
+from ai.assessments import (
     AI_CONTENT_COMMENT_KEY,
     AI_CONTENT_QUALITY_KEY,
     CORUN_ASSESSMENT_SECTION,
     append_corun_page_group_id,
     corun_page_group_ids,
 )
-from monitor_app.corun_client import CorunAPIError, CorunClient, corun_configured
+from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from monitor_app.models import AIContent, EpicProdJob, PandaQueue
 
 

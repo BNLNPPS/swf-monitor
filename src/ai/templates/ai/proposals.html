@@ -123,7 +123,7 @@
     if (!confirm(`${verb} ${ids.length} AI proposal(s)?`)) return;
     const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
     try {
-      const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/proposal-decide/', {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
         body: JSON.stringify({ ids: ids, decision: decision, quality: quality || '',
@@ -150,7 +150,7 @@
       if (!confirm('Delete this row from the AI proposal list? This removes its history entry.')) return;
       const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
       try {
-        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/proposal-delete/', {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/delete/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
           body: JSON.stringify({ ids: [parseInt(btn.dataset.id, 10)] }),

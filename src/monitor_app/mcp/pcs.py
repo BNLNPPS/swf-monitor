@@ -5,7 +5,7 @@ Each tool registers with the MCP server and queries Django ORM via sync_to_async
 """
 
 from asgiref.sync import sync_to_async
-from monitor_app.ai_assessments import ai_content_retrieval_guidance
+from ai.assessments import ai_content_retrieval_guidance
 from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
 

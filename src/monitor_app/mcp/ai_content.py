@@ -6,12 +6,12 @@ from urllib.parse import urlencode
 from asgiref.sync import sync_to_async
 from django.urls import reverse
 
-from monitor_app.ai_assessments import (
+from ai.assessments import (
     CORUN_ASSESSMENT_SECTION,
     append_corun_page_group_id,
     corun_page_items,
 )
-from monitor_app.corun_client import CorunAPIError, CorunClient, corun_configured
+from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
 from monitor_app.mcp.common import _monitor_url

@@ -32,7 +32,14 @@ authority: the AI surface holds no mutation right, structurally.
 
 ## The AI proposal list: the Proposal table is canonical
 
-Every proposal is a `Proposal` row (`pcs_proposal`): action, subject
+The AI subsystem is its own Django app, `src/ai/` — a sibling of `pcs`,
+owning the proposal model, services, pages, and API, plus the AI
+assessment helpers and the corun-ai client (`ai/assessments.py`,
+`ai/corun_client.py`; the legacy `AIContent` model remains in
+`monitor_app` until its planned post-backfill retirement). Executors stay
+in their domain apps; `ai` dispatches to them.
+
+Every proposal is a `Proposal` row (`ai_proposal`): action, subject
 (type + key, `counterpart_key` for relation subjects such as a
 questionnaire–task match), frozen `payload`, required `comment`,
 `confidence`, proposer identity + scan version, `batch_id`, **executor**
@@ -70,7 +77,7 @@ ink on light purple ground, defined once (`--ai-fg`, `--ai-bg`,
   the bulk bar act on the selection.
 - **The compose detail**: the same proposal block with the same controls —
   the record is server-side, so list and detail cannot fork.
-- **The proposals page** (`/pcs/proposals/`, on the production home under
+- **The proposals page** (`/ai/proposals/`, on the production home under
   AI assessments): the pending queue and the decided history, filterable by
   status, action, proposer, and batch, with bulk decide and per-proposer
   track records.

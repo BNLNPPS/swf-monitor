@@ -6,7 +6,7 @@ and delegates to the synchronous query function via sync_to_async.
 """
 
 from asgiref.sync import sync_to_async
-from monitor_app.ai_assessments import ai_content_retrieval_guidance
+from ai.assessments import ai_content_retrieval_guidance
 from monitor_app.epicprod_inventory import diagnosis_for_study_data
 from monitor_app.mcp import mcp
 from monitor_app.panda import queries
