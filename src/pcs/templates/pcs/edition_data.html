@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load swf_fmt %}
 
-{% block title %}Edition Data - epicprod{% endblock %}
+{% block title %}Rucio Data per Campaign - epicprod{% endblock %}
 
 {% block content %}
 <style>
@@ -10,21 +10,24 @@
 </style>
 
 <div class="container-fluid mt-3">
-  <h1 style="font-size: 1.4rem">Edition data</h1>
-  <div class="mb-1"><strong>{{ name }}</strong></div>
+  <h1 style="font-size: 1.4rem">Rucio data per campaign</h1>
+  <div class="mb-1"><strong>{{ pc_spec }}</strong>
+    {% for rid in requests %}
+    <a href="{% url 'pcs:questionnaire_detail' rid %}" class="ms-1"
+       title="matched production request #{{ rid }}">Request #{{ rid }}</a>
+    {% endfor %}
+  </div>
   <div class="mb-2">
-    <span class="pcs-pc-files" style="color:#1e7e34">{{ total_files }} files &middot; {{ total_bytes|filesizeformat }}</span>
+    <span style="color:#1e7e34">{{ total_files }} files &middot; {{ total_bytes|filesizeformat }}</span>
     across {{ items|length }} dataset{{ items|length|pluralize }}
-    <a class="btn btn-sm btn-outline-secondary ms-3"
-       href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ name|urlencode }}">Catalog task</a>
-    <a class="btn btn-sm btn-outline-secondary ms-1"
+    <a class="btn btn-sm btn-secondary ms-3"
        href="{% url 'pcs:pcs_physics_configs' %}">Physics configurations</a>
   </div>
 
   <table class="table table-sm table-striped pcs-ed-table">
     <thead>
       <tr><th>Campaign</th><th>Stage</th><th>Rucio dataset</th>
-          <th>Files</th><th>Size</th><th>Replicas</th></tr>
+          <th>Files</th><th>Size</th><th>Replicas</th><th></th></tr>
     </thead>
     <tbody>
       {% for i in items %}
@@ -46,6 +49,8 @@
           <div>{{ r.name }}: {{ r.files }}/{{ r.total }}{% if r.status != 'complete' %} <span class="pcs-ed-rse-bad">({{ r.status }})</span>{% endif %}</div>
           {% empty %}<span class="text-muted">—</span>{% endfor %}
         </td>
+        <td class="small"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ i.name|urlencode }}"
+             title="{{ i.name }}">task</a></td>
       </tr>
       {% endfor %}
     </tbody>

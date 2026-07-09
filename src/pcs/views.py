@@ -2279,21 +2279,69 @@ def pcs_physics_configs(request):
 
 
 def pcs_edition_data(request, name):
-    """One edition's data: the physical datasets realizing a composed
-    identity — real Rucio DIDs (linked to the live detail page), files,
-    volume, per-RSE replica status. The physics-configuration view's
-    produced cells land here: navigate to data, then act via the catalog
-    cross-link. Read-open.
+    """Rucio data per campaign for one physics configuration: reached
+    from any of its editions, the page resolves the configuration and
+    lists every physical Rucio dataset across campaigns — real DIDs
+    linked to the live detail page, files, volume, per-RSE replica
+    status. Read-open.
 
     Past/ingested rows carry their real Rucio DID in
     ``metadata.source.location`` (the ``did`` column is the PCS-internal
     name); PanDA-produced rows carry it in ``did``. Both shapes render;
     a row with no real DID shows its internal name unlinked.
     """
-    rows = list(Dataset.objects.filter(composed_name=name)
-                .select_related('campaign').order_by('block_num', 'pk'))
-    if not rows:
+    from .physics_config import physics_config_key
+
+    select = ('campaign', 'physics_tag', 'evgen_tag', 'background_tag')
+    anchor = (Dataset.objects.filter(composed_name=name)
+              .select_related(*select).order_by('block_num', 'pk').first())
+    if anchor is None:
         raise Http404(f'No dataset identity {name!r}')
+    anchor_detail = physics_config_key(anchor)
+    # Sibling editions across campaigns: same-physics-tag heads (a cheap
+    # prefilter) resolved to the same configuration key. An unresolved
+    # anchor keys uniquely, so it matches only itself.
+    edition_names = [
+        head.composed_name
+        for head in (Dataset.objects.filter(physics_tag=anchor.physics_tag)
+                     .select_related(*select)
+                     .order_by('composed_name', 'block_num', 'pk')
+                     .distinct('composed_name'))
+        if physics_config_key(head)['key'] == anchor_detail['key']
+    ] or [name]
+
+    rows = sorted(
+        Dataset.objects.filter(composed_name__in=edition_names)
+        .select_related('campaign').order_by('composed_name', 'block_num', 'pk'),
+        key=lambda d: (_version_tuple(d.campaign.name if d.campaign_id else '')
+                       or (0,), d.block_num, d.pk),
+        reverse=True)
+
+    params = (anchor.physics_tag.parameters or {}) if anchor.physics_tag else {}
+    evgen = anchor_detail['evgen']
+    be = str(params.get('beam_energy_electron', '') or '')
+    bh = str(params.get('beam_energy_hadron', '') or '')
+    be = '' if be.upper() == 'N/A' else be
+    bh = '' if bh.upper() == 'N/A' else bh
+    spec_parts = [
+        params.get('process', ''),
+        f'{be}x{bh}' if be and bh else (be or bh),
+        params.get('beam_species', ''),
+        params.get('q2_range', ''),
+        ' '.join(part for part in evgen[:2] if part) if evgen else '',
+        anchor_detail['sample'],
+        anchor.physics_tag.tag_label if anchor.physics_tag else '',
+    ]
+    pc_spec = ' · '.join(part for part in spec_parts if part)
+
+    request_ids = set()
+    for overrides in (ProdTask.objects
+                      .filter(dataset__composed_name__in=edition_names)
+                      .values_list('overrides', flat=True)):
+        for match in (overrides or {}).get('questionnaire_matches') or []:
+            qid = match.get('questionnaire_id') if isinstance(match, dict) else None
+            if isinstance(qid, int) or str(qid).isdigit():
+                request_ids.add(int(qid))
 
     items = []
     total_files = 0
@@ -2310,6 +2358,7 @@ def pcs_edition_data(request, name):
         past = metadata.get('past_output') or {}
         items.append({
             'campaign': dataset.campaign.name if dataset.campaign_id else '',
+            'name': dataset.composed_name,
             'stage': (past.get('stage')
                       or str(metadata.get('stage', '')).upper()),
             'did': did,
@@ -2324,14 +2373,13 @@ def pcs_edition_data(request, name):
         total_files += dataset.file_count or 0
         total_bytes += dataset.data_size or 0
 
-    task = (ProdTask.objects.filter(dataset__composed_name=name)
-            .exclude(status='past_output').order_by('pk').first())
     return render(request, 'pcs/edition_data.html', {
         'name': name,
+        'pc_spec': pc_spec,
+        'requests': sorted(request_ids),
         'items': items,
         'total_files': total_files,
         'total_bytes': total_bytes,
-        'task_name': task.name if task else name,
     })
 
 

@@ -101,7 +101,7 @@
         <td class="pcs-pc-cell small" data-sort-val="{% if e %}{{ e.files|default:0 }}{% else %}-1{% endif %}">
           {% if e %}
             {% if e.files %}<span class="pcs-pc-files" title="{{ e.name }}{% if e.n_datasets > 1 %} — {{ e.n_datasets }} datasets{% endif %}">&#10003; {{ e.files }} f</span> <span class="text-muted">{{ e.size|filesizeformat }}</span>
-            {% else %}<span class="pcs-pc-status" title="{{ e.name }}">{{ e.status|default:"—" }}</span>{% endif %}
+            {% else %}<span class="pcs-pc-status" title="{{ e.name }} — {{ e.status|default:"no task" }}, nothing produced">&#9675;</span>{% endif %}
             {% if e.propagation == 'hold' %}<span class="pcs-pc-hold" title="disposition: hold">H</span>{% endif %}
             {% if e.propagation == 'final' %}<span class="pcs-pc-final" title="disposition: final{% if e.replaced_by %} — replaced by {{ e.replaced_by }}{% endif %}">F</span>{% endif %}
             {% if e.proposal %}<a class="ai-attr" href="{% url 'ai:ai_proposals' %}?subject={{ e.name|urlencode }}" title="pending AI proposal — click to review" style="text-decoration:none">AI</a>{% endif %}
@@ -121,8 +121,8 @@
 
   <div class="small text-muted mb-3">
     Cell legend: <span class="pcs-pc-files">&#10003; N f</span> data produced (files, volume) &middot;
-    <span class="pcs-pc-status">draft / submitted</span> working task, nothing
-    produced yet &middot; <span class="pcs-pc-hold">H</span> hold &middot;
+    <span class="pcs-pc-status">&#9675;</span> edition exists, nothing produced
+    (status in the tooltip) &middot; <span class="pcs-pc-hold">H</span> hold &middot;
     <span class="pcs-pc-final">F</span> final &middot;
     <span class="ai-attr">AI</span> pending proposal &middot;
     · no edition in that campaign.
