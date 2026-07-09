@@ -9,10 +9,13 @@ the origin stamp on the event.
 """
 import hashlib as _hashlib
 import json as _json
+import logging as _logging
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone as _timezone
+
+_log = _logging.getLogger(__name__)
 
 from pcs.models import Dataset
 from pcs.services import (
@@ -63,6 +66,25 @@ def _clear_proposal_projection(name):
         metadata.pop('proposal', None)
         head.metadata = metadata
         head.save(update_fields=['metadata'])
+
+
+def _refresh_catalog_table_cache():
+    """Rebuild the current-campaign catalog table fragment after proposal
+    activity, so the page a human reloads shows the state they just
+    changed — a stale cached table is otherwise served indefinitely
+    (page-load rebuild is suppressed). Failure is logged and reported in
+    the caller's result, never raised: the decision stands regardless."""
+    try:
+        from pcs.models import Campaign
+        from pcs.views import rebuild_current_task_list_html_cache
+        campaign = (Campaign.objects.filter(lifecycle='current')
+                    .order_by('name').first())
+        if campaign is not None:
+            rebuild_current_task_list_html_cache(campaign, 'catalog')
+        return ''
+    except Exception as e:                                    # noqa: BLE001
+        _log.warning('catalog table cache refresh failed: %s', e)
+        return f'catalog table cache refresh failed: {e}'
 
 
 def _write_proposal_projection(row, head):
@@ -175,8 +197,13 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
         proposer=proposer or '', batch_id=batch_id or '',
         scan_version=scan_version,
     )
-    return {'proposed': proposed, 'noop': noop, 'denied': denied,
-            'unknown': unknown, 'state': state}
+    result = {'proposed': proposed, 'noop': noop, 'denied': denied,
+              'unknown': unknown, 'state': state}
+    if proposed:
+        cache_error = _refresh_catalog_table_cache()
+        if cache_error:
+            result['cache_refresh_error'] = cache_error
+    return result
 
 
 def proposal_decide(composed_names, decision, *, decided_by='',
@@ -300,8 +327,13 @@ def proposal_decide(composed_names, decision, *, decided_by='',
             no_proposal=len(no_proposal),
             **({'quality': quality} if quality else {}),
         )
-    return {'approved': approved, 'denied': denied, 'stale': stale,
-            'no_proposal': no_proposal}
+    result = {'approved': approved, 'denied': denied, 'stale': stale,
+              'no_proposal': no_proposal}
+    if approved or denied or stale:
+        cache_error = _refresh_catalog_table_cache()
+        if cache_error:
+            result['cache_refresh_error'] = cache_error
+    return result
 
 
 def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
@@ -382,8 +414,13 @@ def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
         if restored_head is not None:
             _write_proposal_projection(row, restored_head)
         undone.append(row.subject_key)
-    return {'undone': undone, 'moved': moved, 'not_executed': not_executed,
-            'no_proposal': no_proposal}
+    result = {'undone': undone, 'moved': moved, 'not_executed': not_executed,
+              'no_proposal': no_proposal}
+    if undone:
+        cache_error = _refresh_catalog_table_cache()
+        if cache_error:
+            result['cache_refresh_error'] = cache_error
+    return result
 
 
 def proposal_delete(proposal_ids, *, deleted_by=''):
@@ -442,4 +479,9 @@ def proposal_withdraw(*, batch_id=None, created_by=''):
                 + (f' [batch {batch_id}]' if batch_id else ''),
         withdrawn=withdrawn, batch_id=batch_id or '',
     )
-    return {'withdrawn': withdrawn}
+    result = {'withdrawn': withdrawn}
+    if withdrawn:
+        cache_error = _refresh_catalog_table_cache()
+        if cache_error:
+            result['cache_refresh_error'] = cache_error
+    return result
