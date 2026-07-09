@@ -14,6 +14,8 @@ urlpatterns = [
          name='api_proposal_decide'),
     path('api/proposals/delete/', api_views.ProposalDeleteView.as_view(),
          name='api_proposal_delete'),
+    path('api/proposals/undo/', api_views.ProposalUndoView.as_view(),
+         name='api_proposal_undo'),
     path('api/narratives/save/', api_views.NarrativeSaveView.as_view(),
          name='api_narrative_save'),
     path('api/narratives/comment/', api_views.NarrativeCommentView.as_view(),

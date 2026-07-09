@@ -44,13 +44,16 @@ Every proposal is a `Proposal` row (`ai_proposal`): action, subject
 questionnaire–task match), frozen `payload`, required `comment`,
 `confidence`, proposer identity + scan version, `batch_id`, **executor**
 (`service` now; `agent_message` reserved for prod-ops-agent actions),
-`precondition` (the deterministic decide-time guard), input hash, status,
+`precondition` (the deterministic decide-time guard, capturing every prior
+value an undo must restore), input hash, status,
 and the decision record (`decided_by`, `decided_at`, optional `quality`,
 executed action-stream log id).
 
 Status vocabulary: `proposed → executed | denied | withdrawn | stale`, with
-`approved_pending_execution` reserved for asynchronous executors. **Terminal
-rows are retained** — the AI proposal list is where AI-proposed activity
+`approved_pending_execution` reserved for asynchronous executors; an
+executed proposal becomes `undone` when its compensating action runs,
+keeping its decision record and gaining the undo's actor, time, and event
+log id. **Terminal rows are retained** — the AI proposal list is where AI-proposed activity
 and its decisions stay visible: the queue (pending), the decision history,
 per-proposer track records, and the standing metric of what fraction of
 production mutations originate with AI. Operators can delete list rows
@@ -63,6 +66,45 @@ transactions by the same services — so the catalog badges, filters, and
 compose detail render without joins while the table holds truth. Denial
 memory is a proposal-list query (denied row with the same subject and input
 hash), not record state.
+
+## Adding a proposal category
+
+Every proposal category completes the same checklist, in order; the
+propagation pilot is the worked example of each item.
+
+1. **Executor first.** A validated service in the domain app: one call is
+   one operator action, it accepts `origin`, logs one origin-stamped
+   action-stream event (action id registered with sublevel and live
+   defaults), and returns the event's log id. Humans and approvals make
+   the identical call — without the executor there is nothing to propose.
+2. **Precondition.** The deterministic decide-time anchor: the fields
+   that prove the record has not moved, including every prior value an
+   undo must restore (for propagation: `prev_state`, `prev_replaced_by`).
+3. **Propose service.** Validates the payload with the executor's own
+   validators (an unexecutable proposal is refused at birth), captures
+   the precondition, computes the input hash, honors denial memory, and
+   writes the Proposal rows and the render projection.
+4. **Decide dispatch.** The action's revalidation rule and executor call
+   registered in the decide path. (The pilot hard-wires `proposal_decide`
+   to the propagation action; the second category generalizes this into a
+   per-action registry.)
+5. **Comment template.** Defined per action: code fills the facts, the
+   model fills only the judgment fragment — or nothing.
+6. **Review surfaces.** The render projection badge and an AI-proposed
+   filter on the domain list page in the `.ai-attr` treatment, with
+   approve/deny in its bulk bar. The proposals page picks the rows up
+   without further work.
+7. **Reversibility class.** Declared undoable, mitigable, or
+   irreversible-by-design; review ceremony follows the class, and the
+   approve control states its undo story.
+8. **Scan lifecycle.** Proposer identity, scan version, batch id;
+   heartbeat refresh semantics if the proposer recurs; the per-action
+   SysConfig off-switch, present in the SysConfig document at its
+   default.
+9. **Weakest consumer.** If bots or small models read or relay the
+   category, the retrieval surface is sized for the smallest model.
+10. **Documentation.** The category added to this document: its
+    precondition, comment template, and reversibility class.
 
 ## Review surfaces
 
@@ -141,10 +183,13 @@ docstring.
 Review friction matches irreversibility, in both directions:
 
 - **Undoable** actions (catalog state: propagation, tags, matches) approve
-  in one tap, and the system can offer **Undo** — a computed compensating
-  action with full provenance (`origin: undo-of`), never erasure; history
-  stays append-only. The undo offer expires when the record moves on, by
-  the same precondition machinery.
+  in one tap, and the system offers **Undo** — a computed compensating
+  action with full provenance (`origin: undo` carrying the proposal id),
+  never erasure; history stays append-only. The undo offer expires when
+  the record moves on, by the same precondition machinery. Propagation is
+  the worked example: Undo on an executed proposal restores the
+  precondition state — including the prior `replaced_by` — through the
+  same executor, with a templated comment naming the proposal.
 - **Mitigable** actions (external effects: a submitted PanDA task can be
   killed or superseded by `.tryN`, not unsubmitted) offer the named
   mitigation, labeled honestly: it does not restore the prior world.
@@ -197,6 +242,7 @@ Designed-for extensions, reserved now, built when their consumer arrives:
 | `proposal_denied` | one per deny decision, with count and quality |
 | `proposal_expired` | one per heartbeat withdrawal, with count |
 | (execution) | the executed action's own event, origin-stamped |
+| (undo) | the compensating action's own event, `origin: undo` with the proposal id |
 
 ## Related
 

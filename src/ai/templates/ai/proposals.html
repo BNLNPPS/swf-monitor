@@ -47,6 +47,8 @@
     <button type="button" id="props-deny" class="btn btn-sm btn-secondary" disabled>Deny</button>
     <button type="button" id="props-deny-wrong" class="btn btn-sm btn-secondary" disabled
             title="Deny and score the proposal wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
+    <button type="button" id="props-undo" class="btn btn-sm btn-dark-green" disabled
+            title="Undo the selected executed proposals — restores the pre-approval state through the same service, recorded as a new history entry, never erased. The offer expires if the record has changed since execution.">Undo</button>
     <button type="button" id="props-delete" class="btn btn-sm btn-danger" disabled
             title="Remove the selected rows from the AI proposal list — decision history included, permanent">Delete</button>
   </div>
@@ -73,7 +75,7 @@
           {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}</td>
         <td class="small">{{ p.confidence|default:"—" }}</td>
         <td class="small pcs-props-comment">{{ p.comment }}</td>
-        <td class="small">{{ p.status }}</td>
+        <td class="small">{{ p.status }}{% if p.status == 'undone' %}<div class="text-muted">{{ p.undone_by }} {{ p.undone_at|date:"m-d H:i" }}</div>{% endif %}</td>
         <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% else %}—{% endif %}</td>
         <td class="small">{{ p.quality|default:"—" }}</td>
         <td class="small">{{ p.proposer|default:"—" }}</td>
@@ -88,10 +90,10 @@
   {% if proposer_stats %}
   <h5 class="mt-4">Proposer track records</h5>
   <table class="table table-sm pcs-props-stats" style="max-width:46em">
-    <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Denied</th><th>Wrong</th></tr></thead>
+    <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Undone</th><th>Denied</th><th>Wrong</th></tr></thead>
     <tbody>
       {% for s in proposer_stats %}
-      <tr><td>{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
+      <tr><td>{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.undone }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -103,7 +105,7 @@
   const cbs = document.querySelectorAll('.props-cb');
   const selectAll = document.getElementById('props-selectall');
   const count = document.getElementById('props-count');
-  const buttons = ['props-approve', 'props-deny', 'props-deny-wrong', 'props-delete']
+  const buttons = ['props-approve', 'props-deny', 'props-deny-wrong', 'props-undo', 'props-delete']
     .map(id => document.getElementById(id)).filter(Boolean);
   if (!buttons.length) return;
   function refresh() {
@@ -146,11 +148,35 @@
   document.getElementById('props-deny').addEventListener('click', () => decide('deny', ''));
   document.getElementById('props-deny-wrong').addEventListener('click', () => decide('deny', 'wrong'));
 
+  document.getElementById('props-undo').addEventListener('click', async () => {
+    const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
+    if (!ids.length) return;
+    if (!confirm(`Undo ${ids.length} executed AI proposal(s)? `
+                 + 'Restores the pre-approval state — recorded as a new history entry.')) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/undo/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ ids: ids }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [`${j.undone.length} undone`];
+      if (j.moved.length) parts.push(`${j.moved.length} expired (record changed since execution)`);
+      if (j.not_executed.length) parts.push(`${j.not_executed.length} skipped (not in executed status)`);
+      alert('AI proposal undo: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Undo failed: ' + err.message);
+    }
+  });
+
   document.getElementById('props-delete').addEventListener('click', async () => {
     const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
     if (!ids.length) return;
     if (!confirm(`Delete ${ids.length} selected row(s) from the AI proposal list? `
-                 + 'Decided history included — this is permanent.')) return;
+                 + 'Decision history included — this is permanent.')) return;
     const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
     try {
       const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/delete/', {

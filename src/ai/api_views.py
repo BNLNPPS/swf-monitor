@@ -72,6 +72,28 @@ class ProposalDecideView(_AiApiView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class ProposalUndoView(_AiApiView):
+    def post(self, request):
+        """Undo executed AI proposals — the compensating action.
+
+        Body: ``ids``. Restores the prior state captured at propose time
+        through the same executor, origin-stamped ``undo``; expired offers
+        (record moved on) are counted in ``moved``, never silently
+        skipped.
+        """
+        try:
+            result = services.proposal_undo(
+                request.data.get('ids') or [],
+                undone_by=request.user.username,
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        except (TypeError, ValueError):
+            return Response({'detail': 'ids must be integers'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class NarrativeSaveView(_AiApiView):
     def post(self, request):
         """Save an edited narrative as a new corun-ai version.

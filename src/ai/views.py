@@ -33,8 +33,8 @@ def ai_proposals(request):
 
     status_counts = dict(
         Proposal.objects.values_list('status').annotate(Count('id')))
-    status_order = ['proposed', 'executed', 'denied', 'withdrawn', 'stale',
-                    'approved_pending_execution']
+    status_order = ['proposed', 'executed', 'undone', 'denied', 'withdrawn',
+                    'stale', 'approved_pending_execution']
     status_facets = [
         {'status': s, 'count': status_counts.get(s, 0)}
         for s in status_order if status_counts.get(s, 0) or s == 'proposed'
@@ -49,6 +49,7 @@ def ai_proposals(request):
             'total': base.count(),
             'pending': base.filter(status='proposed').count(),
             'executed': base.filter(status='executed').count(),
+            'undone': base.filter(status='undone').count(),
             'denied': base.filter(status='denied').count(),
             'wrong': base.filter(quality='wrong').count(),
         })

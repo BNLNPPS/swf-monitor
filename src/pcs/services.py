@@ -2822,7 +2822,8 @@ PROPAGATION_STATES = ('continue', 'hold', 'final')
 
 
 def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
-                            changed_by='', filter_state='', origin=None):
+                            clear_replaced_by=False, changed_by='',
+                            filter_state='', origin=None):
     """Set the cross-campaign propagation disposition on dataset editions.
 
     One call = one operator action, single or bulk. Every named composed
@@ -2832,6 +2833,13 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
     state, previous, comment (required: the why and its source travel
     together), changed_by, changed_at. The ``propagation`` column mirrors
     the newest entry on every block row.
+
+    ``replaced_by`` semantics: an empty value leaves the successor
+    reference untouched; ``clear_replaced_by=True`` blanks it explicitly
+    (the two are mutually exclusive). Whenever the reference is touched,
+    the history entry records ``replaced_by`` (the new value, '' on a
+    clear) and — when it changed — ``previous_replaced_by``, so every flip
+    is unwindable from its own history entry.
 
     Exactly one ``dataset_propagation_set`` action-stream event is logged
     per call, carrying the changed count, the comment, and the selecting
@@ -2862,6 +2870,9 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
         raise ServiceError('comment is required on every propagation change')
     if not names:
         raise ServiceError('no dataset names supplied')
+    if replaced_by and clear_replaced_by:
+        raise ServiceError(
+            'replaced_by and clear_replaced_by are mutually exclusive')
 
     changed, unchanged, unknown = [], [], []
     now = _timezone.now().isoformat()
@@ -2873,8 +2884,9 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
                 unknown.append(name)
                 continue
             head = rows[0]
-            if head.propagation == state and (
-                    not replaced_by or head.replaced_by == replaced_by):
+            if (head.propagation == state
+                    and (not replaced_by or head.replaced_by == replaced_by)
+                    and not (clear_replaced_by and head.replaced_by)):
                 unchanged.append(name)
                 continue
             entry = {
@@ -2884,11 +2896,16 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
                 'changed_by': changed_by or '',
                 'changed_at': now,
             }
-            if replaced_by:
+            if replaced_by or clear_replaced_by:
                 entry['replaced_by'] = replaced_by
+                if head.replaced_by != replaced_by:
+                    entry['previous_replaced_by'] = head.replaced_by
             if origin:
-                entry['origin'] = 'ai_proposal'
-                entry['proposer'] = str(origin.get('proposer') or '')
+                entry['origin'] = str(origin.get('kind') or 'ai_proposal')
+                if origin.get('proposer'):
+                    entry['proposer'] = str(origin.get('proposer'))
+                if origin.get('undo_of'):
+                    entry['undo_of'] = origin['undo_of']
             metadata = dict(head.metadata or {})
             propagation_block = dict(metadata.get('propagation') or {})
             history = list(propagation_block.get('history') or [])
@@ -2900,6 +2917,8 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
                 row.propagation = state
                 if replaced_by:
                     row.replaced_by = replaced_by
+                elif clear_replaced_by:
+                    row.replaced_by = ''
             head.save(update_fields=['propagation', 'replaced_by', 'metadata'])
             for row in rows[1:]:
                 row.save(update_fields=['propagation', 'replaced_by'])
@@ -2912,14 +2931,22 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
              'unknown': len(unknown), 'state': state, 'comment': comment}
     if replaced_by:
         extra['replaced_by'] = replaced_by
+    if clear_replaced_by:
+        extra['replaced_by_cleared'] = True
     if filter_state:
         extra['filter'] = filter_state
     if origin:
-        extra['origin'] = 'ai_proposal'
-        extra['proposer'] = str(origin.get('proposer') or '')
-        extra['proposal_scan_version'] = origin.get('scan_version')
-        extra['proposal_batch_id'] = str(origin.get('batch_id') or '')
-        extra['proposed_at'] = str(origin.get('proposed_at') or '')
+        extra['origin'] = str(origin.get('kind') or 'ai_proposal')
+        if origin.get('proposer'):
+            extra['proposer'] = str(origin['proposer'])
+        if origin.get('scan_version') is not None:
+            extra['proposal_scan_version'] = origin.get('scan_version')
+        if origin.get('batch_id'):
+            extra['proposal_batch_id'] = str(origin['batch_id'])
+        if origin.get('proposed_at'):
+            extra['proposed_at'] = str(origin['proposed_at'])
+        if origin.get('undo_of'):
+            extra['undo_of'] = origin['undo_of']
     log_id = log_epicprod_action(
         'web', 'dataset_propagation_set',
         subject_type='dataset' if len(changed) == 1 else '',

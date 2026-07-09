@@ -107,7 +107,8 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
                 scan_version=scan_version,
                 batch_id=batch_id or '',
                 executor='service',
-                precondition={'prev_state': head.propagation},
+                precondition={'prev_state': head.propagation,
+                              'prev_replaced_by': head.replaced_by},
                 input_hash=input_hash,
                 created_by=created_by or '',
             )
@@ -121,6 +122,7 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
                 'scan_version': scan_version,
                 'batch_id': batch_id or '',
                 'prev_state': head.propagation,
+                'prev_replaced_by': head.replaced_by,
                 'proposed_at': now.isoformat(),
             }
             head.metadata = metadata
@@ -198,8 +200,12 @@ def proposal_decide(composed_names, decision, *, decided_by='',
             head = (Dataset.objects
                     .filter(composed_name=row.subject_key)
                     .order_by('block_num').first())
+            pre = row.precondition or {}
             current = head.propagation if head else None
-            if current != (row.precondition or {}).get('prev_state'):
+            record_moved = current != pre.get('prev_state')
+            if not record_moved and head is not None and 'prev_replaced_by' in pre:
+                record_moved = head.replaced_by != pre['prev_replaced_by']
+            if record_moved:
                 row.status = 'stale'
                 row.decided_by = decided_by
                 row.decided_at = now
@@ -263,10 +269,69 @@ def proposal_decide(composed_names, decision, *, decided_by='',
             'no_proposal': no_proposal}
 
 
+def proposal_undo(proposal_ids, *, undone_by=''):
+    """Undo executed AI proposals — the computed compensating action
+    (AI_PROPOSALS.md).
+
+    Each selected executed proposal is compensated through the identical
+    executor: the prior state (and prior ``replaced_by``) captured in the
+    precondition at propose time is restored, with a templated comment
+    naming the proposal, ``origin: undo`` provenance carrying the proposal
+    id, and the undoing human as ``changed_by`` — a new history entry,
+    never erasure. Guarded like decide: if the record has moved past the
+    executed payload, the undo offer has expired and the row is skipped
+    (counted, never silent). The undone row keeps its decision record and
+    becomes terminal status ``undone`` with the compensating event's log
+    id.
+    """
+    ids = [int(i) for i in (proposal_ids or [])]
+    if not ids:
+        raise ServiceError('no proposal ids supplied')
+    if not undone_by:
+        raise ServiceError('an authenticated undoer is required')
+
+    now = _timezone.now()
+    undone, moved, not_executed = [], [], []
+    for row in Proposal.objects.filter(pk__in=ids):
+        if row.status != 'executed':
+            not_executed.append(row.pk)
+            continue
+        head = (Dataset.objects
+                .filter(composed_name=row.subject_key)
+                .order_by('block_num').first())
+        payload = row.payload or {}
+        pre = row.precondition or {}
+        # The undo offer expires when the record moves past the payload.
+        if head is None or head.propagation != payload.get('state') or (
+                payload.get('replaced_by')
+                and head.replaced_by != payload.get('replaced_by')):
+            moved.append(row.subject_key)
+            continue
+        prev_replaced_by = pre.get('prev_replaced_by', '')
+        touched_replaced_by = bool(payload.get('replaced_by'))
+        result = dataset_propagation_set(
+            [row.subject_key], pre.get('prev_state'),
+            f'undo of AI proposal #{row.pk} '
+            f'(approved by {row.decided_by or "unknown"})',
+            replaced_by=prev_replaced_by if touched_replaced_by else '',
+            clear_replaced_by=touched_replaced_by and not prev_replaced_by,
+            changed_by=undone_by,
+            origin={'kind': 'undo', 'undo_of': row.pk},
+        )
+        row.status = 'undone'
+        row.undone_by = undone_by
+        row.undone_at = now
+        row.undone_log_id = result.get('log_id')
+        row.save(update_fields=['status', 'undone_by', 'undone_at',
+                                'undone_log_id'])
+        undone.append(row.subject_key)
+    return {'undone': undone, 'moved': moved, 'not_executed': not_executed}
+
+
 def proposal_delete(proposal_ids, *, deleted_by=''):
     """Operator deletion of AI proposal list rows — housekeeping for test
     or noise entries that would confuse readers. Human-only and logged; a
-    pending row also clears its render projection. This removes decided
+    pending row also clears its render projection. This removes decision
     history, so it is a cleanup verb, never a decision verb."""
     from monitor_app.epicprod_logging import log_epicprod_action
 
