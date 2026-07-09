@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import threading
@@ -15,10 +16,46 @@ from rest_framework.authtoken.models import Token
 from rest_framework.permissions import IsAuthenticated
 from django.conf import settings
 from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from .models import Subscriber
 
 logger = logging.getLogger(__name__)
+
+
+def _matches_filters(message: Dict, filters: Dict) -> bool:
+    """Whether a relayed message passes a client's subscription filters."""
+    if not filters:
+        return True
+    if 'msg_types' in filters:
+        if message.get('msg_type') not in filters['msg_types']:
+            return False
+    if 'agents' in filters:
+        if message.get('processed_by', '') not in filters['agents']:
+            return False
+    if 'run_ids' in filters:
+        if message.get('run_id') not in filters['run_ids']:
+            return False
+    return True
+
+
+def _client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0]
+    return request.META.get('REMOTE_ADDR')
+
+
+def _client_location(request):
+    location = request.META.get('HTTP_X_CLIENT_LOCATION', '')
+    if not location:
+        ip = _client_ip(request) or ''
+        if ip.startswith('192.168.'):
+            location = 'Local'
+        elif ip.startswith('10.'):
+            location = 'Internal'
+        else:
+            location = 'Remote'
+    return location
 
 
 class SSEMessageBroadcaster:
@@ -152,53 +189,15 @@ class SSEMessageBroadcaster:
     
     def _message_matches_filters(self, message: Dict, filters: Dict) -> bool:
         """Check if a message matches the client's subscription filters."""
-        if not filters:
-            return True
-        
-        # Filter by message type
-        if 'msg_types' in filters:
-            msg_type = message.get('msg_type')
-            if msg_type not in filters['msg_types']:
-                return False
-        
-        # Filter by agent
-        if 'agents' in filters:
-            sender = message.get('processed_by', '')
-            if sender not in filters['agents']:
-                return False
-        
-        # Filter by run_id
-        if 'run_ids' in filters:
-            run_id = message.get('run_id')
-            if run_id not in filters['run_ids']:
-                return False
-        
-        return True
-    
+        return _matches_filters(message, filters)
+
     def _get_client_ip(self, request):
         """Extract client IP from request."""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(',')[0]
-        else:
-            ip = request.META.get('REMOTE_ADDR')
-        return ip
-    
+        return _client_ip(request)
+
     def _get_client_location(self, request):
         """Determine client location from IP or headers."""
-        # Could be enhanced with IP geolocation
-        # For now, check for custom header or default
-        location = request.META.get('HTTP_X_CLIENT_LOCATION', '')
-        if not location:
-            # Simple heuristic based on IP ranges (customize for your network)
-            ip = self._get_client_ip(request)
-            if ip.startswith('192.168.'):
-                location = 'Local'
-            elif ip.startswith('10.'):
-                location = 'Internal'
-            else:
-                location = 'Remote'
-        return location
+        return _client_location(request)
     
     def _update_subscriber_stats(self, subscriber_id: int, stat_type: str):
         """Update subscriber statistics in database."""
@@ -253,72 +252,132 @@ def sse_event_generator(client_id: str, client_queue: queue.Queue):
         logger.error(f"Error in SSE event generator for client {client_id}: {e}")
 
 
-def sse_message_stream(request):
+def _sse_auth_user(request):
+    """Resolve the requesting user: session first, then DRF token."""
+    user = request.user if hasattr(request, 'user') else AnonymousUser()
+    if not user.is_authenticated:
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if auth_header.startswith('Token '):
+            try:
+                user = Token.objects.get(key=auth_header[6:]).user
+            except Token.DoesNotExist:
+                pass
+    return user if user.is_authenticated else None
+
+
+def _register_sse_subscriber(client_id, ip, location, filters):
+    """Create/refresh the Subscriber row for a connecting SSE client."""
+    subscriber, _created = Subscriber.objects.update_or_create(
+        subscriber_name=f"sse_{client_id[:8]}",
+        defaults={
+            'delivery_type': 'sse',
+            'client_ip': ip,
+            'client_location': location,
+            'connected_at': timezone.now(),
+            'disconnected_at': None,
+            'last_activity': timezone.now(),
+            'is_active': True,
+            'message_filters': filters or {},
+            'description': f"SSE client from {ip}",
+        },
+    )
+    return subscriber.subscriber_id
+
+
+def _unregister_sse_subscriber(subscriber_id):
+    Subscriber.objects.filter(subscriber_id=subscriber_id).update(
+        disconnected_at=timezone.now(), is_active=False)
+
+
+def _count_sse_sent(subscriber_id):
+    Subscriber.objects.filter(subscriber_id=subscriber_id).update(
+        messages_sent=F('messages_sent') + 1, last_activity=timezone.now())
+
+
+async def sse_message_stream(request):
     """
     SSE endpoint for streaming ActiveMQ messages to remote clients.
-    
-    This is a plain Django view (not DRF) to avoid content negotiation issues with SSE.
-    Authentication is handled manually to support text/event-stream responses.
-    
+
+    A plain Django view (not DRF) to avoid content negotiation issues with
+    SSE; authentication is handled manually (session or DRF token). Async,
+    subscribed directly to the Channels group, so the long-held EventSource
+    connection lives on the ASGI worker's event loop — Apache proxies this
+    path to uvicorn. A stream held by a sync WSGI worker pins that worker
+    for its lifetime, which is what exhausted the worker pool and 503'd the
+    whole monitor on 2026-06-16 (SSE_RELAY.md).
+
     Query parameters:
     - msg_types: Comma-separated list of message types to filter (e.g., "stf_gen,data_ready")
     - agents: Comma-separated list of agent names to filter
     - run_ids: Comma-separated list of run IDs to filter
-    
+
     Example:
     GET /api/messages/stream/?msg_types=stf_gen,data_ready&agents=daq-simulator
     """
-    # Manual authentication handling (supports both session and token auth)
-    user = request.user if hasattr(request, 'user') else AnonymousUser()
-    
-    # Check for token authentication if user is not authenticated
-    if not user.is_authenticated:
-        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-        if auth_header.startswith('Token '):
-            token_key = auth_header[6:]  # Remove 'Token ' prefix
-            try:
-                token = Token.objects.get(key=token_key)
-                user = token.user
-            except Token.DoesNotExist:
-                pass
-    
-    # Check if user is authenticated
-    if not user.is_authenticated:
+    user = await sync_to_async(_sse_auth_user)(request)
+    if user is None:
         return HttpResponse(
             json.dumps({'detail': 'Authentication credentials were not provided.'}),
             status=401,
             content_type='application/json'
         )
-    
-    # Generate unique client ID
+
+    channel_layer = get_channel_layer()
+    if channel_layer is None:
+        return HttpResponse(
+            json.dumps({'detail': 'No channel layer configured.'}),
+            status=503,
+            content_type='application/json'
+        )
+
     client_id = str(uuid.uuid4())
-    
-    # Parse filters from query parameters
+
     filters = {}
-    
     msg_types = request.GET.get('msg_types')
     if msg_types:
         filters['msg_types'] = [t.strip() for t in msg_types.split(',')]
-    
     agents = request.GET.get('agents')
     if agents:
         filters['agents'] = [a.strip() for a in agents.split(',')]
-    
     run_ids = request.GET.get('run_ids')
     if run_ids:
         filters['run_ids'] = [r.strip() for r in run_ids.split(',')]
-    
-    # Get broadcaster instance and add client
-    broadcaster = SSEMessageBroadcaster()
-    client_queue = broadcaster.add_client(client_id, request, filters)
-    
-    def event_stream():
+
+    ip = _client_ip(request)
+    location = _client_location(request)
+    subscriber_id = await sync_to_async(_register_sse_subscriber)(
+        client_id, ip, location, filters)
+    group = getattr(settings, 'SSE_CHANNEL_GROUP', 'workflow_events')
+
+    async def event_stream():
+        channel_name = await channel_layer.new_channel()
+        await channel_layer.group_add(group, channel_name)
+        logger.info(f"Starting SSE event stream for client {client_id} (async)")
         try:
-            yield from sse_event_generator(client_id, client_queue)
+            yield f"event: connected\ndata: {json.dumps({'client_id': client_id, 'status': 'connected'})}\n\n"
+            last_heartbeat = time.time()
+            heartbeat_interval = 30  # seconds
+            while True:
+                try:
+                    message = await asyncio.wait_for(
+                        channel_layer.receive(channel_name), timeout=5.0)
+                except asyncio.TimeoutError:
+                    message = None
+                if message and message.get('type') == 'broadcast':
+                    payload = message.get('payload', {})
+                    if _matches_filters(payload, filters):
+                        await sync_to_async(_count_sse_sent)(subscriber_id)
+                        event_type = payload.get('msg_type', 'message')
+                        yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+                now = time.time()
+                if now - last_heartbeat > heartbeat_interval:
+                    yield f"event: heartbeat\ndata: {json.dumps({'timestamp': now})}\n\n"
+                    last_heartbeat = now
         finally:
-            broadcaster.remove_client(client_id)
-    
-    # Create SSE response with appropriate headers
+            logger.info(f"SSE client {client_id} disconnected")
+            await channel_layer.group_discard(group, channel_name)
+            await sync_to_async(_unregister_sse_subscriber)(subscriber_id)
+
     response = StreamingHttpResponse(
         event_stream(),
         content_type='text/event-stream'
@@ -326,7 +385,7 @@ def sse_message_stream(request):
     response['Cache-Control'] = 'no-cache'
     response['X-Accel-Buffering'] = 'no'  # Disable Nginx buffering
     response['Access-Control-Allow-Origin'] = '*'  # Configure as needed for production
-    
+
     return response
 
 

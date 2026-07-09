@@ -12,6 +12,8 @@ For the design that reuses this relay to push ops-agent action-completion events
 
 Production runs Django under mod_wsgi (one or more daemon processes) with the ActiveMQ listener running inside the mod_wsgi Apache process, and `/swf-monitor/mcp/` on a separate uvicorn ASGI worker. To reliably fan out events to all SSE clients across processes, we use Django Channels with a Redis channel layer as an inter-process relay. WebSockets are not required or enabled for this feature.
 
+The stream endpoint itself (`/api/messages/stream/`) is served by the ASGI worker: Apache proxies the path to uvicorn, where the async view subscribes directly to the Channels group and the long-held EventSource connection lives on the event loop. A stream held by a sync WSGI worker pins that worker for the connection's lifetime — with a handful of open tabs this exhausted the mod_wsgi pool and 503'd the whole monitor (2026-06-16); page-load-opened streams were button-gated then, and the ASGI move removes the underlying constraint.
+
 Important: Redis/Channels is REQUIRED in any environment that must support remote ActiveMQ client recipients via SSE. The in-memory fallback is for single-process development only and is not suitable for production.
 
 ## Architecture
