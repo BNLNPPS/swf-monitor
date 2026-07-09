@@ -151,6 +151,11 @@ what a population would do; firing it creates the campaign row (lifecycle
 `future`) and populates it, and the normal rotation takes over from there.
 The plan sources from the newest producing campaign when one is ahead of
 current (it will be current by population time); otherwise from current.
+Dispositions are resolved configuration-wide, whatever campaign's edition
+carries them — a deliberate hold or final on any edition decides the
+configuration (the default `continue` is non-information; hold and final
+disagreeing is a conflict for a human) — so decisions stamped on the
+current campaign's editions govern a plan sourced from a newer one.
 With that the catalog perpetuates itself: each campaign's successor is
 planned, populated, promoted, and retired inside the catalog.
 

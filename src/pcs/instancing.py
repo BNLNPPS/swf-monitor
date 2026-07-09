@@ -17,7 +17,7 @@ import logging
 from django.db import transaction
 
 from .models import Campaign, Dataset, ProdTask
-from .physics_config import group_editions
+from .physics_config import group_editions, physics_config_key
 
 _log = logging.getLogger(__name__)
 
@@ -72,9 +72,30 @@ def plan_campaign_instancing(source_campaign, target_campaign):
 
     Pending AI disposition proposals are not consumed — the plan reads
     decided state only, so deciding proposals changes the plan.
+
+    Dispositions are configuration-level decisions stored on whichever
+    edition the decider touched (PCS.md) — commonly the current
+    campaign's, while the plan may source from a newer producing
+    campaign. They are therefore resolved across ALL campaigns'
+    editions of each configuration: a deliberate hold or final anywhere
+    decides it (the default ``continue`` is non-information); hold and
+    final disagreeing across editions is a conflict for a human.
     """
     source_groups = group_editions(_campaign_heads(source_campaign))
     target_groups = group_editions(_campaign_heads(target_campaign))
+    # Configuration-wide decided state: the non-default rows are few;
+    # resolve each to its configuration key and union into the read.
+    decided_states = {}
+    decided_replaced = {}
+    for row in (Dataset.objects.exclude(propagation='continue')
+                .select_related('physics_tag', 'evgen_tag',
+                                'background_tag')
+                .order_by('composed_name', 'block_num', 'pk')
+                .distinct('composed_name')):
+        row_key = physics_config_key(row)['key']
+        decided_states.setdefault(row_key, set()).add(row.propagation)
+        if row.replaced_by:
+            decided_replaced.setdefault(row_key, set()).add(row.replaced_by)
     # Adoption state is identity-level: one identity carries one working
     # task (composed-name-as-identity), and a multi-row identity's
     # sibling tasks remain output records. An identity is awaiting
@@ -111,18 +132,20 @@ def plan_campaign_instancing(source_campaign, target_campaign):
         if not all(detail['resolved'] for _, detail in editions):
             plan['unresolved'].append(item)
             continue
-        dispositions = {d.propagation for d, _ in editions}
-        if len(dispositions) > 1:
-            item['dispositions'] = sorted(dispositions)
+        decided = ({d.propagation for d, _ in editions}
+                   | decided_states.get(key, set())) - {'continue'}
+        if len(decided) > 1:
+            item['dispositions'] = sorted(decided)
             plan['conflict'].append(item)
             continue
-        disposition = dispositions.pop()
+        disposition = decided.pop() if decided else 'continue'
         if disposition == 'hold':
             plan['hold'].append(item)
             continue
         if disposition == 'final':
             replaced = sorted({d.replaced_by for d, _ in editions
-                               if d.replaced_by})
+                               if d.replaced_by}
+                              | decided_replaced.get(key, set()))
             if replaced:
                 item['replaced_by'] = replaced
             plan['final'].append(item)
