@@ -15,4 +15,6 @@ urlpatterns = [
          name='api_proposal_delete'),
     path('api/narratives/save/', api_views.NarrativeSaveView.as_view(),
          name='api_narrative_save'),
+    path('api/narratives/publish/', api_views.NarrativePublishView.as_view(),
+         name='api_narrative_publish'),
 ]

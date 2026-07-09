@@ -46,8 +46,8 @@
   {% if entries %}
   <div class="mb-2">
     {% csrf_token %}
-    <button type="button" id="narr-open-all" class="btn btn-sm btn-outline-secondary">Open all</button>
-    <button type="button" id="narr-close-all" class="btn btn-sm btn-outline-secondary">Close all</button>
+    <button type="button" id="narr-open-all" class="btn btn-sm btn-secondary">Open all</button>
+    <button type="button" id="narr-close-all" class="btn btn-sm btn-secondary">Close all</button>
   </div>
   {% endif %}
 
@@ -83,6 +83,29 @@
       const entry = btn.closest('details');
       entry.querySelector('.narrative-rendered').style.display = 'none';
       entry.querySelector('.narrative-editor').style.display = '';
+      window.swfFitEditor(entry.querySelector('textarea'));
+    });
+  });
+  document.querySelectorAll('[data-narr-publish]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const entry = btn.closest('details');
+      const title = entry.querySelector('summary h4').textContent;
+      if (!confirm(`Publish "${title}"? Published revisions are immutable — corrections become new revisions.`)) return;
+      btn.disabled = true;
+      const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/publish/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ group_id: btn.dataset.narrPublish }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || 'publish failed');
+        window.location.reload();
+      } catch (err) {
+        btn.disabled = false;
+        alert('Publish failed: ' + err.message);
+      }
     });
   });
   document.querySelectorAll('[data-narr-cancel]').forEach(btn => {

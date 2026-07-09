@@ -116,7 +116,7 @@
         <div class="collapse mt-2" id="sysconfig-editor">
             <form method="post" action="{% url 'monitor_app:sysconfig_save' %}">
                 {% csrf_token %}
-                <textarea class="form-control font-monospace small" name="config_json" rows="12">{{ sysconfig_json }}</textarea>
+                <textarea class="form-control font-monospace small swf-fit-editor" name="config_json" rows="12">{{ sysconfig_json }}</textarea>
                 <button class="btn btn-sm btn-primary mt-2" type="submit">Save configuration</button>
             </form>
         </div>

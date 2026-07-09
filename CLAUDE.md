@@ -85,6 +85,25 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - Any new or edited doc gets a separate re-read at doc voice before the
   commit — dialog phrasings leak into docs under momentum.
 
+## Button roles
+
+One role → one treatment, everywhere (all `btn-sm`, solid variants):
+
+| Role | Class | Examples |
+|---|---|---|
+| Constructive: create / save / new / import / match | `btn-primary` | Save, New Task, Import |
+| Object verbs on existing items: edit / copy | `btn-dark-green` | Edit, Copy |
+| Consequential commits: submit / lock / publish / approve-and-execute | `btn-success` | Submit to PanDA, Lock, Publish, Approve |
+| Suggestion adoption (yellow suggestion bars only) | `btn-warning btn-apply` | Apply |
+| Destructive: delete | `btn-danger` | Delete |
+| Neutral dismiss / utility: cancel / clear / open-close all | `btn-secondary` | Cancel, Clear |
+| Stateful toggles ONLY (fill = on/off) | `btn-outline-*` | Catalog/Progress switch |
+
+Outline is never the default reflex — anything that acts is solid, colored
+by role. For editing large documents in-page, use the base-template
+utility `swfFitEditor(el)` (or class `swf-fit-editor` on the textarea) so
+the editor grows to the visible window.
+
 ## Deploy
 
 `sudo bash deploy-swf-monitor.sh branch <current infra/baseline-vNN>` — pulls from

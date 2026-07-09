@@ -1028,8 +1028,8 @@
         if (!p || !p.payload) return '';
         const name = htmlEscape(taskComposedName(t));
         const buttons = currentUser
-            ? `<span class="ms-2"><button type="button" class="btn btn-sm ai-attr" data-proposal-decide="approve" data-task-name="${name}">Approve</button>`
-              + `<button type="button" class="btn btn-sm ai-attr ms-1" data-proposal-decide="deny" data-task-name="${name}">Deny</button></span>`
+            ? `<span class="ms-2"><button type="button" class="btn btn-success btn-sm" data-proposal-decide="approve" data-task-name="${name}">Approve</button>`
+              + `<button type="button" class="btn btn-secondary btn-sm ms-1" data-proposal-decide="deny" data-task-name="${name}">Deny</button></span>`
             : '';
         const replaced = p.payload.replaced_by
             ? `, replaced by ${htmlEscape(p.payload.replaced_by)}` : '';

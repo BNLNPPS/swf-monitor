@@ -436,14 +436,14 @@ Context expected:
 <div class="pcs-tlf-bulk mt-1 d-flex align-items-center gap-2">
   <span class="text-muted small"><span id="pcs-tlf-count">0</span> selected</span>
   <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Bulk actions">
-    <button type="button" class="btn btn-outline-primary" data-bulk="submit" disabled>Submit</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="archive" disabled>Archive</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="withdraw" disabled>Withdraw</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="clone" disabled>Clone</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="priority" disabled>Set priority…</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="propagation" disabled>Campaign propagation…</button>
-    <button type="button" class="btn ai-attr" data-bulk="ai_approve" disabled>Approve AI</button>
-    <button type="button" class="btn ai-attr" data-bulk="ai_deny" disabled>Deny AI</button>
+    <button type="button" class="btn btn-success" data-bulk="submit" disabled>Submit</button>
+    <button type="button" class="btn btn-secondary" data-bulk="archive" disabled>Archive</button>
+    <button type="button" class="btn btn-secondary" data-bulk="withdraw" disabled>Withdraw</button>
+    <button type="button" class="btn btn-secondary" data-bulk="clone" disabled>Clone</button>
+    <button type="button" class="btn btn-secondary" data-bulk="priority" disabled>Set priority…</button>
+    <button type="button" class="btn btn-secondary" data-bulk="propagation" disabled>Campaign propagation…</button>
+    <button type="button" class="btn btn-success" data-bulk="ai_approve" disabled>Approve AI</button>
+    <button type="button" class="btn btn-secondary" data-bulk="ai_deny" disabled>Deny AI</button>
   </div>
   <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
 </div>
@@ -467,7 +467,7 @@ Context expected:
   <div class="d-flex align-items-start gap-2 mt-2">
     <textarea id="pcs-prop-comment" class="form-control" rows="2"
               placeholder="Comment (required) — the why, with its source">{{ propagation_last_comment }}</textarea>
-    <button type="button" id="pcs-prop-apply" class="btn btn-primary">Apply</button>
+    <button type="button" id="pcs-prop-apply" class="btn btn-success">Apply</button>
     <button type="button" id="pcs-prop-cancel" class="btn btn-outline-secondary">Cancel</button>
   </div>
   <div id="pcs-prop-result" class="mt-1" style="color:#b02a37"></div>

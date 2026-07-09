@@ -81,6 +81,13 @@
       main > .container-fluid > .d-flex h2 {
         margin-bottom: 0 !important;
       }
+      /* Button roles (see CLAUDE.md "Button roles" — the AI-facing table):
+         constructive create/save/new/import = btn-primary; object verbs
+         edit/copy on existing items = btn-dark-green; consequential commits
+         submit/lock/publish/approve = btn-success; suggestion-bar Apply =
+         btn-warning btn-apply; destructive delete = btn-danger; neutral
+         cancel/utility = btn-secondary; btn-outline-* reserved for stateful
+         toggles where fill signals on/off. All btn-sm. */
       .btn.btn-dark-green {
         background-color: #166534; border-color: #166534; color: #fff;
       }
@@ -539,5 +546,25 @@ function applyNavMode(mode) {
     setInterval(pollSystemStatus, 60000);
 })();
 </script>
+    <script>
+      /* Fit an in-page document editor to the visible window: if the
+         document overflows its panel, grow the panel to use nearly the
+         full viewport height. The app-wide utility for editing large
+         documents — call swfFitEditor(el) when opening an editor, or give
+         the textarea the swf-fit-editor class to fit on focus. */
+      window.swfFitEditor = function (el) {
+        if (!el) return;
+        const margin = 24;
+        const avail = window.innerHeight - el.getBoundingClientRect().top - margin;
+        if (el.scrollHeight > el.clientHeight && avail > el.clientHeight) {
+          el.style.height = Math.max(avail, 240) + 'px';
+        }
+      };
+      document.addEventListener('focusin', function (e) {
+        if (e.target.matches && e.target.matches('textarea.swf-fit-editor')) {
+          window.swfFitEditor(e.target);
+        }
+      });
+    </script>
 </body>
 </html>

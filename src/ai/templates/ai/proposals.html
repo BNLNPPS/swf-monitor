@@ -43,11 +43,11 @@
   <div class="mb-2 d-flex align-items-center gap-2">
     {% csrf_token %}
     <span class="text-muted"><span id="props-count">0</span> selected</span>
-    <button type="button" id="props-approve" class="btn btn-sm btn-outline-primary" disabled>Approve</button>
-    <button type="button" id="props-deny" class="btn btn-sm btn-outline-secondary" disabled>Deny</button>
-    <button type="button" id="props-deny-wrong" class="btn btn-sm btn-outline-secondary" disabled
+    <button type="button" id="props-approve" class="btn btn-sm btn-success" disabled>Approve</button>
+    <button type="button" id="props-deny" class="btn btn-sm btn-secondary" disabled>Deny</button>
+    <button type="button" id="props-deny-wrong" class="btn btn-sm btn-secondary" disabled
             title="Deny and score the proposal wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
-    <button type="button" id="props-delete" class="btn btn-sm btn-outline-danger" disabled
+    <button type="button" id="props-delete" class="btn btn-sm btn-danger" disabled
             title="Remove the selected rows from the AI proposal list — decided history included, permanent">Delete</button>
   </div>
   {% endif %}
