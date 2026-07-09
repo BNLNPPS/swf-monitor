@@ -24,51 +24,54 @@ is a full re-baseline.
 purpose, software identity (container, geometry, reconstruction tags), the
 dataset matrix with priorities and dispositions, timeline expectations,
 retirements and replacements. Drafted before the campaign, living during
-it, final revision frozen as its permanent record.
+it, its last version standing as the permanent record after.
 
 Campaign narratives cite the general narrative and never restate its
-content. Provenance metadata records which general revision a campaign
-revision was written against; consumers nevertheless always load the
-current revision of each.
+content. Consumers always load the current version of each.
 
 ## Naming
 
 ```
 campaign_general_YYYYMMDD          general series, dated
-campaign_<campaign>[.revN]         campaign series, e.g. campaign_26.07.X.rev2
+campaign_<campaign>                one living page per campaign, e.g. campaign_26.07.X
 ```
 
 `<campaign>` is the campaign's canonical name as PCS records it (the bare
-version, e.g. `26.07.X`) — never an approximation of it. `revN` is a
-reserved terminal token following the `name_tokens.py` suffix grammar: the
-bare name is the first revision, `.rev2` onward are supersessions, and
-parsing strips the token from the right. Drafting churn never mints names;
-only publication does.
+version, e.g. `26.07.X`) — never an approximation of it. The name is the
+series identity, carried in the corun page's `data.name`; the page title
+is the human title.
 
-## Lifecycle
+## Lifecycle: versions
 
-Narrative revisions follow the PCS tag lifecycle: **draft → locked**.
+A narrative is a living description — evolved by time, corrected and
+elaborated by experts — so its lifecycle is corun-ai's native versioning,
+not a lock. Every save creates an immutable version; the current version
+is what consumers load; every past version is retrievable forever.
 
-- **Draft** — the AI–human iteration workspace. Modify in place, delete and
-  recreate freely; nothing consumes drafts and no assessment cites them.
-- **Locked (published)** — immutable, by the same one-way transition as
-  tags. Publication is a human action. Any correction after publication is
-  a new revision.
+- **Citation rule**: an assessment cites a narrative by *name and
+  version* ("campaign_26.07.X v5"). Versions are immutable, so the cited
+  reference always resolves to the same content — the auditability the
+  earlier draft→locked design sought, provided natively.
+- **Editing** is a signed act: each save stamps the editor and logs
+  `narrative_edited`; the version history (bottom of the document detail
+  page) shows version, date, author, and size, with any version viewable.
+- **Comments** (corun-ai threads, on the list entries and the detail
+  page) are the non-intrusive contribution path beside editing; posting
+  logs `narrative_commented`.
 
-Published revisions are never edited: assessments cite narratives by name,
-and the assessment corpus is only auditable if a cited name always resolves
-to the same content.
+The PCS tag draft → locked lifecycle is unaffected — that lock is
+load-bearing for reproducibility of produced data.
 
 ## Content rules
 
-- **Complete, not delta.** A consumer loads exactly one revision per class.
-  A "changes since previous revision" section inside the document serves
-  human readers; the rest of the document stands alone.
-- **Sources are part of the document.** Every narrative carries a source
-  list — meeting links, talk titles, dates — so any claim traces to raw
-  material.
-- **One resolver.** "Current revision" (highest date for the general
-  series, highest rev per campaign) is implemented once, in the service
+- **Complete, not delta.** A consumer loads exactly one document per
+  series. A "changes since previous revision" section inside the document
+  serves human readers; the rest of the document stands alone.
+- **Sources are part of the document, with links.** Every narrative
+  carries a linked source list — meetings, presentations, records — so
+  any claim traces to raw material.
+- **One resolver.** "Current" (highest date for the general series, the
+  campaign's page for a campaign) is implemented once, in the service
   layer, and shared by every consumer; it is not a convention each client
   re-implements.
 
