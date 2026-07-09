@@ -3230,11 +3230,19 @@ def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
     The work behind the catalog's "Update from Rucio" button. Slow and
     network-bound (a live JLab Rucio fetch of /RECO + /FULL plus the match over
     every task), so it runs off the web request — in the prod-ops agent's
-    ``rucio_snapshot_update`` doer. Returns ``{'summaries': [...], 'errors':
-    [...]}``; errors are collected per campaign, never swallowed.
+    ``rucio_snapshot_update`` doer. Producing campaigns (fresh arrivals,
+    whatever their lifecycle slot) are targeted alongside current and
+    last — the producing tab's Rucio timeline comes from here. Returns
+    ``{'summaries': [...], 'errors': [...]}``; errors are collected per
+    campaign, never swallowed.
     """
+    from pcs.views import _campaigns_with_inflow
+
     targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
                    .order_by('lifecycle'))
+    seen = {camp.pk for camp in targets}
+    targets += [camp for camp, _ in _campaigns_with_inflow()
+                if camp.pk not in seen]
     out = {'summaries': [], 'errors': []}
     if not targets:
         out['errors'].append('No current Campaign defined in PCS')

@@ -2367,6 +2367,11 @@ def pcs_catalog(request):
         rucio_unmatched_campaign = ''
         rucio_detected = []
         rucio_current_name = ''
+        if active_lifecycle == 'producing':
+            # The producing tab gets the same arrivals timeline plot;
+            # its snapshot rides the same refresh as current/last.
+            from .services import load_rucio_timeline
+            rucio_timeline = load_rucio_timeline(producing_campaign_name)
         if active_lifecycle == 'last':
             last_camps = campaigns_by_lifecycle['last']
             target = last_camps[0] if last_camps else None

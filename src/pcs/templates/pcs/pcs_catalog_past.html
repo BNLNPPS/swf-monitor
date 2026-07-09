@@ -32,12 +32,12 @@
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
     {% if not is_tunnel %}
     {% if user.is_authenticated %}
-    {% if active_lifecycle == 'last' %}
+    {% if active_lifecycle == 'last' or active_lifecycle == 'producing' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
       <button type="submit" class="btn btn-sm btn-outline-primary"
-              title="Refresh the JLab Rucio output snapshot for current + last"
-              onclick="return confirm('Refresh the JLab Rucio snapshot for current and last campaigns?');">
+              title="Refresh the JLab Rucio output snapshot for the current, last, and producing campaigns"
+              onclick="return confirm('Refresh the JLab Rucio snapshot for the current, last, and producing campaigns?');">
         Update from Rucio
       </button>
     </form>
@@ -214,7 +214,7 @@
     </div>
   {% endif %}
 
-  {% if active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
+  {% if active_lifecycle == 'producing' and rucio_timeline_json != 'null' or active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
     <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
   {% endif %}
 
@@ -543,7 +543,7 @@
 })();
 </script>
 
-{% if active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
+{% if active_lifecycle == 'producing' and rucio_timeline_json != 'null' or active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 (function() {
