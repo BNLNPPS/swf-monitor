@@ -244,6 +244,11 @@ ACTION_DEFAULTS = {
                        "housekeeping for test or noise rows; removes audit "
                        "rows, logged with count.",
     },
+    'narrative_edited': {
+        'sublevel': 'normal', 'live': False,
+        'description': "Expert revision of a campaign narrative document — "
+                       "a new corun-ai version of the entry.",
+    },
     # web entity lifecycle and operator actions
     'campaign_set_current': {
         'sublevel': 'high', 'live': True,

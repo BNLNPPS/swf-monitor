@@ -402,7 +402,14 @@
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="{% if active_nav.pcs_tasks %}nav-active{% endif %}">Prod Tasks</a>
             </div>
         </div>
-        <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaigns</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.campaigns %} nav-active{% endif %}">Campaigns</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaign Catalog</a>
+                <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
+                <a href="{% url 'monitor_app:ai_content_list' %}?subject_type=campaign_task">Campaign Assessments</a>
+            </div>
+        </div>
         <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">AI</a>
         <strong class="nav-label nav-panda-label">PanDA</strong>
         <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>

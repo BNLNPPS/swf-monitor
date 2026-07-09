@@ -72,6 +72,51 @@ class ProposalDecideView(_AiApiView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class NarrativeSaveView(_AiApiView):
+    def post(self, request):
+        """Save an edited narrative as a new corun-ai version.
+
+        Body: ``group_id``, ``content``. Title, status, tags, and data are
+        carried over from the current version — editing revises content;
+        publication (status change) is a separate deliberate act.
+        """
+        from monitor_app.epicprod_logging import log_epicprod_action
+
+        from .corun_client import CorunAPIError, CorunClient
+
+        group_id = (request.data.get('group_id') or '').strip()
+        content = request.data.get('content') or ''
+        if not group_id or not content.strip():
+            return Response({'detail': 'group_id and content are required'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            client = CorunClient()
+            current = client.get_page(group_id)
+            result = client.create_version(
+                group_id,
+                content=content,
+                title=current.get('title', ''),
+                status=current.get('status', 'draft'),
+                data=current.get('data') or {},
+                tags=current.get('tags') or [],
+            )
+        except CorunAPIError as exc:
+            return Response({'detail': str(exc)},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        name = (current.get('data') or {}).get('name', current.get('title', ''))
+        log_epicprod_action(
+            'web', 'narrative_edited',
+            subject_type='narrative',
+            subject_key=name,
+            username=request.user.username,
+            sublevel='normal', live_default=False,
+            message=f'narrative {name} revised to version {result.get("version")}',
+            version=result.get('version'),
+        )
+        return Response({'version': result.get('version')},
+                        status=status.HTTP_200_OK)
+
+
 class ProposalDeleteView(_AiApiView):
     def post(self, request):
         """Delete AI proposal list rows (operator housekeeping). Body: ids."""

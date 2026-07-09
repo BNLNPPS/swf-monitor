@@ -92,17 +92,34 @@ def ai_narratives(request):
                 items = payload or []
             for page in items:
                 data = page.get('data') or {}
+                content = page.get('content') or ''
+                # The entry header carries the title; drop the document's
+                # own leading H1 from the rendered body to avoid repeating
+                # it. The stored document keeps its H1 (it stands alone).
+                body = content
+                if body.lstrip().startswith('# '):
+                    body = body.lstrip().split('\n', 1)[1] if '\n' in body.lstrip() else ''
                 entries.append({
+                    'name': data.get('name', ''),
                     'title': page.get('title') or data.get('name', ''),
                     'status': page.get('status', ''),
-                    'updated': (page.get('updated_at')
+                    'updated': (page.get('modified_at')
                                 or page.get('created_at') or ''),
-                    'html': render_assessment_markdown(
-                        page.get('content') or ''),
+                    'content': content,
+                    'html': render_assessment_markdown(body),
                     'group_id': page.get('group_id') or page.get('id'),
                 })
-            entries.sort(key=lambda e: e['updated'], reverse=True)
         except CorunAPIError as exc:
             error = f'corun-ai retrieval failed: {exc}'
+    # General items (standing context) precede campaign-specific ones;
+    # newest first within each block. The series identity is data.name.
+    general_entries = sorted(
+        (e for e in entries if e['name'].startswith('campaign_general')),
+        key=lambda e: e['updated'], reverse=True)
+    campaign_entries = sorted(
+        (e for e in entries if not e['name'].startswith('campaign_general')),
+        key=lambda e: e['updated'], reverse=True)
     return render(request, 'ai/narratives.html',
-                  {'entries': entries, 'error': error})
+                  {'general_entries': general_entries,
+                   'campaign_entries': campaign_entries,
+                   'entries': entries, 'error': error})

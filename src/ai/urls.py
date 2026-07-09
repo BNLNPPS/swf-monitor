@@ -13,4 +13,6 @@ urlpatterns = [
          name='api_proposal_decide'),
     path('api/proposals/delete/', api_views.ProposalDeleteView.as_view(),
          name='api_proposal_delete'),
+    path('api/narratives/save/', api_views.NarrativeSaveView.as_view(),
+         name='api_narrative_save'),
 ]

@@ -97,6 +97,17 @@ class CorunClient:
             'tags': tags or [],
         })
 
+    def create_version(self, group_id, *, content, title='', status='draft',
+                       data=None, tags=None):
+        """New version of an existing page — corun-ai's correction path."""
+        return self._request('POST', f'pages/{group_id}/versions/', payload={
+            'content': content,
+            'title': title,
+            'status': status,
+            'data': data or {},
+            'tags': tags or [],
+        })
+
     def get_page(self, group_id):
         return self._request('GET', f'pages/{group_id}/')
 
