@@ -5,6 +5,7 @@
 
 {% block content %}
 <style>
+.pcs-ed-table { width: auto; max-width: 100%; }
 .pcs-ed-table td, .pcs-ed-table th { vertical-align: top; }
 .pcs-ed-rse-bad { color: #dc3545; }
 </style>
@@ -17,6 +18,7 @@
        title="matched production request #{{ rid }}">Request #{{ rid }}</a>
     {% endfor %}
   </div>
+  <div class="text-muted mb-1">{{ name }}</div>
   <div class="mb-2">
     <span style="color:#1e7e34">{{ total_files }} files &middot; {{ total_bytes|filesizeformat }}</span>
     across {{ items|length }} dataset{{ items|length|pluralize }}
