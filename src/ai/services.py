@@ -1,4 +1,4 @@
-"""AI proposal services (EPICPROD_PROPOSALS.md).
+"""AI proposal services (AI_PROPOSALS.md).
 
 The propose / decide / withdraw / delete machinery behind the AI proposal
 list. Proposals are frozen executable payloads; everything past authoring

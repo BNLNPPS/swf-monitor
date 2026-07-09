@@ -1,7 +1,7 @@
 """AI subsystem data models.
 
 The AI app owns the human-in-the-loop automation machinery
-(EPICPROD_PROPOSALS.md): proposals and their decisions. Executors — the
+(AI_PROPOSALS.md): proposals and their decisions. Executors — the
 services that actually mutate domain state — stay in their domain apps
 (e.g. ``pcs.services.dataset_propagation_set``); this app proposes,
 reviews, and dispatches to them.
@@ -11,7 +11,7 @@ from django.db import models
 
 class Proposal(models.Model):
     """AI (or rule-based) proposal of a concrete action, pending or decided —
-    the canonical record behind the AI proposal list (EPICPROD_PROPOSALS.md).
+    the canonical record behind the AI proposal list (AI_PROPOSALS.md).
 
     A proposal is a frozen executable payload: the action identifier plus
     the exact validated arguments of the call it wants. Terminal rows are

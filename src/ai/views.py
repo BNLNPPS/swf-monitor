@@ -6,7 +6,7 @@ from .models import Proposal
 
 
 def ai_proposals(request):
-    """The AI proposal list (EPICPROD_PROPOSALS.md).
+    """The AI proposal list (AI_PROPOSALS.md).
 
     Pending proposals for review, decided history, and per-proposer track
     records. Read-open — visible-but-inert; decisions require sign-in and

@@ -15,7 +15,7 @@ CORUN_ASSESSMENT_SECTION = 'epicprod.assessment'
 AI_CONTENT_RETRIEVE_TOOL = 'epic_get_ai_content'
 AI_CONTENT_QUALITY_KEY = 'quality'
 # One shared review vocabulary across AI assessments and AI proposals,
-# worst to best (EPICPROD_PROPOSALS.md).
+# worst to best (AI_PROPOSALS.md).
 AI_CONTENT_QUALITY_VALUES = ('wrong', 'poor', 'ok', 'good')
 AI_CONTENT_COMMENT_KEY = 'comment'
 _MARKDOWN_EXTENSIONS = ['extra', 'sane_lists']

@@ -2842,7 +2842,7 @@ def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
     dropped. Raises ServiceError on an invalid state or an empty comment.
 
     ``origin`` marks an AI-proposed change approved by a human
-    (EPICPROD_PROPOSALS.md): a dict with ``proposer``, ``scan_version``,
+    (AI_PROPOSALS.md): a dict with ``proposer``, ``scan_version``,
     ``batch_id``, ``proposed_at``. It is stamped on both the history entry
     and the action-stream event (``origin: ai_proposal``), so AI-originated
     mutations stay distinguishable from purely human ones.

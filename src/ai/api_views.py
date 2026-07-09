@@ -26,7 +26,7 @@ class _AiApiView(APIView):
 
 class ProposalProposeView(_AiApiView):
     def post(self, request):
-        """Create AI propagation proposals (EPICPROD_PROPOSALS.md).
+        """Create AI propagation proposals (AI_PROPOSALS.md).
 
         Body: ``names``, ``state``, ``comment`` (required), ``replaced_by``,
         ``proposer``, ``scan_version``, ``batch_id``.

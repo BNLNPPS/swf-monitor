@@ -203,7 +203,7 @@ delete legacy rows.
 
 Review metadata uses `quality` and `comment` fields when present. The valid
 non-empty quality values are `wrong`, `poor`, `ok`, and `good` — one shared
-review vocabulary with AI proposals (EPICPROD_PROPOSALS.md); an empty quality
+review vocabulary with AI proposals (AI_PROPOSALS.md); an empty quality
 string means no quality review has been recorded. AI content retrieval returns
 quality and comment as top-level fields and inside structured `data` when
 present.
