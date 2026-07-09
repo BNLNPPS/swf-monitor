@@ -3233,8 +3233,13 @@ def ai_content_list(request):
 
     all_items = legacy_items + corun_items
 
+    # subject_type accepts a comma-separated list, e.g.
+    # ?subject_type=campaign_task,campaign — the Campaigns pulldown's
+    # campaign-scoped view.
+    subject_types = {s.strip() for s in subject_type.split(',') if s.strip()}
+
     def item_matches(item):
-        if subject_type and item.get('subject_type') != subject_type:
+        if subject_types and item.get('subject_type') not in subject_types:
             return False
         item_quality = item.get('quality') or ''
         if quality:
