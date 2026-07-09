@@ -113,10 +113,19 @@
       <div>
         <strong>{{ producing_campaign }} is producing</strong>{% if producing_arrivals %} &mdash;
         {{ producing_arrivals.files }} new file{{ producing_arrivals.files|pluralize }} in JLab Rucio
-        since {{ producing_arrivals.window_start|slice:":16" }} (as of the last arrivals sweep){% endif %}.
-        <strong>Last activity:</strong> {{ producing_last_activity|default:"none recorded" }}.
-        Its recorded content below tracks the nightly ingest.
+        since {{ producing_arrivals.window_start|fmt_dt }} (as of the last arrivals sweep){% endif %}.
+        <strong>Last activity:</strong> {{ producing_last_activity|fmt_dt|default:"none recorded" }}.
       </div>
+      {% if producing_task_mix %}
+      <div class="small mt-1">
+        <strong>Task records:</strong>
+        {% for status, n in producing_task_mix.items %}{{ n }} {{ status }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
+        <span class="text-muted">— the table below lists produced output records
+          (past_output); planned and producing task rows appear in the working
+          catalog views until this tab converges on the unified view
+          (CAMPAIGN_CONTINUUM.md).</span>
+      </div>
+      {% endif %}
       {% if user.is_authenticated %}
       <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="mt-2 d-inline">
         {% csrf_token %}
@@ -138,6 +147,14 @@
           (CAMPAIGN_CONTINUUM.md); pending AI disposition proposals are not
           consumed — deciding them changes this plan</span>
       </div>
+      {% if instancing.last_run %}
+      <div class="small mb-1">
+        <strong>Last populated:</strong> {{ instancing.last_run.at|fmt_dt }}
+        by {{ instancing.last_run.by|default:"?" }}
+        ({{ instancing.last_run.outcome }}) &mdash; {{ instancing.last_run.summary }}.
+        The plan below is the residual state after that run.
+      </div>
+      {% endif %}
       {% for label, key, items in instancing.classes %}
       {% if items %}
       <details class="mb-1">
@@ -155,6 +172,7 @@
       {% endif %}
       {% endfor %}
       {% if user.is_authenticated %}
+      {% if instancing.plan.summary.mint or instancing.plan.summary.merge %}
       <form method="post" action="{% url 'pcs:pcs_catalog_instancing_execute' %}" class="mt-2">
         {% csrf_token %}
         <input type="hidden" name="source" value="{{ instancing.source }}">
@@ -163,6 +181,10 @@
                 onclick="return confirm('Populate {{ producing_campaign }} from {{ instancing.source }}? {{ instancing.plan.summary.mint }} edition(s) minted, {{ instancing.plan.summary.merge }} adopted; the plan is recomputed at execution.');">
           Populate {{ producing_campaign }} from {{ instancing.source }}</button>
       </form>
+      {% else %}
+      <div class="small text-muted mt-2">Nothing pending — every actionable
+        configuration is instanced; unresolved ones await curation.</div>
+      {% endif %}
       {% endif %}
     </div>
     {% endif %}

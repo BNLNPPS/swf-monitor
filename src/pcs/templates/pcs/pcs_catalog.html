@@ -415,7 +415,7 @@
 
   {% if active_lifecycle == 'current' %}
   <div class="small mb-2">
-    <span><strong>Last activity:</strong> {{ current_last_activity|default:"none recorded" }}</span>
+    <span><strong>Last activity:</strong> {{ current_last_activity|fmt_dt|default:"none recorded" }}</span>
     {% if user.is_authenticated %}
     {% for offer in promote_offers %}
     <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="d-inline ms-3">

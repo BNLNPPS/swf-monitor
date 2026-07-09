@@ -3286,8 +3286,12 @@ def sweep_rucio_arrivals(*, roots=('/RECO', '/SIMU'), scope='epic',
             start_dt = None
         if start_dt is None:
             start_dt = now - _dt.timedelta(hours=24)
+    # created_after is the Rucio filter (UTC, naive by API convention);
+    # window_start is the stored/displayed form — zone-aware, so every
+    # surface renders it Eastern like the rest of the system.
     created_after = (start_dt.astimezone(_dt.timezone.utc)
                      .strftime('%Y-%m-%dT%H:%M:%S'))
+    window_start = start_dt.isoformat()
 
     token = _jlab_rucio_auth()
     per_campaign = {}
@@ -3320,7 +3324,7 @@ def sweep_rucio_arrivals(*, roots=('/RECO', '/SIMU'), scope='epic',
                 continue
             camp.data = {**(camp.data or {}), 'arrivals': {
                 'last_arrival_at': now.isoformat(),
-                'window_start': created_after,
+                'window_start': window_start,
                 'files': info['files'],
                 'by_root': info['by_root'],
                 'locations': info['locations'],
@@ -3338,13 +3342,14 @@ def sweep_rucio_arrivals(*, roots=('/RECO', '/SIMU'), scope='epic',
         shown = lines[:20]
         more = len(lines) - len(shown)
         message = (
-            f'{total} new file(s) in JLab Rucio since {created_after} '
+            f'{total} new file(s) in JLab Rucio since '
+            f'{_timezone.localtime(start_dt).strftime("%Y-%m-%d %H:%M %Z")} '
             f'[{", ".join(sorted(per_campaign))}]:\n' + '\n'.join(shown)
             + (f'\n… and {more} more location(s)' if more > 0 else ''))
         extra = {
             'total_files': total,
             'campaigns': {c: i['files'] for c, i in per_campaign.items()},
-            'window_start': created_after,
+            'window_start': window_start,
             'roots': list(roots),
         }
         if unknown:
@@ -3357,7 +3362,7 @@ def sweep_rucio_arrivals(*, roots=('/RECO', '/SIMU'), scope='epic',
     return {'total_files': total,
             'campaigns': {c: i['files'] for c, i in per_campaign.items()},
             'known': known, 'unknown': unknown,
-            'window_start': created_after, 'log_id': log_id}
+            'window_start': window_start, 'log_id': log_id}
 
 
 # ---------------------------------------------------------------------------

@@ -325,20 +325,15 @@ def _next_campaign_hint():
 
 
 def _campaign_last_activity(campaign):
-    """The most recent Rucio arrival known for a campaign, as a display
-    string: the arrivals sweep's record when present, else the last
-    cumulative increase in the campaign's Rucio timeline (kept for
-    current/last campaigns), else ''."""
-    import datetime as _dt
-
+    """The most recent Rucio arrival known for a campaign, as an ISO
+    string ready for the ``fmt_dt`` filter (Eastern display everywhere):
+    the arrivals sweep's record when present, else the last cumulative
+    increase in the campaign's Rucio timeline (kept for current/last
+    campaigns), else ''."""
     arrivals = (campaign.data or {}).get('arrivals') or {}
     value = arrivals.get('last_arrival_at') or ''
     if value:
-        try:
-            return (_dt.datetime.fromisoformat(value)
-                    .strftime('%Y-%m-%d %H:%M UTC'))
-        except ValueError:
-            pass
+        return value
     from .services import load_rucio_timeline
     timeline = load_rucio_timeline(campaign.name) or {}
     dates = timeline.get('dates') or []
@@ -348,7 +343,8 @@ def _campaign_last_activity(campaign):
         for i in range(1, min(len(cum), len(dates))):
             if cum[i] > cum[i - 1] and dates[i] > best:
                 best = dates[i]
-    return best.replace('T', ' ') if best else ''
+    # Timeline bins are naive UTC; stamp the zone so display converts.
+    return (best + '+00:00') if best else ''
 
 
 def _promote_cascade_note(campaigns_by_lifecycle, target_name):
@@ -2392,6 +2388,7 @@ def pcs_catalog(request):
         producing_arrivals = None
         promote_cascade_note = ''
         producing_last_activity = ''
+        producing_task_mix = None
         instancing = None
         if active_lifecycle == 'producing':
             producing_arrivals = dict(next(
@@ -2403,18 +2400,44 @@ def pcs_catalog(request):
                 name=producing_campaign_name).first()
             if producing_camp is not None:
                 producing_last_activity = _campaign_last_activity(producing_camp)
+            producing_task_mix = dict(
+                ProdTask.objects.filter(campaign__name=producing_campaign_name)
+                .values_list('status').annotate(Count('id')))
             current_names = [c.name for c in campaigns_by_lifecycle['current']]
             if current_names and producing_campaign_name not in current_names:
+                from monitor_app.models import AppLog
+
                 from .instancing import plan_campaign_instancing
                 plan = plan_campaign_instancing(current_names[0],
                                                 producing_campaign_name)
+                last_run_row = (AppLog.objects
+                                .filter(app_name='epicprod',
+                                        extra_data__action='campaign_instancing',
+                                        extra_data__subject_key=producing_campaign_name)
+                                .order_by('-timestamp').first())
+                last_run = None
+                if last_run_row is not None:
+                    message = last_run_row.message or ''
+                    last_run = {
+                        'at': last_run_row.timestamp,
+                        'by': (last_run_row.extra_data or {}).get('username', ''),
+                        'outcome': (last_run_row.extra_data or {}).get('outcome', ''),
+                        'summary': message.split(': ', 1)[-1],
+                    }
                 instancing = {
                     'source': current_names[0],
+                    'last_run': last_run,
                     'plan': plan,
                     'classes': [
                         ('Adopt (already produced)', 'merge', plan['merge']),
                         ('Mint (planned, not yet produced)', 'mint',
                          plan['mint']),
+                        ('Aligned (already instanced, nothing to do)',
+                         'aligned', plan['aligned']),
+                        ('No request context — curation supplies it',
+                         'no_context', plan['no_context']),
+                        ('Name collision — anchor-tag ambiguity, curation',
+                         'name_collision', plan['name_collision']),
                         ('Hold', 'hold', plan['hold']),
                         ('Final', 'final', plan['final']),
                         ('Unresolved — curation pool', 'unresolved',
@@ -2433,6 +2456,7 @@ def pcs_catalog(request):
             'producing_campaign': producing_campaign_name,
             'producing_arrivals': producing_arrivals,
             'producing_last_activity': producing_last_activity,
+            'producing_task_mix': producing_task_mix,
             'promote_cascade_note': promote_cascade_note,
             'instancing': instancing,
             'active_lifecycle': active_lifecycle,
