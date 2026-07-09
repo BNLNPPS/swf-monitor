@@ -287,6 +287,26 @@
     </table>
   {% elif active_lifecycle == 'last' %}
     {# Last not set yet — Make-last selector above is the call to action. #}
+  {% elif active_lifecycle == 'future' %}
+    <div class="border rounded p-3" style="max-width: 62em">
+      {% if next_campaign_hint %}
+      <div class="mb-1"><strong>Likely next campaign: {{ next_campaign_hint.name }}</strong> &mdash;
+        named by
+        <a class="ai-attr-text" href="{% url 'ai:ai_proposals' %}?batch={{ next_campaign_hint.batches.0|urlencode }}"
+           title="Pending campaign-propagation proposals whose disposition batch names {{ next_campaign_hint.name }} as the next campaign">{{ next_campaign_hint.pending }} pending AI campaign-propagation proposal{{ next_campaign_hint.pending|pluralize }}</a>.
+      </div>
+      <div class="text-muted">
+        No future campaign exists yet. Once dispositions are decided, the next
+        campaign is created from the current campaign's continuing datasets
+        (the create-next-campaign step, to come).
+      </div>
+      {% else %}
+      <div class="text-muted">
+        No future campaigns yet. The next campaign is created from the current
+        campaign's dataset dispositions once they are proposed and decided.
+      </div>
+      {% endif %}
+    </div>
   {% else %}
     <div class="alert alert-info">
       No past campaigns ingested yet. Click <strong>Update from epic-prod</strong> above to populate from

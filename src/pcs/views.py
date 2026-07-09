@@ -288,6 +288,42 @@ def _executed_proposal_names():
                .values_list('subject_key', flat=True))
 
 
+def _version_tuple(name):
+    """Campaign version as a comparable tuple ('26.4.1' < '26.7'), or
+    None when the name is not a dotted-integer version."""
+    try:
+        return tuple(int(p) for p in str(name or '').split('.'))
+    except ValueError:
+        return None
+
+
+def _next_campaign_hint():
+    """The likely next campaign, derived from pending campaign-propagation
+    proposal batches named '<next-campaign>-dispositions-<date>' (PCS.md).
+    Returns {'name', 'pending', 'batches'} for the newest such version, or
+    None when no batch names one."""
+    import re
+
+    from ai.models import Proposal
+    hints = {}
+    pending = (Proposal.objects
+               .filter(action='propagation', status='proposed')
+               .exclude(batch_id='')
+               .values_list('batch_id')
+               .annotate(Count('id')).order_by())
+    for batch_id, count in pending:
+        m = re.match(r'^(\d+(?:\.\d+)*)-dispositions-', batch_id)
+        if not m or _version_tuple(m.group(1)) is None:
+            continue
+        hint = hints.setdefault(m.group(1), {'pending': 0, 'batches': []})
+        hint['pending'] += count
+        hint['batches'].append(batch_id)
+    if not hints:
+        return None
+    name = max(hints, key=_version_tuple)
+    return {'name': name, **hints[name]}
+
+
 def _catalog_table_cache_key(campaign_id, catalog_view, signature):
     payload = json.dumps(signature, sort_keys=True, separators=(',', ':'))
     digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()
@@ -2178,6 +2214,8 @@ def pcs_catalog(request):
 
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
+            'next_campaign_hint': (_next_campaign_hint()
+                                   if active_lifecycle == 'future' else None),
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
             'release_versions': release_versions,
@@ -2223,7 +2261,20 @@ def pcs_catalog(request):
             target_data = _campaign_data(target)
             rucio_unmatched = target_data.get('rucio_unmatched', []) or []
             rucio_unmatched_campaign = target.name
-            rucio_detected = target_data.get('detected_releases', []) or []
+            # The current tab offers only genuinely NEW detected releases
+            # (a one-click switch forward): newer than current AND not
+            # already occupying a catalog lifecycle slot — a retired
+            # interim (26.06.0, past) is never re-promoted, and older
+            # releases' content lives under Past.
+            current_version = _version_tuple(target.name)
+            known_names = set(Campaign.objects.exclude(lifecycle='future')
+                              .values_list('name', flat=True))
+            rucio_detected = [
+                r for r in (target_data.get('detected_releases', []) or [])
+                if current_version and _version_tuple(r.get('version'))
+                and _version_tuple(r.get('version')) > current_version
+                and r.get('version') not in known_names
+            ]
             rucio_current_name = target.name
             evgen_rucio_unmatched = target_data.get('evgen_rucio_unmatched', []) or []
             evgen_rucio_checked_at = target_data.get('evgen_rucio_checked_at', '')
