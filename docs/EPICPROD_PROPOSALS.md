@@ -68,15 +68,11 @@ hash), not record state.
 
 Proposals are **visible but inert** on the open face: anyone can see a
 recommendation; only an authenticated approver can act. Everything
-AI-attributable renders in the universal AI presence scheme — dark purple
-ink on lavender ground, the ground always wearing a 1px border in the ink
-color — defined once (`--ai-fg`, `--ai-bg`, `--ai-border`, `.ai-attr` /
-`.ai-attr-text` / `.ai-fill`) in the base template. The scheme is used
-with restraint, so purple registers as "this is AI" without exhausting the
-reader or suggesting AI is an end in itself: it marks AI material embedded
-in non-AI surfaces (catalog badges and filters, the compose proposal
-block, the production-home AI boxes) and the titles of the AI pages — not
-the body of pages that are wholly AI, and not the navigation.
+AI-attributable renders in the universal AI presence scheme — purple ink
+on lavender ground, defined once (`--ai-fg`, `--ai-bg`, `--ai-border`,
+`.ai-attr` / `.ai-attr-text` / `.ai-fill`) in the base template. Used with
+restraint: it marks AI material embedded in non-AI surfaces and the titles
+of AI pages, so the color registers as "this is AI" without saturating.
 
 - **The catalog list**: an AI-proposed filter isolates recommended rows;
   each carries a badge with the proposed transition; Approve AI / Deny AI in

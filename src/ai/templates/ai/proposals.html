@@ -47,6 +47,8 @@
     <button type="button" id="props-deny" class="btn btn-sm btn-outline-secondary" disabled>Deny</button>
     <button type="button" id="props-deny-wrong" class="btn btn-sm btn-outline-secondary" disabled
             title="Deny and score the proposal wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
+    <button type="button" id="props-delete" class="btn btn-sm btn-outline-danger" disabled
+            title="Remove the selected rows from the AI proposal list — decided history included, permanent">Delete</button>
   </div>
   {% endif %}
 
@@ -57,13 +59,13 @@
         <th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
         <th>Confidence</th><th class="pcs-props-comment">Comment</th>
         <th>Status</th><th>Decision</th><th>Quality</th>
-        <th>Proposer</th><th>Batch</th>{% if user.is_authenticated %}<th style="width:2em"></th>{% endif %}
+        <th>Proposer</th><th>Batch</th>
       </tr>
     </thead>
     <tbody>
       {% for p in rows %}
       <tr>
-        {% if user.is_authenticated %}<td>{% if p.status == 'proposed' %}<input type="checkbox" class="props-cb" value="{{ p.id }}">{% endif %}</td>{% endif %}
+        {% if user.is_authenticated %}<td><input type="checkbox" class="props-cb" value="{{ p.id }}"></td>{% endif %}
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
         <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>
         <td class="small">{{ p.precondition.prev_state|default:"" }} &rarr; {{ p.payload.state|default:"" }}{% if p.payload.replaced_by %}<div class="text-muted">replaced by {{ p.payload.replaced_by }}</div>{% endif %}</td>
@@ -76,10 +78,9 @@
         <td class="small">{{ p.quality|default:"—" }}</td>
         <td class="small">{{ p.proposer|default:"—" }}</td>
         <td class="small">{{ p.batch_id|default:"—" }}</td>
-        {% if user.is_authenticated %}<td class="small text-end"><button type="button" class="btn btn-sm btn-link text-danger p-0 props-del" data-id="{{ p.id }}" title="Delete this row from the AI proposal list">&#10005;</button></td>{% endif %}
       </tr>
       {% empty %}
-      <tr><td colspan="13" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
+      <tr><td colspan="12" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -102,7 +103,7 @@
   const cbs = document.querySelectorAll('.props-cb');
   const selectAll = document.getElementById('props-selectall');
   const count = document.getElementById('props-count');
-  const buttons = ['props-approve', 'props-deny', 'props-deny-wrong']
+  const buttons = ['props-approve', 'props-deny', 'props-deny-wrong', 'props-delete']
     .map(id => document.getElementById(id)).filter(Boolean);
   if (!buttons.length) return;
   function refresh() {
@@ -145,23 +146,24 @@
   document.getElementById('props-deny').addEventListener('click', () => decide('deny', ''));
   document.getElementById('props-deny-wrong').addEventListener('click', () => decide('deny', 'wrong'));
 
-  document.querySelectorAll('.props-del').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('Delete this row from the AI proposal list? This removes its history entry.')) return;
-      const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
-      try {
-        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/delete/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-          body: JSON.stringify({ ids: [parseInt(btn.dataset.id, 10)] }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.detail || 'request failed');
-        window.location.reload();
-      } catch (err) {
-        alert('Delete failed: ' + err.message);
-      }
-    });
+  document.getElementById('props-delete').addEventListener('click', async () => {
+    const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected row(s) from the AI proposal list? `
+                 + 'Decided history included — this is permanent.')) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/delete/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ ids: ids }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      window.location.reload();
+    } catch (err) {
+      alert('Delete failed: ' + err.message);
+    }
   });
 })();
 </script>
