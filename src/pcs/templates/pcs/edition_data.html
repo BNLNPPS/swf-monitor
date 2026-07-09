@@ -11,7 +11,11 @@
 </style>
 
 <div class="container-fluid mt-3">
-  <h1 style="font-size: 1.4rem">Rucio data per campaign</h1>
+  <div class="d-flex align-items-center mb-1">
+    <h1 style="font-size: 1.4rem" class="mb-0 me-3">Rucio data per campaign</h1>
+    <a href="{% url 'pcs:pcs_physics_configs' %}" class="btn btn-sm btn-secondary"
+       title="back to the physics-configuration view">&larr; Physics configurations</a>
+  </div>
   <div class="mb-1"><strong>{{ pc_spec }}</strong>
     {% for rid in requests %}
     <a href="{% url 'pcs:questionnaire_detail' rid %}" class="ms-1"
@@ -22,8 +26,6 @@
   <div class="mb-2">
     <span style="color:#1e7e34">{{ total_files }} files &middot; {{ total_bytes|filesizeformat }}</span>
     across {{ items|length }} dataset{{ items|length|pluralize }}
-    <a class="btn btn-sm btn-secondary ms-3"
-       href="{% url 'pcs:pcs_physics_configs' %}">Physics configurations</a>
   </div>
 
   <table class="table table-sm table-striped pcs-ed-table">
