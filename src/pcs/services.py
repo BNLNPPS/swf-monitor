@@ -3248,6 +3248,118 @@ def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
     return out
 
 
+def sweep_rucio_arrivals(*, roots=('/RECO', '/SIMU'), scope='epic',
+                         window_hours=None, created_by='', instance='web'):
+    """Clockwork detection of new files landing in JLab Rucio — the
+    arrivals sweep (EPICPROD_DATA_LINEAGE.md).
+
+    One ``created_after`` DID query per root (the server-side filter the
+    eic/firehose action uses) across ALL campaign versions, so arrivals
+    into any campaign surface whatever its lifecycle slot — the mechanism
+    behind the derived 'producing' status. New files are grouped by
+    campaign (the path segment under the root) and by location (the
+    file's parent directory); each arriving campaign's row records the
+    block ``campaign.data['arrivals']`` — last_arrival_at, window, file
+    counts by root, full location breakdown. Campaign names with no
+    catalog row are returned and logged, never dropped: an unknown
+    arrival is the first signal of a new campaign appearing.
+
+    The window starts at the previous sweep's timestamp (PersistentState
+    ``rucio_arrivals_last_swept``), so a missed run is covered by the
+    next one; ``window_hours`` overrides for hand runs. One live
+    ``rucio_arrivals`` action-stream event when anything arrived; a
+    quiet sweep records its bookkeeping and emits nothing.
+    """
+    import datetime as _dt
+
+    from monitor_app.epicprod_logging import log_epicprod_action
+    from monitor_app.models import PersistentState
+
+    now = _timezone.now()
+    if window_hours:
+        start_dt = now - _dt.timedelta(hours=float(window_hours))
+    else:
+        last = PersistentState.get_state().get('rucio_arrivals_last_swept')
+        try:
+            start_dt = _dt.datetime.fromisoformat(last) if last else None
+        except (TypeError, ValueError):
+            start_dt = None
+        if start_dt is None:
+            start_dt = now - _dt.timedelta(hours=24)
+    created_after = (start_dt.astimezone(_dt.timezone.utc)
+                     .strftime('%Y-%m-%dT%H:%M:%S'))
+
+    token = _jlab_rucio_auth()
+    per_campaign = {}
+    total = 0
+    for root in roots:
+        names = _ndjson(_jlab_rucio_get(
+            f'/dids/{scope}/dids/search', token,
+            type='file', created_after=created_after, name=root + '/*'))
+        root_key = root.strip('/')
+        for name in names:
+            if not isinstance(name, str):
+                continue
+            segs = name.split('/')
+            if len(segs) < 4 or not segs[2]:
+                continue
+            campaign_name, location = segs[2], '/'.join(segs[2:-1])
+            camp = per_campaign.setdefault(
+                campaign_name, {'files': 0, 'by_root': {}, 'locations': {}})
+            camp['files'] += 1
+            camp['by_root'][root_key] = camp['by_root'].get(root_key, 0) + 1
+            camp['locations'][location] = camp['locations'].get(location, 0) + 1
+            total += 1
+
+    known, unknown = [], []
+    with transaction.atomic():
+        for campaign_name, info in sorted(per_campaign.items()):
+            camp = Campaign.objects.filter(name=campaign_name).first()
+            if camp is None:
+                unknown.append(campaign_name)
+                continue
+            camp.data = {**(camp.data or {}), 'arrivals': {
+                'last_arrival_at': now.isoformat(),
+                'window_start': created_after,
+                'files': info['files'],
+                'by_root': info['by_root'],
+                'locations': info['locations'],
+            }}
+            camp.save(update_fields=['data', 'updated_at'])
+            known.append(campaign_name)
+    PersistentState.update_state({'rucio_arrivals_last_swept': now.isoformat()})
+
+    log_id = None
+    if total:
+        lines = []
+        for campaign_name, info in sorted(per_campaign.items()):
+            for location, count in sorted(info['locations'].items()):
+                lines.append(f'{count:>7} {location}')
+        shown = lines[:20]
+        more = len(lines) - len(shown)
+        message = (
+            f'{total} new file(s) in JLab Rucio since {created_after} '
+            f'[{", ".join(sorted(per_campaign))}]:\n' + '\n'.join(shown)
+            + (f'\n… and {more} more location(s)' if more > 0 else ''))
+        extra = {
+            'total_files': total,
+            'campaigns': {c: i['files'] for c, i in per_campaign.items()},
+            'window_start': created_after,
+            'roots': list(roots),
+        }
+        if unknown:
+            extra['unknown_campaigns'] = unknown
+        log_id = log_epicprod_action(
+            instance, 'rucio_arrivals',
+            username=created_by,
+            sublevel='normal', live_default=True,
+            message=message, **extra)
+    return {'total_files': total,
+            'campaigns': {c: i['files'] for c, i in per_campaign.items()},
+            'known': known, 'unknown': unknown,
+            'window_start': created_after, 'log_id': log_id}
+
+
 # ---------------------------------------------------------------------------
 # EVGEN input assimilation (JLab Rucio epic:/EVGEN/* -> PCS evgen Datasets)
 # ---------------------------------------------------------------------------

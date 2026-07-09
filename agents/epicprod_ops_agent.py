@@ -107,6 +107,9 @@ PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION
 # the per-task rematch — slow and network-bound, so generously bounded.
 RUCIO_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-snapshot-update.py"
 RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "900"))
+# Arrivals sweep: one created_after DID query per root — light and bounded.
+RUCIO_ARRIVALS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-arrivals-sweep.py"
+RUCIO_ARRIVALS_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_ARRIVALS_TIMEOUT", "300"))
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -848,6 +851,7 @@ class EpicProdOpsAgent(BaseAgent):
             ('questionnaire_import', self._do_questionnaire_import),
             ('association_sweep', self._do_association_sweep),
             ('rucio_snapshot_update', self._do_rucio_snapshot_update),
+            ('rucio_arrivals_sweep', self._do_rucio_arrivals_sweep),
             ('evgen_rucio_update', self._do_evgen_rucio_update),
             ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
@@ -918,6 +922,53 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('rucio_sweep', t0,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True)
+
+    def _handle_rucio_arrivals_sweep(self, m):
+        """Run the clockwork arrivals sweep off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_rucio_arrivals_sweep, m,
+            dedup_key="rucio_arrivals_sweep", label="rucio_arrivals_sweep")
+
+    def _do_rucio_arrivals_sweep(self, m):
+        """Detect new files landed in JLab Rucio since the last sweep and
+        record per-campaign arrivals (the derived 'producing' signal). The
+        service emits the live rucio_arrivals event when anything arrived;
+        this logs the step itself."""
+        cmd = [sys.executable, str(RUCIO_ARRIVALS_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS rucio_arrivals_sweep: querying new files")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RUCIO_ARRIVALS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS rucio_arrivals_sweep TIMEOUT after {RUCIO_ARRIVALS_TIMEOUT}s")
+            self._log_action('rucio_arrivals_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {RUCIO_ARRIVALS_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  rucio-arrivals-sweep: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  rucio-arrivals-sweep: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS rucio_arrivals_sweep FAILED rc={p.returncode}")
+            self._log_action('rucio_arrivals_sweep', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS rucio_arrivals_sweep done")
+            self._log_action('rucio_arrivals_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=((p.stdout or '').splitlines() or [''])[0])
 
     def _handle_evgen_rucio_update(self, m):
         """Assimilate the JLab Rucio EVGEN inventory off the receiver thread — a

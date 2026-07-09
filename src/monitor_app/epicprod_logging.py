@@ -97,6 +97,20 @@ ACTION_DEFAULTS = {
                        "current (and last) campaign and rematch produced "
                        "RECO/FULL datasets onto each task's recorded outputs.",
     },
+    'rucio_arrivals': {
+        'sublevel': 'normal', 'live': True,
+        'description': "New files landed in JLab Rucio since the last "
+                       "arrivals sweep, counted by campaign and location "
+                       "across all versions — the signal behind the "
+                       "derived 'producing' campaign status. Emitted only "
+                       "when something arrived.",
+    },
+    'rucio_arrivals_sweep': {
+        'sublevel': 'low', 'live': False,
+        'description': "The clockwork arrivals-sweep step itself (outcome "
+                       "and duration); the arrivals, when any, are the "
+                       "rucio_arrivals event.",
+    },
     'evgen_sweep': {
         'sublevel': 'high', 'live': True,
         'description': "Assimilate the JLab Rucio EVGEN input inventory "
@@ -118,9 +132,10 @@ ACTION_DEFAULTS = {
         'sublevel': 'high', 'live': True,
         'description': "Nightly composite chain (cron 02:15): csv import, "
                        "questionnaire import, association sweep, Rucio output "
-                       "snapshot, EVGEN assimilation, questionnaire "
-                       "automatch, match cache, progress refresh. This "
-                       "record is the catalog-freshness timestamp.",
+                       "snapshot, Rucio arrivals sweep, EVGEN assimilation, "
+                       "questionnaire automatch, match cache, progress "
+                       "refresh. This record is the catalog-freshness "
+                       "timestamp.",
     },
     'agent_shutdown': {
         'sublevel': 'high', 'live': True,

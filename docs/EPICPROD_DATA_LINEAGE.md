@@ -156,11 +156,28 @@ catalog page receives over the SSE relay (`EventSource`) and refreshes live,
 internally and through the swf-remote streaming proxy. The web tier holds no
 credential.
 
-- Trigger: the **Update from Rucio** button (on demand). No nightly cron and no
-  per-campaign Sweep button are wired today.
+- Trigger: the **Update from Rucio** button (on demand) and the nightly
+  `catalog_sync` chain.
 - Unit of work: the current and last campaigns — for each, fetch the snapshot
   once and match the campaign's `ProdTask` rows against it; the receiver thread
   never blocks.
+
+**Arrivals sweep** *(implemented)* — clockwork detection of new files landing
+in JLab Rucio, complementing the snapshot: where the snapshot is a deep fetch
+of two campaigns, the sweep is a shallow query over all of them.
+`sweep_rucio_arrivals` (`pcs/services.py`; the agent's
+`rucio-arrivals-sweep.py` doer, a `catalog_sync` chain step) runs one
+`created_after` DID query per root (`/RECO`, `/SIMU`) — the server-side
+filter the eic/firehose notification action uses — windowed from the previous
+sweep's timestamp so a missed night is covered by the next. New files are
+grouped by campaign and location; each arriving campaign's row records
+`campaign.data['arrivals']` (last arrival, counts by root, full location
+breakdown) — the signal behind the campaign page's derived **producing**
+status, whatever lifecycle slot the campaign occupies. One live
+`rucio_arrivals` event carries the breakdown when anything arrived; arrivals
+naming a campaign with no catalog row are reported in the event, never
+dropped — an unknown arrival is the first signal of a new campaign
+appearing.
 
 **Reference** *(future, building on the gathered links)* — a catalog read over the stored links, no credential: the existing
 filter set (`EPICPROD_TASK_CATALOG.md` §7) collects the tasks' `outputs`
