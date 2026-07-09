@@ -2053,6 +2053,128 @@ def rucio_did_files(request, scope, name):
     return JsonResponse({'files': files, 'count': len(files)})
 
 
+def pcs_physics_configs(request):
+    """The physics-configuration view (CAMPAIGN_CONTINUUM.md): physics
+    first, fulfillment through time. One row per physics configuration,
+    its editions along the campaign axis — presentation only, no compose,
+    no editing; anything actionable cross-links to the catalog. Read-open.
+    """
+    from .physics_config import group_editions
+
+    def url_with(**updates):
+        params = request.GET.copy()
+        for key, value in updates.items():
+            if value:
+                params[key] = value
+            else:
+                params.pop(key, None)
+        encoded = params.urlencode()
+        return f'{request.path}?{encoded}' if encoded else request.path
+
+    years = (request.GET.get('years') or '2026').strip()
+    if years not in ('2026', '2025', 'all'):
+        years = '2026'
+    campaigns = sorted(
+        (c.name for c in Campaign.objects.all()
+         if years == 'all' or c.name.startswith(years[2:] + '.')),
+        key=lambda n: _version_tuple(n) or (0,))
+
+    heads = list(
+        Dataset.objects.filter(campaign__name__in=campaigns)
+        .select_related('physics_tag', 'evgen_tag', 'background_tag',
+                        'campaign')
+        .order_by('composed_name', 'block_num', 'pk')
+        .distinct('composed_name'))
+    groups = group_editions(heads)
+
+    # One working task per identity decides the edition's state; sibling
+    # output records don't override it.
+    task_status = {}
+    for name, status in (ProdTask.objects
+                         .filter(campaign__name__in=campaigns)
+                         .values_list('dataset__composed_name', 'status')):
+        if name not in task_status or task_status[name] == 'past_output':
+            task_status[name] = status
+
+    filters = {key: (request.GET.get(key) or '').strip()
+               for key in ('process', 'generator', 'beam', 'species', 'q2')}
+
+    rows = []
+    for key, group in groups.items():
+        head, detail = group['editions'][0]
+        params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
+        evgen = detail['evgen']
+        generator = evgen[0] if evgen else '(unresolved)'
+        gen_display = (' '.join(part for part in evgen[:2] if part)
+                       + (' noRad' if evgen and evgen[2] == 'off' else '')
+                       + (' Rad' if evgen and evgen[2] == 'on' else '')
+                       ) if evgen else '(unresolved)'
+        beam = (f"{params.get('beam_energy_electron', '')}x"
+                f"{params.get('beam_energy_hadron', '')}").strip('x')
+        row = {
+            'physics': head.physics_tag.tag_label if head.physics_tag else '',
+            'process': params.get('process', ''),
+            'beam': beam,
+            'species': params.get('beam_species', ''),
+            'q2': params.get('q2_range', ''),
+            'generator': generator,
+            'gen_display': gen_display,
+            'sample': detail['sample'],
+            'editions': {},
+        }
+        for dataset, edition_detail in group['editions']:
+            camp = dataset.campaign.name if dataset.campaign_id else ''
+            row['editions'][camp] = {
+                'name': dataset.composed_name,
+                'status': task_status.get(dataset.composed_name, ''),
+                'files': dataset.file_count or 0,
+                'propagation': dataset.propagation,
+                'replaced_by': dataset.replaced_by,
+                'proposal': bool((dataset.metadata or {}).get('proposal')),
+            }
+        # Template-friendly: one cell per campaign column, aligned.
+        row['cells'] = [row['editions'].get(c) for c in campaigns]
+        rows.append(row)
+
+    rows_all = rows
+    for key, value in filters.items():
+        if value:
+            rows = [r for r in rows if r[key] == value]
+
+    def facet(param):
+        counts = {}
+        for r in rows_all:
+            value = r[param]
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        return {'param': param,
+                'items': [{'value': v, 'count': n,
+                           'url': url_with(**{param: v}),
+                           'active': filters[param] == v}
+                          for v, n in sorted(counts.items())],
+                'all_url': url_with(**{param: ''}),
+                'all_active': not filters[param]}
+
+    facet_rows = [
+        ('Process', facet('process')),
+        ('Generator', facet('generator')),
+        ('Beam', facet('beam')),
+        ('Species', facet('species')),
+        ('Q²', facet('q2')),
+    ]
+
+    rows.sort(key=lambda r: (r['process'], r['physics'], r['sample']))
+    return render(request, 'pcs/physics_configs.html', {
+        'rows': rows,
+        'campaigns': campaigns,
+        'years': years,
+        'years_urls': {y: url_with(years=y) for y in ('2026', '2025', 'all')},
+        'facet_rows': facet_rows,
+        'total': len(groups),
+        'shown': len(rows),
+    })
+
+
 @_login_required_flash
 def pcs_catalog_promote_current(request):
     """POST handler for the producing tab's 'Make <campaign> current'

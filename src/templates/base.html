@@ -414,6 +414,7 @@
             <div class="dropdown-content">
                 <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaign Catalog</a>
                 <a href="{% url 'pcs:pcs_catalog' %}?lifecycle=current&amp;view=progress">Campaign Progress</a>
+                <a href="{% url 'pcs:pcs_physics_configs' %}">Physics Configurations</a>
                 <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
                 <a href="{% url 'monitor_app:ai_content_list' %}?subject_type=campaign_task,campaign">Campaign Assessments</a>
             </div>

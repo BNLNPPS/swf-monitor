@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% load swf_fmt %}
+
+{% block title %}Physics Configurations - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.pcs-pc-table td, .pcs-pc-table th { vertical-align: top; white-space: nowrap; }
+.pcs-pc-table .pcs-pc-cell { min-width: 7em; }
+.pcs-pc-filter a { margin-right: .7em; text-decoration: none; }
+.pcs-pc-filter a.active { font-weight: 700; text-decoration: underline; }
+.pcs-pc-scroll { overflow-x: auto; }
+.pcs-pc-files { color: #1e7e34; }
+.pcs-pc-status { color: #5d6b7a; }
+.pcs-pc-hold { color: #b8860b; font-weight: 600; }
+.pcs-pc-final { color: #a71d2a; font-weight: 600; }
+</style>
+
+<div class="container-fluid mt-3">
+  <h1>Physics Configurations</h1>
+  <p style="max-width: 62em">
+    Physics first: one row per physics configuration — the campaign-invariant
+    identity a request asks for — with its editions along the campaign axis,
+    showing fulfillment through time. A presentation view: nothing is edited
+    here; edition links lead to the catalog, where actions live. See
+    docs/CAMPAIGN_CONTINUUM.md.
+  </p>
+
+  <div class="pcs-pc-filter mb-2">
+    <div class="mb-1">
+      <strong>Campaigns:</strong>
+      {% for y, url in years_urls.items %}
+      <a href="{{ url }}" class="{% if years == y %}active{% endif %}">{{ y }}</a>
+      {% endfor %}
+    </div>
+    {% for label, f in facet_rows %}
+    {% if f.items %}
+    <div class="mb-1">
+      <strong>{{ label }}:</strong>
+      <a href="{{ f.all_url }}" class="{% if f.all_active %}active{% endif %}">All</a>
+      {% for item in f.items %}
+      <a href="{{ item.url }}" class="{% if item.active %}active{% endif %}">{{ item.value }} ({{ item.count }})</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    <div class="text-muted small">{{ shown }} of {{ total }} configuration{{ total|pluralize }}</div>
+  </div>
+
+  <div class="pcs-pc-scroll">
+  <table class="table table-sm table-striped pcs-pc-table">
+    <thead>
+      <tr>
+        <th>Physics</th><th>Process</th><th>Beam</th><th>Species</th>
+        <th>Q²</th><th>Generator</th><th>Sample</th>
+        {% for c in campaigns %}<th class="pcs-pc-cell">{{ c }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.physics }}</td>
+        <td>{{ r.process }}</td>
+        <td>{{ r.beam }}</td>
+        <td>{{ r.species }}</td>
+        <td>{{ r.q2 }}</td>
+        <td>{{ r.gen_display }}</td>
+        <td>{{ r.sample }}</td>
+        {% for e in r.cells %}
+        <td class="pcs-pc-cell small">
+          {% if e %}
+            <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ e.name|urlencode }}"
+               title="{{ e.name }}" style="text-decoration:none">
+              {% if e.files %}<span class="pcs-pc-files">{{ e.files }} f</span>
+              {% else %}<span class="pcs-pc-status">{{ e.status|default:"—" }}</span>{% endif %}
+            </a>
+            {% if e.propagation == 'hold' %}<span class="pcs-pc-hold" title="disposition: hold">H</span>{% endif %}
+            {% if e.propagation == 'final' %}<span class="pcs-pc-final" title="disposition: final{% if e.replaced_by %} — replaced by {{ e.replaced_by }}{% endif %}">F</span>{% endif %}
+            {% if e.proposal %}<a class="ai-attr" href="{% url 'ai:ai_proposals' %}?subject={{ e.name|urlencode }}" title="pending AI proposal — click to review" style="text-decoration:none">AI</a>{% endif %}
+          {% else %}
+            <span class="text-muted">·</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+      {% empty %}
+      <tr><td colspan="{{ campaigns|length|add:7 }}" class="text-center text-muted py-3">No configurations match this filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <div class="small text-muted mb-3">
+    Cell legend: <span class="pcs-pc-files">N f</span> files produced &middot;
+    <span class="pcs-pc-status">draft / submitted</span> working task, nothing
+    produced yet &middot; <span class="pcs-pc-hold">H</span> hold &middot;
+    <span class="pcs-pc-final">F</span> final &middot;
+    <span class="ai-attr">AI</span> pending proposal &middot;
+    · no edition in that campaign.
+  </div>
+</div>
+{% endblock %}
