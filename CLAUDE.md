@@ -70,6 +70,21 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
 
+## Editing discipline (AI sessions)
+
+- Templates and HTML are edited with precision edits (the Edit tool), never
+  stream editors (`sed`/`awk`) — a regex that clips one attribute quote
+  renders as a silently truncated page.
+- Before every commit: `bash scripts/pre-commit-checks.sh` — compiles
+  changed `.py`, one Django system check, lints changed templates; under
+  ten seconds, and it encodes the manage.py/venv invocation so no session
+  rediscovers it.
+- After any deploy that touched templates: smoke-check the affected page's
+  content (fetch and confirm a marker below the changed region), not just
+  the deploy's HTTP 200 health check.
+- Any new or edited doc gets a separate re-read at doc voice before the
+  commit — dialog phrasings leak into docs under momentum.
+
 ## Deploy
 
 `sudo bash deploy-swf-monitor.sh branch <current infra/baseline-vNN>` — pulls from
