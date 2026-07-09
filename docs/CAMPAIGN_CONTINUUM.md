@@ -81,7 +81,17 @@ migrations, retirement-with-replacement all read configuration-first,
 and request matching lands here (request → physics configuration;
 campaigns map to editions). The campaign tabs and the
 physics-configuration view are two projections of the same records —
-campaign-first and physics-first.
+campaign-first and physics-first. They are separate views, and different
+in kind: the physics-configuration view is not another PCS working
+display — it has no compose function and no editing machinery. It is
+optimized for presentation: physics first, showing physics fulfillment
+through time — through campaigns — with each configuration's editions
+laid out along the campaign axis. Its own page, its own physics-axis
+filters (process, generator, beams, species, Q²), campaign as a column
+rather than a tab, cross-links to and from the catalog for anything
+actionable. It maps directly onto the production team's planning tables
+(configuration blocks with a beam × Q² matrix), which become an export
+of this view.
 
 ## One view, phase-gated affordances
 
