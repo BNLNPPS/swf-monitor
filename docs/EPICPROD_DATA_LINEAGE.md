@@ -142,6 +142,14 @@ past-campaign ingest writes this schema directly (one bare-named campaign per
 version, per-stage totals in `data['past_summary'][stage]`), so legacy-shaped
 task overrides are no longer produced.
 
+The past-campaign ingest itself is clockwork: a `catalog_sync` chain step
+(`epic-prod-past-import.py`) pulls the eic/epic-prod bookkeeping clone —
+the production team's nightly-regenerated, Rucio-derived record — and
+re-runs the idempotent import, so every campaign's recorded production
+content tracks what production publishes without operator action. The Past
+tab's "Update from epic-prod" button remains as the on-demand override of
+the same ingest, not the mechanism.
+
 ## Architecture
 
 **Gather** *(implemented)* — standard credentialed-async pattern, no new

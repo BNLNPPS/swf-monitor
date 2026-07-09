@@ -97,6 +97,14 @@ ACTION_DEFAULTS = {
                        "current (and last) campaign and rematch produced "
                        "RECO/FULL datasets onto each task's recorded outputs.",
     },
+    'past_import': {
+        'sublevel': 'high', 'live': True,
+        'description': "Pull the eic/epic-prod bookkeeping clone and re-run "
+                       "the idempotent FULL/RECO past-campaign output "
+                       "ingest, keeping every campaign's recorded "
+                       "production content current with what the "
+                       "production team publishes.",
+    },
     'rucio_arrivals': {
         'sublevel': 'normal', 'live': True,
         'description': "New files landed in JLab Rucio since the last "
@@ -131,11 +139,11 @@ ACTION_DEFAULTS = {
     'catalog_sync': {
         'sublevel': 'high', 'live': True,
         'description': "Nightly composite chain (cron 02:15): csv import, "
-                       "questionnaire import, association sweep, Rucio output "
-                       "snapshot, Rucio arrivals sweep, EVGEN assimilation, "
-                       "questionnaire automatch, match cache, progress "
-                       "refresh. This record is the catalog-freshness "
-                       "timestamp.",
+                       "epic-prod past ingest, questionnaire import, "
+                       "association sweep, Rucio output snapshot, Rucio "
+                       "arrivals sweep, EVGEN assimilation, questionnaire "
+                       "automatch, match cache, progress refresh. This "
+                       "record is the catalog-freshness timestamp.",
     },
     'agent_shutdown': {
         'sublevel': 'high', 'live': True,

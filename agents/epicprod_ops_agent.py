@@ -110,6 +110,9 @@ RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "
 # Arrivals sweep: one created_after DID query per root — light and bounded.
 RUCIO_ARRIVALS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-arrivals-sweep.py"
 RUCIO_ARRIVALS_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_ARRIVALS_TIMEOUT", "300"))
+# Past-campaign output ingest: pull the epic-prod clone + idempotent re-import.
+PAST_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "epic-prod-past-import.py"
+PAST_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_PAST_IMPORT_TIMEOUT", "600"))
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -848,6 +851,7 @@ class EpicProdOpsAgent(BaseAgent):
         steps = [
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
+            ('epic_prod_past_import', self._do_epic_prod_past_import),
             ('questionnaire_import', self._do_questionnaire_import),
             ('association_sweep', self._do_association_sweep),
             ('rucio_snapshot_update', self._do_rucio_snapshot_update),
@@ -969,6 +973,52 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[0])
+
+    def _handle_epic_prod_past_import(self, m):
+        """Run the past-campaign output ingest off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_epic_prod_past_import, m,
+            dedup_key="epic_prod_past_import", label="epic_prod_past_import")
+
+    def _do_epic_prod_past_import(self, m):
+        """Pull the epic-prod clone and re-run the idempotent FULL/RECO
+        past-campaign ingest, so recorded production content for every
+        campaign tracks what the production team publishes — clockwork,
+        not a button."""
+        cmd = [sys.executable, str(PAST_IMPORT_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS epic_prod_past_import: pull + ingest")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=PAST_IMPORT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS epic_prod_past_import TIMEOUT after {PAST_IMPORT_TIMEOUT}s")
+            self._log_action('past_import', t0, outcome='timeout',
+                             reason=f'timed out after {PAST_IMPORT_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  epic-prod-past-import: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  epic-prod-past-import: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS epic_prod_past_import FAILED rc={p.returncode}")
+            self._log_action('past_import', t0, outcome='error', reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS epic_prod_past_import done")
+            self._log_action('past_import', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             summary=((p.stdout or '').splitlines() or [''])[-1])
 
     def _handle_evgen_rucio_update(self, m):
         """Assimilate the JLab Rucio EVGEN inventory off the receiver thread — a
