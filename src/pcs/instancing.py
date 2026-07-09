@@ -237,7 +237,12 @@ def execute_campaign_instancing(source_campaign, target_campaign, *,
     from monitor_app.epicprod_logging import log_epicprod_action
 
     plan = plan_campaign_instancing(source_campaign, target_campaign)
-    target = Campaign.objects.get(name=target_campaign)
+    # The batch-derived next campaign may have no row until its first
+    # population; created here it enters as lifecycle 'future' (the
+    # model default) and the normal rotation takes over from there.
+    target, _created = Campaign.objects.get_or_create(
+        name=target_campaign,
+        defaults={'created_by': created_by or 'instancing'})
     merged, minted, skipped_no_task, errors = [], [], [], []
 
     with transaction.atomic():

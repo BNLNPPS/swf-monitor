@@ -143,6 +143,15 @@ production to reconcile against. It ships as a reviewable operator action —
 the mechanism proposes, a human fires it — with a dry-run listing of what
 would be minted, merged, and skipped.
 
+The Future tab gives the next campaign the same treatment the moment it is
+detected — an existing future-lifecycle row, or the version named by pending
+disposition batches before any row exists. The plan tolerates the missing
+row (every continuing configuration classifies as mint), so the tab lays out
+what a population would do; firing it creates the campaign row (lifecycle
+`future`) and populates it, and the normal rotation takes over from there.
+With that the catalog perpetuates itself: each campaign's successor is
+planned, populated, promoted, and retired inside the catalog.
+
 ## Migration path
 
 1. **Continuum instancing** (the 26.06.0 rehearsal): mint-and-merge, with

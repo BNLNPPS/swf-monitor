@@ -143,12 +143,18 @@
       </div>
       {% endif %}
     </div>
+  {% endif %}
 
     {% if instancing %}
     <div class="border rounded p-2 mb-3" style="max-width: 62em">
-      <div class="mb-1">
-        <strong>Instancing plan {{ instancing.source }} &rarr; {{ producing_campaign }}</strong>
-        <span class="text-muted small ms-2">populate this campaign's working catalog from
+      {# Collapsed when idle: the plan is residual bookkeeping until something is pending, then it opens itself. #}
+      <details{% if instancing.plan.summary.mint or instancing.plan.summary.merge %} open{% endif %}>
+      <summary style="cursor:pointer">
+        <strong>Instancing plan {{ instancing.source }} &rarr; {{ instancing.target }}</strong>
+        <span class="text-muted small ms-2">{% if instancing.plan.summary.mint or instancing.plan.summary.merge %}{{ instancing.plan.summary.mint }} to mint, {{ instancing.plan.summary.merge }} to adopt{% else %}nothing pending{% endif %}</span>
+      </summary>
+      <div class="mb-1 mt-1">
+        <span class="text-muted small">populate this campaign's working catalog from
           {{ instancing.source }}'s continuing physics configurations
           (CAMPAIGN_CONTINUUM.md); pending AI disposition proposals are not
           consumed — deciding them changes this plan</span>
@@ -182,19 +188,20 @@
       <form method="post" action="{% url 'pcs:pcs_catalog_instancing_execute' %}" class="mt-2">
         {% csrf_token %}
         <input type="hidden" name="source" value="{{ instancing.source }}">
-        <input type="hidden" name="target" value="{{ producing_campaign }}">
+        <input type="hidden" name="target" value="{{ instancing.target }}">
+        <input type="hidden" name="return_lifecycle" value="{{ active_lifecycle }}">
         <button type="submit" class="btn btn-sm btn-success"
-                onclick="return confirm('Populate {{ producing_campaign }} from {{ instancing.source }}? {{ instancing.plan.summary.mint }} edition(s) minted, {{ instancing.plan.summary.merge }} adopted; the plan is recomputed at execution.');">
-          Populate {{ producing_campaign }} from {{ instancing.source }}</button>
+                onclick="return confirm('Populate {{ instancing.target }} from {{ instancing.source }}? {{ instancing.plan.summary.mint }} edition(s) minted, {{ instancing.plan.summary.merge }} adopted; the plan is recomputed at execution.');">
+          Populate {{ instancing.target }} from {{ instancing.source }}</button>
       </form>
       {% else %}
       <div class="small text-muted mt-2">Nothing pending — every actionable
         configuration is instanced; unresolved ones await curation.</div>
       {% endif %}
       {% endif %}
+      </details>
     </div>
     {% endif %}
-  {% endif %}
 
   {% if active_lifecycle == 'last' and not rucio_unmatched_campaign and rucio_detected %}
     <div class="border rounded p-2 mb-3 small bg-light">

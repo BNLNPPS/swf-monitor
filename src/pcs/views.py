@@ -689,6 +689,58 @@ def _annotate_questionnaire_matches(questionnaires):
         questionnaire.prod_matches = matches
 
 
+def _instancing_context(source_name, target_name):
+    """The instancing box context — the recomputed plan, the last
+    population run, the class layout — shared by the producing and
+    future tabs (CAMPAIGN_CONTINUUM.md). The plan tolerates a target
+    campaign with no row yet (the batch-derived next campaign): every
+    continuing configuration classifies as mint, so the box lays out
+    what a population would do before the campaign exists."""
+    from monitor_app.models import AppLog
+
+    from .instancing import plan_campaign_instancing
+    plan = plan_campaign_instancing(source_name, target_name)
+    last_run_row = (AppLog.objects
+                    .filter(app_name='epicprod',
+                            extra_data__action='campaign_instancing',
+                            extra_data__subject_key=target_name)
+                    .order_by('-timestamp').first())
+    last_run = None
+    if last_run_row is not None:
+        message = last_run_row.message or ''
+        last_run = {
+            'at': last_run_row.timestamp,
+            'by': (last_run_row.extra_data or {}).get('username', ''),
+            'outcome': (last_run_row.extra_data or {}).get('outcome', ''),
+            'summary': message.split(': ', 1)[-1],
+        }
+    return {
+        'source': source_name,
+        'target': target_name,
+        'last_run': last_run,
+        'plan': plan,
+        'classes': [
+            ('Adopt (already produced)', 'merge', plan['merge']),
+            ('Mint (planned, not yet produced)', 'mint',
+             plan['mint']),
+            ('Aligned (already instanced, nothing to do)',
+             'aligned', plan['aligned']),
+            ('No request context — curation supplies it',
+             'no_context', plan['no_context']),
+            ('Name collision — anchor-tag ambiguity, curation',
+             'name_collision', plan['name_collision']),
+            ('Hold', 'hold', plan['hold']),
+            ('Final', 'final', plan['final']),
+            ('Unresolved — curation pool', 'unresolved',
+             plan['unresolved']),
+            ('Conflicting dispositions', 'conflict',
+             plan['conflict']),
+            ('Only in this campaign', 'target_only',
+             plan['target_only']),
+        ],
+    }
+
+
 def _annotate_task_pc_requests(tasks):
     """Attach PC-projected production requests as ``task.pc_requests``:
     a task points to requests through its physics configuration
@@ -2490,10 +2542,17 @@ def pcs_catalog_instancing_execute(request):
             action_label='Campaign instancing')
     source = (request.POST.get('source') or '').strip()
     target = (request.POST.get('target') or '').strip()
+    return_lifecycle = (request.POST.get('return_lifecycle') or '').strip()
+    if return_lifecycle not in ('producing', 'future'):
+        return_lifecycle = 'producing'
     back = (reverse('pcs:pcs_catalog')
-            + f'?lifecycle=producing&campaign={target}')
-    if not (Campaign.objects.filter(name=source).exists()
-            and Campaign.objects.filter(name=target).exists()):
+            + f'?lifecycle={return_lifecycle}&campaign={target}')
+    # The target may have no row yet only when it is the batch-derived
+    # next campaign (the future tab's plan); execution creates that row.
+    target_known = (
+        Campaign.objects.filter(name=target).exists()
+        or (_next_campaign_hint() or {}).get('name') == target)
+    if not (Campaign.objects.filter(name=source).exists() and target_known):
         messages.error(request, f'Unknown campaign in {source!r} -> {target!r}.')
         return redirect(reverse('pcs:pcs_catalog'))
     result = execute_campaign_instancing(
@@ -2798,6 +2857,25 @@ def pcs_catalog(request):
                 producing_table_html, _, _ = _cached_current_task_list_html(
                     release_camp, 'catalog', {}, None,
                     timings=timings, rebuild_on_miss=True)
+        elif active_lifecycle == 'future':
+            # The next campaign gets the producing tab's instancing
+            # treatment the moment it is detected: an existing
+            # future-lifecycle row, or the version pending disposition
+            # batches name (next_campaign_hint) before any row exists.
+            candidates = [c.name for c in campaigns_by_lifecycle['future']]
+            if next_hint:
+                candidates.append(next_hint['name'])
+            candidates = [n for n in candidates if _version_tuple(n)]
+            current_names = [c.name for c in campaigns_by_lifecycle['current']]
+            target_name = max(candidates, key=_version_tuple) if candidates else ''
+            if (target_name and current_names
+                    and target_name != current_names[0]):
+                instancing = _instancing_context(current_names[0], target_name)
+                future_camp = Campaign.objects.filter(name=target_name).first()
+                if future_camp is not None:
+                    producing_table_html, _, _ = _cached_current_task_list_html(
+                        future_camp, 'catalog', {}, None,
+                        timings=timings, rebuild_on_miss=True)
         if active_lifecycle == 'producing':
             producing_arrivals = dict(next(
                 (arr for camp, arr in inflow
@@ -2819,49 +2897,8 @@ def pcs_catalog(request):
                     rebuild_on_miss=True)
             current_names = [c.name for c in campaigns_by_lifecycle['current']]
             if current_names and producing_campaign_name not in current_names:
-                from monitor_app.models import AppLog
-
-                from .instancing import plan_campaign_instancing
-                plan = plan_campaign_instancing(current_names[0],
-                                                producing_campaign_name)
-                last_run_row = (AppLog.objects
-                                .filter(app_name='epicprod',
-                                        extra_data__action='campaign_instancing',
-                                        extra_data__subject_key=producing_campaign_name)
-                                .order_by('-timestamp').first())
-                last_run = None
-                if last_run_row is not None:
-                    message = last_run_row.message or ''
-                    last_run = {
-                        'at': last_run_row.timestamp,
-                        'by': (last_run_row.extra_data or {}).get('username', ''),
-                        'outcome': (last_run_row.extra_data or {}).get('outcome', ''),
-                        'summary': message.split(': ', 1)[-1],
-                    }
-                instancing = {
-                    'source': current_names[0],
-                    'last_run': last_run,
-                    'plan': plan,
-                    'classes': [
-                        ('Adopt (already produced)', 'merge', plan['merge']),
-                        ('Mint (planned, not yet produced)', 'mint',
-                         plan['mint']),
-                        ('Aligned (already instanced, nothing to do)',
-                         'aligned', plan['aligned']),
-                        ('No request context — curation supplies it',
-                         'no_context', plan['no_context']),
-                        ('Name collision — anchor-tag ambiguity, curation',
-                         'name_collision', plan['name_collision']),
-                        ('Hold', 'hold', plan['hold']),
-                        ('Final', 'final', plan['final']),
-                        ('Unresolved — curation pool', 'unresolved',
-                         plan['unresolved']),
-                        ('Conflicting dispositions', 'conflict',
-                         plan['conflict']),
-                        ('Only in this campaign', 'target_only',
-                         plan['target_only']),
-                    ],
-                }
+                instancing = _instancing_context(current_names[0],
+                                                 producing_campaign_name)
 
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
