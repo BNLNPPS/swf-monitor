@@ -395,9 +395,10 @@
            title="Pending campaign-propagation proposals whose disposition batch names {{ next_campaign_hint.name }} as the next campaign">{{ next_campaign_hint.pending }} pending AI campaign-propagation proposal{{ next_campaign_hint.pending|pluralize }}</a>.
       </div>
       <div class="text-muted">
-        No future campaign exists yet. Once dispositions are decided, the next
-        campaign is created from the current campaign's continuing datasets
-        (the create-next-campaign step, to come).
+        No future campaign exists yet. The instancing plan above lays out what
+        a population would create from the current campaign's continuing
+        physics configurations; deciding the pending dispositions changes the
+        plan, and Populate creates the campaign.
       </div>
       {% else %}
       <div class="text-muted">
