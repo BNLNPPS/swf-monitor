@@ -32,7 +32,7 @@ class ProposalProposeView(_AiApiView):
         ``proposer``, ``scan_version``, ``batch_id``.
         """
         try:
-            result = services.dataset_proposal_create(
+            result = services.propose_propagation(
                 request.data.get('names') or [],
                 request.data.get('state'),
                 request.data.get('comment'),
@@ -56,7 +56,7 @@ class ProposalDecideView(_AiApiView):
         (optional audit record of the selecting filter).
         """
         try:
-            result = services.dataset_proposal_decide(
+            result = services.proposal_decide(
                 request.data.get('names') or [],
                 request.data.get('decision'),
                 decided_by=request.user.username,
@@ -76,7 +76,7 @@ class ProposalDeleteView(_AiApiView):
     def post(self, request):
         """Delete AI proposal list rows (operator housekeeping). Body: ids."""
         try:
-            result = services.dataset_proposal_delete(
+            result = services.proposal_delete(
                 request.data.get('ids') or [],
                 deleted_by=request.user.username,
             )

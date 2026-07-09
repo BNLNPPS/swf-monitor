@@ -40,7 +40,7 @@ def _clear_proposal_projection(name):
         head.save(update_fields=['metadata'])
 
 
-def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
+def propose_propagation(composed_names, state, comment, *, replaced_by='',
                             proposer='', scan_version=1, batch_id='',
                             created_by=''):
     """Create AI propagation proposals on dataset editions.
@@ -55,7 +55,7 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
     with a denied proposal-list row matching this proposal's input hash (a
     denied proposal never returns until its inputs change). An existing
     pending proposal is superseded (withdrawn) by the fresh one — the
-    heartbeat refresh. One ``dataset_proposal_created`` action-stream event
+    heartbeat refresh. One ``proposal_created`` action-stream event
     per call.
     """
     from monitor_app.epicprod_logging import log_epicprod_action
@@ -128,7 +128,7 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
             proposed.append(name)
 
     log_epicprod_action(
-        'web', 'dataset_proposal_created',
+        'web', 'proposal_created',
         username=created_by,
         sublevel='normal', live_default=True,
         message=(f'AI proposal: propagation -> {state} on {len(proposed)} '
@@ -142,7 +142,7 @@ def dataset_proposal_create(composed_names, state, comment, *, replaced_by='',
             'unknown': unknown, 'state': state}
 
 
-def dataset_proposal_decide(composed_names, decision, *, decided_by='',
+def proposal_decide(composed_names, decision, *, decided_by='',
                             quality='', filter_state='', proposal_ids=None):
     """Approve or deny pending AI proposals.
 
@@ -157,7 +157,7 @@ def dataset_proposal_decide(composed_names, decision, *, decided_by='',
     batch is one call and one origin-stamped event; the approving human is
     ``changed_by`` and the executed proposal rows record the event's log
     id. Denial marks the proposal row (denial memory is the proposal
-    list); one ``dataset_proposal_denied`` event per call. ``quality``
+    list); one ``proposal_denied`` event per call. ``quality``
     optionally tags the decision with the shared review vocabulary
     (wrong | poor | ok | good) — 'wrong' is the one-tap miscalibration
     signal that weighs against the proposer's track record.
@@ -250,7 +250,7 @@ def dataset_proposal_decide(composed_names, decision, *, decided_by='',
 
     if decision == 'deny':
         log_epicprod_action(
-            'web', 'dataset_proposal_denied',
+            'web', 'proposal_denied',
             username=decided_by,
             sublevel='normal', live_default=True,
             message=(f'AI proposal denied on {len(denied)} dataset(s)'
@@ -263,7 +263,7 @@ def dataset_proposal_decide(composed_names, decision, *, decided_by='',
             'no_proposal': no_proposal}
 
 
-def dataset_proposal_delete(proposal_ids, *, deleted_by=''):
+def proposal_delete(proposal_ids, *, deleted_by=''):
     """Operator deletion of AI proposal list rows — housekeeping for test
     or noise entries that would confuse readers. Human-only and logged; a
     pending row also clears its render projection. This removes decided
@@ -283,7 +283,7 @@ def dataset_proposal_delete(proposal_ids, *, deleted_by=''):
             row.delete()
             deleted += 1
     log_epicprod_action(
-        'web', 'dataset_proposal_deleted',
+        'web', 'proposal_deleted',
         username=deleted_by,
         sublevel='normal', live_default=False,
         message=f'{deleted} AI proposal list row(s) deleted',
@@ -292,10 +292,10 @@ def dataset_proposal_delete(proposal_ids, *, deleted_by=''):
     return {'deleted': deleted}
 
 
-def dataset_proposal_withdraw(*, batch_id=None, created_by=''):
+def proposal_withdraw(*, batch_id=None, created_by=''):
     """Withdraw pending proposals — the recurring proposer's heartbeat
     (withdraw, then re-derive and re-propose from current inputs) or an
-    operator clear. Counted and logged (``dataset_proposal_expired``),
+    operator clear. Counted and logged (``proposal_expired``),
     never silent."""
     from monitor_app.epicprod_logging import log_epicprod_action
 
@@ -312,7 +312,7 @@ def dataset_proposal_withdraw(*, batch_id=None, created_by=''):
             _clear_proposal_projection(row.subject_key)
             withdrawn += 1
     log_epicprod_action(
-        'web', 'dataset_proposal_expired',
+        'web', 'proposal_expired',
         username=created_by,
         sublevel='normal', live_default=True,
         message=f'{withdrawn} pending AI proposal(s) withdrawn'

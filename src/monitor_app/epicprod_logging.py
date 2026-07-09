@@ -221,24 +221,24 @@ ACTION_DEFAULTS = {
                        "changed count and the selecting filter. Carries an "
                        "origin stamp when executing an approved AI proposal.",
     },
-    'dataset_proposal_created': {
+    'proposal_created': {
         'sublevel': 'normal', 'live': True,
         'description': "AI proposal of a dataset propagation change, pending "
                        "human review; one event per propose call with the "
                        "proposed count and batch.",
     },
-    'dataset_proposal_denied': {
+    'proposal_denied': {
         'sublevel': 'normal', 'live': True,
         'description': "Human denial of pending AI proposals; denial memory "
                        "prevents re-proposal until the proposer's inputs "
                        "change.",
     },
-    'dataset_proposal_expired': {
+    'proposal_expired': {
         'sublevel': 'normal', 'live': True,
         'description': "Withdrawal of pending AI proposals (recurring-scan "
                        "heartbeat refresh or operator clear), with count.",
     },
-    'dataset_proposal_deleted': {
+    'proposal_deleted': {
         'sublevel': 'normal', 'live': False,
         'description': "Operator deletion of AI proposal list rows — "
                        "housekeeping for test or noise rows; removes audit "

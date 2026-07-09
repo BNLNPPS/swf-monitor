@@ -180,14 +180,18 @@ Designed-for extensions, reserved now, built when their consumer arrives:
   (relation subjects, `counterpart_key`), high/medium confidence keeps
   auto-accepting with origin stamps: the graduation ladder
   (`manual → auto+notify`) already in production.
+- **Beyond epicprod**: the subsystem is system-wide — testbed and
+  streaming actions are expected consumers. Proposal events currently log
+  to the epicprod action stream; where non-epicprod proposals log is
+  decided when the first such consumer arrives.
 
 ## Action-stream records
 
 | action | when |
 |---|---|
-| `dataset_proposal_created` | one per propose call, with count and batch |
-| `dataset_proposal_denied` | one per deny decision, with count and quality |
-| `dataset_proposal_expired` | one per heartbeat withdrawal, with count |
+| `proposal_created` | one per propose call, with count and batch |
+| `proposal_denied` | one per deny decision, with count and quality |
+| `proposal_expired` | one per heartbeat withdrawal, with count |
 | (execution) | the executed action's own event, origin-stamped |
 
 ## Related
