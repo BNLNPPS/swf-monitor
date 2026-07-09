@@ -35,6 +35,8 @@
     {% if active_lifecycle == 'last' or active_lifecycle == 'producing' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
+      <input type="hidden" name="lifecycle" value="{{ active_lifecycle }}">
+      <input type="hidden" name="campaign" value="{{ producing_campaign|default:'' }}">
       <button type="submit" class="btn btn-sm btn-outline-primary"
               title="Refresh the JLab Rucio output snapshot for the current, last, and producing campaigns"
               onclick="return confirm('Refresh the JLab Rucio snapshot for the current, last, and producing campaigns?');">

@@ -1900,15 +1900,24 @@ def pcs_catalog_rucio_update(request):
         return _post_only_redirect(
             request, reverse('pcs:pcs_catalog'),
             action_label='Update from Rucio')
+    # Return to the tab the button lives on (last or producing) — the
+    # URL is rebuilt server-side from the posted fields, never echoed.
+    back = reverse('pcs:pcs_catalog')
+    lifecycle = (request.POST.get('lifecycle') or '').strip()
+    campaign = (request.POST.get('campaign') or '').strip()
+    if lifecycle == 'producing' and campaign:
+        back += f'?lifecycle=producing&campaign={campaign}'
+    elif lifecycle == 'last':
+        back += '?lifecycle=last'
     from .services import rucio_snapshot_update_request, ServiceError
     user = getattr(request.user, 'username', '') or 'rucio_snapshot'
     try:
         rucio_snapshot_update_request(created_by=user)
     except ServiceError as e:
         messages.error(request, e.detail)
-        return redirect(reverse('pcs:pcs_catalog'))
+        return redirect(back)
     messages.success(request, 'Rucio update queued — refreshing in the background.')
-    return redirect(reverse('pcs:pcs_catalog'))
+    return redirect(back)
 
 
 @_login_required_flash
