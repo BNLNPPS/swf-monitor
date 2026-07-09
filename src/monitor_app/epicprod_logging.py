@@ -97,6 +97,15 @@ ACTION_DEFAULTS = {
                        "current (and last) campaign and rematch produced "
                        "RECO/FULL datasets onto each task's recorded outputs.",
     },
+    'campaign_instancing': {
+        'sublevel': 'high', 'live': True,
+        'description': "Operator-fired campaign instancing: populate the "
+                       "target campaign's working catalog from the source "
+                       "campaign's continuing physics configurations — "
+                       "adopting ingested editions and minting planned "
+                       "ones, dispositions consumed, unresolved "
+                       "identities left to curation.",
+    },
     'campaign_promoted': {
         'sublevel': 'high', 'live': True,
         'description': "Operator-clicked campaign lifecycle rotation: the "

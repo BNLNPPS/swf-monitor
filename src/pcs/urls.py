@@ -18,6 +18,7 @@ urlpatterns = [
     path('catalog/cache-refresh/', views.pcs_catalog_cache_refresh, name='pcs_catalog_cache_refresh'),
     path('catalog/set-current/', views.pcs_catalog_set_current, name='pcs_catalog_set_current'),
     path('catalog/promote-current/', views.pcs_catalog_promote_current, name='pcs_catalog_promote_current'),
+    path('catalog/instancing-execute/', views.pcs_catalog_instancing_execute, name='pcs_catalog_instancing_execute'),
     path('catalog/set-last/', views.pcs_catalog_set_last, name='pcs_catalog_set_last'),
 
     # Questionnaire intake

@@ -128,6 +128,44 @@
       <span class="text-muted small ms-2">{{ promote_cascade_note }}</span>
       {% endif %}
     </div>
+
+    {% if instancing %}
+    <div class="border rounded p-2 mb-3" style="max-width: 62em">
+      <div class="mb-1">
+        <strong>Instancing plan {{ instancing.source }} &rarr; {{ producing_campaign }}</strong>
+        <span class="text-muted small ms-2">populate this campaign's working catalog from
+          {{ instancing.source }}'s continuing physics configurations
+          (CAMPAIGN_CONTINUUM.md); pending AI disposition proposals are not
+          consumed — deciding them changes this plan</span>
+      </div>
+      {% for label, key, items in instancing.classes %}
+      {% if items %}
+      <details class="mb-1">
+        <summary class="small" style="cursor:pointer">{{ label }}: <strong>{{ items|length }}</strong></summary>
+        <div class="small text-muted" style="max-height: 20em; overflow-y: auto">
+          {% for item in items %}
+          <div>{{ item.pc.0 }} · {{ item.pc.1|join:" " }}{% if item.pc.3 %} · {{ item.pc.3 }}{% endif %}
+            &mdash; {% if item.target_editions %}{{ item.target_editions.0 }}{% else %}{{ item.source_editions.0 }}{% endif %}
+            {% if item.replaced_by %} (replaced by {{ item.replaced_by|join:", " }}){% endif %}
+            {% if item.dispositions %} (dispositions: {{ item.dispositions|join:", " }}){% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+      {% endfor %}
+      {% if user.is_authenticated %}
+      <form method="post" action="{% url 'pcs:pcs_catalog_instancing_execute' %}" class="mt-2">
+        {% csrf_token %}
+        <input type="hidden" name="source" value="{{ instancing.source }}">
+        <input type="hidden" name="target" value="{{ producing_campaign }}">
+        <button type="submit" class="btn btn-sm btn-success"
+                onclick="return confirm('Populate {{ producing_campaign }} from {{ instancing.source }}? {{ instancing.plan.summary.mint }} edition(s) minted, {{ instancing.plan.summary.merge }} adopted; the plan is recomputed at execution.');">
+          Populate {{ producing_campaign }} from {{ instancing.source }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
   {% endif %}
 
   {% if active_lifecycle == 'last' and not rucio_unmatched_campaign and rucio_detected %}

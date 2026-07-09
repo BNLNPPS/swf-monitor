@@ -2097,6 +2097,42 @@ def pcs_catalog_promote_current(request):
 
 
 @_login_required_flash
+def pcs_catalog_instancing_execute(request):
+    """POST handler for the producing tab's instancing action: populate
+    the target campaign's working catalog from the source campaign. The
+    plan is recomputed at execution — the page's rendering is the review,
+    the fresh computation is the guard."""
+    from .instancing import execute_campaign_instancing
+
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Campaign instancing')
+    source = (request.POST.get('source') or '').strip()
+    target = (request.POST.get('target') or '').strip()
+    back = (reverse('pcs:pcs_catalog')
+            + f'?lifecycle=producing&campaign={target}')
+    if not (Campaign.objects.filter(name=source).exists()
+            and Campaign.objects.filter(name=target).exists()):
+        messages.error(request, f'Unknown campaign in {source!r} -> {target!r}.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    result = execute_campaign_instancing(
+        source, target,
+        created_by=getattr(request.user, 'username', '') or '')
+    s = result['summary']
+    msg = (f"Instancing {source} -> {target}: {s['minted_editions']} "
+           f"edition(s) minted, {s['merged_tasks']} task(s) adopted; "
+           f"{s['hold']} held, {s['final']} final, {s['unresolved']} "
+           f"unresolved left to curation.")
+    if result['errors']:
+        messages.warning(request, msg + f" {len(result['errors'])} error(s): "
+                         + '; '.join(result['errors'][:3]))
+    else:
+        messages.success(request, msg)
+    return redirect(back)
+
+
+@_login_required_flash
 def pcs_catalog_past_update(request):
     """POST handler for the 'Update from epic-prod' button on the Past tab.
 
@@ -2356,6 +2392,7 @@ def pcs_catalog(request):
         producing_arrivals = None
         promote_cascade_note = ''
         producing_last_activity = ''
+        instancing = None
         if active_lifecycle == 'producing':
             producing_arrivals = dict(next(
                 (arr for camp, arr in inflow
@@ -2366,6 +2403,28 @@ def pcs_catalog(request):
                 name=producing_campaign_name).first()
             if producing_camp is not None:
                 producing_last_activity = _campaign_last_activity(producing_camp)
+            current_names = [c.name for c in campaigns_by_lifecycle['current']]
+            if current_names and producing_campaign_name not in current_names:
+                from .instancing import plan_campaign_instancing
+                plan = plan_campaign_instancing(current_names[0],
+                                                producing_campaign_name)
+                instancing = {
+                    'source': current_names[0],
+                    'plan': plan,
+                    'classes': [
+                        ('Adopt (already produced)', 'merge', plan['merge']),
+                        ('Mint (planned, not yet produced)', 'mint',
+                         plan['mint']),
+                        ('Hold', 'hold', plan['hold']),
+                        ('Final', 'final', plan['final']),
+                        ('Unresolved — curation pool', 'unresolved',
+                         plan['unresolved']),
+                        ('Conflicting dispositions', 'conflict',
+                         plan['conflict']),
+                        ('Only in this campaign', 'target_only',
+                         plan['target_only']),
+                    ],
+                }
 
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
@@ -2375,6 +2434,7 @@ def pcs_catalog(request):
             'producing_arrivals': producing_arrivals,
             'producing_last_activity': producing_last_activity,
             'promote_cascade_note': promote_cascade_note,
+            'instancing': instancing,
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
             'release_versions': release_versions,
