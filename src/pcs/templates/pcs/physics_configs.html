@@ -4,8 +4,12 @@
 {% block title %}Physics Configurations - epicprod{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
 <style>
 .pcs-pc-table td, .pcs-pc-table th { vertical-align: top; white-space: nowrap; }
+/* House convention: DataTables' indicator classes on a hand-sorted table
+   (.sorting / .sorting_asc / .sorting_desc from the loaded CSS). */
+.pcs-pc-table th.pcs-pc-sort { cursor: pointer; user-select: none; }
 .pcs-pc-table .pcs-pc-cell { min-width: 7em; }
 .pcs-pc-filter a { margin-right: .7em; text-decoration: none; }
 .pcs-pc-filter a.active { font-weight: 700; text-decoration: underline; }
@@ -44,6 +48,17 @@
     </div>
     {% endif %}
     {% endfor %}
+    <div class="mb-1 d-flex align-items-center gap-2">
+      <form method="get" class="d-flex align-items-center gap-2">
+        <input type="hidden" name="years" value="{{ years }}">
+        {% for label, f in facet_rows %}{% for item in f.items %}{% if item.active %}<input type="hidden" name="{{ f.param }}" value="{{ item.value }}">{% endif %}{% endfor %}{% endfor %}
+        <strong>Search:</strong>
+        <input type="search" name="q" value="{{ q }}" class="form-control form-control-sm" style="width: 24em"
+               placeholder="physics / generator / edition name&hellip;">
+        <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+        <a class="btn btn-sm btn-secondary" href="{{ clear_url }}">Clear</a>
+      </form>
+    </div>
     <div class="text-muted small">{{ shown }} of {{ total }} configuration{{ total|pluralize }}</div>
   </div>
 
@@ -51,9 +66,27 @@
   <table class="table table-sm table-striped pcs-pc-table">
     <thead>
       <tr>
-        <th>Physics</th><th>Process</th><th>Beam</th><th>Species</th>
-        <th>Q²</th><th>Generator</th><th>Sample</th>
-        {% for c in campaigns %}<th class="pcs-pc-cell">{{ c }}</th>{% endfor %}
+        <th class="pcs-pc-sort sorting_asc">Physics</th>
+        <th class="pcs-pc-sort sorting">Process</th>
+        <th class="pcs-pc-sort sorting">Beam</th>
+        <th class="pcs-pc-sort sorting">Species</th>
+        <th class="pcs-pc-sort sorting">Q²</th>
+        <th class="pcs-pc-sort sorting">Generator</th>
+        <th class="pcs-pc-sort sorting">Sample</th>
+        {% for c in campaigns %}<th class="pcs-pc-cell pcs-pc-sort sorting" data-default-dir="desc">{{ c }}</th>{% endfor %}
+      </tr>
+      <tr class="table-light small">
+        <th colspan="7" class="text-end fw-normal text-muted">produced, over the rows below:</th>
+        {% for t in campaign_totals %}
+        <th class="pcs-pc-cell fw-normal">
+          {% if t.produced %}
+          <span class="pcs-pc-files">{{ t.files }} files</span><br>
+          {{ t.size|filesizeformat }}<br>
+          <span class="text-muted">{{ t.n_datasets }} dataset{{ t.n_datasets|pluralize }} / {{ t.produced }} of {{ t.configs }} config{{ t.configs|pluralize }}</span>
+          {% elif t.configs %}<span class="text-muted">{{ t.configs }} config{{ t.configs|pluralize }}, none produced</span>
+          {% else %}<span class="text-muted">—</span>{% endif %}
+        </th>
+        {% endfor %}
       </tr>
     </thead>
     <tbody>
@@ -67,11 +100,11 @@
         <td>{{ r.gen_display }}</td>
         <td>{{ r.sample }}</td>
         {% for e in r.cells %}
-        <td class="pcs-pc-cell small">
+        <td class="pcs-pc-cell small" data-sort-val="{% if e %}{{ e.files|default:0 }}{% else %}-1{% endif %}">
           {% if e %}
             <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ e.name|urlencode }}"
-               title="{{ e.name }}" style="text-decoration:none">
-              {% if e.files %}<span class="pcs-pc-files">{{ e.files }} f</span>
+               title="{{ e.name }}{% if e.n_datasets > 1 %} — {{ e.n_datasets }} datasets{% endif %}" style="text-decoration:none">
+              {% if e.files %}<span class="pcs-pc-files">&#10003; {{ e.files }} f</span> <span class="text-muted">{{ e.size|filesizeformat }}</span>
               {% else %}<span class="pcs-pc-status">{{ e.status|default:"—" }}</span>{% endif %}
             </a>
             {% if e.propagation == 'hold' %}<span class="pcs-pc-hold" title="disposition: hold">H</span>{% endif %}
@@ -91,7 +124,7 @@
   </div>
 
   <div class="small text-muted mb-3">
-    Cell legend: <span class="pcs-pc-files">N f</span> files produced &middot;
+    Cell legend: <span class="pcs-pc-files">&#10003; N f</span> data produced (files, volume) &middot;
     <span class="pcs-pc-status">draft / submitted</span> working task, nothing
     produced yet &middot; <span class="pcs-pc-hold">H</span> hold &middot;
     <span class="pcs-pc-final">F</span> final &middot;
@@ -99,4 +132,37 @@
     · no edition in that campaign.
   </div>
 </div>
+
+<script>
+(function () {
+  const table = document.querySelector('.pcs-pc-table');
+  if (!table) return;
+  const tbody = table.querySelector('tbody');
+  const headers = Array.from(table.querySelectorAll('th.pcs-pc-sort'));
+  headers.forEach((th, idx) => th.addEventListener('click', () => {
+    const wasAsc = th.classList.contains('sorting_asc');
+    const wasDesc = th.classList.contains('sorting_desc');
+    const dir = wasAsc ? 'desc' : (wasDesc ? 'asc'
+                : (th.dataset.defaultDir || 'asc'));
+    headers.forEach(h => { h.classList.remove('sorting_asc', 'sorting_desc');
+                           h.classList.add('sorting'); });
+    th.classList.remove('sorting');
+    th.classList.add(dir === 'asc' ? 'sorting_asc' : 'sorting_desc');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const value = tr => {
+      const td = tr.children[idx];
+      if (!td) return '';
+      if (td.dataset.sortVal !== undefined) return parseFloat(td.dataset.sortVal);
+      return td.textContent.trim().toLowerCase();
+    };
+    rows.sort((a, b) => {
+      const va = value(a), vb = value(b);
+      const cmp = (typeof va === 'number' && typeof vb === 'number')
+        ? va - vb : String(va).localeCompare(String(vb));
+      return dir === 'asc' ? cmp : -cmp;
+    });
+    rows.forEach(tr => tbody.appendChild(tr));
+  }));
+})();
+</script>
 {% endblock %}

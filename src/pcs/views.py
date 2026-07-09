@@ -18,7 +18,7 @@ from django.urls import reverse
 from django.http import JsonResponse, Http404
 from django.contrib import messages
 from django.core.cache import cache
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -2074,10 +2074,11 @@ def pcs_physics_configs(request):
     years = (request.GET.get('years') or '2026').strip()
     if years not in ('2026', '2025', 'all'):
         years = '2026'
+    # Newest first, left to right — the eye lands on the most recent.
     campaigns = sorted(
         (c.name for c in Campaign.objects.all()
          if years == 'all' or c.name.startswith(years[2:] + '.')),
-        key=lambda n: _version_tuple(n) or (0,))
+        key=lambda n: _version_tuple(n) or (0,), reverse=True)
 
     heads = list(
         Dataset.objects.filter(campaign__name__in=campaigns)
@@ -2096,8 +2097,21 @@ def pcs_physics_configs(request):
         if name not in task_status or task_status[name] == 'past_output':
             task_status[name] = status
 
+    # Produced data per identity, summed over ALL its physical rows —
+    # the head row alone undercounts multi-row identities.
+    produced = {
+        row['composed_name']: row
+        for row in Dataset.objects.filter(campaign__name__in=campaigns)
+        .values('composed_name')
+        .annotate(n_datasets=Count('id'), files=Sum('file_count'),
+                  size=Sum('data_size'))
+    }
+
     filters = {key: (request.GET.get(key) or '').strip()
-               for key in ('process', 'generator', 'beam', 'species', 'q2')}
+               for key in ('process', 'generator', 'beam', 'species', 'q2',
+                           'sample')}
+    q = (request.GET.get('q') or '').strip().lower()
+    produced_in = (request.GET.get('produced') or '').strip()
 
     rows = []
     for key, group in groups.items():
@@ -2124,22 +2138,54 @@ def pcs_physics_configs(request):
         }
         for dataset, edition_detail in group['editions']:
             camp = dataset.campaign.name if dataset.campaign_id else ''
+            data = produced.get(dataset.composed_name) or {}
             row['editions'][camp] = {
                 'name': dataset.composed_name,
                 'status': task_status.get(dataset.composed_name, ''),
-                'files': dataset.file_count or 0,
+                'n_datasets': data.get('n_datasets') or 0,
+                'files': data.get('files') or 0,
+                'size': data.get('size') or 0,
                 'propagation': dataset.propagation,
                 'replaced_by': dataset.replaced_by,
                 'proposal': bool((dataset.metadata or {}).get('proposal')),
             }
         # Template-friendly: one cell per campaign column, aligned.
         row['cells'] = [row['editions'].get(c) for c in campaigns]
+        row['search_blob'] = ' '.join(
+            [row['physics'], row['process'], row['beam'], row['species'],
+             row['q2'], row['gen_display'], row['sample']]
+            + [e['name'] for e in row['editions'].values()]).lower()
         rows.append(row)
 
     rows_all = rows
     for key, value in filters.items():
         if value:
             rows = [r for r in rows if r[key] == value]
+    if q:
+        rows = [r for r in rows if q in r['search_blob']]
+    if produced_in in campaigns:
+        produced_index = campaigns.index(produced_in)
+        rows = [r for r in rows
+                if r['cells'][produced_index]
+                and r['cells'][produced_index]['files']]
+
+    # Per-campaign fulfillment totals over the filtered set — the
+    # dataset/file/volume picture the view exists to surface.
+    campaign_totals = []
+    for index, camp in enumerate(campaigns):
+        total = {'configs': 0, 'produced': 0, 'n_datasets': 0,
+                 'files': 0, 'size': 0}
+        for r in rows:
+            cell = r['cells'][index]
+            if not cell:
+                continue
+            total['configs'] += 1
+            total['n_datasets'] += cell['n_datasets']
+            if cell['files']:
+                total['produced'] += 1
+                total['files'] += cell['files']
+                total['size'] += cell['size']
+        campaign_totals.append(total)
 
     def facet(param):
         counts = {}
@@ -2161,15 +2207,38 @@ def pcs_physics_configs(request):
         ('Beam', facet('beam')),
         ('Species', facet('species')),
         ('Q²', facet('q2')),
+        ('Sample', facet('sample')),
     ]
+    produced_counts = {
+        camp: sum(1 for r in rows_all
+                  if r['cells'][i] and r['cells'][i]['files'])
+        for i, camp in enumerate(campaigns)
+    }
+    facet_rows.append(('Has data', {
+        'param': 'produced',
+        'items': [{'value': camp, 'count': n,
+                   'url': url_with(produced=camp),
+                   'active': produced_in == camp}
+                  for camp, n in produced_counts.items() if n],
+        'all_url': url_with(produced=''),
+        'all_active': not produced_in,
+    }))
 
-    rows.sort(key=lambda r: (r['process'], r['physics'], r['sample']))
+    # Default order: physics tag ascending (numeric within the p prefix).
+    def _physics_sort_key(row):
+        label = row['physics']
+        number = (int(label[1:]) if label[1:].isdigit() else 0) if label else 0
+        return (number, row['sample'])
+    rows.sort(key=_physics_sort_key)
     return render(request, 'pcs/physics_configs.html', {
         'rows': rows,
         'campaigns': campaigns,
+        'campaign_totals': campaign_totals,
         'years': years,
         'years_urls': {y: url_with(years=y) for y in ('2026', '2025', 'all')},
         'facet_rows': facet_rows,
+        'q': request.GET.get('q', ''),
+        'clear_url': request.path,
         'total': len(groups),
         'shown': len(rows),
     })
