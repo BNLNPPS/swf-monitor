@@ -65,6 +65,28 @@ def _clear_proposal_projection(name):
         head.save(update_fields=['metadata'])
 
 
+def _write_proposal_projection(row, head):
+    """Write the pending proposal's render projection on its target's
+    head row — at propose time and again when an undo returns the row
+    to pending."""
+    pre = row.precondition or {}
+    metadata = dict(head.metadata or {})
+    metadata['proposal'] = {
+        'id': row.id,
+        'action': row.action,
+        'payload': row.payload,
+        'comment': row.comment,
+        'proposer': row.proposer,
+        'scan_version': row.scan_version,
+        'batch_id': row.batch_id,
+        'prev_state': pre.get('prev_state'),
+        'prev_replaced_by': pre.get('prev_replaced_by', ''),
+        'proposed_at': row.created_at.isoformat(),
+    }
+    head.metadata = metadata
+    head.save(update_fields=['metadata'])
+
+
 def propose_propagation(composed_names, state, comment, *, replaced_by='',
                             proposer='', scan_version=1, batch_id='',
                             created_by=''):
@@ -139,21 +161,7 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
                 input_hash=input_hash,
                 created_by=created_by or '',
             )
-            metadata = dict(head.metadata or {})
-            metadata['proposal'] = {
-                'id': row.id,
-                'action': 'propagation',
-                'payload': payload,
-                'comment': comment,
-                'proposer': proposer or '',
-                'scan_version': scan_version,
-                'batch_id': batch_id or '',
-                'prev_state': head.propagation,
-                'prev_replaced_by': head.replaced_by,
-                'proposed_at': now.isoformat(),
-            }
-            head.metadata = metadata
-            head.save(update_fields=['metadata'])
+            _write_proposal_projection(row, head)
             proposed.append(name)
 
     log_epicprod_action(
@@ -307,9 +315,10 @@ def proposal_undo(proposal_ids, *, undone_by=''):
     id, and the undoing human as ``changed_by`` — a new history entry,
     never erasure. Guarded like decide: if the record has moved past the
     executed payload, the undo offer has expired and the row is skipped
-    (counted, never silent). The undone row keeps its decision record and
-    becomes terminal status ``undone`` with the compensating event's log
-    id.
+    (counted, never silent). The undone proposal returns to ``proposed``
+    — pending again, decision fields cleared, render projection restored
+    — while the execution and undo events carry the record; the row keeps
+    a trace of its most recent undo.
     """
     ids = [int(i) for i in (proposal_ids or [])]
     if not ids:
@@ -345,12 +354,22 @@ def proposal_undo(proposal_ids, *, undone_by=''):
             changed_by=undone_by,
             origin={'kind': 'undo', 'undo_of': row.pk},
         )
-        row.status = 'undone'
+        row.status = 'proposed'
+        row.decided_by = ''
+        row.decided_at = None
+        row.quality = ''
+        row.executed_log_id = None
         row.undone_by = undone_by
         row.undone_at = now
         row.undone_log_id = result.get('log_id')
-        row.save(update_fields=['status', 'undone_by', 'undone_at',
-                                'undone_log_id'])
+        row.save(update_fields=['status', 'decided_by', 'decided_at',
+                                'quality', 'executed_log_id', 'undone_by',
+                                'undone_at', 'undone_log_id'])
+        restored_head = (Dataset.objects
+                         .filter(composed_name=row.subject_key)
+                         .order_by('block_num', 'pk').first())
+        if restored_head is not None:
+            _write_proposal_projection(row, restored_head)
         undone.append(row.subject_key)
     return {'undone': undone, 'moved': moved, 'not_executed': not_executed}
 

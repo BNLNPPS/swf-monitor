@@ -30,14 +30,14 @@ class Proposal(models.Model):
     services that write these rows; this table is the truth.
     """
     EXECUTOR_CHOICES = [('service', 'service'), ('agent_message', 'agent_message')]
-    # proposed -> executed | denied | withdrawn | stale; executed -> undone
-    # (the compensating action ran); approved_pending_execution is reserved
-    # for agent_message executors.
+    # proposed -> executed | denied | withdrawn | stale; undoing an
+    # executed proposal returns it to proposed — the approve and undo
+    # live as origin-stamped events, not as row state.
+    # approved_pending_execution is reserved for agent_message executors.
     STATUS_CHOICES = [
         ('proposed', 'proposed'), ('approved_pending_execution',
         'approved_pending_execution'), ('executed', 'executed'),
         ('denied', 'denied'), ('withdrawn', 'withdrawn'), ('stale', 'stale'),
-        ('undone', 'undone'),
     ]
     # One shared review vocabulary with AI assessments, worst to best.
     QUALITY_CHOICES = [('wrong', 'wrong'), ('poor', 'poor'), ('ok', 'ok'),
@@ -73,8 +73,8 @@ class Proposal(models.Model):
     decided_at = models.DateTimeField(null=True, blank=True)
     # AppLog row id of the origin-stamped execution event.
     executed_log_id = models.BigIntegerField(null=True, blank=True)
-    # Undo of an executed proposal: who ran the compensating action, when,
-    # and the AppLog row id of the compensating event.
+    # Trace of the most recent undo (the row returns to proposed; the
+    # origin-stamped events are the canonical record).
     undone_by = models.CharField(max_length=100, blank=True, default='')
     undone_at = models.DateTimeField(null=True, blank=True)
     undone_log_id = models.BigIntegerField(null=True, blank=True)

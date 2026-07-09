@@ -148,7 +148,7 @@ async def ai_list_proposals(status: str = 'proposed', limit: int = 50) -> dict:
 
     Args:
         status: 'proposed' (default: awaiting decision), or 'executed',
-            'undone', 'denied', 'withdrawn', 'stale', 'all' for history.
+            'denied', 'withdrawn', 'stale', 'all' for history.
         limit: Max proposals returned (default 50, cap 200).
 
     Returns:

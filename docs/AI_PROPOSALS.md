@@ -50,10 +50,10 @@ and the decision record (`decided_by`, `decided_at`, optional `quality`,
 executed action-stream log id).
 
 Status vocabulary: `proposed → executed | denied | withdrawn | stale`, with
-`approved_pending_execution` reserved for asynchronous executors; an
-executed proposal becomes `undone` when its compensating action runs,
-keeping its decision record and gaining the undo's actor, time, and event
-log id. **Terminal rows are retained** — the AI proposal list is where AI-proposed activity
+`approved_pending_execution` reserved for asynchronous executors. Undoing
+an executed proposal returns it to `proposed` — pending again, decision
+fields cleared, render projection restored — while the origin-stamped
+execution and undo events carry the record. **Terminal rows are retained** — the AI proposal list is where AI-proposed activity
 and its decisions stay visible: the queue (pending), the decision history,
 per-proposer track records, and the standing metric of what fraction of
 production mutations originate with AI. Operators can delete list rows
@@ -147,10 +147,11 @@ whoever drafted them.
   filter field records the relaying surface (`mcp:<ref>`).
 
 A decision optionally carries a **quality tag** from the shared review
-vocabulary (`wrong | poor | ok | good` — the same scale as AI assessments).
-`Deny — wrong` records a miscalibrated proposal and weighs against the
-proposer's track record; plain deny records a sound proposal decided
-against.
+vocabulary (`wrong | poor | ok | good` — the same scale as AI assessments):
+set the tag in the quality selector, then approve or deny, and it is
+recorded with the decision. A deny tagged `wrong` records a miscalibrated
+proposal and weighs against the proposer's track record; a plain deny
+records a sound proposal decided against.
 
 Execution events and history entries are **origin-stamped**
 (`origin: ai_proposal`, proposer, scan version, batch, proposed-at)
@@ -205,7 +206,8 @@ Review friction matches irreversibility, in both directions:
   the record moves on, by the same precondition machinery. Propagation is
   the worked example: Undo on an executed proposal restores the
   precondition state — including the prior `replaced_by` — through the
-  same executor, with a templated comment naming the proposal.
+  same executor, with a templated comment naming the proposal, and
+  returns the proposal to the pending queue.
 - **Mitigable** actions (external effects: a submitted PanDA task can be
   killed or superseded by `.tryN`, not unsubmitted) offer the named
   mitigation, labeled honestly: it does not restore the prior world.

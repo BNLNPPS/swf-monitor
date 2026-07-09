@@ -44,10 +44,17 @@
     <span class="text-muted"><span id="props-count">0</span> selected</span>
     <button type="button" id="props-approve" class="btn btn-sm btn-success" disabled>Approve</button>
     <button type="button" id="props-deny" class="btn btn-sm btn-secondary" disabled>Deny</button>
-    <button type="button" id="props-deny-wrong" class="btn btn-sm btn-secondary" disabled
-            title="Deny and score the proposal wrong — miscalibrated, counts against the proposer's track record">Deny — wrong</button>
+    <select id="props-quality" class="form-select form-select-sm" style="width:auto"
+            title="Optional quality tag recorded with the decision (worst to best; 'wrong' marks the proposal miscalibrated and counts against the proposer's track record)">
+      <option value="">quality&hellip;</option>
+      <option value="wrong">wrong</option>
+      <option value="poor">poor</option>
+      <option value="ok">ok</option>
+      <option value="good">good</option>
+    </select>
+    <span class="text-muted small me-4">Quality choice is recorded with the decision.</span>
     <button type="button" id="props-undo" class="btn btn-sm btn-dark-green" disabled
-            title="Undo the selected executed proposals — restores the pre-approval state through the same service, recorded as a new history entry, never erased. The offer expires if the record has changed since execution.">Undo</button>
+            title="Undo the selected executed proposals — restores the pre-approval state through the same service and returns the proposal to pending; the execution and undo events remain on the record. The offer expires if the record has changed since execution.">Undo</button>
     <button type="button" id="props-delete" class="btn btn-sm btn-danger" disabled
             title="Remove the selected rows from the AI proposal list — decision history included, permanent">Delete</button>
   </div>
@@ -76,7 +83,7 @@
         <td class="small pcs-props-comment">{{ p.comment }}
           {% if p.payload.replaced_by %}<div class="text-muted">Replaced by: {{ p.payload.replaced_by }}</div>{% endif %}
           {% if p.confidence %}<div class="text-muted">Confidence: {{ p.confidence }}</div>{% endif %}</td>
-        <td class="small">{{ p.status }}{% if p.status == 'undone' %}<div class="text-muted">{{ p.undone_by }} {{ p.undone_at|date:"m-d H:i" }}</div>{% endif %}</td>
+        <td class="small">{{ p.status }}</td>
         <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% else %}—{% endif %}</td>
         <td class="small">{{ p.quality|default:"—" }}</td>
         <td class="small">{{ p.proposer|default:"—" }}</td>
@@ -91,10 +98,10 @@
   {% if proposer_stats %}
   <h5 class="mt-4">Proposer track records</h5>
   <table class="table table-sm pcs-props-stats" style="max-width:46em">
-    <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Undone</th><th>Denied</th><th>Wrong</th></tr></thead>
+    <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Denied</th><th>Wrong</th></tr></thead>
     <tbody>
       {% for s in proposer_stats %}
-      <tr><td>{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.undone }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
+      <tr><td>{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -106,7 +113,7 @@
   const cbs = document.querySelectorAll('.props-cb');
   const selectAll = document.getElementById('props-selectall');
   const count = document.getElementById('props-count');
-  const buttons = ['props-approve', 'props-deny', 'props-deny-wrong', 'props-undo', 'props-delete']
+  const buttons = ['props-approve', 'props-deny', 'props-undo', 'props-delete']
     .map(id => document.getElementById(id)).filter(Boolean);
   if (!buttons.length) return;
   function refresh() {
@@ -119,12 +126,13 @@
   });
   cbs.forEach(c => c.addEventListener('change', refresh));
 
-  async function decide(decision, quality) {
+  async function decide(decision) {
     const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
     if (!ids.length) return;
-    const verb = decision === 'approve' ? 'Approve and execute'
-               : (quality === 'wrong' ? 'Deny as wrong' : 'Deny');
-    if (!confirm(`${verb} ${ids.length} AI proposal(s)?`)) return;
+    const quality = document.getElementById('props-quality').value;
+    const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
+    const qnote = quality ? ` (quality: ${quality})` : '';
+    if (!confirm(`${verb} ${ids.length} AI proposal(s)${qnote}?`)) return;
     const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
     try {
       const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
@@ -145,9 +153,8 @@
       alert('Proposal decision failed: ' + err.message);
     }
   }
-  document.getElementById('props-approve').addEventListener('click', () => decide('approve', ''));
-  document.getElementById('props-deny').addEventListener('click', () => decide('deny', ''));
-  document.getElementById('props-deny-wrong').addEventListener('click', () => decide('deny', 'wrong'));
+  document.getElementById('props-approve').addEventListener('click', () => decide('approve'));
+  document.getElementById('props-deny').addEventListener('click', () => decide('deny'));
 
   document.getElementById('props-undo').addEventListener('click', async () => {
     const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
