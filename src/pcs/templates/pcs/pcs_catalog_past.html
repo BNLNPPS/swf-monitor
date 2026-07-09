@@ -234,11 +234,7 @@
   </details>
   {% endif %}
 
-  {% if active_lifecycle == 'producing' and task_list_html %}
-    {# The unified curated view (CAMPAIGN_CONTINUUM.md): the producing campaign renders the same task table as Current. #}
-    {{ task_list_html|safe }}
-  {% else %}
-  {% if active_lifecycle != 'last' %}
+  {% if active_lifecycle == 'past' or active_lifecycle == 'future' %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Release:</span>
     <a href="?lifecycle={{ active_lifecycle }}&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
@@ -257,6 +253,10 @@
   </div>
   {% endif %}
 
+  {% if task_list_html %}
+    {# The unified curated view (CAMPAIGN_CONTINUUM.md): this campaign renders the same task table as Current. #}
+    {{ task_list_html|safe }}
+  {% else %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Stage:</span>
     <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}"

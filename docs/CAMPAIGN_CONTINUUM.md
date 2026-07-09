@@ -131,14 +131,20 @@ would be minted, merged, and skipped.
 ## Migration path
 
 1. **Continuum instancing** (the 26.06.0 rehearsal): mint-and-merge, with
-   the CSV-import version-segment naming fix riding along.
+   the CSV-import version-segment naming fix riding along. *(Implemented —
+   `pcs/instancing.py`; 26.06.0 populated 2026-07-09.)*
 2. **Unified view**: the campaign tabs converge on the curated task-list
    rendering with the phase-affordance matrix; the past template's extras
-   fold in as data-gated additions.
+   fold in as data-gated additions. *(Implemented for every single-campaign
+   view — producing, last, single-release past; multi-campaign aggregates
+   keep the outputs table, their genuine role.)*
 3. **Requests over physics configurations**: request context resolves to
    physics configurations and projects onto editions; the CSV import stops
    binding requests to the current campaign.
-4. **The physics-configuration view**: the inverted, datasets-first projection.
+4. **The physics-configuration view**: the inverted, datasets-first
+   projection. *(Implemented — `/pcs/physics/` and the per-configuration
+   Rucio-data-per-campaign page; firsthand reconciliation in
+   `pcs/reconcile.py` keeps producing campaigns' records current.)*
 
 Each step is independently shippable and none reshapes stored data
 destructively; steps 3 and 4 share the configuration-resolution machinery.

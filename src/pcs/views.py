@@ -440,7 +440,12 @@ def _current_catalog_tasks(campaign, catalog_view, progress_snapshot, timings=No
     return tasks
 
 
-def _cached_current_task_list_html(campaign, catalog_view, context, progress_snapshot, timings=None):
+def _cached_current_task_list_html(campaign, catalog_view, context,
+                                   progress_snapshot, timings=None,
+                                   rebuild_on_miss=False):
+    """``rebuild_on_miss`` skips the stale-serve suppression: low-traffic
+    views (past/last/producing tabs) accept the inline rebuild cost
+    rather than serving a stale table with no other rebuilder."""
     if campaign is None or catalog_view not in ('catalog', 'progress'):
         return None, False, {}
     signature = _timed(
@@ -469,6 +474,8 @@ def _cached_current_task_list_html(campaign, catalog_view, context, progress_sna
         return cached['html'], True, cached
 
     latest_cache_key = cache.get(latest_key)
+    if rebuild_on_miss:
+        latest_cache_key = None
     if latest_cache_key and latest_cache_key != cache_key:
         stale = _timed(
             timings,
@@ -2735,6 +2742,22 @@ def pcs_catalog(request):
         producing_task_mix = None
         producing_table_html = None
         instancing = None
+        # Unified-view convergence: last and single-release past render
+        # the same curated table as Current; multi-campaign aggregates
+        # ('all', year spans) keep the outputs table, their genuine role.
+        if active_lifecycle == 'last' and campaigns_by_lifecycle['last']:
+            producing_table_html, _, _ = _cached_current_task_list_html(
+                campaigns_by_lifecycle['last'][0], 'catalog', {}, None,
+                timings=timings, rebuild_on_miss=True)
+        elif (active_lifecycle == 'past' and active_release
+              and active_release != 'all'
+              and not active_release.startswith('all_')):
+            release_camp = Campaign.objects.filter(
+                name=active_release).first()
+            if release_camp is not None:
+                producing_table_html, _, _ = _cached_current_task_list_html(
+                    release_camp, 'catalog', {}, None,
+                    timings=timings, rebuild_on_miss=True)
         if active_lifecycle == 'producing':
             producing_arrivals = dict(next(
                 (arr for camp, arr in inflow
@@ -2752,7 +2775,8 @@ def pcs_catalog(request):
             # producing campaign renders the same task table as Current.
             if producing_camp is not None:
                 producing_table_html, _, _ = _cached_current_task_list_html(
-                    producing_camp, 'catalog', {}, None, timings=timings)
+                    producing_camp, 'catalog', {}, None, timings=timings,
+                    rebuild_on_miss=True)
             current_names = [c.name for c in campaigns_by_lifecycle['current']]
             if current_names and producing_campaign_name not in current_names:
                 from monitor_app.models import AppLog
