@@ -430,6 +430,12 @@ def _current_catalog_tasks(campaign, catalog_view, progress_snapshot, timings=No
         lambda: _annotate_task_questionnaire_matches(tasks),
         detail_fn=lambda rows: f'{len(rows)} task-local cached match lists',
     )
+    tasks = _timed(
+        timings,
+        'pc request projection',
+        lambda: _annotate_task_pc_requests(tasks),
+        detail_fn=lambda rows: f'{len(rows)} rows',
+    )
     if catalog_view == 'progress':
         tasks = _timed(
             timings,
@@ -681,6 +687,19 @@ def _annotate_questionnaire_matches(questionnaires):
         matches = _questionnaire_prod_matches(questionnaire, status='accepted')
         questionnaire.prod_match_count = len(matches)
         questionnaire.prod_matches = matches
+
+
+def _annotate_task_pc_requests(tasks):
+    """Attach PC-projected production requests as ``task.pc_requests``:
+    a task points to requests through its physics configuration
+    (CAMPAIGN_CONTINUUM.md), never a per-task binding."""
+    from .services import pc_request_projection
+    projection = pc_request_projection(
+        [t.dataset for t in tasks if t.dataset_id])
+    for task in tasks:
+        task.pc_requests = (projection.get(task.dataset.composed_name, [])
+                            if task.dataset_id else [])
+    return tasks
 
 
 def _annotate_task_questionnaire_matches(tasks):
@@ -2094,6 +2113,7 @@ def pcs_physics_configs(request):
         .order_by('composed_name', 'block_num', 'pk')
         .distinct('composed_name'))
     groups = group_editions(heads)
+    requests_by_anchor = services.pc_anchored_requests()
 
     # One working task per identity decides the edition's state; sibling
     # output records don't override it. Matched requests ride along.
@@ -2158,6 +2178,12 @@ def pcs_physics_configs(request):
         row['requests'] = sorted(set().union(*(
             task_requests.get(d.composed_name, set())
             for d, _ in group['editions'])))
+        # PC-anchored production requests: a request whose anchor is any
+        # of this configuration's editions belongs to the configuration.
+        row['prod_requests'] = sorted(
+            {req.pk: req for d, _ in group['editions']
+             for req in requests_by_anchor.get(d.composed_name, ())}.values(),
+            key=lambda r: r.pk)
         for dataset, edition_detail in group['editions']:
             camp = dataset.campaign.name if dataset.campaign_id else ''
             data = produced.get(dataset.composed_name) or {}
@@ -2350,6 +2376,15 @@ def pcs_edition_data(request, name):
             if isinstance(qid, int) or str(qid).isdigit():
                 request_ids.add(int(qid))
 
+    # PC-anchored production requests: this page is the configuration's
+    # home, so its requests render in full — a request whose anchor is
+    # any of the configuration's editions belongs here.
+    requests_by_anchor = services.pc_anchored_requests()
+    prod_requests = sorted(
+        {req.pk: req for edition in edition_names
+         for req in requests_by_anchor.get(edition, ())}.values(),
+        key=lambda r: r.pk)
+
     items = []
     total_files = 0
     total_bytes = 0
@@ -2384,6 +2419,7 @@ def pcs_edition_data(request, name):
         'name': name,
         'pc_spec': pc_spec,
         'requests': sorted(request_ids),
+        'prod_requests': prod_requests,
         'items': items,
         'total_files': total_files,
         'total_bytes': total_bytes,
@@ -3115,7 +3151,8 @@ def prod_task_compose(request):
         tasks_list = list(
             ProdTask.objects.select_related(
                 'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-                'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+                'dataset__simu_tag', 'dataset__reco_tag',
+                'dataset__background_tag', 'prod_config',
             ).prefetch_related('panda_tasks').filter(campaign=campaign).order_by('-updated_at')
         )
     # Light task entries: EVGEN submission spec + cached commands omitted, hydrated on
@@ -3123,6 +3160,7 @@ def prod_task_compose(request):
     # detail panel can show submit-readiness without a round trip.
     from .services import prodtask_readiness_problems
     tasks_list = _annotate_task_questionnaire_matches(tasks_list)
+    tasks_list = _annotate_task_pc_requests(tasks_list)
     tasks_data = []
     for t in tasks_list:
         tasks_data.append({
@@ -3158,6 +3196,18 @@ def prod_task_compose(request):
                     'reason': item.get('reason') or '',
                 }
                 for item in getattr(t, 'questionnaire_matches', [])
+            ],
+            # PC-projected production requests (CAMPAIGN_CONTINUUM.md):
+            # the task reaches them through its physics configuration.
+            'pc_requests': [
+                {
+                    'id': req.pk,
+                    'requestor': req.requestor,
+                    'nevents': req.nevents,
+                    'description': req.description,
+                    'issue_url': req.source_url,
+                }
+                for req in getattr(t, 'pc_requests', [])
             ],
         })
 

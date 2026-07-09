@@ -69,6 +69,21 @@ No new entity is required: the physics configuration remains a derived key (PCS.
 request context migrates from "rows owned by the current campaign" to
 "rows resolved to physics configurations, projected onto whichever editions exist."
 
+*(Implemented.)* The catalog CSV import writes one `ProdRequest` per row,
+idempotent on the row key, and binds it to its physics configuration through
+`data['physics_config_anchor']` — the composed name of the edition the request
+was recorded against, a name reference in the same convention as
+`replaced_by`. Production-team triage fields and status are never touched by
+re-import. `pc_request_projection` (`pcs/services.py`) is the read path: any
+edition resolving to the same configuration key carries the request, so the
+catalog task rows, the compose detail, the physics-configuration view, and the
+edition data page all reach requests through the configuration — requests
+point to configurations, configurations list their requests, tasks reach
+requests only via their configuration. The edition data page is the request's
+home and renders it in full; request links elsewhere land there. Task request
+columns (`REQUEST_TO_TASK_COPY_FIELDS`) are creation-time seeds: re-imports
+refresh the request row and no longer re-stamp the task.
+
 ## The physics-configuration view
 
 The tabs answer "what is campaign X?" The physics-configuration view
@@ -140,7 +155,8 @@ would be minted, merged, and skipped.
    keep the outputs table, their genuine role.)*
 3. **Requests over physics configurations**: request context resolves to
    physics configurations and projects onto editions; the CSV import stops
-   binding requests to the current campaign.
+   binding requests to the current campaign. *(Implemented — see "Requests
+   over physics configurations" above.)*
 4. **The physics-configuration view**: the inverted, datasets-first
    projection. *(Implemented — `/pcs/physics/` and the per-configuration
    Rucio-data-per-campaign page; firsthand reconciliation in

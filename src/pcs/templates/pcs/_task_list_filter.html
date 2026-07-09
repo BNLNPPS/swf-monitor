@@ -325,10 +325,14 @@ Context expected:
               {% if issue %}{% if t.description %} · {% endif %}<a href="{{ issue }}" target="_blank" rel="noopener">issue</a>{% endif %}
             </div>
           {% endif %}
-          {% if t.questionnaire_matches %}
+          {% if t.pc_requests or t.questionnaire_matches %}
             <div><strong class="text-muted">Request:</strong>
-              {% for qm in t.questionnaire_matches %}
+              {% for pr in t.pc_requests %}
                 {% if not forloop.first %}, {% endif %}
+                <a href="{% url 'pcs:pcs_edition_data' name=t.composed_name %}" title="{{ pr.requestor }}{% if pr.nevents %} · {{ pr.nevents }} events{% endif %}{% if pr.description %} · {{ pr.description|truncatechars:120 }}{% endif %} — production request on this physics configuration; click for the configuration's data page">req#{{ pr.pk }}</a>
+              {% endfor %}
+              {% for qm in t.questionnaire_matches %}
+                {% if not forloop.first or t.pc_requests %}, {% endif %}
                 <a href="{% url 'pcs:questionnaire_detail' pk=qm.questionnaire.pk %}">#{{ qm.questionnaire.pk }}</a>{% if qm.confidence %} <span class="text-muted">({{ qm.confidence }})</span>{% endif %}
               {% endfor %}
             </div>

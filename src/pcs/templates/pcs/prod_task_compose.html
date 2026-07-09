@@ -1124,12 +1124,19 @@
         html += aiAssessmentsHtml(t.ai_content || []);
         html += pandaTasksHtml(t);
         html += pandaOperationsHtml(t);
-        if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
-            const requestLinks = t.questionnaire_matches.map(m => {
-                const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
-                return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>`;
-            }).join(', ');
-            html += `<div class="mb-2">${requestLinks}</div>`;
+        const pcRequestLinks = (Array.isArray(t.pc_requests) ? t.pc_requests : []).map(r => {
+            const detail = [r.requestor, r.nevents ? `${r.nevents} events` : '', r.description]
+                .filter(Boolean).join(' · ');
+            const tip = detail ? ` title="${htmlEscape(detail)} — production request on this physics configuration; click for the configuration's data page"` : '';
+            return `<a href="../../data/${encodeURIComponent(t.composed_name)}/"${tip}>Request req#${r.id}</a>`;
+        });
+        const questionnaireLinks = (Array.isArray(t.questionnaire_matches) ? t.questionnaire_matches : []).map(m => {
+            const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
+            return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>`;
+        });
+        const requestLinks = pcRequestLinks.concat(questionnaireLinks);
+        if (requestLinks.length) {
+            html += `<div class="mb-2">${requestLinks.join(', ')}</div>`;
         }
         // Produced data: the task's recorded outputs (unified schema),
         // each DID linking to the live Rucio detail page.

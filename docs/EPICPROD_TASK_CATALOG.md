@@ -153,6 +153,10 @@ Production-team fields added during processing:
 | `validation_status` | Validation summary string. |
 | `prod_task_links` | Relation to ProdTask records derived from the request. |
 
+Request records are populated by the catalog CSV import and bind to physics
+configurations, not campaigns; the binding and its projection onto campaign
+editions are described in [CAMPAIGN_CONTINUUM.md](CAMPAIGN_CONTINUUM.md).
+
 Production requests use a dedicated 2-panel page: a filterable request list
 on the left, and request details, processing fields, and linked tasks on
 the right. The request page feeds the task catalog but remains separate

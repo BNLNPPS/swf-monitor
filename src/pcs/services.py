@@ -1679,6 +1679,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
         rows = list(_csv.DictReader(f))
 
     summary = {'rows': len(rows), 'created': 0, 'updated': 0,
+               'requests_created': 0, 'requests_updated': 0,
                'tag_actions': {}, 'errors': []}
 
     with transaction.atomic():
@@ -1831,6 +1832,14 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 for k, v in task_defaults.items():
                     if k == 'status':
                         continue
+                    if k in REQUEST_TO_TASK_COPY_FIELDS:
+                        # Request context is owned by the ProdRequest row
+                        # (below) and projected through the physics
+                        # configuration; the task columns are creation-time
+                        # seeds, independently mutable thereafter
+                        # (CAMPAIGN_CONTINUUM.md — requests over physics
+                        # configurations).
+                        continue
                     if k == 'overrides':
                         # Merge so non-csv_import override keys (added by
                         # operators or other code paths) are preserved;
@@ -1845,7 +1854,108 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 ProdTask.objects.create(name=task_name, **task_defaults)
                 summary['created'] += 1
 
+            # The request record: one ProdRequest per CSV row, bound to the
+            # physics configuration (never a campaign) through the composed
+            # name of the edition it was recorded against — a name
+            # reference, the same convention as ``replaced_by``. Editions
+            # in any campaign reach it by resolving to the same
+            # configuration (pc_request_projection). Triage fields and
+            # status belong to the production team and are never touched
+            # by re-import.
+            request_fields = dict(
+                requestor=(row.get('DSC or PWG') or '').strip().upper(),
+                simu_path=ds_path,
+                gen_config=gen_ver,
+                nevents=nevents,
+                background=(row.get('Background') or '').strip(),
+                description=(row.get('Description') or '').strip(),
+                priority=priority,
+                pre_tdr_use=_possible(row.get('Pre-TDR Use')),
+                early_science_use=_yesno(row.get('Early Science Use')),
+                other_use=_possible(row.get('Other Use')),
+                new_request=_yesno(row.get('New Request')),
+                source_url=(row.get('Issue') or '').strip(),
+            )
+            req = ProdRequest.objects.filter(source_row=slug).first()
+            if req is None:
+                req = ProdRequest(source_row=slug, status='new',
+                                  created_by=created_by)
+                summary['requests_created'] += 1
+            else:
+                summary['requests_updated'] += 1
+            for k, v in request_fields.items():
+                setattr(req, k, v)
+            req_data = dict(req.data or {})
+            req_data.update({
+                'filters': filters,
+                'physics_config_anchor': ds.composed_name,
+                'angular_range': angular_range,
+                'other_use_text': (row.get('Other Use') or '').strip(),
+            })
+            req.data = req_data
+            req.save()
+
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Requests over physics configurations (CAMPAIGN_CONTINUUM.md)
+# ---------------------------------------------------------------------------
+
+def pc_anchored_requests():
+    """{anchor_composed_name: [ProdRequest, ...]} for every request bound
+    to a physics configuration. The anchor is the composed name of the
+    edition the request was recorded against; any edition resolving to
+    the same configuration carries the request."""
+    by_anchor = {}
+    for req in ProdRequest.objects.order_by('pk'):
+        anchor = (req.data or {}).get('physics_config_anchor')
+        if anchor:
+            by_anchor.setdefault(anchor, []).append(req)
+    return by_anchor
+
+
+def pc_request_projection(datasets):
+    """Project PC-anchored requests onto dataset editions.
+
+    Returns {composed_name: [ProdRequest, ...]} for every given edition
+    that resolves to the same physics configuration as a request's
+    anchor — the read path behind "tasks point to requests via their
+    configuration". Anchor and edition are compared by
+    ``physics_config_key``; an anchor naming no surviving dataset is
+    reported, never silently dropped.
+    """
+    from .physics_config import physics_config_key
+    by_anchor = pc_anchored_requests()
+    if not by_anchor or not datasets:
+        return {}
+    select = ('physics_tag', 'evgen_tag', 'background_tag')
+    heads = (Dataset.objects.filter(composed_name__in=by_anchor)
+             .select_related(*select)
+             .order_by('composed_name', 'block_num', 'pk')
+             .distinct('composed_name'))
+    requests_by_key = {}
+    resolved = set()
+    for head in heads:
+        key = physics_config_key(head)['key']
+        resolved.add(head.composed_name)
+        requests_by_key.setdefault(key, []).extend(by_anchor[head.composed_name])
+    orphaned = set(by_anchor) - resolved
+    if orphaned:
+        _log.warning(
+            'pc_request_projection: %d request anchor(s) name no dataset: %s',
+            len(orphaned), sorted(orphaned)[:5])
+    projection = {}
+    seen = set()
+    for dataset in datasets:
+        name = dataset.composed_name
+        if name in seen:
+            continue
+        seen.add(name)
+        matched = requests_by_key.get(physics_config_key(dataset)['key'])
+        if matched:
+            projection[name] = matched
+    return projection
 
 
 # ---------------------------------------------------------------------------
