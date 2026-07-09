@@ -2868,9 +2868,17 @@ def pcs_catalog(request):
             candidates = [n for n in candidates if _version_tuple(n)]
             current_names = [c.name for c in campaigns_by_lifecycle['current']]
             target_name = max(candidates, key=_version_tuple) if candidates else ''
-            if (target_name and current_names
-                    and target_name != current_names[0]):
-                instancing = _instancing_context(current_names[0], target_name)
+            # Source: a producing campaign ahead of current seeds the next
+            # campaign — it will be current by population time, its
+            # promotion merely pending a human click; else current itself.
+            source_name = current_names[0] if current_names else ''
+            for camp, _arr in inflow:
+                if (camp.name != target_name and _version_tuple(camp.name)
+                        and (not source_name or _version_tuple(camp.name)
+                             > _version_tuple(source_name))):
+                    source_name = camp.name
+            if target_name and source_name and target_name != source_name:
+                instancing = _instancing_context(source_name, target_name)
                 future_camp = Campaign.objects.filter(name=target_name).first()
                 if future_camp is not None:
                     producing_table_html, _, _ = _cached_current_task_list_html(

@@ -87,8 +87,7 @@
     </script>
     {% endif %}
     {% if catalog_view != 'progress' %}
-    {% if not is_tunnel %}
-    {% if user.is_authenticated %}
+    {% if not is_tunnel and user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_csv_update' %}" class="ms-2 d-inline" id="csv-update-form">
       {% csrf_token %}
       <button type="submit" id="csv-update-btn" class="btn btn-sm btn-primary"
@@ -117,7 +116,16 @@
         Update request links
       </button>
     </form>
-    {% endif %}
+    {% else %}
+    {# Inactive-button convention: operator actions stay visible to every viewer, disabled outside an operator session. #}
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Re-import eic/epic-prod/docs/_data/datasets.csv into the catalog — operator action; sign in on pandaserver02">Update from CSV</button>
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Refresh the JLab Rucio output snapshot — operator action; sign in on pandaserver02">Update from Rucio</button>
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Assimilate the JLab Rucio EVGEN inventory and resolve it onto the catalog — operator action; sign in on pandaserver02">Update EVGEN from Rucio</button>
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Rebuild task-local questionnaire request links — operator action; sign in on pandaserver02">Update request links</button>
     {% endif %}
     {% endif %}
   </div>
@@ -416,8 +424,8 @@
   {% if active_lifecycle == 'current' %}
   <div class="small mb-2">
     <span><strong>Last activity:</strong> {{ current_last_activity|fmt_dt|default:"none recorded" }}</span>
-    {% if user.is_authenticated %}
     {% for offer in promote_offers %}
+    {% if user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="d-inline ms-3">
       {% csrf_token %}
       <input type="hidden" name="name" value="{{ offer.name }}">
@@ -425,8 +433,11 @@
               onclick="return confirm('Make {{ offer.name }} current? {{ offer.note }}');">
         Make {{ offer.name }} current</button>
     </form>
-    {% endfor %}
+    {% else %}
+    <button type="button" class="btn btn-sm btn-success ms-3" disabled
+            title="{{ offer.note }} — operator action; sign in to use">Make {{ offer.name }} current</button>
     {% endif %}
+    {% endfor %}
   </div>
   {% endif %}
 
@@ -449,6 +460,9 @@
                       title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot in one click"
                       onclick="return confirm('Switch PCS current to {{ r.version }} and refresh snapshot?');">Make current</button>
             </form>
+            {% else %}
+            <button type="button" class="btn btn-sm btn-success py-0 px-2 ms-1" disabled
+                    title="Rename PCS current campaign to {{ r.version }} and pull its Rucio snapshot — operator action; sign in to use">Make current</button>
             {% endif %}
           {% else %}
             <span class="badge bg-success">current</span>
@@ -478,6 +492,9 @@
         Refresh
       </button>
     </form>
+    {% else %}
+    <button type="button" class="btn btn-sm btn-primary py-0 px-2" disabled
+            title="Refresh progress — operator action; sign in on pandaserver02">Refresh</button>
     {% endif %}
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>
@@ -504,6 +521,9 @@
         Refresh
       </button>
     </form>
+    {% else %}
+    <button type="button" class="btn btn-sm btn-primary py-0 px-2" disabled
+            title="Refresh table — operator action; sign in on pandaserver02">Refresh</button>
     {% endif %}
     <span id="pcs-refresh-status" class="pcs-refresh-status" role="status" aria-live="polite"></span>
   </div>

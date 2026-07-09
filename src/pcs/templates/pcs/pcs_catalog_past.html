@@ -30,8 +30,7 @@
   <div class="d-flex align-items-center mb-3">
     <h2 class="me-3 mb-0">Campaign Task Catalog</h2>
     <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-secondary">PCS Hub</a>
-    {% if not is_tunnel %}
-    {% if user.is_authenticated %}
+    {% if not is_tunnel and user.is_authenticated %}
     {% if active_lifecycle == 'last' or active_lifecycle == 'producing' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
@@ -52,6 +51,14 @@
       </button>
     </form>
     {% endif %}
+    {% else %}
+    {# Inactive-button convention: operator actions stay visible to every viewer, disabled outside an operator session. #}
+    {% if active_lifecycle == 'last' or active_lifecycle == 'producing' %}
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Refresh the JLab Rucio output snapshot for the current, last, and producing campaigns — operator action; sign in on pandaserver02">Update from Rucio</button>
+    {% else %}
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Re-import 2026 FULL/RECO campaign output from epic-prod — operator action; sign in on pandaserver02">Update from epic-prod</button>
     {% endif %}
     {% endif %}
   </div>
@@ -114,7 +121,8 @@
   {# The symmetric tab strip (Current has the same one): Last activity under the tabs, promotion after it where rotation applies. #}
   <div class="small mb-2">
     <span><strong>Last activity:</strong> {{ tab_last_activity|fmt_dt|default:"none recorded" }}</span>
-    {% if active_lifecycle == 'producing' and user.is_authenticated %}
+    {% if active_lifecycle == 'producing' %}
+    {% if user.is_authenticated %}
     <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="d-inline ms-3">
       {% csrf_token %}
       <input type="hidden" name="name" value="{{ producing_campaign }}">
@@ -122,6 +130,10 @@
               onclick="return confirm('Make {{ producing_campaign }} current? {{ promote_cascade_note }}');">
         Make {{ producing_campaign }} current</button>
     </form>
+    {% else %}
+    <button type="button" class="btn btn-sm btn-success ms-3" disabled
+            title="Promote {{ producing_campaign }} to current — operator action; sign in to use">Make {{ producing_campaign }} current</button>
+    {% endif %}
     <span class="text-muted">{{ promote_cascade_note }}</span>
     {% endif %}
   </div>
@@ -183,8 +195,8 @@
       </details>
       {% endif %}
       {% endfor %}
-      {% if user.is_authenticated %}
       {% if instancing.plan.summary.mint or instancing.plan.summary.merge %}
+      {% if user.is_authenticated %}
       <form method="post" action="{% url 'pcs:pcs_catalog_instancing_execute' %}" class="mt-2">
         {% csrf_token %}
         <input type="hidden" name="source" value="{{ instancing.source }}">
@@ -195,9 +207,13 @@
           Populate {{ instancing.target }} from {{ instancing.source }}</button>
       </form>
       {% else %}
+      <button type="button" class="btn btn-sm btn-success mt-2" disabled
+              title="Mint {{ instancing.plan.summary.mint }} edition(s), adopt {{ instancing.plan.summary.merge }} — operator action; sign in to use">
+        Populate {{ instancing.target }} from {{ instancing.source }}</button>
+      {% endif %}
+      {% else %}
       <div class="small text-muted mt-2">Nothing pending — every actionable
         configuration is instanced; unresolved ones await curation.</div>
-      {% endif %}
       {% endif %}
       </details>
     </div>
@@ -221,6 +237,9 @@
                     title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot"
                     onclick="return confirm('Set PCS last to {{ r.version }} and pull snapshot?');">Make last</button>
           </form>
+          {% else %}
+          <button type="button" class="btn btn-sm btn-success py-0 px-2 ms-1" disabled
+                  title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot — operator action; sign in to use">Make last</button>
           {% endif %}
         </span>
         {% endif %}
@@ -396,9 +415,11 @@
       </div>
       <div class="text-muted">
         No future campaign exists yet. The instancing plan above lays out what
-        a population would create from the current campaign's continuing
-        physics configurations; deciding the pending dispositions changes the
-        plan, and Populate creates the campaign.
+        a population would create from
+        {% if instancing %}<strong>{{ instancing.source }}</strong>'s{% else %}the
+        current campaign's{% endif %} continuing physics configurations;
+        deciding the pending dispositions changes the plan, and Populate
+        creates the campaign.
       </div>
       {% else %}
       <div class="text-muted">

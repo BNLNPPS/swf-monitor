@@ -149,6 +149,8 @@ disposition batches before any row exists. The plan tolerates the missing
 row (every continuing configuration classifies as mint), so the tab lays out
 what a population would do; firing it creates the campaign row (lifecycle
 `future`) and populates it, and the normal rotation takes over from there.
+The plan sources from the newest producing campaign when one is ahead of
+current (it will be current by population time); otherwise from current.
 With that the catalog perpetuates itself: each campaign's successor is
 planned, populated, promoted, and retired inside the catalog.
 

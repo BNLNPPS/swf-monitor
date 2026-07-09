@@ -466,7 +466,16 @@
     </div>
     <main>
         {% timezone "America/New_York" %}
-        <div class="main-time-info">Built at {% now "Ymd H:i:s" %} {% now "T" %}</div>
+        <div class="main-time-info">
+            {% if is_tunnel %}
+            <a href="https://pandaserver02.sdcc.bnl.gov/swf-monitor{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
+               target="_blank" rel="noopener">Go to page at pandaserver02</a> &middot;
+            {% else %}
+            <a href="https://epic-devcloud.org/prod{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
+               target="_blank" rel="noopener">Go to page at epic-devcloud.org</a> &middot;
+            {% endif %}
+            Built at {% now "Ymd H:i:s" %} {% now "T" %}
+        </div>
         {% endtimezone %}
         {% if messages %}
             {% for message in messages %}
