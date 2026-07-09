@@ -120,10 +120,8 @@
       <div class="small mt-1">
         <strong>Task records:</strong>
         {% for status, n in producing_task_mix.items %}{{ n }} {{ status }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
-        <span class="text-muted">— the table below lists produced output records
-          (past_output); planned and producing task rows appear in the working
-          catalog views until this tab converges on the unified view
-          (CAMPAIGN_CONTINUUM.md).</span>
+        <span class="text-muted">— all listed in the table below, the same
+          curated view as the Current tab (CAMPAIGN_CONTINUUM.md).</span>
       </div>
       {% endif %}
       {% if user.is_authenticated %}
@@ -234,6 +232,10 @@
   </details>
   {% endif %}
 
+  {% if active_lifecycle == 'producing' and task_list_html %}
+    {# The unified curated view (CAMPAIGN_CONTINUUM.md): the producing campaign renders the same task table as Current. #}
+    {{ task_list_html|safe }}
+  {% else %}
   {% if active_lifecycle != 'last' %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Release:</span>
@@ -394,6 +396,7 @@
       No past campaigns ingested yet. Click <strong>Update from epic-prod</strong> above to populate from
       the cloned <code>epic-prod</code> tree.
     </div>
+  {% endif %}
   {% endif %}
 </div>
 

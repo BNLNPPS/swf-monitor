@@ -2389,6 +2389,7 @@ def pcs_catalog(request):
         promote_cascade_note = ''
         producing_last_activity = ''
         producing_task_mix = None
+        producing_table_html = None
         instancing = None
         if active_lifecycle == 'producing':
             producing_arrivals = dict(next(
@@ -2403,6 +2404,11 @@ def pcs_catalog(request):
             producing_task_mix = dict(
                 ProdTask.objects.filter(campaign__name=producing_campaign_name)
                 .values_list('status').annotate(Count('id')))
+            # The unified curated view (CAMPAIGN_CONTINUUM.md): the
+            # producing campaign renders the same task table as Current.
+            if producing_camp is not None:
+                producing_table_html, _, _ = _cached_current_task_list_html(
+                    producing_camp, 'catalog', {}, None, timings=timings)
             current_names = [c.name for c in campaigns_by_lifecycle['current']]
             if current_names and producing_campaign_name not in current_names:
                 from monitor_app.models import AppLog
@@ -2457,6 +2463,7 @@ def pcs_catalog(request):
             'producing_arrivals': producing_arrivals,
             'producing_last_activity': producing_last_activity,
             'producing_task_mix': producing_task_mix,
+            'task_list_html': producing_table_html,
             'promote_cascade_note': promote_cascade_note,
             'instancing': instancing,
             'active_lifecycle': active_lifecycle,

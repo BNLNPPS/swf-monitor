@@ -41,6 +41,10 @@ def main():
     # The catalog view has no other clockwork rebuilder — without this it
     # serves its stale copy indefinitely (page-load rebuild is suppressed).
     catalog_table = rebuild_current_task_list_html_cache(campaign, "catalog")
+    # Producing campaigns render the same cached table (the unified view).
+    from pcs.views import _campaigns_with_inflow
+    for producing_camp, _ in _campaigns_with_inflow():
+        rebuild_current_task_list_html_cache(producing_camp, "catalog")
 
     print(
         "campaign={campaign} tasks={tasks} warnings={warnings} "

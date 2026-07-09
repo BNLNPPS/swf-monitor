@@ -76,10 +76,14 @@ def _refresh_catalog_table_cache():
     the caller's result, never raised: the decision stands regardless."""
     try:
         from pcs.models import Campaign
-        from pcs.views import rebuild_current_task_list_html_cache
-        campaign = (Campaign.objects.filter(lifecycle='current')
-                    .order_by('name').first())
-        if campaign is not None:
+        from pcs.views import (_campaigns_with_inflow,
+                               rebuild_current_task_list_html_cache)
+        campaigns = list(Campaign.objects.filter(lifecycle='current')
+                         .order_by('name')[:1])
+        # Producing campaigns render the same cached table (the unified
+        # view), so decisions refresh them too.
+        campaigns += [camp for camp, _ in _campaigns_with_inflow()]
+        for campaign in campaigns:
             rebuild_current_task_list_html_cache(campaign, 'catalog')
         return ''
     except Exception as e:                                    # noqa: BLE001
