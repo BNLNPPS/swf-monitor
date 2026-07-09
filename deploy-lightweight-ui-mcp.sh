@@ -131,6 +131,10 @@ PCS_EXCLUDES=(
     --exclude 'management/'
     --exclude 'tests/'
 )
+AI_EXCLUDES=(
+    --exclude 'migrations/'
+    --exclude 'tests/'
+)
 
 if [[ "$DO_MCP" != true ]]; then
     MONITOR_EXCLUDES+=(--exclude 'mcp/')
@@ -139,6 +143,7 @@ fi
 if [[ "$DO_UI" != true ]]; then
     MONITOR_EXCLUDES+=(--exclude 'templates/')
     PCS_EXCLUDES+=(--exclude 'templates/')
+    AI_EXCLUDES+=(--exclude 'templates/')
 fi
 
 if [[ "$DO_STATIC" != true ]]; then
@@ -154,6 +159,9 @@ rsync "${RSYNC_ARGS[@]}" "${MONITOR_EXCLUDES[@]}" "$SRC_DIR/monitor_app/" "$TARG
 
 log "Syncing pcs lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${PCS_EXCLUDES[@]}" "$SRC_DIR/pcs/" "$TARGET_SRC/pcs/"
+
+log "Syncing ai lightweight paths..."
+rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/ai/" "$TARGET_SRC/ai/"
 
 if [[ "$DO_UI" == true ]]; then
     log "Syncing project-level templates and URL routing..."
