@@ -59,6 +59,7 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
+- `CAMPAIGN_CONTINUUM.md` — one curated catalog for every campaign; lifecycle as phase attribute; requests over families; instancing design.
 - `EPICPROD_NARRATIVES.md` — campaign narrative documents: classes, naming, draft→locked lifecycle, corun-ai home.
 - `AI_PROPOSALS.md` — AI proposals: LLM proposes, human approves, deterministic execution; record-resident v1, origin-stamped events, the `.ai-attr` UI convention.
 - `EPICPROD_QUESTIONNAIRE.md` — ingest the PWG/DSC production-request Google Form into a PCS Questionnaire entity; public browser, request linkage.
