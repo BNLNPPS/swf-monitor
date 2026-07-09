@@ -249,11 +249,10 @@ ACTION_DEFAULTS = {
         'description': "Expert revision of a campaign narrative document — "
                        "a new corun-ai version of the entry.",
     },
-    'narrative_published': {
-        'sublevel': 'high', 'live': True,
-        'description': "Publication of a campaign narrative — the one-way "
-                       "transition from draft to the immutable record "
-                       "assessors reason against.",
+    'narrative_commented': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Comment posted on a campaign narrative — the "
+                       "non-intrusive contribution path beside editing.",
     },
     # web entity lifecycle and operator actions
     'campaign_set_current': {

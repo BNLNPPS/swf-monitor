@@ -15,17 +15,17 @@
                                    transition: transform .15s ease-in-out; }
 .narrative-entry[open] summary::before { transform: rotate(90deg); }
 .narrative-entry summary h4 { margin: 0; display: inline; }
-.narrative-status-draft { background-color: #ffe9b0; color: #6b4e00;
-                          border-radius: .4em; padding: 0 .5em;
-                          font-weight: 600; }
-.narrative-status-published { background-color: #d4f4d4; color: #1c5c2e;
-                              border-radius: .4em; padding: 0 .5em;
-                              font-weight: 600; }
+.narr-detail-link { margin-left: auto; }
 .narrative-body { padding: 0 1.25rem 1rem 2.2rem; }
 .narrative-body h1 { font-size: 1.35rem; }
 .narrative-body h2 { font-size: 1.15rem; }
-.narrative-editor textarea { width: 100%; min-height: 30em;
-                             font-family: monospace; font-size: .95rem; }
+.narrative-block-head { border-top: 1px solid #8a9bad; margin-top: 1rem;
+                        padding-top: .6rem; color: #5d6b7a;
+                        font-weight: 600; margin-bottom: .4rem; }
+.narrative-comment { margin: .4rem 0; padding: .4rem .6rem;
+                     background: #f6f8fb; border-radius: 4px; }
+.narrative-comment .nc-meta { color: #5d6b7a; margin-bottom: .15rem; }
+.narrative-comment .nc-body { white-space: pre-wrap; }
 </style>
 
 <div class="container-fluid mt-3">
@@ -78,62 +78,25 @@
   if (openAll) openAll.addEventListener('click', () => all().forEach(d => d.open = true));
   if (closeAll) closeAll.addEventListener('click', () => all().forEach(d => d.open = false));
 
-  document.querySelectorAll('[data-narr-edit]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const entry = btn.closest('details');
-      entry.querySelector('.narrative-rendered').style.display = 'none';
-      entry.querySelector('.narrative-editor').style.display = '';
-      window.swfFitEditor(entry.querySelector('textarea'));
-    });
-  });
-  document.querySelectorAll('[data-narr-publish]').forEach(btn => {
+  document.querySelectorAll('[data-narr-comment]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const entry = btn.closest('details');
-      const title = entry.querySelector('summary h4').textContent;
-      if (!confirm(`Publish "${title}"? Published revisions are immutable — corrections become new revisions.`)) return;
+      const text = entry.querySelector('.narrative-comment-text').value.trim();
+      if (!text) return;
       btn.disabled = true;
       const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
       try {
-        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/publish/', {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/comment/', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-          body: JSON.stringify({ group_id: btn.dataset.narrPublish }),
+          body: JSON.stringify({ group_id: btn.dataset.narrComment, content: text }),
         });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.detail || 'publish failed');
+        if (!r.ok) throw new Error(j.detail || 'comment failed');
         window.location.reload();
       } catch (err) {
         btn.disabled = false;
-        alert('Publish failed: ' + err.message);
-      }
-    });
-  });
-  document.querySelectorAll('[data-narr-cancel]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const entry = btn.closest('details');
-      entry.querySelector('.narrative-editor').style.display = 'none';
-      entry.querySelector('.narrative-rendered').style.display = '';
-    });
-  });
-  document.querySelectorAll('[data-narr-save]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const entry = btn.closest('details');
-      const groupId = btn.dataset.narrSave;
-      const content = entry.querySelector('textarea').value;
-      btn.disabled = true;
-      const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
-      try {
-        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/save/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-          body: JSON.stringify({ group_id: groupId, content: content }),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.detail || 'save failed');
-        window.location.reload();
-      } catch (err) {
-        btn.disabled = false;
-        alert('Save failed: ' + err.message);
+        alert('Comment failed: ' + err.message);
       }
     });
   });

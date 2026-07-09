@@ -66,14 +66,83 @@ def ai_proposals(request):
     })
 
 
-def ai_narratives(request):
-    """Campaign narratives (EPICPROD_NARRATIVES.md), rendered from corun-ai.
-
-    The general series and per-campaign series, newest first, drafts
-    labeled. Read-open; a corun-ai failure renders as an error message,
-    never an empty page.
-    """
+def _narrative_entry_from_page(page, client, *, with_versions=False,
+                                with_comments=True):
+    """Shared shaping of a corun narrative page for templates."""
     from .assessments import render_assessment_markdown
+    from .corun_client import CorunAPIError
+
+    def _strip_h1(text):
+        # The page header carries the title; drop the document's own
+        # leading H1 from the rendered body to avoid repeating it. The
+        # stored document keeps its H1 (it stands alone).
+        stripped = text.lstrip()
+        if stripped.startswith('# '):
+            return stripped.split('\n', 1)[1] if '\n' in stripped else ''
+        return text
+
+    data = page.get('data') or {}
+    content = page.get('content') or ''
+    group_id = page.get('group_id') or page.get('id')
+    entry = {
+        'name': data.get('name', ''),
+        'title': page.get('title') or data.get('name', ''),
+        'version': page.get('version'),
+        'updated': (page.get('modified_at') or page.get('created_at') or ''),
+        'content': content,
+        'html': render_assessment_markdown(_strip_h1(content)),
+        'group_id': group_id,
+        'versions': [],
+        'comments': [],
+    }
+    if with_versions:
+        try:
+            for v in sorted(client.list_versions(group_id) or [],
+                            key=lambda x: x.get('version', 0), reverse=True):
+                v_content = v.get('content') or ''
+                entry['versions'].append({
+                    'version': v.get('version'),
+                    'date': (v.get('created_at') or '')[:16].replace('T', ' '),
+                    'author': (v.get('data') or {}).get('author', ''),
+                    'lines': len(v_content.splitlines()),
+                    'is_current': bool(v.get('is_current')),
+                    'html': render_assessment_markdown(_strip_h1(v_content)),
+                })
+        except CorunAPIError:
+            entry['versions'] = []
+    if with_comments:
+        try:
+            for c in client.list_comments(group_id) or []:
+                entry['comments'].append({
+                    'author': ((c.get('author') or {}).get('username')
+                               if isinstance(c.get('author'), dict)
+                               else c.get('author')) or '',
+                    'date': (c.get('created_at') or '')[:16].replace('T', ' '),
+                    'content': c.get('content') or '',
+                })
+        except CorunAPIError:
+            entry['comments'] = []
+    return entry
+
+
+def _narrative_pages(client):
+    payload = client.list_pages(
+        section='epicprod.narrative',
+        artifact_type='campaign_narrative',
+        limit=100,
+    )
+    if isinstance(payload, dict):
+        return payload.get('results') or payload.get('items') or []
+    return payload or []
+
+
+def ai_narratives(request):
+    """The Campaign Narratives list (EPICPROD_NARRATIVES.md).
+
+    Collapsible read view with comments; document management (editing,
+    version history) lives on the per-document detail page. Read-open; a
+    corun-ai failure renders as an error message, never an empty page.
+    """
     from .corun_client import CorunAPIError, CorunClient, corun_configured
 
     entries, error = [], ''
@@ -81,34 +150,11 @@ def ai_narratives(request):
         error = 'corun-ai is not configured on this deployment.'
     else:
         try:
-            payload = CorunClient().list_pages(
-                section='epicprod.narrative',
-                artifact_type='campaign_narrative',
-                limit=100,
-            )
-            if isinstance(payload, dict):
-                items = payload.get('results') or payload.get('items') or []
-            else:
-                items = payload or []
-            for page in items:
-                data = page.get('data') or {}
-                content = page.get('content') or ''
-                # The entry header carries the title; drop the document's
-                # own leading H1 from the rendered body to avoid repeating
-                # it. The stored document keeps its H1 (it stands alone).
-                body = content
-                if body.lstrip().startswith('# '):
-                    body = body.lstrip().split('\n', 1)[1] if '\n' in body.lstrip() else ''
-                entries.append({
-                    'name': data.get('name', ''),
-                    'title': page.get('title') or data.get('name', ''),
-                    'status': page.get('status', ''),
-                    'updated': (page.get('modified_at')
-                                or page.get('created_at') or ''),
-                    'content': content,
-                    'html': render_assessment_markdown(body),
-                    'group_id': page.get('group_id') or page.get('id'),
-                })
+            client = CorunClient()
+            entries = [
+                _narrative_entry_from_page(p, client, with_comments=True)
+                for p in _narrative_pages(client)
+            ]
         except CorunAPIError as exc:
             error = f'corun-ai retrieval failed: {exc}'
     # General items (standing context) precede campaign-specific ones;
@@ -123,3 +169,27 @@ def ai_narratives(request):
                   {'general_entries': general_entries,
                    'campaign_entries': campaign_entries,
                    'entries': entries, 'error': error})
+
+
+def ai_narrative_detail(request, name):
+    """One narrative document: content, expert editing, the version
+    history (tjai-style, at the bottom), and comments."""
+    from django.http import Http404
+
+    from .corun_client import CorunAPIError, CorunClient, corun_configured
+
+    if not corun_configured():
+        raise Http404('corun-ai is not configured')
+    try:
+        client = CorunClient()
+        page = next((p for p in _narrative_pages(client)
+                     if (p.get('data') or {}).get('name') == name), None)
+    except CorunAPIError as exc:
+        return render(request, 'ai/narrative_detail.html',
+                      {'entry': None, 'error': f'corun-ai retrieval failed: {exc}'})
+    if page is None:
+        raise Http404(f'No narrative named {name!r}')
+    entry = _narrative_entry_from_page(page, client, with_versions=True,
+                                       with_comments=True)
+    return render(request, 'ai/narrative_detail.html',
+                  {'entry': entry, 'error': ''})

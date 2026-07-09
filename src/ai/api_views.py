@@ -92,12 +92,15 @@ class NarrativeSaveView(_AiApiView):
         try:
             client = CorunClient()
             current = client.get_page(group_id)
+            data = dict(current.get('data') or {})
+            data['author'] = request.user.username
+            data['ui_visible'] = True
             result = client.create_version(
                 group_id,
                 content=content,
                 title=current.get('title', ''),
                 status=current.get('status', 'draft'),
-                data=current.get('data') or {},
+                data=data,
                 tags=current.get('tags') or [],
             )
         except CorunAPIError as exc:
@@ -117,54 +120,37 @@ class NarrativeSaveView(_AiApiView):
                         status=status.HTTP_200_OK)
 
 
-class NarrativePublishView(_AiApiView):
+class NarrativeCommentView(_AiApiView):
     def post(self, request):
-        """Publish a draft narrative — the deliberate one-way transition.
-
-        Body: ``group_id``. Creates a new version with status 'published'
-        and corun browse visibility on; content, title, and data carry
-        over. Published revisions are immutable — corrections are new
-        revisions of the series, not edits.
-        """
+        """Post a comment on a narrative — the non-intrusive contribution
+        path beside direct editing. Body: ``group_id``, ``content``."""
         from monitor_app.epicprod_logging import log_epicprod_action
 
         from .corun_client import CorunAPIError, CorunClient
 
         group_id = (request.data.get('group_id') or '').strip()
-        if not group_id:
-            return Response({'detail': 'group_id is required'},
+        content = (request.data.get('content') or '').strip()
+        if not group_id or not content:
+            return Response({'detail': 'group_id and content are required'},
                             status=status.HTTP_400_BAD_REQUEST)
         try:
             client = CorunClient()
             current = client.get_page(group_id)
-            if current.get('status') == 'published':
-                return Response({'detail': 'already published'},
-                                status=status.HTTP_400_BAD_REQUEST)
-            data = dict(current.get('data') or {})
-            data['ui_visible'] = True
-            result = client.create_version(
-                group_id,
-                content=current.get('content') or '',
-                title=current.get('title', ''),
-                status='published',
-                data=data,
-                tags=current.get('tags') or [],
-            )
+            client.create_comment(group_id, content=content,
+                                  data={'author': request.user.username})
         except CorunAPIError as exc:
             return Response({'detail': str(exc)},
                             status=status.HTTP_502_BAD_GATEWAY)
-        name = data.get('name', current.get('title', ''))
+        name = (current.get('data') or {}).get('name', current.get('title', ''))
         log_epicprod_action(
-            'web', 'narrative_published',
+            'web', 'narrative_commented',
             subject_type='narrative',
             subject_key=name,
             username=request.user.username,
-            sublevel='high', live_default=True,
-            message=f'narrative {name} published',
-            version=result.get('version'),
+            sublevel='normal', live_default=True,
+            message=f'comment on narrative {name}',
         )
-        return Response({'version': result.get('version')},
-                        status=status.HTTP_200_OK)
+        return Response({'ok': True}, status=status.HTTP_200_OK)
 
 
 class ProposalDeleteView(_AiApiView):

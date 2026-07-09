@@ -1,28 +1,29 @@
-<details class="narrative-entry">
+<details class="narrative-entry" data-group-id="{{ e.group_id }}">
   <summary>
     <h4>{{ e.title }}</h4>
-    <span class="narrative-status-{{ e.status }}">{{ e.status }}</span>
-    <span class="text-muted">{{ e.updated|slice:":10" }}</span>
+    <span class="text-muted">v{{ e.version }} &middot; {{ e.updated|slice:":10" }}</span>
+    <a class="narr-detail-link" href="{% url 'ai:ai_narrative_detail' e.name %}">detail</a>
   </summary>
   <div class="narrative-body">
-    <div class="narrative-rendered">
-      {% if user.is_authenticated and e.status == 'draft' %}
-      <div class="mb-2">
-        <button type="button" class="btn btn-dark-green btn-sm" data-narr-edit>Edit</button>
-        <button type="button" class="btn btn-success btn-sm ms-1" data-narr-publish="{{ e.group_id }}"
-                title="Publish this draft — the one-way transition to the immutable record">Publish</button>
+    <div class="narrative-doc">{{ e.html }}</div>
+
+    <div class="narrative-comments">
+      <div class="narrative-block-head">Comments ({{ e.comments|length }})</div>
+      {% for c in e.comments %}
+      <div class="narrative-comment">
+        <div class="nc-meta">{{ c.author|default:"—" }} &middot; {{ c.date }}</div>
+        <div class="nc-body">{{ c.content }}</div>
+      </div>
+      {% empty %}
+      <div class="text-muted">No comments yet.</div>
+      {% endfor %}
+      {% if user.is_authenticated %}
+      <div class="mt-2">
+        <textarea class="form-control narrative-comment-text" rows="2"
+                  placeholder="Comment — corrections, elaborations, questions"></textarea>
+        <button type="button" class="btn btn-primary btn-sm mt-1" data-narr-comment="{{ e.group_id }}">Post</button>
       </div>
       {% endif %}
-      {{ e.html }}
     </div>
-    {% if user.is_authenticated and e.status == 'draft' %}
-    <div class="narrative-editor" style="display:none">
-      <textarea class="swf-fit-editor">{{ e.content }}</textarea>
-      <div class="mt-2">
-        <button type="button" class="btn btn-primary btn-sm" data-narr-save="{{ e.group_id }}">Save</button>
-        <button type="button" class="btn btn-secondary btn-sm ms-1" data-narr-cancel>Cancel</button>
-      </div>
-    </div>
-    {% endif %}
   </div>
 </details>

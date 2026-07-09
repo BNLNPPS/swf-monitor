@@ -108,6 +108,9 @@ class CorunClient:
             'tags': tags or [],
         })
 
+    def list_versions(self, group_id):
+        return self._request('GET', f'pages/{group_id}/versions/')
+
     def get_page(self, group_id):
         return self._request('GET', f'pages/{group_id}/')
 
