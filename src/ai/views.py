@@ -13,31 +13,99 @@ def ai_proposals(request):
     act through the same proposal-decide service as the catalog and
     compose surfaces.
     """
-    status_filter = (request.GET.get('status') or 'all').strip()
-    action_filter = (request.GET.get('action') or '').strip()
-    proposer_filter = (request.GET.get('proposer') or '').strip()
-    batch_filter = (request.GET.get('batch') or '').strip()
+    def url_with(**updates):
+        params = request.GET.copy()
+        for key, value in updates.items():
+            if value:
+                params[key] = value
+            else:
+                params.pop(key, None)
+        encoded = params.urlencode()
+        return f'{request.path}?{encoded}' if encoded else request.path
+
+    filters = {key: (request.GET.get(key) or '').strip()
+               for key in ('status', 'action', 'change', 'decision',
+                           'quality', 'proposer', 'batch')}
+    status_filter = filters['status'] or 'all'
 
     qs = Proposal.objects.all()
-    if status_filter and status_filter != 'all':
+    if status_filter != 'all':
         qs = qs.filter(status=status_filter)
-    if action_filter:
-        qs = qs.filter(action=action_filter)
-    if proposer_filter:
-        qs = qs.filter(proposer=proposer_filter)
-    if batch_filter:
-        qs = qs.filter(batch_id=batch_filter)
+    if filters['action']:
+        qs = qs.filter(action=filters['action'])
+    if filters['change'] and ':' in filters['change']:
+        prev_state, _, new_state = filters['change'].partition(':')
+        qs = qs.filter(precondition__prev_state=prev_state,
+                       payload__state=new_state)
+    if filters['decision']:
+        qs = qs.filter(decided_by=filters['decision'])
+    if filters['quality']:
+        qs = qs.filter(quality=filters['quality'])
+    if filters['proposer']:
+        qs = qs.filter(proposer=filters['proposer'])
+    if filters['batch']:
+        qs = qs.filter(batch_id=filters['batch'])
 
     total_count = qs.count()
     rows = list(qs.order_by('-created_at')[:500])
 
-    status_counts = dict(
-        Proposal.objects.values_list('status').annotate(Count('id')))
+    # Facet rows: per-dimension global counts, links preserving the other
+    # active filters; every dimension leads with All (the default).
+    everything = Proposal.objects.all()
+
+    def facet_row(title, param, pairs, label_of=str):
+        items = [{
+            'label': label_of(value), 'count': count,
+            'url': url_with(**{param: value}),
+            'active': filters[param] == value,
+        } for value, count in pairs if value]
+        return {'title': title, 'items': items,
+                'all_url': url_with(**{param: ''}),
+                'all_active': not filters[param]}
+
+    status_counts = dict(everything.values_list('status').annotate(Count('id')))
     status_order = ['proposed', 'executed', 'undone', 'denied', 'withdrawn',
                     'stale', 'approved_pending_execution']
-    status_facets = [
-        {'status': s, 'count': status_counts.get(s, 0)}
-        for s in status_order if status_counts.get(s, 0) or s == 'proposed'
+    status_row = {
+        'title': 'Status',
+        'items': [{'label': s, 'count': status_counts.get(s, 0),
+                   'url': url_with(status=s), 'active': status_filter == s}
+                  for s in status_order
+                  if status_counts.get(s, 0) or s == 'proposed'],
+        'all_url': url_with(status=''),
+        'all_active': status_filter == 'all',
+    }
+
+    action_labels = {'propagation': 'campaign propagation'}
+    facet_rows = [
+        status_row,
+        facet_row('Action', 'action',
+                  everything.values_list('action').annotate(Count('id'))
+                  .order_by('action'),
+                  lambda a: action_labels.get(a, a)),
+        facet_row('Change', 'change', [
+            (f'{prev}:{new}', count)
+            for prev, new, count in everything
+            .values_list('precondition__prev_state', 'payload__state')
+            .annotate(Count('id')).order_by()
+            if prev and new],
+            lambda v: v.replace(':', ' → ')),
+        facet_row('Decision', 'decision',
+                  everything.exclude(decided_by='')
+                  .values_list('decided_by').annotate(Count('id'))
+                  .order_by('decided_by')),
+        facet_row('Quality', 'quality',
+                  everything.exclude(quality='')
+                  .values_list('quality').annotate(Count('id'))
+                  .order_by('quality')),
+        facet_row('Proposer', 'proposer',
+                  everything.exclude(proposer='')
+                  .values_list('proposer').annotate(Count('id'))
+                  .order_by('proposer')),
+        facet_row('Batch', 'batch',
+                  everything.exclude(batch_id='')
+                  .values_list('batch_id').annotate(Count('id'))
+                  .order_by('batch_id')),
     ]
 
     proposer_stats = []
@@ -58,11 +126,7 @@ def ai_proposals(request):
         'rows': rows,
         'total_count': total_count,
         'shown_count': len(rows),
-        'status_filter': status_filter,
-        'action_filter': action_filter,
-        'proposer_filter': proposer_filter,
-        'batch_filter': batch_filter,
-        'status_facets': status_facets,
+        'facet_rows': facet_rows,
         'proposer_stats': proposer_stats,
     })
 

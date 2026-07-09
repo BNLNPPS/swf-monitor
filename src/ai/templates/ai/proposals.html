@@ -21,18 +21,17 @@
   </p>
 
   <div class="pcs-props-filter mb-2">
-    <strong>Status:</strong>
-    <a href="?status=all" class="{% if status_filter == 'all' %}active{% endif %}">All</a>
-    {% for f in status_facets %}
-      <a href="?status={{ f.status }}" class="{% if status_filter == f.status %}active{% endif %}">{{ f.status }} ({{ f.count }})</a>
-    {% endfor %}
-    {% if action_filter or proposer_filter or batch_filter %}
-      <span class="text-muted">&middot; filtered:
-        {% if action_filter %}action={{ action_filter }}{% endif %}
-        {% if proposer_filter %}proposer={{ proposer_filter }}{% endif %}
-        {% if batch_filter %}batch={{ batch_filter }}{% endif %}
-        <a href="?status={{ status_filter }}">clear</a></span>
+    {% for row in facet_rows %}
+    {% if row.items %}
+    <div class="mb-1">
+      <strong>{{ row.title }}:</strong>
+      <a href="{{ row.all_url }}" class="{% if row.all_active %}active{% endif %}">All</a>
+      {% for f in row.items %}
+      <a href="{{ f.url }}" class="{% if f.active %}active{% endif %}">{{ f.label }} ({{ f.count }})</a>
+      {% endfor %}
+    </div>
     {% endif %}
+    {% endfor %}
   </div>
 
   {% if shown_count < total_count %}
@@ -59,7 +58,7 @@
       <tr>
         {% if user.is_authenticated %}<th style="width:1.5em"><input type="checkbox" id="props-selectall" title="Select all pending"></th>{% endif %}
         <th>Ref</th><th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
-        <th>Confidence</th><th class="pcs-props-comment">Comment</th>
+        <th class="pcs-props-comment">Comment</th>
         <th>Status</th><th>Decision</th><th>Quality</th>
         <th>Proposer</th><th>Batch</th>
       </tr>
@@ -71,11 +70,12 @@
         <td class="small"><strong>{{ p.ref }}</strong></td>
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
         <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>
-        <td class="small">{{ p.precondition.prev_state|default:"" }} &rarr; {{ p.payload.state|default:"" }}{% if p.payload.replaced_by %}<div class="text-muted">replaced by {{ p.payload.replaced_by }}</div>{% endif %}</td>
+        <td class="small text-nowrap">{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}</td>
         <td class="small"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
           {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}</td>
-        <td class="small">{{ p.confidence|default:"—" }}</td>
-        <td class="small pcs-props-comment">{{ p.comment }}</td>
+        <td class="small pcs-props-comment">{{ p.comment }}
+          {% if p.payload.replaced_by %}<div class="text-muted">Replaced by: {{ p.payload.replaced_by }}</div>{% endif %}
+          {% if p.confidence %}<div class="text-muted">Confidence: {{ p.confidence }}</div>{% endif %}</td>
         <td class="small">{{ p.status }}{% if p.status == 'undone' %}<div class="text-muted">{{ p.undone_by }} {{ p.undone_at|date:"m-d H:i" }}</div>{% endif %}</td>
         <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% else %}—{% endif %}</td>
         <td class="small">{{ p.quality|default:"—" }}</td>
@@ -83,7 +83,7 @@
         <td class="small">{{ p.batch_id|default:"—" }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="13" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
+      <tr><td colspan="12" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>
