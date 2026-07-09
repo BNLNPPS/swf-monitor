@@ -109,3 +109,9 @@ the editor grows to the visible window.
 
 `sudo bash deploy-swf-monitor.sh branch <current infra/baseline-vNN>` — pulls from
 git, so commit + push first. Run it in the foreground.
+
+For UI/template/view-only or MCP-tool-only changes, prefer the fast in-place
+sync: `sudo ./deploy-lightweight-ui-mcp.sh --ui` and/or `--mcp` (add
+`--static` when assets changed). Use the full deploy whenever migrations,
+requirements, Apache config, systemd units, ops-agent code, or bot code are
+involved. Commit first either way.
