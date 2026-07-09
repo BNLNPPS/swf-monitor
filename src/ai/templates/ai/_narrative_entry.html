@@ -8,7 +8,7 @@
     <div class="narrative-rendered">
       {% if user.is_authenticated %}
       <div class="mb-2">
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-narr-edit>Edit</button>
+        <button type="button" class="btn btn-dark-green btn-sm" data-narr-edit>Edit</button>
       </div>
       {% endif %}
       {{ e.html }}
@@ -17,8 +17,8 @@
     <div class="narrative-editor" style="display:none">
       <textarea>{{ e.content }}</textarea>
       <div class="mt-2">
-        <button type="button" class="btn btn-sm btn-primary" data-narr-save="{{ e.group_id }}">Save</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary ms-1" data-narr-cancel>Cancel</button>
+        <button type="button" class="btn btn-dark-green btn-sm" data-narr-save="{{ e.group_id }}">Save</button>
+        <button type="button" class="btn btn-secondary btn-sm ms-1" data-narr-cancel>Cancel</button>
       </div>
     </div>
     {% endif %}
