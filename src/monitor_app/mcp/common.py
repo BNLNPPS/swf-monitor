@@ -251,6 +251,16 @@ def get_available_tools_list() -> list:
             "parameters": ["ids", "corun_page_group_ids"],
         },
         {
+            "name": "ai_list_proposals",
+            "description": "List AI proposals awaiting human decision (default) or by status. Show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12).",
+            "parameters": ["status", "limit"],
+        },
+        {
+            "name": "ai_decide_proposal",
+            "description": "Relay one human's approve/deny on one AI proposal by ref. Only after an explicit human instruction naming the ref; username is the deciding human, who must be on the SysConfig approver list.",
+            "parameters": ["ref", "decision", "username", "quality"],
+        },
+        {
             "name": "epicprod_list_actions",
             "description": "Query the epicprod action stream: structured records of production actions (sweeps, submissions, assessments) with who/what/outcome/duration. summarize=True gives counts and duration stats — prefer it for reporting.",
             "parameters": ["action", "instance", "subject_type", "subject_key", "username", "outcome", "start_time", "end_time", "summarize", "limit", "offset"],

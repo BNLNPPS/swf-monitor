@@ -58,7 +58,7 @@
     <thead>
       <tr>
         {% if user.is_authenticated %}<th style="width:1.5em"><input type="checkbox" id="props-selectall" title="Select all pending"></th>{% endif %}
-        <th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
+        <th>Ref</th><th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
         <th>Confidence</th><th class="pcs-props-comment">Comment</th>
         <th>Status</th><th>Decision</th><th>Quality</th>
         <th>Proposer</th><th>Batch</th>
@@ -68,6 +68,7 @@
       {% for p in rows %}
       <tr>
         {% if user.is_authenticated %}<td><input type="checkbox" class="props-cb" value="{{ p.id }}"></td>{% endif %}
+        <td class="small"><strong>{{ p.ref }}</strong></td>
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
         <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>
         <td class="small">{{ p.precondition.prev_state|default:"" }} &rarr; {{ p.payload.state|default:"" }}{% if p.payload.replaced_by %}<div class="text-muted">replaced by {{ p.payload.replaced_by }}</div>{% endif %}</td>
@@ -82,7 +83,7 @@
         <td class="small">{{ p.batch_id|default:"—" }}</td>
       </tr>
       {% empty %}
-      <tr><td colspan="12" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
+      <tr><td colspan="13" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>

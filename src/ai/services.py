@@ -19,7 +19,32 @@ from pcs.services import (
     PROPAGATION_STATES, ServiceError, dataset_propagation_set,
 )
 
-from .models import Proposal
+from .models import ACTION_REF_PREFIXES, Proposal
+
+
+def parse_proposal_ref(ref):
+    """Resolve a proposal ref ('cp-123') to its Proposal row.
+
+    The prefix is corroboration, not decoration: it must match the row's
+    category, so a garbled or mis-relayed reference is refused loudly
+    instead of deciding the wrong proposal. Raises ServiceError on any
+    mismatch; the message names the actual row when one exists.
+    """
+    text = (ref or '').strip().lower()
+    prefix, sep, num = text.partition('-')
+    known = set(ACTION_REF_PREFIXES.values())
+    if not sep or not num.isdigit() or prefix not in known:
+        raise ServiceError(
+            f'unrecognized proposal ref {ref!r} — expected '
+            f'<prefix>-<number> with prefix in {sorted(known)}')
+    row = Proposal.objects.filter(pk=int(num)).first()
+    if row is None:
+        raise ServiceError(f'no proposal {text} exists')
+    if row.ref != text:
+        raise ServiceError(
+            f'ref {text} does not match proposal #{row.pk}, which is a '
+            f'{row.action} proposal with ref {row.ref} — refusing')
+    return row
 
 
 def _proposal_input_hash(payload, comment):

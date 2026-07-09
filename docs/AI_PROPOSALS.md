@@ -60,6 +60,14 @@ production mutations originate with AI. Operators can delete list rows
 (test or noise entries), logged with counts — a cleanup verb, never a
 decision verb.
 
+Every proposal has a **ref** — its category prefix plus row id (`cp-123`
+for campaign propagation) — the one identifier humans use across surfaces:
+the web list's Ref column, the bot listing, and decide instructions. The
+prefix doubles as corroboration: a decide call whose prefix mismatches the
+row's category is refused, never reinterpreted, so a garbled or mis-relayed
+reference cannot decide the wrong proposal. Prefixes are declared per
+category in `ACTION_REF_PREFIXES` (`ai/models.py`).
+
 Records a proposal targets carry a **render projection** in their metadata
 (`Dataset.metadata['proposal']`), written and cleared in the same
 transactions by the same services — so the catalog badges, filters, and
@@ -85,8 +93,9 @@ propagation pilot is the worked example of each item.
    the precondition, computes the input hash, honors denial memory, and
    writes the Proposal rows and the render projection.
 4. **Decide dispatch.** The action's revalidation rule and executor call
-   registered in the decide path. (The pilot hard-wires `proposal_decide`
-   to the propagation action; the second category generalizes this into a
+   registered in the decide path, and the category's ref prefix declared
+   in `ACTION_REF_PREFIXES`. (The pilot hard-wires `proposal_decide` to
+   the propagation action; the second category generalizes this into a
    per-action registry.)
 5. **Comment template.** Defined per action: code fills the facts, the
    model fills only the judgment fragment — or nothing.
@@ -129,6 +138,13 @@ whoever drafted them.
   AI assessments): the pending queue and the decision history, filterable by
   status, action, proposer, and batch, with bulk decide and per-proposer
   track records.
+- **The bot surface** (MCP: `ai_list_proposals`, `ai_decide_proposal`): one
+  flat list over every category — refs plus server-rendered description
+  lines the bot shows verbatim — and a decide relay carrying the human's
+  ref, verdict, and identity. The relaying LLM contributes no
+  interpretation; deciders must be on the SysConfig approver list
+  (`ai_proposal_mcp_approvers`, default empty), and the executed event's
+  filter field records the relaying surface (`mcp:<ref>`).
 
 A decision optionally carries a **quality tag** from the shared review
 vocabulary (`wrong | poor | ok | good` — the same scale as AI assessments).

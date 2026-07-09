@@ -94,11 +94,12 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
+| AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
 | Action Stream | `epicprod_list_actions` | 1 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **57** |
+| **Total** | | **59** |
 
 ## Implementation Files
 
@@ -111,6 +112,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | `src/monitor_app/mcp/workflows.py` | Workflow, message, run, STF, TF-slice, and log tools. |
 | `src/monitor_app/mcp/ai_memory.py` | AI memory tools. |
 | `src/monitor_app/mcp/ai_content.py` | epicprod AI-assessment tools. |
+| `src/monitor_app/mcp/ai_proposals.py` | AI proposal listing and human-decision relay (the bot review flow). |
 | `src/monitor_app/mcp/pandamon.py` | PanDA production monitoring tools. |
 | `src/monitor_app/auth0.py` | JWT validation with Auth0 JWKS. |
 | `src/monitor_app/middleware.py` | OAuth-related MCP authentication middleware. |

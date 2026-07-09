@@ -8,6 +8,14 @@ reviews, and dispatches to them.
 """
 from django.db import models
 
+# Per-category ref prefix behind the short human-referencable proposal
+# identifier ('cp-123'), used identically on the web list and the bot/MCP
+# surface. Every proposal category declares its prefix here
+# (AI_PROPOSALS.md, "Adding a proposal category").
+ACTION_REF_PREFIXES = {
+    'propagation': 'cp',  # campaign propagation
+}
+
 
 class Proposal(models.Model):
     """AI (or rule-based) proposal of a concrete action, pending or decided —
@@ -77,6 +85,13 @@ class Proposal(models.Model):
         indexes = [
             models.Index(fields=['action', 'subject_key', 'status']),
         ]
+
+    @property
+    def ref(self):
+        """The short reference humans use across surfaces, e.g. 'cp-123':
+        category prefix + row id. The prefix doubles as corroboration — a
+        decide call whose prefix mismatches the row's category is refused."""
+        return f"{ACTION_REF_PREFIXES.get(self.action, 'ap')}-{self.pk}"
 
     def __str__(self):
         return f'{self.action} {self.subject_key} [{self.status}]'

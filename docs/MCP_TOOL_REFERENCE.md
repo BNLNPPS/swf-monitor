@@ -450,6 +450,19 @@ This tool aggregates information from workflow messages and logs, providing a si
 
 ---
 
+### AI Proposals
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `ai_list_proposals` | `status`, `limit` | List AI proposals awaiting human decision (default `status='proposed'`), or by terminal status / `all` for history. Returns preformatted `display` text — one line per proposal, each starting with its ref (e.g. `cp-12`) — to show the human verbatim, plus structured items. See [AI_PROPOSALS.md](AI_PROPOSALS.md). |
+| `ai_decide_proposal` | `ref`, `decision`, `username`, `quality` | Relay one human's approve/deny on one proposal by ref. Approval executes the frozen payload through the deterministic service path; the calling LLM transmits the human's verdict and nothing more. `username` is the deciding human, who must be on the SysConfig approver list (`ai_proposal_mcp_approvers`, default empty). A ref whose prefix mismatches the row's category is refused, never reinterpreted. |
+
+The bot flow: list, show `display` verbatim, and relay only explicit human
+instructions naming a ref ('approve cp-12'). On any refusal, report the error
+verbatim and re-list.
+
+---
+
 ### PanDA Production Monitoring
 
 Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
@@ -580,10 +593,12 @@ Use cases:
 | Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
+| AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| Action Stream | `epicprod_list_actions` | 1 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **56** |
+| **Total** | | **59** |
 
 ---
 
