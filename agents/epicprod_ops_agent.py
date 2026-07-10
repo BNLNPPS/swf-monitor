@@ -859,6 +859,7 @@ class EpicProdOpsAgent(BaseAgent):
             ('rucio_snapshot_update', self._do_rucio_snapshot_update),
             ('rucio_arrivals_sweep', self._do_rucio_arrivals_sweep),
             ('evgen_rucio_update', self._do_evgen_rucio_update),
+            ('dataset_definitions_sweep', self._do_dataset_definitions_sweep),
             ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
@@ -923,6 +924,47 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
                              level=logging.ERROR, days_left=days)
+
+    def _do_dataset_definitions_sweep(self, m):
+        """Assimilate the simulation_campaign_datasets definitions
+        (catalog_sync chain step): inventory, CI cost model, background
+        configs, and the defined/requested/registered completeness
+        populations. Runs after the EVGEN Rucio assimilation, whose
+        snapshot it matches against."""
+        t0 = time.monotonic()
+        cmd = [sys.executable, '-m', 'pcs.definitions_sweep', '--apply',
+               '--created-by', str(m.get('created_by') or 'prodops_agent')]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=900)
+        except subprocess.TimeoutExpired:
+            self._log_action('dataset_definitions_sweep', t0,
+                             outcome='timeout',
+                             reason='timed out after 900s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            pass
+        counts = {k: summary.get(k) for k in
+                  ('definitions', 'with_cost', 'cost_absent',
+                   'datasets_matched', 'applied')}
+        counts['sweep_errors'] = len(summary.get('errors') or [])
+        counts.update(summary.get('populations') or {})
+        if p.returncode != 0:
+            self._log_action('dataset_definitions_sweep', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, **counts)
+        else:
+            self._log_action('dataset_definitions_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             **counts)
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
