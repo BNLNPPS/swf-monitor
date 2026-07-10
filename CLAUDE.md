@@ -59,7 +59,8 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - `EPICPROD_ASSESSMENTS.md` — scheduled nightly/weekly campaign assessments: corun-ai as assessor, campaign analytics library, deterministic artifact schema, harness lifecycle (design).
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
-- `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
+- `EPICPROD_TASK_CATALOG.md` — the production task catalog.
+- PCS docs (`PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `PCS_BACKGROUND_TAG.md`) have moved to `swf-epicprod/docs/`, with the `pcs` application itself — stubs remain at the old paths.
 - `CAMPAIGN_CONTINUUM.md` — one curated catalog for every campaign; lifecycle as phase attribute; requests over families; instancing design.
 - `EPICPROD_NARRATIVES.md` — campaign narrative documents: classes, naming, draft→locked lifecycle, corun-ai home.
 - `AI_PROPOSALS.md` — AI proposals: LLM proposes, human approves, deterministic execution; record-resident v1, origin-stamped events, the `.ai-attr` UI convention.

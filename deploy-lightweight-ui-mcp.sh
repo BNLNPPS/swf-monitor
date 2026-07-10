@@ -157,8 +157,21 @@ log "Active target: $CURRENT_DIR"
 log "Syncing monitor_app lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${MONITOR_EXCLUDES[@]}" "$SRC_DIR/monitor_app/" "$TARGET_SRC/monitor_app/"
 
-log "Syncing pcs lightweight paths..."
-rsync "${RSYNC_ARGS[@]}" "${PCS_EXCLUDES[@]}" "$SRC_DIR/pcs/" "$TARGET_SRC/pcs/"
+# pcs ships from swf-epicprod as an installed package; lightweight-sync the
+# swf-epicprod dev tree onto the deployed venv's installed copy (migrations
+# and management commands still ride the full deploy only).
+EPICPROD_ROOT="/data/wenauseic/github/swf-epicprod"
+TARGET_PCS=$("$CURRENT_DIR/.venv/bin/python" -c "import pcs, os; print(os.path.dirname(pcs.__file__))")
+case "$TARGET_PCS" in
+    "$CURRENT_DIR"/.venv/*) ;;
+    *)
+        echo "ERROR: deployed pcs resolves outside the deployed venv: $TARGET_PCS" >&2
+        echo "Run the full deploy to freeze swf-epicprod, then retry." >&2
+        exit 1
+        ;;
+esac
+log "Syncing pcs lightweight paths (swf-epicprod -> deployed venv)..."
+rsync "${RSYNC_ARGS[@]}" "${PCS_EXCLUDES[@]}" "$EPICPROD_ROOT/pcs/" "$TARGET_PCS/"
 
 log "Syncing ai lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/ai/" "$TARGET_SRC/ai/"

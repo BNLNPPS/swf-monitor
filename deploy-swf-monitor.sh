@@ -130,6 +130,9 @@ source .venv/bin/activate
 if .venv/bin/python -m pip show swf-epicprod >/dev/null 2>&1; then
     log "Freezing swf-epicprod into the deployed venv (non-editable)..."
     .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/swf-epicprod
+    # The root-run build drops a root-owned build/ into the dev tree, which
+    # breaks later developer builds — remove it.
+    rm -rf /data/wenauseic/github/swf-epicprod/build
 fi
 
 # Verify production environment file exists
