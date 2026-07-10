@@ -170,6 +170,19 @@ def _requestor_options():
     return options
 
 
+def _generator_display_case():
+    """Map lowercased generator identities to the proper-case spelling
+    recorded on evgen tags ('beagle' -> 'BeAGLE'). Physics-configuration
+    keys lowercase the generator for stable comparison
+    (pcs/physics_config.py); displays map back through this."""
+    return {
+        str(g).lower(): str(g)
+        for g in EvgenTag.objects.values_list('parameters__generator',
+                                              flat=True)
+        if g
+    }
+
+
 def _parse_catalog_filters(request):
     """Parse catalog filter query params into a dict of clean values."""
     return {
@@ -2242,14 +2255,15 @@ def pcs_physics_configs(request):
     q = (request.GET.get('q') or '').strip().lower()
     produced_in = (request.GET.get('produced') or '').strip()
 
+    gen_case = _generator_display_case()
     rows = []
     for key, group in groups.items():
         head, detail = group['editions'][0]
         params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
         evgen = detail['evgen']
-        generator = evgen[0] if evgen else ''
+        generator = gen_case.get(evgen[0], evgen[0]) if evgen else ''
         species = params.get('beam_species', '')
-        gen_display = ((' '.join(part for part in evgen[:2] if part)
+        gen_display = ((' '.join(part for part in (generator, evgen[1]) if part)
                         + (f' {species}' if species else '')
                         + (' noRad' if evgen[2] == 'off' else '')
                         + (' Rad' if evgen[2] == 'on' else ''))
@@ -2428,6 +2442,7 @@ def pcs_request_composer(request):
         .annotate(files=Sum('file_count'))
     }
     configs = []
+    gen_case = _generator_display_case()
     for key, group in groups.items():
         head, detail = group['editions'][0]
         params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
@@ -2441,7 +2456,7 @@ def pcs_request_composer(request):
             'beam': f'{be}x{bh}' if be and bh else (be or bh),
             'species': params.get('beam_species', ''),
             'q2': params.get('q2_range', ''),
-            'generator': (evgen[0] if evgen else ''),
+            'generator': (gen_case.get(evgen[0], evgen[0]) if evgen else ''),
             'gen_version': (evgen[1] if evgen else ''),
             'sample': detail['sample'],
             'physics': head.physics_tag.tag_label if head.physics_tag else '',
@@ -2546,6 +2561,7 @@ def pcs_edition_data(request, name):
 
     params = (anchor.physics_tag.parameters or {}) if anchor.physics_tag else {}
     evgen = anchor_detail['evgen']
+    gen_case = _generator_display_case()
     be = str(params.get('beam_energy_electron', '') or '')
     bh = str(params.get('beam_energy_hadron', '') or '')
     be = '' if be.upper() == 'N/A' else be
@@ -2555,7 +2571,8 @@ def pcs_edition_data(request, name):
         f'{be}x{bh}' if be and bh else (be or bh),
         params.get('beam_species', ''),
         params.get('q2_range', ''),
-        ' '.join(part for part in evgen[:2] if part) if evgen else '',
+        (' '.join(part for part in (gen_case.get(evgen[0], evgen[0]),
+                                    evgen[1]) if part) if evgen else ''),
         anchor_detail['sample'],
         anchor.physics_tag.tag_label if anchor.physics_tag else '',
     ]
