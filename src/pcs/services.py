@@ -2189,7 +2189,7 @@ def _parse_past_index(text):
 
 
 _PAST_BEAM_RE = _re.compile(r'(\d+x\d+)')
-_PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:to\d+)?)')
+_PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:(?:to|_)\d+)?)')
 _PAST_PHYS_TOP = ('DIS', 'SIDIS', 'DDIS', 'EXCLUSIVE', 'SINGLE', 'BACKGROUNDS')
 
 
@@ -2846,7 +2846,7 @@ def _index_snapshot_by_tail(snapshot):
 
 
 _Q2_MIN_RE   = _re.compile(r'^minQ2=([\d.]+)$', _re.I)
-_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)to([\d.]+)$', _re.I)
+_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)(?:to|_)([\d.]+)$', _re.I)
 _Q2_POINT_RE = _re.compile(r'^q2_([\d.]+)$', _re.I)
 
 
@@ -2855,6 +2855,7 @@ def _q2_range(s):
 
     'minQ2=1'    -> (1, inf)
     'q2_1to10'   -> (1, 10)
+    'q2_20_35'   -> (20, 35)   (the underscore spelling, as in DEMP paths)
     'q2_20'      -> (20, 20)
     anything else / empty -> None
     """
