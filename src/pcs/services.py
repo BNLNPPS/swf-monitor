@@ -2020,8 +2020,8 @@ def prodrequest_compose(*, created_by, pwg='', dsc='', description='',
     an imported one. Production-team triage fields are left for the
     production team.
     """
-    pwg = (pwg or '').strip().upper()
-    dsc = (dsc or '').strip().upper()
+    pwg = (pwg or '').strip()
+    dsc = (dsc or '').strip()
     requestor = pwg or dsc
     contact_name = (contact_name or '').strip()
     contact_email = (contact_email or '').strip()

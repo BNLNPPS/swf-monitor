@@ -101,21 +101,31 @@
             <input id="rc-nevents" class="form-control" placeholder="10M or 10000000">
             <div class="form-text">Rough is fine; "M" for millions works.</div>
           </div>
-          <div class="col-md-2">
+          <div class="col-md-3">
             <label for="rc-pwg">PWG <span class="text-muted">(optional)</span></label>
-            <input id="rc-pwg" class="form-control" list="rc-pwg-opts" value="{{ default_pwg }}">
-            <datalist id="rc-pwg-opts">{% for o in pwg_options %}<option value="{{ o }}">{% endfor %}</datalist>
+            <select id="rc-pwg" class="form-select">
+              <option value=""></option>
+              {% for o in pwg_options %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+              <option value="__other__">Other…</option>
+            </select>
+            <input id="rc-pwg-other" class="form-control mt-1 d-none" placeholder="working group name">
           </div>
-          <div class="col-md-2">
+          <div class="col-md-3">
             <label for="rc-dsc">DSC <span class="text-muted">(optional)</span></label>
-            <input id="rc-dsc" class="form-control" list="rc-dsc-opts" value="{{ default_dsc }}">
-            <datalist id="rc-dsc-opts">{% for o in dsc_options %}<option value="{{ o }}">{% endfor %}</datalist>
+            <select id="rc-dsc" class="form-select">
+              <option value=""></option>
+              {% for group, opts in dsc_option_groups %}<optgroup label="{{ group }}">
+                {% for o in opts %}<option value="{{ o }}">{{ o }}</option>{% endfor %}
+              </optgroup>{% endfor %}
+              <option value="__other__">Other…</option>
+            </select>
+            <input id="rc-dsc-other" class="form-control mt-1 d-none" placeholder="subsystem name">
           </div>
-          <div class="col-md-4">
+          <div class="col-md-3">
             <label for="rc-contact-name">Your name</label>
             <input id="rc-contact-name" class="form-control" value="{{ default_contact_name }}" required>
           </div>
-          <div class="col-md-4">
+          <div class="col-md-3">
             <label for="rc-contact-email">Email</label>
             <input id="rc-contact-email" class="form-control" type="email" value="{{ default_contact_email }}" placeholder="physicist@epic.org" required>
           </div>
@@ -188,6 +198,25 @@
     return String(s).replace(/[&<>"']/g, c => (
       {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
+
+  function wireCombo(selectId, otherId, initial) {
+    const sel = el(selectId), other = el(otherId);
+    const sync = () => other.classList.toggle('d-none', sel.value !== '__other__');
+    sel.addEventListener('change', sync);
+    if (initial) {
+      if ([...sel.options].some(o => o.value === initial)) sel.value = initial;
+      else { sel.value = '__other__'; other.value = initial; }
+    }
+    sync();
+  }
+
+  function comboValue(selectId, otherId) {
+    const sel = el(selectId);
+    return sel.value === '__other__' ? el(otherId).value.trim() : sel.value;
+  }
+
+  wireCombo('rc-pwg', 'rc-pwg-other', '{{ default_pwg|escapejs }}');
+  wireCombo('rc-dsc', 'rc-dsc-other', '{{ default_dsc|escapejs }}');
 
   function currentAxes() {
     return {
@@ -299,8 +328,8 @@
       return;
     }
     const body = {
-      pwg: el('rc-pwg').value.trim(),
-      dsc: el('rc-dsc').value.trim(),
+      pwg: comboValue('rc-pwg', 'rc-pwg-other'),
+      dsc: comboValue('rc-dsc', 'rc-dsc-other'),
       contact_name: el('rc-contact-name').value.trim(),
       contact_email: el('rc-contact-email').value.trim(),
       description: el('rc-description').value.trim(),

@@ -73,12 +73,51 @@ def _prod_config_scout_mode_pref(username):
 CATALOG_TASK_LIST_CACHE_VERSION = 4
 CATALOG_BUILD_TIMING_ENABLED = False
 
+# The official ePIC physics working groups
+# (https://www.epic-eic.org/physics/pwgs.html): the name, with the
+# common acronym in parentheses where one exists. The option string is
+# also the stored requestor value.
+PWG_OPTIONS = (
+    'Inclusive',
+    'Semi-Inclusive',
+    'Exclusive, Diffraction and Tagging (EDT)',
+    'Jets and Heavy Flavour',
+    'Beyond Standard Model and Electroweak (BSM & EW)',
+)
+
+# The official ePIC detector subsystem collaborations
+# (https://www.epic-eic.org/detector/dsc.html), grouped for the request
+# composer pulldown.
+DSC_OPTION_GROUPS = (
+    ('Particle Identification', (
+        'dRICH',
+        'hpDIRC',
+        'Backwards RICH (pfRICH)',
+    )),
+    ('Tracking & Timing', (
+        'Si Trackers (SVT)',
+        'Gaseous Trackers (MPGD)',
+        'AC-LGAD TOF',
+    )),
+    ('Calorimetry', (
+        'Backwards ECAL (BECAL)',
+        'Backwards HCAL (BHCAL)',
+        'Barrel ECAL',
+        'Barrel HCAL',
+        'Forward ECAL',
+        'Forward HCAL',
+    )),
+    ('Auxiliary & Beamline', (
+        'Far-Forward (FF)',
+        'Luminosity (Lumi)',
+        'Far Backward High Rate Tracker (FB-HRT)',
+    )),
+)
+DSC_OPTIONS = tuple(o for _, opts in DSC_OPTION_GROUPS for o in opts)
+
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
-REQUESTOR_SEED_OPTIONS = (
-    'DIS', 'SIDIS', 'EXCLUSIVE', 'JET', 'HF', 'EW', 'BSM',
-    'TRACKING-DSC', 'CALORIMETRY-DSC', 'PID-DSC',
-)
+REQUESTOR_SEED_OPTIONS = PWG_OPTIONS + DSC_OPTIONS
 
 
 def _timing_ms(seconds):
@@ -2433,9 +2472,6 @@ def pcs_request_composer(request):
                 'filters': filters,
                 'anchor': (row.data or {}).get('physics_config_anchor', ''),
             })
-    requestors = _requestor_options()
-    dsc_options = [r for r in requestors if 'DSC' in r.upper()]
-    pwg_options = [r for r in requestors if 'DSC' not in r.upper()]
     default_pwg = prefs.get('composer_pwg', '')
     default_dsc = prefs.get('composer_dsc', '')
     full_name = ''
@@ -2453,8 +2489,8 @@ def pcs_request_composer(request):
         'q2_options': _options('q2'),
         'generator_options': _options('generator'),
         'sample_options': _options('sample'),
-        'pwg_options': pwg_options,
-        'dsc_options': dsc_options,
+        'pwg_options': PWG_OPTIONS,
+        'dsc_option_groups': DSC_OPTION_GROUPS,
         'default_pwg': default_pwg,
         'default_dsc': default_dsc,
         'my_requests': my_requests,
