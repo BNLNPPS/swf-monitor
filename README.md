@@ -1,11 +1,12 @@
 # swf-monitor
 
-**The common monitor, web, and database services of the ePIC Workflow Management System (WFMS) platform.**
+**The common monitor, web, and database services of the swf platform.**
 
-swf-monitor serves every WFMS workflow domain — the streaming workflow testbed and the epicprod production
+swf-monitor serves every workflow domain of the swf platform — the streaming workflow testbed and the epicprod production
 system today — with browser pages, REST APIs, MCP tools, and the database-backed state beneath them. Production
 applications ship from the [swf-epicprod](https://github.com/BNLNPPS/swf-epicprod) repository and run installed
-within this application's runtime. The official system-level documentation is at
+within this application's runtime. The swf platform implements the ePIC Workflow Management System
+(WFMS); the official system-level documentation is at
 <https://epic-wfms-docs.readthedocs.io>; this repository's `docs/` carry the platform implementation detail
 beneath it, and `swf-epicprod/docs/` carry the production-domain documentation.
 
