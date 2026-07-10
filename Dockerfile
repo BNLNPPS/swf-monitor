@@ -37,6 +37,14 @@ RUN pip install --no-cache-dir django-mcp-server django-oauth-toolkit uvicorn
 COPY . /build/swf-monitor
 RUN pip install --no-cache-dir -e /build/swf-monitor
 
+# Clone and install swf-epicprod (production applications installed into the
+# monitor runtime; provides the pcs package in INSTALLED_APPS). Same
+# self-contained pattern as swf-common-lib above.
+ARG SWF_EPICPROD_REF=main
+RUN git clone --depth 1 --branch "${SWF_EPICPROD_REF}" \
+        https://github.com/BNLNPPS/swf-epicprod.git /build/swf-epicprod \
+    && pip install --no-cache-dir /build/swf-epicprod
+
 # Collect static files.  We set only the variables that settings.py requires at
 # import time; the real values come from the environment at runtime.
 RUN SECRET_KEY="build-placeholder" \
