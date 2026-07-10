@@ -268,7 +268,7 @@ Designed-for extensions, reserved now, built when their consumer arrives:
 ## Related
 
 - [PCS.md](PCS.md) — the propagation disposition model the pilot proposes on.
-- [EPICPROD_ACTION_STREAM.md](EPICPROD_ACTION_STREAM.md) — the event record.
+- [ACTION_STREAM.md](ACTION_STREAM.md) — the event record.
 - [EPICPROD_NARRATIVES.md](EPICPROD_NARRATIVES.md) — the context proposers
   reason against.
 - [EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md) — the review surface.
