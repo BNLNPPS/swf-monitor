@@ -2478,8 +2478,13 @@ def pcs_request_composer(request):
     if username:
         full_name = (request.user.get_full_name() or '').strip()
     default_contact_name = prefs.get('composer_contact_name', '') or full_name
+    user_email = (getattr(request.user, 'email', '') or '')
+    if user_email.lower().rpartition('@')[2] in ('example.com', 'example.org'):
+        # Synthetic placeholder from an old account-creation flow —
+        # never offer it as real contact data.
+        user_email = ''
     default_contact_email = (prefs.get('composer_contact_email', '')
-                             or (getattr(request.user, 'email', '') or ''))
+                             or user_email)
 
     return render(request, 'pcs/request_composer.html', {
         'configs_json': json.dumps(configs),

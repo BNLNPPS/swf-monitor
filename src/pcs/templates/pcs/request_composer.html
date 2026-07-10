@@ -5,6 +5,8 @@
 {% block content %}
 <style>
 .pcs-rc-form label { font-weight: 600; margin-bottom: .15rem; }
+.pcs-rc-form select option { color: #212529; background: #fff; }
+.pcs-rc-form select optgroup { color: #212529; background: #fff; font-style: normal; font-weight: 700; }
 .pcs-rc-form .form-text { color: #6c757d; }
 .pcs-rc-match-card { border: 1px solid #d0d7de; border-radius: .4rem; padding: .6rem .8rem; margin-bottom: .5rem; }
 .pcs-rc-match-card .pcs-rc-produced { color: #1e7e34; }
@@ -101,7 +103,7 @@
             <input id="rc-nevents" class="form-control" placeholder="10M or 10000000">
             <div class="form-text">Rough is fine; "M" for millions works.</div>
           </div>
-          <div class="col-md-3">
+          <div class="col-12">
             <label for="rc-pwg">PWG <span class="text-muted">(optional)</span></label>
             <select id="rc-pwg" class="form-select">
               <option value=""></option>
@@ -110,7 +112,7 @@
             </select>
             <input id="rc-pwg-other" class="form-control mt-1 d-none" placeholder="working group name">
           </div>
-          <div class="col-md-3">
+          <div class="col-12">
             <label for="rc-dsc">DSC <span class="text-muted">(optional)</span></label>
             <select id="rc-dsc" class="form-select">
               <option value=""></option>
@@ -121,11 +123,11 @@
             </select>
             <input id="rc-dsc-other" class="form-control mt-1 d-none" placeholder="subsystem name">
           </div>
-          <div class="col-md-3">
+          <div class="col-12">
             <label for="rc-contact-name">Your name</label>
             <input id="rc-contact-name" class="form-control" value="{{ default_contact_name }}" required>
           </div>
-          <div class="col-md-3">
+          <div class="col-12">
             <label for="rc-contact-email">Email</label>
             <input id="rc-contact-email" class="form-control" type="email" value="{{ default_contact_email }}" placeholder="physicist@epic.org" required>
           </div>
