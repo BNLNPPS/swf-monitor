@@ -850,6 +850,7 @@ class EpicProdOpsAgent(BaseAgent):
         created_by = str(m.get('created_by') or 'catalog_sync')
         t0 = time.monotonic()
         steps = [
+            ('credential_expiry_check', self._do_credential_expiry_check),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -877,6 +878,51 @@ class EpicProdOpsAgent(BaseAgent):
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
             steps=len(steps), raised=failed)
+
+    def _do_credential_expiry_check(self, m):
+        """Nightly credential-expiry check (catalog_sync chain step): runs
+        the swf_epicprod checker over the PanDA OIDC token and the two x509
+        proxies. A credential inside the warning window, expired, missing,
+        or unverifiable raises the record to the live stream — automation
+        that dies with a credential must not die silently."""
+        t0 = time.monotonic()
+        cmd = [sys.executable, '-m', 'swf_epicprod.credential_check']
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            self._log_action('credential_expiry_check', t0, outcome='timeout',
+                             reason='timed out after 60s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            pass
+        creds = summary.get('credentials', [])
+        days = {c['credential']: c.get('days_left') for c in creds}
+        reason = '; '.join(
+            f"{c['credential']}: {c['status']}"
+            + (f" ({c['days_left']}d left)" if 'days_left' in c else '')
+            for c in creds if c.get('status') != 'ok')
+        if p.returncode == 0:
+            self._log_action('credential_expiry_check', t0,
+                             username=str(m.get('created_by') or ''),
+                             days_left=days)
+        elif p.returncode == 3:
+            self._log_action('credential_expiry_check', t0, outcome='warning',
+                             reason=reason or 'credential inside warning window',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.WARNING, days_left=days)
+        else:
+            self._log_action('credential_expiry_check', t0, outcome='error',
+                             reason=reason or self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, days_left=days)
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
