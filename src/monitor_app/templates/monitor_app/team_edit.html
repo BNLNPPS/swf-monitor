@@ -230,7 +230,7 @@
                     '<td class="vts">' + new Date(lo.ts).toISOString().replace('T',' ').slice(0,19) + '</td>' +
                     '<td class="vwho">autosave (browser)</td>' +
                     '<td>' + esc((lo.content || '').slice(0,120)) + '</td>' +
-                    '<td><button class="btn btn-sm btn-outline-warning" onclick="swfTeamRestoreLocal()">Restore</button></td></tr>';
+                    '<td><button class="btn btn-sm btn-warning" onclick="swfTeamRestoreLocal()">Restore</button></td></tr>';
         } catch (e) {}
     }
     for (var i = 0; i < versions.length; i++) {
@@ -239,7 +239,7 @@
                 '<td class="vts">' + fmtTs(v.timestamp) + '</td>' +
                 '<td class="vwho">' + esc(v.changed_by || '') + '</td>' +
                 '<td>' + esc((v.preview || '').slice(0,120)) + '</td>' +
-                '<td><button class="btn btn-sm btn-outline-secondary" onclick="swfTeamRestoreVersion(' + v.version_num + ')">Load</button></td></tr>';
+                '<td><button class="btn btn-sm btn-secondary" onclick="swfTeamRestoreVersion(' + v.version_num + ')">Load</button></td></tr>';
     }
     html += '</tbody></table>';
     root.innerHTML = html;

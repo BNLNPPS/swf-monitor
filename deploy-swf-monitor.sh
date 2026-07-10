@@ -156,12 +156,16 @@ log "  .env source: $DEPLOY_ROOT/config/env/production.env (edit this file for c
 # Shared caches — writable by both httpd (WSGI) and service users
 mkdir -p "$DEPLOY_ROOT/shared/hf_cache"
 chmod 777 "$DEPLOY_ROOT/shared/hf_cache"
+mkdir -p "$DEPLOY_ROOT/shared/django-cache"
+chmod 777 "$DEPLOY_ROOT/shared/django-cache"
 # JLab Rucio snapshot files — written by the WSGI process when the
 # operator clicks 'Update from Rucio'.
 mkdir -p "$DEPLOY_ROOT/shared/rucio-snapshots"
 chmod 777 "$DEPLOY_ROOT/shared/rucio-snapshots"
 grep -q '^HF_HOME=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
     echo "HF_HOME=$DEPLOY_ROOT/shared/hf_cache" >> "$DEPLOY_ROOT/config/env/production.env"
+grep -q '^DJANGO_CACHE_DIR=' "$DEPLOY_ROOT/config/env/production.env" 2>/dev/null || \
+    echo "DJANGO_CACHE_DIR=$DEPLOY_ROOT/shared/django-cache" >> "$DEPLOY_ROOT/config/env/production.env"
 
 # Install WSGI module configuration if it exists in repository
 if [ -f "$RELEASE_DIR/config/apache/20-swf-monitor-wsgi.conf" ]; then
@@ -253,10 +257,18 @@ if systemctl is-enabled swf-monitor-mcp-asgi.service >/dev/null 2>&1; then
     systemctl restart swf-monitor-mcp-asgi.service
 fi
 
+# Prod-ops agent launches doer subprocesses from the release tree. Restart every
+# deploy so it does not keep a deleted release as cwd or write through stale env.
+if systemctl is-enabled epicprod-ops-agent.service >/dev/null 2>&1; then
+    log "Restarting prod-ops agent (epicprod-ops-agent) to pick up new code/env..."
+    systemctl restart epicprod-ops-agent.service
+fi
+
 # Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
 PANDA_BOT_CHANGED=false
 TESTBED_BOT_CHANGED=false
+LIVE_PUBLISHER_CHANGED=false
 
 if systemctl is-enabled swf-panda-bot.service >/dev/null 2>&1; then
     if [ -z "$PREV_RELEASE" ]; then
@@ -279,6 +291,18 @@ if systemctl is-enabled swf-testbed-bot.service >/dev/null 2>&1; then
     elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/testbed_bot.py" \
                     "$RELEASE_DIR/src/monitor_app/management/commands/testbed_bot.py" >/dev/null 2>&1; then
         TESTBED_BOT_CHANGED=true
+    fi
+fi
+
+if systemctl is-enabled swf-epicprod-live.service >/dev/null 2>&1; then
+    if [ -z "$PREV_RELEASE" ]; then
+        LIVE_PUBLISHER_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/management/commands/publish_epicprod_live.py" \
+                    "$RELEASE_DIR/src/monitor_app/management/commands/publish_epicprod_live.py" >/dev/null 2>&1; then
+        LIVE_PUBLISHER_CHANGED=true
+    elif ! diff -q "$DEPLOY_ROOT/releases/$PREV_RELEASE/src/monitor_app/epicprod_logging.py" \
+                    "$RELEASE_DIR/src/monitor_app/epicprod_logging.py" >/dev/null 2>&1; then
+        LIVE_PUBLISHER_CHANGED=true
     fi
 fi
 
@@ -308,6 +332,13 @@ if [ "$TESTBED_BOT_CHANGED" = true ]; then
     systemctl restart swf-testbed-bot.service
 else
     log "Bot code unchanged — skipping Testbed bot restart"
+fi
+
+if [ "$LIVE_PUBLISHER_CHANGED" = true ]; then
+    log "Publisher code changed — restarting epicprod-live publisher..."
+    systemctl restart swf-epicprod-live.service
+else
+    log "Publisher code unchanged — skipping epicprod-live publisher restart"
 fi
 
 # Cleanup old releases (keep last 5)

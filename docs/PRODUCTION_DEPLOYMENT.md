@@ -43,7 +43,8 @@ python /eic/u/wenauseic/github/swf-testbed/report_system_status.py
 - **PostgreSQL**: Production database (system-managed)
 - **ActiveMQ**: Message broker (system-managed via artemis.service)
 - **Redis (Channels layer)**: Required inter-process relay used by the SSE forwarder. Redis/Channels-backed SSE is an integral part of the system whenever remote ActiveMQ client recipients are supported.
-- **Mattermost bots**: `swf-panda-bot.service` and `swf-testbed-bot.service` — Claude-backed chatbots for `#pandabot` and `#testbed-bot` channels
+- **Mattermost bots**: `swf-panda-bot.service` (DISpatcher) and `swf-testbed-bot.service` — Claude-backed chatbots for `#dispatcher` and `#testbed-bot` channels
+- **epicprod-live publisher**: `swf-epicprod-live.service` — tails the epicprod action stream and posts live events to `#epicprod-live` as the `epicprod` bot account (`EPICPROD_LIVE_TOKEN` in production.env; see EPICPROD_ACTION_STREAM.md)
 - **Release Management**: Automated deployment with Apache-conf sync and ASGI-worker recycle
 
 ## Prerequisites
@@ -217,6 +218,65 @@ sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch infra/baseline-v19
 sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh tag v1.2.3
 ```
 
+### Lightweight UI/MCP Deploy
+
+For rapid development on UI and MCP changes, use `deploy-lightweight-ui-mcp.sh`
+instead of the full release deploy. This script updates the active release in
+place and recycles only the process that needs the new code.
+
+This follows the normal dev-area sync workflow: the source is the current
+`github/swf-monitor` checkout, and the target is the active
+`/opt/swf-monitor/current` release. It does not create a new release directory
+or move the `current` symlink.
+
+Use it for:
+
+- Django UI/view/template/form/helper changes under `src/monitor_app/`,
+  `src/pcs/`, `src/templates/`, or URL routing
+- MCP tool changes under `src/monitor_app/mcp/` and helper modules used by MCP
+- Static asset changes only when explicitly adding `--static`
+
+Do not use it for:
+
+- database migrations or model/schema changes requiring migrations
+- `requirements.txt`, `pyproject.toml`, virtualenv, or dependency changes
+- Apache config, systemd units, production env/config changes
+- ops-agent code, DISpatcher bot code, or testbed bot code
+- release/symlink changes where `/opt/swf-monitor/current` must move
+
+Typical commands from the repo checkout on `pandaserver02`:
+
+```bash
+# UI/templates/views only: sync code and touch wsgi.py
+sudo ./deploy-lightweight-ui-mcp.sh --ui
+
+# MCP tools only: sync code and restart only the MCP ASGI worker
+sudo ./deploy-lightweight-ui-mcp.sh --mcp
+
+# UI plus MCP changes
+sudo ./deploy-lightweight-ui-mcp.sh --ui --mcp
+
+# UI changes with CSS/JS/static asset updates
+sudo ./deploy-lightweight-ui-mcp.sh --ui --static
+
+# Inspect what would be copied and restarted
+./deploy-lightweight-ui-mcp.sh --ui --mcp --dry-run
+```
+
+Expected interruption:
+
+- `--ui`: near-zero to a few seconds. The script touches
+  `/opt/swf-monitor/current/src/swf_monitor_project/wsgi.py`, causing mod_wsgi
+  to reload the Django app on the next request without reloading Apache config.
+- `--mcp`: subsecond to a few seconds for MCP calls while
+  `swf-monitor-mcp-asgi.service` restarts. Normal web UI is not restarted for
+  MCP-only deploys.
+- no ops-agent or bot interruption.
+
+This is an active-release patch path, not a durable release record. Follow up
+with the standard full deploy when the branch is ready to become the production
+release baseline.
+
 ### What Happens During Deployment
 
 The deployment script automatically:
@@ -266,13 +326,15 @@ Key directives (abridged — see `apache-swf-monitor.conf` for the full file):
 
 ```apache
 # WSGI tuning — threads absorb bursty concurrency; listen-backlog absorbs retry
-# bursts; queue/inactivity/graceful timeouts bound failure modes. No
-# request-timeout because it would truncate /api/messages/stream/ SSE long-poll.
+# bursts; queue/inactivity/graceful timeouts bound failure modes. Request-count
+# and time-based recycling cap retained Python heap growth. No request-timeout
+# because it would truncate /api/messages/stream/ SSE long-poll.
 WSGIDaemonProcess swf-monitor \
     python-path=/opt/swf-monitor/current/src:/opt/swf-monitor/current/.venv/lib/python3.11/site-packages \
     python-home=/opt/swf-monitor/current/.venv \
     processes=1 threads=30 \
     listen-backlog=500 queue-timeout=30 \
+    maximum-requests=250 restart-interval=1800 \
     inactivity-timeout=300 graceful-timeout=15 \
     display-name=%{GROUP} lang='en_US.UTF-8' locale='en_US.UTF-8'
 
@@ -364,26 +426,27 @@ an external HTTP probe rather than an in-process Django management command.
 ```bash
 sudo systemctl restart swf-panda-bot.service
 sudo systemctl restart swf-testbed-bot.service
+sudo systemctl restart swf-epicprod-live.service
 sudo journalctl -u swf-panda-bot.service -f
 ```
 
 `swf-panda-bot.service` can also launch the standalone corun MCP server when
 `CORUN_API_TOKEN` is present in `production.env`. The bot uses it to queue codoc
-generation jobs through prod corun and deliberately does not expose corun's
+generation jobs through prod corun-ai and deliberately does not expose corun-ai's
 long-polling `wait_for_job` tool. On startup, the bot registers or refreshes a
-corun notification subscription pointing at:
+corun-ai notification subscription pointing at:
 
 ```text
 https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
 ```
 
-Corun posts terminal job notices to that endpoint, and swf-monitor posts a
+corun-ai posts terminal job notices to that endpoint, and swf-monitor posts a
 simple completion/failure/cancel notice to the configured Mattermost channel
-(`MATTERMOST_CHANNEL`, normally `pandabot`). Required/optional env vars:
+(`MATTERMOST_CHANNEL`, normally `dispatcher`). Required/optional env vars:
 
 ```bash
 CORUN_BASE_URL=https://epic-devcloud.org/doc
-CORUN_API_TOKEN=<prod corun token>
+CORUN_API_TOKEN=<prod corun-ai token>
 CORUN_CALLBACK_URL=https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/
 CORUN_SUBSCRIPTION_NAME=pandabot-swf-testbed
 ```
@@ -496,6 +559,29 @@ sudo chmod -R 755 /opt/swf-monitor/shared/static/
 ```
 
 ## Monitoring and Maintenance
+
+### Database Backups
+
+`scripts/backup-swfdb.sh` dumps the system database nightly (wenauseic
+cron, 01:30) to `/data/swf-shared/db-backups/` — compressed pg_dump
+custom format, one file per day. Every run verifies the fresh dump's
+table of contents and size before accepting it, then ages out old
+dumps: nightlies after 14 days, first-of-month dumps after 400 days.
+Credentials are parsed (never bash-sourced) from the deploy
+EnvironmentFile. One line per run lands in `backup.log`, ERROR-prefixed
+on failure; `cron.log` catches anything outside the script.
+
+Restore:
+
+```bash
+pg_restore -h <DB_HOST> -U <DB_USER> -d swfdb --clean --if-exists \
+    /data/swf-shared/db-backups/swfdb-<YYYYMMDD>.dump
+```
+
+The dumps share the `/data` volume with PGDATA (`/data/pgsql`), so they
+protect against logical loss — a bad migration, table deletion,
+corruption — not against loss of the volume itself. Host-level and
+off-host protection is SDCC's layer.
 
 ### Regular Maintenance
 

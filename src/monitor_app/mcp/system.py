@@ -505,6 +505,10 @@ async def swf_list_logs(
     - Find all errors: list_logs(level='ERROR')
     - Search for specific issues: list_logs(search='connection failed')
 
+    Rows with app_name='epicprod' are the structured epicprod ACTION stream;
+    prefer the epicprod_list_actions tool for those (filters on action fields,
+    summarize mode with duration statistics).
+
     Args:
         app_name: Filter by application name (e.g., 'daq_simulator', 'data_agent')
         instance_name: Filter by agent instance name

@@ -14,19 +14,30 @@ import json as _json
 import logging as _logging
 import os as _os
 import re as _re
+import uuid as _uuid
 from datetime import datetime as _datetime
 
 from django.conf import settings as _settings
-from django.db import transaction
+from django.core.cache import cache as _cache
+from django.db import connections, transaction
+from django.db.models import Q
 from django.utils import timezone as _timezone
 from django.utils.dateparse import parse_datetime as _parse_datetime
+
+from monitor_app.utils import format_datetime
 
 _log = _logging.getLogger(__name__)
 
 from .models import (
-    Dataset, ProdConfig, ProdTask,
+    Dataset, ProdConfig, ProdTask, PandaTasks,
     Campaign, Questionnaire, ProdRequest,
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
+)
+from .name_tokens import (
+    logical_name_from_physical_name,
+    panda_attempt_name,
+    panda_name_from_physical_name,
+    try_number_from_physical_name,
 )
 from .physics_match import derive_physics, derive_background, derive_evgen, single_particle_angle
 
@@ -37,6 +48,20 @@ class ServiceError(Exception):
         self.detail = detail
         self.status = status
         super().__init__(detail)
+
+
+PROGRESS_SNAPSHOT_KEY = 'progress_snapshot'
+
+
+def campaign_progress_snapshot_cache_key(campaign):
+    if campaign is None:
+        return ''
+    return f'pcs:campaign-progress-snapshot:{campaign.pk}:{campaign.name}'
+
+
+def load_campaign_progress_snapshot(campaign):
+    key = campaign_progress_snapshot_cache_key(campaign)
+    return _cache.get(key) if key else None
 
 
 # Allowed ProdTask lifecycle transitions. Submission and post-submission
@@ -71,6 +96,565 @@ REQUEST_TO_TASK_COPY_FIELDS = (
     'requestor', 'priority',
     'pre_tdr_use', 'early_science_use', 'other_use', 'new_request',
 )
+
+
+def _to_int(value, default=0):
+    try:
+        if value in (None, ''):
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _progress_output_file_count(output):
+    """Best available dataset-level file count from a recorded output entry."""
+    if not isinstance(output, dict):
+        return 0
+    count = _to_int(output.get('file_count'), 0)
+    for rse in output.get('rses') or []:
+        count = max(count, _to_int(rse.get('files'), 0))
+    return count
+
+
+def _progress_candidate_tasknames(task, output):
+    names = []
+    for value in (task.composed_name, task.name):
+        if value:
+            names.append(value)
+    did = (output or {}).get('did') if isinstance(output, dict) else ''
+    if did and ':' in did:
+        did_name = did.split(':', 1)[1]
+        names.extend([did_name, did_name.lstrip('/')])
+        parts = [p for p in did_name.strip('/').split('/') if p]
+        if len(parts) >= 3 and parts[0] in ('FULL', 'RECO', 'SIMU'):
+            # Current legacy production names JLab Rucio outputs as
+            # epic:/RECO/<campaign>/<detector>/<path...>, while PanDA task
+            # names use group.EIC.<campaign>.<detector>.<path...>.
+            names.append('group.EIC.' + '.'.join(parts[1:]))
+        if did_name.endswith('.b1'):
+            names.extend([did_name[:-3], did_name.lstrip('/')[:-3]])
+    elif did:
+        names.append(did)
+    more = []
+    replacements = (
+        ('.e+.', '.e_plus.'),
+        ('.e-.', '.e_minus.'),
+        ('.pi+.', '.pi_plus.'),
+        ('.pi-.', '.pi_minus.'),
+    )
+    for name in names:
+        variants = {name}
+        for a, b in replacements:
+            new_variants = set()
+            for v in variants:
+                new_variants.add(v.replace(a, b))
+                new_variants.add(v.replace(b, a))
+            variants |= new_variants
+        more.extend(variants)
+    names.extend(more)
+    return [n for i, n in enumerate(names) if n and n not in names[:i]]
+
+
+def panda_tasks_physical_name(task, try_number):
+    """Physical PanDA task/output name for one submission attempt."""
+    return panda_attempt_name(task.composed_name, try_number)
+
+
+def _log_dataset_name(task_name):
+    return f'{task_name}_log/'
+
+
+def panda_tasks_summary(task, *, include_live=False):
+    """Compact association history for API/UI payloads.
+
+    The compose page ships many task summaries, so live PanDA enrichment is
+    opt-in. Use include_live=True only for focused task hydration or small
+    detail payloads.
+    """
+    rows = getattr(task, '_prefetched_objects_cache', {}).get('panda_tasks')
+    if rows is None:
+        rows = task.panda_tasks.all()
+    rows = list(rows)
+    live_by_id = {}
+    live_by_name = {}
+    if include_live:
+        ids = [row.jedi_task_id for row in rows if row.jedi_task_id]
+        names = [row.task_name for row in rows if row.task_name]
+        live_by_id, live_by_name, _ = _panda_progress_summaries(ids, names)
+
+    summaries = []
+    for row in sorted(rows, key=lambda item: item.try_number):
+        live = (
+            live_by_id.get(_to_int(row.jedi_task_id))
+            or live_by_name.get(row.task_name)
+            or {}
+        )
+        metadata = row.metadata or {}
+        maxattempt = live.get('maxattempt')
+        if maxattempt is None:
+            maxattempt = metadata.get('maxattempt') or metadata.get('panda_maxattempt')
+        if include_live and live:
+            updates = {
+                key: live.get(key)
+                for key in ('status', 'maxattempt', 'nactive', 'nfinished',
+                            'nfailed', 'nfinalfailed', 'nrunning', 'total_jobs',
+                            'terminal_jobs', 'processing_percent',
+                            'final_failure_rate')
+                if live.get(key) is not None
+            }
+            if updates:
+                metadata = {**metadata, **updates}
+        summaries.append({
+            'id': row.pk,
+            'try_number': row.try_number,
+            'jedi_task_id': row.jedi_task_id,
+            'task_name': row.task_name,
+            'out_ds': row.out_ds,
+            'log_ds': row.log_ds,
+            'site': live.get('site') or row.site,
+            'status_snapshot': live.get('status') or row.status_snapshot,
+            'association_source': row.association_source,
+            'match_reason': row.match_reason,
+            'maxattempt': maxattempt,
+            'metadata': metadata,
+            'current': bool(task.panda_task_id and row.jedi_task_id == task.panda_task_id),
+            'created_at': row.created_at.isoformat() if row.created_at else '',
+            'created_at_display': format_datetime(row.created_at) if row.created_at else '',
+            'updated_at': row.updated_at.isoformat() if row.updated_at else '',
+            'updated_at_display': format_datetime(row.updated_at) if row.updated_at else '',
+        })
+    return summaries
+
+
+def prodtask_allocate_panda_tasks(*, task, source='pcs_submit_request'):
+    """Create the next PandaTasks association row before submission."""
+    with transaction.atomic():
+        locked = ProdTask.objects.select_for_update().get(pk=task.pk)
+        last_try = (
+            PandaTasks.objects
+            .filter(prod_task=locked)
+            .order_by('-try_number')
+            .values_list('try_number', flat=True)
+            .first()
+        )
+        try_number = (last_try or 0) + 1
+        task_name = panda_tasks_physical_name(locked, try_number)
+        row = PandaTasks.objects.create(
+            prod_task=locked,
+            try_number=try_number,
+            task_name=task_name,
+            out_ds=task_name,
+            log_ds=_log_dataset_name(task_name),
+            association_source=source,
+            match_reason='allocated before PCS submission',
+        )
+    return row
+
+
+def _try_number_from_physical_name(logical_name, physical_name):
+    return try_number_from_physical_name(logical_name, physical_name)
+
+
+def _next_try_number(task):
+    last_try = (
+        PandaTasks.objects
+        .filter(prod_task=task)
+        .order_by('-try_number')
+        .values_list('try_number', flat=True)
+        .first()
+    )
+    return (last_try or 0) + 1
+
+
+def _match_prod_tasks_for_panda_name(panda_task_name):
+    """Return exact PCS task matches for a PanDA taskName.
+
+    No fuzzy matching: the physical name must reduce via registered suffix
+    parsing to the PCS composed identity, the legacy stored task name, or one
+    of the exact candidate names already used by campaign progress.
+    """
+    name = (panda_task_name or '').strip()
+    if not name:
+        return []
+    base = logical_name_from_physical_name(name)
+    direct = list(
+        ProdTask.objects
+        .select_related('dataset', 'prod_config')
+        .filter(Q(dataset__composed_name=base) | Q(name=base))
+    )
+    if direct:
+        return direct
+
+    matches = []
+    for task in (
+        ProdTask.objects
+        .select_related('dataset', 'prod_config')
+        .exclude(overrides__isnull=True)
+        .iterator()
+    ):
+        candidates = set()
+        for output in task.outputs or [{}]:
+            candidates.update(_progress_candidate_tasknames(task, output))
+        if name in candidates or base in candidates:
+            matches.append(task)
+    return matches
+
+
+def intake_direct_panda_task(panda_task, *, created_by='association_sweep'):
+    """Auto-intake a directly submitted group.EIC production task.
+
+    Commissioning/migration policy: everything lands in the catalog, whatever
+    the submission path. For a PanDA task whose name has no PCS match, this
+    creates the catalog structure the same way past-campaign assimilation
+    does — Campaign from the version segment (lifecycle classified against
+    the current campaign), Dataset from the name with the physics tag derived
+    from the descriptive remainder (anchor tags elsewhere), anchor ProdConfig,
+    and a ProdTask in status 'submitted' — then the normal association
+    reconciler links the PanDA task to it.
+
+    Returns ``(ProdTask|None, reason)``.
+    """
+    task_name = panda_name_from_physical_name(panda_task.get('taskname') or '')
+    if not task_name.startswith('group.EIC.'):
+        return None, 'not a group.EIC production taskname'
+    parts = task_name.split('.')
+    # group . EIC . <det_version: N.N.N> . <det_config> . <remainder...>
+    if len(parts) < 8:
+        return None, f'taskname too short to parse: {task_name!r}'
+    det_version = '.'.join(parts[2:5])
+    det_config = parts[5]
+    remainder = '.'.join(parts[6:])
+    if not _re.fullmatch(r'\d+\.\d+\.\d+', det_version) or not remainder:
+        return None, f'unparseable taskname: {task_name!r}'
+
+    physics, evgen, simu, reco, cfg, _ = _ensure_csvimport_anchors()
+    current_camp = Campaign.objects.filter(lifecycle='current').first()
+    current_v = _version_tuple(current_camp.name) if current_camp else None
+    lc = 'future' if (current_v is not None
+                      and _version_tuple(det_version) > current_v) else 'past'
+
+    with transaction.atomic():
+        campaign, _created = Campaign.objects.get_or_create(
+            name=det_version,
+            defaults={'lifecycle': lc,
+                      'description': f'Auto-created on intake of direct PanDA '
+                                     f'submissions for {det_version}',
+                      'created_by': created_by},
+        )
+
+        beam = ''
+        beam_match = _re.search(r'\.(\d+x\d+)(\.|$)', remainder)
+        if beam_match:
+            beam = beam_match.group(1)
+        derived = derive_physics(remainder.replace('.', '/'), beam=beam)
+        row_physics_tag = physics
+        if derived is None:
+            pass  # unresolved physics stays on the placeholder anchor
+        elif derived.get('process') in ('BEAMGAS', 'SYNRAD'):
+            row_physics_tag = _no_signal_physics_tag()
+        else:
+            row_physics_tag, _ = find_or_create_physics_tag(
+                derived, created_by=created_by)
+
+        did = f'group.EIC:{task_name}'
+        dataset, _ds_created = Dataset.objects.get_or_create(
+            did=did,
+            defaults={
+                'dataset_name': task_name,
+                'scope': 'group.EIC',
+                'detector_version': det_version,
+                'detector_config': det_config,
+                'campaign': campaign,
+                'physics_tag': row_physics_tag,
+                'evgen_tag': evgen,
+                'simu_tag': simu,
+                'reco_tag': reco,
+                'description': 'Auto-intake of direct PanDA submission',
+                'metadata': {
+                    'source': {'kind': 'panda_taskname', 'location': task_name},
+                    'direct_intake': {
+                        'jeditaskid': panda_task.get('jeditaskid'),
+                        'username': panda_task.get('username') or '',
+                    },
+                },
+                'created_by': created_by,
+            },
+        )
+
+        task, _t_created = ProdTask.objects.get_or_create(
+            name=task_name,
+            defaults={
+                'status': 'submitted',
+                'dataset': dataset,
+                'prod_config': cfg,
+                'campaign': campaign,
+                'description': (f'Auto-intake of direct PanDA submission '
+                                f'jediTaskID={panda_task.get("jeditaskid")}'),
+                'created_by': created_by,
+            },
+        )
+    return task, 'intaken'
+
+
+def reconcile_panda_task_association(panda_task):
+    """Create a PandaTasks row for an externally discovered PanDA task.
+
+    Returns ``(ProdTask|None, PandaTasks|None, reason)``. Association is created
+    only on a single exact match; ambiguous or unmatched names are reported and
+    left untouched.
+    """
+    try:
+        jedi_task_id = int(panda_task.get('jeditaskid'))
+    except (TypeError, ValueError):
+        return None, None, 'missing jeditaskid'
+    task_name = panda_name_from_physical_name(panda_task.get('taskname') or '')
+    if not task_name:
+        return None, None, 'missing PanDA taskname'
+
+    row = (
+        PandaTasks.objects
+        .select_related('prod_task', 'prod_task__dataset', 'prod_task__prod_config')
+        .filter(jedi_task_id=jedi_task_id)
+        .first()
+    )
+    if row:
+        return row.prod_task, row, 'existing jediTaskID association'
+
+    matches = _match_prod_tasks_for_panda_name(task_name)
+    if not matches:
+        return None, None, f'no exact PCS match for PanDA taskname {task_name!r}'
+    if len(matches) > 1:
+        return None, None, f'ambiguous PCS match for PanDA taskname {task_name!r}'
+
+    task = matches[0]
+    try_number = _try_number_from_physical_name(task.composed_name, task_name)
+    if try_number is None:
+        try_number = _try_number_from_physical_name(task.name, task_name)
+    if try_number is None:
+        try_number = _next_try_number(task)
+
+    metadata = {
+        'panda_status': panda_task.get('status') or '',
+        'username': panda_task.get('username') or '',
+        'workinggroup': panda_task.get('workinggroup') or '',
+        'processingtype': panda_task.get('processingtype') or '',
+    }
+    with transaction.atomic():
+        row = PandaTasks.objects.select_for_update().filter(task_name=task_name).first()
+        if row and row.prod_task_id != task.pk:
+            return None, None, f'PanDA taskname {task_name!r} already associated elsewhere'
+        if row is None:
+            if PandaTasks.objects.filter(prod_task=task, try_number=try_number).exists():
+                try_number = _next_try_number(task)
+            row = PandaTasks.objects.create(
+                prod_task=task,
+                try_number=try_number,
+                task_name=task_name,
+                out_ds=task_name,
+                log_ds=_log_dataset_name(task_name),
+                jedi_task_id=jedi_task_id,
+                site=panda_task.get('site') or '',
+                status_snapshot=panda_task.get('status') or '',
+                association_source='dynamic_taskname_match',
+                match_reason=f'exact PanDA taskname match: {task_name}',
+                metadata=metadata,
+            )
+        elif row.jedi_task_id in (None, jedi_task_id):
+            row.jedi_task_id = jedi_task_id
+            row.status_snapshot = panda_task.get('status') or row.status_snapshot
+            row.metadata = {**(row.metadata or {}), **metadata}
+            row.save(update_fields=['jedi_task_id', 'status_snapshot', 'metadata', 'updated_at'])
+        else:
+            return None, None, (
+                f'PanDA taskname {task_name!r} already records jediTaskID '
+                f'{row.jedi_task_id}'
+            )
+    return task, row, 'created dynamic exact taskname association'
+
+
+def _panda_progress_summaries(task_ids, tasknames):
+    """Return read-only PanDA task summaries keyed by JEDI id and task name."""
+    ids = sorted({_to_int(tid) for tid in task_ids if _to_int(tid)})
+    names = sorted({str(n) for n in tasknames if n})
+    if not ids and not names:
+        return {}, {}, []
+
+    from monitor_app.panda.constants import PANDA_SCHEMA
+    from monitor_app.panda.queries import _get_task_job_counts
+    from monitor_app.panda.sql import row_to_dict
+
+    fields = [
+        'jeditaskid', 'taskname', 'status', 'username',
+        'creationdate', 'modificationtime', 'processingtype',
+        'site', 'workinggroup', 'errordialog',
+    ]
+    clauses = []
+    params = []
+    if ids:
+        clauses.append('"jeditaskid" IN (' + ','.join(['%s'] * len(ids)) + ')')
+        params.extend(ids)
+    if names:
+        clauses.append('"taskname" IN (' + ','.join(['%s'] * len(names)) + ')')
+        params.extend(names)
+    sql = f"""
+        SELECT {', '.join(f'"{field}"' for field in fields)}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {' OR '.join(clauses)}
+        ORDER BY "jeditaskid" DESC
+    """
+
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, params)
+            rows = [row_to_dict(row, fields) for row in cursor.fetchall()]
+    except Exception as e:
+        return {}, {}, [f'PanDA task lookup failed: {e}']
+
+    counts = _get_task_job_counts([row['jeditaskid'] for row in rows])
+    by_id = {}
+    by_name = {}
+    for row in rows:
+        tid = _to_int(row.get('jeditaskid'))
+        c = counts.get(tid, {})
+        nactive = _to_int(c.get('nactive'))
+        nfinished = _to_int(c.get('nfinished'))
+        nfailed = _to_int(c.get('nfailed'))
+        nfinalfailed = _to_int(c.get('nfinalfailed'))
+        nrunning = _to_int(c.get('nrunning'))
+        total_jobs = nactive + nfinished + nfailed
+        terminal_jobs = nfinished + nfailed
+        row.update({
+            'nactive': nactive,
+            'nfinished': nfinished,
+            'nfailed': nfailed,
+            'nfinalfailed': nfinalfailed,
+            'nrunning': nrunning,
+            'maxattempt': c.get('maxattempt'),
+            'total_jobs': total_jobs,
+            'terminal_jobs': terminal_jobs,
+            'processing_percent': (
+                round(100 * terminal_jobs / total_jobs, 1) if total_jobs else None
+            ),
+            'final_failure_rate': (
+                round(100 * nfinalfailed / (nfinalfailed + nfinished), 1)
+                if (nfinalfailed + nfinished) else None
+            ),
+        })
+        by_id[tid] = row
+        by_name.setdefault(row.get('taskname') or '', row)
+    return by_id, by_name, []
+
+
+def refresh_campaign_progress_snapshot(campaign, *, generated_by='operator'):
+    """Build and store the cached campaign progress view.
+
+    Reads existing PCS output records and bounded PanDA summaries. It never
+    queries Rucio; Rucio output facts come from ``ProdTask.overrides['outputs']``.
+    """
+    if campaign is None:
+        raise ServiceError('No campaign selected for progress refresh.', status=400)
+
+    tasks = list(
+        ProdTask.objects
+        .select_related('campaign', 'dataset', 'prod_config')
+        .prefetch_related('panda_tasks')
+        .filter(campaign=campaign)
+        .order_by('-updated_at')
+    )
+    panda_ids = []
+    panda_ids_by_task = {}
+    for task in tasks:
+        ids = [row.jedi_task_id for row in task.panda_tasks.all() if row.jedi_task_id]
+        if task.panda_task_id and task.panda_task_id not in ids:
+            ids.insert(0, task.panda_task_id)
+        panda_ids_by_task[task.pk] = ids
+        panda_ids.extend(ids)
+    taskname_candidates = []
+    candidate_names_by_task_output = {}
+    for task in tasks:
+        for index, output in enumerate(task.outputs or [{}]):
+            candidates = _progress_candidate_tasknames(task, output)
+            candidate_names_by_task_output[(task.pk, index)] = candidates
+            taskname_candidates.extend(candidates)
+
+    panda_by_id, panda_by_name, errors = _panda_progress_summaries(
+        panda_ids, taskname_candidates)
+
+    rows = {}
+    for task in tasks:
+        cfg = task.get_effective_config()
+        data = cfg.get('data') or {}
+        configured_jobs = _to_int(data.get('n_jobs'), 0) or None
+        direct_panda = None
+        for panda_id in panda_ids_by_task.get(task.pk, []):
+            direct_panda = panda_by_id.get(_to_int(panda_id))
+            if direct_panda:
+                break
+        outputs = []
+
+        for index, output in enumerate(task.outputs):
+            matched = direct_panda
+            link = 'recorded PanDA task' if matched else ''
+            if not matched:
+                for candidate in candidate_names_by_task_output.get((task.pk, index), []):
+                    matched = panda_by_name.get(candidate)
+                    if matched:
+                        link = 'task-name match'
+                        break
+
+            file_count = _progress_output_file_count(output)
+            expected_jobs = None
+            expected_source = ''
+            if matched and matched.get('total_jobs'):
+                expected_jobs = matched['total_jobs']
+                expected_source = 'observed PanDA jobs'
+            elif configured_jobs:
+                expected_jobs = configured_jobs
+                expected_source = 'configured jobs'
+
+            pct = round(100 * file_count / expected_jobs, 1) if expected_jobs else None
+            outputs.append({
+                'did': output.get('did') or '',
+                'stage': output.get('stage') or '',
+                'file_count': file_count,
+                'bytes': _to_int(output.get('bytes'), 0),
+                'complete': bool(output.get('complete', True)),
+                'checked_at': output.get('checked_at') or '',
+                'expected_jobs': expected_jobs,
+                'expected_source': expected_source,
+                'completion_percent': pct,
+                'completion_label': f'{pct:.1f}%' if pct is not None else '',
+                'completion_width': min(100, pct) if pct is not None else 0,
+                'processing': matched or {},
+                'processing_backend': 'PanDA' if matched else '',
+                'link': link,
+            })
+
+        rows[str(task.pk)] = {
+            'task_id': task.pk,
+            'task_name': task.composed_name,
+            'configured_jobs': configured_jobs,
+            'outputs': outputs,
+            'has_processing': bool(direct_panda or any(o.get('processing') for o in outputs)),
+        }
+
+    snapshot = {
+        'version': 1,
+        'campaign': campaign.name,
+        'generated_at': _timezone.now().isoformat(),
+        'generated_by': generated_by,
+        'task_count': len(tasks),
+        'rows': rows,
+        'errors': errors,
+    }
+    _cache.set(campaign_progress_snapshot_cache_key(campaign), snapshot, None)
+    return {
+        'campaign': campaign.name,
+        'tasks': len(tasks),
+        'errors': errors,
+        'generated_at': snapshot['generated_at'],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +809,130 @@ def questionnaire_intake_csv(csv_text, *, source_url='', created_by='questionnai
     rows = _csv.DictReader(_io.StringIO(csv_text))
     return questionnaire_intake(
         list(rows), source_url=source_url, created_by=created_by)
+
+
+def rebuild_questionnaire_match_cache(*, updated_by='questionnaire_match'):
+    """Rebuild task-local questionnaire-match caches.
+
+    ``Questionnaire.data['prod_matches']`` is the editable source of truth.
+    Catalog and compose views read the inverse cache from
+    ``ProdTask.overrides['questionnaire_matches']`` so page rendering never
+    scans every questionnaire.
+
+    Matches bind to physics configurations (CAMPAIGN_CONTINUUM.md —
+    requests over physics configurations): each accepted match carries
+    ``pc_anchor``, the composed name of the matched task's dataset,
+    self-healed here on every rebuild; the cache attaches the match to
+    every task whose dataset resolves to the same configuration, so a
+    match recorded against one campaign's edition is inherited by every
+    other edition of the same physics without re-matching. Unresolved
+    configurations key uniquely and never fan out.
+    """
+    from .physics_config import physics_config_key
+    tasks = list(ProdTask.objects.select_related(
+        'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
+        'dataset__background_tag').all())
+    by_id = {task.pk: task for task in tasks}
+    by_name = {}
+    for task in tasks:
+        if task.name:
+            by_name[task.name] = task
+        if task.composed_name:
+            by_name[task.composed_name] = task
+
+    # Configuration resolution: one key per composed identity, and the
+    # task pks realizing each configuration across campaigns.
+    key_by_name = {}
+    task_pks_by_key = {}
+    for task in tasks:
+        if not task.dataset_id:
+            continue
+        name = task.composed_name
+        if name not in key_by_name:
+            key_by_name[name] = physics_config_key(task.dataset)['key']
+        task_pks_by_key.setdefault(key_by_name[name], set()).add(task.pk)
+
+    matches_by_task = {}
+    questionnaire_count = 0
+    accepted_count = 0
+    unresolved_count = 0
+    changed_questionnaires = []
+    for questionnaire in Questionnaire.objects.all().only('id', 'data'):
+        questionnaire_count += 1
+        anchors_healed = False
+        for match in (questionnaire.data or {}).get('prod_matches') or []:
+            if not isinstance(match, dict):
+                continue
+            if (match.get('status') or 'accepted') != 'accepted':
+                continue
+            accepted_count += 1
+            task = None
+            task_id = match.get('task_id')
+            if isinstance(task_id, int):
+                task = by_id.get(task_id)
+            elif str(task_id).isdigit():
+                task = by_id.get(int(task_id))
+            if task is None:
+                task = by_name.get(match.get('task_name') or '')
+            if task is None:
+                task = by_name.get(match.get('legacy_name') or '')
+            if task is None:
+                unresolved_count += 1
+                continue
+            anchor = task.composed_name if task.dataset_id else ''
+            if anchor and match.get('pc_anchor') != anchor:
+                match['pc_anchor'] = anchor
+                anchors_healed = True
+            entry = {
+                'questionnaire_id': questionnaire.pk,
+                'confidence': match.get('confidence') or '',
+                'reason': match.get('reason') or '',
+                'matched_at': match.get('matched_at') or '',
+            }
+            target_pks = {task.pk}
+            key = key_by_name.get(anchor)
+            if key is not None:
+                target_pks.update(task_pks_by_key.get(key, ()))
+            for target_pk in target_pks:
+                bucket = matches_by_task.setdefault(target_pk, [])
+                if not any(e['questionnaire_id'] == questionnaire.pk
+                           for e in bucket):
+                    bucket.append(entry)
+        if anchors_healed:
+            changed_questionnaires.append(questionnaire)
+    if changed_questionnaires:
+        Questionnaire.objects.bulk_update(
+            changed_questionnaires, ['data'], batch_size=200)
+
+    now = _timezone.now()
+    changed = []
+    for task in tasks:
+        overrides = dict(task.overrides or {})
+        existing = overrides.get('questionnaire_matches') or []
+        rebuilt = matches_by_task.get(task.pk, [])
+        if existing == rebuilt:
+            continue
+        if rebuilt:
+            overrides['questionnaire_matches'] = rebuilt
+            overrides['questionnaire_matches_updated_at'] = now.isoformat()
+            overrides['questionnaire_matches_updated_by'] = updated_by
+        else:
+            overrides.pop('questionnaire_matches', None)
+            overrides.pop('questionnaire_matches_updated_at', None)
+            overrides.pop('questionnaire_matches_updated_by', None)
+        task.overrides = overrides
+        task.updated_at = now
+        changed.append(task)
+    if changed:
+        ProdTask.objects.bulk_update(changed, ['overrides', 'updated_at'], batch_size=200)
+    return {
+        'questionnaires': questionnaire_count,
+        'accepted_matches': accepted_count,
+        'resolved_matches': sum(len(v) for v in matches_by_task.values()),
+        'unresolved_matches': unresolved_count,
+        'tasks_updated': len(changed),
+        'anchors_healed': len(changed_questionnaires),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +1226,23 @@ def prodtask_readiness_problems(task):
         problems.append('No physics output configured (enable copy of reco or full).')
     if not task.has_input:
         problems.append('No matched Rucio EVGEN input (run the EVGEN matcher first).')
+
+    ds = task.dataset
+    if cfg.get('bg_mixing') and ds:
+        bg_params = {}
+        if ds.background_tag_id:
+            bg_params = ds.background_tag.parameters or {}
+        evgen_params = ds.evgen_tag.parameters or {}
+        bg_tag_prefix = bg_params.get('bg_tag_prefix') or evgen_params.get('bg_tag_prefix')
+        bg_files = bg_params.get('bg_files') or evgen_params.get('bg_files')
+        if not ds.background_tag_id and not (bg_tag_prefix or bg_files):
+            problems.append(
+                'Background mixing is enabled but no background tag or legacy '
+                'EvGen background parameters are attached.')
+        if ds.background_tag_id and not (bg_tag_prefix or bg_files):
+            problems.append(
+                'Background mixing is enabled but the background tag has no '
+                'bg_tag_prefix or bg_files parameter.')
 
     csv_filters = (((task.overrides or {}).get('csv_import') or {})
                    .get('filters') or {})
@@ -1000,6 +1725,7 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
         rows = list(_csv.DictReader(f))
 
     summary = {'rows': len(rows), 'created': 0, 'updated': 0,
+               'requests_created': 0, 'requests_updated': 0,
                'tag_actions': {}, 'errors': []}
 
     with transaction.atomic():
@@ -1152,6 +1878,14 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 for k, v in task_defaults.items():
                     if k == 'status':
                         continue
+                    if k in REQUEST_TO_TASK_COPY_FIELDS:
+                        # Request context is owned by the ProdRequest row
+                        # (below) and projected through the physics
+                        # configuration; the task columns are creation-time
+                        # seeds, independently mutable thereafter
+                        # (CAMPAIGN_CONTINUUM.md — requests over physics
+                        # configurations).
+                        continue
                     if k == 'overrides':
                         # Merge so non-csv_import override keys (added by
                         # operators or other code paths) are preserved;
@@ -1166,7 +1900,208 @@ def import_default_datasets_csv(csv_path=None, *, created_by='csv_import'):
                 ProdTask.objects.create(name=task_name, **task_defaults)
                 summary['created'] += 1
 
+            # The request record: one ProdRequest per CSV row, bound to the
+            # physics configuration (never a campaign) through the composed
+            # name of the edition it was recorded against — a name
+            # reference, the same convention as ``replaced_by``. Editions
+            # in any campaign reach it by resolving to the same
+            # configuration (pc_request_projection). Triage fields and
+            # status belong to the production team and are never touched
+            # by re-import.
+            request_fields = dict(
+                requestor=(row.get('DSC or PWG') or '').strip().upper(),
+                simu_path=ds_path,
+                gen_config=gen_ver,
+                nevents=nevents,
+                background=(row.get('Background') or '').strip(),
+                description=(row.get('Description') or '').strip(),
+                priority=priority,
+                pre_tdr_use=_possible(row.get('Pre-TDR Use')),
+                early_science_use=_yesno(row.get('Early Science Use')),
+                other_use=_possible(row.get('Other Use')),
+                new_request=_yesno(row.get('New Request')),
+                source_url=(row.get('Issue') or '').strip(),
+            )
+            req = ProdRequest.objects.filter(source_row=slug).first()
+            if req is None:
+                req = ProdRequest(source_row=slug, status='new',
+                                  created_by=created_by)
+                summary['requests_created'] += 1
+            else:
+                summary['requests_updated'] += 1
+            for k, v in request_fields.items():
+                setattr(req, k, v)
+            req_data = dict(req.data or {})
+            req_data.update({
+                'filters': filters,
+                'physics_config_anchor': ds.composed_name,
+                'angular_range': angular_range,
+                'other_use_text': (row.get('Other Use') or '').strip(),
+            })
+            req.data = req_data
+            req.save()
+
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Requests over physics configurations (CAMPAIGN_CONTINUUM.md)
+# ---------------------------------------------------------------------------
+
+def pc_anchored_requests():
+    """{anchor_composed_name: [ProdRequest, ...]} for every request bound
+    to a physics configuration. The anchor is the composed name of the
+    edition the request was recorded against; any edition resolving to
+    the same configuration carries the request."""
+    by_anchor = {}
+    for req in ProdRequest.objects.order_by('pk'):
+        anchor = (req.data or {}).get('physics_config_anchor')
+        if anchor:
+            by_anchor.setdefault(anchor, []).append(req)
+    return by_anchor
+
+
+def pc_request_projection(datasets):
+    """Project PC-anchored requests onto dataset editions.
+
+    Returns {composed_name: [ProdRequest, ...]} for every given edition
+    that resolves to the same physics configuration as a request's
+    anchor — the read path behind "tasks point to requests via their
+    configuration". Anchor and edition are compared by
+    ``physics_config_key``; an anchor naming no surviving dataset is
+    reported, never silently dropped.
+    """
+    from .physics_config import physics_config_key
+    by_anchor = pc_anchored_requests()
+    if not by_anchor or not datasets:
+        return {}
+    select = ('physics_tag', 'evgen_tag', 'background_tag')
+    heads = (Dataset.objects.filter(composed_name__in=by_anchor)
+             .select_related(*select)
+             .order_by('composed_name', 'block_num', 'pk')
+             .distinct('composed_name'))
+    requests_by_key = {}
+    resolved = set()
+    for head in heads:
+        key = physics_config_key(head)['key']
+        resolved.add(head.composed_name)
+        requests_by_key.setdefault(key, []).extend(by_anchor[head.composed_name])
+    orphaned = set(by_anchor) - resolved
+    if orphaned:
+        _log.warning(
+            'pc_request_projection: %d request anchor(s) name no dataset: %s',
+            len(orphaned), sorted(orphaned)[:5])
+    projection = {}
+    seen = set()
+    for dataset in datasets:
+        name = dataset.composed_name
+        if name in seen:
+            continue
+        seen.add(name)
+        matched = requests_by_key.get(physics_config_key(dataset)['key'])
+        if matched:
+            projection[name] = matched
+    return projection
+
+
+def prodrequest_compose(*, created_by, pwg='', dsc='', description='',
+                        nevents=None, process='', beam='', species='',
+                        q2='', generator='', generator_version='',
+                        sample='', pc_anchor='', simu_path='',
+                        contact_name='', contact_email='',
+                        repository='', intended_use=''):
+    """Create a production request from the request composer.
+
+    The mapping is deterministic: the composer's physics axes land in
+    ``data['filters']`` (the semantic identity block requests resolve
+    by), and adopting an existing configuration sets
+    ``data['physics_config_anchor']`` — the same binding the CSV import
+    writes, so a composed request projects onto editions exactly like
+    an imported one. Production-team triage fields are left for the
+    production team.
+    """
+    pwg = (pwg or '').strip()
+    dsc = (dsc or '').strip()
+    requestor = pwg or dsc
+    contact_name = (contact_name or '').strip()
+    contact_email = (contact_email or '').strip()
+    if not contact_name or not contact_email:
+        raise ServiceError('Contact name and email are required.')
+    if '@' not in contact_email:
+        raise ServiceError('Contact email does not look like an email address.')
+    description = (description or '').strip()
+    process = (process or '').strip()
+    if not description and not process:
+        raise ServiceError(
+            'Describe the physics: pick a process or write a description.')
+    if nevents not in (None, ''):
+        try:
+            nevents = int(nevents)
+        except (TypeError, ValueError):
+            raise ServiceError('Event count must be a number.')
+        if nevents < 0:
+            raise ServiceError('Event count must be positive.')
+    else:
+        nevents = None
+    pc_anchor = (pc_anchor or '').strip()
+    if pc_anchor and not Dataset.objects.filter(
+            composed_name=pc_anchor).exists():
+        raise ServiceError(
+            f'Adopted configuration {pc_anchor!r} names no known dataset.')
+
+    filters = {
+        'process': process,
+        'beam': (beam or '').strip(),
+        'species': (species or '').strip(),
+        'q2': (q2 or '').strip(),
+        'generator': (generator or '').strip(),
+        'sample': (sample or '').strip(),
+    }
+    data = {
+        'composer': True,
+        'filters': filters,
+    }
+    if pwg:
+        data['pwg'] = pwg
+    if dsc:
+        data['dsc'] = dsc
+    if pc_anchor:
+        data['physics_config_anchor'] = pc_anchor
+    data['contact_name'] = contact_name
+    data['contact_email'] = contact_email
+    if repository:
+        data['repository'] = (repository or '').strip()
+    if intended_use:
+        data['intended_use'] = (intended_use or '').strip()
+    gen_config = ' '.join(
+        part for part in ((generator or '').strip(),
+                          (generator_version or '').strip()) if part)
+
+    request_row = ProdRequest.objects.create(
+        requestor=requestor,
+        description=description,
+        nevents=nevents,
+        gen_config=gen_config,
+        simu_path=(simu_path or '').strip(),
+        new_request=True,
+        status='new',
+        source_row=f'composer:{_uuid.uuid4().hex[:12]}',
+        data=data,
+        created_by=created_by or 'request_composer',
+    )
+    from monitor_app.epicprod_logging import log_epicprod_action
+    log_epicprod_action(
+        'web', 'prodrequest_compose',
+        subject_type='prod_request', subject_key=str(request_row.pk),
+        username=created_by, sublevel='normal', live_default=True,
+        requestor=requestor, pc_anchor=pc_anchor or '')
+    return {
+        'id': request_row.pk,
+        'requestor': requestor,
+        'pc_anchor': pc_anchor,
+        'nevents': nevents,
+        'status': request_row.status,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1254,7 +2189,7 @@ def _parse_past_index(text):
 
 
 _PAST_BEAM_RE = _re.compile(r'(\d+x\d+)')
-_PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:to\d+)?)')
+_PAST_Q2_RE   = _re.compile(r'(minQ2=\d+|q2_\d+(?:(?:to|_)\d+)?)')
 _PAST_PHYS_TOP = ('DIS', 'SIDIS', 'DDIS', 'EXCLUSIVE', 'SINGLE', 'BACKGROUNDS')
 
 
@@ -1365,12 +2300,20 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     archive).
 
     For each parsed dataset we get-or-create:
-      - Campaign(name='{STAGE}/{version}', lifecycle='past')
+      - Campaign(name='{version}') — one campaign row per version, bare-named;
+        both stages fold onto it, with per-stage totals under
+        ``data['past_summary'][stage]``. Lifecycle is classified only on
+        create (newer than current -> 'future', else 'past'); an existing
+        campaign's lifecycle is never changed by ingest — lifecycle
+        transitions are operator actions.
       - Dataset(did=PCS internal DID, dataset_name='past.{STAGE}.{ver}.{slug}'),
         with the epic-prod Rucio DID stored in metadata['source']['location']
         and the per-RSE breakdown in metadata['past_output'].
       - ProdTask(name='past.{STAGE}.{ver}.{slug}', status='past_output',
-        linked to the Dataset, anchor ProdConfig, and Campaign).
+        linked to the Dataset, anchor ProdConfig, and Campaign), carrying the
+        produced dataset as a unified ``overrides['outputs']`` entry
+        (EPICPROD_DATA_LINEAGE.md schema — never the legacy ``past_output``
+        block).
 
     Idempotency key: (STAGE, version, epic_prod_did). Re-running refreshes
     file_count / data_size / rse breakdown but leaves any operator-touched
@@ -1404,30 +2347,27 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
     with transaction.atomic():
         for stage, versions in versions_by_stage.items():
             for version in versions:
-                campaign_name = f'{stage}/{version}'
+                campaign_name = version
                 index_path = _os.path.join(epic_prod_path, 'docs', stage, version, 'index.md')
                 try:
                     with open(index_path) as f:
                         text = f.read()
                 except OSError as e:
-                    summary['errors'].append(f'{campaign_name}: {e}')
+                    summary['errors'].append(f'{stage}/{version}: {e}')
                     continue
 
-                # A produced release newer than the current campaign is a
-                # FUTURE release, not past — classify by version so the lifecycle
-                # self-corrects on every import and as current advances.
+                # Lifecycle is classified on create only: a produced release
+                # newer than the current campaign starts as 'future', anything
+                # else as 'past'. An existing campaign's lifecycle is operator
+                # state and is never changed by ingest.
                 lc = 'future' if (current_v is not None
                                   and _version_tuple(version) > current_v) else 'past'
                 campaign, _ = Campaign.objects.get_or_create(
                     name=campaign_name,
                     defaults={'lifecycle': lc,
-                              'description': f'{stage} campaign {version} '
-                                             f'(epic-prod {index_path})',
+                              'description': f'Campaign {version} (epic-prod ingest)',
                               'created_by': created_by},
                 )
-                if campaign.lifecycle != lc:
-                    campaign.lifecycle = lc
-                    campaign.save(update_fields=['lifecycle'])
                 summary['campaigns'] += 1
 
                 campaign_files = 0
@@ -1466,7 +2406,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                     row_physics_tag = physics
                     if derived is None:
                         summary['errors'].append(
-                            f'{campaign_name}: DID {epic_did!r} physics unresolved; '
+                            f'{stage}/{version}: DID {epic_did!r} physics unresolved; '
                             f'left on placeholder {physics.tag_label}')
                     elif derived.get('process') in ('BEAMGAS', 'SYNRAD'):
                         row_physics_tag = _no_signal_physics_tag()
@@ -1501,12 +2441,30 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                         ds.physics_tag = row_physics_tag
                         ds.save()
 
+                    # Unified produced-output entry (ProdTask.outputs schema);
+                    # the legacy past_output block stays in Dataset.metadata
+                    # only, never in task overrides.
+                    outputs_entry = {
+                        'did': epic_did,
+                        'stage': stage,
+                        'version': version,
+                        'filters': metadata['past_output']['filters'],
+                        'rses': [{'rse': r.get('name'),
+                                  'files': r.get('files'),
+                                  'total': r.get('total'),
+                                  'complete': r.get('status') == 'complete'}
+                                 for r in (block['rses'] or [])],
+                        'file_count': block['file_count'],
+                        'bytes': block['data_size_bytes'],
+                        'complete': block['complete'],
+                        'checked_at': _timezone.now().isoformat(),
+                    }
                     task_defaults = dict(
                         description='',
                         dataset=ds,
                         prod_config=cfg,
                         campaign=campaign,
-                        overrides={'past_output': metadata['past_output']},
+                        overrides={'outputs': [outputs_entry]},
                         created_by=created_by,
                     )
                     existing = ProdTask.objects.filter(name=pcs_name).first()
@@ -1516,6 +2474,8 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                             if k == 'overrides':
                                 merged = dict(existing.overrides or {})
                                 merged.update(v)
+                                # Re-import heals any legacy-shaped row.
+                                merged.pop('past_output', None)
                                 v = merged
                             setattr(existing, k, v)
                         if not preserve_status:
@@ -1530,15 +2490,18 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
                     campaign_files += block['file_count']
                     campaign_bytes += block['data_size_bytes']
 
-                campaign.data = {
-                    **(campaign.data or {}),
-                    'past_summary': {
-                        'file_count': campaign_files,
-                        'data_size_bytes': campaign_bytes,
-                        'stage': stage,
-                        'version': version,
-                    },
+                # Stage-keyed totals: one campaign row spans both stages, so
+                # each stage pass writes only its own entry.
+                data = dict(campaign.data or {})
+                past_summary = data.get('past_summary')
+                if not isinstance(past_summary, dict) or 'file_count' in past_summary:
+                    past_summary = {}
+                past_summary[stage] = {
+                    'file_count': campaign_files,
+                    'data_size_bytes': campaign_bytes,
                 }
+                data['past_summary'] = past_summary
+                campaign.data = data
                 campaign.save(update_fields=['data', 'updated_at'])
 
     return summary
@@ -1554,7 +2517,7 @@ def import_epic_prod_past_campaigns(*, epic_prod_path=EPIC_PROD_PATH,
 # task row without waiting for the upstream nightly rebuild.
 #
 # Credentials are the public read-only eicread/eicread account
-# (matches the PandaBot jlab-rucio MCP config). Override via env.
+# (matches the DISpatcher jlab-rucio MCP config). Override via env.
 # ---------------------------------------------------------------------------
 
 JLAB_RUCIO_URL      = '/'.join(['https://rucio-server.jlab.org:443'])
@@ -1562,6 +2525,17 @@ JLAB_RUCIO_ACCOUNT  = 'eicread'
 JLAB_RUCIO_USERNAME = 'eicread'
 JLAB_RUCIO_PASSWORD = 'eicread'
 RUCIO_SNAPSHOT_DIR  = _os.path.join(_settings.SWF_TMP_DIR, 'rucio-snapshots')
+
+
+def _rucio_timeline_path(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
+    return _os.path.join(snapshot_dir, f'timeline-{campaign_name}.json')
+
+
+def _write_json_atomic(path, value):
+    tmp = f'{path}.tmp'
+    with open(tmp, 'w') as f:
+        _json.dump(value, f, indent=2)
+    _os.replace(tmp, path)
 
 
 def _jlab_rucio_auth(timeout=30):
@@ -1872,7 +2846,7 @@ def _index_snapshot_by_tail(snapshot):
 
 
 _Q2_MIN_RE   = _re.compile(r'^minQ2=([\d.]+)$', _re.I)
-_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)to([\d.]+)$', _re.I)
+_Q2_RANGE_RE = _re.compile(r'^q2_([\d.]+)(?:to|_)([\d.]+)$', _re.I)
 _Q2_POINT_RE = _re.compile(r'^q2_([\d.]+)$', _re.I)
 
 
@@ -1881,6 +2855,7 @@ def _q2_range(s):
 
     'minQ2=1'    -> (1, inf)
     'q2_1to10'   -> (1, 10)
+    'q2_20_35'   -> (20, 35)   (the underscore spelling, as in DEMP paths)
     'q2_20'      -> (20, 20)
     anything else / empty -> None
     """
@@ -2100,6 +3075,152 @@ def migrate_outputs_schema(*, apply=False):
     return summary
 
 
+PROPAGATION_STATES = ('continue', 'hold', 'final')
+
+
+def dataset_propagation_set(composed_names, state, comment, *, replaced_by='',
+                            clear_replaced_by=False, changed_by='',
+                            filter_state='', origin=None):
+    """Set the cross-campaign propagation disposition on dataset editions.
+
+    One call = one operator action, single or bulk. Every named composed
+    identity gets the state (and the optional ``replaced_by`` successor
+    reference), with one append-only history entry recorded on the
+    identity's head row — deterministically the first by (block, pk), since
+    past-campaign identities carry several physical rows on one block —
+    under ``metadata['propagation']['history']``;
+    state, previous, comment (required: the why and its source travel
+    together), changed_by, changed_at. The ``propagation`` column mirrors
+    the newest entry on every block row.
+
+    ``replaced_by`` semantics: an empty value leaves the successor
+    reference untouched; ``clear_replaced_by=True`` blanks it explicitly
+    (the two are mutually exclusive). Whenever the reference is touched,
+    the history entry records ``replaced_by`` (the new value, '' on a
+    clear) and — when it changed — ``previous_replaced_by``, so every flip
+    is unwindable from its own history entry.
+
+    Exactly one ``dataset_propagation_set`` action-stream event is logged
+    per call, carrying the changed count, the comment, and the selecting
+    filter — never one event per dataset. The comment is remembered as the
+    caller's next default (UserPreference ``propagation_last_comment``).
+
+    Unknown names and no-op flips are counted and returned, never silently
+    dropped. Raises ServiceError on an invalid state or an empty comment.
+
+    ``origin`` marks an AI-proposed change approved by a human
+    (AI_PROPOSALS.md): a dict with ``proposer``, ``scan_version``,
+    ``batch_id``, ``proposed_at``. It is stamped on both the history entry
+    and the action-stream event (``origin: ai_proposal``), so AI-originated
+    mutations stay distinguishable from purely human ones.
+    """
+    from monitor_app.epicprod_logging import log_epicprod_action
+    from monitor_app.models import UserPreference
+
+    state = (state or '').strip()
+    comment = (comment or '').strip()
+    replaced_by = (replaced_by or '').strip()
+    names = [n.strip() for n in (composed_names or []) if n and n.strip()]
+    if state not in PROPAGATION_STATES:
+        raise ServiceError(
+            f'propagation state must be one of '
+            f'{", ".join(PROPAGATION_STATES)}; got {state!r}')
+    if not comment:
+        raise ServiceError('comment is required on every propagation change')
+    if not names:
+        raise ServiceError('no dataset names supplied')
+    if replaced_by and clear_replaced_by:
+        raise ServiceError(
+            'replaced_by and clear_replaced_by are mutually exclusive')
+
+    changed, unchanged, unknown = [], [], []
+    now = _timezone.now().isoformat()
+    with transaction.atomic():
+        for name in names:
+            rows = list(Dataset.objects
+                        .filter(composed_name=name)
+                        .order_by('block_num', 'pk'))
+            if not rows:
+                unknown.append(name)
+                continue
+            head = rows[0]
+            if (head.propagation == state
+                    and (not replaced_by or head.replaced_by == replaced_by)
+                    and not (clear_replaced_by and head.replaced_by)):
+                unchanged.append(name)
+                continue
+            entry = {
+                'state': state,
+                'previous': head.propagation,
+                'comment': comment,
+                'changed_by': changed_by or '',
+                'changed_at': now,
+            }
+            if replaced_by or clear_replaced_by:
+                entry['replaced_by'] = replaced_by
+                if head.replaced_by != replaced_by:
+                    entry['previous_replaced_by'] = head.replaced_by
+            if origin:
+                entry['origin'] = str(origin.get('kind') or 'ai_proposal')
+                if origin.get('proposer'):
+                    entry['proposer'] = str(origin.get('proposer'))
+                if origin.get('undo_of'):
+                    entry['undo_of'] = origin['undo_of']
+            metadata = dict(head.metadata or {})
+            propagation_block = dict(metadata.get('propagation') or {})
+            history = list(propagation_block.get('history') or [])
+            history.append(entry)
+            propagation_block['history'] = history
+            metadata['propagation'] = propagation_block
+            head.metadata = metadata
+            for row in rows:
+                row.propagation = state
+                if replaced_by:
+                    row.replaced_by = replaced_by
+                elif clear_replaced_by:
+                    row.replaced_by = ''
+            head.save(update_fields=['propagation', 'replaced_by', 'metadata'])
+            for row in rows[1:]:
+                row.save(update_fields=['propagation', 'replaced_by'])
+            changed.append(name)
+
+    if changed_by:
+        UserPreference.set_pref(changed_by, 'propagation_last_comment', comment)
+
+    extra = {'changed': len(changed), 'unchanged': len(unchanged),
+             'unknown': len(unknown), 'state': state, 'comment': comment}
+    if replaced_by:
+        extra['replaced_by'] = replaced_by
+    if clear_replaced_by:
+        extra['replaced_by_cleared'] = True
+    if filter_state:
+        extra['filter'] = filter_state
+    if origin:
+        extra['origin'] = str(origin.get('kind') or 'ai_proposal')
+        if origin.get('proposer'):
+            extra['proposer'] = str(origin['proposer'])
+        if origin.get('scan_version') is not None:
+            extra['proposal_scan_version'] = origin.get('scan_version')
+        if origin.get('batch_id'):
+            extra['proposal_batch_id'] = str(origin['batch_id'])
+        if origin.get('proposed_at'):
+            extra['proposed_at'] = str(origin['proposed_at'])
+        if origin.get('undo_of'):
+            extra['undo_of'] = origin['undo_of']
+    log_id = log_epicprod_action(
+        'web', 'dataset_propagation_set',
+        subject_type='dataset' if len(changed) == 1 else '',
+        subject_key=changed[0] if len(changed) == 1 else '',
+        username=changed_by,
+        sublevel='normal', live_default=True,
+        message=(f'propagation -> {state} on {len(changed)} dataset(s): '
+                 f'{comment}'),
+        **extra,
+    )
+    return {'changed': changed, 'unchanged': unchanged, 'unknown': unknown,
+            'state': state, 'log_id': log_id}
+
+
 def summarize_rucio_timeline(snapshot, *, bin_hours=12):
     """Build a per-bin cumulative arrival timeline from a Rucio snapshot.
 
@@ -2239,6 +3360,19 @@ def load_rucio_snapshot(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
         return None
 
 
+def load_rucio_timeline(campaign_name, *, snapshot_dir=RUCIO_SNAPSHOT_DIR):
+    """Read the precomputed Rucio arrivals timeline. Returns None if absent."""
+    path = _rucio_timeline_path(campaign_name, snapshot_dir=snapshot_dir)
+    if not _os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return _json.load(f)
+    except (OSError, _json.JSONDecodeError) as e:
+        _log.warning('load_rucio_timeline %s: %s', path, e)
+        return None
+
+
 def import_jlab_rucio_current_snapshot(*, campaign_name=None,
                                       snapshot_dir=RUCIO_SNAPSHOT_DIR,
                                       created_by='rucio_snapshot'):
@@ -2296,9 +3430,18 @@ def import_jlab_rucio_current_snapshot(*, campaign_name=None,
                                             'error': str(e)}
             summary['paths'][cpath] = 0
 
-    with open(out_path, 'w') as f:
-        _json.dump(snapshot, f, indent=2)
+    _write_json_atomic(out_path, snapshot)
     summary['file_bytes'] = _os.path.getsize(out_path)
+    try:
+        timeline = summarize_rucio_timeline(snapshot)
+        timeline['campaign_name'] = campaign_name
+        timeline['snapshot_fetched_at'] = snapshot['fetched_at']
+        timeline_path = _rucio_timeline_path(campaign_name, snapshot_dir=snapshot_dir)
+        _write_json_atomic(timeline_path, timeline)
+        summary['timeline_path'] = timeline_path
+        summary['timeline_bytes'] = _os.path.getsize(timeline_path)
+    except Exception as e:                                    # noqa: BLE001
+        summary['errors'].append(f'timeline summary failed: {e}')
 
     # Detect active 26.x releases in JLab Rucio + stash on the PCS
     # current Campaign so the catalog can surface a 'Switch current'
@@ -2344,11 +3487,19 @@ def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
     The work behind the catalog's "Update from Rucio" button. Slow and
     network-bound (a live JLab Rucio fetch of /RECO + /FULL plus the match over
     every task), so it runs off the web request — in the prod-ops agent's
-    ``rucio_snapshot_update`` doer. Returns ``{'summaries': [...], 'errors':
-    [...]}``; errors are collected per campaign, never swallowed.
+    ``rucio_snapshot_update`` doer. Producing campaigns (fresh arrivals,
+    whatever their lifecycle slot) are targeted alongside current and
+    last — the producing tab's Rucio timeline comes from here. Returns
+    ``{'summaries': [...], 'errors': [...]}``; errors are collected per
+    campaign, never swallowed.
     """
+    from pcs.views import _campaigns_with_inflow
+
     targets = list(Campaign.objects.filter(lifecycle__in=['current', 'last'])
                    .order_by('lifecycle'))
+    seen = {camp.pk for camp in targets}
+    targets += [camp for camp, _ in _campaigns_with_inflow()
+                if camp.pk not in seen]
     out = {'summaries': [], 'errors': []}
     if not targets:
         out['errors'].append('No current Campaign defined in PCS')
@@ -2359,7 +3510,137 @@ def refresh_rucio_snapshots(*, created_by='rucio_snapshot'):
                 campaign_name=camp.name, created_by=created_by))
         except Exception as e:                                # noqa: BLE001
             out['errors'].append(f'{camp.lifecycle} {camp.name}: {e}')
+            continue
+        if camp.lifecycle not in ('current', 'last'):
+            # Producing campaigns reconcile firsthand from the snapshot
+            # just fetched (CAMPAIGN_CONTINUUM.md; pcs/reconcile.py) —
+            # current attaches outputs through the request match, last
+            # keeps its CSV heritage, so neither is reconciled here.
+            try:
+                from .reconcile import reconcile_campaign_from_rucio
+                out['summaries'].append(
+                    reconcile_campaign_from_rucio(
+                        camp.name, created_by=created_by))
+            except Exception as e:                            # noqa: BLE001
+                out['errors'].append(f'reconcile {camp.name}: {e}')
     return out
+
+
+def sweep_rucio_arrivals(*, roots=('/RECO', '/SIMU'), scope='epic',
+                         window_hours=None, created_by='', instance='web'):
+    """Clockwork detection of new files landing in JLab Rucio — the
+    arrivals sweep (EPICPROD_DATA_LINEAGE.md).
+
+    One ``created_after`` DID query per root (the server-side filter the
+    eic/firehose action uses) across ALL campaign versions, so arrivals
+    into any campaign surface whatever its lifecycle slot — the mechanism
+    behind the derived 'producing' status. New files are grouped by
+    campaign (the path segment under the root) and by location (the
+    file's parent directory); each arriving campaign's row records the
+    block ``campaign.data['arrivals']`` — last_arrival_at, window, file
+    counts by root, full location breakdown. Campaign names with no
+    catalog row are returned and logged, never dropped: an unknown
+    arrival is the first signal of a new campaign appearing.
+
+    The window starts at the previous sweep's timestamp (PersistentState
+    ``rucio_arrivals_last_swept``), so a missed run is covered by the
+    next one; ``window_hours`` overrides for hand runs. One live
+    ``rucio_arrivals`` action-stream event when anything arrived; a
+    quiet sweep records its bookkeeping and emits nothing.
+    """
+    import datetime as _dt
+
+    from monitor_app.epicprod_logging import log_epicprod_action
+    from monitor_app.models import PersistentState
+
+    now = _timezone.now()
+    if window_hours:
+        start_dt = now - _dt.timedelta(hours=float(window_hours))
+    else:
+        last = PersistentState.get_state().get('rucio_arrivals_last_swept')
+        try:
+            start_dt = _dt.datetime.fromisoformat(last) if last else None
+        except (TypeError, ValueError):
+            start_dt = None
+        if start_dt is None:
+            start_dt = now - _dt.timedelta(hours=24)
+    # created_after is the Rucio filter (UTC, naive by API convention);
+    # window_start is the stored/displayed form — zone-aware, so every
+    # surface renders it Eastern like the rest of the system.
+    created_after = (start_dt.astimezone(_dt.timezone.utc)
+                     .strftime('%Y-%m-%dT%H:%M:%S'))
+    window_start = start_dt.isoformat()
+
+    token = _jlab_rucio_auth()
+    per_campaign = {}
+    total = 0
+    for root in roots:
+        names = _ndjson(_jlab_rucio_get(
+            f'/dids/{scope}/dids/search', token,
+            type='file', created_after=created_after, name=root + '/*'))
+        root_key = root.strip('/')
+        for name in names:
+            if not isinstance(name, str):
+                continue
+            segs = name.split('/')
+            if len(segs) < 4 or not segs[2]:
+                continue
+            campaign_name, location = segs[2], '/'.join(segs[2:-1])
+            camp = per_campaign.setdefault(
+                campaign_name, {'files': 0, 'by_root': {}, 'locations': {}})
+            camp['files'] += 1
+            camp['by_root'][root_key] = camp['by_root'].get(root_key, 0) + 1
+            camp['locations'][location] = camp['locations'].get(location, 0) + 1
+            total += 1
+
+    known, unknown = [], []
+    with transaction.atomic():
+        for campaign_name, info in sorted(per_campaign.items()):
+            camp = Campaign.objects.filter(name=campaign_name).first()
+            if camp is None:
+                unknown.append(campaign_name)
+                continue
+            camp.data = {**(camp.data or {}), 'arrivals': {
+                'last_arrival_at': now.isoformat(),
+                'window_start': window_start,
+                'files': info['files'],
+                'by_root': info['by_root'],
+                'locations': info['locations'],
+            }}
+            camp.save(update_fields=['data', 'updated_at'])
+            known.append(campaign_name)
+    PersistentState.update_state({'rucio_arrivals_last_swept': now.isoformat()})
+
+    log_id = None
+    if total:
+        lines = []
+        for campaign_name, info in sorted(per_campaign.items()):
+            for location, count in sorted(info['locations'].items()):
+                lines.append(f'{count:>7} {location}')
+        shown = lines[:20]
+        more = len(lines) - len(shown)
+        message = (
+            f'{total} new file(s) in JLab Rucio since '
+            f'{_timezone.localtime(start_dt).strftime("%Y-%m-%d %H:%M %Z")} '
+            f'[{", ".join(sorted(per_campaign))}]:\n' + '\n'.join(shown)
+            + (f'\n… and {more} more location(s)' if more > 0 else ''))
+        extra = {
+            'total_files': total,
+            'campaigns': {c: i['files'] for c, i in per_campaign.items()},
+            'window_start': window_start,
+            'roots': list(roots),
+        }
+        if unknown:
+            extra['unknown_campaigns'] = unknown
+        log_id = log_epicprod_action(
+            instance, 'rucio_arrivals',
+            username=created_by,
+            sublevel='normal', live_default=True,
+            message=message, **extra)
+    return {'total_files': total,
+            'campaigns': {c: i['files'] for c, i in per_campaign.items()},
+            'known': known, 'unknown': unknown,
+            'window_start': window_start, 'log_id': log_id}
 
 
 # ---------------------------------------------------------------------------
@@ -2688,29 +3969,19 @@ def rename_pcs_current_campaign(new_name, *, created_by='operator'):
     return set_pcs_campaign_lifecycle(new_name, 'current', created_by=created_by)
 
 
-def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
+def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted',
+                               panda_tasks_id=None, task_name=None):
     """
     Record outcome of a JEDI submission.
 
-    - **Idempotent on the jediTaskID.** Re-recording the SAME id is a no-op
-      success — a doer retry, or a manual re-record after an orphaned
-      submission whose record-back POST failed. A DIFFERENT id on an
-      already-recorded task is refused (409).
-    - Otherwise the task must be in status 'ready' (no record from draft).
+    ``ProdTask.panda_task_id`` is the current/preferred pointer. Full PanDA/JEDI
+    history lives in PandaTasks, so recording a different id is a new association,
+    not an overwrite error.
     """
     try:
         incoming = int(jedi_task_id)
     except (TypeError, ValueError):
         raise ServiceError('jedi_task_id must be an integer')
-
-    if task.panda_task_id is not None:
-        if task.panda_task_id == incoming:
-            return task          # already recorded this submission — idempotent
-        raise ServiceError(
-            f'Task already records panda_task_id={task.panda_task_id}, '
-            f'cannot overwrite with {incoming}.',
-            status=409,
-        )
 
     # Commissioning relaxation: recording a submission from a draft task is
     # allowed — the 'ready' freeze is not required. See
@@ -2721,9 +3992,69 @@ def prodtask_record_submission(*, task, jedi_task_id, new_status='submitted'):
         raise ServiceError(
             f'Invalid status. Choose from: {", ".join(sorted(valid))}'
         )
-    task.panda_task_id = incoming
-    task.status = new_status
-    task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+    with transaction.atomic():
+        locked = ProdTask.objects.select_for_update().get(pk=task.pk)
+        row = None
+        if panda_tasks_id:
+            row = PandaTasks.objects.select_for_update().filter(
+                pk=panda_tasks_id, prod_task=locked).first()
+            if row is None:
+                raise ServiceError(
+                    f'No PandaTasks association {panda_tasks_id} for this task.',
+                    status=404,
+                )
+        if row is None:
+            row = PandaTasks.objects.select_for_update().filter(
+                jedi_task_id=incoming).first()
+            if row and row.prod_task_id != locked.pk:
+                raise ServiceError(
+                    f'jediTaskID {incoming} is already associated with another task.',
+                    status=409,
+                )
+        if row is None and task_name:
+            row = PandaTasks.objects.select_for_update().filter(
+                prod_task=locked, task_name=task_name).first()
+        if row is None:
+            last_try = (
+                PandaTasks.objects
+                .filter(prod_task=locked)
+                .order_by('-try_number')
+                .values_list('try_number', flat=True)
+                .first()
+            )
+            try_number = (last_try or 0) + 1
+            physical = task_name or panda_tasks_physical_name(locked, try_number)
+            row = PandaTasks.objects.create(
+                prod_task=locked,
+                try_number=try_number,
+                task_name=physical,
+                out_ds=physical,
+                log_ds=_log_dataset_name(physical),
+                association_source='record_submission',
+                match_reason='created while recording JEDI submission',
+            )
+        if row.jedi_task_id and row.jedi_task_id != incoming:
+            raise ServiceError(
+                f'PandaTasks row already records jediTaskID {row.jedi_task_id}; '
+                f'cannot overwrite with {incoming}.',
+                status=409,
+            )
+        row.jedi_task_id = incoming
+        if not row.out_ds:
+            row.out_ds = row.task_name
+        if not row.log_ds:
+            row.log_ds = _log_dataset_name(row.task_name)
+        if not row.association_source:
+            row.association_source = 'record_submission'
+        row.save(update_fields=[
+            'jedi_task_id', 'out_ds', 'log_ds', 'association_source',
+            'updated_at',
+        ])
+        locked.panda_task_id = incoming
+        locked.status = new_status
+        locked.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+        task.panda_task_id = locked.panda_task_id
+        task.status = locked.status
     return task
 
 
@@ -2747,8 +4078,84 @@ def prodtask_submit_request(*, task):
     # noInput+noOutput, payload-staged EVGEN, self-registered RECO. The prun
     # doer ('submit_task', build_panda_command, submit-prod-task.py) is kept but
     # sidelined — not wired to the button. See docs/JEDI_INTEGRATION.md.
-    msg = {'msg_type': 'submit_evgen_task', 'namespace': 'prodops',
-           'task_name': task.name, 'owner': task.created_by}
+    panda_tasks = prodtask_allocate_panda_tasks(task=task)
+    msg = {
+        'msg_type': 'submit_evgen_task',
+        'namespace': 'prodops',
+        'task_name': task.name,
+        'panda_tasks_id': panda_tasks.pk,
+        'panda_task_name': panda_tasks.task_name,
+        'owner': task.created_by,
+    }
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        panda_tasks.delete()
+        raise ServiceError(f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        panda_tasks.delete()
+        raise ServiceError(
+            'Submission could not be queued (ops-agent queue unreachable).', status=503)
+    return task
+
+
+def _prodtask_associated_jedi_ids(task):
+    ids = []
+    if task.panda_task_id:
+        ids.append(int(task.panda_task_id))
+    try:
+        for jedi_task_id in task.panda_tasks.filter(jedi_task_id__isnull=False).values_list('jedi_task_id', flat=True):
+            if jedi_task_id and int(jedi_task_id) not in ids:
+                ids.append(int(jedi_task_id))
+    except Exception:
+        # Backward compatibility while old production rows only have
+        # ProdTask.panda_task_id.
+        pass
+    return ids
+
+
+def prodtask_panda_operation_request(*, task, operation, jedi_task_id=None,
+                                     increase=1, new_parameters=None,
+                                     created_by='operator'):
+    """Queue a PanDA-native operation for an associated existing JEDI task."""
+    if operation not in ('increase_attempts', 'retry_failures'):
+        raise ServiceError('operation must be increase_attempts or retry_failures')
+    ids = _prodtask_associated_jedi_ids(task)
+    if not ids:
+        raise ServiceError('Task has no associated PanDA/JEDI task.', status=409)
+    if jedi_task_id is None:
+        jedi_task_id = task.panda_task_id or ids[-1]
+    try:
+        jedi_task_id = int(jedi_task_id)
+    except (TypeError, ValueError):
+        raise ServiceError('jedi_task_id must be an integer')
+    if jedi_task_id not in ids:
+        raise ServiceError(
+            f'jediTaskID {jedi_task_id} is not associated with this campaign task.',
+            status=409,
+        )
+    try:
+        increase = int(increase or 1)
+    except (TypeError, ValueError):
+        raise ServiceError('increase must be an integer')
+    if increase < 1:
+        raise ServiceError('increase must be >= 1')
+    if new_parameters is not None and not isinstance(new_parameters, dict):
+        raise ServiceError('new_parameters must be a JSON object')
+
+    msg = {
+        'msg_type': 'panda_task_operation',
+        'namespace': 'prodops',
+        'task_name': task.name,
+        'composed_name': task.composed_name,
+        'jedi_task_id': jedi_task_id,
+        'operation': operation,
+        'increase': increase,
+        'new_parameters': new_parameters or {},
+        'created_by': created_by,
+    }
     from monitor_app.activemq_connection import ActiveMQConnectionManager
     try:
         triggered = ActiveMQConnectionManager().send_message(
@@ -2757,28 +4164,48 @@ def prodtask_submit_request(*, task):
         raise ServiceError(f'Could not reach the prod-ops agent queue: {e}', status=503)
     if not triggered:
         raise ServiceError(
-            'Submission could not be queued (ops-agent queue unreachable).', status=503)
-    return task
+            'PanDA operation could not be queued (ops-agent queue unreachable).',
+            status=503,
+        )
+    return {'queued': True, 'operation': operation, 'jedi_task_id': jedi_task_id}
 
 
-def prodtask_reset_submission(*, task):
-    """Clear a recorded submission so a task can be re-submitted: panda_task_id
-    → None and status → 'draft'. This is the recovery path when a submission
-    breaks or is aborted PanDA-side and the task is left pinned to a dead
-    jediTaskID — the submit gate (prodtask_submit_request) refuses while
-    panda_task_id is set, and PCS has no other way back to the buildable
-    lifecycle. Does NOT touch the PanDA task itself (none of our credentials
-    live in the web tier); it only detaches the dead reference so the next
-    submission can fire. The API gates
-    this to authenticated operators. Raises ServiceError if there is nothing to
-    reset. See docs/EPICPROD_OPS.md."""
+def prodtask_rerun_entire_task_request(*, task):
+    """Queue a new full PanDA submission attempt for a previously submitted task."""
     if task.panda_task_id is None:
         raise ServiceError(
-            'Nothing to reset — task has no recorded submission.', status=409)
+            'Task has no recorded PanDA submission; use Submit to PanDA.', status=409)
+    old_panda_task_id = task.panda_task_id
+    old_status = task.status
     task.panda_task_id = None
     task.status = 'draft'
     task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+    try:
+        prodtask_submit_request(task=task)
+    except Exception:
+        task.panda_task_id = old_panda_task_id
+        task.status = old_status
+        task.save(update_fields=['panda_task_id', 'status', 'updated_at'])
+        raise
     return task
+
+
+def prodtask_record_submission_failure(*, task, panda_tasks_id, reason):
+    """Mark a preallocated PandaTasks attempt that failed before JEDI id return."""
+    if not panda_tasks_id:
+        raise ServiceError('panda_tasks_id is required')
+    row = PandaTasks.objects.filter(pk=panda_tasks_id, prod_task=task).first()
+    if row is None:
+        raise ServiceError(
+            f'No PandaTasks association {panda_tasks_id} for this task.',
+            status=404,
+        )
+    meta = dict(row.metadata or {})
+    meta['submit_failure'] = reason or ''
+    row.status_snapshot = 'submit_failed'
+    row.metadata = meta
+    row.save(update_fields=['status_snapshot', 'metadata', 'updated_at'])
+    return row
 
 
 def rucio_snapshot_update_request(*, created_by='rucio_snapshot'):
@@ -2831,6 +4258,56 @@ def evgen_rucio_update_request(*, created_by='evgen_rucio'):
     if not triggered:
         raise ServiceError(
             'EVGEN update could not be queued (ops-agent queue unreachable).',
+            status=503)
+
+
+def questionnaire_match_update_request(*, created_by='questionnaire_match'):
+    """Publish a questionnaire_match_update request to the prod-ops agent.
+
+    The agent rebuilds the task-local inverse cache from
+    Questionnaire.data['prod_matches'] and then pushes
+    questionnaire_match_ready over the SSE relay. Catalog rendering reads the
+    cache from task overrides and does not scan questionnaires inline.
+    """
+    import json as _json
+    msg = {'msg_type': 'questionnaire_match_update', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Questionnaire match update could not be queued '
+            '(ops-agent queue unreachable).',
+            status=503)
+
+
+def campaign_progress_refresh_request(*, created_by='progress_refresh'):
+    """Publish a campaign_progress_refresh request to the prod-ops agent.
+
+    The agent rebuilds the current campaign's PanDA progress snapshot and the
+    rendered progress table cache, then pushes campaign_progress_ready over SSE.
+    Page GETs only read cache.
+    """
+    import json as _json
+    if not Campaign.objects.filter(lifecycle='current').exists():
+        raise ServiceError('No current Campaign defined in PCS.', status=400)
+    msg = {'msg_type': 'campaign_progress_refresh', 'namespace': 'prodops',
+           'created_by': created_by}
+    from monitor_app.activemq_connection import ActiveMQConnectionManager
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', _json.dumps(msg))
+    except Exception as e:
+        raise ServiceError(
+            f'Could not reach the prod-ops agent queue: {e}', status=503)
+    if not triggered:
+        raise ServiceError(
+            'Progress refresh could not be queued (ops-agent queue unreachable).',
             status=503)
 
 

@@ -1,12 +1,17 @@
-"""Standalone ASGI entrypoint for the swf-monitor MCP server.
+"""Standalone ASGI entrypoint for the swf-monitor ASGI worker.
 
-Replaces the Django ASGI app for /swf-monitor/mcp/ traffic with a
-lifespan-managed FastMCP service. The Starlette wrapper owns
-mcp.session_manager.run() for the lifetime of the uvicorn process — the
-fix for the per-request StreamableHTTPSessionManager lifecycle that
-django-mcp-server's adapter has.
+Serves two things from the uvicorn process on 127.0.0.1:8001:
 
-MCPRequestGuard wraps the Starlette app and enforces:
+- The MCP server: a lifespan-managed FastMCP service replacing the
+  Django ASGI app for /swf-monitor/mcp/ traffic — the fix for the
+  per-request StreamableHTTPSessionManager lifecycle that
+  django-mcp-server's adapter has.
+- The SSE message stream (/api/messages/stream/): the full Django ASGI
+  application for exactly this path, so long-held EventSource
+  connections live on the async event loop instead of pinning sync
+  mod_wsgi workers (SSE_RELAY.md). Apache proxies the path here.
+
+MCPRequestGuard wraps the MCP Starlette app and enforces:
 - /health returns {"status": "ok"} with no auth, for the watchdog
 - Only POST is accepted (405 otherwise) — no server-pushed SSE, no GET
 - Authorization: Bearer <settings.MCP_BEARER_TOKEN> on every non-health
@@ -135,4 +140,31 @@ _mcp_application = Starlette(
     lifespan=lifespan,
 )
 
-application = MCPRequestGuard(_mcp_application)
+from django.core.asgi import get_asgi_application  # noqa: E402
+
+_django_application = get_asgi_application()
+
+# The SSE stream path, in the forms Apache and dev servers present it.
+# FORCE_SCRIPT_NAME strips the subpath inside Django's ASGI handler.
+_SSE_STREAM_PATHS = (
+    "/swf-monitor/api/messages/stream/",
+    "/api/messages/stream/",
+)
+
+
+class StreamRouter:
+    """Route the SSE stream to the Django ASGI app; everything else —
+    including lifespan, which FastMCP owns — to the MCP app."""
+
+    def __init__(self, django_app, mcp_app):
+        self.django_app = django_app
+        self.mcp_app = mcp_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path", "") in _SSE_STREAM_PATHS:
+            await self.django_app(scope, receive, send)
+            return
+        await self.mcp_app(scope, receive, send)
+
+
+application = StreamRouter(_django_application, MCPRequestGuard(_mcp_application))

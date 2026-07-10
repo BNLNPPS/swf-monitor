@@ -16,6 +16,27 @@ from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = Path(os.environ.get('SWF_ENV_FILE') or (BASE_DIR.parent / '.env'))
+
+
+def _env_file_value(key):
+    """Read one key from the deployed .env without letting os.environ override it."""
+    try:
+        lines = ENV_FILE.read_text(encoding='utf-8').splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        name, value = line.split('=', 1)
+        if name.strip() != key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        return value
+    return None
 
 # Rucio client reads these from os.environ directly, so bridge them from the
 # .env-loaded config. No-op if unset (e.g. in dev).
@@ -72,6 +93,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.humanize",  # intcomma / filesizeformat / naturaltime for swf_fmt
     "pcs",  # Physics Configuration System
+    "ai",  # AI proposals and human-in-the-loop automation
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
     "django_dbml",  # For schema diagram generation
     # Third-party apps
@@ -320,6 +342,19 @@ COMMON QUERIES:
 - Link an input Dataset? → pcs_prodtask_link_input(task_name='...', did='group.EIC.evgen:...b1')
 - Mark a task ready for submission? → pcs_prodtask_set_status(task_name='...', status='ready')
 - Submission itself is not on MCP: operator runs `pcs-task-cmd <name> --submit` locally with their PanDA auth context.
+- Register an AI assessment on a production object? → epic_register_ai_assessment(subject_type='panda_task', subject_key='36565', assessment='...', username='...', ai='...')
+- Bot-created AI assessments? → the bot harness sets username='bot', ai=<exact model>, and data.origin with type='bot' and model=<exact model>.
+- Retrieve AI assessment rows? → Use the exact ai_content.retrieval block returned by detail tools, e.g. epic_get_ai_content(ids=[17, 23])
+- Outstanding AI proposals for human review? → ai_list_proposals() — show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12)
+- Human says 'approve cp-12'? → ai_decide_proposal(ref='cp-12', decision='approve', username=<the deciding human's username>) — relay only explicit human instructions naming the ref; deciders must be on the SysConfig approver list (ai_proposal_mcp_approvers)
+
+AI CONTENT RETRIEVAL:
+Detail-style production tools such as pcs_prodtask_get, panda_study_job,
+panda_get_queue, and single-task panda_list_tasks(taskid=...) may return an
+ai_content block. If ai_content.available is true, call
+ai_content.retrieval.tool with ai_content.retrieval.arguments. Do not guess
+subject_type or subject_key when ids are supplied; the ids are the authoritative
+retrieval path.
 
 PCS (Physics Configuration System):
 PCS manages the configuration of production tasks based on physics inputs for ePIC Monte Carlo simulation campaigns. Configurations are
@@ -370,7 +405,33 @@ EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, c
 
 # Channel layer settings
 # Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
-REDIS_URL = config('REDIS_URL', default='')
+_REDIS_URL_FILE_VALUE = _env_file_value('REDIS_URL')
+REDIS_URL = (
+    _REDIS_URL_FILE_VALUE
+    if _REDIS_URL_FILE_VALUE is not None
+    else config('REDIS_URL', default='')
+)
+_DJANGO_CACHE_DIR_FILE_VALUE = _env_file_value('DJANGO_CACHE_DIR')
+DJANGO_CACHE_DIR = (
+    _DJANGO_CACHE_DIR_FILE_VALUE
+    if _DJANGO_CACHE_DIR_FILE_VALUE is not None
+    else config('DJANGO_CACHE_DIR', default=os.path.join(SWF_TMP_DIR, "django-cache"))
+)
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+            "LOCATION": DJANGO_CACHE_DIR,
+        }
+    }
+
 if REDIS_URL:
     CHANNEL_LAYERS = {
         "default": {

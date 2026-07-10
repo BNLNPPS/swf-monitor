@@ -6,8 +6,50 @@ and delegates to the synchronous query function via sync_to_async.
 """
 
 from asgiref.sync import sync_to_async
+from ai.assessments import ai_content_retrieval_guidance
+from monitor_app.epicprod_inventory import diagnosis_for_study_data
 from monitor_app.mcp import mcp
 from monitor_app.panda import queries
+
+
+def _ai_content_for_panda_task(jeditaskid):
+    if not jeditaskid:
+        return ai_content_retrieval_guidance({})
+    from pcs.models import PandaTasks
+    row = PandaTasks.objects.filter(jedi_task_id=jeditaskid).first()
+    return ai_content_retrieval_guidance(row.metadata if row else {})
+
+
+def _list_tasks_sync(**kwargs):
+    result = queries.list_tasks(**kwargs)
+    if result.get('error'):
+        return result
+    taskid = kwargs.get('taskid')
+    if taskid:
+        for task in result.get('tasks') or []:
+            task['ai_content'] = _ai_content_for_panda_task(task.get('jeditaskid'))
+    return result
+
+
+def _get_queue_sync(panda_queue):
+    result = queries.get_queue(panda_queue=panda_queue)
+    if result.get('error'):
+        return result
+    from monitor_app.models import PandaQueue
+    row = PandaQueue.objects.filter(queue_name=panda_queue).first()
+    result['ai_content'] = ai_content_retrieval_guidance(row.metadata if row else {})
+    return result
+
+
+def _study_job_sync(pandaid):
+    result = queries.study_job(pandaid=pandaid)
+    if result.get('error'):
+        return result
+    from monitor_app.models import EpicProdJob
+    row = EpicProdJob.objects.filter(pandaid=pandaid).first()
+    result['epicprod_diagnosis'] = diagnosis_for_study_data(result, epicprod_job=row)
+    result['ai_content'] = ai_content_retrieval_guidance(row.data if row else {})
+    return result
 
 
 @mcp.tool()
@@ -150,8 +192,12 @@ async def panda_list_tasks(
             by software or by running site).
         pagination: {before_id, has_more, next_before_id} for incremental pulling.
         total_in_window: Total tasks matching filters in the time window.
+        When taskid is provided, matching task records also include
+        `ai_content`. If `ai_content.available` is true, retrieve assessment
+        rows by calling `ai_content.retrieval.tool` with
+        `ai_content.retrieval.arguments`.
     """
-    return await sync_to_async(queries.list_tasks)(
+    return await sync_to_async(_list_tasks_sync)(
         days=days, status=status, username=username, taskname=taskname,
         reqid=reqid, workinggroup=workinggroup, taskid=taskid,
         processingtype=processingtype, limit=limit, before_id=before_id,
@@ -277,8 +323,10 @@ async def panda_get_queue(
 
     Returns:
         queue: Full configuration dict with all parameters.
+        ai_content: Availability flag, ids, and exact retrieval tool/arguments
+            for append-only AI assessments linked to the local queue/site record.
     """
-    return await sync_to_async(queries.get_queue)(panda_queue=panda_queue)
+    return await sync_to_async(_get_queue_sync)(panda_queue=panda_queue)
 
 
 @mcp.tool()
@@ -323,7 +371,8 @@ async def panda_study_job(
     pandaid: int,
 ) -> dict:
     """
-    Deep study of a single PanDA job — full record, files, errors, log URLs.
+    Deep study of a single PanDA job — full record, files, errors, log URLs,
+    and ePIC production diagnosis.
 
     Gathers everything available from the database for a single job:
     - Full job record with all error fields and resource usage
@@ -331,9 +380,16 @@ async def panda_study_job(
     - Harvester worker info with condor log URLs
     - Parent task context (name, status, error dialog)
     - Structured error extraction across all 7 components
+    - ePIC production diagnosis from app inventory, including parsed phase,
+      failure summary, and payload-log timeline when available
 
     Use this after panda_diagnose_jobs identifies a failed job you want to
-    understand in detail. Returns log URLs for manual inspection even when
+    understand in detail. Check `epicprod_diagnosis.available` first; when true,
+    prefer `epicprod_diagnosis.phase` and `failure_summary` for the
+    production-facing failure explanation before falling back to PanDA pilot
+    diagnostics. This matters for ePIC payload-managed data workflows where
+    JLab Rucio input/output failures are visible in payload logs rather than
+    PanDA-managed file tables. Returns log URLs for manual inspection even when
     programmatic log retrieval is not yet available.
 
     Args:
@@ -347,8 +403,13 @@ async def panda_study_job(
         harvester: Condor worker details if available.
         task: Parent JEDI task context.
         monitor_url: Link to PanDA monitoring page.
+        epicprod_diagnosis: {available, phase, failure_summary, timeline,
+            last_refreshed_at, guidance}. Use this for the production-facing
+            phase of failed ePIC jobs.
+        ai_content: Availability flag, ids, and exact retrieval tool/arguments
+            for append-only AI assessments linked to the local job record.
     """
-    return await sync_to_async(queries.study_job)(pandaid=pandaid)
+    return await sync_to_async(_study_job_sync)(pandaid=pandaid)
 
 
 @mcp.tool()

@@ -22,6 +22,12 @@
                         <th>Level</th>
                         <td class="{{ log.levelname|state_class }}" title="{{ log.levelname|state_title }}">{{ log.levelname }}</td>
                     </tr>
+                    {% if action_description %}
+                    <tr>
+                        <th>Action</th>
+                        <td><strong>{{ log.extra_data.action }}</strong> — {{ action_description }}</td>
+                    </tr>
+                    {% endif %}
                     <tr>
                         <th>Application</th>
                         <td><a href="{% url 'monitor_app:log_list' %}?app_name={{ log.app_name }}">{{ log.app_name }}</a></td>
@@ -29,7 +35,11 @@
                     <tr>
                         <th>Instance</th>
                         <td>
+                            {% if agent_exists %}
                             <a href="{% url 'monitor_app:agent_detail' log.instance_name %}">{{ log.instance_name }}</a>
+                            {% else %}
+                            {{ log.instance_name }}
+                            {% endif %}
                             (<a href="{% url 'monitor_app:log_list' %}?instance_name={{ log.instance_name }}">logs</a>)
                         </td>
                     </tr>

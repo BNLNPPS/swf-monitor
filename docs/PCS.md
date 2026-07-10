@@ -1,6 +1,18 @@
 # PCS — Physics Configuration System
 
-PCS manages the configuration of production tasks based on physics inputs for ePIC simulation campaigns at the Electron Ion Collider. It provides a central place to define, browse, reuse, and compose the configurations that drive Monte Carlo production and subsequent reconstruction.
+PCS is the Physics Configuration System within **epicprod**, the ePIC automated
+production system. PCS manages the configuration and campaign records that
+epicprod uses to submit, monitor, retry, and account for production work through
+PanDA and Rucio.
+
+PCS is one subsystem, not the whole production system. The broader epicprod
+system includes the task catalog, PanDA monitor views, production operations
+agent, Rucio lineage/update flows, payload-log retrieval, alarms, system-status
+checks, and external access through the production web face. PCS supplies the
+structured physics/configuration layer for that system: tags, datasets,
+production configs, production tasks, and request/catalog linkage. The
+system-level description of the whole WFMS, above these implementation docs,
+is <https://epic-wfms-docs.readthedocs.io>.
 
 **URL:** `/swf-monitor/pcs/`
 
@@ -93,6 +105,12 @@ Each tag type has required and optional parameters defined in `pcs/schemas.py`. 
 **EvGen (e):**
 - Required: `generator`, `generator_version`
 - Optional: `signal_freq`, `signal_status`, `bg_tag_prefix`, `bg_files`, `notes`
+
+**Background (k):**
+- Required: `background_type`
+- Optional: `bg_source`, `bg_mechanism`, `bg_generator`, `beam_energy_electron`,
+  `beam_energy_hadron`, `beam_species`, `cross_section`, `signal_freq`,
+  `signal_status`, `bg_tag_prefix`, `bg_files`, `evtgen_file`, `notes`
 
 **Simulation (s):**
 - Required: `detector_sim`, `sim_version`
@@ -187,9 +205,47 @@ group.EIC.26.02.0.epic_craterlake.p1141.e37.s1.r1.45to135deg
 
 The version segment is the detector version: it describes the conditions of the produced data. Campaign membership is bookkeeping for production operations and does not rename the dataset identity. Reproducibility locking of the composed tags is enforced at submission prep, not at composition; during alpha that requirement is relaxed (see [Commissioning Relaxations](COMMISSIONING_RELAXATIONS.md)).
 
-The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The task name is the dataset name without the `.bN` suffix.
+Because the version segment is part of the identity, each campaign's realization of a sample is its own dataset row — its **edition**. The campaign-invariant identity behind the editions is the **physics configuration**: physics tag + evgen tag (+ background tag) + sample variant — the thing the system is named for, what a requester asks for, and what a disposition decides about ("family" in earlier notes; distinct from a production config, the execution workflow settings). The simu and reco tags are not part of it: they are campaign-supplied software, bound per edition along with the detector config and version segment. A generator version bump deliberately breaks the physics configuration — that is a replacement, recorded with `replaced_by`. The physics configuration needs no entity of its own. Two dataset fields plan its future across campaigns:
+
+- `propagation` — this edition's disposition, consumed at next-campaign creation: `continue` (default; mints the successor edition), `hold` (stays in the catalog, no next-campaign production), `final` (produced this campaign, then the configuration ends). Operators flip states, sometimes by approving an AI proposal; ingest never does.
+- `replaced_by` — composed-name reference to the successor configuration when a retirement has a designated replacement (campaign-level changes such as an energy migration). A name reference, not a foreign key: the successor may not be materialized yet.
+
+A physics configuration retired in campaign N is one whose N edition is `final`; one new in N has no N−1 edition. The campaign-over-campaign delta (continued / held / retired / replaced / new) is computed from these fields and feeds the campaign narrative and generated summaries ([EPICPROD_NARRATIVES.md](EPICPROD_NARRATIVES.md)).
+
+Campaign lifecycle labels (`current`, `last`, `past`, `future`) are stored, singular, and human-owned: `current` is one campaign — the working catalog. **Producing** is derived, never stored: a campaign with Rucio arrivals inside `campaign_producing_window_days` (SysConfig, default 3) gets its own catalog tab ("26.06.0 · producing") for as long as data flows, whatever slot it occupies. The producing tab carries the one-click rotation — "Make <campaign> current" — which atomically promotes it while the incumbent current becomes last and the incumbent last becomes past (`campaign_promoted` event). Detection is automatic; the transition is always a human click.
+
+Every disposition change records why. `dataset_propagation_set` (`pcs.services`; REST `POST /pcs/api/datasets/propagation/`) requires a free-text **comment** — the reason and its source together ("10×130 replaced by 9×130 per PSC meeting 2026-07-08") — and appends an entry (state, previous, comment, changed_by, changed_at; when the successor reference is touched, `replaced_by` — the new value, empty on an explicit clear — and `previous_replaced_by` when it changed) to the identity's append-only `metadata['propagation']['history']`; the column mirrors the newest entry, and every flip is unwindable from its own history entry. The successor reference is set with `replaced_by`, left untouched when empty, and blanked only by the explicit `clear_replaced_by` flag. Disposition proposal batches are named `<next-campaign>-dispositions-<YYYYMMDD>`, with `<next-campaign>` the full three-segment version (`26.07.0`, never `26.07`) — the batch name is where the successor campaign's name enters the system, becoming the campaign row and the version segment of every edition it mints; the catalog's Future tab derives the likely next campaign from pending batches so the coming transition is visible before the campaign row exists. One call covers a single dataset or a bulk selection and logs exactly one `dataset_propagation_set` action-stream event carrying the changed count, the comment, and the selecting filter — never one event per dataset. The catalog's bulk bar drives it: filter to the target set, select all, choose the state, enter the comment (prefilled with the user's last, remembered per user). Rows with a non-`continue` disposition carry a badge in the catalog list.
+
+The Rucio DID adds the scope prefix and a block suffix: `group.EIC:...r1.45to135deg.b1`. Block `.b1` is always present. Rucio limits a dataset to 100k files; PCS subdivides into blocks (`.b1`, `.b2`, …) automatically as needed. The logical task name is the dataset name without the `.bN` suffix.
 
 The detector-version identity and the sample variants below are extensions to the dataset model, defined here.
+
+### Composed-name Suffixes
+
+PCS separates the logical composed name from dynamic physical suffixes. The logical name is the stable PCS dataset/task identity. Physical PanDA and Rucio names may append suffixes so repeated submissions and Rucio block subdivisions have unique names.
+
+Known dynamic tokens:
+
+- `kN`: optional background-tag segment. It appears immediately after the `.pN.eN.sN.rN` tag run and is part of the logical PCS identity.
+- `.tryN`: terminal PanDA/JEDI attempt suffix. This is the physical-attempt naming feature that lets one logical campaign task produce multiple concrete PanDA tasks without output-name collision. Attempt 1 has no suffix; attempt 2 is `.try2`.
+- `.bN`: terminal Rucio block suffix. It is not part of the logical PCS identity or PanDA task name.
+
+The canonical physical order is:
+
+```
+logical[.tryN][.bN]
+```
+
+Examples:
+
+```
+logical             -> logical PCS identity, first PanDA attempt
+logical.b1          -> block 1 of the first attempt
+logical.try2        -> second PanDA attempt
+logical.try2.b1     -> block 1 of the second attempt
+```
+
+Interpretation strips registered terminal suffixes from right to left. Thus `logical.b1` and `logical.try2.b1` both resolve back to logical identity `logical`, with parsed block/attempt metadata. The implementation lives in `src/pcs/name_tokens.py`; new dynamic suffixes belong there first, then in this section, so name parsing does not fragment across services.
 
 ### Sample Variants
 
@@ -201,7 +257,7 @@ A tag composition that defines a variant list materializes as its variants, and 
 
 Generality is bounded: a variant is a single named sample with its parameters, not a set of independent dimensions the system multiplies out. Two production axes are expressed by naming each resulting sample, not by a composable key-and-value syntax in the name.
 
-**Parsing.** The name is read positionally, not by splitting on `.`. The tag run `.p<n>.e<n>.s<n>.r<n>` occurs once and anchors the name; a `.k<n>` segment follows when present; the remainder is the sample name, taken verbatim and permitted to contain periods (`ma_0.1`). In a Rucio DID the trailing `.b<n>` block suffix is stripped first. Two reserved-token rules keep the parse unambiguous: a sample name's first segment must not match `k<n>` (the background tag) and its last segment must not match `b<n>` (the block suffix). Discriminator values satisfy both.
+**Parsing.** The name is read positionally, not by splitting on `.`. The tag run `.p<n>.e<n>.s<n>.r<n>` occurs once and anchors the name; a `.k<n>` segment follows when present; the remainder is the sample name, taken verbatim and permitted to contain periods (`ma_0.1`). Registered terminal suffixes such as `.try<n>` and `.b<n>` are stripped first by the central suffix utility. Two reserved-token rules keep the parse unambiguous: a sample name's first segment must not match `k<n>` (the background tag) and its last segment must not match a terminal suffix token such as `try<n>` or `b<n>`. Discriminator values satisfy both.
 
 Within one tag composition a sample name is unique. Identity, the duplicate check, and the completion unit all key on the tags together with the sample name; that unit is what completes and triggers validation (see [Validation](EPICPROD_VALIDATION.md)).
 
@@ -252,13 +308,14 @@ A production config is a reusable template capturing everything needed to build 
 | `prod_source_label` | `managed` | PanDA authorization (managed/test) |
 | `vo` | `wlcg` | Virtual organization |
 | `n_jobs` | `1000` | Jobs per task submission |
-| `events_per_job` | `100` | Events per individual job |
+| `events_per_job` | `100` | Events per individual job; stored in `ProdConfig.data` and surfaced as `Events/Job` |
 | `events_per_file` | `1000` | Events per output file |
 | `files_per_job` | `1` | Output files per job |
 | `corecount` | `1` | Cores per job |
 | `no_build` | `true` | Skip PanDA build step |
-| `skip_scout` | `true` | Skip scout jobs |
+| `skip_scout` | `true` | Skip PanDA scout jobs. Surfaced in the Prod Config UI as the positive **Scout Mode** toggle; unchecked writes `skip_scout=true`. New configs use the last saved toggle state from the user's database-backed JSON preferences; with no remembered value, scout mode defaults off. |
 | `exec_command` | `./run.sh` | Payload command (--exec) |
+| `log_rse` | `EIC-XRD-LOG` | Log-output RSE passed to the payload as `LOG_RSE`; stored in `ProdConfig.data` and surfaced as `Log RSE` |
 | `scope` | `group.EIC` | Rucio scope for submission |
 
 Production configs are always mutable — they are working templates. The PanDA task/job spec is the immutable record of what actually ran.
@@ -266,11 +323,13 @@ Production configs are always mutable — they are working templates. The PanDA 
 ## External Access
 
 PCS pages and REST endpoints reach external users via the swf-remote
-proxy at `epic-devcloud.org`. Every new swf-monitor URL intended for
-external access requires a corresponding `path()` entry in
-`swf-remote/src/remote_app/urls.py` — without it, the page returns
-404 to external users. See [External Access](EXTERNAL_ACCESS.md) for
-the contract.
+proxy at `epic-devcloud.org`. All `pcs/` pages and the `pcs/api/`
+REST surface are proxied wholesale by catch-all routes in
+`swf-remote/src/remote_app/urls.py`, so a new PCS URL needs no
+swf-remote change; explicit named entries are needed only outside the
+proxied trees or where swf-remote resolves the route by `{% url %}`
+name. See [External Access](EXTERNAL_ACCESS.md) for the contract,
+including the write-action trigger rules.
 
 ## JEDI Integration
 
@@ -278,7 +337,7 @@ PCS is being extended to submit tasks directly to JEDI (PanDA's Job Execution an
 
 - [JEDI Integration Design](JEDI_INTEGRATION.md) — architecture, field mapping, implementation plan
 - [JEDI ePIC Proposal](JEDI_EPIC_PROPOSAL.md) — technical proposal for PanDA team review
-- [Dataset Request Workflow](PCS_DATASET_REQUEST_WORKFLOW.md) — PCS-centered plan for Mattermost/PanDAbot dataset request intake, external datasets, public catalogue projection, and future EVGEN workflow stages
+- [Dataset Request Workflow](PCS_DATASET_REQUEST_WORKFLOW.md) — PCS-centered plan for Mattermost/DISpatcher dataset request intake, external datasets, public catalogue projection, and future EVGEN workflow stages
 
 ## MCP Tools
 

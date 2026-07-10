@@ -14,6 +14,50 @@ import re
 import shlex
 
 
+def _bg_param(task, key):
+    """Background execution params prefer the k tag, with EvGen as fallback."""
+    ds = task.dataset
+    bg_params = {}
+    if getattr(ds, 'background_tag_id', None) or getattr(ds, 'background_tag', None):
+        bg_params = getattr(ds.background_tag, 'parameters', None) or {}
+    if bg_params.get(key) not in (None, ''):
+        return bg_params[key]
+    evgen_params = getattr(ds.evgen_tag, 'parameters', None) or {}
+    return evgen_params.get(key)
+
+
+def _add_background_env(env, task, *, defaults=False):
+    if not task.get_effective_config().get('bg_mixing'):
+        return
+    signal_freq = _bg_param(task, 'signal_freq')
+    signal_status = _bg_param(task, 'signal_status')
+    bg_tag_prefix = _bg_param(task, 'bg_tag_prefix')
+    bg_files = _bg_param(task, 'bg_files')
+
+    if defaults:
+        env['SIGNAL_FREQ'] = str(signal_freq if signal_freq is not None else '0')
+        env['SIGNAL_STATUS'] = str(signal_status if signal_status is not None else '0')
+    else:
+        if signal_freq is not None:
+            env['SIGNAL_FREQ'] = str(signal_freq)
+        if signal_status is not None:
+            env['SIGNAL_STATUS'] = str(signal_status)
+    if bg_tag_prefix:
+        env['TAG_PREFIX'] = bg_tag_prefix
+    if bg_files:
+        env['BG_FILES'] = bg_files
+
+
+def _add_try_env(env, panda_tasks):
+    """Disambiguate payload-managed Rucio output paths for full task reruns."""
+    try_number = int(getattr(panda_tasks, 'try_number', 0) or 0)
+    if try_number <= 1:
+        return
+    suffix = f'try{try_number}'
+    existing = str(env.get('TAG_PREFIX') or '').strip('/')
+    env['TAG_PREFIX'] = f'{existing}/{suffix}' if existing else suffix
+
+
 def build_condor_command(task):
     """
     Build the Condor submit_csv.sh command from a ProdTask.
@@ -26,7 +70,7 @@ def build_condor_command(task):
     ``?fmt=condor`` artifact, but not maintained or used by the readiness/submit
     flow. Do not build new capability on it.
     """
-    ds = task.output_dataset
+    ds = task.dataset
     cfg = task.get_effective_config()
     physics = ds.physics_tag.parameters
     data = cfg.get('data') or {}
@@ -62,14 +106,7 @@ def build_condor_command(task):
         env['CSV_FILE'] = csv_path
 
     # Background mixing (conditional)
-    if cfg.get('bg_mixing'):
-        evgen = ds.evgen_tag.parameters
-        env['SIGNAL_FREQ'] = str(evgen.get('signal_freq', '0'))
-        env['SIGNAL_STATUS'] = str(evgen.get('signal_status', '0'))
-        if evgen.get('bg_tag_prefix'):
-            env['TAG_PREFIX'] = evgen['bg_tag_prefix']
-        if evgen.get('bg_files'):
-            env['BG_FILES'] = evgen['bg_files']
+    _add_background_env(env, task, defaults=True)
 
     # Build env string (skip empty values)
     env_str = ' \\\n  '.join(f'{k}={v}' for k, v in env.items() if v)
@@ -91,7 +128,7 @@ def build_panda_command(task):
     uses PrunScript.main() from pandaclient, but this generates the
     equivalent CLI command for reference/execution.
     """
-    ds = task.output_dataset
+    ds = task.dataset
     cfg = task.get_effective_config()
     data = cfg.get('data') or {}
 
@@ -165,10 +202,9 @@ def build_panda_command(task):
 
 def _build_env_string(task):
     """Shared env-var string for Condor command and JEDI jobParameters."""
-    ds = task.output_dataset
+    ds = task.dataset
     cfg = task.get_effective_config()
     physics = ds.physics_tag.parameters
-    evgen = ds.evgen_tag.parameters
 
     env = {
         'EBEAM': str(physics.get('beam_energy_electron', '')),
@@ -185,15 +221,7 @@ def _build_env_string(task):
     # the listed files at runtime.
     if task.input_source_location:
         env['CSV_FILE'] = task.input_source_location
-    if cfg.get('bg_mixing'):
-        if evgen.get('signal_freq') is not None:
-            env['SIGNAL_FREQ'] = str(evgen['signal_freq'])
-        if evgen.get('signal_status') is not None:
-            env['SIGNAL_STATUS'] = str(evgen['signal_status'])
-        if evgen.get('bg_tag_prefix'):
-            env['TAG_PREFIX'] = evgen['bg_tag_prefix']
-        if evgen.get('bg_files'):
-            env['BG_FILES'] = evgen['bg_files']
+    _add_background_env(env, task)
     return ' '.join(f'{k}={v}' for k, v in env.items() if v)
 
 
@@ -205,7 +233,7 @@ def build_task_dump(task):
 
     Suitable for human inspection or downstream tooling. Pure read.
     """
-    ds = task.output_dataset
+    ds = task.dataset
     cfg = task.prod_config
 
     def _tag(t):
@@ -251,7 +279,7 @@ def build_task_dump(task):
             'csv_file': task.csv_file,
             'overrides': task.overrides or {},
             'input_dataset_dids': [d.did for d in task.input_datasets],
-            'output_dataset_dids': [d.did for d in task.output_datasets],
+            'output_dataset_dids': [d.did for d in task.output_dataset_overrides],
             'intermediate_dataset_dids': [d.did for d in task.intermediate_datasets],
             'created_by': task.created_by,
             'created_at': task.created_at.isoformat() if task.created_at else None,
@@ -304,7 +332,7 @@ def _output_dataset_name(task):
     (``out_dataset``/``log_dataset`` prepend ``ds.scope``). Falls back to the
     flat ``task_name`` when no EVGEN path or campaign is available.
     """
-    ds = task.output_dataset
+    ds = task.dataset
     parts = (ds.source_location or '').strip('/').split('/')
     if task.campaign_id and parts[:4] == ['volatile', 'eic', 'EPIC', 'EVGEN'] and len(parts) > 4:
         suffix = '/'.join(parts[4:])
@@ -503,34 +531,27 @@ def _evgen_env(task):
     copies the proxy into the sandbox, so no credential reference reaches the
     web tier). The payload's run.sh sources ``environment*.sh`` itself.
     """
-    ds = task.output_dataset
+    ds = task.dataset
     cfg = task.get_effective_config()
+    data = cfg.get('data') or {}
     physics = ds.physics_tag.parameters
-    evgen = ds.evgen_tag.parameters
     env = {
         'COPYRECO': 'true' if cfg.get('copy_reco') else 'false',
         'COPYFULL': 'true' if cfg.get('copy_full') else 'false',
         'COPYLOG': 'true' if cfg.get('copy_log') else 'false',
         'USERUCIO': 'true' if cfg.get('use_rucio') else 'false',
         'OUT_RSE': cfg.get('rucio_rse') or '',
+        'LOG_RSE': data.get('log_rse') or '',
         'DETECTOR_VERSION': ds.detector_version,
         'DETECTOR_CONFIG': ds.detector_config,
         'EBEAM': str(physics.get('beam_energy_electron', '')),
         'PBEAM': str(physics.get('beam_energy_hadron', '')),
     }
-    if cfg.get('bg_mixing'):
-        if evgen.get('signal_freq') is not None:
-            env['SIGNAL_FREQ'] = str(evgen['signal_freq'])
-        if evgen.get('signal_status') is not None:
-            env['SIGNAL_STATUS'] = str(evgen['signal_status'])
-        if evgen.get('bg_tag_prefix'):
-            env['TAG_PREFIX'] = evgen['bg_tag_prefix']
-        if evgen.get('bg_files'):
-            env['BG_FILES'] = evgen['bg_files']
+    _add_background_env(env, task)
     return {k: v for k, v in env.items() if v != ''}
 
 
-def build_evgen_task_params(task):
+def build_evgen_task_params(task, panda_tasks=None):
     """Build the client-API EVGEN production submission spec from a ProdTask.
 
     This is the production reproduction of the proven condor-side recipe
@@ -546,7 +567,7 @@ def build_evgen_task_params(task):
     Pure mapping — no DB writes, no network. Raises ValueError if the task has
     no EVGEN input bound (a misconfigured task must fail loudly).
     """
-    ds = task.output_dataset
+    ds = task.dataset
     cfg = task.get_effective_config()
     data = cfg.get('data') or {}
 
@@ -560,10 +581,15 @@ def build_evgen_task_params(task):
             'carries no per-file event count)')
     csv_rows = _evgen_manifest_from_inputs(task, n_events)
 
-    # The composed PCS identity is unique (including the sample segment where
-    # needed) and is the PanDA taskName/outDS even for noOutput EVGEN tasks.
+    # The composed PCS identity is the logical campaign task. The physical
+    # PanDA task/outDS name is attempt-specific when this is a retry or site race
+    # (try2, try3, ...), carried by the PandaTasks association row.
     env = _evgen_env(task)
-    out_ds = task.composed_name or ds.composed_name or ds.build_dataset_name()
+    _add_try_env(env, panda_tasks)
+    out_ds = (
+        getattr(panda_tasks, 'task_name', '') or
+        task.composed_name or ds.composed_name or ds.build_dataset_name()
+    )
 
     # Container: an explicit image wins; else build the cvmfs eic_xl ref from the
     # jug_xl tag, as submit_csv.sh does.

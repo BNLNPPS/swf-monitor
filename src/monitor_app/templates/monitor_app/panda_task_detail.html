@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
 {% load swf_fmt humanize %}
 
-{% block title %}Task {{ jeditaskid }} - SWF Monitor{% endblock %}
+{% block title %}PanDA Task {{ jeditaskid }} - SWF Monitor{% endblock %}
 
 {% block content %}
 <div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Task {{ jeditaskid }}</h2>
+        <h2>PanDA Task {{ jeditaskid }}</h2>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
     </div>
 
@@ -33,7 +33,7 @@
                         {% endif %}
                         {% if task.workinggroup %}<tr><td><strong>Working Group</strong></td><td>{{ task.workinggroup }}</td></tr>{% endif %}
                         {% if task.processingtype %}<tr><td><strong>Processing Type</strong></td><td>{{ task.processingtype }}</td></tr>{% endif %}
-                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{{ task.transpath }}</td></tr>{% endif %}
+                        {% if task.transpath %}<tr><td><strong>Transformation</strong></td><td style="word-break:break-all;">{% if task.transformation_view_url %}<a href="{{ task.transformation_view_url }}" target="_blank" rel="noopener">{{ task.transpath }}</a>{% else %}{{ task.transpath }}{% endif %}</td></tr>{% endif %}
                     </table>
                 </div>
             </div>
@@ -50,12 +50,12 @@
                         {% if task.endtime %}<tr><td><strong>Ended</strong></td><td>{{ task.endtime|fmt_dt }}</td></tr>{% endif %}
                         {% if task.modificationtime %}<tr><td><strong>Modified</strong></td><td>{{ task.modificationtime|fmt_dt }}</td></tr>{% endif %}
                         {% if task.computed_progress is not None %}<tr><td><strong>Progress</strong></td><td>{{ task.computed_progress }}% <span class="text-muted">(from job counts)</span></td></tr>{% endif %}
-                        <tr><td><strong>Active Jobs</strong></td><td class="running_fill">{{ task.nactive|default:0|intcomma }}</td></tr>
-                        <tr><td><strong>Finished Jobs</strong></td><td class="finished_fill">{{ task.nfinished|default:0|intcomma }}</td></tr>
-                        <tr><td><strong>Failed Jobs</strong></td><td class="failed_fill">{{ task.nfailed|default:0|intcomma }}</td></tr>
-                        <tr><td><strong>Running Jobs</strong></td><td class="running_fill">{{ task.nrunning|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Active Jobs</strong></td><td{% if task.nactive %} class="running_fill"{% endif %}>{{ task.nactive|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Finished Jobs</strong></td><td{% if task.nfinished %} class="finished_fill"{% endif %}>{{ task.nfinished|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Failed Jobs</strong></td><td{% if task.nfailed %} class="failed_fill"{% endif %}>{{ task.nfailed|default:0|intcomma }}</td></tr>
+                        <tr><td><strong>Running Jobs</strong></td><td{% if task.nrunning %} class="running_fill"{% endif %}>{{ task.nrunning|default:0|intcomma }}</td></tr>
                         <tr><td><strong>Retries</strong></td><td>{{ task.nretries|default:0|intcomma }} <span class="text-muted">(jobs with attemptnr&nbsp;&gt;&nbsp;1)</span></td></tr>
-                        <tr><td><strong>Final Failed Jobs</strong></td><td class="failed_fill">{{ task.nfinalfailed|default:0|intcomma }} <span class="text-muted">(retry-exhausted; attemptnr&nbsp;&ge;&nbsp;3)</span></td></tr>
+                        <tr><td><strong>Final Failed Jobs</strong></td><td{% if task.nfinalfailed %} class="failed_fill"{% endif %}>{{ task.nfinalfailed|default:0|intcomma }} <span class="text-muted">(retry-exhausted; attemptnr&nbsp;&ge;&nbsp;maxattempt)</span></td></tr>
                         {% if task.computed_failurerate is not None %}<tr><td><strong>Failure Rate</strong></td><td>{{ task.computed_failurerate|floatformat:3 }} <span class="text-muted">(from job counts; cancelled excluded)</span></td></tr>{% endif %}
                         {% if task.computed_finalfailurerate is not None %}<tr><td><strong>Final Fail Rate</strong></td><td>{{ task.computed_finalfailurerate|floatformat:3 }} <span class="text-muted">(retry-exhausted; what alarms use)</span></td></tr>{% endif %}
                         {% if task.attemptnr is not None %}<tr><td><strong>Attempt</strong></td><td>{{ task.attemptnr }}</td></tr>{% endif %}
@@ -67,6 +67,8 @@
             </div>
         </div>
     </div>
+
+    {% ai_assessment_panel panda_tasks_metadata %}
 
     <!-- Logged status -->
     {% if task.errordialog %}
@@ -88,7 +90,15 @@
                 {% for item in requested_resource_items %}
                 <tr>
                     <td style="width:12rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="overflow-wrap:anywhere;">{{ item.value }}</td>
+                    <td style="overflow-wrap:anywhere;">
+                        {% with href=item.value|url_href %}
+                        {% if href %}
+                        <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                        {% endwith %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -150,7 +160,15 @@
                 {% for item in task.job_parameters %}
                 <tr>
                     <td style="width:12rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="overflow-wrap:anywhere;">{{ item.value }}</td>
+                    <td style="overflow-wrap:anywhere;">
+                        {% with href=item.value|url_href %}
+                        {% if href %}
+                        <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                        {% endwith %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -179,10 +197,12 @@
                         <tr>
                             <th>PanDA ID</th>
                             <th>Status</th>
+                            <th>Error</th>
+                            <th>Attempt</th>
                             <th>Site</th>
                             <th>Created</th>
                             <th>Ended</th>
-                            <th>Cores</th>
+                            <th>Events</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -190,10 +210,29 @@
                     <tr>
                         <td><a href="{% url 'monitor_app:panda_job_detail' job.pandaid %}">{{ job.pandaid }}</a></td>
                         <td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td>
+                        <td style="overflow-wrap:anywhere;">
+                            {% if job.epicprod_failure_summary %}
+                                <div><strong>ePIC {{ job.epicprod_phase|default:"diagnosis" }}</strong>: {{ job.epicprod_failure_summary|truncatechars:180 }}</div>
+                            {% elif job.errors %}
+                                {% for err in job.errors %}
+                                <div><strong>{{ err.component }}</strong>:{{ err.code }}{% if err.diag %} {{ err.diag|truncatechars:120 }}{% endif %}</div>
+                                {% endfor %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if job.attemptnr %}
+                                {{ job.attemptnr }}/{{ job.maxattempt|default:"?" }}
+                                {% if job.final_attempt %}<span class="text-muted">(final)</span>{% endif %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
                         <td>{{ job.computingsite|default:"" }}</td>
                         <td>{{ job.creationtime|fmt_dt }}</td>
                         <td>{{ job.endtime|fmt_dt }}</td>
-                        <td>{{ job.corecount|default:"" }}</td>
+                        <td>{{ job.nevents|default:"" }}</td>
                     </tr>
                     {% endfor %}
                     </tbody>
@@ -212,12 +251,24 @@
     <div class="card mb-3">
         <div class="card-header"><strong>PanDA/JEDI task parameters</strong></div>
         <div class="card-body">
-            <table class="table table-sm table-bordered mb-0">
+            <table class="table table-sm table-bordered mb-0 w-auto">
                 <tbody>
                 {% for item in task_record_items %}
                 <tr>
                     <th style="width:18rem;">{{ item.name }}</th>
-                    <td style="word-break:break-all;">{{ item.value }}</td>
+                    <td style="word-break:break-all; max-width:60rem;">
+                        {% if item.href %}
+                        <a href="{{ item.href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {% with href=item.value|url_href %}
+                        {% if href %}
+                        <a href="{{ href }}" target="_blank" rel="noopener">{{ item.value|fmt_value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                        {% endwith %}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>

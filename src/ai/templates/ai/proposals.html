@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+
+{% block title %}AI Proposals - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.pcs-props-table td, .pcs-props-table th { vertical-align: top; }
+.pcs-props-filter a { margin-right: .8em; text-decoration: none; }
+.pcs-props-filter a.active { font-weight: 700; text-decoration: underline; }
+.pcs-props-comment { max-width: 34em; }
+.pcs-props-stats td, .pcs-props-stats th { padding: .15rem .6rem; }
+</style>
+
+<div class="container-fluid mt-3">
+  <h1><span class="ai-attr-text">AI Proposals</span></h1>
+  <p class="text-muted">
+    AI-proposed actions pending human review, and the decision history.
+    Approval executes the frozen payload deterministically through the same
+    service an operator uses; denial is recorded and the proposal is not
+    re-proposed until its inputs change. See docs/AI_PROPOSALS.md.
+  </p>
+
+  <div class="pcs-props-filter mb-2">
+    {% for row in facet_rows %}
+    {% if row.items %}
+    <div class="mb-1">
+      <strong>{{ row.title }}:</strong>
+      <a href="{{ row.all_url }}" class="{% if row.all_active %}active{% endif %}">All</a>
+      {% for f in row.items %}
+      <a href="{{ f.url }}" class="{% if f.active %}active{% endif %}">{{ f.label }} ({{ f.count }})</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+    {% if subject_filter %}
+    <div class="mb-1">
+      <strong>Subject:</strong> {{ subject_filter }}
+      <a href="{{ subject_clear_url }}" class="ms-2">clear</a>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if shown_count < total_count %}
+    <div class="text-muted mb-2">Showing newest {{ shown_count }} of {{ total_count }} — narrow the filter for the rest.</div>
+  {% endif %}
+
+  {# Look, don't touch: the decision bar renders for every viewer; controls activate only in an operator session. #}
+  <div class="mb-2 d-flex align-items-center gap-2">
+    {% csrf_token %}
+    <span class="text-muted"><span id="props-count">0</span> selected</span>
+    <button type="button" id="props-approve" class="btn btn-sm btn-success" disabled
+            title="Approve and execute the selected proposals — deterministic execution through the same service an operator uses{% if not user.is_authenticated %}; sign in to use{% endif %}">Approve</button>
+    <button type="button" id="props-deny" class="btn btn-sm btn-secondary" disabled
+            title="Deny the selected proposals — recorded, not re-proposed until inputs change{% if not user.is_authenticated %}; sign in to use{% endif %}">Deny</button>
+    <select id="props-quality" class="form-select form-select-sm" style="width:auto"
+            {% if not user.is_authenticated %}disabled{% endif %}
+            title="Optional quality tag recorded with the decision (worst to best; 'wrong' marks the proposal miscalibrated and counts against the proposer's track record)">
+      <option value="">quality&hellip;</option>
+      <option value="wrong">wrong</option>
+      <option value="poor">poor</option>
+      <option value="ok">ok</option>
+      <option value="good">good</option>
+    </select>
+    <span class="text-muted small me-4">Quality choice is recorded with the decision.</span>
+    <button type="button" id="props-undo" class="btn btn-sm btn-dark-green" disabled
+            title="Undo the selected executed proposals — restores the pre-approval state through the same service and returns the proposal to pending; the execution and undo events remain on the record. The offer expires if the record has changed since execution.{% if not user.is_authenticated %} Sign in to use.{% endif %}">Undo</button>
+    <button type="button" id="props-delete" class="btn btn-sm btn-danger" disabled
+            title="Remove the selected rows from the AI proposal list — decision history included, permanent{% if not user.is_authenticated %}; sign in to use{% endif %}">Delete</button>
+  </div>
+
+  <table class="table table-sm pcs-props-table">
+    <thead>
+      <tr>
+        <th style="width:1.5em"><input type="checkbox" id="props-selectall" {% if not user.is_authenticated %}disabled{% endif %} title="Select all pending{% if not user.is_authenticated %} — sign in to select{% endif %}"></th>
+        <th>Ref</th><th>Proposed</th><th>Action</th><th>Change</th><th>Subject</th>
+        <th class="pcs-props-comment">Comment</th>
+        <th>Status</th><th>Decision</th><th>Quality</th>
+        <th>Proposer</th><th>Batch</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in rows %}
+      <tr>
+        <td><input type="checkbox" class="props-cb" value="{{ p.id }}" {% if not user.is_authenticated %}disabled title="Sign in to select"{% endif %}></td>
+        <td class="small"><strong>{{ p.ref }}</strong></td>
+        <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
+        <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>
+        <td class="small text-nowrap">{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}</td>
+        <td class="small"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
+          {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}</td>
+        <td class="small pcs-props-comment">{{ p.comment }}
+          {% if p.payload.replaced_by %}<div class="text-muted">Replaced by: {{ p.payload.replaced_by }}</div>{% endif %}
+          {% if p.confidence %}<div class="text-muted">Confidence: {{ p.confidence }}</div>{% endif %}</td>
+        <td class="small">{{ p.status }}</td>
+        <td class="small">{% if p.decided_by %}{{ p.decided_by }} {{ p.decided_at|date:"m-d H:i" }}{% else %}—{% endif %}</td>
+        <td class="small">{{ p.quality|default:"—" }}</td>
+        <td class="small">{{ p.proposer|default:"—" }}</td>
+        <td class="small">{{ p.batch_id|default:"—" }}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="12" class="text-center text-muted py-3">No proposals match this filter.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if proposer_stats %}
+  <h5 class="mt-4">Proposer track records</h5>
+  <table class="table table-sm pcs-props-stats" style="max-width:46em">
+    <thead><tr><th>Proposer</th><th>Total</th><th>Pending</th><th>Executed</th><th>Denied</th><th>Wrong</th></tr></thead>
+    <tbody>
+      {% for s in proposer_stats %}
+      <tr><td>{{ s.proposer }}</td><td>{{ s.total }}</td><td>{{ s.pending }}</td><td>{{ s.executed }}</td><td>{{ s.denied }}</td><td>{{ s.wrong }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const cbs = document.querySelectorAll('.props-cb');
+  const selectAll = document.getElementById('props-selectall');
+  const count = document.getElementById('props-count');
+  const buttons = ['props-approve', 'props-deny', 'props-undo', 'props-delete']
+    .map(id => document.getElementById(id)).filter(Boolean);
+  if (!buttons.length) return;
+  function refresh() {
+    const n = Array.from(cbs).filter(c => c.checked).length;
+    if (count) count.textContent = n;
+    buttons.forEach(b => b.disabled = (n === 0));
+  }
+  if (selectAll) selectAll.addEventListener('change', () => {
+    cbs.forEach(c => c.checked = selectAll.checked); refresh();
+  });
+  cbs.forEach(c => c.addEventListener('change', refresh));
+
+  async function decide(decision) {
+    const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
+    if (!ids.length) return;
+    const quality = document.getElementById('props-quality').value;
+    const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
+    const qnote = quality ? ` (quality: ${quality})` : '';
+    if (!confirm(`${verb} ${ids.length} AI proposal(s)${qnote}?`)) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ ids: ids, decision: decision, quality: quality || '',
+                               filter: window.location.search }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [];
+      if (decision === 'approve') parts.push(`${j.approved.length} approved and executed`);
+      else parts.push(`${j.denied.length} denied`);
+      if (j.stale.length) parts.push(`${j.stale.length} stale (record changed since proposed)`);
+      alert('AI proposals: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Proposal decision failed: ' + err.message);
+    }
+  }
+  document.getElementById('props-approve').addEventListener('click', () => decide('approve'));
+  document.getElementById('props-deny').addEventListener('click', () => decide('deny'));
+
+  document.getElementById('props-undo').addEventListener('click', async () => {
+    const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
+    if (!ids.length) return;
+    if (!confirm(`Undo ${ids.length} executed AI proposal(s)? `
+                 + 'Restores the pre-approval state — recorded as a new history entry.')) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/undo/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ ids: ids }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [`${j.undone.length} undone`];
+      if (j.moved.length) parts.push(`${j.moved.length} expired (record changed since execution)`);
+      if (j.not_executed.length) parts.push(`${j.not_executed.length} skipped (not in executed status)`);
+      alert('AI proposal undo: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Undo failed: ' + err.message);
+    }
+  });
+
+  document.getElementById('props-delete').addEventListener('click', async () => {
+    const ids = Array.from(cbs).filter(c => c.checked).map(c => parseInt(c.value, 10));
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} selected row(s) from the AI proposal list? `
+                 + 'Decision history included — this is permanent.')) return;
+    const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/delete/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ ids: ids }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      window.location.reload();
+    } catch (err) {
+      alert('Delete failed: ' + err.message);
+    }
+  });
+})();
+</script>
+{% endblock %}

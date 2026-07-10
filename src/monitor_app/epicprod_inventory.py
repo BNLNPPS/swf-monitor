@@ -1,10 +1,12 @@
 import csv
 import json
 import logging
+import os
 import re
 from io import StringIO
 from pathlib import PurePosixPath
 
+from django.conf import settings
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
 
@@ -14,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 PSEUDO_DATASETS = {'seq_number', 'pseudo_dataset'}
+PAYLOAD_LOG_MEMBERS = (
+    'payload.stdout',
+    'payload.stderr',
+    'pilotlog.txt',
+    'pandatracerlog.txt',
+)
 
 
 def is_pseudo_panda_file(file_info):
@@ -212,7 +220,15 @@ def _prod_task_for_jeditaskid(jeditaskid):
     if not jeditaskid:
         return None
     try:
-        from pcs.models import ProdTask
+        from pcs.models import PandaTasks, ProdTask
+        assoc = (
+            PandaTasks.objects
+            .filter(jedi_task_id=int(jeditaskid))
+            .select_related('prod_task', 'prod_task__dataset', 'prod_task__prod_config')
+            .first()
+        )
+        if assoc:
+            return assoc.prod_task
         return (ProdTask.objects
                 .filter(panda_task_id=int(jeditaskid))
                 .select_related('dataset', 'prod_config')
@@ -281,21 +297,35 @@ def _fetch_job_log_texts(pandaid):
     return texts
 
 
-def sync_job_from_study_data(study_data):
-    """Persist epicprod diagnosis from an existing study_job() result."""
-    job = study_data.get('job') or {}
-    pandaid = int(study_data.get('pandaid') or job.get('pandaid'))
-    jeditaskid = job.get('jeditaskid')
-    files = study_data.get('files') or []
-    seq_number = _seq_number_from_files(files)
-    prod_task = _prod_task_for_jeditaskid(jeditaskid)
+def cached_payload_log_parts(jeditaskid, pandaid):
+    """Read payload-log cache members written by the prod-ops agent."""
+    if not (jeditaskid and pandaid):
+        return []
+    cache_root = getattr(settings, 'SWF_TMP_DIR', '/data/swf-tmp')
+    jobdir = os.path.join(cache_root, 'panda-logs', str(jeditaskid), str(pandaid))
+    if not os.path.isfile(os.path.join(jobdir, '.done')):
+        return []
+    parts = []
+    for name in PAYLOAD_LOG_MEMBERS:
+        path = os.path.join(jobdir, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, 'r', errors='replace') as f:
+                text = f.read()
+        except OSError as exc:
+            text = f'(could not read {name}: {exc})'
+        parts.append({'name': name, 'text': text})
+    return parts
 
-    if prod_task:
-        sync_expected_files_for_task(prod_task)
 
-    log_analysis = study_data.get('log_analysis') or {}
-    log_texts = [log_analysis.get('log_excerpt') or '']
-    log_texts.extend(_fetch_job_log_texts(pandaid))
+def cached_payload_log_texts(jeditaskid, pandaid):
+    return [part['text'] for part in cached_payload_log_parts(jeditaskid, pandaid)]
+
+
+def diagnosis_from_log_texts(log_texts, job=None):
+    """Derive the ePIC production phase from payload log text."""
+    job = job or {}
     combined_log_text = '\n'.join(t for t in log_texts if t)
     timeline = _timeline_from_log_text(combined_log_text)
     conflict = _rucio_conflict_details(combined_log_text)
@@ -310,6 +340,78 @@ def sync_job_from_study_data(study_data):
     elif job.get('jobstatus') in ('failed', 'closed'):
         phase = 'failed'
         failure_summary = (job.get('piloterrordiag') or '').strip()
+
+    return {
+        'available': bool(phase or failure_summary or timeline),
+        'phase': phase,
+        'failure_summary': failure_summary,
+        'timeline': timeline,
+        'conflict': conflict,
+        'guidance': (
+            'Use phase/failure_summary as the production-facing diagnosis. '
+            'This is parsed from payload logs and app inventory, and can be '
+            'more specific than the top-level PanDA pilot error for '
+            'payload-managed input/output workflows.'
+        ),
+    }
+
+
+def diagnosis_for_study_data(study_data, epicprod_job=None):
+    """Return persisted or cache-derived production diagnosis for a job page/tool."""
+    if epicprod_job:
+        data = epicprod_job.data or {}
+        return {
+            'available': True,
+            'phase': epicprod_job.phase,
+            'failure_summary': epicprod_job.failure_summary,
+            'timeline': data.get('timeline') or [],
+            'last_refreshed_at': (
+                epicprod_job.last_refreshed_at.isoformat()
+                if epicprod_job.last_refreshed_at else ''
+            ),
+            'source': 'epicprod_inventory',
+            'guidance': (
+                'Use phase/failure_summary as the production-facing diagnosis. '
+                'This is parsed from payload logs and app inventory, and can be '
+                'more specific than the top-level PanDA pilot error for '
+                'payload-managed input/output workflows.'
+            ),
+        }
+
+    job = study_data.get('job') or {}
+    pandaid = study_data.get('pandaid') or job.get('pandaid')
+    jeditaskid = job.get('jeditaskid')
+    log_analysis = study_data.get('log_analysis') or {}
+    log_texts = [log_analysis.get('log_excerpt') or '']
+    cached_texts = cached_payload_log_texts(jeditaskid, pandaid)
+    log_texts.extend(cached_texts)
+    diagnosis = diagnosis_from_log_texts(log_texts, job=job)
+    diagnosis['last_refreshed_at'] = ''
+    diagnosis['source'] = 'payload_log_cache' if cached_texts else 'study_job'
+    return diagnosis
+
+
+def sync_job_from_study_data(study_data):
+    """Persist epicprod diagnosis from an existing study_job() result."""
+    job = study_data.get('job') or {}
+    pandaid = int(study_data.get('pandaid') or job.get('pandaid'))
+    jeditaskid = job.get('jeditaskid')
+    files = study_data.get('files') or []
+    seq_number = _seq_number_from_files(files)
+    prod_task = _prod_task_for_jeditaskid(jeditaskid)
+
+    if prod_task:
+        sync_expected_files_for_task(prod_task)
+
+    log_analysis = study_data.get('log_analysis') or {}
+    log_texts = [log_analysis.get('log_excerpt') or '']
+    log_texts.extend(cached_payload_log_texts(jeditaskid, pandaid))
+    log_texts.extend(_fetch_job_log_texts(pandaid))
+    diagnosis = diagnosis_from_log_texts(log_texts, job=job)
+    phase = diagnosis['phase']
+    failure_summary = diagnosis['failure_summary']
+    timeline = diagnosis['timeline']
+    conflict = diagnosis.get('conflict')
 
     data = {
         'panda': {

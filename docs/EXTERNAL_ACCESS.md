@@ -30,26 +30,21 @@ page itself works on swf-monitor.
 
 ## Contract: adding a new swf-monitor URL intended for external access
 
-When you add a new URL to swf-monitor (typically in `src/pcs/urls.py`
-or `src/monitor_app/urls.py`) and you want external users to reach
-it through `epic-devcloud.org`, you must **also** add a sibling entry
-in `swf-remote/src/remote_app/urls.py` pointing at the appropriate
-proxy view. Without this, the page is BNL-internal only.
+`swf-remote/src/remote_app/urls.py` ends with wholesale catch-alls —
+`re_path(r'^pcs/', views.pcs_proxy)` and `re_path(r'^panda/',
+views.panda_proxy)` — so any `pcs/` or `panda/` page is proxied to
+external users with no per-route maintenance, and the REST API is
+covered by the `pcs/api/<path:path>` catch-all. A new page under those
+trees needs no swf-remote change.
 
-Pattern:
+An explicit named entry is still required in two cases:
 
-```python
-# swf-remote/src/remote_app/urls.py
-path('pcs/<your-path>/', views.pcs_proxy, name='<your-name>'),
-```
-
-The `name=` should mirror the swf-monitor URL name where practical, so
-existing `{% url %}` template references resolve correctly when
-templates are rendered server-side on swf-monitor and proxied through.
-
-REST API endpoints under `/pcs/api/` are already covered by a
-catch-all (`pcs/api/<path:path>`) — those do not need per-endpoint
-entries.
+- a route **outside** the `pcs/` and `panda/` trees (as with `alarms/`
+  and the SSE stream), which no catch-all covers;
+- a route that swf-remote's own code or templates reference by
+  `{% url %}` name — the explicit entries above the catch-alls exist
+  to keep those names resolvable, with `name=` mirroring the
+  swf-monitor URL name.
 
 ## Write actions and triggers (POST/PATCH/DELETE) — read this before adding a button
 
@@ -87,13 +82,30 @@ action:
    `X-Remote-User` + body.
 5. **Completion returns over SSE.** The relay (`/api/messages/stream/`) is
    already proxied (`sse_proxy`); the page holds an `EventSource` and updates
-   when the agent emits its event. See [SSE_PUSH.md](SSE_PUSH.md).
+   when the agent emits an event or swf-monitor relays a corun-ai completion
+   callback. See [SSE_PUSH.md](SSE_PUSH.md) and
+   [EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md).
 6. **Verify on `epic-devcloud.org`, not internally.** The internal face
    satisfies session+CSRF and relays redirects, so it passes while the external
    face fails. Test where the users are.
 
 The supported write path is the `/pcs/api/` surface (per *Authentication*
 below); page-view POSTs through the proxy are not.
+
+## Conditional template behavior on the proxy
+
+swf-monitor exposes the template context flag `is_tunnel` for requests arriving
+through the swf-remote SSH tunnel. It is set by
+`monitor_app.middleware.tunnel_context`, which checks whether the upstream
+request reaches swf-monitor from localhost. Direct browser access on
+`pandaserver02` gets `is_tunnel = False`; proxied external access through
+swf-remote gets `is_tunnel = True`.
+
+Use `is_tunnel` in swf-monitor templates when a control or message must differ
+between the internal and external faces. Existing examples include hiding or
+disabling page-view write controls that are only supported on `pandaserver02`.
+Do not implement this class of behavior by matching URL strings or rewriting
+proxied HTML in swf-remote.
 
 ## Static assets
 

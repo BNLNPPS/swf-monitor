@@ -81,6 +81,13 @@
       main > .container-fluid > .d-flex h2 {
         margin-bottom: 0 !important;
       }
+      /* Button roles (see CLAUDE.md "Button roles" — the AI-facing table):
+         constructive create/save/new/import = btn-primary; object verbs
+         edit/copy on existing items = btn-dark-green; consequential commits
+         submit/lock/publish/approve = btn-success; suggestion-bar Apply =
+         btn-warning btn-apply; destructive delete = btn-danger; neutral
+         cancel/utility = btn-secondary; btn-outline-* reserved for stateful
+         toggles where fill signals on/off. All btn-sm. */
       .btn.btn-dark-green {
         background-color: #166534; border-color: #166534; color: #fff;
       }
@@ -197,6 +204,7 @@
       #mode-label {
         border-right: 1px solid rgba(255,255,255,.2);
         color: #fff;
+        font-weight: 700;
         padding-right: 12px;
         margin-right: 4px;
       }
@@ -218,6 +226,39 @@
       }
       .copy-btn:hover { color: #0d6efd; }
       .copy-btn.copied { color: #198754; }
+      /* AI presence — the universal convention for material attributable to
+         the AI (proposals, recommendation filters, AI-authored blocks):
+         dark purple ink on light purple ground. Tune the system-wide AI
+         look here and nowhere else. */
+      :root {
+        --ai-fg: #5b21b6;
+        --ai-bg: #f8f4fe;
+        /* Lavender ground always wears a 1px border in the ink color. */
+        --ai-border: var(--ai-fg);
+      }
+      .ai-attr {
+        color: var(--ai-fg);
+        background-color: var(--ai-bg);
+        border: 1px solid var(--ai-border);
+        border-radius: .5em;
+        padding: 0 .45em;
+        font-weight: 600;
+      }
+      /* Purple ink always sits on lavender ground — the universal pairing. */
+      .ai-attr-text {
+        color: var(--ai-fg); background-color: var(--ai-bg);
+        border: 1px solid var(--ai-border);
+        border-radius: .35em; padding: 0 .3em; font-weight: 600;
+      }
+      /* Lavender fill for AI-owned containers (home-page boxes, panels). */
+      .ai-fill {
+        background-color: var(--ai-bg);
+        border: 1px solid var(--ai-border) !important;
+      }
+      button.ai-attr:hover, a.ai-attr:hover {
+        background-color: var(--ai-fg); color: #fff;
+        border-color: var(--ai-fg);
+      }
     </style>
 </head>
 <body>
@@ -352,7 +393,14 @@
 
         {# ── Production mode ── #}
         <span class="nav-mode nav-production">
-        <a href="{% url 'pcs:questionnaires_list' %}" class="{% if active_nav.requests %}nav-active{% endif %}">Requests</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
+            <div class="dropdown-content">
+                <a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener">Google request form</a>
+                <a href="{% url 'pcs:pcs_request_composer' %}">Request Production</a>
+                <a href="{% url 'pcs:questionnaires_list' %}">Request list</a>
+            </div>
+        </div>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.pcs %} nav-active{% endif %}">PCS</button>
             <div class="dropdown-content">
@@ -368,15 +416,32 @@
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="{% if active_nav.pcs_tasks %}nav-active{% endif %}">Prod Tasks</a>
             </div>
         </div>
-        <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaigns</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.campaigns %} nav-active{% endif %}">Campaigns</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:pcs_catalog' %}" class="{% if active_nav.campaigns %}nav-active{% endif %}">Campaign Catalog</a>
+                <a href="{% url 'pcs:pcs_catalog' %}?lifecycle=current&amp;view=progress">Campaign Progress</a>
+                <a href="{% url 'pcs:pcs_physics_configs' %}">Physics configs by campaign</a>
+                <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
+                <a href="{% url 'monitor_app:ai_content_list' %}?subject_type=campaign_task,campaign">Campaign Assessments</a>
+            </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.ai_content %} nav-active{% endif %}">AI</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:ai_content_list' %}" class="{% if active_nav.ai_content %}nav-active{% endif %}">Assessments</a>
+                <a href="{% url 'ai:ai_proposals' %}">Proposals</a>
+            </div>
+        </div>
         <strong class="nav-label nav-panda-label">PanDA</strong>
         <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
         <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
         <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
+        <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod" class="{% if active_nav.logs %}nav-active{% endif %}">Logs</a>
+        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
         <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
         <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">Queues</a>
-        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
         </span>
         <span class="nav-spacer"></span>
         <div class="dropdown">
@@ -401,14 +466,23 @@
                 <a href="{% url 'monitor_app:account' %}" class="{% if active_nav.account %}nav-active{% endif %}">Account</a>
                 <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;">{% csrf_token %}<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font:inherit;">Logout</button></form>
             {% else %}
-                <a href="{% url 'login' %}">Login</a>
+                <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Login</a>
             {% endif %}
         </div>
     </nav>
     </div>
     <main>
         {% timezone "America/New_York" %}
-        <div class="main-time-info">Built at {% now "Ymd H:i:s" %} {% now "T" %}</div>
+        <div class="main-time-info">
+            {% if is_tunnel %}
+            <a href="https://pandaserver02.sdcc.bnl.gov/swf-monitor{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
+               target="_blank" rel="noopener">Go to page at pandaserver02</a> &middot;
+            {% else %}
+            <a href="https://epic-devcloud.org/prod{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
+               target="_blank" rel="noopener">Go to page at epic-devcloud.org</a> &middot;
+            {% endif %}
+            Built at {% now "Ymd H:i:s" %} {% now "T" %}
+        </div>
         {% endtimezone %}
         {% if messages %}
             {% for message in messages %}
@@ -496,5 +570,25 @@ function applyNavMode(mode) {
     setInterval(pollSystemStatus, 60000);
 })();
 </script>
+    <script>
+      /* Fit an in-page document editor to the visible window: if the
+         document overflows its panel, grow the panel to use nearly the
+         full viewport height. The app-wide utility for editing large
+         documents — call swfFitEditor(el) when opening an editor, or give
+         the textarea the swf-fit-editor class to fit on focus. */
+      window.swfFitEditor = function (el) {
+        if (!el) return;
+        const margin = 24;
+        const avail = window.innerHeight - el.getBoundingClientRect().top - margin;
+        if (el.scrollHeight > el.clientHeight && avail > el.clientHeight) {
+          el.style.height = Math.max(avail, 240) + 'px';
+        }
+      };
+      document.addEventListener('focusin', function (e) {
+        if (e.target.matches && e.target.matches('textarea.swf-fit-editor')) {
+          window.swfFitEditor(e.target);
+        }
+      });
+    </script>
 </body>
 </html>

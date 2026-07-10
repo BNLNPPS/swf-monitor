@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}{{ entry.title|default:"Narrative" }} - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.narr-detail { max-width: 62em; }
+.narr-detail-meta { color: #5d6b7a; margin-bottom: .8rem; }
+.narrative-block-head { border-top: 1px solid #8a9bad; margin-top: 1.4rem;
+                        padding-top: .6rem; color: #5d6b7a;
+                        font-weight: 600; margin-bottom: .4rem; }
+.narrative-versions table { border-collapse: collapse; }
+.narrative-versions th, .narrative-versions td { padding: .15rem .8rem .15rem 0;
+                                                 text-align: left; }
+.narrative-versions .nv-num { color: #166534; font-weight: 600; }
+.narrative-version-banner { background-color: #fff7e0; border: 1px solid #e6c96a;
+                            color: #5b4a12; border-radius: .5em;
+                            padding: .3em .7em; margin-bottom: .6rem;
+                            font-weight: 600; }
+.narrative-comment { margin: .4rem 0; padding: .4rem .6rem;
+                     background: #f6f8fb; border-radius: 4px; }
+.narrative-comment .nc-meta { color: #5d6b7a; margin-bottom: .15rem; }
+.narrative-comment .nc-body { white-space: pre-wrap; }
+.narrative-editor textarea { width: 100%; min-height: 30em;
+                             font-family: monospace; font-size: .95rem; }
+.narr-doc h1 { font-size: 1.35rem; }
+.narr-doc h2 { font-size: 1.15rem; }
+</style>
+
+<div class="container-fluid mt-3 narr-detail">
+  {% if error %}
+    <div class="border rounded p-2 mb-3" style="background-color:#fff3f3; color:#7a1212">{{ error }}</div>
+  {% endif %}
+  {% if entry %}
+  <h1>{{ entry.title }}</h1>
+  <div class="narr-detail-meta">
+    v{{ entry.version }} &middot; {{ entry.updated|slice:":10" }}
+    &middot; <a href="{% url 'ai:ai_narratives' %}">all narratives</a>
+  </div>
+
+  <div class="narrative-rendered">
+    <div class="mb-2">
+      <button type="button" class="btn btn-dark-green btn-sm" {% if user.is_authenticated %}data-narr-edit{% else %}disabled title="Edit this narrative in place — sign in to use"{% endif %}>Edit</button>
+    </div>
+    <div class="narrative-version-banner" style="display:none">
+      Viewing <span class="narrative-version-label"></span> — historical, not current.
+      <a href="#" data-narr-view-current>Back to current</a>
+    </div>
+    <div class="narrative-doc narr-doc" data-version="current">{{ entry.html }}</div>
+    {% for v in entry.versions %}
+      {% if not v.is_current %}
+      <div class="narrative-doc narr-doc" data-version="{{ v.version }}" style="display:none">{{ v.html }}</div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {% if user.is_authenticated %}
+  <div class="narrative-editor" style="display:none">
+    {% csrf_token %}
+    <textarea class="swf-fit-editor">{{ entry.content }}</textarea>
+    <div class="mt-2">
+      <button type="button" class="btn btn-primary btn-sm" data-narr-save="{{ entry.group_id }}">Save</button>
+      <button type="button" class="btn btn-secondary btn-sm ms-1" data-narr-cancel>Cancel</button>
+    </div>
+  </div>
+  {% else %}
+  {% csrf_token %}
+  {% endif %}
+
+  <div class="narrative-versions">
+    <div class="narrative-block-head">Version History ({{ entry.versions|length }})</div>
+    <table>
+      <tr><th>V</th><th>Date</th><th>By</th><th>Lines</th><th></th></tr>
+      {% for v in entry.versions %}
+      <tr>
+        <td class="nv-num">v{{ v.version }}{% if v.is_current %} (current){% endif %}</td>
+        <td>{{ v.date }}</td>
+        <td>{{ v.author|default:"—" }}</td>
+        <td>{{ v.lines }}</td>
+        <td>{% if not v.is_current %}<a href="#" data-narr-view="{{ v.version }}">view</a>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="narrative-comments">
+    <div class="narrative-block-head">Comments ({{ entry.comments|length }})</div>
+    {% for c in entry.comments %}
+    <div class="narrative-comment">
+      <div class="nc-meta">{{ c.author|default:"—" }} &middot; {{ c.date }}</div>
+      <div class="nc-body">{{ c.content }}</div>
+    </div>
+    {% empty %}
+    <div class="text-muted">No comments yet.</div>
+    {% endfor %}
+    <div class="mt-2">
+      <textarea class="form-control narrative-comment-text" rows="2" {% if not user.is_authenticated %}disabled{% endif %}
+                placeholder="Comment — corrections, elaborations, questions{% if not user.is_authenticated %} (sign in to post){% endif %}"></textarea>
+      <button type="button" class="btn btn-primary btn-sm mt-1" {% if user.is_authenticated %}data-narr-comment="{{ entry.group_id }}"{% else %}disabled title="Post a comment on this narrative — sign in to use"{% endif %}>Post</button>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const token = () => document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+  const editBtn = document.querySelector('[data-narr-edit]');
+  if (editBtn) editBtn.addEventListener('click', () => {
+    document.querySelector('.narrative-rendered').style.display = 'none';
+    const editor = document.querySelector('.narrative-editor');
+    editor.style.display = '';
+    window.swfFitEditor(editor.querySelector('textarea'));
+  });
+  const cancelBtn = document.querySelector('[data-narr-cancel]');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => {
+    document.querySelector('.narrative-editor').style.display = 'none';
+    document.querySelector('.narrative-rendered').style.display = '';
+  });
+  const saveBtn = document.querySelector('[data-narr-save]');
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const content = document.querySelector('.narrative-editor textarea').value;
+    saveBtn.disabled = true;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/save/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token() },
+        body: JSON.stringify({ group_id: saveBtn.dataset.narrSave, content: content }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'save failed');
+      window.location.reload();
+    } catch (err) {
+      saveBtn.disabled = false;
+      alert('Save failed: ' + err.message);
+    }
+  });
+
+  document.querySelectorAll('[data-narr-view]').forEach(link => {
+    link.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const version = link.dataset.narrView;
+      document.querySelectorAll('.narrative-doc').forEach(d => {
+        d.style.display = (d.dataset.version === version) ? '' : 'none';
+      });
+      const banner = document.querySelector('.narrative-version-banner');
+      banner.querySelector('.narrative-version-label').textContent = 'v' + version;
+      banner.style.display = '';
+      if (editBtn) editBtn.style.display = 'none';
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    });
+  });
+  const backCurrent = document.querySelector('[data-narr-view-current]');
+  if (backCurrent) backCurrent.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    document.querySelectorAll('.narrative-doc').forEach(d => {
+      d.style.display = (d.dataset.version === 'current') ? '' : 'none';
+    });
+    document.querySelector('.narrative-version-banner').style.display = 'none';
+    if (editBtn) editBtn.style.display = '';
+  });
+
+  const commentBtn = document.querySelector('[data-narr-comment]');
+  if (commentBtn) commentBtn.addEventListener('click', async () => {
+    const text = document.querySelector('.narrative-comment-text').value.trim();
+    if (!text) return;
+    commentBtn.disabled = true;
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/comment/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token() },
+        body: JSON.stringify({ group_id: commentBtn.dataset.narrComment, content: text }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'comment failed');
+      window.location.reload();
+    } catch (err) {
+      commentBtn.disabled = false;
+      alert('Comment failed: ' + err.message);
+    }
+  });
+})();
+</script>
+{% endblock %}

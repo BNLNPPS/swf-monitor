@@ -31,6 +31,7 @@ urlpatterns = [
     path("api-auth/", include("rest_framework.urls")),
     path("accounts/", include("django.contrib.auth.urls")),  # Add this line
     path("pcs/", include("pcs.urls")),  # Physics Configuration System
+    path("ai/", include("ai.urls")),  # AI proposals
     path("", include("monitor_app.urls")),  # Include monitor_app URLs for the root path
     # API Schema and Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

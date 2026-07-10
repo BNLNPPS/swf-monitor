@@ -21,9 +21,11 @@ monitor Postgres `entry`, `entry_context`, and `entry_version` tables.
 
 ## Email
 
-The alarm engine sends through AWS SES using `boto3`. `notify.py` is the send
-hook. This is intentionally isolated so the delivery channel can be replaced
-with a BNL-supported SMTP relay or mail API without changing alarm detection.
+The alarm engine sends through the configured channel in `config.toml`.
+Production on `pandaserver02` uses the BNL internal SMTP relay
+`rcf.rhic.bnl.gov:25` with sender `no-reply@swf-alarm-group.bnl.gov`;
+username/password are not required for internal relay from that host.
+AWS SES remains available as a fallback provider in `notify.py`.
 
 ## Data Model
 

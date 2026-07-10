@@ -5,6 +5,8 @@ Each tool registers with the MCP server and queries Django ORM via sync_to_async
 """
 
 from asgiref.sync import sync_to_async
+from ai.assessments import ai_content_retrieval_guidance
+from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
 
 
@@ -245,12 +247,15 @@ def _dataset_to_dict(ds, full=True):
 
 
 def _prodtask_to_dict(t, full=True):
+    from pcs import services
+
     out = {
         'composed_name': t.composed_name,
         'name': t.name,
         'status': t.status,
         'panda_task_id': t.panda_task_id,
-        'output_dataset_dids': [d.did for d in t.output_datasets],
+        'panda_tasks': services.panda_tasks_summary(t),
+        'output_dataset_dids': [d.did for d in t.output_dataset_overrides],
         'input_dataset_dids':  [d.did for d in t.input_datasets],
         'intermediate_dataset_dids': [d.did for d in t.intermediate_datasets],
         'input_source_kind': t.input_source_kind,
@@ -267,6 +272,7 @@ def _prodtask_to_dict(t, full=True):
             'created_by': t.created_by,
             'created_at': t.created_at.isoformat() if t.created_at else None,
             'updated_at': t.updated_at.isoformat() if t.updated_at else None,
+            'ai_content': ai_content_retrieval_guidance(t.overrides or {}),
         })
     return out
 
@@ -383,7 +389,16 @@ def _dataset_intake_sync(*, source_location, source_kind, scope, stage,
             description=description, created_by=created_by,
         )
     except services.ServiceError as e:
+        log_epicprod_action(
+            'mcp', 'dataset_intake', outcome='error',
+            subject_key=str(source_location), username=str(created_by or ''),
+            sublevel='normal', live_default=True, message=f'dataset intake failed: {e.detail}')
         return {'error': e.detail}
+    log_epicprod_action(
+        'mcp', 'dataset_intake',
+        subject_key=ds.composed_name or ds.dataset_name,
+        username=str(created_by or ''),
+        sublevel='normal', live_default=True, created=created)
     return {'created': created, 'dataset': _dataset_to_dict(ds, full=True)}
 
 
@@ -526,8 +541,10 @@ async def pcs_prodtask_get(name: str) -> dict:
 
     Returns: composed_name (canonical identity), legacy name, status,
     panda_task_id, prod_config, description, overrides, csv_file (legacy),
-    the three dataset DID lists, and the derived
-    input_source_{kind,location,stage}.
+    the three dataset DID lists, derived input_source_{kind,location,stage},
+    and `ai_content`. If `ai_content.available` is true, retrieve the assessment
+    rows by calling `ai_content.retrieval.tool` with
+    `ai_content.retrieval.arguments`.
     """
     return await sync_to_async(_prodtask_get_sync)(name=name)
 
@@ -560,7 +577,16 @@ def _prodtask_intake_sync(payload, created_by):
             payload=payload, created_by=created_by,
         )
     except services.ServiceError as e:
+        log_epicprod_action(
+            'mcp', 'task_intake', outcome='error',
+            username=str(created_by or ''),
+            sublevel='normal', live_default=True, message=f'task intake failed: {e.detail}')
         return {'error': e.detail}
+    log_epicprod_action(
+        'mcp', 'task_intake',
+        subject_type='campaign_task', subject_key=task.composed_name,
+        username=str(created_by or ''),
+        sublevel='normal', live_default=True, created=created)
     return {'created': created, 'task': _prodtask_to_dict(task, full=True)}
 
 
@@ -575,7 +601,15 @@ def _prodtask_link_input_sync(task_name, did=None, dids=None):
     try:
         services.prodtask_link_input(task=task, did=did, dids=dids)
     except services.ServiceError as e:
+        log_epicprod_action(
+            'mcp', 'task_link_input', outcome='error',
+            subject_type='campaign_task', subject_key=task.composed_name,
+            message=f'link input failed: {e.detail}')
         return {'error': e.detail}
+    log_epicprod_action(
+        'mcp', 'task_link_input',
+        subject_type='campaign_task', subject_key=task.composed_name,
+        dids=(dids or ([did] if did else [])))
     return {'task': _prodtask_to_dict(task, full=True)}
 
 
@@ -590,7 +624,16 @@ def _prodtask_set_status_sync(task_name, new_status):
     try:
         services.prodtask_set_status(task=task, new_status=new_status)
     except services.ServiceError as e:
+        log_epicprod_action(
+            'mcp', 'task_set_status', outcome='error',
+            subject_type='campaign_task', subject_key=task.composed_name,
+            sublevel='normal', live_default=True,
+            message=f'set status {new_status} failed: {e.detail}')
         return {'error': e.detail}
+    log_epicprod_action(
+        'mcp', 'task_set_status',
+        subject_type='campaign_task', subject_key=task.composed_name,
+        sublevel='normal', live_default=True, new_status=str(new_status))
     return {'task': _prodtask_to_dict(task, full=True)}
 
 

@@ -22,8 +22,11 @@ class EngineConfig:
 @dataclass
 class EmailConfig:
     provider: str
-    region: str
     from_addr: str
+    region: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 25
+    smtp_timeout: int = 20
 
 
 @dataclass
@@ -95,7 +98,13 @@ def load(path: str | Path) -> Config:
         log_path=os.path.expanduser(eng['log_path']) if eng.get('log_path') else None,
     )
     e = raw['email']
-    email = EmailConfig(provider=e['provider'], region=e['region'],
-                        from_addr=e['from'])
+    email = EmailConfig(
+        provider=e.get('provider', 'smtp'),
+        from_addr=e['from'],
+        region=e.get('region', ''),
+        smtp_host=e.get('smtp_host') or e.get('host') or '',
+        smtp_port=int(e.get('smtp_port') or e.get('port') or 25),
+        smtp_timeout=int(e.get('smtp_timeout') or e.get('timeout') or 20),
+    )
     db_dsn = _compose_dsn(raw.get('db', {}))
     return Config(engine=engine, email=email, db_dsn=db_dsn, raw=raw)

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Live Stream Policy{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <h2>Live Stream Policy</h2>
+    <p><em>Importance</em> (stored as <em>sublevel</em> on the record) is which humans an
+       event reaches (high: everyone, including digests and email; normal: live-page
+       watchers; low: deliberately verbose viewers only). Channels select live events at
+       or above an importance threshold. It is set in the event's code and changed by
+       changing the event.
+       <em>Live</em> is a separate category — "interesting to some humans, now": each event
+       declares a live default, and the <em>override</em> (stored in
+       <a href="{% url 'monitor_app:system_status' %}">SysConfig</a>) is the runtime attention
+       knob that wins when set. The
+       <a href="{% url 'monitor_app:log_list' %}?live=1">live stream view</a> shows the events
+       whose effective state is live.</p>
+
+    <form method="post" action="{% url 'monitor_app:live_policy' %}">
+        {% csrf_token %}
+        <table class="table table-sm table-striped w-auto align-middle">
+            <thead>
+                <tr><th>Action</th><th>Description</th><th>Importance</th><th>Live default</th><th>Override</th><th>Effective</th></tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td><strong>{{ row.action }}</strong></td>
+                    <td style="max-width: 40em;">{{ row.description }}</td>
+                    <td>{{ row.sublevel }}</td>
+                    <td>{{ row.live_default|yesno:"live,quiet" }}</td>
+                    <td>
+                        {% if user.is_authenticated %}
+                        <select name="policy_{{ row.action }}" class="form-select form-select-sm">
+                            <option value="default" {% if row.state == 'default' %}selected{% endif %}>default</option>
+                            <option value="live" {% if row.state == 'live' %}selected{% endif %}>live</option>
+                            <option value="quiet" {% if row.state == 'quiet' %}selected{% endif %}>quiet</option>
+                        </select>
+                        {% else %}
+                        {{ row.state }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {% if row.effective %}bg-success{% else %}bg-secondary{% endif %}">
+                            {{ row.effective|yesno:"live,quiet" }}</span>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% if user.is_authenticated %}
+        <button class="btn btn-sm btn-primary" type="submit">Save policy</button>
+        {% else %}
+        <button class="btn btn-sm btn-primary" type="button" disabled
+                title="Save the live-stream policy overrides — sign in to use">Save policy</button>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

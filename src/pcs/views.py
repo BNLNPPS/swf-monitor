@@ -6,18 +6,25 @@ Tag list views use server-side DataTables via monitor_app._datatable_base.html.
 Read operations are public; create/edit/lock require login.
 """
 import json
+import time
+import hashlib
 from functools import wraps
 from urllib.request import urlopen
 from urllib.parse import quote as urlquote
 from django.shortcuts import render, get_object_or_404, redirect
+from django.template.loader import render_to_string
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.http import JsonResponse, Http404
 from django.contrib import messages
-from django.db.models import Count, Q
+from django.core.cache import cache
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from monitor_app.models import UserPreference
+from ai.assessments import ai_content_summary
+from monitor_app.epicprod_logging import log_epicprod_action
 
 # ---------------------------------------------------------------------------
 # Auth / method-guard decorators that flash instead of silently redirecting.
@@ -54,24 +61,126 @@ from .models import (
     PRODTASK_STATUS_CHOICES,
 )
 from .serializers import _redact_contact
+from . import services
+
+PROD_CONFIG_SCOUT_MODE_PREF = 'prod_config_scout_mode'
+
+
+def _prod_config_scout_mode_pref(username):
+    return bool(UserPreference.get_prefs(username).get(PROD_CONFIG_SCOUT_MODE_PREF, False))
+
+
+CATALOG_TASK_LIST_CACHE_VERSION = 4
+CATALOG_BUILD_TIMING_ENABLED = False
+
+# The official ePIC physics working groups
+# (https://www.epic-eic.org/physics/pwgs.html): the name, with the
+# common acronym in parentheses where one exists. The option string is
+# also the stored requestor value.
+PWG_OPTIONS = (
+    'Inclusive',
+    'Semi-Inclusive',
+    'Exclusive, Diffraction and Tagging (EDT)',
+    'Jets and Heavy Flavour',
+    'Beyond Standard Model and Electroweak (BSM & EW)',
+)
+
+# The official ePIC detector subsystem collaborations
+# (https://www.epic-eic.org/detector/dsc.html), grouped for the request
+# composer pulldown.
+DSC_OPTION_GROUPS = (
+    ('Particle Identification', (
+        'dRICH',
+        'hpDIRC',
+        'Backwards RICH (pfRICH)',
+    )),
+    ('Tracking & Timing', (
+        'Si Trackers (SVT)',
+        'Gaseous Trackers (MPGD)',
+        'AC-LGAD TOF',
+    )),
+    ('Calorimetry', (
+        'Backwards ECAL (BECAL)',
+        'Backwards HCAL (BHCAL)',
+        'Barrel ECAL',
+        'Barrel HCAL',
+        'Forward ECAL',
+        'Forward HCAL',
+    )),
+    ('Auxiliary & Beamline', (
+        'Far-Forward (FF)',
+        'Luminosity (Lumi)',
+        'Far Backward High Rate Tracker (FB-HRT)',
+    )),
+)
+DSC_OPTIONS = tuple(o for _, opts in DSC_OPTION_GROUPS for o in opts)
 
 # Seed list of known requestor labels (PWGs + DSCs). Catalog pulldown
 # surfaces these plus any distinct values already in the DB.
-REQUESTOR_SEED_OPTIONS = (
-    'DIS', 'SIDIS', 'EXCLUSIVE', 'JET', 'HF', 'EW', 'BSM',
-    'TRACKING-DSC', 'CALORIMETRY-DSC', 'PID-DSC',
-)
+REQUESTOR_SEED_OPTIONS = PWG_OPTIONS + DSC_OPTIONS
+
+
+def _timing_ms(seconds):
+    return round(seconds * 1000.0, 1)
+
+
+def _timing_record(timings, label, start, *, detail=''):
+    if timings is not None:
+        ms = _timing_ms(time.perf_counter() - start)
+        timings.append({
+            'label': label,
+            'ms': ms,
+            'ms_display': f'{ms} ms',
+            'detail': detail,
+        })
+
+
+def _timing_note(timings, label, *, detail=''):
+    if timings is not None:
+        timings.append({'label': label, 'ms': None, 'ms_display': '', 'detail': detail})
+
+
+def _timed(timings, label, fn, *, detail_fn=None):
+    if timings is None:
+        return fn()
+    start = time.perf_counter()
+    result = fn()
+    detail = detail_fn(result) if detail_fn else ''
+    _timing_record(timings, label, start, detail=detail)
+    return result
 
 
 def _requestor_options():
     """Distinct existing requestors ∪ seed options, sorted."""
-    from itertools import chain
-    seen = set(chain(
-        ProdRequest.objects.exclude(requestor='').values_list('requestor', flat=True),
-        ProdTask.objects.exclude(requestor='').values_list('requestor', flat=True),
-        REQUESTOR_SEED_OPTIONS,
-    ))
-    return sorted(seen)
+    cache_key = 'pcs:catalog:requestor-options:v1'
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+    seen = set(REQUESTOR_SEED_OPTIONS)
+    seen.update(
+        ProdRequest.objects.exclude(requestor='')
+        .values_list('requestor', flat=True).distinct()
+    )
+    seen.update(
+        ProdTask.objects.exclude(requestor='')
+        .values_list('requestor', flat=True).distinct()
+    )
+    options = sorted(seen)
+    cache.set(cache_key, options, 300)
+    return options
+
+
+def _generator_display_case():
+    """Map lowercased generator identities to the proper-case spelling
+    recorded on evgen tags ('beagle' -> 'BeAGLE'). Physics-configuration
+    keys lowercase the generator for stable comparison
+    (pcs/physics_config.py); displays map back through this."""
+    return {
+        str(g).lower(): str(g)
+        for g in EvgenTag.objects.values_list('parameters__generator',
+                                              flat=True)
+        if g
+    }
 
 
 def _parse_catalog_filters(request):
@@ -114,6 +223,404 @@ def _apply_catalog_filters(qs, filters):
     if filters['other_use']:
         qs = qs.filter(other_use=True)
     return qs
+
+
+def _catalog_view_url(request, active_lifecycle, view_mode):
+    q = request.GET.copy()
+    q['lifecycle'] = active_lifecycle
+    if view_mode == 'progress':
+        q['view'] = 'progress'
+    else:
+        q.pop('view', None)
+    q.pop('refresh', None)
+    encoded = q.urlencode()
+    return '?' + encoded if encoded else '?'
+
+
+def _annotate_task_progress(tasks, snapshot):
+    rows = (snapshot or {}).get('rows') or {}
+    empty = {'outputs': [], 'configured_jobs': None, 'has_processing': False}
+    empty_processing = {
+        'jeditaskid': '', 'status': '', 'total_jobs': '', 'nfailed': '',
+        'nactive': '', 'nfinished': '', 'nfinalfailed': '',
+        'processing_percent': None, 'final_failure_rate': None,
+    }
+    empty_output = {
+        'completion_percent': None, 'expected_jobs': '', 'link': '',
+        'processing': empty_processing,
+    }
+    for task in tasks:
+        task.progress = rows.get(str(task.pk), empty)
+        outputs = task.progress.get('outputs') or []
+        if outputs:
+            first = dict(empty_output)
+            first.update(outputs[0])
+            processing = dict(empty_processing)
+            processing.update(first.get('processing') or {})
+            first['processing'] = processing
+            task.progress_first = first
+        else:
+            task.progress_first = empty_output
+        linked = []
+        completion_values = []
+        job_values = []
+        for output in outputs:
+            if output.get('completion_percent') is not None:
+                completion_values.append(output.get('completion_percent'))
+            processing = output.get('processing') or {}
+            total_jobs = processing.get('total_jobs') or output.get('expected_jobs')
+            if total_jobs not in (None, ''):
+                try:
+                    job_values.append(int(total_jobs))
+                except (TypeError, ValueError):
+                    pass
+            if processing.get('jeditaskid'):
+                linked.append(output)
+        failure_values = []
+        for output in linked:
+            try:
+                failure_values.append(int((output.get('processing') or {}).get('nfailed') or 0))
+            except (TypeError, ValueError):
+                failure_values.append(0)
+        task.progress_sort = {
+            'completion': max(completion_values) if completion_values else -1,
+            'jobs': max(job_values) if job_values else '',
+            'processing': (
+                '1:' + str((linked[0].get('processing') or {}).get('status') or '')
+                if linked else '0:'
+            ),
+            'failures': (
+                f'1:{max(failure_values):09d}' if failure_values else '0:'
+            ),
+            'link': '1:' + str(linked[0].get('link') or '') if linked else '0:',
+        }
+    return tasks
+
+
+def _catalog_cache_dt(value):
+    return value.isoformat() if value else ''
+
+
+def _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot):
+    from ai.models import Proposal
+
+    task_meta = ProdTask.objects.filter(campaign=campaign).aggregate(
+        count=Count('id'), updated=Max('updated_at'))
+    # AI proposal activity changes the rendered rows (pending badges and
+    # filters, executed marks) without touching any ProdTask, so it is
+    # part of the signature: creation adds rows, decide stamps
+    # decided_at, undo stamps undone_at.
+    proposal_meta = Proposal.objects.aggregate(
+        count=Count('id'), created=Max('created_at'),
+        decided=Max('decided_at'), undone=Max('undone_at'))
+    return {
+        'version': CATALOG_TASK_LIST_CACHE_VERSION,
+        'view': catalog_view,
+        'campaign_id': campaign.pk,
+        'campaign_name': campaign.name,
+        'task_count': task_meta['count'] or 0,
+        'task_updated_at': _catalog_cache_dt(task_meta['updated']),
+        'proposal_count': proposal_meta['count'] or 0,
+        'proposal_created_at': _catalog_cache_dt(proposal_meta['created']),
+        'proposal_decided_at': _catalog_cache_dt(proposal_meta['decided']),
+        'proposal_undone_at': _catalog_cache_dt(proposal_meta['undone']),
+        'progress_generated_at': (
+            (progress_snapshot or {}).get('generated_at') or ''
+            if catalog_view == 'progress' else ''
+        ),
+    }
+
+
+def _executed_proposal_names():
+    """Composed names carrying an executed AI proposal — the catalog's
+    'AI: executed' filter reads this (pending proposals ride the render
+    projection instead)."""
+    from ai.models import Proposal
+    return set(Proposal.objects.filter(status='executed')
+               .values_list('subject_key', flat=True))
+
+
+def _version_tuple(name):
+    """Campaign version as a comparable tuple ('26.4.1' < '26.7'), or
+    None when the name is not a dotted-integer version."""
+    try:
+        return tuple(int(p) for p in str(name or '').split('.'))
+    except ValueError:
+        return None
+
+
+def _next_campaign_hint():
+    """The likely next campaign, derived from pending campaign-propagation
+    proposal batches named '<next-campaign>-dispositions-<date>' (PCS.md).
+    Returns {'name', 'pending', 'batches'} for the newest such version, or
+    None when no batch names one."""
+    import re
+
+    from ai.models import Proposal
+    hints = {}
+    pending = (Proposal.objects
+               .filter(action='propagation', status='proposed')
+               .exclude(batch_id='')
+               .values_list('batch_id')
+               .annotate(Count('id')).order_by())
+    for batch_id, count in pending:
+        m = re.match(r'^(\d+(?:\.\d+)*)-dispositions-', batch_id)
+        if not m or _version_tuple(m.group(1)) is None:
+            continue
+        hint = hints.setdefault(m.group(1), {'pending': 0, 'batches': []})
+        hint['pending'] += count
+        hint['batches'].append(batch_id)
+    if not hints:
+        return None
+    name = max(hints, key=_version_tuple)
+    return {'name': name, **hints[name]}
+
+
+def _campaign_last_activity(campaign):
+    """The most recent Rucio arrival known for a campaign, as an ISO
+    string ready for the ``fmt_dt`` filter (Eastern display everywhere):
+    the arrivals sweep's record when present, else the last cumulative
+    increase in the campaign's Rucio timeline (kept for current/last
+    campaigns), else ''."""
+    arrivals = (campaign.data or {}).get('arrivals') or {}
+    value = arrivals.get('last_arrival_at') or ''
+    if value:
+        return value
+    from .services import load_rucio_timeline
+    timeline = load_rucio_timeline(campaign.name) or {}
+    dates = timeline.get('dates') or []
+    best = ''
+    for key in ('reco', 'simu'):
+        cum = (timeline.get(key) or {}).get('cum_files') or []
+        for i in range(1, min(len(cum), len(dates))):
+            if cum[i] > cum[i - 1] and dates[i] > best:
+                best = dates[i]
+    # Timeline bins are naive UTC; stamp the zone so display converts.
+    return (best + '+00:00') if best else ''
+
+
+def _promote_cascade_note(campaigns_by_lifecycle, target_name):
+    """Human line stating what the promote rotation will do."""
+    steps = [f'{c.name} becomes last'
+             for c in campaigns_by_lifecycle['current']
+             if c.name != target_name]
+    steps += [f'{c.name} becomes past'
+              for c in campaigns_by_lifecycle['last']
+              if c.name != target_name]
+    return ('; '.join(steps) + '.') if steps else ''
+
+
+def _campaigns_with_inflow():
+    """Campaigns with fresh Rucio arrivals — the derived 'producing'
+    status (EPICPROD_DATA_LINEAGE.md): an arrivals block recorded within
+    SysConfig ``campaign_producing_window_days`` (default 3, covering
+    missed sweep nights). Current-labeled campaigns are excluded — the
+    Current tab already is their surface. Returns [(campaign, arrivals),
+    ...] sorted by name; purely derived, no stored lifecycle involved.
+    """
+    import datetime as _dt
+
+    from monitor_app.models import SysConfig
+    days = SysConfig.get_setting('campaign_producing_window_days', 3)
+    try:
+        window = _dt.timedelta(days=float(days))
+    except (TypeError, ValueError):
+        window = _dt.timedelta(days=3)
+    cutoff = timezone.now() - window
+    out = []
+    for camp in Campaign.objects.exclude(lifecycle='current'):
+        arrivals = (camp.data or {}).get('arrivals') or {}
+        try:
+            last = _dt.datetime.fromisoformat(
+                arrivals.get('last_arrival_at', ''))
+        except (TypeError, ValueError):
+            continue
+        if last >= cutoff:
+            out.append((camp, arrivals))
+    return sorted(out, key=lambda pair: pair[0].name)
+
+
+def _catalog_table_cache_key(campaign_id, catalog_view, signature):
+    payload = json.dumps(signature, sort_keys=True, separators=(',', ':'))
+    digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()
+    return f'pcs:catalog-table:{campaign_id}:{catalog_view}:{digest}'
+
+
+def _catalog_table_latest_key(campaign_id, catalog_view):
+    return f'pcs:catalog-table:latest:{campaign_id}:{catalog_view}'
+
+
+def _campaign_data(campaign):
+    if campaign is None:
+        return {}
+    return (
+        Campaign.objects
+        .filter(pk=campaign.pk)
+        .values_list('data', flat=True)
+        .first()
+    ) or {}
+
+
+def _current_catalog_tasks(campaign, catalog_view, progress_snapshot, timings=None):
+    def load_tasks():
+        return list(
+            ProdTask.objects.select_related(
+                'campaign', 'dataset', 'prod_config', 'request',
+                'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
+                'dataset__reco_tag', 'dataset__background_tag',
+            ).filter(campaign=campaign).order_by('-updated_at')
+        )
+    tasks = _timed(
+        timings,
+        'task query',
+        load_tasks,
+        detail_fn=lambda rows: f'{len(rows)} rows',
+    )
+    tasks = _timed(
+        timings,
+        'questionnaire match cache hydrate',
+        lambda: _annotate_task_questionnaire_matches(tasks),
+        detail_fn=lambda rows: f'{len(rows)} task-local cached match lists',
+    )
+    tasks = _timed(
+        timings,
+        'pc request projection',
+        lambda: _annotate_task_pc_requests(tasks),
+        detail_fn=lambda rows: f'{len(rows)} rows',
+    )
+    if catalog_view == 'progress':
+        tasks = _timed(
+            timings,
+            'progress row annotation',
+            lambda: _annotate_task_progress(tasks, progress_snapshot),
+            detail_fn=lambda rows: f'{len(rows)} rows',
+        )
+    return tasks
+
+
+def _cached_current_task_list_html(campaign, catalog_view, context,
+                                   progress_snapshot, timings=None,
+                                   rebuild_on_miss=False):
+    """``rebuild_on_miss`` skips the stale-serve suppression: low-traffic
+    views (past/last/producing tabs) accept the inline rebuild cost
+    rather than serving a stale table with no other rebuilder."""
+    if campaign is None or catalog_view not in ('catalog', 'progress'):
+        return None, False, {}
+    signature = _timed(
+        timings,
+        'table cache signature',
+        lambda: _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot),
+    )
+    cache_key = _catalog_table_cache_key(campaign.pk, catalog_view, signature)
+    latest_key = _catalog_table_latest_key(campaign.pk, catalog_view)
+    cached = _timed(
+        timings,
+        'table cache lookup',
+        lambda: cache.get(cache_key),
+        detail_fn=lambda value: (
+            f'cache hit, {len(value.get("html", ""))} html bytes'
+            if value and value.get('html') else 'miss'
+        ),
+    )
+    if cached and cached.get('html'):
+        cache.set(latest_key, cache_key, None)
+        _timing_note(
+            timings,
+            'table render',
+            detail='Django cache hit',
+        )
+        return cached['html'], True, cached
+
+    latest_cache_key = cache.get(latest_key)
+    if rebuild_on_miss:
+        latest_cache_key = None
+    if latest_cache_key and latest_cache_key != cache_key:
+        stale = _timed(
+            timings,
+            'table stale cache lookup',
+            lambda: cache.get(latest_cache_key),
+            detail_fn=lambda value: (
+                f'stale cache hit, {len(value.get("html", ""))} html bytes'
+                if value and value.get('html') else 'miss'
+            ),
+        )
+        if stale and stale.get('html'):
+            _timing_note(
+                timings,
+                'table render',
+                detail='stale Django cache used; page-load rebuild suppressed',
+            )
+            return stale['html'], True, {**stale, 'stale': True}
+
+    tasks = _timed(
+        timings,
+        'table cache miss task query',
+        lambda: _current_catalog_tasks(campaign, catalog_view, progress_snapshot),
+        detail_fn=lambda rows: f'{len(rows)} rows',
+    )
+    html = _timed(
+        timings,
+        'table cache miss render',
+        lambda: render_to_string(
+            'pcs/_task_list_filter.html',
+            {
+                'tasks': tasks,
+                'catalog_view': catalog_view,
+                'columns_mode': 'full',
+                'status_choices': PRODTASK_STATUS_CHOICES,
+                'ai_executed_names': _executed_proposal_names(),
+            },
+        ),
+        detail_fn=lambda value: f'{len(value)} html bytes',
+    )
+    entry = {
+        'signature': signature,
+        'html': html,
+        'rendered_at': timezone.now().isoformat(),
+    }
+    cache.set(cache_key, entry, None)
+    cache.set(latest_key, cache_key, None)
+    _timing_note(
+        timings,
+        'table render',
+        detail='cache miss rebuilt and cached',
+    )
+    return html, False, entry
+
+
+def rebuild_current_task_list_html_cache(campaign, catalog_view='catalog', progress_snapshot=None):
+    """Rebuild the current-campaign table fragment outside the page GET path."""
+    if campaign is None or catalog_view not in ('catalog', 'progress'):
+        raise ValueError('campaign and catalog/progress view are required')
+    signature = _catalog_task_list_cache_signature(campaign, catalog_view, progress_snapshot)
+    tasks = _current_catalog_tasks(campaign, catalog_view, progress_snapshot)
+    html = render_to_string(
+        'pcs/_task_list_filter.html',
+        {
+            'tasks': tasks,
+            'catalog_view': catalog_view,
+            'columns_mode': 'full',
+            'status_choices': PRODTASK_STATUS_CHOICES,
+            'ai_executed_names': _executed_proposal_names(),
+        },
+    )
+    entry = {
+        'signature': signature,
+        'html': html,
+        'rendered_at': timezone.now().isoformat(),
+    }
+    cache_key = _catalog_table_cache_key(campaign.pk, catalog_view, signature)
+    cache.set(cache_key, entry, None)
+    cache.set(_catalog_table_latest_key(campaign.pk, catalog_view), cache_key, None)
+    return {
+        'campaign': campaign.name,
+        'view': catalog_view,
+        'tasks': len(tasks),
+        'html_bytes': len(html),
+        'rendered_at': entry['rendered_at'],
+    }
+
+
 from .schemas import TAG_SCHEMAS, get_tag_model, get_param_defs, save_param_defs
 from .forms import PhysicsTagForm, SimpleTagForm, DatasetForm, PhysicsCategoryForm, ProdConfigForm
 
@@ -234,31 +741,92 @@ def _annotate_questionnaire_matches(questionnaires):
         questionnaire.prod_matches = matches
 
 
+def _instancing_context(source_name, target_name):
+    """The instancing box context — the recomputed plan, the last
+    population run, the class layout — shared by the producing and
+    future tabs (CAMPAIGN_CONTINUUM.md). The plan tolerates a target
+    campaign with no row yet (the batch-derived next campaign): every
+    continuing configuration classifies as mint, so the box lays out
+    what a population would do before the campaign exists."""
+    from monitor_app.models import AppLog
+
+    from .instancing import plan_campaign_instancing
+    plan = plan_campaign_instancing(source_name, target_name)
+    last_run_row = (AppLog.objects
+                    .filter(app_name='epicprod',
+                            extra_data__action='campaign_instancing',
+                            extra_data__subject_key=target_name)
+                    .order_by('-timestamp').first())
+    last_run = None
+    if last_run_row is not None:
+        message = last_run_row.message or ''
+        last_run = {
+            'at': last_run_row.timestamp,
+            'by': (last_run_row.extra_data or {}).get('username', ''),
+            'outcome': (last_run_row.extra_data or {}).get('outcome', ''),
+            'summary': message.split(': ', 1)[-1],
+        }
+    return {
+        'source': source_name,
+        'target': target_name,
+        'last_run': last_run,
+        'plan': plan,
+        'classes': [
+            ('Adopt (already produced)', 'merge', plan['merge']),
+            ('Mint (planned, not yet produced)', 'mint',
+             plan['mint']),
+            ('Aligned (already instanced, nothing to do)',
+             'aligned', plan['aligned']),
+            ('No request context — curation supplies it',
+             'no_context', plan['no_context']),
+            ('Name collision — anchor-tag ambiguity, curation',
+             'name_collision', plan['name_collision']),
+            ('Hold', 'hold', plan['hold']),
+            ('Final', 'final', plan['final']),
+            ('Unresolved — curation pool', 'unresolved',
+             plan['unresolved']),
+            ('Conflicting dispositions', 'conflict',
+             plan['conflict']),
+            ('Only in this campaign', 'target_only',
+             plan['target_only']),
+        ],
+    }
+
+
+def _annotate_task_pc_requests(tasks):
+    """Attach PC-projected production requests as ``task.pc_requests``:
+    a task points to requests through its physics configuration
+    (CAMPAIGN_CONTINUUM.md), never a per-task binding."""
+    from .services import pc_request_projection
+    projection = pc_request_projection(
+        [t.dataset for t in tasks if t.dataset_id])
+    for task in tasks:
+        task.pc_requests = (projection.get(task.dataset.composed_name, [])
+                            if task.dataset_id else [])
+    return tasks
+
+
 def _annotate_task_questionnaire_matches(tasks):
     tasks = list(tasks)
-    by_id = {task.pk: task for task in tasks}
-    by_name = {}
+    qids = set()
     for task in tasks:
         task.questionnaire_matches = []
-        if task.name:
-            by_name[task.name] = task
-        if task.composed_name:
-            by_name[task.composed_name] = task
-
-    questionnaires = Questionnaire.objects.all()
-    for questionnaire in questionnaires:
-        for match in _questionnaire_prod_matches(questionnaire, status='accepted'):
-            task = None
-            task_id = match.get('task_id')
-            if isinstance(task_id, int):
-                task = by_id.get(task_id)
-            elif str(task_id).isdigit():
-                task = by_id.get(int(task_id))
-            if task is None:
-                task = by_name.get(match.get('task_name') or '')
-            if task is None:
-                task = by_name.get(match.get('legacy_name') or '')
-            if task is None:
+        for match in (task.overrides or {}).get('questionnaire_matches') or []:
+            if not isinstance(match, dict):
+                continue
+            qid = match.get('questionnaire_id')
+            if isinstance(qid, int) or str(qid).isdigit():
+                qids.add(int(qid))
+    questionnaires = {
+        q.pk: q for q in Questionnaire.objects.filter(pk__in=qids)
+    } if qids else {}
+    for task in tasks:
+        for match in (task.overrides or {}).get('questionnaire_matches') or []:
+            if not isinstance(match, dict):
+                continue
+            qid = match.get('questionnaire_id')
+            questionnaire = questionnaires.get(int(qid)) if str(qid).isdigit() else None
+            if questionnaire is None:
                 continue
             task.questionnaire_matches.append({
                 'questionnaire': questionnaire,
@@ -350,6 +918,10 @@ def questionnaire_match_add(request, pk):
         'task_id': task.pk,
         'task_name': _task_display_name(task),
         'legacy_name': task.name,
+        # The match binds to the physics configuration through this
+        # name reference; the cache rebuild projects it onto every
+        # edition of the same physics (CAMPAIGN_CONTINUUM.md).
+        'pc_anchor': task.composed_name if task.dataset_id else '',
         'confidence': confidence,
         'status': 'accepted',
         'reason': reason,
@@ -360,6 +932,11 @@ def questionnaire_match_add(request, pk):
     questionnaire.data = data
     questionnaire.save(update_fields=['data', 'updated_at'])
     messages.success(request, f'Matched request #{pk} to {_task_display_name(task)}.')
+    log_epicprod_action(
+        'web', 'questionnaire_match_add',
+        subject_type='campaign_task', subject_key=task.composed_name,
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True, questionnaire=pk)
     return redirect('pcs:questionnaire_detail', pk=pk)
 
 
@@ -381,6 +958,11 @@ def questionnaire_match_remove(request, pk, task_id):
     removed = before - len(data['prod_matches'])
     if removed:
         messages.success(request, f'Removed {removed} production match.')
+        log_epicprod_action(
+            'web', 'questionnaire_match_remove',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True,
+            questionnaire=pk, task_id=task_id)
     else:
         messages.warning(request, 'No matching production task link was present.')
     return redirect('pcs:questionnaire_detail', pk=pk)
@@ -420,6 +1002,12 @@ def questionnaire_import(request):
         f'Questionnaire import: {summary["created"]} new, '
         f'{summary["updated"]} updated, {summary["unchanged"]} unchanged.'
     )
+    log_epicprod_action(
+        'web', 'questionnaire_import',
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True,
+        created=summary['created'], updated=summary['updated'],
+        unchanged=summary['unchanged'])
     return redirect(reverse('pcs:questionnaires_list'))
 
 
@@ -437,6 +1025,11 @@ def physics_category_create(request):
         if form.is_valid():
             form.save()
             messages.success(request, f"Category {form.instance.digit}: {form.instance.name} created.")
+            log_epicprod_action(
+                'web', 'category_create',
+                subject_key=f'{form.instance.digit} {form.instance.name}',
+                username=getattr(request.user, 'username', ''),
+                sublevel='normal', live_default=True)
             return redirect('pcs:physics_categories_list')
     else:
         form = PhysicsCategoryForm()
@@ -604,6 +1197,9 @@ def tag_create(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
+            log_epicprod_action(
+                'web', 'tag_create', subject_key=tag.tag_label,
+                username=getattr(request.user, 'username', ''))
             compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
             return redirect(f'{compose_url}?selected={urlquote(tag.tag_label)}')
     else:
@@ -658,6 +1254,9 @@ def tag_compose(request, tag_type):
                 )
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} created.")
+            log_epicprod_action(
+                'web', 'tag_create', subject_key=tag.tag_label,
+                username=getattr(request.user, 'username', ''))
             compose_url = reverse('pcs:tag_compose', kwargs={'tag_type': tag_type})
             return redirect(f'{compose_url}?selected={urlquote(tag.tag_label)}')
     else:
@@ -791,6 +1390,10 @@ def tag_delete(request, tag_type, tag_number):
     label = tag.tag_label
     tag.delete()
     messages.success(request, f"Tag {label} deleted.")
+    log_epicprod_action(
+        'web', 'tag_delete', subject_key=label,
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True)
     return redirect('pcs:tag_compose', tag_type=tag_type)
 
 
@@ -810,6 +1413,10 @@ def tag_lock(request, tag_type, tag_number):
         tag.status = 'locked'
         tag.save(update_fields=['status', 'updated_at'])
         messages.success(request, f"Tag {tag.tag_label} locked. It can now be used in datasets.")
+        log_epicprod_action(
+            'web', 'tag_lock', subject_key=tag.tag_label,
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True)
     return redirect(selected_url)
 
 
@@ -841,6 +1448,9 @@ def tag_edit(request, tag_type, tag_number):
                 tag.category = form.cleaned_data['category']
             tag.save()
             messages.success(request, f"Tag {tag.tag_label} updated.")
+            log_epicprod_action(
+                'web', 'tag_edit', subject_key=tag.tag_label,
+                username=getattr(request.user, 'username', ''))
             return redirect(selected_url)
     else:
         initial = {
@@ -887,6 +1497,10 @@ def datasets_compose(request):
             )
             ds.save()
             messages.success(request, f"Dataset created: {ds.did}")
+            log_epicprod_action(
+                'web', 'dataset_create', subject_key=ds.composed_name or ds.dataset_name,
+                username=getattr(request.user, 'username', ''),
+                sublevel='normal', live_default=True)
             return redirect(f"{reverse('pcs:datasets_compose')}?selected={urlquote(ds.dataset_name)}")
 
     qs = Dataset.objects.filter(block_num=1).select_related(
@@ -1068,6 +1682,10 @@ def dataset_create(request):
             )
             ds.save()
             messages.success(request, f"Dataset created: {ds.did}")
+            log_epicprod_action(
+                'web', 'dataset_create', subject_key=ds.composed_name or ds.dataset_name,
+                username=getattr(request.user, 'username', ''),
+                sublevel='normal', live_default=True)
             return redirect('pcs:dataset_detail', pk=ds.pk)
     else:
         form = DatasetForm()
@@ -1101,6 +1719,9 @@ def dataset_add_block(request, pk):
         created_by=request.user.username if request.user.is_authenticated else 'unknown',
     )
     messages.success(request, f"Block {new_block_num} added: {new_block.did}")
+    log_epicprod_action(
+        'web', 'dataset_block_add', subject_key=new_block.did,
+        username=getattr(request.user, 'username', ''))
     return redirect('pcs:dataset_detail', pk=dataset.pk)
 
 
@@ -1118,6 +1739,10 @@ def prod_configs_compose(request):
         if form.is_valid():
             pc = form.save()
             messages.success(request, f"Config '{pc.name}' {'updated' if editing_pk else 'created'}.")
+            log_epicprod_action(
+                'web', 'config_edit' if editing_pk else 'config_create',
+                subject_key=pc.name,
+                username=getattr(request.user, 'username', ''))
             return redirect(f"{reverse('pcs:prod_configs_compose')}?selected={urlquote(pc.name)}")
 
     qs = ProdConfig.objects.order_by('-updated_at')
@@ -1155,6 +1780,11 @@ def prod_configs_compose(request):
         'configs_json': json.dumps(configs_data),
         'selected_item_json': json.dumps(request.GET.get('selected') or None),
         'username': request.user.username if request.user.is_authenticated else '',
+        'prod_config_scout_mode_json': json.dumps(
+            _prod_config_scout_mode_pref(
+                request.user.username if request.user.is_authenticated else ''
+            )
+        ),
     }
     return render(request, 'pcs/prod_config_compose.html', context)
 
@@ -1219,10 +1849,19 @@ def prod_config_create(request):
         if form.is_valid():
             form.save()
             messages.success(request, f"Production config '{form.instance.name}' created.")
+            log_epicprod_action(
+                'web', 'config_create', subject_key=form.instance.name,
+                username=getattr(request.user, 'username', ''))
             return redirect('pcs:prod_config_detail', pk=form.instance.pk)
     else:
         form = ProdConfigForm()
-    return render(request, 'pcs/prod_config_form.html', {'form': form})
+    return render(request, 'pcs/prod_config_form.html', {
+        'form': form,
+        'username': request.user.username if request.user.is_authenticated else '',
+        'prod_config_scout_mode_json': json.dumps(
+            _prod_config_scout_mode_pref(request.user.username)
+        ),
+    })
 
 
 @_login_required_flash
@@ -1233,10 +1872,21 @@ def prod_config_edit(request, pk):
         if form.is_valid():
             form.save()
             messages.success(request, f"Production config '{config.name}' updated.")
+            log_epicprod_action(
+                'web', 'config_edit', subject_key=config.name,
+                username=getattr(request.user, 'username', ''))
             return redirect('pcs:prod_config_detail', pk=config.pk)
     else:
         form = ProdConfigForm(instance=config)
-    return render(request, 'pcs/prod_config_form.html', {'form': form, 'editing': True, 'config': config})
+    return render(request, 'pcs/prod_config_form.html', {
+        'form': form,
+        'editing': True,
+        'config': config,
+        'username': request.user.username if request.user.is_authenticated else '',
+        'prod_config_scout_mode_json': json.dumps(
+            _prod_config_scout_mode_pref(request.user.username)
+        ),
+    })
 
 
 # ── Production Tasks ─────────────────────────────────────────────
@@ -1268,6 +1918,8 @@ def pcs_catalog_csv_update(request):
         return redirect(reverse('pcs:pcs_catalog'))
     msg = (f'CSV import: {summary["created"]} new, '
            f'{summary["updated"]} updated, '
+           f'{summary["requests_created"]} new / '
+           f'{summary["requests_updated"]} updated requests, '
            f'{len(summary["errors"])} errors '
            f'(of {summary["rows"]} rows)')
     if summary['errors']:
@@ -1303,6 +1955,11 @@ def pcs_catalog_set_current(request):
     if not result.get('changed'):
         messages.info(request, f"PCS current campaign already {target}.")
         return redirect(reverse('pcs:pcs_catalog'))
+    log_epicprod_action(
+        'web', 'campaign_set_current',
+        subject_type='campaign', subject_key=result['name'],
+        username=getattr(request.user, 'username', '') or 'operator',
+        sublevel='high', live_default=True, previous=result.get('old_name', ''))
     # Pull the snapshot for the new current as part of the same click —
     # operator already consented by clicking 'Make current'; no point
     # making them hunt for 'Update from Rucio' next.
@@ -1344,6 +2001,11 @@ def pcs_catalog_set_last(request):
     except ServiceError as e:
         messages.error(request, f'Make last failed: {e}')
         return redirect(reverse('pcs:pcs_catalog') + '?lifecycle=last')
+    log_epicprod_action(
+        'web', 'campaign_set_last',
+        subject_type='campaign', subject_key=result['name'],
+        username=getattr(request.user, 'username', '') or 'operator',
+        sublevel='high', live_default=True)
     try:
         snap = import_jlab_rucio_current_snapshot(
             campaign_name=target,
@@ -1374,15 +2036,24 @@ def pcs_catalog_rucio_update(request):
         return _post_only_redirect(
             request, reverse('pcs:pcs_catalog'),
             action_label='Update from Rucio')
+    # Return to the tab the button lives on (last or producing) — the
+    # URL is rebuilt server-side from the posted fields, never echoed.
+    back = reverse('pcs:pcs_catalog')
+    lifecycle = (request.POST.get('lifecycle') or '').strip()
+    campaign = (request.POST.get('campaign') or '').strip()
+    if lifecycle == 'producing' and campaign:
+        back += f'?lifecycle=producing&campaign={campaign}'
+    elif lifecycle == 'last':
+        back += '?lifecycle=last'
     from .services import rucio_snapshot_update_request, ServiceError
     user = getattr(request.user, 'username', '') or 'rucio_snapshot'
     try:
         rucio_snapshot_update_request(created_by=user)
     except ServiceError as e:
         messages.error(request, e.detail)
-        return redirect(reverse('pcs:pcs_catalog'))
+        return redirect(back)
     messages.success(request, 'Rucio update queued — refreshing in the background.')
-    return redirect(reverse('pcs:pcs_catalog'))
+    return redirect(back)
 
 
 @_login_required_flash
@@ -1408,6 +2079,81 @@ def pcs_catalog_evgen_update(request):
         return redirect(reverse('pcs:pcs_catalog'))
     messages.success(request, 'EVGEN update queued — refreshing in the background.')
     return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_questionnaire_match_update(request):
+    """No-JS fallback for the catalog questionnaire-match cache button.
+
+    The JavaScript path posts to /pcs/api/ and waits for the prod-ops
+    questionnaire_match_ready event. This page-view only queues the same
+    background agent work when JavaScript is unavailable.
+    """
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Update questionnaire matches')
+    from .services import questionnaire_match_update_request, ServiceError
+    user = getattr(request.user, 'username', '') or 'questionnaire_match'
+    try:
+        questionnaire_match_update_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(reverse('pcs:pcs_catalog'))
+    messages.success(
+        request,
+        'Questionnaire match update queued — refreshing in the background.')
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_progress_refresh(request):
+    """Refresh the cached current-campaign progress snapshot.
+
+    This is intentionally a manual refresh path. The catalog page reads the
+    cached snapshot from Campaign.data and does not query Rucio or scan PanDA on
+    every page load.
+    """
+    target_url = reverse('pcs:pcs_catalog') + '?lifecycle=current&view=progress'
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, target_url,
+            action_label='Refresh progress')
+    from .services import campaign_progress_refresh_request, ServiceError
+    user = getattr(request.user, 'username', '') or 'progress_refresh'
+    try:
+        campaign_progress_refresh_request(created_by=user)
+    except ServiceError as e:
+        messages.error(request, e.detail)
+        return redirect(target_url)
+    messages.success(request, 'Progress refresh queued — updating in the background.')
+    return redirect(target_url)
+
+
+@_login_required_flash
+def pcs_catalog_cache_refresh(request):
+    """Manually rebuild cached current-campaign catalog/progress table HTML."""
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Refresh catalog table')
+    view = (request.POST.get('view') or 'catalog').strip()
+    if view not in ('catalog', 'progress'):
+        view = 'catalog'
+    target_url = reverse('pcs:pcs_catalog') + '?lifecycle=current'
+    if view == 'progress':
+        target_url += '&view=progress'
+    campaign = Campaign.objects.filter(lifecycle='current').order_by('name').first()
+    if campaign is None:
+        messages.error(request, 'No current campaign is available.')
+        return redirect(target_url)
+    progress_snapshot = None
+    if view == 'progress':
+        from .services import load_campaign_progress_snapshot
+        progress_snapshot = load_campaign_progress_snapshot(campaign)
+    rebuild_current_task_list_html_cache(
+        campaign, view, progress_snapshot=progress_snapshot)
+    return redirect(target_url)
 
 
 def rucio_did_detail(request, scope, name):
@@ -1441,6 +2187,545 @@ def rucio_did_files(request, scope, name):
     except ServiceError as e:
         return JsonResponse({'error': e.detail}, status=e.status)
     return JsonResponse({'files': files, 'count': len(files)})
+
+
+def pcs_physics_configs(request):
+    """The physics-configuration view (CAMPAIGN_CONTINUUM.md): physics
+    first, fulfillment through time. One row per physics configuration,
+    its editions along the campaign axis — presentation only, no compose,
+    no editing; anything actionable cross-links to the catalog. Read-open.
+    """
+    from .physics_config import group_editions
+
+    def url_with(**updates):
+        params = request.GET.copy()
+        for key, value in updates.items():
+            if value:
+                params[key] = value
+            else:
+                params.pop(key, None)
+        encoded = params.urlencode()
+        return f'{request.path}?{encoded}' if encoded else request.path
+
+    years = (request.GET.get('years') or '2026').strip()
+    if years not in ('2026', '2025', 'all'):
+        years = '2026'
+    # Newest first, left to right — the eye lands on the most recent.
+    campaigns = sorted(
+        (c.name for c in Campaign.objects.all()
+         if years == 'all' or c.name.startswith(years[2:] + '.')),
+        key=lambda n: _version_tuple(n) or (0,), reverse=True)
+
+    heads = list(
+        Dataset.objects.filter(campaign__name__in=campaigns)
+        .select_related('physics_tag', 'evgen_tag', 'background_tag',
+                        'campaign')
+        .order_by('composed_name', 'block_num', 'pk')
+        .distinct('composed_name'))
+    groups = group_editions(heads)
+    requests_by_anchor = services.pc_anchored_requests()
+
+    # One working task per identity decides the edition's state; sibling
+    # output records don't override it. Matched requests ride along.
+    task_status = {}
+    task_requests = {}
+    for name, status, overrides in (
+            ProdTask.objects.filter(campaign__name__in=campaigns)
+            .values_list('dataset__composed_name', 'status', 'overrides')):
+        if name not in task_status or task_status[name] == 'past_output':
+            task_status[name] = status
+        for match in (overrides or {}).get('questionnaire_matches') or []:
+            qid = match.get('questionnaire_id') if isinstance(match, dict) else None
+            if isinstance(qid, int) or str(qid).isdigit():
+                task_requests.setdefault(name, set()).add(int(qid))
+
+    # Produced data per identity, summed over ALL its physical rows —
+    # the head row alone undercounts multi-row identities.
+    produced = {
+        row['composed_name']: row
+        for row in Dataset.objects.filter(campaign__name__in=campaigns)
+        .values('composed_name')
+        .annotate(n_datasets=Count('id'), files=Sum('file_count'),
+                  size=Sum('data_size'))
+    }
+
+    filters = {key: (request.GET.get(key) or '').strip()
+               for key in ('process', 'generator', 'beam', 'species', 'q2',
+                           'sample')}
+    q = (request.GET.get('q') or '').strip().lower()
+    produced_in = (request.GET.get('produced') or '').strip()
+
+    gen_case = _generator_display_case()
+    rows = []
+    for key, group in groups.items():
+        head, detail = group['editions'][0]
+        params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
+        evgen = detail['evgen']
+        generator = gen_case.get(evgen[0], evgen[0]) if evgen else ''
+        species = params.get('beam_species', '')
+        gen_display = ((' '.join(part for part in (generator, evgen[1]) if part)
+                        + (f' {species}' if species else '')
+                        + (' noRad' if evgen[2] == 'off' else '')
+                        + (' Rad' if evgen[2] == 'on' else ''))
+                       if evgen else '')
+        be = str(params.get('beam_energy_electron', '') or '')
+        bh = str(params.get('beam_energy_hadron', '') or '')
+        if be.upper() == 'N/A':
+            be = ''
+        if bh.upper() == 'N/A':
+            bh = ''
+        beam = f'{be}x{bh}' if be and bh else (be or bh)
+        row = {
+            'physics': head.physics_tag.tag_label if head.physics_tag else '',
+            'process': params.get('process', ''),
+            'beam': beam,
+            'species': species,
+            'q2': params.get('q2_range', ''),
+            'generator': generator,
+            'gen_display': gen_display,
+            'sample': detail['sample'],
+            'editions': {},
+        }
+        row['requests'] = sorted(set().union(*(
+            task_requests.get(d.composed_name, set())
+            for d, _ in group['editions'])))
+        # PC-anchored production requests: a request whose anchor is any
+        # of this configuration's editions belongs to the configuration.
+        row['prod_requests'] = sorted(
+            {req.pk: req for d, _ in group['editions']
+             for req in requests_by_anchor.get(d.composed_name, ())}.values(),
+            key=lambda r: r.pk)
+        for dataset, edition_detail in group['editions']:
+            camp = dataset.campaign.name if dataset.campaign_id else ''
+            data = produced.get(dataset.composed_name) or {}
+            row['editions'][camp] = {
+                'name': dataset.composed_name,
+                'status': task_status.get(dataset.composed_name, ''),
+                'n_datasets': data.get('n_datasets') or 0,
+                'files': data.get('files') or 0,
+                'size': data.get('size') or 0,
+                'propagation': dataset.propagation,
+                'replaced_by': dataset.replaced_by,
+                'proposal': bool((dataset.metadata or {}).get('proposal')),
+            }
+        # Template-friendly: one cell per campaign column, aligned.
+        row['cells'] = [row['editions'].get(c) for c in campaigns]
+        row['search_blob'] = ' '.join(
+            [row['physics'], row['process'], row['beam'], row['species'],
+             row['q2'], row['gen_display'], row['sample']]
+            + [e['name'] for e in row['editions'].values()]).lower()
+        rows.append(row)
+
+    rows_all = rows
+    for key, value in filters.items():
+        if value:
+            rows = [r for r in rows if r[key] == value]
+    if q:
+        rows = [r for r in rows if q in r['search_blob']]
+    if produced_in in campaigns:
+        produced_index = campaigns.index(produced_in)
+        rows = [r for r in rows
+                if r['cells'][produced_index]
+                and r['cells'][produced_index]['files']]
+    matched = (request.GET.get('matched') or '').strip()
+    if matched == 'matched':
+        rows = [r for r in rows if r['requests']]
+    elif matched == 'unmatched':
+        rows = [r for r in rows if not r['requests']]
+
+    # Per-campaign fulfillment totals over the filtered set — the
+    # dataset/file/volume picture the view exists to surface.
+    campaign_totals = []
+    for index, camp in enumerate(campaigns):
+        total = {'configs': 0, 'produced': 0, 'n_datasets': 0,
+                 'files': 0, 'size': 0}
+        for r in rows:
+            cell = r['cells'][index]
+            if not cell:
+                continue
+            total['configs'] += 1
+            total['n_datasets'] += cell['n_datasets']
+            if cell['files']:
+                total['produced'] += 1
+                total['files'] += cell['files']
+                total['size'] += cell['size']
+        campaign_totals.append(total)
+
+    def facet(param):
+        counts = {}
+        for r in rows_all:
+            value = r[param]
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+        return {'param': param,
+                'items': [{'value': v, 'count': n,
+                           'url': url_with(**{param: v}),
+                           'active': filters[param] == v}
+                          for v, n in sorted(counts.items())],
+                'all_url': url_with(**{param: ''}),
+                'all_active': not filters[param]}
+
+    facet_rows = [
+        ('Process', facet('process')),
+        ('Generator', facet('generator')),
+        ('Beam', facet('beam')),
+        ('Species', facet('species')),
+        ('Q²', facet('q2')),
+        ('Sample', facet('sample')),
+    ]
+    produced_counts = {
+        camp: sum(1 for r in rows_all
+                  if r['cells'][i] and r['cells'][i]['files'])
+        for i, camp in enumerate(campaigns)
+    }
+    matched_count = sum(1 for r in rows_all if r['requests'])
+    facet_rows.append(('Request', {
+        'param': 'matched',
+        'items': [
+            {'value': 'matched', 'count': matched_count,
+             'url': url_with(matched='matched'),
+             'active': matched == 'matched'},
+            {'value': 'unmatched', 'count': len(rows_all) - matched_count,
+             'url': url_with(matched='unmatched'),
+             'active': matched == 'unmatched'},
+        ],
+        'all_url': url_with(matched=''),
+        'all_active': not matched,
+    }))
+    facet_rows.append(('Has data', {
+        'param': 'produced',
+        'items': [{'value': camp, 'count': n,
+                   'url': url_with(produced=camp),
+                   'active': produced_in == camp}
+                  for camp, n in produced_counts.items() if n],
+        'all_url': url_with(produced=''),
+        'all_active': not produced_in,
+    }))
+
+    # Default order: physics tag ascending (numeric within the p prefix).
+    def _physics_sort_key(row):
+        label = row['physics']
+        number = (int(label[1:]) if label[1:].isdigit() else 0) if label else 0
+        return (number, row['sample'])
+    rows.sort(key=_physics_sort_key)
+    return render(request, 'pcs/physics_configs.html', {
+        'rows': rows,
+        'campaigns': campaigns,
+        'campaign_totals': campaign_totals,
+        'years': years,
+        'years_urls': {y: url_with(years=y) for y in ('2026', '2025', 'all')},
+        'facet_rows': facet_rows,
+        'q': request.GET.get('q', ''),
+        'clear_url': request.path,
+        'total': len(groups),
+        'shown': len(rows),
+    })
+
+
+def pcs_request_composer(request):
+    """The request composer — a friendly front door for asking for
+    production, and the first 'my epicprod' surface: the signed-in
+    user's past requests and remembered defaults guide the next one.
+    The mapping to PCS is deterministic (axes → the request's filter
+    block; adopting an existing configuration sets the same anchor the
+    CSV import writes). Read-open; submission is login-gated.
+    """
+    from .physics_config import group_editions
+    select = ('physics_tag', 'evgen_tag', 'background_tag', 'campaign')
+    heads = list(Dataset.objects.select_related(*select)
+                 .order_by('composed_name', 'block_num', 'pk')
+                 .distinct('composed_name'))
+    groups = group_editions(heads)
+    produced = {
+        row['composed_name']: row['files'] or 0
+        for row in Dataset.objects.values('composed_name')
+        .annotate(files=Sum('file_count'))
+    }
+    configs = []
+    gen_case = _generator_display_case()
+    for key, group in groups.items():
+        head, detail = group['editions'][0]
+        params = (head.physics_tag.parameters or {}) if head.physics_tag else {}
+        evgen = detail['evgen']
+        be = str(params.get('beam_energy_electron', '') or '')
+        bh = str(params.get('beam_energy_hadron', '') or '')
+        be = '' if be.upper() == 'N/A' else be
+        bh = '' if bh.upper() == 'N/A' else bh
+        configs.append({
+            'process': params.get('process', ''),
+            'beam': f'{be}x{bh}' if be and bh else (be or bh),
+            'species': params.get('beam_species', ''),
+            'q2': params.get('q2_range', ''),
+            'generator': (gen_case.get(evgen[0], evgen[0]) if evgen else ''),
+            'gen_version': (evgen[1] if evgen else ''),
+            'sample': detail['sample'],
+            'physics': head.physics_tag.tag_label if head.physics_tag else '',
+            'anchor': head.composed_name,
+            'campaigns': sorted(group['campaigns']),
+            'files': sum(produced.get(d.composed_name, 0)
+                         for d, _ in group['editions']),
+        })
+    configs.sort(key=lambda c: (c['process'], c['beam'], c['q2']))
+
+    def _options(field):
+        return sorted({c[field] for c in configs if c[field]})
+
+    username = getattr(request.user, 'username', '') or ''
+    prefs = UserPreference.get_prefs(username) if username else {}
+    my_requests = []
+    if username:
+        for row in (ProdRequest.objects.filter(created_by=username)
+                    .order_by('-created_at')[:10]):
+            filters = (row.data or {}).get('filters') or {}
+            my_requests.append({
+                'id': row.pk,
+                'created': row.created_at.strftime('%Y-%m-%d'),
+                'requestor': row.requestor,
+                'status': row.status,
+                'nevents': row.nevents,
+                'description': row.description,
+                'filters': filters,
+                'anchor': (row.data or {}).get('physics_config_anchor', ''),
+            })
+    default_pwg = prefs.get('composer_pwg', '')
+    default_dsc = prefs.get('composer_dsc', '')
+    full_name = ''
+    if username:
+        full_name = (request.user.get_full_name() or '').strip()
+    default_contact_name = prefs.get('composer_contact_name', '') or full_name
+    user_email = (getattr(request.user, 'email', '') or '')
+    if user_email.lower().rpartition('@')[2] in ('example.com', 'example.org'):
+        # Synthetic placeholder from an old account-creation flow —
+        # never offer it as real contact data.
+        user_email = ''
+    default_contact_email = (prefs.get('composer_contact_email', '')
+                             or user_email)
+
+    return render(request, 'pcs/request_composer.html', {
+        'configs_json': json.dumps(configs),
+        'process_options': _options('process'),
+        'beam_options': _options('beam'),
+        'species_options': _options('species'),
+        'q2_options': _options('q2'),
+        'generator_options': _options('generator'),
+        'sample_options': _options('sample'),
+        'pwg_options': PWG_OPTIONS,
+        'dsc_option_groups': DSC_OPTION_GROUPS,
+        'default_pwg': default_pwg,
+        'default_dsc': default_dsc,
+        'my_requests': my_requests,
+        'my_requests_json': json.dumps(my_requests),
+        'default_contact_name': default_contact_name,
+        'default_contact_email': default_contact_email,
+    })
+
+
+def pcs_edition_data(request, name):
+    """Rucio data per campaign for one physics configuration: reached
+    from any of its editions, the page resolves the configuration and
+    lists every physical Rucio dataset across campaigns — real DIDs
+    linked to the live detail page, files, volume, per-RSE replica
+    status. Read-open.
+
+    Past/ingested rows carry their real Rucio DID in
+    ``metadata.source.location`` (the ``did`` column is the PCS-internal
+    name); PanDA-produced rows carry it in ``did``. Both shapes render;
+    a row with no real DID shows its internal name unlinked.
+    """
+    from .physics_config import physics_config_key
+
+    select = ('campaign', 'physics_tag', 'evgen_tag', 'background_tag')
+    anchor = (Dataset.objects.filter(composed_name=name)
+              .select_related(*select).order_by('block_num', 'pk').first())
+    if anchor is None:
+        raise Http404(f'No dataset identity {name!r}')
+    anchor_detail = physics_config_key(anchor)
+    # Sibling editions across campaigns: same-physics-tag heads (a cheap
+    # prefilter) resolved to the same configuration key. An unresolved
+    # anchor keys uniquely, so it matches only itself.
+    edition_names = [
+        head.composed_name
+        for head in (Dataset.objects.filter(physics_tag=anchor.physics_tag)
+                     .select_related(*select)
+                     .order_by('composed_name', 'block_num', 'pk')
+                     .distinct('composed_name'))
+        if physics_config_key(head)['key'] == anchor_detail['key']
+    ] or [name]
+
+    rows = sorted(
+        Dataset.objects.filter(composed_name__in=edition_names)
+        .select_related('campaign').order_by('composed_name', 'block_num', 'pk'),
+        key=lambda d: (_version_tuple(d.campaign.name if d.campaign_id else '')
+                       or (0,), d.block_num, d.pk),
+        reverse=True)
+
+    params = (anchor.physics_tag.parameters or {}) if anchor.physics_tag else {}
+    evgen = anchor_detail['evgen']
+    gen_case = _generator_display_case()
+    be = str(params.get('beam_energy_electron', '') or '')
+    bh = str(params.get('beam_energy_hadron', '') or '')
+    be = '' if be.upper() == 'N/A' else be
+    bh = '' if bh.upper() == 'N/A' else bh
+    spec_parts = [
+        params.get('process', ''),
+        f'{be}x{bh}' if be and bh else (be or bh),
+        params.get('beam_species', ''),
+        params.get('q2_range', ''),
+        (' '.join(part for part in (gen_case.get(evgen[0], evgen[0]),
+                                    evgen[1]) if part) if evgen else ''),
+        anchor_detail['sample'],
+        anchor.physics_tag.tag_label if anchor.physics_tag else '',
+    ]
+    pc_spec = ' · '.join(part for part in spec_parts if part)
+
+    request_ids = set()
+    for overrides in (ProdTask.objects
+                      .filter(dataset__composed_name__in=edition_names)
+                      .values_list('overrides', flat=True)):
+        for match in (overrides or {}).get('questionnaire_matches') or []:
+            qid = match.get('questionnaire_id') if isinstance(match, dict) else None
+            if isinstance(qid, int) or str(qid).isdigit():
+                request_ids.add(int(qid))
+
+    # PC-anchored production requests: this page is the configuration's
+    # home, so its requests render in full — a request whose anchor is
+    # any of the configuration's editions belongs here.
+    requests_by_anchor = services.pc_anchored_requests()
+    prod_requests = sorted(
+        {req.pk: req for edition in edition_names
+         for req in requests_by_anchor.get(edition, ())}.values(),
+        key=lambda r: r.pk)
+
+    items = []
+    total_files = 0
+    total_bytes = 0
+    for dataset in rows:
+        metadata = dataset.metadata or {}
+        location = (metadata.get('source') or {}).get('location', '')
+        did = ''
+        if ':' in location and '/' not in location.split(':', 1)[0]:
+            did = location
+        elif (dataset.did or '').startswith('group.EIC:group.EIC'):
+            did = dataset.did
+        scope, _, did_name = did.partition(':')
+        past = metadata.get('past_output') or {}
+        items.append({
+            'campaign': dataset.campaign.name if dataset.campaign_id else '',
+            'name': dataset.composed_name,
+            'stage': (past.get('stage')
+                      or str(metadata.get('stage', '')).upper()),
+            'did': did,
+            'did_scope': scope,
+            'did_name': did_name.lstrip('/'),
+            'internal': dataset.did,
+            'files': dataset.file_count or 0,
+            'size': dataset.data_size or 0,
+            'rses': past.get('rses') or [],
+            'source': location,
+        })
+        total_files += dataset.file_count or 0
+        total_bytes += dataset.data_size or 0
+
+    return render(request, 'pcs/edition_data.html', {
+        'name': name,
+        'pc_spec': pc_spec,
+        'requests': sorted(request_ids),
+        'prod_requests': prod_requests,
+        'items': items,
+        'total_files': total_files,
+        'total_bytes': total_bytes,
+    })
+
+
+@_login_required_flash
+def pcs_catalog_promote_current(request):
+    """POST handler for the producing tab's 'Make <campaign> current'
+    button — the lifecycle rotation, one atomic operator action: the
+    named campaign becomes current, the incumbent current becomes last,
+    the incumbent last becomes past. Detection is automatic (the derived
+    producing status); the transition is always this human click.
+    """
+    from django.db import transaction
+
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Make current')
+    name = (request.POST.get('name') or '').strip()
+    target = Campaign.objects.filter(name=name).first()
+    if target is None:
+        messages.error(request, f'No campaign named {name!r}.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    if target.lifecycle == 'current':
+        messages.info(request, f'{name} is already current.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    moves = []
+    with transaction.atomic():
+        for camp in Campaign.objects.filter(lifecycle='last').exclude(pk=target.pk):
+            camp.lifecycle = 'past'
+            camp.save(update_fields=['lifecycle', 'updated_at'])
+            moves.append(f'{camp.name} -> past')
+        for camp in Campaign.objects.filter(lifecycle='current').exclude(pk=target.pk):
+            camp.lifecycle = 'last'
+            camp.save(update_fields=['lifecycle', 'updated_at'])
+            moves.append(f'{camp.name} -> last')
+        target.lifecycle = 'current'
+        target.save(update_fields=['lifecycle', 'updated_at'])
+        moves.append(f'{name} -> current')
+    summary = '; '.join(reversed(moves))
+    log_epicprod_action(
+        'web', 'campaign_promoted',
+        subject_type='campaign', subject_key=name,
+        username=getattr(request.user, 'username', '') or '',
+        sublevel='high', live_default=True,
+        message=f'campaign lifecycle rotation: {summary}')
+    messages.success(request, f'Campaign rotation: {summary}')
+    return redirect(reverse('pcs:pcs_catalog'))
+
+
+@_login_required_flash
+def pcs_catalog_instancing_execute(request):
+    """POST handler for the producing tab's instancing action: populate
+    the target campaign's working catalog from the source campaign. The
+    plan is recomputed at execution — the page's rendering is the review,
+    the fresh computation is the guard."""
+    from .instancing import execute_campaign_instancing
+
+    if request.method != 'POST':
+        return _post_only_redirect(
+            request, reverse('pcs:pcs_catalog'),
+            action_label='Campaign instancing')
+    source = (request.POST.get('source') or '').strip()
+    target = (request.POST.get('target') or '').strip()
+    return_lifecycle = (request.POST.get('return_lifecycle') or '').strip()
+    if return_lifecycle not in ('producing', 'future'):
+        return_lifecycle = 'producing'
+    back = (reverse('pcs:pcs_catalog')
+            + f'?lifecycle={return_lifecycle}&campaign={target}')
+    # The target may have no row yet only when it is the batch-derived
+    # next campaign (the future tab's plan); execution creates that row.
+    target_known = (
+        Campaign.objects.filter(name=target).exists()
+        or (_next_campaign_hint() or {}).get('name') == target)
+    if not (Campaign.objects.filter(name=source).exists() and target_known):
+        messages.error(request, f'Unknown campaign in {source!r} -> {target!r}.')
+        return redirect(reverse('pcs:pcs_catalog'))
+    result = execute_campaign_instancing(
+        source, target,
+        created_by=getattr(request.user, 'username', '') or '')
+    s = result['summary']
+    msg = (f"Instancing {source} -> {target}: {s['minted_editions']} "
+           f"edition(s) minted, {s['merged_tasks']} task(s) adopted; "
+           f"{s['hold']} held, {s['final']} final, {s['unresolved']} "
+           f"unresolved left to curation.")
+    if result['errors']:
+        messages.warning(request, msg + f" {len(result['errors'])} error(s): "
+                         + '; '.join(result['errors'][:3]))
+    else:
+        messages.success(request, msg)
+    return redirect(back)
 
 
 @_login_required_flash
@@ -1484,38 +2769,70 @@ def pcs_catalog(request):
     sign-in. Catching auth at the GET prevents the silent-fail trap
     where an anonymous user sees buttons that quietly do nothing.
     """
-    filters = _parse_catalog_filters(request)
+    build_start = time.perf_counter() if CATALOG_BUILD_TIMING_ENABLED else None
+    timings = [] if CATALOG_BUILD_TIMING_ENABLED else None
+    filters = _timed(timings, 'parse filters', lambda: _parse_catalog_filters(request))
+    inflow = _campaigns_with_inflow()
     active_lifecycle = (request.GET.get('lifecycle') or '').strip()
-    if active_lifecycle not in LIFECYCLE_KEYS:
+    producing_campaign_name = ''
+    if active_lifecycle == 'producing':
+        producing_campaign_name = (request.GET.get('campaign') or '').strip()
+        if not Campaign.objects.filter(name=producing_campaign_name).exists():
+            active_lifecycle, producing_campaign_name = 'current', ''
+    elif active_lifecycle not in LIFECYCLE_KEYS:
         active_lifecycle = 'current'
+    catalog_view = (request.GET.get('view') or 'catalog').strip()
+    if active_lifecycle != 'current' or catalog_view not in ('catalog', 'progress'):
+        catalog_view = 'catalog'
 
-    campaigns_by_lifecycle = {
-        k: list(Campaign.objects.filter(lifecycle=k).order_by('name'))
-        for k in LIFECYCLE_KEYS
-    }
+    campaigns_by_lifecycle = _timed(
+        timings,
+        'campaign lifecycle query',
+        lambda: {
+            k: list(
+                Campaign.objects
+                .filter(lifecycle=k)
+                .only('id', 'name', 'lifecycle', 'start_date', 'created_at')
+                .order_by('name')
+            )
+            for k in LIFECYCLE_KEYS
+        },
+        detail_fn=lambda value: f'{sum(len(v) for v in value.values())} campaigns',
+    )
     def _tab_detail(key, camps):
-        # Future campaigns are stage-prefixed (RECO/26.06.0); show the bare
-        # version so the tab reads "Future · 26.06.0", mirroring Current.
         if key == 'past':
             return ''
-        if key == 'future':
-            return ', '.join(sorted(
-                {c.name.split('/', 1)[1] for c in camps if '/' in c.name}))
         return ', '.join(c.name for c in camps)
+    def _tab(key, label, color):
+        return {'key': key, 'label': label, 'color': color,
+                'campaigns': campaigns_by_lifecycle[key],
+                'detail': _tab_detail(key, campaigns_by_lifecycle[key]),
+                'url': f'?lifecycle={key}',
+                'active': active_lifecycle == key}
     lifecycle_tabs = [
-        {'key': 'past',    'label': 'Past',    'color': 'secondary',
-         'campaigns': campaigns_by_lifecycle['past'],
-         'detail': _tab_detail('past', campaigns_by_lifecycle['past'])},
-        {'key': 'last',    'label': 'Last',    'color': 'last-green',
-         'campaigns': campaigns_by_lifecycle['last'],
-         'detail': _tab_detail('last', campaigns_by_lifecycle['last'])},
-        {'key': 'current', 'label': 'Current', 'color': 'success',
-         'campaigns': campaigns_by_lifecycle['current'],
-         'detail': _tab_detail('current', campaigns_by_lifecycle['current'])},
-        {'key': 'future',  'label': 'Future',  'color': 'primary',
-         'campaigns': campaigns_by_lifecycle['future'],
-         'detail': _tab_detail('future', campaigns_by_lifecycle['future'])},
+        _tab('past', 'Past', 'secondary'),
+        _tab('last', 'Last', 'last-green'),
+        _tab('current', 'Current', 'success'),
     ]
+    # Derived producing tabs: campaigns with fresh Rucio inflow, whatever
+    # their stored lifecycle — current by the data's definition, so they
+    # dress like Current.
+    for camp, arrivals in inflow:
+        lifecycle_tabs.append({
+            'key': 'producing',
+            'label': 'Producing',
+            'color': 'success',
+            'campaigns': [camp],
+            'detail': camp.name,
+            'url': f'?lifecycle=producing&campaign={camp.name}',
+            'active': (active_lifecycle == 'producing'
+                       and producing_campaign_name == camp.name),
+        })
+    next_hint = _next_campaign_hint()
+    future_tab = _tab('future', 'Future', 'primary')
+    if next_hint and not future_tab['detail']:
+        future_tab['detail'] = next_hint['name']
+    lifecycle_tabs.append(future_tab)
 
     # Past lifecycle: per-release view of output datasets. Each release
     # is one SW version (e.g. 26.04.1) covering up to two stages
@@ -1528,15 +2845,25 @@ def pcs_catalog(request):
     # Last campaign's name (e.g. 26.04.1) and adds the Rucio timeline
     # plot above the table — a hybrid of Past's row model and Current's
     # snapshot view.
-    if active_lifecycle in ('past', 'last', 'future'):
-        # Future and Past share the release-table view; each lists its own
-        # lifecycle's produced releases (Last pins to a past version, below).
-        past_campaigns = list(
-            campaigns_by_lifecycle['future' if active_lifecycle == 'future' else 'past'])
-        # Time flows left to right; releases ordered ASC.
-        release_versions = sorted(
-            {c.name.split('/', 1)[1] for c in past_campaigns if '/' in c.name}
+    if active_lifecycle in ('past', 'last', 'future', 'producing'):
+        # Campaigns are bare-named (one row per version). Releases in this
+        # view = versions that actually carry past-output rows, independent
+        # of the lifecycle slot the campaign occupies — the current campaign
+        # legitimately holds the ingested record of its pre-PanDA production.
+        # The Future tab lists only future-slot campaigns' produced rows.
+        rows_by_campaign = dict(
+            ProdTask.objects
+            .filter(status='past_output')
+            .values_list('campaign__name')
+            .annotate(Count('id'))
         )
+        if active_lifecycle == 'future':
+            future_names = {c.name for c in campaigns_by_lifecycle['future']}
+            producing_names = {n for n in rows_by_campaign if n in future_names}
+        else:
+            producing_names = set(rows_by_campaign)
+        # Time flows left to right; releases ordered ASC.
+        release_versions = sorted(producing_names)
         def _version_year(v):
             head = v.split('.', 1)[0]
             return ('20' + head) if head.isdigit() and len(head) == 2 else ''
@@ -1552,11 +2879,13 @@ def pcs_catalog(request):
 
         if active_lifecycle == 'last':
             # Pin release to the Last campaign's version; no nav. The
-            # Last Campaign carries its version directly as its name
-            # (e.g. '26.04.1'); past campaigns for the same version are
-            # named 'FULL/26.04.1' and 'RECO/26.04.1'.
+            # campaign name is the bare version ('26.04.1') and carries
+            # both stages' rows.
             last_camps = campaigns_by_lifecycle['last']
             active_release = last_camps[0].name if last_camps else ''
+        elif active_lifecycle == 'producing':
+            # Pin release to the producing campaign the tab names.
+            active_release = producing_campaign_name
         else:
             requested_release = (request.GET.get('release') or '').strip()
             if requested_release == 'all':
@@ -1573,53 +2902,55 @@ def pcs_catalog(request):
         requested_stage = (request.GET.get('stage') or '').strip().upper()
         active_stage = requested_stage if requested_stage in ('FULL', 'RECO') else ''
 
-        def in_release(c):
-            if active_release == 'all':
-                return True
-            if active_release.startswith('all_'):
-                year = active_release[4:]
-                versions = releases_by_year.get(year, [])
-                return any(c.name.endswith('/' + v) for v in versions)
-            return c.name.endswith('/' + active_release)
-        release_campaigns = [c for c in past_campaigns if in_release(c)]
+        if active_release == 'all':
+            wanted_versions = set(release_versions)
+        elif active_release.startswith('all_'):
+            wanted_versions = set(releases_by_year.get(active_release[4:], []))
+        else:
+            wanted_versions = {active_release}
+        selected_names = {n for n in producing_names if n in wanted_versions}
+        selected_campaigns = list(Campaign.objects.filter(name__in=selected_names))
 
-        def in_stage(c, s):
-            return c.name.startswith(s + '/')
-        selected_campaigns = [c for c in release_campaigns
-                              if not active_stage or in_stage(c, active_stage)]
-
-        # Stage-facet counts: number of past_output rows under each stage
-        # in the active release.
-        per_campaign_count = dict(
+        # Stage-facet counts from each row's produced-output stage
+        # (outputs[0].stage — one entry per past-output row).
+        stage_rows = (
             ProdTask.objects
-            .filter(campaign__in=release_campaigns, status='past_output')
-            .values_list('campaign__name')
+            .filter(campaign__name__in=selected_names, status='past_output')
+            .values_list('overrides__outputs__0__stage')
             .annotate(Count('id'))
         )
-        def count_for(stage):
-            return sum(n for name, n in per_campaign_count.items()
-                       if name.startswith(stage + '/'))
-        stage_counts = {
-            'all':  sum(per_campaign_count.values()),
-            'FULL': count_for('FULL'),
-            'RECO': count_for('RECO'),
-        }
+        stage_counts = {'all': 0, 'FULL': 0, 'RECO': 0}
+        for stage_value, n in stage_rows:
+            stage_counts['all'] += n
+            if stage_value in ('FULL', 'RECO'):
+                stage_counts[stage_value] += n
 
-        past_tasks = list(
+        past_tasks_qs = (
             ProdTask.objects
             .select_related(
                 'campaign', 'dataset', 'dataset__physics_tag',
                 'dataset__evgen_tag', 'dataset__simu_tag',
                 'dataset__reco_tag', 'dataset__background_tag',
             )
-            .filter(campaign__in=selected_campaigns, status='past_output')
+            .filter(campaign__name__in=selected_names, status='past_output')
             .order_by('campaign__name', 'dataset__dataset_name')
         )
-        past_tasks = _annotate_task_questionnaire_matches(past_tasks)
-        agg_files = sum((c.data or {}).get('past_summary', {}).get('file_count', 0)
-                        for c in selected_campaigns)
-        agg_size = sum((c.data or {}).get('past_summary', {}).get('data_size_bytes', 0)
-                       for c in selected_campaigns)
+        if active_stage:
+            past_tasks_qs = past_tasks_qs.filter(
+                overrides__outputs__0__stage=active_stage)
+        past_tasks = _annotate_task_questionnaire_matches(list(past_tasks_qs))
+
+        # Aggregates from the stage-keyed past_summary, respecting the
+        # stage filter.
+        def _summary_total(campaign, key):
+            past_summary = (campaign.data or {}).get('past_summary') or {}
+            if not isinstance(past_summary, dict):
+                return 0
+            stages = [active_stage] if active_stage else list(past_summary)
+            return sum((past_summary.get(s) or {}).get(key, 0)
+                       for s in stages if isinstance(past_summary.get(s), dict))
+        agg_files = sum(_summary_total(c, 'file_count') for c in selected_campaigns)
+        agg_size = sum(_summary_total(c, 'data_size_bytes') for c in selected_campaigns)
 
         # Year groups for the template's per-year nav blocks.
         release_year_groups = [
@@ -1636,28 +2967,115 @@ def pcs_catalog(request):
         rucio_unmatched_campaign = ''
         rucio_detected = []
         rucio_current_name = ''
+        if active_lifecycle == 'producing':
+            # The producing tab gets the same arrivals timeline plot;
+            # its snapshot rides the same refresh as current/last.
+            from .services import load_rucio_timeline
+            rucio_timeline = load_rucio_timeline(producing_campaign_name)
         if active_lifecycle == 'last':
             last_camps = campaigns_by_lifecycle['last']
             target = last_camps[0] if last_camps else None
             if target is not None:
-                from .services import load_rucio_snapshot, summarize_rucio_timeline
-                snap = load_rucio_snapshot(target.name)
-                if snap is not None:
-                    rucio_timeline = summarize_rucio_timeline(snap)
-                    rucio_timeline['campaign_name'] = target.name
-                rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
+                from .services import load_rucio_timeline
+                rucio_timeline = load_rucio_timeline(target.name)
+                target_data = _campaign_data(target)
+                rucio_unmatched = target_data.get('rucio_unmatched', []) or []
                 rucio_unmatched_campaign = target.name
-                rucio_detected = (target.data or {}).get('detected_releases', []) or []
+                rucio_detected = target_data.get('detected_releases', []) or []
                 rucio_current_name = target.name
             else:
                 # No Last set yet — borrow detected releases from
                 # current so the operator has options to pick from.
                 cur = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
-                rucio_detected = (cur.data or {}).get('detected_releases', []) if cur else []
+                rucio_detected = _campaign_data(cur).get('detected_releases', []) if cur else []
                 rucio_current_name = cur.name if cur else ''
+
+        producing_arrivals = None
+        promote_cascade_note = ''
+        producing_task_mix = None
+        producing_table_html = None
+        instancing = None
+        # Unified-view convergence: last and single-release past render
+        # the same curated table as Current; multi-campaign aggregates
+        # ('all', year spans) keep the outputs table, their genuine role.
+        tab_last_activity = ''
+        if active_lifecycle == 'last' and campaigns_by_lifecycle['last']:
+            tab_last_activity = _campaign_last_activity(
+                campaigns_by_lifecycle['last'][0])
+            producing_table_html, _, _ = _cached_current_task_list_html(
+                campaigns_by_lifecycle['last'][0], 'catalog', {}, None,
+                timings=timings, rebuild_on_miss=True)
+        elif (active_lifecycle == 'past' and active_release
+              and active_release != 'all'
+              and not active_release.startswith('all_')):
+            release_camp = Campaign.objects.filter(
+                name=active_release).first()
+            if release_camp is not None:
+                producing_table_html, _, _ = _cached_current_task_list_html(
+                    release_camp, 'catalog', {}, None,
+                    timings=timings, rebuild_on_miss=True)
+        elif active_lifecycle == 'future':
+            # The next campaign gets the producing tab's instancing
+            # treatment the moment it is detected: an existing
+            # future-lifecycle row, or the version pending disposition
+            # batches name (next_campaign_hint) before any row exists.
+            candidates = [c.name for c in campaigns_by_lifecycle['future']]
+            if next_hint:
+                candidates.append(next_hint['name'])
+            candidates = [n for n in candidates if _version_tuple(n)]
+            current_names = [c.name for c in campaigns_by_lifecycle['current']]
+            target_name = max(candidates, key=_version_tuple) if candidates else ''
+            # Source: a producing campaign ahead of current seeds the next
+            # campaign — it will be current by population time, its
+            # promotion merely pending a human click; else current itself.
+            source_name = current_names[0] if current_names else ''
+            for camp, _arr in inflow:
+                if (camp.name != target_name and _version_tuple(camp.name)
+                        and (not source_name or _version_tuple(camp.name)
+                             > _version_tuple(source_name))):
+                    source_name = camp.name
+            if target_name and source_name and target_name != source_name:
+                instancing = _instancing_context(source_name, target_name)
+                future_camp = Campaign.objects.filter(name=target_name).first()
+                if future_camp is not None:
+                    producing_table_html, _, _ = _cached_current_task_list_html(
+                        future_camp, 'catalog', {}, None,
+                        timings=timings, rebuild_on_miss=True)
+        if active_lifecycle == 'producing':
+            producing_arrivals = dict(next(
+                (arr for camp, arr in inflow
+                 if camp.name == producing_campaign_name), {}))
+            promote_cascade_note = _promote_cascade_note(
+                campaigns_by_lifecycle, producing_campaign_name)
+            producing_camp = Campaign.objects.filter(
+                name=producing_campaign_name).first()
+            if producing_camp is not None:
+                tab_last_activity = _campaign_last_activity(producing_camp)
+            producing_task_mix = dict(
+                ProdTask.objects.filter(campaign__name=producing_campaign_name)
+                .values_list('status').annotate(Count('id')))
+            # The unified curated view (CAMPAIGN_CONTINUUM.md): the
+            # producing campaign renders the same task table as Current.
+            if producing_camp is not None:
+                producing_table_html, _, _ = _cached_current_task_list_html(
+                    producing_camp, 'catalog', {}, None, timings=timings,
+                    rebuild_on_miss=True)
+            current_names = [c.name for c in campaigns_by_lifecycle['current']]
+            if current_names and producing_campaign_name not in current_names:
+                instancing = _instancing_context(current_names[0],
+                                                 producing_campaign_name)
 
         return render(request, 'pcs/pcs_catalog_past.html', {
             'show_tabs': True,
+            'next_campaign_hint': (next_hint
+                                   if active_lifecycle == 'future' else None),
+            'producing_campaign': producing_campaign_name,
+            'producing_arrivals': producing_arrivals,
+            'tab_last_activity': tab_last_activity,
+            'producing_task_mix': producing_task_mix,
+            'task_list_html': producing_table_html,
+            'promote_cascade_note': promote_cascade_note,
+            'instancing': instancing,
             'active_lifecycle': active_lifecycle,
             'lifecycle_tabs': lifecycle_tabs,
             'release_versions': release_versions,
@@ -1676,16 +3094,6 @@ def pcs_catalog(request):
             'rucio_current_name': rucio_current_name,
         })
 
-    qs = ProdTask.objects.select_related(
-        'campaign', 'dataset', 'prod_config', 'request',
-        # Each row's composed name (models.py composed_name) reads the dataset's
-        # five tag FKs; prefetch them so the unpaginated list is one query, not
-        # 1 + 5N.
-        'dataset__physics_tag', 'dataset__evgen_tag', 'dataset__simu_tag',
-        'dataset__reco_tag', 'dataset__background_tag',
-    ).filter(campaign__lifecycle=active_lifecycle).order_by('-updated_at')
-    qs = _apply_catalog_filters(qs, filters)
-
     # Rucio arrivals timeline for the current campaign (when a snapshot
     # exists). Surfaced at the top of the page as a Plotly chart.
     rucio_timeline = None
@@ -1699,40 +3107,133 @@ def pcs_catalog(request):
         camp_list = campaigns_by_lifecycle['current']
         target = camp_list[0] if camp_list else None
         if target is not None:
-            from .services import load_rucio_snapshot, summarize_rucio_timeline
-            snap = load_rucio_snapshot(target.name)
-            if snap is not None:
-                rucio_timeline = summarize_rucio_timeline(snap)
-                rucio_timeline['campaign_name'] = target.name
-            rucio_unmatched = (target.data or {}).get('rucio_unmatched', []) or []
+            from .services import load_rucio_timeline
+            rucio_timeline = _timed(
+                timings,
+                'Rucio timeline cached read',
+                lambda: load_rucio_timeline(target.name),
+                detail_fn=lambda value: (
+                    f'{len(value.get("dates") or [])} bins'
+                    if value else 'missing'
+                ),
+            )
+            data_start = time.perf_counter()
+            target_data = _campaign_data(target)
+            rucio_unmatched = target_data.get('rucio_unmatched', []) or []
             rucio_unmatched_campaign = target.name
-            rucio_detected = (target.data or {}).get('detected_releases', []) or []
+            # The current tab offers only genuinely NEW detected releases
+            # (a one-click switch forward): newer than current AND not
+            # already occupying a catalog lifecycle slot — a retired
+            # interim (26.06.0, past) is never re-promoted, and older
+            # releases' content lives under Past.
+            current_version = _version_tuple(target.name)
+            known_names = set(Campaign.objects.exclude(lifecycle='future')
+                              .values_list('name', flat=True))
+            rucio_detected = [
+                r for r in (target_data.get('detected_releases', []) or [])
+                if current_version and _version_tuple(r.get('version'))
+                and _version_tuple(r.get('version')) > current_version
+                and r.get('version') not in known_names
+            ]
             rucio_current_name = target.name
-            evgen_rucio_unmatched = (target.data or {}).get('evgen_rucio_unmatched', []) or []
-            evgen_rucio_checked_at = (target.data or {}).get('evgen_rucio_checked_at', '')
+            evgen_rucio_unmatched = target_data.get('evgen_rucio_unmatched', []) or []
+            evgen_rucio_checked_at = target_data.get('evgen_rucio_checked_at', '')
+            _timing_record(
+                timings,
+                'Rucio cached metadata read',
+                data_start,
+                detail=f'{len(rucio_unmatched)} unmatched, {len(evgen_rucio_unmatched)} EVGEN unmatched',
+            )
 
-    tasks = _annotate_task_questionnaire_matches(list(qs))
+    progress_snapshot = None
+    progress_refresh_requested = request.GET.get('refresh') == '1'
+    progress_refreshed_for_request = False
+    progress_refresh_error = ''
+    progress_campaign = campaigns_by_lifecycle['current'][0] if campaigns_by_lifecycle['current'] else None
+    if progress_campaign is not None:
+        from .services import load_campaign_progress_snapshot
+        progress_snapshot = _timed(
+            timings,
+            'progress snapshot cached read',
+            lambda: load_campaign_progress_snapshot(progress_campaign),
+            detail_fn=lambda value: (
+                'generated_at=' + str((value or {}).get('generated_at') or '')
+                if value else 'missing'
+            ),
+        )
+    rucio_json = _timed(
+        timings,
+        'Rucio chart JSON encode',
+        lambda: json.dumps(rucio_timeline) if rucio_timeline else 'null',
+        detail_fn=lambda value: f'{len(value)} bytes',
+    )
+    requestor_options = _timed(
+        timings,
+        'requestor filter options',
+        _requestor_options,
+        detail_fn=lambda value: f'{len(value)} options',
+    )
+    propagation_last_comment = ''
+    if request.user.is_authenticated:
+        from monitor_app.models import UserPreference
+        propagation_last_comment = UserPreference.get_prefs(
+            request.user.username).get('propagation_last_comment', '')
+    current_camp = (campaigns_by_lifecycle['current'][0]
+                    if campaigns_by_lifecycle['current'] else None)
     context = {
-        'tasks': tasks,
+        'propagation_last_comment': propagation_last_comment,
+        'tasks': [],
+        'ai_executed_names': _executed_proposal_names(),
+        'current_last_activity': (_campaign_last_activity(current_camp)
+                                  if current_camp else ''),
+        'promote_offers': [
+            {'name': camp.name,
+             'note': _promote_cascade_note(campaigns_by_lifecycle, camp.name)}
+            for camp, _ in inflow
+        ],
         'show_tabs': True,
         'columns_mode': 'full',
+        'catalog_view': catalog_view,
+        'catalog_view_urls': {
+            'catalog': _catalog_view_url(request, active_lifecycle, 'catalog'),
+            'progress': _catalog_view_url(request, active_lifecycle, 'progress'),
+        },
         'active_lifecycle': active_lifecycle,
         'lifecycle_tabs': lifecycle_tabs,
         'active_campaigns': campaigns_by_lifecycle[active_lifecycle],
+        'progress_campaign_name': progress_campaign.name if progress_campaign else '',
         'focused_campaign': None,
         'focused_task_id': None,
         'filters': filters,
-        'requestor_options': _requestor_options(),
+        'requestor_options': requestor_options,
         'status_choices': PRODTASK_STATUS_CHOICES,
         'form_action': reverse('pcs:pcs_catalog'),
-        'rucio_timeline_json': json.dumps(rucio_timeline) if rucio_timeline else 'null',
+        'rucio_timeline_json': rucio_json,
         'rucio_unmatched': rucio_unmatched,
         'rucio_unmatched_campaign': rucio_unmatched_campaign,
         'rucio_detected': rucio_detected,
         'rucio_current_name': rucio_current_name,
         'evgen_rucio_unmatched': evgen_rucio_unmatched,
         'evgen_rucio_checked_at': evgen_rucio_checked_at,
+        'progress_snapshot': progress_snapshot,
+        'progress_errors': (progress_snapshot or {}).get('errors') or [],
+        'progress_generated_at': (progress_snapshot or {}).get('generated_at') or '',
+        'progress_generated_by': (progress_snapshot or {}).get('generated_by') or '',
+        'progress_refresh_requested': progress_refresh_requested,
+        'progress_refreshed_for_request': progress_refreshed_for_request,
+        'progress_refresh_error': progress_refresh_error,
     }
+    task_list_html, task_list_cache_hit, task_list_cache_meta = _cached_current_task_list_html(
+        progress_campaign, catalog_view, context, progress_snapshot, timings=timings)
+    context['task_list_html'] = task_list_html
+    context['task_list_cache_hit'] = task_list_cache_hit
+    context['task_list_cache_rendered_at'] = task_list_cache_meta.get('rendered_at') or ''
+    context['task_list_cache_stale'] = bool(task_list_cache_meta.get('stale'))
+    context['task_list_cache_miss_suppressed'] = bool(
+        task_list_cache_meta.get('cache_miss_suppressed'))
+    if CATALOG_BUILD_TIMING_ENABLED:
+        context['catalog_timing_rows'] = timings
+        context['catalog_timing_total_ms'] = _timing_ms(time.perf_counter() - build_start)
     return render(request, 'pcs/pcs_catalog.html', context)
 
 
@@ -1792,7 +3293,7 @@ def prod_task_detail(request, name):
         task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
             'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-        ))
+        ).prefetch_related('panda_tasks'))
     except ProdTask.DoesNotExist:
         raise Http404(f"No task {name!r}")
     # Canonical task URL is the composed name; 301 a legacy/raw-name or stale
@@ -1812,8 +3313,9 @@ def prod_task_detail(request, name):
         'task_params_json': task_params_json,
         'task_params_error': task_params_error,
         'can_operate': can_operate,
+        'panda_tasks': services.panda_tasks_summary(task, include_live=True),
         'can_submit': can_operate and task.panda_task_id is None and task.status in ('draft', 'ready'),
-        'can_reset_submission': can_operate and task.panda_task_id is not None,
+        'can_reset_submission': False,
     })
 
 
@@ -1855,14 +3357,16 @@ def prod_task_compose(request):
         tasks_list = list(
             ProdTask.objects.select_related(
                 'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-                'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-            ).filter(campaign=campaign).order_by('-updated_at')
+                'dataset__simu_tag', 'dataset__reco_tag',
+                'dataset__background_tag', 'prod_config',
+            ).prefetch_related('panda_tasks').filter(campaign=campaign).order_by('-updated_at')
         )
     # Light task entries: EVGEN submission spec + cached commands omitted, hydrated on
     # open (prod_task_compose_task_detail). Readiness (cheap) is included so the
     # detail panel can show submit-readiness without a round trip.
     from .services import prodtask_readiness_problems
     tasks_list = _annotate_task_questionnaire_matches(tasks_list)
+    tasks_list = _annotate_task_pc_requests(tasks_list)
     tasks_data = []
     for t in tasks_list:
         tasks_data.append({
@@ -1876,12 +3380,17 @@ def prod_task_compose(request):
             # to show the PanDA-task link + the operator Reset control. Omitting it
             # left every submitted task with only the Copy button on page load.
             'panda_task_id': t.panda_task_id,
+            'panda_tasks': services.panda_tasks_summary(t),
             'dataset_id': t.dataset_id,
             'dataset_name': t.dataset.dataset_name,
             'prod_config_id': t.prod_config_id,
             'prod_config_name': t.prod_config.name,
             'csv_file': t.csv_file,
             'overrides': t.overrides or {},
+            'ai_content': ai_content_summary(t.overrides or {}),
+            'propagation': t.dataset.propagation if t.dataset_id else '',
+            'proposal': ((t.dataset.metadata or {}).get('proposal')
+                         if t.dataset_id else None),
             'description': t.description,
             'created_by': t.created_by,
             'readiness': prodtask_readiness_problems(t),
@@ -1893,6 +3402,18 @@ def prod_task_compose(request):
                     'reason': item.get('reason') or '',
                 }
                 for item in getattr(t, 'questionnaire_matches', [])
+            ],
+            # PC-projected production requests (CAMPAIGN_CONTINUUM.md):
+            # the task reaches them through its physics configuration.
+            'pc_requests': [
+                {
+                    'id': req.pk,
+                    'requestor': req.requestor,
+                    'nevents': req.nevents,
+                    'description': req.description,
+                    'issue_url': req.source_url,
+                }
+                for req in getattr(t, 'pc_requests', [])
             ],
         })
 
@@ -1992,6 +3513,7 @@ def prod_task_compose(request):
         'username': request.user.username if request.user.is_authenticated else '',
         # Left-panel task-list context (consumed by the list partial):
         'tasks': campaign_tasks,
+        'ai_executed_names': _executed_proposal_names(),
         'focused_task_id': focused_task.id if focused_task else None,
         'focused_campaign': campaign,
         'filters': {},
@@ -2015,6 +3537,11 @@ def prod_task_delete(request, name):
         return redirect('pcs:prod_task_detail', name=task.composed_name)
     task.delete()
     messages.success(request, f"Task '{task.composed_name}' deleted.")
+    log_epicprod_action(
+        'web', 'task_delete', subject_type='campaign_task',
+        subject_key=task.composed_name,
+        username=getattr(request.user, 'username', ''),
+        sublevel='normal', live_default=True)
     return redirect('pcs:prod_tasks_list')
 
 
@@ -2065,7 +3592,8 @@ def prod_task_compose_task_detail(request, name):
     try:
         task = resolve_prodtask(name, ProdTask.objects.select_related(
             'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
-            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config'))
+            'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
+        ).prefetch_related('panda_tasks'))
     except ProdTask.DoesNotExist:
         raise Http404(f"No task {name!r}")
     try:
@@ -2079,4 +3607,6 @@ def prod_task_compose_task_detail(request, name):
         'task_params_error': task_params_error,
         'condor_command': task.condor_command,
         'panda_command': task.panda_command,
+        'panda_tasks': services.panda_tasks_summary(task, include_live=True),
+        'ai_content': ai_content_summary(task.overrides or {}),
     })

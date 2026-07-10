@@ -1,11 +1,13 @@
 # ePIC Production Task Catalog
 
-The ePIC Production Task Catalog is the PCS-backed catalog of production
-tasks for epicprod. It replaces the static GitHub/Jekyll dataset page with
-a campaign-aware view of production tasks. Campaigns are shown as tabs or
-tab-like sections ordered left to right in time: past campaigns, the
-current campaign, and the next campaign being prepared. The current and
-future campaign views are dynamic interfaces for campaign task management.
+The ePIC Production Task Catalog is an epicprod interface backed by PCS task and
+configuration records. epicprod is the ePIC automated production system; PCS is
+the configuration/catalog subsystem inside it. The catalog replaces the static
+GitHub/Jekyll dataset page with a campaign-aware view of production tasks.
+Campaigns are shown as tabs or tab-like sections ordered left to right in time:
+past campaigns, the current campaign, and the next campaign being prepared. The
+current and future campaign views are dynamic interfaces for campaign task
+management.
 
 The present static catalog is
 `eic/epic-prod/docs/_documentation/default_datasets.md`
@@ -28,8 +30,9 @@ This document implements the Dynamic Public Catalog described in
 `PCS_DATASET_REQUEST_WORKFLOW.md`.
 
 For submission, operators filter, review, select, and submit tasks from the
-catalog. Submission details are covered by `JEDI_INTEGRATION.md`.
-Inspection, cloning, and editing use the task compose view reached from the
+catalog. Submission is executed by epicprod's prod-ops agent and PanDA
+integration; submission details are covered by `JEDI_INTEGRATION.md`.
+Inspection, cloning, and editing use the PCS task compose view reached from the
 catalog.
 
 ## Scope
@@ -150,6 +153,10 @@ Production-team fields added during processing:
 | `validation_status` | Validation summary string. |
 | `prod_task_links` | Relation to ProdTask records derived from the request. |
 
+Request records are populated by the catalog CSV import and bind to physics
+configurations, not campaigns; the binding and its projection onto campaign
+editions are described in [CAMPAIGN_CONTINUUM.md](CAMPAIGN_CONTINUUM.md).
+
 Production requests use a dedicated 2-panel page: a filterable request list
 on the left, and request details, processing fields, and linked tasks on
 the right. The request page feeds the task catalog but remains separate
@@ -162,6 +169,11 @@ campaigns. It is organized as campaign tabs or tab-like sections, with time
 flowing left to right: past campaigns, current campaign, and next campaign.
 Tab/header color uses ergonomic pastels: grey for past campaigns, green for
 the current campaign, and blue for future campaigns.
+
+Campaign identity is one bare-named campaign row per version (`26.06.0`);
+production stage is carried on each row's produced-output record, not in the
+campaign name. The Past view lists every version with produced-output rows,
+whatever lifecycle slot its campaign occupies.
 
 Past campaign sections are frozen archives of completed production tasks.
 The current campaign contains active production tasks and the status needed
@@ -186,6 +198,27 @@ from existing tasks; the right panel is the focused task detail, with
 editable fields, controls, validation and status, cloning/copying, and
 submission-readiness actions.
 
+For submitted campaign tasks, the focused task detail includes a `PanDA Tasks`
+table. The table shows each associated physical PanDA/JEDI task, including the
+try number, JEDI task link, status snapshot, PanDA task name, output and log
+datasets, site, association source, and update time. Associations are created
+when PCS submits the task and can also be recorded dynamically from a PanDA task
+page when the PanDA task name matches exactly one campaign task.
+
+When a focused task has an associated JEDI task, the compose page shows a
+compact `PanDA Operations` row:
+
+- **Add Another Retry** increases the allowed attempts on the existing PanDA
+  task; the button shows `current nmax: N` when PanDA job rows expose the
+  current maximum attempt count.
+- **Restart And Retry Failures** asks PanDA to retry failed work in the existing
+  task.
+- **Rerun Entire Task** submits a new physical task attempt with the next
+  `.tryN` output namespace.
+
+The first two actions operate on the existing JEDI task. The full rerun creates
+a new `PandaTasks` association and a new PanDA/Rucio physical name.
+
 The compose view left panel reuses the catalog task-list and filter component.
 In the compose view it omits the campaign tabs, indicates the campaign of the
 focused task, and uses a reduced column/control set appropriate for
@@ -200,8 +233,13 @@ questionnaire matches, and operator workflows should target the compose view wit
 `?tab=tasks&selected=<composed-task-name>`. Any standalone task route is a
 legacy/internal view and is not part of the exposed interface.
 
+Authentication preserves the page URL: logging in from the compose view returns
+to the same selected task rather than to the PCS home page.
+
 Supported catalog actions include submit, clone, archive, withdraw,
-priority update, readiness update, and BG-mixing matrix expansion. Actions
+priority update, readiness update, propagation disposition update
+(continue / hold / final with required comment — see
+[PCS.md](PCS.md#datasets)), and BG-mixing matrix expansion. Actions
 apply either to a single task or to the current selected set.
 
 The Current Campaign view shows the production status needed for action,
@@ -210,7 +248,8 @@ dashboard links. Four feeds are relevant:
 
 - **PanDA Monitor** — task and job state, retry counts, site status, alarm
   signals (the `nfinalfailed`/`computed_finalfailurerate` family in
-  `monitor_app/panda/api.py`), plus the April 21 Production WG dashboard
+  `monitor_app/panda/api.py`; final failures are jobs with
+  `attemptnr >= maxattempt`), plus the April 21 Production WG dashboard
   requirement: "Develop dashboard that display usage across all resources
   in PanDA over time: How are we doing in terms of utilizing our
   allocations?" ([meeting notes](https://docs.google.com/document/d/1JA8GIQae30Ru62kgDN2pzqK90XBbQKz4LffXYbWNgIY/edit?tab=t.0#heading=h.y3evqgz3sc98)).
@@ -224,7 +263,7 @@ dashboard links. Four feeds are relevant:
   campaign's scope.
 - **swf-monitor** — PCS and campaign-level state owned by this app.
 - **corun-ai** — AI-driven monitoring and diagnostics; callbacks already
-  wired via `monitor_app/panda/corun_callback.py` to the PandaBot Mattermost
+  wired via `monitor_app/panda/corun_callback.py` to the DISpatcher Mattermost
   channel.
 
 Feed implementation remains in the source subsystems.
@@ -232,9 +271,9 @@ Feed implementation remains in the source subsystems.
 ## 7. Filters and Selection
 
 Catalog filters cover the fields used to find task sets: campaign stage,
-campaign, requestor, physics tags, priority, Use flags, status, readiness,
-submission path, input source, BG-mixing state, output state, and linked
-request.
+campaign, requestor, physics tags, priority, Use flags, status, propagation
+disposition, readiness, submission path, input source, BG-mixing state,
+output state, and linked request.
 
 Filters are displayed in a shared layout that works in both the full-page
 catalog and the compose view. In the full-page catalog, filters sit above the
@@ -307,3 +346,25 @@ The PCS catalog additionally renders system state (the `Status` column),
 the originating CSV `Issue` URL (appended next to the description), a
 bulk-selection checkbox, and the live filter / sort bar. None of these
 are present on the canonical page.
+
+## 10. Adopted Tasks — Auto-Intake of Direct Submissions
+
+The campaign-task flow (request → PCS composition → campaign task → submit)
+is the target; during commissioning and migration, production also reaches
+PanDA directly. The nightly association sweep
+([EPICPROD_ACTION_STREAM.md](EPICPROD_ACTION_STREAM.md), runbook in
+[EPICPROD_OPS.md](EPICPROD_OPS.md#nightly-catalog-sync)) guarantees the
+catalog stays complete either way: it reads recent EIC tasks from the PanDA
+task database, associates any that match existing catalog identities, and
+auto-intakes unmatched `group.EIC.*` production names —
+`pcs.services.intake_direct_panda_task` creates the Campaign (from the
+version segment, lifecycle classified against the current campaign), a
+Dataset carrying a derived physics tag (anchor tags elsewhere), and a
+ProdTask in status `submitted`, then the normal reconciler links the PanDA
+task.
+
+Adopted tasks are marked (`created_by='association_sweep'`, auto-intake
+description) and carry only what a task name yields: no request linkage, no
+real generator/simulation/reconstruction configuration. Born-vs-adopted is
+therefore the standing migration metric — adopted counts belong in reports
+and trend to zero as production moves onto the campaign-task flow.

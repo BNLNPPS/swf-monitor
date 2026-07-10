@@ -3,13 +3,19 @@
 This is operations documentation for submitting, monitoring, retrieving logs, etc. for official ePIC production using BNL PanDA on `pandaserver02.sdcc.bnl.gov`. This is the
 operations counterpart to the design docs: [PCS.md](PCS.md) (configuration),
 [JEDI_INTEGRATION.md](JEDI_INTEGRATION.md) (PCS→JEDI submission design),
-[EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md) (the task catalog), and
+[EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md) (the task catalog),
+[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md) (LLM operations), and
 [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) (deploying swf-monitor).
 
 The `prun` submission path described here is the foundation the automated
 PCS submission builds on: it establishes that an operator's identity can submit
 official `group.EIC` production tasks. The first official `EIC.production`
 submission through this path was validated 2026-06-01 (jediTaskID 36439).
+
+The operations model at a glance — the system tends itself, attention
+concentrates, and human decisions act through bounded, recorded controls:
+
+![The operations automation loop](ops_automation_loop.svg)
 
 ## Identity and client
 
@@ -73,21 +79,40 @@ is then cached under `$PANDA_CONFIG_ROOT` and reused by subsequent commands.
 `workinggroup` as `EIC` even though `--workingGroup EIC.production` was passed —
 the production dimension is the IAM role, not the working-group field.
 
-## Re-submitting after a broken submission
+## Campaign-task PanDA operations
 
-Once a PCS task records a `jediTaskID`, the submit path refuses a second
-submission (`prodtask_submit_request` raises while `panda_task_id` is set), and
-the task page shows the PanDA link in place of the Submit control. A submission
-that broke or aborted PanDA-side therefore leaves the task pinned to a dead task
-ID with no way forward. The **Reset submission** button (owner-only, shown beside
-the PanDA link on both the task page and the compose panel) clears that:
-`panda_task_id → None`, `status → draft`. The task returns to the buildable
-lifecycle and Submit goes live again. Reset only detaches the reference — it does
-not stop or delete the PanDA task, since the web tier holds no PanDA credential;
-abort the dead task in PanDA separately if needed.
+PCS records PanDA/JEDI task associations in `PandaTasks`, one row per physical
+submission attempt. `ProdTask.panda_task_id` is only the current/preferred
+pointer used by the existing UI. The first attempt uses the logical PCS composed
+task name as the PanDA `taskName`/`outDS`; later attempts use the same name with
+`.tryN` appended (`.try2`, `.try3`, …), so every retry or site race has a unique
+PanDA task name and Rucio output namespace.
 
-This is a commissioning-era recovery affordance. Gate or remove it once
-submissions are reliable, so a submitted task is not casually detached.
+`.tryN` is the production feature that makes whole-task rerun and future site
+racing safe: it preserves one logical campaign task identity while giving each
+physical PanDA submission its own concrete task and output names.
+
+The campaign task compose page shows the associated PanDA tasks in a `PanDA
+Tasks` table. When a campaign task has an associated JEDI task, the page exposes
+three operations:
+
+| Operation | When used | Effect |
+|---|---|---|
+| **Add Another Retry** | The PanDA task is still active and failures have exhausted the current attempt limit. | Queues `panda_api.increase_attempt_nr(jediTaskID, 1)` through the prod-ops agent. This increases the allowed attempts on the existing task; the UI shows the current job-level `nmax` when PanDA exposes it. |
+| **Restart And Retry Failures** | The PanDA task is finished or otherwise retryable in PanDA, and only failed work should be retried. | Queues `panda_api.retry_task(jediTaskID, new_parameters={})` through the prod-ops agent. PanDA retries failed work within the existing task. |
+| **Rerun Entire Task** | The full task should be submitted again as a new concrete production attempt. | Allocates the next `PandaTasks` row, appends `.tryN` to the physical PanDA task and output names, and submits a new task. This reruns all work. |
+
+The first two operations are native PanDA operations on an existing JEDI task.
+They do not create a new Rucio output namespace. The third operation is a new PCS
+submission attempt and therefore creates a new physical PanDA task name and Rucio
+namespace. Recorded submission fields are production provenance and are not
+cleared by operator actions.
+
+PanDA tasks submitted outside PCS can still be associated: when a PanDA task page
+is opened, swf-monitor first looks in `PandaTasks`, then performs an exact
+PanDA-task-name match against PCS task identities. If exactly one PCS task
+matches, it records the association dynamically. Ambiguous or missing matches are
+left unlinked; no fuzzy match changes task state.
 
 ## TLS / CA — pip and Rucio from this host
 
@@ -122,6 +147,99 @@ and its JSON endpoint read cached DB rows refreshed by `epicprod_ops_agent`;
 they do not probe services from Apache requests. The production nav `System`
 item turns red when the cached aggregate is red or stale, so both
 `pandaserver02` and devcloud surface infrastructure trouble quickly.
+
+## AI assessments
+
+epicprod stores append-only AI assessments of production objects. The current
+supported subjects are campaign tasks, PanDA tasks, PanDA jobs, and PanDA
+sites/queues. Assessments appear on the corresponding object pages and in the
+production nav under **AI**, which lists all assessment content with counts by
+subject type.
+
+The architecture for corun-ai-backed LLM operations and artifacts is documented in
+[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md). This section records
+the operational details of the current AI assessment path.
+
+The primary persistent record is now a corun-ai Page in section
+`epicprod.assessment`. `epic_register_ai_assessment` writes the Markdown
+assessment text as corun-ai Page content and stores subject metadata in
+`Page.data`, including `artifact_type: "ai_assessment"`,
+`source_system: "swf-monitor"`, `ui_visible: false`, subject type/key/label/url,
+username, and AI/model identifier. `ui_visible: false` hides these service-owned
+artifacts from corun-ai/codoc browse UI; it is not an access-control boundary, and
+the Pages remain available through the corun-ai REST API and direct URLs. The
+subject object's own JSON field stores only
+`corun_page_group_ids`, so object pages can show their assessments without
+embedding the assessment text in task, job, or queue records. Assessment entries
+are append-only; corrections and followups are represented as additional corun-ai
+Pages.
+
+Older local `AIContent` rows remain readable. They store the assessed subject as
+a string type/key pair, display label, monitor URL, human or service username,
+AI/model identifier, Markdown assessment text, optional JSON metadata, and
+creation time. The old subject JSON pointer is `ai_content_ids`.
+
+The legacy `AIContent` mechanism is temporary during migration only. After the
+corun-ai-backed path is validated and the backfill is complete, new writes should
+remain corun-ai-only and the old local mechanism should be removed or thoroughly
+disabled so operators and AI clients have one assessment system to reason
+about.
+
+Backfill existing local rows after deploying corun-ai credentials:
+
+```bash
+# inspect
+python src/manage.py backfill_ai_content_to_corun --dry-run
+
+# backfill all legacy AIContent rows into corun-ai and link subject pointers
+python src/manage.py backfill_ai_content_to_corun
+```
+
+The command is idempotent. It records the created Page group id in
+`AIContent.data.corun_page_group_id`, preserves legacy quality/comment metadata
+inside the corun-ai Page data, sets `ui_visible: false`, and appends the Page group
+id to the subject JSON field when the local subject can be resolved. It does not
+delete legacy rows.
+
+Review metadata uses `quality` and `comment` fields when present. The valid
+non-empty quality values are `wrong`, `poor`, `ok`, and `good` — one shared
+review vocabulary with AI proposals (AI_PROPOSALS.md); an empty quality
+string means no quality review has been recorded. AI content retrieval returns
+quality and comment as top-level fields and inside structured `data` when
+present.
+
+The canonical subject types for new assessments are:
+
+| Subject type | Key |
+|---|---|
+| `campaign_task` | PCS composed campaign task name |
+| `panda_task` | JEDI task id, or PanDA task name when no JEDI id is known |
+| `panda_job` | PanDA job id (`pandaid`) |
+| `panda_queue` | PanDA queue name; if the queue name equals the site name, the row represents the site as a whole |
+
+AI clients register assessments through MCP with
+`epic_register_ai_assessment`. The tool resolves known subjects, creates the
+corun-ai Page, and appends the new Page group id to the subject JSON field. This is
+the write path intended for Codex, the PanDA Mattermost bot, and automated
+production assessors. The public subject type names above are the MCP interface;
+implementation-specific model names are not part of that interface. MCP
+registrations stamp metadata with
+`registered_via: "mcp"` and `mcp_tool: "epic_register_ai_assessment"`.
+When the Mattermost bot registers an assessment, its harness stamps
+`username: "bot"`, `ai` as the exact model used, and `data.origin` with
+`type: "bot"` plus the same model.
+
+MCP detail tools that can return assessed subjects include an `ai_content`
+retrieval block. When `ai_content.available` is true, clients should call the
+tool and arguments supplied in that block, for example
+`epic_get_ai_content(corun_page_group_ids=["..."])`. Legacy detail payloads may
+also include `ids` for local `AIContent` rows. Clients should use the supplied
+arguments directly instead of reconstructing a subject type/key lookup from the
+parent object.
+
+Assessment text is rendered as Markdown in the UI and sanitized before display.
+The metadata row identifies who registered it, which AI/model produced it, and
+when it was created.
 
 ## Logs
 
@@ -183,6 +301,7 @@ not used for testbed scratch. Layout:
 /data/swf-tmp/
   panda-logs/<jeditaskid>/<pandaid>/   # extracted job log members
   downloads/                           # transient tarballs
+  django-cache/                        # fallback Django file cache if DJANGO_CACHE_DIR is unset
 ```
 
 Owned `wenauseic:eic`, setgid, world-readable so a web view can serve cached
@@ -309,3 +428,22 @@ deployed path. Remaining: the activity health chip, and the matching
 
 Auto-notify the operator the moment the agent finishes, removing the manual
 refresh.
+
+## Nightly catalog sync
+
+A `wenauseic` cron enqueues `catalog_sync` for the ops agent nightly at 02:15:
+
+```
+15 2 * * * bash -lc 'source ~/.env && /opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/enqueue-ops-message.py catalog_sync --created-by nightly_cron' >> /opt/swf-monitor/shared/logs/catalog-sync-cron.log 2>&1
+```
+
+The chain runs csv import → questionnaire import → association sweep with
+auto-intake of direct group.EIC submissions → Rucio output snapshot → EVGEN
+assimilation → questionnaire automatch (LLM matching of requests to tasks,
+EPICPROD_QUESTIONNAIRE.md) → questionnaire match cache → progress refresh,
+in order. Each step
+and the chain summary log to the epicprod action stream (Logs page,
+app_name=epicprod) with measured durations; questionnaire import reads its
+CSV URL from SysConfig `questionnaire_csv_url` and records `skipped` when
+unset. Manual full run: the same enqueue command with any `--created-by`;
+association backfill: `--extra days=30`.

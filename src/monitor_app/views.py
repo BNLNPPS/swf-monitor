@@ -1,7 +1,9 @@
+from collections import Counter
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.urls import reverse
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Q
 from django.core.paginator import Paginator
 from rest_framework import viewsets, generics
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
@@ -15,7 +17,18 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.views.decorators.http import require_POST
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent
+from ai.assessments import (
+    AI_CONTENT_COMMENT_KEY,
+    AI_CONTENT_QUALITY_KEY,
+    AI_CONTENT_QUALITY_VALUES,
+    CORUN_ASSESSMENT_SECTION,
+    ai_content_items,
+    corun_page_items,
+)
+from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
 from .serializers import (
     SystemAgentSerializer, AppLogSerializer, LogSummarySerializer,
@@ -32,6 +45,7 @@ from django.utils import timezone
 from django.conf import settings as django_settings
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -524,7 +538,9 @@ def log_list(request):
         {'name': 'timestamp', 'title': 'Timestamp', 'orderable': True},
         {'name': 'app_name', 'title': 'App Name', 'orderable': True},
         {'name': 'instance_name', 'title': 'Instance Name', 'orderable': True},
+        {'name': 'username', 'title': 'User', 'orderable': False},
         {'name': 'levelname', 'title': 'Level', 'orderable': True},
+        {'name': 'sublevel', 'title': 'Importance', 'orderable': False},
         {'name': 'message', 'title': 'Message', 'orderable': False},
         {'name': 'module', 'title': 'Module', 'orderable': True},
         {'name': 'funcname', 'title': 'Function', 'orderable': True},
@@ -532,14 +548,18 @@ def log_list(request):
 
     # Filter field definitions for dynamic filtering
     filter_fields = [
-        {'name': 'app_name', 'label': 'Applications', 'type': 'select'},
-        {'name': 'username', 'label': 'Users', 'type': 'select'},
-        {'name': 'levelname', 'label': 'Levels', 'type': 'select'},
+        {'name': 'app_name', 'label': 'App Name', 'type': 'select'},
+        {'name': 'instance_name', 'label': 'Instance Name', 'type': 'select'},
+        {'name': 'username', 'label': 'User', 'type': 'select'},
+        {'name': 'levelname', 'label': 'Level', 'type': 'select'},
+        {'name': 'sublevel', 'label': 'Importance threshold', 'type': 'select'},
+        {'name': 'module', 'label': 'Module', 'type': 'select'},
     ]
 
+    live_mode = request.GET.get('live') == '1'
     context = {
-        'table_title': 'Log List',
-        'table_description': 'View and search application logs with dynamic filtering by source, user, and level.',
+        'table_title': 'Log List - epic-live feed' if live_mode else 'Log List',
+        'table_description': 'View and search application logs with dynamic filtering by source, instance, user, level, importance, and module.',
         'ajax_url': reverse('monitor_app:logs_datatable_ajax'),
         'filter_counts_url': reverse('monitor_app:log_filter_counts'),
         'columns': columns,
@@ -547,14 +567,70 @@ def log_list(request):
         'selected_app': app_name,
         'selected_username': username,
         'selected_levelname': levelname,
+        'selected_instance': request.GET.get('instance_name'),
+        'selected_sublevel': request.GET.get('sublevel'),
+        'selected_module': request.GET.get('module'),
+        'live_mode': live_mode,
     }
     return render(request, 'monitor_app/log_list_dynamic.html', context)
 
 
+def live_policy(request):
+    """Live-stream policy: every known epicprod action with its call-site
+    default, any SysConfig override, and the effective state — editable."""
+    from django.contrib import messages
+    from .epicprod_logging import (get_live_policy, live_policy_rows,
+                                   log_epicprod_action, set_live_policy_entry)
+
+    if request.method == 'POST':
+        if not request.user.is_authenticated:
+            messages.error(request, 'Sign in to edit the live policy.')
+            return redirect('monitor_app:live_policy')
+        current = get_live_policy()
+        value_map = {'default': None, 'live': True, 'quiet': False}
+        changes = {}
+        for key, raw in request.POST.items():
+            if not key.startswith('policy_') or raw not in value_map:
+                continue
+            action = key[len('policy_'):]
+            new = value_map[raw]
+            if new != current.get(action):
+                set_live_policy_entry(action, new, username=request.user.username)
+                changes[action] = raw
+        if changes:
+            log_epicprod_action(
+                'web', 'live_policy_edit',
+                username=request.user.username,
+                sublevel='high',
+                live_default=True,
+                changes=changes,
+            )
+            messages.success(
+                request,
+                'Live policy updated: '
+                + ', '.join(f'{a} → {v}' for a, v in sorted(changes.items())))
+        else:
+            messages.info(request, 'No live policy changes.')
+        return redirect('monitor_app:live_policy')
+
+    return render(request, 'monitor_app/live_policy.html',
+                  {'rows': live_policy_rows()})
+
+
 def log_detail(request, log_id):
     """Display details for a specific log entry."""
+    from .epicprod_logging import EPICPROD_APP_NAME, action_description
     log = get_object_or_404(AppLog, id=log_id)
-    return render(request, 'monitor_app/log_detail.html', {'log': log})
+    action_desc = ''
+    if log.app_name == EPICPROD_APP_NAME and isinstance(log.extra_data, dict):
+        action_desc = action_description(log.extra_data.get('action', ''))
+    # Action-stream instance names ('web', 'ops-agent', 'mcp') are component
+    # labels, not registry names — only link to a real registered agent.
+    agent_exists = SystemAgent.objects.filter(
+        instance_name=log.instance_name).exists()
+    return render(request, 'monitor_app/log_detail.html',
+                  {'log': log, 'action_description': action_desc,
+                   'agent_exists': agent_exists})
 
 
 def logs_datatable_ajax(request):
@@ -566,19 +642,40 @@ def logs_datatable_ajax(request):
     from django.utils.dateparse import parse_datetime
 
     # Initialize DataTables processor
-    columns = ['timestamp', 'app_name', 'instance_name', 'levelname', 'message', 'module', 'funcname']
+    columns = ['timestamp', 'app_name', 'instance_name', 'username', 'levelname', 'sublevel', 'message', 'module', 'funcname']
     dt = DataTablesProcessor(request, columns, default_order_column=0, default_order_direction='desc')
 
-    # Build base queryset and apply standard filters (app_name, levelname)
+    # Build base queryset and apply standard filters
     queryset = AppLog.objects.all()
-    filters = get_filter_params(request, ['app_name', 'levelname'])
+    filters = get_filter_params(request, ['app_name', 'levelname', 'instance_name', 'module'])
     queryset = apply_filters(queryset, filters)
 
-    # Handle username filter (username is segment before trailing numeric ID)
+    # Handle username filter — a user appears either as the segment before
+    # the trailing numeric ID of a testbed-agent instance name, or as the
+    # requester recorded on an action-stream record (extra_data.username)
     username = request.GET.get('username')
     if username:
-        queryset = queryset.filter(instance_name__regex=rf'-{username}-\d+$')
+        queryset = queryset.filter(
+            Q(instance_name__regex=rf'-{username}-\d+$')
+            | Q(extra_data__username=username))
     filters['username'] = username
+
+    # Importance threshold (action-stream sublevel field, in extra_data):
+    # ≥ semantics, the same way every channel consumes it — selecting
+    # 'normal' shows normal and high
+    sublevel = request.GET.get('sublevel')
+    if sublevel:
+        from .epicprod_logging import SUBLEVEL_ORDER, SUBLEVEL_VALUES
+        if sublevel in SUBLEVEL_ORDER:
+            at_or_above = [v for v in SUBLEVEL_VALUES
+                           if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]]
+            queryset = queryset.filter(extra_data__sublevel__in=at_or_above)
+
+    # Live stream mode: epicprod actions above the live threshold
+    # (live_default recommendation, overridden by the SysConfig policy).
+    if request.GET.get('live') == '1':
+        from .epicprod_logging import live_stream_q
+        queryset = queryset.filter(live_stream_q())
 
     # Handle time range filters
     start_time = request.GET.get('start_time')
@@ -623,11 +720,18 @@ def logs_datatable_ajax(request):
         # Truncate message if too long
         message = log.message[:200] + '...' if len(log.message) > 200 else log.message
         func_display = f"{log.funcname}:{log.lineno}"
+        extra = log.extra_data if isinstance(log.extra_data, dict) else {}
+        sublevel_display = extra.get('sublevel', '')
+        username_display = extra.get('username', '')
+        if not username_display:
+            m = re.search(r'-([^-]+)-\d+$', log.instance_name or '')
+            username_display = m.group(1) if m else ''
 
         from .cell_fmt import fill_cell
         data.append([
             timestamp_link, app_name_link, instance_name_display,
-            fill_cell(level_text, log.levelname), message, log.module, func_display
+            username_display, fill_cell(level_text, log.levelname),
+            sublevel_display, message, log.module, func_display
         ])
 
     return dt.create_response(data, records_total, records_filtered)
@@ -638,46 +742,93 @@ def get_log_filter_counts(request):
     AJAX endpoint that returns dynamic filter options with counts.
     Only shows options that have >0 matches in the current filtered dataset.
     """
-    from .utils import get_filter_counts, get_filter_params
+    from .utils import apply_filters, get_filter_counts, get_filter_params
     from django.db.models import Count
     import re
 
     # Get current filters for actual model fields only
-    current_filters = get_filter_params(request, ['app_name', 'levelname'])
+    current_filters = get_filter_params(
+        request, ['app_name', 'levelname', 'instance_name', 'module'])
     username = request.GET.get('username')
+    sublevel = request.GET.get('sublevel')
 
-    # Build base queryset with username filter applied if set
+    # Build base queryset with username/threshold filters applied if set
+    from .epicprod_logging import SUBLEVEL_ORDER, SUBLEVEL_VALUES
+    at_or_above = ([v for v in SUBLEVEL_VALUES
+                    if SUBLEVEL_ORDER[v] >= SUBLEVEL_ORDER[sublevel]]
+                   if sublevel in SUBLEVEL_ORDER else None)
     base_queryset = AppLog.objects.all()
     if username:
-        base_queryset = base_queryset.filter(instance_name__regex=rf'-{username}-\d+$')
+        base_queryset = base_queryset.filter(
+            Q(instance_name__regex=rf'-{username}-\d+$')
+            | Q(extra_data__username=username))
+    if at_or_above:
+        base_queryset = base_queryset.filter(extra_data__sublevel__in=at_or_above)
 
-    # Use standard utility for app_name and levelname counts
-    # NOTE: current_filters only contains model fields, not username
-    filter_counts = get_filter_counts(base_queryset, ['app_name', 'levelname'], current_filters)
+    # Use standard utility for the model-field counts
+    # NOTE: current_filters only contains model fields, not username/sublevel
+    filter_counts = get_filter_counts(
+        base_queryset, ['app_name', 'levelname', 'instance_name', 'module'],
+        current_filters)
+    # Instance names are high-cardinality — offer the top 25 by count; the
+    # list recomputes against the active filters, so it narrows as they bind.
+    filter_counts['instance_name'] = filter_counts['instance_name'][:25]
 
-    # Extract usernames from instance_name (segment before trailing numeric ID)
+    # Importance-threshold counts (action-stream sublevel field, in
+    # extra_data): apply the other filters, never the threshold itself.
+    # Cumulative — each option counts events at or above it, matching the
+    # ≥ filter semantics (normal shows normal and high).
+    qs_for_sublevel = AppLog.objects.all()
+    if username:
+        qs_for_sublevel = qs_for_sublevel.filter(
+            instance_name__regex=rf'-{username}-\d+$')
+    qs_for_sublevel = apply_filters(qs_for_sublevel, current_filters)
+    per_class = {
+        item['extra_data__sublevel']: item['count']
+        for item in (qs_for_sublevel
+                     .filter(extra_data__sublevel__in=SUBLEVEL_VALUES)
+                     .values('extra_data__sublevel')
+                     .annotate(count=Count('id')))
+    }
+    threshold_counts = []
+    running = 0
+    for v in SUBLEVEL_VALUES:  # ordered high → low
+        running += per_class.get(v, 0)
+        if running:
+            threshold_counts.append((v, running))
+    filter_counts['sublevel'] = threshold_counts
+
+    # Username counts: apply every other filter, never the username itself.
+    # A user appears either parsed from a testbed-agent instance name or as
+    # the requester on an action-stream record (extra_data.username) — the
+    # two sources are disjoint (action instances are 'ops-agent'/'web'/'mcp',
+    # which never match the agent pattern).
     username_pattern = re.compile(r'-([^-]+)-\d+$')
+    qs_for_username = apply_filters(AppLog.objects.all(), current_filters)
+    if at_or_above:
+        qs_for_username = qs_for_username.filter(
+            extra_data__sublevel__in=at_or_above)
 
-    # Build queryset for username counts (apply app_name and levelname filters)
-    qs_for_username = AppLog.objects.all()
-    if current_filters.get('app_name'):
-        qs_for_username = qs_for_username.filter(app_name=current_filters['app_name'])
-    if current_filters.get('levelname'):
-        qs_for_username = qs_for_username.filter(levelname=current_filters['levelname'])
-
-    # Count usernames extracted from instance_name
     username_counts = {}
     for item in qs_for_username.values('instance_name').annotate(count=Count('id')):
         match = username_pattern.search(item['instance_name'])
         if match:
             uname = match.group(1)
             username_counts[uname] = username_counts.get(uname, 0) + item['count']
+    for item in (qs_for_username
+                 .exclude(extra_data__username__isnull=True)
+                 .exclude(extra_data__username='')
+                 .values('extra_data__username')
+                 .annotate(count=Count('id'))):
+        uname = item['extra_data__username']
+        username_counts[uname] = username_counts.get(uname, 0) + item['count']
 
     # Convert to sorted list of tuples (matching expected format)
     filter_counts['username'] = sorted(username_counts.items(), key=lambda x: (-x[1], x[0]))
 
-    # Add username to current_filters for UI state (after utility call, not before)
+    # Add username/sublevel to current_filters for UI state (after utility call)
     current_filters['username'] = username
+    current_filters['sublevel'] = sublevel
 
     return JsonResponse({
         'filter_counts': filter_counts,
@@ -2881,10 +3032,8 @@ def update_panda_queues_from_github(request):
         with urllib.request.urlopen(github_url) as response:
             data = json.loads(response.read().decode())
         
-        # Clear existing data and reload
-        PandaQueue.objects.all().delete()
-        
         created_count = 0
+        updated_count = 0
         for queue_name, config in data.items():
             # Extract key fields from config
             site = config.get('site', '')
@@ -2895,18 +3044,29 @@ def update_panda_queues_from_github(request):
             if config.get('status') == 'offline':
                 status = 'offline'
             
-            # Create queue
-            PandaQueue.objects.create(
+            _queue, created = PandaQueue.objects.update_or_create(
                 queue_name=queue_name,
-                site=site,
-                queue_type=queue_type,
-                status=status,
-                config_data=config,
+                defaults={
+                    'site': site,
+                    'queue_type': queue_type,
+                    'status': status,
+                    'config_data': config,
+                },
             )
-            created_count += 1
+            if created:
+                created_count += 1
+            else:
+                updated_count += 1
         
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'queues_update',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True,
+            created=created_count, updated=updated_count)
         messages.success(request, 
-            f'Successfully updated {created_count} PanDA queues from GitHub<br>'
+            f'Successfully updated PanDA queues from GitHub '
+            f'({created_count} created, {updated_count} updated)<br>'
             f'<strong>Repository:</strong> {repo_location}<br>'
             f'<strong>File:</strong> {file_path}<br>'
             f'<strong>View on GitHub:</strong> <a href="{github_file_url}" target="_blank">Click here to see what was loaded</a>',
@@ -2971,6 +3131,11 @@ def update_rucio_endpoints_from_github(request):
             )
             created_count += 1
         
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'endpoints_update',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True, created=created_count)
         messages.success(request, 
             f'Successfully updated {created_count} Rucio endpoints from GitHub<br>'
             f'<strong>Repository:</strong> {repo_location}<br>'
@@ -2990,10 +3155,257 @@ def panda_hub(request):
     return render(request, 'monitor_app/panda_hub.html')
 
 
+def _corun_ai_assessment_count():
+    if not corun_configured():
+        return 0
+    try:
+        payload = CorunClient().list_pages(
+            section=CORUN_ASSESSMENT_SECTION,
+            artifact_type='ai_assessment',
+            source_system='swf-monitor',
+            limit=1,
+        )
+    except CorunAPIError as exc:
+        logger.warning('corun AI assessment count failed: %s', exc)
+        return 0
+    if isinstance(payload, dict):
+        try:
+            return int(payload.get('count') or 0)
+        except (TypeError, ValueError):
+            return len(payload.get('items') or [])
+    return len(payload or [])
+
+
+def _corun_narrative_count():
+    if not corun_configured():
+        return 0
+    try:
+        payload = CorunClient().list_pages(
+            section='epicprod.narrative',
+            artifact_type='campaign_narrative',
+            limit=1,
+        )
+    except CorunAPIError as exc:
+        logger.warning('corun narrative count failed: %s', exc)
+        return 0
+    if isinstance(payload, dict):
+        try:
+            return int(payload.get('count') or 0)
+        except (TypeError, ValueError):
+            return 0
+    return len(payload or [])
+
+
 def prod_hub(request):
     """ePIC Production home — production monitor + PCS sections."""
     from pcs.views import pcs_hub_counts
-    return render(request, 'monitor_app/prod_hub_workflow.html', pcs_hub_counts())
+    from ai.models import Proposal
+    context = pcs_hub_counts()
+    context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
+    context['ai_proposals_pending_count'] = Proposal.objects.filter(
+        status='proposed').count()
+    context['campaign_narratives_count'] = _corun_narrative_count()
+    return render(request, 'monitor_app/prod_hub_workflow.html', context)
+
+
+def ai_content_list(request):
+    """Consolidated append-only AI content for epicprod."""
+    subject_type = (request.GET.get('subject_type') or '').strip()
+    quality = (request.GET.get('quality') or '').strip()
+    username = (request.GET.get('username') or '').strip()
+    ai = (request.GET.get('ai') or '').strip()
+    q = (request.GET.get('q') or '').strip()
+
+    legacy_items = ai_content_items(AIContent.objects.all().order_by('-created_at', '-id'))
+    corun_items = []
+    if corun_configured():
+        try:
+            payload = CorunClient().list_pages(
+                section=CORUN_ASSESSMENT_SECTION,
+                artifact_type='ai_assessment',
+                source_system='swf-monitor',
+                limit=500,
+            )
+            pages = payload.get('items', []) if isinstance(payload, dict) else payload
+            corun_items = corun_page_items(pages)
+        except CorunAPIError as exc:
+            logger.warning('corun AI assessment list failed: %s', exc)
+
+    all_items = legacy_items + corun_items
+
+    # subject_type accepts a comma-separated list, e.g.
+    # ?subject_type=campaign_task,campaign — the Campaigns pulldown's
+    # campaign-scoped view.
+    subject_types = {s.strip() for s in subject_type.split(',') if s.strip()}
+
+    def item_matches(item):
+        if subject_types and item.get('subject_type') not in subject_types:
+            return False
+        item_quality = item.get('quality') or ''
+        if quality:
+            if quality == 'unreviewed':
+                if item_quality:
+                    return False
+            elif quality in AI_CONTENT_QUALITY_VALUES:
+                if item_quality != quality:
+                    return False
+            else:
+                return False
+        if username and item.get('username') != username:
+            return False
+        if ai and item.get('ai') != ai:
+            return False
+        if q:
+            needle = q.lower()
+            haystack = ' '.join(str(item.get(key) or '') for key in (
+                'subject_key',
+                'subject_label',
+                'subject_display',
+                'assessment',
+                'username',
+                'ai',
+            )).lower()
+            if needle not in haystack:
+                return False
+        return True
+
+    def item_sort_key(item):
+        value = item.get('created_at')
+        if hasattr(value, 'isoformat'):
+            return value.isoformat()
+        return str(value or '')
+
+    filtered_items = [item for item in all_items if item_matches(item)]
+    filtered_items.sort(key=item_sort_key, reverse=True)
+    paginator = Paginator(filtered_items, 100)
+    page_obj = paginator.get_page(request.GET.get('page') or 1)
+
+    def filter_url(**updates):
+        params = request.GET.copy()
+        params.pop('page', None)
+        for key, value in updates.items():
+            if value:
+                params[key] = value
+            else:
+                params.pop(key, None)
+        query = params.urlencode()
+        return f'?{query}' if query else '?'
+
+    subject_counter = Counter(item.get('subject_type') or '' for item in all_items)
+    subject_counts = [
+        {
+            'subject_type': key,
+            'count': subject_counter[key],
+            'url': filter_url(subject_type=key),
+        }
+        for key in sorted(subject_counter)
+        if key
+    ]
+
+    quality_counts = {key: 0 for key in ('unreviewed',) + AI_CONTENT_QUALITY_VALUES}
+    for item in all_items:
+        value = str(item.get('quality') or '').strip()
+        if value in AI_CONTENT_QUALITY_VALUES:
+            quality_counts[value] += 1
+        else:
+            quality_counts['unreviewed'] += 1
+    quality_rows = [
+        {
+            'value': value,
+            'label': value,
+            'count': quality_counts[value],
+            'url': filter_url(quality=value),
+        }
+        for value in ('unreviewed',) + AI_CONTENT_QUALITY_VALUES
+    ]
+
+    username_counter = Counter(item.get('username') or '' for item in all_items)
+    username_counts = [
+        {
+            'username': key,
+            'count': username_counter[key],
+            'url': filter_url(username=key),
+        }
+        for key in sorted(username_counter)
+        if key
+    ]
+
+    ai_counter = Counter(item.get('ai') or '' for item in all_items)
+    ai_counts = [
+        {
+            'ai': key,
+            'count': ai_counter[key],
+            'url': filter_url(ai=key),
+        }
+        for key in sorted(ai_counter)
+        if key
+    ]
+
+    total_count = len(all_items)
+    page_params = request.GET.copy()
+    page_params.pop('page', None)
+    return render(request, 'monitor_app/ai_content_list.html', {
+        'items': page_obj.object_list,
+        'page_obj': page_obj,
+        'subject_counts': subject_counts,
+        'quality_rows': quality_rows,
+        'username_counts': username_counts,
+        'ai_counts': ai_counts,
+        'total_count': total_count,
+        'selected_subject_type': subject_type,
+        'selected_quality': quality,
+        'selected_username': username,
+        'selected_ai': ai,
+        'q': q,
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+        'all_url': filter_url(subject_type='', quality='', username='', ai=''),
+        'subject_all_url': filter_url(subject_type=''),
+        'quality_all_url': filter_url(quality=''),
+        'username_all_url': filter_url(username=''),
+        'ai_all_url': filter_url(ai=''),
+        'clear_subject_url': filter_url(subject_type=''),
+        'clear_quality_url': filter_url(quality=''),
+        'clear_username_url': filter_url(username=''),
+        'clear_ai_url': filter_url(ai=''),
+        'page_query': page_params.urlencode(),
+    })
+
+
+@login_required
+@require_POST
+def ai_content_set_quality(request, content_id):
+    """Set sideband review metadata on one AIContent row."""
+    row = get_object_or_404(AIContent, pk=content_id)
+    quality = (request.POST.get('quality') or '').strip().lower()
+    comment = (request.POST.get('comment') or '').strip()
+    if quality and quality not in AI_CONTENT_QUALITY_VALUES:
+        messages.error(request, 'Invalid AI assessment quality.')
+    else:
+        data = row.data or {}
+        if not isinstance(data, dict):
+            data = {}
+        else:
+            data = dict(data)
+        data[AI_CONTENT_QUALITY_KEY] = quality
+        data[AI_CONTENT_COMMENT_KEY] = comment
+        row.data = data
+        row.save(update_fields=['data'])
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'assessment_quality_set',
+            subject_type=row.subject_type or '', subject_key=row.subject_key or '',
+            username=getattr(request.user, 'username', ''),
+            sublevel='normal', live_default=True,
+            quality=quality, content_id=content_id)
+
+    next_url = request.POST.get('next') or reverse('monitor_app:ai_content_list')
+    if not url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        next_url = reverse('monitor_app:ai_content_list')
+    return redirect(next_url)
 
 
 def testbed_hub(request):

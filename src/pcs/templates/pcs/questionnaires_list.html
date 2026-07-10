@@ -40,7 +40,7 @@
       <span class="pcs-tlf-label">Search:</span>
       <input type="search" id="pcs-qf-q" class="form-control form-control-sm"
              style="width:24em;" placeholder="request / contact / repo...">
-      <button type="button" id="pcs-qf-clear" class="btn btn-sm btn-outline-secondary"
+      <button type="button" id="pcs-qf-clear" class="btn btn-sm btn-secondary"
               title="Clear all filters">Clear</button>
     </div>
     <div class="pcs-tlf-bar-row">
@@ -65,11 +65,7 @@
     </div>
   </div>
 
-  {% if is_tunnel %}
-  <p class="small text-muted fst-italic mb-4" style="max-width: 58rem;">
-    CSV import is available from pandaserver02.
-  </p>
-  {% elif user.is_authenticated %}
+  {% if not is_tunnel and user.is_authenticated %}
   <div class="mb-3 p-2 border rounded bg-light" style="max-width: 42rem;">
     <form method="post" action="{% url 'pcs:questionnaire_import' %}" class="row g-2 align-items-end">
       {% csrf_token %}
@@ -83,6 +79,20 @@
         <button class="btn btn-primary" type="submit">Import</button>
       </div>
     </form>
+  </div>
+  {% else %}
+  <div class="mb-3 p-2 border rounded bg-light" style="max-width: 42rem;">
+    <div class="row g-2 align-items-end">
+      <div class="col">
+        <label class="form-label small mb-1" for="csv-url">Import questionnaire CSV from URL</label>
+        <input id="csv-url" type="url" class="form-control" disabled
+               placeholder="https://docs.google.com/spreadsheets/.../export?format=csv">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary" type="button" disabled
+                title="Import the production-request form responses — operator action; sign in on pandaserver02">Import</button>
+      </div>
+    </div>
   </div>
   {% endif %}
 
@@ -112,7 +122,7 @@
 	            <div><a href="{% url 'pcs:questionnaire_detail' pk=q.pk %}">Request #{{ q.pk }}</a></div>
 	            <div class="text-muted small">{{ q.submitted_at|fmt_dt }}</div>
 	            {% if user.is_authenticated %}
-	              <button type="button" class="btn btn-sm btn-outline-secondary mt-2"
+	              <button type="button" class="btn btn-sm btn-secondary mt-2"
 	                      data-bs-toggle="modal" data-bs-target="#questionnaire-raw-{{ q.id }}">
                 Raw
               </button>

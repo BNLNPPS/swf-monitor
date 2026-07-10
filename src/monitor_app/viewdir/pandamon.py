@@ -16,7 +16,7 @@ import os
 import hashlib
 from html import escape
 from datetime import datetime
-from urllib.parse import urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 from ..utils import DataTablesProcessor
@@ -24,7 +24,7 @@ from ..panda import (
     get_activity, study_job, list_jobs,
     list_jobs_dt, list_tasks_dt,
     job_filter_counts, task_filter_counts,
-    get_task, error_summary, diagnose_jobs,
+    get_task, error_summary, diagnose_jobs, job_completion_details,
     list_queues, get_queue,
 )
 from ..panda.constants import (
@@ -33,18 +33,56 @@ from ..panda.constants import (
 )
 from ..cell_fmt import fill_cell
 from ..activemq_connection import ActiveMQConnectionManager
-from ..epicprod_inventory import inventory_for_job_context
+from ..epicprod_inventory import (
+    cached_payload_log_parts,
+    diagnosis_for_study_data,
+    inventory_for_job_context,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _pcs_task_for_jeditaskid(jeditaskid):
     try:
-        from pcs.models import ProdTask
+        from pcs.models import PandaTasks, ProdTask
+        row = (PandaTasks.objects
+               .select_related('prod_task', 'prod_task__dataset')
+               .filter(jedi_task_id=int(jeditaskid)).first())
+        if row:
+            return row.prod_task
         return (ProdTask.objects.select_related('dataset')
                 .filter(panda_task_id=int(jeditaskid)).first())
     except Exception:
         logger.exception("PCS lookup failed for PanDA task %s", jeditaskid)
+        return None
+
+
+def _panda_tasks_row_for_jeditaskid(jeditaskid):
+    try:
+        from pcs.models import PandaTasks
+        return (PandaTasks.objects
+                .select_related('prod_task')
+                .filter(jedi_task_id=int(jeditaskid)).first())
+    except Exception:
+        logger.exception("PandaTasks lookup failed for PanDA task %s", jeditaskid)
+        return None
+
+
+def _pcs_task_for_panda_task(task):
+    pcs_task = _pcs_task_for_jeditaskid(task.get('jeditaskid'))
+    if pcs_task:
+        return pcs_task
+    try:
+        from pcs.services import reconcile_panda_task_association
+        pcs_task, _row, reason = reconcile_panda_task_association(task)
+        if pcs_task:
+            logger.info(
+                "PCS dynamic PanDA association: jediTaskID=%s task=%s reason=%s",
+                task.get('jeditaskid'), pcs_task.composed_name, reason)
+        return pcs_task
+    except Exception:
+        logger.exception("PCS dynamic association failed for PanDA task %s",
+                         task.get('jeditaskid'))
         return None
 
 
@@ -104,7 +142,7 @@ TASK_COLUMNS = [
     # it isn't running for ePIC task types), so this is the only signal shown.
     {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': True},
     # Final-failed: jobs that failed AND exhausted the retry budget
-    # (attemptnr >= 3). Subset of Failed. The rate derived from these is
+    # (attemptnr >= maxattempt). Subset of Failed. The rate derived from these is
     # what alarms trigger on — distinguishes true failures from
     # transient-fail-then-retry-succeeds.
     {'name': 'nfinalfailed', 'title': 'Final Failed', 'orderable': True},
@@ -417,13 +455,13 @@ def panda_tasks_datatable_ajax(request):
             _fmt_dt(task.get('creationdate')),
             _fmt_dt(task.get('modificationtime')),
             comp_pr_str,
-            _fill_cell(task.get('nactive', 0), 'running'),
-            _fill_cell(task.get('nfinished', 0), 'finished'),
-            _fill_cell(task.get('nfailed', 0), 'failed'),
-            _fill_cell(task.get('nrunning', 0), 'running'),
+            _fill_cell(task.get('nactive', 0), 'running') if task.get('nactive', 0) else 0,
+            _fill_cell(task.get('nfinished', 0), 'finished') if task.get('nfinished', 0) else 0,
+            _fill_cell(task.get('nfailed', 0), 'failed') if task.get('nfailed', 0) else 0,
+            _fill_cell(task.get('nrunning', 0), 'running') if task.get('nrunning', 0) else 0,
             task.get('nretries', 0),
             comp_fr_str,
-            _fill_cell(task.get('nfinalfailed', 0), 'failed'),
+            _fill_cell(task.get('nfinalfailed', 0), 'failed') if task.get('nfinalfailed', 0) else 0,
             comp_ffr_str,
         ])
 
@@ -458,7 +496,7 @@ def panda_job_detail(request, pandaid):
     if 'pandaserver-doma.cern.ch/trf/' in trf:
         job['transformation_view_url'] = _panda_view_text_url(trf)
     if job.get('jeditaskid'):
-        data['pcs_task'] = _pcs_task_for_jeditaskid(job['jeditaskid'])
+        data['pcs_task'] = _pcs_task_for_panda_task(data.get('task') or job)
     data['job_record_items'] = [
         {'name': key, 'value': '' if value is None else value}
         for key, value in sorted((data.get('job_record') or {}).items())
@@ -477,6 +515,8 @@ def panda_job_detail(request, pandaid):
         if job.get(key) not in (None, '')
     ]
     data.update(inventory_for_job_context(data))
+    data['epicprod_diagnosis'] = diagnosis_for_study_data(
+        data, epicprod_job=data.get('epicprod_job'))
     return render(request, 'monitor_app/panda_job_detail.html', data)
 
 
@@ -488,10 +528,16 @@ def epicprod_job_refresh(request, pandaid):
         'namespace': 'prodops',
         'pandaid': str(pandaid),
     }
+    triggered = False
     try:
-        ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
     except Exception as e:
         logger.error("epicprod inventory refresh trigger failed for job %s: %s", pandaid, e)
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        status = 202 if triggered else 502
+        return JsonResponse({'ok': triggered, 'queued': triggered, 'pandaid': pandaid},
+                            status=status)
     return redirect('monitor_app:panda_job_detail', pandaid=pandaid)
 
 
@@ -749,16 +795,8 @@ def panda_payload_log(request, pandaid):
     # is fully populated — never keyed on a single member (a log may lack stdout).
     if not force and os.path.isfile(os.path.join(jobdir, '.done')):
         parts = []
-        for name in ('payload.stdout', 'payload.stderr', 'pilotlog.txt', 'pandatracerlog.txt'):
-            path = os.path.join(jobdir, name)
-            if not os.path.isfile(path):
-                continue
-            try:
-                with open(path, 'r', errors='replace') as f:
-                    body = f.read()
-            except OSError as e:
-                body = f'(could not read {name}: {e})'
-            parts.append(f"===== {name} =====\n{body}\n")
+        for part in cached_payload_log_parts(jeditaskid, pandaid):
+            parts.append(f"===== {part['name']} =====\n{part['text']}\n")
         return HttpResponse(''.join(parts) or '(log cached but empty)\n',
                             content_type='text/plain; charset=utf-8')
 
@@ -784,7 +822,9 @@ def panda_payload_log(request, pandaid):
     # caller must address it explicitly.
     msg = {'msg_type': 'fetch_payload_log', 'namespace': 'prodops',
            'scope': scope, 'lfn': lfn,
-           'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid)}
+           'jeditaskid': str(jeditaskid), 'pandaid': str(pandaid),
+           'requested_by': (request.user.username
+                            if request.user.is_authenticated else '')}
     if force:
         msg['force'] = True
     try:
@@ -820,15 +860,52 @@ def panda_task_detail(request, jeditaskid):
     if isinstance(task, dict) and 'error' in task:
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
-    pcs_task = _pcs_task_for_jeditaskid(jeditaskid)
+    pcs_task = _pcs_task_for_panda_task(task)
+    panda_tasks_row = _panda_tasks_row_for_jeditaskid(jeditaskid)
+
+    def _task_transformation_url(value):
+        transpath = (value or '').strip()
+        if not transpath:
+            return ''
+        if transpath.startswith(('http://', 'https://')):
+            return (
+                _panda_view_text_url(transpath)
+                if 'pandaserver-doma.cern.ch/trf/' in transpath else transpath
+            )
+        return _panda_view_text_url(
+            'https://pandaserver-doma.cern.ch/trf/user/'
+            + quote(transpath.strip('/'), safe='')
+        )
+
+    transpath = task.get('transpath') or ''
+    if transpath:
+        task['transformation_view_url'] = _task_transformation_url(transpath)
 
     # Get jobs for this task
     jobs_data = list_jobs(taskid=int(jeditaskid), days=90, limit=200)
     jobs = jobs_data.get('jobs', []) if not jobs_data.get('error') else []
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
+    completion_details = job_completion_details([job.get('pandaid') for job in jobs])
+    from ..models import EpicProdJob
+    epicprod_jobs = {
+        row.pandaid: row
+        for row in EpicProdJob.objects.filter(
+            pandaid__in=[job.get('pandaid') for job in jobs if job.get('pandaid')]
+        )
+    }
+    for job in jobs:
+        job.update(completion_details.get(job.get('pandaid'), {}))
+        epicprod_job = epicprod_jobs.get(job.get('pandaid'))
+        if epicprod_job and epicprod_job.failure_summary:
+            job['epicprod_phase'] = epicprod_job.phase
+            job['epicprod_failure_summary'] = epicprod_job.failure_summary
     task_record = task.get('task_record') or {}
     task_record_items = [
-        {'name': key, 'value': '' if value is None else value}
+        {
+            'name': key,
+            'value': '' if value is None else value,
+            'href': _task_transformation_url(value) if key == 'transpath' else '',
+        }
         for key, value in sorted(task_record.items())
     ]
     requested_resource_items = [
@@ -849,6 +926,7 @@ def panda_task_detail(request, jeditaskid):
         'task': task,
         'jeditaskid': jeditaskid,
         'pcs_task': pcs_task,
+        'panda_tasks_metadata': (panda_tasks_row.metadata if panda_tasks_row else {}),
         'jobs': jobs,
         'job_summary': summary,
         'job_count': len(jobs),
@@ -990,11 +1068,18 @@ def epic_queues_list(request):
 def epic_queue_detail(request, queue_name):
     """Full schedconfig for a single ePIC queue."""
     import json as json_mod
+    try:
+        from monitor_app.models import PandaQueue
+        panda_queue = PandaQueue.objects.filter(queue_name=queue_name).first()
+    except Exception:
+        logger.exception("PandaQueue lookup failed for %s", queue_name)
+        panda_queue = None
     result = get_queue(queue_name)
     if 'error' in result:
         return render(request, 'monitor_app/epic_queue_detail.html', {
             'error': result['error'],
             'queue_name': queue_name,
+            'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
         })
     config = result['queue']
 
@@ -1043,6 +1128,7 @@ def epic_queue_detail(request, queue_name):
 
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
+        'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),

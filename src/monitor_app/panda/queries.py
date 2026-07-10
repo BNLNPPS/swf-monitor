@@ -95,13 +95,13 @@ def _pcs_owner_map(jeditaskids):
     if not ids:
         return {}
     try:
-        from pcs.models import ProdTask
+        from pcs.models import PandaTasks
         return {
-            int(panda_task_id): _canonical_user(created_by)
-            for panda_task_id, created_by in ProdTask.objects
-            .filter(panda_task_id__in=ids)
-            .values_list('panda_task_id', 'created_by')
-            if panda_task_id and created_by
+            int(jedi_task_id): _canonical_user(created_by)
+            for jedi_task_id, created_by in PandaTasks.objects
+            .filter(jedi_task_id__in=ids)
+            .values_list('jedi_task_id', 'prod_task__created_by')
+            if jedi_task_id and created_by
         }
     except Exception as e:
         logger.warning("_pcs_owner_map failed: %s", e)
@@ -113,31 +113,31 @@ def _pcs_taskids_for_owner(username):
     if not username:
         return [], []
     try:
-        from pcs.models import ProdTask
-        linked = ProdTask.objects.filter(panda_task_id__isnull=False)
+        from pcs.models import PandaTasks
+        linked = PandaTasks.objects.filter(jedi_task_id__isnull=False)
         if '%' in username:
             variants = [v.replace('%', '') for v in _user_filter_values(username)]
             owner_ids = set()
             for needle in variants:
                 owner_ids.update(
-                    int(panda_task_id)
-                    for panda_task_id in linked
-                    .filter(created_by__contains=needle)
-                    .values_list('panda_task_id', flat=True)
-                    if panda_task_id
+                    int(jedi_task_id)
+                    for jedi_task_id in linked
+                    .filter(prod_task__created_by__contains=needle)
+                    .values_list('jedi_task_id', flat=True)
+                    if jedi_task_id
                 )
         else:
             owner_ids = {
-                int(panda_task_id)
-                for panda_task_id in linked
-                .filter(created_by__in=_user_filter_values(username))
-                .values_list('panda_task_id', flat=True)
-                if panda_task_id
+                int(jedi_task_id)
+                for jedi_task_id in linked
+                .filter(prod_task__created_by__in=_user_filter_values(username))
+                .values_list('jedi_task_id', flat=True)
+                if jedi_task_id
             }
         other_ids = {
-            int(panda_task_id)
-            for panda_task_id in linked.values_list('panda_task_id', flat=True)
-            if panda_task_id and int(panda_task_id) not in owner_ids
+            int(jedi_task_id)
+            for jedi_task_id in linked.values_list('jedi_task_id', flat=True)
+            if jedi_task_id and int(jedi_task_id) not in owner_ids
         }
         return sorted(owner_ids), sorted(other_ids)
     except Exception as e:
@@ -376,6 +376,51 @@ def _bulk_destinationse(pandaids):
             return {row[0]: row[1] for row in cursor.fetchall()}
     except Exception:
         logger.exception("_bulk_destinationse failed")
+        return {}
+
+
+def job_completion_details(pandaids):
+    """Return lightweight completion/error details for visible jobs.
+
+    This reads only jobsactive4/jobsarchived4 columns. It deliberately does not
+    fetch files, harvester records, pilot logs, or run log analysis; the single
+    job detail page owns that deeper path.
+    """
+    ids = [int(pandaid) for pandaid in (pandaids or []) if pandaid]
+    if not ids:
+        return {}
+    fields = ['pandaid', 'attemptnr', 'maxattempt', *ERROR_FIELDS]
+    placeholders = ','.join(['%s'] * len(ids))
+    field_list = ', '.join(f'"{field}"' for field in fields)
+    sql = f"""
+        SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsactive4"
+            WHERE "pandaid" IN ({placeholders})
+        UNION ALL
+        SELECT {field_list} FROM "{PANDA_SCHEMA}"."jobsarchived4"
+            WHERE "pandaid" IN ({placeholders})
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql, ids + ids)
+            details = {}
+            for row in cursor.fetchall():
+                item = row_to_dict(row, fields)
+                errors = extract_errors(item)
+                attempt = item.get('attemptnr')
+                maxattempt = item.get('maxattempt') or 3
+                try:
+                    final_attempt = bool(attempt and int(attempt) >= int(maxattempt))
+                except (TypeError, ValueError):
+                    final_attempt = False
+                details[item['pandaid']] = {
+                    'attemptnr': attempt,
+                    'maxattempt': maxattempt,
+                    'final_attempt': final_attempt,
+                    'errors': errors,
+                }
+            return details
+    except Exception:
+        logger.exception("job_completion_details failed")
         return {}
 
 
@@ -632,7 +677,8 @@ def _compute_progress(nactive, nfinished, nfailed):
 
 def _get_task_job_counts(jeditaskids):
     """Return per-task job counts:
-    {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries, nfinalfailed}}.
+    {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries,
+    nfinalfailed, maxattempt}}.
 
     Aggregates over jobsactive4 + jobsarchived4 bucketed by JOB_STATUS_CATEGORIES.
     Cancelled and closed are deliberately not reported — alarms surface what
@@ -642,14 +688,16 @@ def _get_task_job_counts(jeditaskids):
     - nrunning: count of job records with jobstatus='running' (subset of nactive).
     - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
       schema every retry creates a new job record, so this is the total
-      retry count for the task. The retry limit is 3.
+      retry count for the task.
     - nfinalfailed: count of job records with jobstatus='failed' AND
-      attemptnr >= 3. These are final failures — the job exhausted its
-      retry budget. Distinguishes true failures from transient-fail-then-
-      retry-succeeds, which matters for alarms (see goal-panda-alarms).
+      attemptnr >= maxattempt. These are final failures — the job exhausted
+      its retry budget. Distinguishes true failures from transient-fail-then-
+      retry-succeeds, which matters for alarms.
+    - maxattempt: maximum job-level maxattempt currently seen for the task.
     """
     zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
-                   'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0}
+                   'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0,
+                   'maxattempt': None}
     if not jeditaskids:
         return {}
 
@@ -664,13 +712,14 @@ def _get_task_job_counts(jeditaskids):
         SELECT "jeditaskid", "jobstatus",
                COUNT(*) AS n,
                SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
-               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= 3 THEN 1 ELSE 0 END) AS nfinalfailed_part
+               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= COALESCE("maxattempt", 3) THEN 1 ELSE 0 END) AS nfinalfailed_part,
+               MAX(COALESCE("maxattempt", 3)) AS maxattempt_part
         FROM (
-            SELECT "jeditaskid", "jobstatus", "attemptnr"
+            SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
                 FROM "{PANDA_SCHEMA}"."jobsactive4"
                 WHERE "jeditaskid" IN ({placeholders})
             UNION ALL
-            SELECT "jeditaskid", "jobstatus", "attemptnr"
+            SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
                 FROM "{PANDA_SCHEMA}"."jobsarchived4"
                 WHERE "jeditaskid" IN ({placeholders})
         ) combined
@@ -682,7 +731,7 @@ def _get_task_job_counts(jeditaskids):
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, params)
-            for tid, jobstatus, n, nretries_part, nfinalfailed_part in cursor.fetchall():
+            for tid, jobstatus, n, nretries_part, nfinalfailed_part, maxattempt_part in cursor.fetchall():
                 cat = status_to_cat.get(jobstatus)
                 if cat is not None:
                     counts[tid][f'n{cat}'] += n
@@ -691,6 +740,12 @@ def _get_task_job_counts(jeditaskids):
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
                 counts[tid]['nfinalfailed'] += nfinalfailed_part or 0
+                if maxattempt_part is not None:
+                    current = counts[tid].get('maxattempt')
+                    counts[tid]['maxattempt'] = max(
+                        current or 0,
+                        maxattempt_part,
+                    )
     except Exception as e:
         logger.error(f"_get_task_job_counts failed: {e}")
         # On failure, return zeros so caller still gets a consistent shape.
@@ -791,7 +846,7 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
 
     # Per-task job counts (nactive, nfinished, nfailed, nrunning, nretries,
     # nfinalfailed) — one extra query. computed_failurerate (all failures)
-    # and computed_finalfailurerate (attemptnr>=3 only — retry-exhausted)
+    # and computed_finalfailurerate (attemptnr>=maxattempt — retry-exhausted)
     # serve as usable substitutes for the native JEDI failurerate column,
     # which is NULL in this deployment. Alarms use the final-failure rate.
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,

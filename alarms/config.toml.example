@@ -20,6 +20,13 @@ log_path = "/opt/swf-monitor/shared/logs/swf-alarms/run.log"
 # dsn = "postgresql://admin:PASSWORD@localhost:5432/swfdb"
 
 [email]
-provider = "ses"
-region = "us-east-1"
-from = "wenaus@gmail.com"
+provider = "smtp"
+from = "no-reply@swf-alarm-group.bnl.gov"
+smtp_host = "rcf.rhic.bnl.gov"
+smtp_port = 25
+smtp_timeout = 20
+
+# AWS SES fallback:
+# provider = "ses"
+# region = "us-east-1"
+# from = "no-reply@swf-alarm-group.bnl.gov"

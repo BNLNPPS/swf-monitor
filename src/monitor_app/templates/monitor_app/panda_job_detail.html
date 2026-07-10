@@ -6,12 +6,15 @@
 {% block content %}
 <div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h2>Job {{ pandaid }}</h2>
-        <div class="d-flex gap-2">
-            <form method="post" action="{% url 'monitor_app:epicprod_job_refresh' pandaid %}">
+        <div class="d-flex align-items-center gap-2">
+            <h2>Job {{ pandaid }}</h2>
+            <form method="post" action="{% url 'monitor_app:epicprod_job_refresh' pandaid %}" id="job-study-form" data-pandaid="{{ pandaid }}">
                 {% csrf_token %}
-                <button type="submit" class="btn btn-outline-primary btn-sm">Refresh ePIC Prod</button>
+                <button type="submit" class="btn btn-outline-primary btn-sm" id="job-study-button">{% if epicprod_job %}Redo Job Study{% else %}Study Job{% endif %}</button>
             </form>
+            <span class="text-muted small" id="job-study-status"></span>
+        </div>
+        <div class="d-flex gap-2">
             <a href="{% url 'monitor_app:panda_jobs_list' %}" class="btn btn-outline-secondary btn-sm">Back to Jobs</a>
         </div>
     </div>
@@ -30,6 +33,8 @@
                         <tr><td><strong>PanDA ID</strong></td><td>{{ job.pandaid }} {% copy_btn job.pandaid %}</td></tr>
                         {% if job.jobname %}<tr><td><strong>Job Name</strong></td><td style="word-break:break-all;">{{ job.jobname }}</td></tr>{% endif %}
                         <tr><td><strong>Status</strong></td><td class="{{ job.jobstatus|state_class }}" title="{{ job.jobstatus|state_title }}">{{ job.jobstatus }}</td></tr>
+                        {% if epicprod_diagnosis.phase %}<tr><td><strong>ePIC Phase</strong></td><td>{{ epicprod_diagnosis.phase }}</td></tr>{% endif %}
+                        {% if epicprod_diagnosis.failure_summary %}<tr><td><strong>ePIC Failure</strong></td><td class="text-danger" style="word-break:break-word;">{{ epicprod_diagnosis.failure_summary }}</td></tr>{% endif %}
                         {% if job.jobsubstatus %}<tr><td><strong>Substatus</strong></td><td>{{ job.jobsubstatus }}</td></tr>{% endif %}
                         {% if job.currentpriority or job.assignedpriority %}<tr><td><strong>Priority</strong></td><td>{{ job.currentpriority|default:job.assignedpriority }}{% if job.currentpriority and job.assignedpriority and job.currentpriority != job.assignedpriority %} (assigned: {{ job.assignedpriority }}){% endif %}</td></tr>{% endif %}
                         {% if job.produsername or job.vo %}
@@ -87,6 +92,10 @@
         </div>
     </div>
 
+    {% if epicprod_job %}
+    {% ai_assessment_panel epicprod_job.data %}
+    {% endif %}
+
     <!-- Files -->
     {% if display_files %}
     <div class="card mb-3">
@@ -143,19 +152,20 @@
     </div>
     {% endif %}
 
-    {% if epicprod_job %}
+    {% if epicprod_diagnosis.available %}
     <div class="card mb-3">
         <div class="card-header"><strong>ePIC Production Diagnosis</strong></div>
         <div class="card-body">
             <table class="table table-sm mb-0">
-                {% if epicprod_job.phase %}<tr><td><strong>Phase</strong></td><td>{{ epicprod_job.phase }}</td></tr>{% endif %}
-                {% if epicprod_job.failure_summary %}<tr><td><strong>Failure</strong></td><td class="text-danger">{{ epicprod_job.failure_summary }}</td></tr>{% endif %}
-                {% if epicprod_job.last_refreshed_at %}<tr><td><strong>Refreshed</strong></td><td>{{ epicprod_job.last_refreshed_at|fmt_dt }}</td></tr>{% endif %}
+                {% if epicprod_diagnosis.phase %}<tr><td><strong>Phase</strong></td><td>{{ epicprod_diagnosis.phase }}</td></tr>{% endif %}
+                {% if epicprod_diagnosis.failure_summary %}<tr><td><strong>Failure</strong></td><td class="text-danger">{{ epicprod_diagnosis.failure_summary }}</td></tr>{% endif %}
+                {% if epicprod_diagnosis.source %}<tr><td><strong>Source</strong></td><td>{{ epicprod_diagnosis.source }}</td></tr>{% endif %}
+                {% if epicprod_diagnosis.last_refreshed_at %}<tr><td><strong>Refreshed</strong></td><td>{{ epicprod_diagnosis.last_refreshed_at|fmt_dt }}</td></tr>{% endif %}
             </table>
-            {% if epicprod_job.data.timeline %}
+            {% if epicprod_diagnosis.timeline %}
             <hr>
             <ol class="mb-0">
-                {% for event in epicprod_job.data.timeline %}
+                {% for event in epicprod_diagnosis.timeline %}
                 <li>
                     <strong>{{ event.phase }}</strong>{% if event.message %}: {{ event.message }}{% endif %}
                     {% if event.path %}<br><span style="word-break:break-all;">{{ event.path }}</span>{% endif %}
@@ -166,6 +176,67 @@
         </div>
     </div>
     {% endif %}
+
+    <script>
+    (function() {
+        const form = document.getElementById('job-study-form');
+        const button = document.getElementById('job-study-button');
+        const status = document.getElementById('job-study-status');
+        if (!form || !button || !status || !window.EventSource) return;
+
+        form.addEventListener('submit', function(ev) {
+            ev.preventDefault();
+            const pandaid = String(form.dataset.pandaid || '');
+            const token = form.querySelector('input[name="csrfmiddlewaretoken"]')?.value || '';
+            const streamUrl = "{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=epicprod_inventory_ready";
+            let done = false;
+            let es = null;
+
+            function finish(message, failed) {
+                done = true;
+                if (es) es.close();
+                button.disabled = false;
+                status.textContent = message || '';
+                if (failed) status.className = 'text-danger small';
+            }
+
+            button.disabled = true;
+            status.className = 'text-muted small';
+            status.textContent = 'Studying...';
+
+            es = new EventSource(streamUrl);
+            es.addEventListener('epicprod_inventory_ready', function(event) {
+                let data = {};
+                try { data = JSON.parse(event.data); } catch (e) { return; }
+                if (String(data.pandaid || '') !== pandaid) return;
+                if (data.ok) {
+                    window.location.reload();
+                } else {
+                    finish(data.error || 'Study failed.', true);
+                }
+            });
+            es.onerror = function() {
+                if (!done) status.textContent = 'Waiting for study result...';
+            };
+
+            fetch(form.action, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': token,
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            }).then(function(resp) {
+                if (!resp.ok) throw new Error('queue failed');
+            }).catch(function() {
+                finish('Could not queue job study.', true);
+            });
+
+            window.setTimeout(function() {
+                if (!done) finish('Study still running or event not received; refresh to check.', true);
+            }, 90000);
+        });
+    })();
+    </script>
 
     <!-- Errors -->
     {% if job.errors %}
@@ -218,7 +289,13 @@
                 {% for item in job_parameter_items %}
                 <tr>
                     <td style="width:16rem;"><strong>{{ item.label }}</strong></td>
-                    <td style="word-break:break-word; overflow-wrap:anywhere;">{{ item.value }}</td>
+                    <td style="word-break:break-word; overflow-wrap:anywhere;">
+                        {% if item.value|is_url %}
+                        <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>
@@ -234,7 +311,16 @@
         <div class="card-body">
             <table class="table table-sm mb-0">
                 {% for key, val in harvester.items %}
-                <tr><td><strong>{{ key }}</strong></td><td>{{ val }}</td></tr>
+                <tr>
+                    <td><strong>{{ key }}</strong></td>
+                    <td style="word-break:break-all;">
+                        {% if val|is_url %}
+                        <a href="{{ val }}" target="_blank" rel="noopener">{{ val }}</a>
+                        {% else %}
+                        {{ val|fmt_value }}
+                        {% endif %}
+                    </td>
+                </tr>
                 {% endfor %}
             </table>
         </div>
@@ -245,12 +331,18 @@
     <div class="card mb-3">
         <div class="card-header"><strong>All job parameters</strong></div>
         <div class="card-body">
-            <table class="table table-sm table-bordered mb-0">
+            <table class="table table-sm table-bordered mb-0 w-auto">
                 <tbody>
                 {% for item in job_record_items %}
                 <tr>
                     <th style="width:18rem;">{{ item.name }}</th>
-                    <td style="word-break:break-all;">{{ item.value }}</td>
+                    <td style="word-break:break-all;">
+                        {% if item.value|is_url %}
+                        <a href="{{ item.value }}" target="_blank" rel="noopener">{{ item.value }}</a>
+                        {% else %}
+                        {{ item.value|fmt_value }}
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
                 </tbody>

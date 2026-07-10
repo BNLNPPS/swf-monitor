@@ -1,0 +1,27 @@
+<details class="narrative-entry" data-group-id="{{ e.group_id }}">
+  <summary>
+    <h4>{{ e.title }}</h4>
+    <span class="text-muted">v{{ e.version }} &middot; {{ e.updated|slice:":10" }}</span>
+    <a class="narr-detail-link" href="{% url 'ai:ai_narrative_detail' e.name %}">detail</a>
+  </summary>
+  <div class="narrative-body">
+    <div class="narrative-doc">{{ e.html }}</div>
+
+    <div class="narrative-comments">
+      <div class="narrative-block-head">Comments ({{ e.comments|length }})</div>
+      {% for c in e.comments %}
+      <div class="narrative-comment">
+        <div class="nc-meta">{{ c.author|default:"—" }} &middot; {{ c.date }}</div>
+        <div class="nc-body">{{ c.content }}</div>
+      </div>
+      {% empty %}
+      <div class="text-muted">No comments yet.</div>
+      {% endfor %}
+      <div class="mt-2">
+        <textarea class="form-control narrative-comment-text" rows="2" {% if not user.is_authenticated %}disabled{% endif %}
+                  placeholder="Comment — corrections, elaborations, questions{% if not user.is_authenticated %} (sign in to post){% endif %}"></textarea>
+        <button type="button" class="btn btn-primary btn-sm mt-1" {% if user.is_authenticated %}data-narr-comment="{{ e.group_id }}"{% else %}disabled title="Post a comment on this narrative — sign in to use"{% endif %}>Post</button>
+      </div>
+    </div>
+  </div>
+</details>

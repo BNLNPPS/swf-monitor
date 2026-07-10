@@ -29,27 +29,36 @@
 <div class="container-fluid mt-3 pcs-catalog">
   <div class="d-flex align-items-center mb-3">
     <h2 class="me-3 mb-0">Campaign Task Catalog</h2>
-    <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-outline-secondary">PCS Hub</a>
-    {% if not is_tunnel %}
-    {% if user.is_authenticated %}
-    {% if active_lifecycle == 'last' %}
+    <a href="{% url 'pcs:pcs_hub' %}" class="btn btn-sm btn-secondary">PCS Hub</a>
+    {% if not is_tunnel and user.is_authenticated %}
+    {% if active_lifecycle == 'last' or active_lifecycle == 'producing' %}
     <form method="post" action="{% url 'pcs:pcs_catalog_rucio_update' %}" class="ms-2 d-inline">
       {% csrf_token %}
-      <button type="submit" class="btn btn-sm btn-outline-primary"
-              title="Refresh the JLab Rucio output snapshot for current + last"
-              onclick="return confirm('Refresh the JLab Rucio snapshot for current and last campaigns?');">
+      <input type="hidden" name="lifecycle" value="{{ active_lifecycle }}">
+      <input type="hidden" name="campaign" value="{{ producing_campaign|default:'' }}">
+      <button type="submit" class="btn btn-sm btn-primary"
+              title="Refresh the JLab Rucio output snapshot for the current, last, and producing campaigns"
+              onclick="return confirm('Refresh the JLab Rucio snapshot for the current, last, and producing campaigns?');">
         Update from Rucio
       </button>
     </form>
     {% else %}
     <form method="post" action="{% url 'pcs:pcs_catalog_past_update' %}" class="ms-2 d-inline" id="epicprod-update-form">
       {% csrf_token %}
-      <button type="submit" id="epicprod-update-btn" class="btn btn-sm btn-outline-primary"
+      <button type="submit" id="epicprod-update-btn" class="btn btn-sm btn-primary"
               title="Re-import 2026 FULL/RECO campaign output from epic-prod (runs in the prod-ops agent; updates live when done)">
         Update from epic-prod
       </button>
     </form>
     {% endif %}
+    {% else %}
+    {# Inactive-button convention: operator actions stay visible to every viewer, disabled outside an operator session. #}
+    {% if active_lifecycle == 'last' or active_lifecycle == 'producing' %}
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Refresh the JLab Rucio output snapshot for the current, last, and producing campaigns — operator action; sign in on pandaserver02">Update from Rucio</button>
+    {% else %}
+    <button type="button" class="btn btn-sm btn-primary ms-2" disabled
+            title="Re-import 2026 FULL/RECO campaign output from epic-prod — operator action; sign in on pandaserver02">Update from epic-prod</button>
     {% endif %}
     {% endif %}
   </div>
@@ -100,13 +109,115 @@
   {% if show_tabs %}
   <div class="pcs-tlf-tabs btn-group mb-2 flex-wrap" role="tablist" aria-label="Lifecycle tabs">
     {% for tab in lifecycle_tabs %}
-      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if active_lifecycle == tab.key %} active{% endif %}"
-         href="?lifecycle={{ tab.key }}">
+      <a class="btn btn-sm btn-outline-{{ tab.color }}{% if tab.active %} active{% endif %}"
+         href="{{ tab.url }}">
         {{ tab.label }}{% if tab.detail %} <span class="text-muted">·</span> {{ tab.detail }}{% endif %}
       </a>
     {% endfor %}
   </div>
   {% endif %}
+
+  {% if active_lifecycle == 'producing' or active_lifecycle == 'last' %}
+  {# The symmetric tab strip (Current has the same one): Last activity under the tabs, promotion after it where rotation applies. #}
+  <div class="small mb-2">
+    <span><strong>Last activity:</strong> {{ tab_last_activity|fmt_dt|default:"none recorded" }}</span>
+    {% if active_lifecycle == 'producing' %}
+    {% if user.is_authenticated %}
+    <form method="post" action="{% url 'pcs:pcs_catalog_promote_current' %}" class="d-inline ms-3">
+      {% csrf_token %}
+      <input type="hidden" name="name" value="{{ producing_campaign }}">
+      <button type="submit" class="btn btn-sm btn-success"
+              onclick="return confirm('Make {{ producing_campaign }} current? {{ promote_cascade_note }}');">
+        Make {{ producing_campaign }} current</button>
+    </form>
+    {% else %}
+    <button type="button" class="btn btn-sm btn-success ms-3" disabled
+            title="Promote {{ producing_campaign }} to current — operator action; sign in to use">Make {{ producing_campaign }} current</button>
+    {% endif %}
+    <span class="text-muted">{{ promote_cascade_note }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if active_lifecycle == 'producing' %}
+    <div class="border rounded p-2 mb-3" style="max-width: 62em">
+      <div>
+        <strong>{{ producing_campaign }} is producing</strong>{% if producing_arrivals %} &mdash;
+        {{ producing_arrivals.files }} new file{{ producing_arrivals.files|pluralize }} in JLab Rucio
+        since {{ producing_arrivals.window_start|fmt_dt }} (as of the last arrivals sweep){% endif %}.
+      </div>
+      {% if producing_task_mix %}
+      <div class="small mt-1">
+        <strong>Task records:</strong>
+        {% for status, n in producing_task_mix.items %}{{ n }} {{ status }}{% if not forloop.last %} &middot; {% endif %}{% endfor %}
+        <span class="text-muted">— all listed in the table below, the same
+          curated view as the Current tab (CAMPAIGN_CONTINUUM.md).</span>
+      </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+    {% if instancing %}
+    <div class="border rounded p-2 mb-3" style="max-width: 62em">
+      {# Collapsed when idle: the plan is residual bookkeeping until something is pending, then it opens itself. #}
+      <details{% if instancing.plan.summary.mint or instancing.plan.summary.merge %} open{% endif %}>
+      <summary style="cursor:pointer">
+        <strong>Instancing plan {{ instancing.source }} &rarr; {{ instancing.target }}</strong>
+        <span class="text-muted small ms-2">{% if instancing.plan.summary.mint or instancing.plan.summary.merge %}{{ instancing.plan.summary.mint }} to mint, {{ instancing.plan.summary.merge }} to adopt{% else %}nothing pending{% endif %}</span>
+      </summary>
+      <div class="mb-1 mt-1">
+        <span class="text-muted small">populate this campaign's working catalog from
+          {{ instancing.source }}'s continuing physics configurations
+          (CAMPAIGN_CONTINUUM.md); pending AI disposition proposals are not
+          consumed — deciding them changes this plan</span>
+      </div>
+      {% if instancing.last_run %}
+      <div class="small mb-1">
+        <strong>Last populated:</strong> {{ instancing.last_run.at|fmt_dt }}
+        by {{ instancing.last_run.by|default:"?" }}
+        ({{ instancing.last_run.outcome }}) &mdash; {{ instancing.last_run.summary }}.
+        The plan below is the residual state after that run.
+      </div>
+      {% endif %}
+      {% for label, key, items in instancing.classes %}
+      {% if items %}
+      <details class="mb-1">
+        <summary class="small" style="cursor:pointer">{{ label }}: <strong>{{ items|length }}</strong></summary>
+        <div class="small text-muted" style="max-height: 20em; overflow-y: auto">
+          {% for item in items %}
+          <div>{{ item.pc.0 }} · {{ item.pc.1|join:" " }}{% if item.pc.3 %} · {{ item.pc.3 }}{% endif %}
+            &mdash; {% if item.target_editions %}{{ item.target_editions.0 }}{% else %}{{ item.source_editions.0 }}{% endif %}
+            {% if item.replaced_by %} (replaced by {{ item.replaced_by|join:", " }}){% endif %}
+            {% if item.dispositions %} (dispositions: {{ item.dispositions|join:", " }}){% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+      {% endfor %}
+      {% if instancing.plan.summary.mint or instancing.plan.summary.merge %}
+      {% if user.is_authenticated %}
+      <form method="post" action="{% url 'pcs:pcs_catalog_instancing_execute' %}" class="mt-2">
+        {% csrf_token %}
+        <input type="hidden" name="source" value="{{ instancing.source }}">
+        <input type="hidden" name="target" value="{{ instancing.target }}">
+        <input type="hidden" name="return_lifecycle" value="{{ active_lifecycle }}">
+        <button type="submit" class="btn btn-sm btn-success"
+                onclick="return confirm('Populate {{ instancing.target }} from {{ instancing.source }}? {{ instancing.plan.summary.mint }} edition(s) minted, {{ instancing.plan.summary.merge }} adopted; the plan is recomputed at execution.');">
+          Populate {{ instancing.target }} from {{ instancing.source }}</button>
+      </form>
+      {% else %}
+      <button type="button" class="btn btn-sm btn-success mt-2" disabled
+              title="Mint {{ instancing.plan.summary.mint }} edition(s), adopt {{ instancing.plan.summary.merge }} — operator action; sign in to use">
+        Populate {{ instancing.target }} from {{ instancing.source }}</button>
+      {% endif %}
+      {% else %}
+      <div class="small text-muted mt-2">Nothing pending — every actionable
+        configuration is instanced; unresolved ones await curation.</div>
+      {% endif %}
+      </details>
+    </div>
+    {% endif %}
 
   {% if active_lifecycle == 'last' and not rucio_unmatched_campaign and rucio_detected %}
     <div class="border rounded p-2 mb-3 small bg-light">
@@ -122,10 +233,13 @@
           <form method="post" action="{% url 'pcs:pcs_catalog_set_last' %}" class="d-inline">
             {% csrf_token %}
             <input type="hidden" name="name" value="{{ r.version }}">
-            <button type="submit" class="btn btn-sm btn-outline-info py-0 px-2 ms-1"
+            <button type="submit" class="btn btn-sm btn-success py-0 px-2 ms-1"
                     title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot"
                     onclick="return confirm('Set PCS last to {{ r.version }} and pull snapshot?');">Make last</button>
           </form>
+          {% else %}
+          <button type="button" class="btn btn-sm btn-success py-0 px-2 ms-1" disabled
+                  title="Designate {{ r.version }} as PCS last and pull its Rucio snapshot — operator action; sign in to use">Make last</button>
           {% endif %}
         </span>
         {% endif %}
@@ -134,7 +248,7 @@
     </div>
   {% endif %}
 
-  {% if active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
+  {% if active_lifecycle == 'producing' and rucio_timeline_json != 'null' or active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
     <div id="pcs-rucio-timeline" class="mb-3" style="min-height:540px"></div>
   {% endif %}
 
@@ -152,7 +266,7 @@
   </details>
   {% endif %}
 
-  {% if active_lifecycle != 'last' %}
+  {% if active_lifecycle == 'past' or active_lifecycle == 'future' %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Release:</span>
     <a href="?lifecycle={{ active_lifecycle }}&amp;release=all{% if active_stage %}&amp;stage={{ active_stage }}{% endif %}"
@@ -171,6 +285,10 @@
   </div>
   {% endif %}
 
+  {% if task_list_html %}
+    {# The unified curated view (CAMPAIGN_CONTINUUM.md): this campaign renders the same task table as Current. #}
+    {{ task_list_html|safe }}
+  {% else %}
   <div class="pcs-pdl-nav small mb-2">
     <span class="pcs-pdl-section-label">Stage:</span>
     <a href="?lifecycle={{ active_lifecycle }}&amp;release={{ active_release|urlencode }}"
@@ -196,7 +314,7 @@
         <span class="pcs-pdl-section-label">Search:</span>
         <input type="search" id="pcs-pdl-q" class="form-control form-control-sm"
                style="width:24em;" placeholder="dataset / path&hellip;">
-        <button type="button" id="pcs-pdl-clear" class="btn btn-sm btn-outline-secondary"
+        <button type="button" id="pcs-pdl-clear" class="btn btn-sm btn-secondary"
                 title="Clear all filters">Clear</button>
       </div>
       <div class="mb-1">
@@ -287,11 +405,35 @@
     </table>
   {% elif active_lifecycle == 'last' %}
     {# Last not set yet — Make-last selector above is the call to action. #}
+  {% elif active_lifecycle == 'future' %}
+    <div class="border rounded p-3" style="max-width: 62em">
+      {% if next_campaign_hint %}
+      <div class="mb-1"><strong>Likely next campaign: {{ next_campaign_hint.name }}</strong> &mdash;
+        named by
+        <a class="ai-attr-text" href="{% url 'ai:ai_proposals' %}?batch={{ next_campaign_hint.batches.0|urlencode }}"
+           title="Pending campaign-propagation proposals whose disposition batch names {{ next_campaign_hint.name }} as the next campaign">{{ next_campaign_hint.pending }} pending AI campaign-propagation proposal{{ next_campaign_hint.pending|pluralize }}</a>.
+      </div>
+      <div class="text-muted">
+        No future campaign exists yet. The instancing plan above lays out what
+        a population would create from
+        {% if instancing %}<strong>{{ instancing.source }}</strong>'s{% else %}the
+        current campaign's{% endif %} continuing physics configurations;
+        deciding the pending dispositions changes the plan, and Populate
+        creates the campaign.
+      </div>
+      {% else %}
+      <div class="text-muted">
+        No future campaigns yet. The next campaign is created from the current
+        campaign's dataset dispositions once they are proposed and decided.
+      </div>
+      {% endif %}
+    </div>
   {% else %}
     <div class="alert alert-info">
       No past campaigns ingested yet. Click <strong>Update from epic-prod</strong> above to populate from
       the cloned <code>epic-prod</code> tree.
     </div>
+  {% endif %}
   {% endif %}
 </div>
 
@@ -438,7 +580,7 @@
 })();
 </script>
 
-{% if active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
+{% if active_lifecycle == 'producing' and rucio_timeline_json != 'null' or active_lifecycle == 'last' and rucio_timeline_json != 'null' %}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 (function() {

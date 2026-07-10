@@ -11,7 +11,7 @@ PCS should be the authoritative record for production
 requests, which take form as
 task specifications composed from dataset, tag, and production configuration specs.
 The tasks are also the source of record for downstream production state as
-production progresses. Mattermost/pandabot is a two-way conversational
+production progresses. Mattermost/DISpatcher is a two-way conversational
 interface between users and PCS. The `eic/epic-prod` issue/PR/Jekyll workflow is
 the public catalogue projection of production plans as expressed in PCS data,
 with PCS the source of truth.
@@ -27,7 +27,7 @@ future mode where EVGEN is run as an internal production stage.
 Sakib has described and prototyped this public intake path:
 
 1. A requester submits a dataset request through a GitHub issue template or,
-   later, through Mattermost/PanDAbot as dialog front end to issue creation.
+   later, through Mattermost/DISpatcher as dialog front end to issue creation.
 2. A GitHub Action triggered by the issue creation appends a row to `eic/epic-prod`:
    `docs/_data/datasets.csv`.
 3. A pull request is opened for review.
@@ -78,7 +78,7 @@ surfaces over that layer: each is a thin adapter that turns wire-format input
 (HTTP body or MCP args) into a service call and the service result back into
 wire-format output.
 
-- **Bots trigger; they do not mediate.** PanDAbot receives a Mattermost
+- **Bots trigger; they do not mediate.** DISpatcher receives a Mattermost
   event, then calls a PCS MCP tool. Bots do not embed PCS logic. Intake
   decisions, validation, and persistence live in the service layer.
 - **Web UI uses REST.** PCS web pages call PCS REST for reads and writes;
@@ -298,6 +298,35 @@ needed for the interim model):
 `public_catalog_row_key`, `public_catalog_page_url`,
 `public_catalog_commit_sha`.
 
+## Request Composer
+
+The request composer (`/pcs/request/`) is the native intake surface on the
+path to replacing the Google Form, which serves as its guide rather than its
+specification. A requester describes the physics in plain terms — process,
+beams, species, Q², generator, sample variant, event count, PWG and/or DSC
+(distinct fields, each optional), intended use, optional input location and
+configuration repository — and the
+page shows, live, the physics configurations the system already has that
+match: what they are, where they were produced, and how much. Contact name
+and email are required, prefilled for signed-in users. "Use this"
+bases the request on an existing configuration, recording the same
+physics-configuration anchor the CSV import writes, so a composed request
+projects onto campaign editions exactly like an imported one. The mapping is
+deterministic throughout: form fields land in the request's filter block and
+columns; no inference intervenes.
+
+Submission is a `/pcs/api/` POST (external-safe through the swf-remote
+proxy) gated by login; the page itself is readable by anyone, with the
+submit control visible but inactive for visitors. Each submission is an
+action-stream event.
+
+The composer is also the first "my epicprod" surface: the signed-in user's
+past requests are shown as the starting point for the next one ("start from
+this"), and their working group and contact are remembered in per-user
+preferences. The same identity surface is where user-level analysis support
+enters later — the system that knows a user's physics and runs their bulk
+production is positioned to run their analysis over it as well.
+
 ## Dynamic Public Catalog
 
 The present GitHub/Jekyll public catalog webpage provides a static snapshot of production requests, but does not offer dynamic modification: cloning of established requests into new campaigns, modification of requests and injection into campaigns, adjustment of priorities, withdrawal of requests, and other changes, all of them based on authenticated users with particular production system rights.
@@ -320,7 +349,7 @@ Once PCS is integrated with the ePIC phonebook and COmanage, role assertions gat
    (`datasets/intake/`, `prod-tasks/intake/`, `link-input/`, the
    lifecycle gates on `set-status/` and `record-submission/`).
    Expose each as a peer MCP tool calling the same service function,
-   so PanDAbot and other MCP clients drive intake, status transitions,
+   so DISpatcher and other MCP clients drive intake, status transitions,
    comment append, catalogue-row preview, and PCS-driven GitHub issue
    creation through the shared service layer rather than constructing
    REST queries.

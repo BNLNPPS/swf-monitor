@@ -69,7 +69,8 @@ def _get_testbed_config_path() -> tuple:
 # IMPORTANT: When adding a new @mcp.tool(), you MUST also add it to the
 # hardcoded list below. This list is what LLMs see when discovering tools.
 #
-# Also update: server instructions in settings.py, docs/MCP.md
+# Also update: server instructions in settings.py, docs/MCP.md, and
+# docs/MCP_TOOL_REFERENCE.md.
 # -----------------------------------------------------------------------------
 
 def get_available_tools_list() -> list:
@@ -239,6 +240,31 @@ def get_available_tools_list() -> list:
             "description": "Get recent dialogue history for session context",
             "parameters": ["username", "turns", "namespace"],
         },
+        {
+            "name": "epic_register_ai_assessment",
+            "description": "Register append-only AI assessment content as a corun-ai Page for an epicprod object and link it from the target object's JSON corun_page_group_ids when it is a known local subject.",
+            "parameters": ["subject_type", "subject_key", "assessment", "username", "ai", "subject_label", "subject_url", "data"],
+        },
+        {
+            "name": "epic_get_ai_content",
+            "description": "Retrieve append-only epicprod AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments provided in a detail payload's ai_content.retrieval.arguments.",
+            "parameters": ["ids", "corun_page_group_ids"],
+        },
+        {
+            "name": "ai_list_proposals",
+            "description": "List AI proposals awaiting human decision (default) or by status. Show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12).",
+            "parameters": ["status", "limit"],
+        },
+        {
+            "name": "ai_decide_proposal",
+            "description": "Relay one human's approve/deny on one AI proposal by ref. Only after an explicit human instruction naming the ref; username is the deciding human, who must be on the SysConfig approver list.",
+            "parameters": ["ref", "decision", "username", "quality"],
+        },
+        {
+            "name": "epicprod_list_actions",
+            "description": "Query the epicprod action stream: structured records of production actions (sweeps, submissions, assessments) with who/what/outcome/duration. summarize=True gives counts and duration stats — prefer it for reporting.",
+            "parameters": ["action", "instance", "subject_type", "subject_key", "username", "outcome", "start_time", "end_time", "summarize", "limit", "offset"],
+        },
         # PanDA Monitor tools
         {
             "name": "panda_list_jobs",
@@ -282,7 +308,7 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_study_job",
-            "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context.",
+            "description": "Deep study of a single PanDA job — full record, files, errors, log URLs, harvester info, parent task context, and parsed ePIC production diagnosis.",
             "parameters": ["pandaid"],
         },
         {

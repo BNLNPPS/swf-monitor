@@ -35,10 +35,20 @@ Capabilities:
   evgen_rucio_update — assimilate the JLab Rucio EVGEN inventory (epic:/EVGEN/*)
                        and resolve each PCS evgen Dataset onto metadata['rucio']
                        (delegates to scripts/import_evgen_rucio.py --apply).
+  campaign_progress_refresh — rebuild current campaign progress data and its
+                       rendered progress table cache.
+  panda_task_operation — run a PanDA-native operation on an existing JEDI task:
+                       increase allowed attempts or retry failed work.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
                        agents, and external monitor endpoints.
+  association_sweep  — batch-associate recent PanDA tasks with PCS campaign
+                       tasks (manage.py sweep_panda_associations).
+  catalog_sync       — the nightly composite: association sweep, Rucio
+                       snapshot, EVGEN assimilation, questionnaire match,
+                       progress refresh, in order; logs the chain summary
+                       that serves as the catalog-freshness timestamp.
   health_ping        — liveness probe; replies 'pong' to reply_to.
   shutdown           — deliberate stop; exits EXIT_DELIBERATE so systemd leaves
                        the singleton down instead of restarting it.
@@ -56,10 +66,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests
+
 from swf_common_lib.base_agent import BaseAgent
 
 # Anycast control queue: one consumer handles each request exactly once.
 OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
+
+# Monitor REST base for the epicprod action stream (same endpoint the shared
+# REST log handler posts to).
+MONITOR_HTTP_URL = os.environ.get("SWF_MONITOR_HTTP_URL", "http://localhost:8002")
+ACTION_LOG_TIMEOUT = int(os.environ.get("EPICPROD_ACTION_LOG_TIMEOUT", "5"))
 
 # Managed scratch/cache root (shared with the doer and the web view).
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
@@ -83,13 +100,30 @@ SUBMIT_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_TIMEOUT", "300"))
 # (manifest + env + dispatcher + JLab proxy) and submits noInput+noOutput.
 SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "submit-evgen-task.py"
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
+PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
+PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
 # the per-task rematch — slow and network-bound, so generously bounded.
 RUCIO_SNAPSHOT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-snapshot-update.py"
 RUCIO_SNAPSHOT_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_SNAPSHOT_TIMEOUT", "900"))
+# Arrivals sweep: one created_after DID query per root — light and bounded.
+RUCIO_ARRIVALS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "rucio-arrivals-sweep.py"
+RUCIO_ARRIVALS_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_ARRIVALS_TIMEOUT", "300"))
+# Past-campaign output ingest: pull the epic-prod clone + idempotent re-import.
+PAST_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "epic-prod-past-import.py"
+PAST_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_PAST_IMPORT_TIMEOUT", "600"))
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
+QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
+QUESTIONNAIRE_MATCH_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_MATCH_TIMEOUT", "300"))
+QUESTIONNAIRE_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "import-questionnaires.py"
+QUESTIONNAIRE_AUTOMATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "match-questionnaires.py"
+QUESTIONNAIRE_AUTOMATCH_TIMEOUT = int(os.environ.get("EPICPROD_AUTOMATCH_TIMEOUT", "1800"))
+QUESTIONNAIRE_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_IMPORT_TIMEOUT", "120"))
+CAMPAIGN_PROGRESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-campaign-progress.py"
+CAMPAIGN_PROGRESS_TIMEOUT = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_TIMEOUT", "300"))
+CAMPAIGN_PROGRESS_MIN_INTERVAL = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_MIN_INTERVAL", "300"))
 
 # EVGEN-input assimilation doer: a live JLab Rucio fetch of epic:/EVGEN/* plus
 # the per-dataset match — slow and network-bound, so generously bounded.
@@ -100,6 +134,11 @@ EVGEN_RUCIO_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_RUCIO_TIMEOUT", "900"))
 # evidence and writes monitor-side EpicProdJob/EpicProdFile rows.
 MANAGE_PY = Path(__file__).resolve().parent.parent / "src" / "manage.py"
 INVENTORY_TIMEOUT = int(os.environ.get("EPICPROD_INVENTORY_TIMEOUT", "180"))
+
+# Association sweep: batch counterpart of the lazy per-view reconciliation —
+# pulls directly submitted PanDA tasks into the catalog (management command).
+ASSOCIATION_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_ASSOCIATION_SWEEP_TIMEOUT", "600"))
+ASSOCIATION_SWEEP_DAYS = int(os.environ.get("EPICPROD_ASSOCIATION_SWEEP_DAYS", "14"))
 
 # System status refresh doer: cached monitor/system rows, intentionally a
 # standalone script rather than a Django management command.
@@ -123,8 +162,13 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
+                   "panda_task_operation",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
+                   "questionnaire_match_update", "campaign_progress_refresh",
+                   "association_sweep", "catalog_sync", "questionnaire_import",
+                   "questionnaire_automatch",
                    "sync_epicprod_inventory", "refresh_system_status",
+                   "rucio_arrivals_sweep", "epic_prod_past_import",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -134,6 +178,8 @@ class EpicProdOpsAgent(BaseAgent):
         super().__init__(agent_type="PRODOPS", subscription_queue=OPS_QUEUE,
                          config_path=str(PRODOPS_CONFIG))
         self._deliberate = False
+        self._campaign_progress_last_start = 0
+        self._action_log_session = requests.Session()
         self._system_status_thread = threading.Thread(
             target=self._system_status_periodic_loop,
             name="system-status-refresh",
@@ -183,6 +229,8 @@ class EpicProdOpsAgent(BaseAgent):
         Distinct from `systemctl stop`, the host-level back door."""
         self.logger.warning(
             f"PRODOPS: deliberate shutdown requested by {m.get('sender', '?')}")
+        self._log_action('agent_shutdown', username=str(m.get('sender') or ''),
+                         sublevel='high', live_default=True, level=logging.WARNING)
         self._deliberate = True
         os.kill(self.pid, signal.SIGTERM)   # reuse BaseAgent's graceful unwind
 
@@ -212,22 +260,39 @@ class EpicProdOpsAgent(BaseAgent):
         if m.get("force"):           # operator override: re-fetch even if cached
             cmd.append("--force")
         self.logger.info(f"PRODOPS fetch_payload_log: pandaid={m['pandaid']} task={m['jeditaskid']}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=FETCH_TIMEOUT)
         except subprocess.TimeoutExpired:
             self.logger.error(
                 f"PRODOPS fetch_payload_log TIMEOUT after {FETCH_TIMEOUT}s pandaid={m['pandaid']}")
             self._mark_error(jobdir, f"fetch timed out after {FETCH_TIMEOUT}s")
+            self._log_action('payload_log_fetch', t0, outcome='timeout',
+                             reason=f'timed out after {FETCH_TIMEOUT}s',
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             username=str(m.get('requested_by') or ''),
+                             sublevel='normal',
+                             level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
             return
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  cache-payload-log: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(
                 f"PRODOPS fetch_payload_log FAILED rc={p.returncode} pandaid={m['pandaid']}")
             self._mark_error(jobdir, reason)
+            self._log_action('payload_log_fetch', t0, outcome='error',
+                             reason=reason,
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             username=str(m.get('requested_by') or ''),
+                             sublevel='normal',
+                             level=logging.ERROR, jeditaskid=str(m['jeditaskid']))
         else:
+            self._log_action('payload_log_fetch', t0,
+                             subject_type='panda_job', subject_key=str(m['pandaid']),
+                             username=str(m.get('requested_by') or ''),
+                             sublevel='normal',
+                             jeditaskid=str(m['jeditaskid']))
             self.logger.info(f"PRODOPS fetch_payload_log done: pandaid={m['pandaid']}")
             # Push completion to the browser via the SSE relay (rides the topic
             # the monitor consumes; the page matches on pandaid). See docs/SSE_PUSH.md.
@@ -264,6 +329,7 @@ class EpicProdOpsAgent(BaseAgent):
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
         self.logger.info(f"PRODOPS submit_task: {task_name}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -272,12 +338,17 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
                 'reason': f'submission timed out after {SUBMIT_TIMEOUT}s'})
+            self._log_action('task_submit', t0, outcome='timeout',
+                             reason=f'timed out after {SUBMIT_TIMEOUT}s',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         stderr = p.stderr or ""
         for line in stderr.splitlines():
             self.logger.info(f"  submit-prod-task: {line}")
         jedi_task_id = (p.stdout or '').strip()
-        reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+        reason = self._derive_reason(p)
         # Every outcome emits an event over the SSE relay (docs/SSE_PUSH.md) so the
         # compose page is never left polling a submission that already resolved.
         if p.returncode == 0 and jedi_task_id:
@@ -286,6 +357,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submitted',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id})
+            self._log_action('task_submit', t0,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, jedi_task_id=jedi_task_id)
         elif p.returncode == 7 and jedi_task_id:
             # Submitted to PanDA, but the record-back POST failed after retries —
             # an orphan. Surface the id; the task stays ready/unrecorded and
@@ -296,11 +371,22 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
                 'jedi_task_id': jedi_task_id, 'reason': reason})
+            self._log_action('task_submit', t0, outcome='unrecorded',
+                             reason=reason,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR,
+                             jedi_task_id=jedi_task_id)
         else:
             self.logger.error(f"PRODOPS submit_task FAILED rc={p.returncode}: {task_name}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
+            self._log_action('task_submit', t0, outcome='error',
+                             reason=reason,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
 
     def _handle_submit_evgen_task(self, m):
         """Validate, then run the client-API EVGEN submission on the worker
@@ -327,9 +413,12 @@ class EpicProdOpsAgent(BaseAgent):
         agent's environment (SWF_MONITOR_URL, SWFMON_TOKEN, EVGEN_X509_PROXY)."""
         task_name = m["task_name"]
         cmd = [sys.executable, str(SUBMIT_EVGEN_SCRIPT), "--task-name", str(task_name)]
+        if m.get("panda_tasks_id"):
+            cmd += ["--panda-tasks-id", str(m["panda_tasks_id"])]
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
         self.logger.info(f"PRODOPS submit_evgen_task: {task_name}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, timeout=SUBMIT_EVGEN_TIMEOUT)
         except subprocess.TimeoutExpired:
@@ -337,18 +426,27 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed', 'task_name': task_name,
                 'reason': f'submission timed out after {SUBMIT_EVGEN_TIMEOUT}s'})
+            self._log_action('evgen_task_submit', t0, outcome='timeout',
+                             reason=f'timed out after {SUBMIT_EVGEN_TIMEOUT}s',
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         stderr = p.stderr or ""
         for line in stderr.splitlines():
             self.logger.info(f"  submit-evgen-task: {line}")
         jedi_task_id = (p.stdout or '').strip()
-        reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+        reason = self._derive_reason(p)
         if p.returncode == 0 and jedi_task_id:
             self.logger.info(
                 f"PRODOPS submit_evgen_task done: {task_name} -> jediTaskID={jedi_task_id}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submitted',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id})
+            self._log_action('evgen_task_submit', t0,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, jedi_task_id=jedi_task_id)
         elif p.returncode == 7 and jedi_task_id:
             # Submitted, but the record-back POST failed after retries — an
             # orphan; surface the id (record-submission is idempotent).
@@ -358,11 +456,109 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_unrecorded', 'task_name': task_name,
                 'jedi_task_id': jedi_task_id, 'reason': reason})
+            self._log_action('evgen_task_submit', t0, outcome='unrecorded',
+                             reason=reason,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR,
+                             jedi_task_id=jedi_task_id)
         else:
             self.logger.error(f"PRODOPS submit_evgen_task FAILED rc={p.returncode}: {task_name}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'prodtask_submit_failed',
                 'task_name': task_name, 'reason': reason})
+            self._log_action('evgen_task_submit', t0, outcome='error',
+                             reason=reason,
+                             subject_type='campaign_task', subject_key=task_name,
+                             username=str(m.get('owner') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
+
+    def _handle_panda_task_operation(self, m):
+        """Run a PanDA-native operation on an existing JEDI task."""
+        operation = m.get("operation")
+        task_name = m.get("task_name")
+        jedi_task_id = m.get("jedi_task_id")
+        if operation not in ("increase_attempts", "retry_failures"):
+            self.logger.error(f"PRODOPS panda_task_operation: bad operation {operation!r}")
+            return
+        if not task_name or not jedi_task_id:
+            self.logger.error("PRODOPS panda_task_operation: missing task_name/jedi_task_id")
+            return
+        self.run_in_background(
+            self._do_panda_task_operation, m,
+            dedup_key=f"panda-op:{operation}:{jedi_task_id}",
+            label=f"panda_task_operation {operation} {jedi_task_id}")
+
+    def _do_panda_task_operation(self, m):
+        operation = m["operation"]
+        task_name = str(m["task_name"])
+        jedi_task_id = str(m["jedi_task_id"])
+        cmd = [
+            sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
+            "--operation", operation,
+            "--jedi-task-id", jedi_task_id,
+            "--timeout", str(PANDA_TASK_OPERATION_TIMEOUT),
+        ]
+        if operation == "increase_attempts":
+            cmd += ["--increase", str(m.get("increase") or 1)]
+        if operation == "retry_failures" and m.get("new_parameters"):
+            cmd += ["--new-parameters", json.dumps(m["new_parameters"])]
+
+        self.logger.info(
+            f"PRODOPS panda_task_operation: {operation} task={task_name} "
+            f"jediTaskID={jedi_task_id}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
+        except subprocess.TimeoutExpired:
+            reason = f'operation timed out after {PANDA_TASK_OPERATION_TIMEOUT}s'
+            self.logger.error(
+                f"PRODOPS panda_task_operation TIMEOUT: {operation} {jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': operation, 'ok': False, 'error': reason})
+            self._log_action('panda_task_operation', t0, outcome='timeout',
+                             reason=reason,
+                             subject_type='panda_task', subject_key=jedi_task_id,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR,
+                             operation=operation, task_name=task_name)
+            return
+
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  panda-task-operation: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  panda-task-operation: {line}")
+        if p.returncode == 0:
+            summary = (p.stdout or "").strip()
+            self.logger.info(
+                f"PRODOPS panda_task_operation done: {operation} {jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': operation, 'ok': True, 'summary': summary})
+            self._log_action('panda_task_operation', t0,
+                             subject_type='panda_task', subject_key=jedi_task_id,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             operation=operation, task_name=task_name)
+        else:
+            reason = self._derive_reason(p)
+            self.logger.error(
+                f"PRODOPS panda_task_operation FAILED rc={p.returncode}: "
+                f"{operation} {jedi_task_id}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'panda_task_operation_done',
+                'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                'operation': operation, 'ok': False, 'error': reason})
+            self._log_action('panda_task_operation', t0, outcome='error',
+                             reason=reason,
+                             subject_type='panda_task', subject_key=jedi_task_id,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR,
+                             operation=operation, task_name=task_name)
 
     def _handle_sync_epicprod_inventory(self, m):
         """Refresh one job/task inventory record on the worker pool."""
@@ -393,6 +589,13 @@ class EpicProdOpsAgent(BaseAgent):
         else:
             cmd += ["--prod-task", str(m["task_name"])]
         self.logger.info(f"PRODOPS sync_epicprod_inventory: {' '.join(cmd)}")
+        if m.get('pandaid'):
+            subj_type, subj_key = 'panda_job', str(m['pandaid'])
+        elif m.get('jeditaskid'):
+            subj_type, subj_key = 'panda_task', str(m['jeditaskid'])
+        else:
+            subj_type, subj_key = 'campaign_task', str(m['task_name'])
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=INVENTORY_TIMEOUT)
@@ -403,6 +606,10 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'epicprod_inventory_ready', 'ok': False,
                 'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
                 'task_name': m.get('task_name'), 'error': reason})
+            self._log_action('inventory_sync', t0, outcome='timeout',
+                             reason=reason,
+                             subject_type=subj_type, subject_key=subj_key,
+                             level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  sync-epicprod-inventory: {line}")
@@ -411,8 +618,7 @@ class EpicProdOpsAgent(BaseAgent):
         ok = p.returncode == 0
         reason = ''
         if not ok:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS sync_epicprod_inventory FAILED rc={p.returncode}")
         else:
             self.logger.info("PRODOPS sync_epicprod_inventory done")
@@ -420,6 +626,11 @@ class EpicProdOpsAgent(BaseAgent):
             'msg_type': 'epicprod_inventory_ready', 'ok': ok,
             'pandaid': m.get('pandaid'), 'jeditaskid': m.get('jeditaskid'),
             'task_name': m.get('task_name'), 'error': reason})
+        self._log_action('inventory_sync', t0,
+                         outcome='ok' if ok else 'error',
+                         reason=reason,
+                         subject_type=subj_type, subject_key=subj_key,
+                         level=logging.INFO if ok else logging.ERROR)
 
     def _handle_refresh_system_status(self, m):
         """Refresh cached system status rows through the shared doer."""
@@ -439,6 +650,7 @@ class EpicProdOpsAgent(BaseAgent):
         for name in selected:
             cmd += ["--only", str(name)]
         self.logger.info(f"PRODOPS refresh_system_status: {' '.join(cmd)}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=SYSTEM_STATUS_TIMEOUT)
@@ -447,6 +659,10 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(f"PRODOPS refresh_system_status TIMEOUT: {reason}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'system_status_ready', 'ok': False, 'error': reason})
+            self._log_action('system_status_refresh', t0, outcome='timeout',
+                             reason=reason,
+                             level=logging.ERROR,
+                             source=str(m.get('source') or 'ops_agent'))
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  refresh-system-status: {line}")
@@ -455,13 +671,17 @@ class EpicProdOpsAgent(BaseAgent):
         ok = p.returncode == 0
         reason = ''
         if not ok:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS refresh_system_status FAILED rc={p.returncode}")
         else:
             self.logger.info("PRODOPS refresh_system_status done")
         self.send_message('/topic/epictopic', {
             'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
+        self._log_action('system_status_refresh', t0,
+                         outcome='ok' if ok else 'error',
+                         reason=reason,
+                         level=logging.INFO if ok else logging.ERROR,
+                         source=str(m.get('source') or 'ops_agent'))
 
     def _system_status_periodic_loop(self):
         """Keep cached system knowledge fresh without page-load probes."""
@@ -477,6 +697,187 @@ class EpicProdOpsAgent(BaseAgent):
                 label="refresh_system_status periodic")
             time.sleep(SYSTEM_STATUS_INTERVAL)
 
+    def _handle_association_sweep(self, m):
+        """Batch-associate recent PanDA tasks with PCS campaign tasks."""
+        self.run_in_background(
+            self._do_association_sweep, m,
+            dedup_key="association_sweep", label="association_sweep")
+
+    def _do_association_sweep(self, m):
+        """Run the sweep_panda_associations management command. No SSE push —
+        nothing in the browser waits on this; the action stream carries the
+        outcome, counts, and duration."""
+        days = int(m.get('days') or ASSOCIATION_SWEEP_DAYS)
+        cmd = [sys.executable, str(MANAGE_PY), "sweep_panda_associations",
+               "--days", str(days)]
+        self.logger.info(f"PRODOPS association_sweep: days={days}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ASSOCIATION_SWEEP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS association_sweep TIMEOUT after {ASSOCIATION_SWEEP_TIMEOUT}s")
+            self._log_action('association_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {ASSOCIATION_SWEEP_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, days=days)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  sweep-panda-associations: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  sweep-panda-associations: {line}")
+        summary = (p.stdout or "").strip().splitlines()
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS association_sweep FAILED rc={p.returncode}")
+            self._log_action('association_sweep', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, days=days)
+        else:
+            self.logger.info("PRODOPS association_sweep done")
+            self._log_action('association_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, days=days,
+                             summary=(summary[-1] if summary else ''))
+
+    def _handle_questionnaire_import(self, m):
+        """Import new production-request form responses (nightly sweep mode:
+        CSV URL from SysConfig 'questionnaire_csv_url')."""
+        self.run_in_background(
+            self._do_questionnaire_import, m,
+            dedup_key="questionnaire_import", label="questionnaire_import")
+
+    def _do_questionnaire_import(self, m):
+        created_by = str(m.get('created_by') or 'questionnaire_import')
+        cmd = [sys.executable, str(QUESTIONNAIRE_IMPORT_SCRIPT),
+               "--from-sysconfig", "--created-by", created_by]
+        self.logger.info("PRODOPS questionnaire_import: importing form responses")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=QUESTIONNAIRE_IMPORT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS questionnaire_import TIMEOUT after {QUESTIONNAIRE_IMPORT_TIMEOUT}s")
+            self._log_action('questionnaire_import', t0, outcome='timeout',
+                             reason=f'timed out after {QUESTIONNAIRE_IMPORT_TIMEOUT}s',
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  import-questionnaires: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  import-questionnaires: {line}")
+        out = (p.stdout or "").strip()
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS questionnaire_import FAILED rc={p.returncode}")
+            self._log_action('questionnaire_import', t0, outcome='error',
+                             reason=reason,
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+        elif out.startswith('SKIPPED'):
+            self.logger.info("PRODOPS questionnaire_import skipped (no URL configured)")
+            self._log_action('questionnaire_import', t0, outcome='skipped',
+                             username=created_by, message=out)
+        else:
+            self.logger.info("PRODOPS questionnaire_import done")
+            self._log_action('questionnaire_import', t0,
+                             username=created_by, sublevel='normal',
+                             live_default=True,
+                             summary=(out.splitlines()[-1] if out else ''))
+
+    def _handle_questionnaire_automatch(self, m):
+        """LLM-assisted matching of questionnaires to catalog tasks."""
+        self.run_in_background(
+            self._do_questionnaire_automatch, m,
+            dedup_key="questionnaire_automatch", label="questionnaire_automatch")
+
+    def _do_questionnaire_automatch(self, m):
+        created_by = str(m.get('created_by') or 'automatch')
+        cmd = [sys.executable, str(QUESTIONNAIRE_AUTOMATCH_SCRIPT),
+               "--created-by", created_by]
+        if m.get('all'):
+            cmd.append("--all")
+        self.logger.info("PRODOPS questionnaire_automatch: matching requests to tasks")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=QUESTIONNAIRE_AUTOMATCH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS questionnaire_automatch TIMEOUT after {QUESTIONNAIRE_AUTOMATCH_TIMEOUT}s")
+            self._log_action('questionnaire_automatch', t0, outcome='timeout',
+                             reason=f'timed out after {QUESTIONNAIRE_AUTOMATCH_TIMEOUT}s',
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  match-questionnaires: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  match-questionnaires: {line}")
+        out = (p.stdout or "").strip()
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS questionnaire_automatch FAILED rc={p.returncode}")
+            self._log_action('questionnaire_automatch', t0, outcome='error',
+                             reason=reason,
+                             username=created_by, sublevel='normal',
+                             live_default=True, level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS questionnaire_automatch done")
+            self._log_action('questionnaire_automatch', t0,
+                             username=created_by, sublevel='normal',
+                             live_default=True,
+                             summary=(out.splitlines()[-1] if out else ''))
+
+    def _handle_catalog_sync(self, m):
+        """Nightly composite catalog sync: association sweep, Rucio snapshot,
+        EVGEN assimilation, questionnaire match, progress refresh — in
+        dependency order."""
+        self.run_in_background(
+            self._do_catalog_sync, m,
+            dedup_key="catalog_sync", label="catalog_sync")
+
+    def _do_catalog_sync(self, m):
+        """Run the sync steps sequentially. Each step logs its own action
+        record with outcome and duration; this logs the chain summary — the
+        catalog-freshness timestamp the alarm system watches."""
+        created_by = str(m.get('created_by') or 'catalog_sync')
+        t0 = time.monotonic()
+        steps = [
+            ('catalog_import_csv',
+             lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
+            ('epic_prod_past_import', self._do_epic_prod_past_import),
+            ('questionnaire_import', self._do_questionnaire_import),
+            ('association_sweep', self._do_association_sweep),
+            ('rucio_snapshot_update', self._do_rucio_snapshot_update),
+            ('rucio_arrivals_sweep', self._do_rucio_arrivals_sweep),
+            ('evgen_rucio_update', self._do_evgen_rucio_update),
+            ('questionnaire_automatch', self._do_questionnaire_automatch),
+            ('questionnaire_match_update', self._do_questionnaire_match_update),
+            ('campaign_progress_refresh', self._do_campaign_progress_refresh),
+        ]
+        failed = []
+        for name, step in steps:
+            try:
+                step(dict(m, created_by=created_by))
+            except Exception as e:
+                failed.append(name)
+                self.logger.error(f"PRODOPS catalog_sync step {name} raised: {e}")
+        self._log_action(
+            'catalog_sync', t0,
+            outcome='ok' if not failed else 'error',
+            reason=('step(s) raised: ' + ', '.join(failed)) if failed else '',
+            username=created_by,
+            sublevel='high', live_default=True,
+            level=logging.INFO if not failed else logging.ERROR,
+            steps=len(steps), raised=failed)
+
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
         thread — the doer makes a live JLab fetch and matches every task, far
@@ -491,6 +892,7 @@ class EpicProdOpsAgent(BaseAgent):
         so the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
         cmd = [sys.executable, str(RUCIO_SNAPSHOT_SCRIPT)]
         self.logger.info("PRODOPS rucio_snapshot_update: refreshing current/last snapshot")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=RUCIO_SNAPSHOT_TIMEOUT)
@@ -500,21 +902,124 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False,
                 'error': f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s'})
+            self._log_action('rucio_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {RUCIO_SNAPSHOT_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  rucio-snapshot-update: {line}")
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  rucio-snapshot-update: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS rucio_snapshot_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': False, 'error': reason})
+            self._log_action('rucio_sweep', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS rucio_snapshot_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
+            self._log_action('rucio_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True)
+
+    def _handle_rucio_arrivals_sweep(self, m):
+        """Run the clockwork arrivals sweep off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_rucio_arrivals_sweep, m,
+            dedup_key="rucio_arrivals_sweep", label="rucio_arrivals_sweep")
+
+    def _do_rucio_arrivals_sweep(self, m):
+        """Detect new files landed in JLab Rucio since the last sweep and
+        record per-campaign arrivals (the derived 'producing' signal). The
+        service emits the live rucio_arrivals event when anything arrived;
+        this logs the step itself."""
+        cmd = [sys.executable, str(RUCIO_ARRIVALS_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS rucio_arrivals_sweep: querying new files")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=RUCIO_ARRIVALS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS rucio_arrivals_sweep TIMEOUT after {RUCIO_ARRIVALS_TIMEOUT}s")
+            self._log_action('rucio_arrivals_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {RUCIO_ARRIVALS_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  rucio-arrivals-sweep: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  rucio-arrivals-sweep: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS rucio_arrivals_sweep FAILED rc={p.returncode}")
+            self._log_action('rucio_arrivals_sweep', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS rucio_arrivals_sweep done")
+            self._log_action('rucio_arrivals_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=((p.stdout or '').splitlines() or [''])[0])
+
+    def _handle_epic_prod_past_import(self, m):
+        """Run the past-campaign output ingest off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_epic_prod_past_import, m,
+            dedup_key="epic_prod_past_import", label="epic_prod_past_import")
+
+    def _do_epic_prod_past_import(self, m):
+        """Pull the epic-prod clone and re-run the idempotent FULL/RECO
+        past-campaign ingest, so recorded production content for every
+        campaign tracks what the production team publishes — clockwork,
+        not a button."""
+        cmd = [sys.executable, str(PAST_IMPORT_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS epic_prod_past_import: pull + ingest")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=PAST_IMPORT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS epic_prod_past_import TIMEOUT after {PAST_IMPORT_TIMEOUT}s")
+            self._log_action('past_import', t0, outcome='timeout',
+                             reason=f'timed out after {PAST_IMPORT_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  epic-prod-past-import: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  epic-prod-past-import: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS epic_prod_past_import FAILED rc={p.returncode}")
+            self._log_action('past_import', t0, outcome='error', reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS epic_prod_past_import done")
+            self._log_action('past_import', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             summary=((p.stdout or '').splitlines() or [''])[-1])
 
     def _handle_evgen_rucio_update(self, m):
         """Assimilate the JLab Rucio EVGEN inventory off the receiver thread — a
@@ -529,6 +1034,7 @@ class EpicProdOpsAgent(BaseAgent):
         AND failure so the catalog never hangs on 'Updating…'. See docs/SSE_PUSH.md."""
         cmd = [sys.executable, str(EVGEN_RUCIO_SCRIPT), "--apply"]
         self.logger.info("PRODOPS evgen_rucio_update: assimilating JLab Rucio EVGEN")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=EVGEN_RUCIO_TIMEOUT)
@@ -538,21 +1044,31 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False,
                 'error': f'timed out after {EVGEN_RUCIO_TIMEOUT}s'})
+            self._log_action('evgen_sweep', t0, outcome='timeout',
+                             reason=f'timed out after {EVGEN_RUCIO_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  import-evgen-rucio: {line}")
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  import-evgen-rucio: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS evgen_rucio_update FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': False, 'error': reason})
+            self._log_action('evgen_sweep', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS evgen_rucio_update done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_rucio_ready', 'ok': True})
+            self._log_action('evgen_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True)
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
@@ -569,6 +1085,7 @@ class EpicProdOpsAgent(BaseAgent):
         source = m.get('source', '')
         cmd = [sys.executable, str(CATALOG_IMPORT_SCRIPT), source]
         self.logger.info(f"PRODOPS catalog_import: importing {source}")
+        t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=CATALOG_IMPORT_TIMEOUT)
@@ -578,26 +1095,240 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': f'timed out after {CATALOG_IMPORT_TIMEOUT}s'})
+            self._log_action('catalog_import', t0, outcome='timeout',
+                             reason=f'timed out after {CATALOG_IMPORT_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR, source=source)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  pcs-catalog-import: {line}")
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  pcs-catalog-import: {line}")
         if p.returncode != 0:
-            stderr = (p.stderr or "").strip()
-            reason = stderr.splitlines()[-1] if stderr else f"rc={p.returncode}"
+            reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS catalog_import {source} FAILED rc={p.returncode}")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': False,
                 'error': reason})
+            self._log_action('catalog_import', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, level=logging.ERROR, source=source)
         else:
             summary = (p.stdout or "").strip().splitlines()
             self.logger.info(f"PRODOPS catalog_import {source} done")
             self.send_message('/topic/epictopic', {
                 'msg_type': 'catalog_import_ready', 'source': source, 'ok': True,
                 'summary': summary[-1] if summary else ''})
+            self._log_action('catalog_import', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True, source=source,
+                             summary=(summary[-1] if summary else ''))
+
+    def _handle_questionnaire_match_update(self, m):
+        """Rebuild task-local questionnaire-match caches off the receiver
+        thread, then push completion so the catalog button can reload."""
+        self.run_in_background(
+            self._do_questionnaire_match_update, m,
+            dedup_key="questionnaire_match_update",
+            label="questionnaire_match_update")
+
+    def _do_questionnaire_match_update(self, m):
+        created_by = m.get('created_by') or 'questionnaire_match'
+        cmd = [
+            sys.executable, str(QUESTIONNAIRE_MATCH_SCRIPT),
+            "--updated-by", str(created_by),
+        ]
+        self.logger.info("PRODOPS questionnaire_match_update: rebuilding cache")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=QUESTIONNAIRE_MATCH_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                "PRODOPS questionnaire_match_update TIMEOUT after "
+                f"{QUESTIONNAIRE_MATCH_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'questionnaire_match_ready', 'ok': False,
+                'error': f'timed out after {QUESTIONNAIRE_MATCH_TIMEOUT}s'})
+            self._log_action('questionnaire_match', t0, outcome='timeout',
+                             reason=f'timed out after {QUESTIONNAIRE_MATCH_TIMEOUT}s',
+                             username=str(created_by), level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  update-questionnaire-matches: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  update-questionnaire-matches: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(
+                f"PRODOPS questionnaire_match_update FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'questionnaire_match_ready', 'ok': False,
+                'error': reason})
+            self._log_action('questionnaire_match', t0, outcome='error',
+                             reason=reason,
+                             username=str(created_by), level=logging.ERROR)
+        else:
+            summary = (p.stdout or "").strip()
+            self.logger.info("PRODOPS questionnaire_match_update done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'questionnaire_match_ready', 'ok': True,
+                'summary': summary})
+            self._log_action('questionnaire_match', t0, username=str(created_by))
+
+    def _handle_campaign_progress_refresh(self, m):
+        """Rebuild current campaign progress data + progress table cache."""
+        now = time.time()
+        if now - self._campaign_progress_last_start < CAMPAIGN_PROGRESS_MIN_INTERVAL:
+            self.logger.warning("PRODOPS campaign_progress_refresh: cooldown active, dropping duplicate")
+            return
+        self._campaign_progress_last_start = now
+        self.run_in_background(
+            self._do_campaign_progress_refresh, m,
+            dedup_key="campaign_progress_refresh",
+            label="campaign_progress_refresh")
+
+    def _do_campaign_progress_refresh(self, m):
+        created_by = m.get('created_by') or 'progress_refresh'
+        cmd = [
+            sys.executable, str(CAMPAIGN_PROGRESS_SCRIPT),
+            "--generated-by", str(created_by),
+        ]
+        self.logger.info("PRODOPS campaign_progress_refresh: rebuilding progress cache")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=CAMPAIGN_PROGRESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                "PRODOPS campaign_progress_refresh TIMEOUT after "
+                f"{CAMPAIGN_PROGRESS_TIMEOUT}s")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'campaign_progress_ready', 'ok': False,
+                'error': f'timed out after {CAMPAIGN_PROGRESS_TIMEOUT}s'})
+            self._log_action('progress_refresh', t0, outcome='timeout',
+                             reason=f'timed out after {CAMPAIGN_PROGRESS_TIMEOUT}s',
+                             username=str(created_by), level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  refresh-campaign-progress: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  refresh-campaign-progress: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(
+                f"PRODOPS campaign_progress_refresh FAILED rc={p.returncode}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'campaign_progress_ready', 'ok': False,
+                'error': reason})
+            self._log_action('progress_refresh', t0, outcome='error',
+                             reason=reason,
+                             username=str(created_by), level=logging.ERROR)
+        else:
+            summary = (p.stdout or "").strip()
+            self.logger.info("PRODOPS campaign_progress_refresh done")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'campaign_progress_ready', 'ok': True,
+                'summary': summary})
+            self._log_action('progress_refresh', t0, username=str(created_by))
+
+    # -- action stream --------------------------------------------------------
+
+    def _log_action(self, action, t0=None, *, outcome='ok', subject_type='',
+                    subject_key='', username='', sublevel='low',
+                    live_default=False, message='', reason='',
+                    level=logging.INFO, **counts):
+        """Record one action in the epicprod action stream (AppLog via REST).
+
+        The ops agent is out-of-process, so this posts the same record shape
+        monitor_app.epicprod_logging.log_epicprod_action writes via the ORM:
+        app_name='epicprod', instance 'ops-agent', structured extra_data with
+        the event's declared sublevel (importance: which humans it
+        reaches; authoritative, changed by changing the event) and its
+        live_default RECOMMENDATION for the live stream (effective decision =
+        SysConfig live override over the default). Pass the doer start time
+        as t0 and the measured duration_ms is recorded — every sweep and
+        timed operation reports its execution time to the log. Every non-ok
+        outcome passes reason — the short failure cause (last stderr line,
+        rc, or timeout note); it is stored in extra_data and appended to the
+        message, so the why is exposed everywhere the record is read.
+        Never raises; a failed post is logged and the action proceeds.
+        """
+        extra = {
+            'action': str(action),
+            'outcome': str(outcome),
+            'sublevel': str(sublevel),
+            'live_default': bool(live_default),
+        }
+        if subject_type:
+            extra['subject_type'] = str(subject_type)
+        if subject_key:
+            extra['subject_key'] = str(subject_key)
+        if username:
+            extra['username'] = str(username)
+        if t0 is not None:
+            extra['duration_ms'] = int((time.monotonic() - t0) * 1000)
+        if reason:
+            extra['reason'] = str(reason)[:300]
+        for key, value in counts.items():
+            if key not in ('action', 'subject_type', 'subject_key', 'username',
+                           'outcome', 'duration_ms', 'sublevel', 'live_default',
+                           'reason'):
+                extra[key] = value
+        if not message:
+            subject = f"{subject_type}:{subject_key}" if subject_key else ''
+            message = ' '.join(x for x in (str(action), subject, str(outcome)) if x)
+        if reason:
+            message = f"{message} — {str(reason)[:300]}"
+        try:
+            resp = self._action_log_session.post(
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/logs/",
+                json={
+                    'app_name': 'epicprod',
+                    'instance_name': 'ops-agent',
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'level': int(level),
+                    'levelname': logging.getLevelName(int(level)),
+                    'message': message,
+                    'module': 'epicprod_ops_agent',
+                    'funcname': str(action),
+                    'lineno': 0,
+                    'process': os.getpid(),
+                    'thread': threading.get_ident(),
+                    'extra_data': extra,
+                },
+                timeout=ACTION_LOG_TIMEOUT)
+            resp.raise_for_status()
+        except Exception as e:
+            self.logger.warning(f"PRODOPS action log post failed ({action}): {e}")
 
     # -- helpers -------------------------------------------------------------
+
+    @staticmethod
+    def _derive_reason(p):
+        """Short failure cause from a finished doer subprocess.
+
+        A negative returncode means the doer was killed by a signal (an agent
+        restart SIGTERMs in-flight doers) and its stderr cannot explain that.
+        Otherwise prefer the last stderr line that states an error over
+        trailing bootstrap/INFO noise, then the last line, then the bare rc.
+        """
+        if p.returncode < 0:
+            try:
+                signame = signal.Signals(-p.returncode).name
+            except ValueError:
+                signame = str(-p.returncode)
+            return f"killed by signal {signame}"
+        stderr = (p.stderr or "").strip()
+        if not stderr:
+            return f"rc={p.returncode}"
+        lines = stderr.splitlines()
+        for line in reversed(lines):
+            if any(tok in line for tok in ('ERROR', 'CRITICAL', 'FATAL',
+                                           'Error:', 'Exception')):
+                return line.strip()
+        return lines[-1].strip()
 
     def _mark_error(self, jobdir, reason):
         """Record a failed fetch in the cache dir (attempt count + reason) so the

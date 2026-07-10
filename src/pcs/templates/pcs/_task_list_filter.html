@@ -17,6 +17,17 @@
 .pcs-tlf-list th.pcs-sort { cursor: pointer; user-select: none; }
 .pcs-tlf-list td.pcs-tlf-cell-dataset { min-width: 24em; }
 
+/* Propagation disposition badges — shown only when not 'continue'. */
+.pcs-prop-badge { font-weight: 600; padding: 0 .45em; border-radius: .5em; margin-left: .4em; }
+.pcs-prop-hold  { background-color: #ffe9b0; color: #6b4e00; }
+.pcs-prop-final { background-color: #f6c8c8; color: #7a1212; }
+
+/* Gentle required-comment prompt inside the propagation panel. */
+.pcs-prop-need { background-color: #fff7e0; border: 1px solid #e6c96a; color: #5b4a12;
+                 border-radius: .5em; padding: .4em .7em; font-weight: 600; }
+.pcs-prop-comment-attn { border-color: #e6c96a !important;
+                         box-shadow: 0 0 0 .2rem rgba(230, 201, 106, .35); }
+
 /* Requestor row colors, mirroring eic/epic-prod default_datasets.md. */
 .pwg-edt            { background-color: #d0e8ff !important; }
 .pwg-inclusive      { background-color: #d4f4d4 !important; }
@@ -44,11 +55,41 @@
 /* Dataset cell takes all leftover horizontal space and wraps long URLs
    so the table fits the viewport without horizontal scroll. */
 .pcs-tlf-list td.pcs-tlf-cell-dataset {
-  width: 100%;
+  width: 48%;
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+.pcs-tlf-list.pcs-tlf-progress {
+  width: auto !important;
+  max-width: 100%;
+}
+.pcs-tlf-list.pcs-tlf-progress td.pcs-tlf-cell-dataset {
+  width: auto;
+  min-width: 24em;
+  max-width: 42em;
+}
+.pcs-tlf-progress-output td {
+  border-top: 0;
+  background: #fbfcfd;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+}
+.pcs-tlf-progress-output td.pcs-tlf-cell-dataset {
+  padding-left: 1.25rem;
+}
 .pcs-tlf-list tr.pcs-tlf-desc td { word-break: break-word; overflow-wrap: anywhere; }
+.pcs-progress-track {
+  width: 12em;
+  max-width: 100%;
+  height: 0.55rem;
+  background: #e9ecef;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pcs-progress-fill {
+  height: 100%;
+  background: #0d6efd;
+}
 </style>
 {% comment %}
 Shared task-list + filter partial used by:
@@ -83,13 +124,18 @@ Context expected:
     <input type="search" id="pcs-tlf-q" value="{{ filters.q|default:'' }}"
            class="form-control form-control-sm" style="width:24em;"
            placeholder="dataset / description…">
-    <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-outline-secondary"
+    <button type="button" id="pcs-tlf-clear" class="btn btn-sm btn-secondary"
             title="Clear all filters">Clear</button>
   </div>
   <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Status:</span>
     <a href="#" data-filter="status" data-value="" class="filter-link filter-active">All</a>
     <span id="pcs-tlf-status-opts"></span>
+  </div>
+  <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label">Campaign propagation:</span>
+    <a href="#" data-filter="propagation" data-value="" class="filter-link filter-active">All</a>
+    <span id="pcs-tlf-propagation-opts"></span>
   </div>
   <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Requestor:</span>
@@ -161,6 +207,11 @@ Context expected:
     <a href="#" data-toggle="incomplete_input" class="filter-link">incomplete (<span data-count="incomplete_input">0</span>)</a>
   </div>
   <div class="pcs-tlf-bar-row">
+    <span class="pcs-tlf-label ai-attr-text">AI:</span>
+    <a href="#" data-toggle="ai_proposed" class="filter-link ai-attr-text">proposed (<span data-count="ai_proposed">0</span>)</a>
+    <a href="#" data-toggle="ai_executed" class="filter-link ai-attr-text">executed (<span data-count="ai_executed">0</span>)</a>
+  </div>
+  <div class="pcs-tlf-bar-row">
     <span class="pcs-tlf-label">Flags:</span>
     <a href="#" data-toggle="new_request" class="filter-link">New (<span data-count="new_request">0</span>)</a>
     <a href="#" data-toggle="pre_tdr_use" class="filter-link">pTDR (<span data-count="pre_tdr_use">0</span>)</a>
@@ -180,12 +231,21 @@ Context expected:
 </div>
 
 <div class="dataTables_wrapper pcs-tlf-list-wrap table-responsive">
-  <table class="table table-sm pcs-tlf-list dataTable mb-1">
+  <table class="table table-sm pcs-tlf-list{% if catalog_view == 'progress' %} pcs-tlf-progress{% endif %} dataTable mb-1">
     <thead>
       <tr>
         <th style="width:1.5em"><input type="checkbox" id="pcs-tlf-selectall" aria-label="Select all visible"></th>
         <th data-sort="index" class="pcs-sort sorting">#</th>
         <th data-sort="requestor" class="pcs-sort sorting">Requestor</th>
+        {% if catalog_view == 'progress' %}
+        <th data-sort="task_mod" data-default-dir="desc" class="pcs-sort sorting">Task mod</th>
+        <th data-sort="dataset" class="pcs-sort sorting">Datasets</th>
+        <th data-sort="jobs" class="pcs-sort sorting">Jobs</th>
+        <th data-sort="completion" data-default-dir="desc" class="pcs-sort sorting">Dataset fill</th>
+        <th data-sort="processing" data-default-dir="desc" class="pcs-sort sorting">Processing</th>
+        <th data-sort="failures" data-default-dir="desc" class="pcs-sort sorting">Failures</th>
+        <th data-sort="link" data-default-dir="desc" class="pcs-sort sorting">Link</th>
+        {% else %}
         <th data-sort="dataset" class="pcs-sort sorting">Dataset</th>
         <th data-sort="status" class="pcs-sort sorting">Status</th>
         <th data-sort="nevents" class="pcs-sort sorting">Nev (M)</th>
@@ -194,6 +254,7 @@ Context expected:
         <th data-sort="pre_tdr_use" class="pcs-sort sorting">pTDR</th>
         <th data-sort="early_science_use" class="pcs-sort sorting">early</th>
         <th data-sort="priority" class="pcs-sort sorting">Priority</th>
+        {% endif %}
       </tr>
     </thead>
     <tbody>
@@ -202,6 +263,9 @@ Context expected:
       <tr class="pcs-tlf-row pcs-tlf-data{% if focused_task_id == t.pk %} table-active{% endif %}"
           data-task-id="{{ t.pk }}"
           data-status="{{ t.status|default:'' }}"
+          data-propagation="{{ t.dataset.propagation|default:'' }}"
+          data-ai-proposed="{% if t.dataset.metadata.proposal %}1{% else %}0{% endif %}"
+          data-ai-executed="{% if t.dataset.composed_name in ai_executed_names %}1{% else %}0{% endif %}"
           data-requestor="{{ t.requestor|default:'' }}"
           data-submission-path="{% if t.prod_config.data.submission_path == 'panda' %}panda{% else %}condor{% endif %}"
           data-pre-tdr="{% if t.pre_tdr_use %}1{% else %}0{% endif %}"
@@ -226,14 +290,27 @@ Context expected:
           data-has-input="{% if t.has_input %}1{% else %}0{% endif %}"
           data-no-input="{% if t.dataset.stage == 'evgen' and not t.has_input %}1{% else %}0{% endif %}"
           data-incomplete-input="{% if t.input_incomplete %}1{% else %}0{% endif %}"
+          {% if catalog_view == 'progress' %}
+          data-progress-completion="{{ t.progress_sort.completion }}"
+          data-progress-processing="{{ t.progress_sort.processing }}"
+          data-progress-jobs="{{ t.progress_sort.jobs }}"
+          data-progress-failures="{{ t.progress_sort.failures }}"
+          data-progress-link="{{ t.progress_sort.link }}"
+          {% endif %}
           data-search="{{ ds_path|lower }} {{ t.composed_name|lower }} {{ t.description|default:''|lower }}">
-        <td class="align-top"><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.composed_name }}"></td>
-        <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}">{{ forloop.counter }}</td>
-        <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}">{{ t.requestor|default:"—" }}</td>
-        <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}">
+        <td class="align-top"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}><input type="checkbox" class="pcs-tlf-cb" name="task" value="{{ t.composed_name }}"></td>
+        <td class="align-top small text-muted" data-sort-val="{{ forloop.counter }}"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ forloop.counter }}</td>
+        <td class="align-top small{% if t.requestor %} pwg-{{ t.requestor|lower }}{% endif %}"{% if catalog_view == 'progress' and t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ t.requestor|default:"—" }}</td>
+        {% if catalog_view == 'progress' %}
+        <td class="align-top small text-muted" data-sort-val="{{ t.updated_at|date:'U' }}"{% if t.progress.outputs %} rowspan="{{ t.progress.outputs|length|add:'1' }}"{% endif %}>{{ t.updated_at|fmt_ago }}</td>
+        {% endif %}
+        <td class="small pcs-tlf-cell-dataset align-top" data-sort-val="{{ ds_path }}"{% if catalog_view == 'progress' %} colspan="6"{% endif %}>
           {% if t.campaign %}
             <div class="text-muted"><strong>Campaign:</strong> {{ t.campaign.name }}
               &middot; <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ t.composed_name }}</a>
+              {% if t.dataset and t.dataset.propagation != 'continue' %}<span class="pcs-prop-badge pcs-prop-{{ t.dataset.propagation }}">{{ t.dataset.propagation }}</span>{% endif %}
+              {% with prop=t.dataset.metadata.proposal %}{% if prop %}<a class="ai-attr" style="text-decoration:none" href="{% url 'ai:ai_proposals' %}?subject={{ t.dataset.composed_name|urlencode }}" title="{{ prop.comment }} — proposed by {{ prop.proposer }} {{ prop.proposed_at|slice:":10" }}. Click to review and decide on the AI proposal list.">AI: {{ prop.prev_state }} &rarr; {{ prop.payload.state }}</a>{% endif %}{% endwith %}
+              {% if t.dataset.composed_name in ai_executed_names %}<a class="ai-attr" style="text-decoration:none" href="{% url 'ai:ai_proposals' %}?subject={{ t.dataset.composed_name|urlencode }}" title="An executed AI proposal stands on this dataset — click to see it on the AI proposal list, where it can be undone">AI: executed</a>{% endif %}
             </div>
           {% endif %}
           <div><strong class="text-muted">Input:</strong> <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ t.composed_name|urlencode }}">{{ ds_path }}</a></div>
@@ -248,10 +325,14 @@ Context expected:
               {% if issue %}{% if t.description %} · {% endif %}<a href="{{ issue }}" target="_blank" rel="noopener">issue</a>{% endif %}
             </div>
           {% endif %}
-          {% if t.questionnaire_matches %}
+          {% if t.pc_requests or t.questionnaire_matches %}
             <div><strong class="text-muted">Request:</strong>
-              {% for qm in t.questionnaire_matches %}
+              {% for pr in t.pc_requests %}
                 {% if not forloop.first %}, {% endif %}
+                <a href="{% url 'pcs:pcs_edition_data' name=t.composed_name %}" title="{{ pr.requestor }}{% if pr.nevents %} · {{ pr.nevents }} events{% endif %}{% if pr.description %} · {{ pr.description|truncatechars:120 }}{% endif %} — production request on this physics configuration; click for the configuration's data page">req#{{ pr.pk }}</a>
+              {% endfor %}
+              {% for qm in t.questionnaire_matches %}
+                {% if not forloop.first or t.pc_requests %}, {% endif %}
                 <a href="{% url 'pcs:questionnaire_detail' pk=qm.questionnaire.pk %}">#{{ qm.questionnaire.pk }}</a>{% if qm.confidence %} <span class="text-muted">({{ qm.confidence }})</span>{% endif %}
               {% endfor %}
             </div>
@@ -270,7 +351,7 @@ Context expected:
               </ul>
             </div>
           {% endif %}
-          {% if t.outputs %}
+          {% if t.outputs and catalog_view != 'progress' %}
             <div><strong class="text-muted">Output{{ t.outputs|length|pluralize }}:</strong>
               <ul class="mb-0 ps-3">
                 {% for o in t.outputs %}
@@ -282,7 +363,11 @@ Context expected:
               </ul>
             </div>
           {% endif %}
+          {% if catalog_view == 'progress' and not t.progress.outputs %}
+            <div class="text-muted">No output recorded</div>
+          {% endif %}
         </td>
+        {% if catalog_view != 'progress' %}
         <td class="small {{ t.status|state_class }}" title="{{ t.status|state_title }}" data-sort-val="{{ t.status }}">{{ t.status|state_label }}</td>
         <td class="small text-end" data-sort-val="{{ nev|default:'' }}">{{ nev|millions }}</td>
         <td class="small text-center" data-sort-val="{% if bg|lower == 'yes' %}1{% else %}0{% endif %}">{% if bg|lower == 'yes' %}Yes{% endif %}</td>
@@ -290,13 +375,67 @@ Context expected:
         <td class="small text-center">{% if t.pre_tdr_use %}Yes{% endif %}</td>
         <td class="small text-center">{% if t.early_science_use %}Yes{% endif %}</td>
         <td class="small" data-sort-val="{{ t.priority|default:'' }}">{{ t.priority|default:"" }}</td>
+        {% endif %}
       </tr>
+      {% if catalog_view == 'progress' %}
+        {% for o in t.progress.outputs %}
+        <tr class="pcs-tlf-progress-output">
+          <td class="small pcs-tlf-cell-dataset align-top">
+            {% if o.stage %}<strong>{% if o.stage == 'FULL' %}Simu{% else %}Reco{% endif %}:</strong>{% else %}<strong>Output:</strong>{% endif %}
+            <a href="{{ o.did|rucio_did_url }}" title="Rucio dataset detail">{{ o.did }}</a>
+            <span class="text-muted">&middot; {{ o.file_count }} file{{ o.file_count|pluralize }}</span>
+          </td>
+          <td class="small align-top">
+            {% if o.processing.jeditaskid %}
+              <div><strong>{{ o.processing.total_jobs }}</strong> total</div>
+              <div class="text-muted">{{ o.processing.nactive }} active, {{ o.processing.nfinished }} finished</div>
+            {% elif o.expected_jobs %}
+              <div><strong>{{ o.expected_jobs }}</strong></div>
+            {% else %}
+              <span class="text-muted">Unknown</span>
+            {% endif %}
+          </td>
+          <td class="small align-top">
+            {% if o.expected_jobs %}
+              <div class="d-flex align-items-center gap-2">
+                <div class="pcs-progress-track" title="{{ o.file_count }} / {{ o.expected_jobs }} {{ o.expected_source }}">
+                  <div class="pcs-progress-fill" style="width:{{ o.completion_width }}%"></div>
+                </div>
+                <span>{{ o.completion_label }}</span>
+              </div>
+            {% else %}
+              <span class="text-muted">No expected job count</span>
+            {% endif %}
+          </td>
+          <td class="small align-top">
+            {% if o.processing.jeditaskid %}
+              <a href="{% url 'monitor_app:panda_task_detail' o.processing.jeditaskid %}">PanDA {{ o.processing.jeditaskid }}</a>
+              <div class="{{ o.processing.status|state_class }}" title="{{ o.processing.status|state_title }}">{{ o.processing.status|state_label }}</div>
+              {% if o.processing.processing_percent is not None %}
+                <div class="text-muted">{{ o.processing.processing_percent }}% terminal</div>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td class="small align-top">
+            {% if o.processing.jeditaskid %}
+              <div>{{ o.processing.nfailed }} failed</div>
+              <div class="text-muted">{{ o.processing.nfinalfailed }} final{% if o.processing.final_failure_rate is not None %} &middot; {{ o.processing.final_failure_rate }}%{% endif %}</div>
+            {% endif %}
+          </td>
+          <td class="small align-top">
+            {% if o.link %}
+              {{ o.link }}
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      {% endif %}
       {% endwith %}
       {% empty %}
-      <tr><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr><td colspan="{% if catalog_view == 'progress' %}10{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
       {% endfor %}
 
-      <tr id="pcs-tlf-empty" style="display:none"><td colspan="11" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
+      <tr id="pcs-tlf-empty" style="display:none"><td colspan="{% if catalog_view == 'progress' %}10{% else %}11{% endif %}" class="text-center text-muted py-3">No tasks match the current filter.</td></tr>
     </tbody>
   </table>
 </div>
@@ -304,13 +443,51 @@ Context expected:
 <div class="pcs-tlf-bulk mt-1 d-flex align-items-center gap-2">
   <span class="text-muted small"><span id="pcs-tlf-count">0</span> selected</span>
   <div class="btn-group btn-group-sm ms-2" role="group" aria-label="Bulk actions">
-    <button type="button" class="btn btn-outline-primary" data-bulk="submit" disabled>Submit</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="archive" disabled>Archive</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="withdraw" disabled>Withdraw</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="clone" disabled>Clone</button>
-    <button type="button" class="btn btn-outline-secondary" data-bulk="priority" disabled>Set priority…</button>
+    <button type="button" class="btn btn-success" data-bulk="submit" disabled>Submit</button>
+    <button type="button" class="btn btn-secondary" data-bulk="archive" disabled>Archive</button>
+    <button type="button" class="btn btn-secondary" data-bulk="withdraw" disabled>Withdraw</button>
+    <button type="button" class="btn btn-secondary" data-bulk="clone" disabled>Clone</button>
+    <button type="button" class="btn btn-secondary" data-bulk="priority" disabled>Set priority…</button>
+    <button type="button" class="btn btn-secondary" data-bulk="propagation" disabled>Campaign propagation…</button>
+    <button type="button" class="btn btn-success" data-bulk="ai_approve" disabled>Approve AI</button>
+    <button type="button" class="btn btn-secondary" data-bulk="ai_deny" disabled>Deny AI</button>
+    <button type="button" class="btn btn-dark-green" data-bulk="ai_undo" disabled
+            title="Undo executed AI proposals on the selected datasets — restores the pre-approval state and returns the proposals to pending; the events remain on the record">Undo AI</button>
   </div>
+  <select id="pcs-ai-quality" class="form-select form-select-sm ms-1" style="width:auto"
+          title="Optional quality tag recorded with an AI proposal decision (worst to best; 'wrong' marks the proposal miscalibrated and counts against the proposer's track record)">
+    <option value="">quality&hellip;</option>
+    <option value="wrong">wrong</option>
+    <option value="poor">poor</option>
+    <option value="ok">ok</option>
+    <option value="good">good</option>
+  </select>
   <span class="text-muted small ms-auto">Showing {{ tasks|length }} task{{ tasks|length|pluralize }}</span>
+</div>
+
+<div id="pcs-prop-panel" class="mt-2 p-2 border rounded" style="display:none; max-width:60em">
+  {% csrf_token %}
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <strong>Campaign propagation</strong>
+    <span class="text-muted">(<span id="pcs-prop-count">0</span> selected)</span>
+    <select id="pcs-prop-state" class="form-select" style="width:auto">
+      <option value="continue">continue</option>
+      <option value="hold">hold</option>
+      <option value="final">final</option>
+    </select>
+    <input id="pcs-prop-replaced-by" class="form-control" style="width:26em"
+           placeholder="replaced by (composed name, optional)">
+  </div>
+  <div id="pcs-prop-need-comment" class="pcs-prop-need mt-2" style="display:none">
+    A comment is required — a sentence on why, with its source. Enter completes the change.
+  </div>
+  <div class="d-flex align-items-start gap-2 mt-2">
+    <textarea id="pcs-prop-comment" class="form-control" rows="2"
+              placeholder="Comment (required) — the why, with its source">{{ propagation_last_comment }}</textarea>
+    <button type="button" id="pcs-prop-apply" class="btn btn-success">Apply</button>
+    <button type="button" id="pcs-prop-cancel" class="btn btn-secondary">Cancel</button>
+  </div>
+  <div id="pcs-prop-result" class="mt-1" style="color:#b02a37"></div>
 </div>
 
 <script>
@@ -321,12 +498,13 @@ Context expected:
      state of the other filters. Initial state comes from URL query params
      so the catalog stays bookmarkable. */
 
-  const STR = ['status','requestor','evgen','submission_path','priority','nevents',
+  const STR = ['status','propagation','requestor','evgen','submission_path','priority','nevents',
                'detector','beam','physics','q2','species','energy'];
   const BOOL = ['new_request','pre_tdr_use','early_science_use','other_use','background',
                 'has_output','no_output','incomplete_output','has_simu','has_reco',
-                'has_input','no_input','incomplete_input'];
-  const DS = { status:'status', requestor:'requestor', evgen:'evgen',
+                'has_input','no_input','incomplete_input','ai_proposed','ai_executed'];
+  const DS = { status:'status', propagation:'propagation',
+               requestor:'requestor', evgen:'evgen',
                submission_path:'submissionPath',
                priority:'priority', nevents:'nevents',
                detector:'detector', beam:'beam', physics:'physics',
@@ -338,7 +516,8 @@ Context expected:
                incomplete_output:'incompleteOutput',
                has_simu:'hasSimu', has_reco:'hasReco',
                has_input:'hasInput', no_input:'noInput',
-               incomplete_input:'incompleteInput' };
+               incomplete_input:'incompleteInput',
+               ai_proposed:'aiProposed', ai_executed:'aiExecuted' };
 
   // Unit-aware Energy sort (100MeV < 500MeV < 1GeV < 5GeV).
   function energyMeV(s) {
@@ -358,6 +537,7 @@ Context expected:
   const state = {
     q: (initial.get('q') || '').trim(),
     status: initial.get('status') || '',
+    propagation: initial.get('propagation') || '',
     requestor: initial.get('requestor') || '',
     evgen: initial.get('evgen') || '',
     submission_path: initial.get('submission_path') || '',
@@ -382,6 +562,10 @@ Context expected:
     has_input: initial.get('has_input') === '1',
     no_input: initial.get('no_input') === '1',
     incomplete_input: initial.get('incomplete_input') === '1',
+    ai_proposed: initial.get('ai_proposed') === '1',
+    ai_executed: initial.get('ai_executed') === '1',
+    sort: initial.get('sort') || '',
+    dir: initial.get('dir') === 'desc' ? 'desc' : (initial.get('dir') === 'asc' ? 'asc' : ''),
   };
 
   function rowMatches(tr, skip) {
@@ -408,12 +592,12 @@ Context expected:
     // Faceted counts: for each str filter, count rows that match all OTHER
     // filters, bucketed by the row's own value of that filter. Boolean
     // filters count rows that would still match if that boolean were ON.
-    const strCounts = { status:{}, requestor:{}, evgen:{}, submission_path:{},
+    const strCounts = { status:{}, propagation:{}, requestor:{}, evgen:{}, submission_path:{},
                         priority:{}, nevents:{},
                         detector:{}, beam:{}, physics:{}, q2:{}, species:{}, energy:{} };
     const boolCounts = { new_request:0, pre_tdr_use:0, early_science_use:0, other_use:0, background:0,
                          has_output:0, no_output:0, incomplete_output:0, has_simu:0, has_reco:0,
-                         has_input:0, no_input:0, incomplete_input:0 };
+                         has_input:0, no_input:0, incomplete_input:0, ai_proposed:0, ai_executed:0 };
     for (const tr of dataRows) {
       for (const k of STR) {
         if (rowMatches(tr, k)) {
@@ -433,6 +617,10 @@ Context expected:
         if (k === 'energy') {
           const ea = energyMeV(a[0]), eb = energyMeV(b[0]);
           if (ea !== null && eb !== null) return ea - eb;
+        }
+        if (k === 'propagation') {
+          const order = {continue: 0, hold: 1, final: 2};
+          if (a[0] in order && b[0] in order) return order[a[0]] - order[b[0]];
         }
         // Numeric sort when both values parse as numbers, otherwise alphabetic.
         const na = parseFloat(a[0]), nb = parseFloat(b[0]);
@@ -459,14 +647,19 @@ Context expected:
   function syncUrl() {
     const u = new URL(window.location.href);
     const p = u.searchParams;
-    ['q','status','requestor','evgen','submission_path','priority','nevents',
+    ['q','status','propagation','requestor','evgen','submission_path','priority','nevents',
      'detector','beam','physics','q2','species','energy',
      'new_request','pre_tdr_use','early_science_use','other_use','background',
      'has_output','no_output','incomplete_output','has_simu','has_reco',
-     'has_input','no_input','incomplete_input'].forEach(k => p.delete(k));
+     'has_input','no_input','incomplete_input','ai_proposed','ai_executed',
+     'sort','dir'].forEach(k => p.delete(k));
     if (state.q) p.set('q', state.q);
     for (const k of STR)  if (state[k]) p.set(k, state[k]);
     for (const k of BOOL) if (state[k]) p.set(k, '1');
+    if (state.sort && state.dir) {
+      p.set('sort', state.sort);
+      p.set('dir', state.dir);
+    }
     history.replaceState(null, '', u.toString());
   }
 
@@ -556,14 +749,155 @@ Context expected:
     });
   }
   allCbs.forEach(c => c.addEventListener('change', refresh));
+  const propPanel = document.getElementById('pcs-prop-panel');
   bulkButtons.forEach(b => {
     b.addEventListener('click', () => {
       const action = b.dataset.bulk;
       const ids = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
+      if (action === 'propagation' && propPanel) {
+        document.getElementById('pcs-prop-count').textContent = ids.length;
+        propPanel.style.display = '';
+        propPanel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        return;
+      }
+      if (action === 'ai_approve' || action === 'ai_deny') {
+        decideProposals(action === 'ai_approve' ? 'approve' : 'deny', ids);
+        return;
+      }
+      if (action === 'ai_undo') {
+        undoProposals(ids);
+        return;
+      }
       alert(`Bulk action "${action}" on ${ids.length} task(s) — not yet wired.`);
     });
   });
   refresh();
+
+  /* AI proposal decision — approve executes deterministically through the
+     propagation service with the approving human as changed_by; deny
+     records denial memory. One event per decision, not per dataset. */
+  async function decideProposals(decision, names) {
+    if (!names.length) return;
+    const quality = (document.getElementById('pcs-ai-quality') || {value:''}).value;
+    const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
+    const qnote = quality ? ` (quality: ${quality})` : '';
+    if (!confirm(`${verb} AI proposals on ${names.length} selected dataset(s)${qnote}? `
+                 + 'Rows without a pending proposal are skipped and reported.')) return;
+    const token = propPanel ? propPanel.querySelector('[name=csrfmiddlewaretoken]').value : '';
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ names: names, decision: decision, quality: quality,
+                               filter: window.location.search }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [];
+      if (decision === 'approve') parts.push(`${j.approved.length} approved and executed`);
+      else parts.push(`${j.denied.length} denied`);
+      if (j.stale.length) parts.push(`${j.stale.length} stale (withdrawn — record changed since proposed)`);
+      if (j.no_proposal.length) parts.push(`${j.no_proposal.length} had no pending proposal`);
+      alert('AI proposals: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Proposal decision failed: ' + err.message);
+    }
+  }
+
+  /* Undo executed AI proposals — the compensating action restores the
+     pre-approval state and returns the proposals to pending. */
+  async function undoProposals(names) {
+    if (!names.length) return;
+    if (!confirm(`Undo executed AI proposals on ${names.length} selected dataset(s)? `
+                 + 'Restores the pre-approval state and returns the proposals to pending; '
+                 + 'rows without an executed proposal are skipped and reported.')) return;
+    const token = propPanel ? propPanel.querySelector('[name=csrfmiddlewaretoken]').value : '';
+    try {
+      const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/proposals/undo/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+        body: JSON.stringify({ names: names }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.detail || 'request failed');
+      const parts = [`${j.undone.length} undone`];
+      if (j.moved.length) parts.push(`${j.moved.length} expired (record changed since execution)`);
+      if (j.no_proposal.length) parts.push(`${j.no_proposal.length} had no executed proposal`);
+      alert('AI proposal undo: ' + parts.join(', ') + '.');
+      window.location.reload();
+    } catch (err) {
+      alert('Undo failed: ' + err.message);
+    }
+  }
+
+  /* Propagation flip — one POST, one action-stream event, whatever the
+     selection size. Comment is required; the server remembers it as this
+     user's next default. */
+  (function () {
+    if (!propPanel) return;
+    const applyBtn = document.getElementById('pcs-prop-apply');
+    const cancelBtn = document.getElementById('pcs-prop-cancel');
+    const resultEl = document.getElementById('pcs-prop-result');
+    const commentEl = document.getElementById('pcs-prop-comment');
+    const needEl = document.getElementById('pcs-prop-need-comment');
+    function needComment() {
+      needEl.style.display = '';
+      commentEl.classList.add('pcs-prop-comment-attn');
+      commentEl.focus();
+    }
+    function commentSettled() {
+      needEl.style.display = 'none';
+      commentEl.classList.remove('pcs-prop-comment-attn');
+    }
+    commentEl.addEventListener('input', () => {
+      if (commentEl.value.trim()) commentSettled();
+    });
+    // Enter completes the change (Shift+Enter for a newline).
+    commentEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        applyBtn.click();
+      }
+    });
+    cancelBtn.addEventListener('click', () => {
+      propPanel.style.display = 'none';
+      resultEl.textContent = '';
+      commentSettled();
+    });
+    applyBtn.addEventListener('click', async () => {
+      const names = Array.from(allCbs).filter(c => c.checked).map(c => c.value);
+      const state = document.getElementById('pcs-prop-state').value;
+      const comment = commentEl.value.trim();
+      const replacedBy = document.getElementById('pcs-prop-replaced-by').value.trim();
+      if (!names.length) { resultEl.textContent = 'No tasks selected.'; return; }
+      if (!comment) { needComment(); return; }
+      commentSettled();
+      if (!confirm(`Set propagation to "${state}" on ${names.length} dataset(s)?`)) return;
+      applyBtn.disabled = true;
+      const token = propPanel.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/pcs/api/datasets/propagation/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ names: names, state: state, comment: comment,
+                                 replaced_by: replacedBy,
+                                 filter: window.location.search }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || 'request failed');
+        alert(`Propagation set to "${state}" on ${j.changed.length} dataset(s)`
+              + (j.unchanged.length ? `, ${j.unchanged.length} already there` : '')
+              + (j.unknown.length ? `, ${j.unknown.length} unknown: ${j.unknown.join(', ')}` : '')
+              + '.');
+        window.location.reload();
+      } catch (err) {
+        applyBtn.disabled = false;
+        if (/comment is required/i.test(err.message)) { needComment(); }
+        else { resultEl.textContent = 'Failed: ' + err.message; }
+      }
+    });
+  })();
 
   /* Paired-row sort. */
   const table = document.querySelector('table.pcs-tlf-list');
@@ -593,6 +927,16 @@ Context expected:
   }
 
   function cellSortValue(dataRow, colIdx) {
+    if (table.classList.contains('pcs-tlf-progress') && colIdx >= 5) {
+      const progressSortKeys = {
+        5: 'progressJobs',
+        6: 'progressCompletion',
+        7: 'progressProcessing',
+        8: 'progressFailures',
+        9: 'progressLink',
+      };
+      return dataRow.dataset[progressSortKeys[colIdx]] || '';
+    }
     const cells = dataRow.children;
     if (colIdx >= cells.length) return '';
     const td = cells[colIdx];
@@ -607,8 +951,20 @@ Context expected:
   }
 
   const headers = table.querySelectorAll('thead th.pcs-sort');
-  let activeIdx = -1;
-  let activeDir = 1;  // 1 asc, -1 desc
+  const requestedSort = state.sort;
+  const requestedDir = state.dir;
+  let syncInitialSortUrl = false;
+  let activeIdx = Array.from(headers).findIndex(h => h.dataset.sort === state.sort);
+  let activeDir = state.dir === 'desc' ? -1 : 1;  // 1 asc, -1 desc
+  if (activeIdx < 0) {
+    state.sort = '';
+    state.dir = '';
+    syncInitialSortUrl = Boolean(requestedSort || requestedDir);
+  } else if (!state.dir) {
+    activeDir = headers[activeIdx].dataset.defaultDir === 'desc' ? -1 : 1;
+    state.dir = activeDir === -1 ? 'desc' : 'asc';
+    syncInitialSortUrl = true;
+  }
 
   function renderIndicators() {
     headers.forEach((h, i) => {
@@ -620,7 +976,31 @@ Context expected:
       }
     });
   }
-  renderIndicators();
+  function applySort(updateUrl) {
+    if (activeIdx < 0) {
+      renderIndicators();
+      if (updateUrl) syncUrl();
+      return;
+    }
+    // Header columns include the checkbox col at index 0, which is also a TH.
+    // The sortable headers start at index 1 in the THs of the row. But the
+    // header NodeList "headers" is filtered to .pcs-sort only, so its index
+    // activeIdx corresponds to the (activeIdx+1)-th cell in the data row
+    // (offset by the checkbox TD).
+    const colIdx = activeIdx + 1;
+    const groups = buildGroups();
+    groups.sort((g1, g2) => {
+      const v1 = cellSortValue(g1[0], colIdx);
+      const v2 = cellSortValue(g2[0], colIdx);
+      return compareValues(v1, v2) * activeDir;
+    });
+    groups.forEach(grp => grp.forEach(tr => tbody.appendChild(tr)));
+    // Keep the empty-state row at the end of the tbody.
+    if (emptyRow) tbody.appendChild(emptyRow);
+    renderIndicators();
+    if (updateUrl) syncUrl();
+  }
+  applySort(syncInitialSortUrl);
 
   headers.forEach((h, i) => {
     h.addEventListener('click', () => {
@@ -628,24 +1008,11 @@ Context expected:
         activeDir = -activeDir;
       } else {
         activeIdx = i;
-        activeDir = 1;
+        activeDir = h.dataset.defaultDir === 'desc' ? -1 : 1;
       }
-      // Header columns include the checkbox col at index 0, which is also a TH.
-      // The sortable headers start at index 1 in the THs of the row. But the
-      // header NodeList "headers" is filtered to .pcs-sort only, so its index
-      // i corresponds to the (i+1)-th cell in the data row (offset by the
-      // checkbox TD).
-      const colIdx = i + 1;
-      const groups = buildGroups();
-      groups.sort((g1, g2) => {
-        const v1 = cellSortValue(g1[0], colIdx);
-        const v2 = cellSortValue(g2[0], colIdx);
-        return compareValues(v1, v2) * activeDir;
-      });
-      groups.forEach(grp => grp.forEach(tr => tbody.appendChild(tr)));
-      // Keep the empty-state row at the end of the tbody.
-      if (emptyRow) tbody.appendChild(emptyRow);
-      renderIndicators();
+      state.sort = h.dataset.sort || '';
+      state.dir = activeDir === -1 ? 'desc' : 'asc';
+      applySort(true);
     });
   });
 })();

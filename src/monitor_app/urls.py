@@ -11,6 +11,7 @@ from .views import (
     account_view,
     log_summary,
     log_summary_datatable_ajax,
+    live_policy,
     log_list,
     log_detail,
     logs_datatable_ajax,
@@ -57,6 +58,8 @@ from .views import (
     update_rucio_endpoints_from_github,
     mcp_health,
     panda_hub, prod_hub, testbed_hub,
+    ai_content_list,
+    ai_content_set_quality,
 )
 
 # Import PanDA database views from new dedicated module
@@ -91,6 +94,7 @@ from .viewdir.pandamon import (
 )
 
 from .viewdir.system_status import (
+    sysconfig_save,
     system_status_json,
     system_status_page,
     system_status_refresh,
@@ -139,6 +143,7 @@ urlpatterns = [
     path('logs/summary/', log_summary, name='log_summary'),
     path('logs/summary/datatable/', log_summary_datatable_ajax, name='log_summary_datatable_ajax'),
     path('logs/', log_list, name='log_list'),
+    path('logs/live-policy/', live_policy, name='live_policy'),
     path('logs/<int:log_id>/', log_detail, name='log_detail'),
     path('logs/datatable/', logs_datatable_ajax, name='logs_datatable_ajax'),
     path('logs/filter-counts/', get_log_filter_counts, name='log_filter_counts'),
@@ -207,6 +212,7 @@ urlpatterns = [
     path('system/', system_status_page, name='system_status_root'),
     path('system/status.json', system_status_json, name='system_status_json_root'),
     path('system/refresh/', system_status_refresh, name='system_status_refresh_root'),
+    path('system/sysconfig/', sysconfig_save, name='sysconfig_save'),
     
     # PanDA Queues
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),
@@ -227,6 +233,8 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
+    path('ai/assessments/', ai_content_list, name='ai_content_list'),
+    path('ai/assessments/<int:content_id>/quality/', ai_content_set_quality, name='ai_content_set_quality'),
     path('testbed/', testbed_hub, name='testbed_hub'),
 
     # PanDA Production Monitor

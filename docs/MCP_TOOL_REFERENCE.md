@@ -1,0 +1,744 @@
+# MCP Tool Reference
+
+This document is the detailed tool reference for the SWF Monitor MCP server. The
+short operational overview is [MCP.md](MCP.md), client setup is
+[MCP_CLIENTS.md](MCP_CLIENTS.md), and the PanDA Mattermost bot client is
+documented in [PANDA_BOT.md](PANDA_BOT.md).
+
+List tools use ISO datetime filters named `start_time` and `end_time` where
+applicable. Paginated list responses include `items`, `total_count`, `has_more`,
+and `monitor_urls` when web UI links are available.
+
+## Available Tools
+
+### Tool Discovery
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_available_tools` | - | List all available MCP tools with descriptions. Use to discover capabilities. |
+
+---
+
+### System State
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_get_system_state` | `username` | Comprehensive system state for a user: context from testbed.toml, agent manager status, workflow runner readiness, agent counts, execution stats. |
+
+**Parameters:**
+- `username`: Optional. Username to get context for (reads their testbed.toml). If not provided, infers from SWF_HOME environment variable.
+
+**Returns:**
+- `timestamp`: Current server time
+- `user_context`: namespace, workflow defaults from user's testbed.toml
+- `agent_manager`: Status of user's agent manager daemon (healthy/unhealthy/missing/exited)
+- `workflow_runner`: Status of healthy DAQ_Simulator that can accept swf_start_workflow
+- `ready_to_run`: Boolean - True if workflow_runner is healthy and can accept commands
+- `last_execution`: Most recent workflow execution for user's namespace
+- `errors_last_hour`: Count of ERROR logs in user's namespace
+- `agents`: Total, active, exited, healthy, unhealthy counts
+- `executions`: Running count, completed in last hour
+- `messages_last_10min`: Recent message count
+- `run_states`: Current fast processing run states
+- `persistent_state`: System-wide persistent state (next IDs, etc.)
+- `recent_events`: Last 10 system state events
+
+---
+
+### Agents
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_agents` | `namespace`, `agent_type`, `status`, `execution_id`, `start_time`, `end_time` | List agents with filtering. **Excludes EXITED agents by default.** |
+| `swf_get_agent` | `name` (required) | Full details for a specific agent including metadata. |
+
+**`swf_list_agents` filters:**
+- `namespace`: Filter to agents in this namespace
+- `agent_type`: Filter by type (daqsim, data, processing, fastmon, workflow_runner, etc.)
+- `status`: Filter by status. Special values:
+  - `None` (default): Excludes EXITED agents
+  - `'EXITED'`: Show only exited agents
+  - `'all'`: Show all agents regardless of status
+  - `'OK'`, `'WARNING'`, `'ERROR'`: Filter to specific status
+- `execution_id`: Filter to agents that participated in this execution
+- `start_time`, `end_time`: Filter by heartbeat within date range
+
+**Returns per agent:**
+- `name`, `agent_type`, `status`, `operational_state`, `namespace`
+- `last_heartbeat` (ISO timestamp)
+- `workflow_enabled`, `total_stf_processed`
+
+---
+
+### Namespaces
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_namespaces` | - | List all testbed namespaces with owners. |
+| `swf_get_namespace` | `namespace` (required), `start_time`, `end_time` | Details for a namespace including activity counts. |
+
+**`swf_get_namespace` returns:**
+- `name`, `owner`, `description`
+- `agent_count`: Agents registered in namespace
+- `execution_count`: Workflow executions (in date range if specified)
+- `message_count`: Messages (in date range if specified)
+- `active_users`: Users who ran executions (in date range if specified)
+
+---
+
+### Workflow Definitions
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_workflow_definitions` | `workflow_type`, `created_by` | List available workflow definitions. |
+
+**Returns per definition:**
+- `workflow_name`, `version`, `workflow_type`
+- `description`, `created_by`, `created_at`
+- `execution_count`: Number of times executed
+
+---
+
+### Workflow Executions
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_workflow_executions` | `namespace`, `status`, `executed_by`, `workflow_name`, `currently_running`, `start_time`, `end_time` | List workflow executions with filtering. |
+| `swf_get_workflow_execution` | `execution_id` (required) | Full details for a specific execution. |
+
+**`swf_list_workflow_executions` filters:**
+- `namespace`: Filter to executions in this namespace
+- `status`: Filter by status (pending, running, completed, failed, terminated)
+- `executed_by`: Filter by user who started the execution
+- `workflow_name`: Filter by workflow definition name
+- `currently_running`: If True, return all running executions (ignores date range). Use for "What's running?"
+- `start_time`, `end_time`: Filter by execution start time
+
+**Returns per execution:**
+- `execution_id`, `workflow_name`, `namespace`
+- `status`, `executed_by`
+- `start_time`, `end_time` (ISO timestamps)
+- `parameter_values`: Execution configuration
+
+---
+
+### Messages
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_messages` | `namespace`, `execution_id`, `agent`, `message_type`, `start_time`, `end_time` | List workflow messages with filtering. |
+| `swf_send_message` | `message` (required), `message_type`, `metadata` | Send a message to the monitoring stream. |
+
+**Diagnostic use cases:**
+- Track workflow progress: `swf_list_messages(execution_id='stf_datataking-user-0044')`
+- See what an agent sent: `swf_list_messages(agent='daq_simulator-agent-user-123')`
+- Debug message flow: `swf_list_messages(namespace='torre1', start_time='2026-01-13T11:00:00')`
+- For workflow failures: use `swf_list_logs(level='ERROR')` instead
+
+**Common message types:** `run_imminent`, `start_run`, `stf_gen`, `end_run`, `pause_run`, `resume_run`
+
+**Filters:**
+- `namespace`: Filter to messages in this namespace
+- `execution_id`: Filter to messages for this execution
+- `agent`: Filter by sender agent name
+- `message_type`: Filter by type (stf_gen, start_run, etc.)
+- `start_time`, `end_time`: Filter by sent time (default: last 1 hour)
+
+**Returns per message (max 200):**
+- `message_type`, `sender_agent`, `namespace`
+- `sent_at` (ISO timestamp)
+- `execution_id`, `run_id`
+- `payload_summary`: Truncated message content
+
+**`swf_send_message` parameters:**
+- `message` (required): The message text to send
+- `message_type`: Type of message (default: 'announcement')
+  - `'test'`: Namespace is omitted (for pipeline testing)
+  - `'announcement'`, `'status'`, etc.: Uses configured namespace from testbed.toml
+- `metadata`: Optional dict of additional key-value data
+
+**`swf_send_message` behavior:**
+- Sender is automatically identified as `{username}-personal-agent`
+- Messages are sent to `/topic/epictopic` and captured by the monitor
+- Use for: testing the message pipeline, announcements to colleagues, or any broadcast purpose
+
+**Returns:**
+- `success`: Whether the message was sent
+- `sender`: The sender identifier (e.g., 'wenauseic-personal-agent')
+- `message_type`: The type of message sent
+- `namespace`: The namespace used (or null for test messages)
+- `content`: The message content
+
+---
+
+### Runs
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_runs` | `start_time`, `end_time` | List simulation runs with timing and file counts. |
+| `swf_get_run` | `run_number` (required) | Full details for a specific run. |
+
+**`swf_list_runs` returns per run:**
+- `run_number`
+- `start_time`, `end_time`, `duration_seconds`
+- `stf_file_count`: Number of STF files in this run
+
+**`swf_get_run` returns:**
+- All fields above plus:
+- `run_conditions`: JSON metadata
+- `file_stats`: STF file counts by status (registered, processing, done, failed)
+
+---
+
+### STF Files
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_stf_files` | `run_number`, `status`, `machine_state`, `start_time`, `end_time` | List STF files with filtering. |
+| `swf_get_stf_file` | `file_id` or `stf_filename` (one required) | Full details for a specific STF file. |
+
+**`swf_list_stf_files` filters:**
+- `run_number`: Filter to files from this run
+- `status`: Filter by processing status (registered, processing, processed, done, failed)
+- `machine_state`: Filter by detector state (physics, cosmics, etc.)
+- `start_time`, `end_time`: Filter by creation time
+
+**Returns per STF file:**
+- `file_id`, `stf_filename`, `run_number`
+- `status`, `machine_state`
+- `file_size_bytes`, `created_at`
+- `tf_file_count`: Number of TF files derived from this STF
+
+**`swf_get_stf_file` returns:**
+- All fields above plus:
+- `checksum`, `metadata`
+- `workflow_id`, `daq_state`, `daq_substate`, `workflow_status`
+
+---
+
+### TF Slices (Fast Processing)
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_tf_slices` | `run_number`, `stf_filename`, `tf_filename`, `status`, `assigned_worker`, `start_time`, `end_time` | List TF slices for fast processing workflow. |
+| `swf_get_tf_slice` | `tf_filename`, `slice_id` (both required) | Full details for a specific TF slice. |
+
+**`swf_list_tf_slices` filters:**
+- `run_number`: Filter to slices from this run
+- `stf_filename`: Filter to slices from this STF file
+- `tf_filename`: Filter to slices from this TF sample
+- `status`: Filter by status (queued, processing, completed, failed)
+- `assigned_worker`: Filter by worker assignment
+- `start_time`, `end_time`: Filter by creation time
+
+**Returns per slice (max 200):**
+- `slice_id`, `tf_filename`, `stf_filename`, `run_number`
+- `tf_first`, `tf_last`, `tf_count` (TF range)
+- `status`, `assigned_worker`
+- `created_at`, `completed_at`
+
+**`swf_get_tf_slice` returns:**
+- All fields above plus:
+- `retries`, `assigned_at`
+- `metadata`
+
+---
+
+### Logs
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_list_logs` | `app_name`, `instance_name`, `execution_id`, `level`, `search`, `start_time`, `end_time` | List log entries from all agents. |
+| `swf_get_log_entry` | `log_id` (required) | Full details for a specific log entry. |
+
+**Diagnostic use cases:**
+- Workflow logs: `swf_list_logs(execution_id='stf_datataking-user-0044')`
+- Debug a specific agent: `swf_list_logs(instance_name='daq_simulator-agent-user-123')`
+- Find all errors: `swf_list_logs(level='ERROR')`
+- Search for specific issues: `swf_list_logs(search='connection failed')`
+
+**`swf_list_logs` filters:**
+- `app_name`: Filter by application type (e.g., 'daq_simulator', 'data_agent')
+- `instance_name`: Filter by agent instance name
+- `execution_id`: Filter by workflow execution ID (e.g., 'stf_datataking-wenauseic-0044')
+- `level`: Minimum level threshold - returns this level and higher severity:
+  - `DEBUG` -> all logs
+  - `INFO` -> INFO, WARNING, ERROR, CRITICAL
+  - `WARNING` -> WARNING, ERROR, CRITICAL
+  - `ERROR` -> ERROR, CRITICAL
+  - `CRITICAL` -> CRITICAL only
+- `search`: Case-insensitive text search in message
+- `start_time`, `end_time`: Filter by timestamp (default: last 24 hours)
+
+**Returns per entry (max 200):**
+- `id`, `timestamp`, `app_name`, `instance_name`
+- `level`, `message`, `module`, `funcname`, `lineno`
+- `extra_data`: Additional context (execution_id, run_id, etc.)
+
+---
+
+### Workflow Control
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_start_workflow` | `workflow_name`, `namespace`, `config`, `realtime`, `duration`, `stf_count`, `physics_period_count`, `physics_period_duration`, `stf_interval` | Start a workflow by sending command to DAQ Simulator agent. |
+| `swf_stop_workflow` | `execution_id` (required) | Stop a running workflow gracefully. |
+| `swf_end_execution` | `execution_id` (required) | Mark a stuck execution as terminated (database state change only). |
+
+**`swf_start_workflow` parameters:**
+
+All parameters are optional - defaults are read from the user's `testbed.toml`:
+- `workflow_name`: Name of workflow (default: from config, typically 'stf_datataking')
+- `namespace`: Testbed namespace (default: from config)
+- `config`: Workflow config name (default: from config, e.g., 'fast_processing_default')
+- `realtime`: Run in real-time mode (default: from config, typically True)
+- `duration`: Max duration in seconds (0 = run until complete)
+- `stf_count`: Number of STF files to generate (overrides config)
+- `physics_period_count`: Number of physics periods (overrides config)
+- `physics_period_duration`: Duration of each physics period in seconds (overrides config)
+- `stf_interval`: Interval between STF generation in seconds (overrides config)
+
+**Returns:** Success/failure status with execution details. Workflow runs asynchronously.
+
+**After starting — ACTIVELY POLL, do not sleep:**
+- Poll `swf_get_workflow_monitor(execution_id)` every 10-15s until completion
+- Report progress to user as it evolves
+- Check `swf_list_logs(level='ERROR')` after completion
+
+**`swf_stop_workflow`:** Sends a stop command to the DAQ Simulator agent. The workflow stops gracefully at the next checkpoint. Use `swf_list_workflow_executions(currently_running=True)` to find running execution IDs.
+
+**`swf_end_execution`:** Use to clean up stale or stuck executions that are still marked as 'running' in the database. This is a state change only - no agent message is sent.
+
+---
+
+### Agent Process Management
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_kill_agent` | `name` (required) | Kill an agent process by sending SIGKILL to its PID. |
+
+**`swf_kill_agent` behavior:**
+- Looks up the agent by `instance_name`
+- Retrieves its `pid` and `hostname`
+- Sends SIGKILL if the agent is on the current host
+- Always marks the agent's status and operational_state as `EXITED`
+- Agent will no longer appear in default `swf_list_agents` results
+
+**Returns:**
+- `success`: Whether the operation completed
+- `killed`: Whether the process was actually killed (may be False if already dead or on different host)
+- `kill_error`: Error message if kill failed (permission denied, process not found, remote host)
+- `old_state`, `new_state`: State transition
+
+---
+
+### User Agent Manager
+
+The User Agent Manager is a per-user daemon that enables MCP-driven testbed control. It listens for commands on a user-specific queue and manages supervisord-controlled agents.
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_check_agent_manager` | `username` | Check if a user's agent manager daemon is alive. |
+| `swf_get_testbed_status` | `username` | Comprehensive testbed status: agent manager, agents, running workflows, readiness. |
+| `swf_start_user_testbed` | `username`, `config_name` | Start a user's testbed via their agent manager. |
+| `swf_stop_user_testbed` | `username` | Stop a user's testbed via their agent manager. |
+
+**`swf_check_agent_manager` returns:**
+- `alive`: True if agent manager has recent heartbeat (within 5 minutes)
+- `username`: The user being checked
+- `instance_name`: The agent manager's instance name (e.g., 'agent-manager-wenauseic')
+- `last_heartbeat`: When it last checked in
+- `operational_state`: Current state (READY, EXITED, etc.)
+- `control_queue`: The queue to send commands to (e.g., '/queue/agent_control.wenauseic')
+- `agents_running`: Whether testbed agents are currently running
+- `how_to_start`: Instructions if not alive
+
+**`swf_get_testbed_status` returns:**
+- `agent_manager`: alive, namespace, operational_state, status, last_heartbeat
+- `agents`: List of workflow agents with running/stopped status
+- `summary`: Running and stopped agent counts
+- `running_workflows`: Count of currently executing workflows
+- `ready`: True when agent manager alive, agents running, and no workflow executing
+- `note`: Human-readable status summary
+
+**`swf_start_user_testbed`:**
+- Sends `start_testbed` command to the user's agent manager
+- Agent manager must be running first (use `swf_check_agent_manager` to verify)
+- `config_name`: Optional config name (e.g., 'fast_processing'). Uses default if not specified.
+- Agents start asynchronously - use `swf_list_agents` to verify
+
+**`swf_stop_user_testbed`:**
+- Sends `stop_testbed` command to the user's agent manager
+- If agent manager is not running, use `swf_kill_agent` to stop agents directly
+
+**Starting the agent manager:**
+```bash
+cd /data/<username>/github/swf-testbed
+source .venv/bin/activate && source ~/.env
+testbed agent-manager
+```
+
+---
+
+### Workflow Monitoring
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `swf_get_workflow_monitor` | `execution_id` (required) | Get aggregated status and events for a workflow execution. |
+| `swf_list_workflow_monitors` | - | List recent executions that can be monitored. |
+
+**`swf_get_workflow_monitor` returns:**
+- `execution_id`: The execution being monitored
+- `status`: Current workflow status (running/completed/failed/terminated)
+- `phase`: Current phase (imminent/running/ended/unknown)
+- `run_id`: The run number for this execution
+- `stf_count`: Number of STF files generated
+- `events`: List of key events with timestamps (run_imminent, start_run, end_run)
+- `errors`: List of any errors encountered (from messages and logs)
+- `start_time`, `end_time`: Execution timestamps
+- `duration_seconds`: How long the workflow ran (if completed)
+
+This tool aggregates information from workflow messages and logs, providing a single-call summary of workflow progress without needing to poll multiple tools.
+
+**`swf_list_workflow_monitors` returns:**
+- List of executions from last 24 hours with: `execution_id`, `status`, `start_time`, `end_time`, `stf_count`
+- Use to pick an execution for detailed monitoring with `swf_get_workflow_monitor`
+
+---
+
+### AI Content
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `epic_register_ai_assessment` | `subject_type`, `subject_key`, `assessment`, `username`, `ai`, `subject_label`, `subject_url`, `data` | Register append-only AI assessment content as a corun-ai Page and link it from the target object JSON when the subject is known locally. |
+| `epic_get_ai_content` | `ids`, `corun_page_group_ids` | Retrieve append-only AI assessment content by corun-ai Page group ids and/or legacy AIContent ids. Use the arguments supplied in a detail payload's `ai_content.retrieval.arguments`. |
+| `epicprod_list_actions` | `action`, `instance`, `subject_type`, `subject_key`, `username`, `outcome`, `start_time`, `end_time`, `min_sublevel`, `summarize`, `limit`, `offset` | Query the epicprod action stream (structured production-action records with outcome and duration). Prefer `summarize=True` for reporting: counts by action with ok/error split and duration statistics. Raw listings default to an importance floor of `normal` (excluded records counted in `excluded_below_floor`; floor lifts for action/subject/outcome drill-downs and summaries); `min_sublevel` sets it explicitly. See [EPICPROD_ACTION_STREAM.md](EPICPROD_ACTION_STREAM.md). |
+
+**Known subject types:**
+- `campaign_task`: campaign/production task, keyed by composed task name.
+- `panda_task`: local PanDA-task association, keyed by JEDI task id or task name.
+- `panda_job`: local production job record, keyed by pandaid.
+- `panda_queue`: PanDA site/queue record, keyed by queue name. A row with `queue_name == site` represents site-level content.
+- `campaign`: production campaign, keyed by campaign name (e.g. `26.05.0`); the natural subject for campaign-level reports. Links into the campaign's `data` JSON.
+
+**Behavior:**
+- AI content is append-only. Corrections and followups create new entries.
+- New registrations write corun-ai Pages in section `epicprod.assessment` and append the Page group id to the subject JSON field under `corun_page_group_ids`.
+- corun-ai Page metadata includes `artifact_type: "ai_assessment"`, `source_system: "swf-monitor"`, and `ui_visible: false`; the visibility flag hides service-owned artifacts from codoc browse UI but does not block REST API access or direct URLs.
+- Legacy local `AIContent` rows remain readable through `ids` and old object pointers under `ai_content_ids`.
+- MCP registrations stamp stored metadata with `registered_via: "mcp"` and `mcp_tool: "epic_register_ai_assessment"`.
+- Bot-originated registrations should be stamped by the bot harness with `username: "bot"`, `ai` set to the exact model, and `data.origin` including `type: "bot"` and the same model.
+- Detail-style production tools include an `ai_content` block when the object can have linked AI assessments. If `ai_content.available` is true, call the specified retrieval tool with the specified arguments:
+
+```json
+{
+  "available": true,
+  "count": 2,
+  "ids": [],
+  "corun_page_group_ids": ["5f7539aa-4b08-4d9c-9a3f-c36ca2fd6721"],
+  "retrieval": {
+    "tool": "epic_get_ai_content",
+    "arguments": {
+      "corun_page_group_ids": ["5f7539aa-4b08-4d9c-9a3f-c36ca2fd6721"]
+    }
+  }
+}
+```
+
+- Use the supplied `ids` and/or `corun_page_group_ids` directly. Do not reconstruct `subject_type` or `subject_key` from the parent object when a detail payload already includes this retrieval block.
+- Future subject types can be added without changing existing content references.
+
+---
+
+### AI Proposals
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `ai_list_proposals` | `status`, `limit` | List AI proposals awaiting human decision (default `status='proposed'`), or by terminal status / `all` for history. Returns preformatted `display` text — one line per proposal, each starting with its ref (e.g. `cp-12`) — to show the human verbatim, plus structured items. See [AI_PROPOSALS.md](AI_PROPOSALS.md). |
+| `ai_decide_proposal` | `ref`, `decision`, `username`, `quality` | Relay one human's approve/deny on one proposal by ref. Approval executes the frozen payload through the deterministic service path; the calling LLM transmits the human's verdict and nothing more. `username` is the deciding human, who must be on the SysConfig approver list (`ai_proposal_mcp_approvers`, default empty). A ref whose prefix mismatches the row's category is refused, never reinterpreted. |
+
+The bot flow: list, show `display` verbatim, and relay only explicit human
+instructions naming a ref ('approve cp-12'). On any refusal, report the error
+verbatim and re-list.
+
+---
+
+### PanDA Production Monitoring
+
+Tools for querying the ePIC PanDA production database (`doma_panda` schema). Read-only access to jobs and JEDI tasks.
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `panda_get_activity` | `days`, `username`, `site`, `workinggroup` | Pre-digested PanDA activity overview — aggregate counts only, no individual records. Use first for "What is PanDA doing?" |
+| `panda_list_jobs` | `days`, `status`, `username`, `site`, `taskid`, `reqid`, `limit`, `before_id` | List PanDA jobs with summary stats (default 200 jobs, 14 fields). Cursor-based pagination via before_id. |
+| `panda_diagnose_jobs` | `days`, `username`, `site`, `taskid`, `reqid`, `error_component`, `limit`, `before_id` | Diagnose failed/faulty PanDA jobs with full error details (7 error components). Cursor-based pagination via before_id. |
+| `panda_list_tasks` | `days`, `status`, `username`, `taskname`, `reqid`, `workinggroup`, `taskid`, `processingtype`, `limit`, `before_id` | List JEDI tasks with summary stats (default 500 tasks). Cursor-based pagination via before_id. |
+| `panda_error_summary` | `days`, `username`, `site`, `taskid`, `error_source`, `limit` | Aggregate error summary across failed jobs, ranked by frequency. |
+| `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
+| `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
+| `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
+| `panda_resource_usage` | `days`, `site`, `username`, `taskid` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
+| `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
+
+**`panda_get_activity`** — Pre-digested overview, no individual records:
+- `days`: Time window in days (default 1)
+- `username`: Filter by job owner / task owner (supports SQL LIKE with %)
+- `site`: Filter by computing site (supports SQL LIKE with %)
+- `workinggroup`: Filter tasks by working group (e.g. 'EIC')
+
+Returns:
+- `jobs`: `{total, by_status, by_user, by_site}` — each with status breakdown
+- `tasks`: `{total, by_status, by_user}` — each with status breakdown
+
+Use cases:
+- What's PanDA doing right now? `panda_get_activity()`
+- EIC activity this week? `panda_get_activity(days=7, workinggroup='EIC')`
+- Activity for a user? `panda_get_activity(username='Dmitrii Kalinkin')`
+
+**`panda_list_tasks` filters:**
+- `days`: Time window in days (default 7)
+- `status`: Task status (done, failed, running, ready, broken, aborted, pending, finished)
+- `username`: Task owner (supports SQL LIKE with %)
+- `taskname`: Task name (supports SQL LIKE with %)
+- `reqid`: Request ID
+- `workinggroup`: Experiment affiliation (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
+- `processingtype`: Processing type (e.g. 'epicproduction'). Supports SQL LIKE with %.
+- `taskid`: Specific JEDI task ID
+- `limit`: Max tasks to return (default 500)
+- `before_id`: Pagination cursor
+
+**Returns per task:**
+- `jeditaskid`, `taskname`, `status`, `username`
+- `creationdate`, `starttime`, `endtime`, `modificationtime`
+- `reqid`, `processingtype`, `transpath`
+- `progress`, `failurerate`, `errordialog`
+- `site`, `corecount`, `taskpriority`, `currentpriority`
+- `gshare`, `attemptnr`, `parent_tid`, `workinggroup`
+- **`nactive`, `nfinished`, `nfailed`** — per-task job counts aggregated from `jobsactive4` + `jobsarchived4`, bucketed per `JOB_STATUS_CATEGORIES` in `panda/constants.py`. Cancelled and closed are deliberately excluded so alarm consumers see only what operators don't know.
+- **`nrunning`** — count of job records with `jobstatus='running'` (subset of `nactive`).
+- **`nretries`** — count of job records with `attemptnr > 1`. Every retry creates a new job record in the ePIC PanDA schema, so this is the total retry count for the task. Retry limit is 3.
+- When called with a specific `taskid`, task records include `ai_content`. If `ai_content.available` is true, call `ai_content.retrieval.tool` with `ai_content.retrieval.arguments`.
+
+**Diagnostic use cases:**
+- Task overview: `panda_list_tasks(days=7)`
+- Failed tasks: `panda_list_tasks(status='failed')`
+- Tasks for a user: `panda_list_tasks(username='Dmitrii Kalinkin')`
+- EIC experiment tasks: `panda_list_tasks(workinggroup='EIC')`
+- Search by name pattern: `panda_list_tasks(taskname='%workflow%')`
+
+**`panda_error_summary` filters:**
+- `days`: Time window in days (default 10)
+- `username`: Filter by job owner (supports SQL LIKE with %)
+- `site`: Filter by computing site (supports SQL LIKE with %)
+- `taskid`: Filter by JEDI task ID
+- `error_source`: Filter to one component (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer)
+- `limit`: Max error patterns to return (default 20)
+
+**Returns per error pattern:**
+- `error_source`: Component name (pilot, executor, ddm, etc.)
+- `error_code`: Numeric error code
+- `error_diag`: Diagnostic message (truncated to 256 chars)
+- `count`: Number of affected jobs
+- `task_count`: Number of affected tasks
+- `users`: List of affected users
+- `sites`: List of affected sites
+
+**Diagnostic use cases:**
+- Top errors this week: `panda_error_summary(days=7)`
+- Errors for a specific user: `panda_error_summary(username='Dmitrii Kalinkin')`
+- Pilot errors only: `panda_error_summary(error_source='pilot')`
+- Errors for a specific task: `panda_error_summary(taskid=33824)`
+
+**`panda_study_job`** — Deep study of a single job:
+- `pandaid`: PanDA job ID (required)
+
+Returns:
+- `job`: Full record (~40 fields, nulls stripped) with structured `errors` list
+- `files`: All associated files from `filestable4` (log, output, input) with lfn, guid, scope, status
+- `log_urls`: Harvester log URLs — `pilot_stdout`, `pilot_stderr`, `batch_log` (require CILogon auth)
+- `log_file`: Log tarball metadata if registered (lfn, guid, scope for future rucio retrieval)
+- `harvester`: Condor worker details (workerid, status, error info)
+- `task`: Parent JEDI task context (name, status, error dialog)
+- `monitor_url`: Link to PanDA monitoring page
+- `ai_content`: Availability flag and exact retrieval tool/arguments for linked AI assessments
+
+**`panda_get_queue`** returns:
+- `queue`: Full schedconfig record.
+- `ai_content`: Availability flag and exact retrieval tool/arguments for linked AI assessments on the local queue/site record.
+
+Use cases:
+- Study a failed job: `panda_study_job(pandaid=130497)`
+- After `panda_diagnose_jobs` identifies failures, drill into specific jobs
+
+---
+
+## Tool Summary
+
+| Category | Tools | Count |
+|----------|-------|-------|
+| Tool Discovery | `swf_list_available_tools`, `get_server_instructions` | 2 |
+| System State | `swf_get_system_state` | 1 |
+| Agents | `swf_list_agents`, `swf_get_agent` | 2 |
+| Namespaces | `swf_list_namespaces`, `swf_get_namespace` | 2 |
+| Workflow Definitions | `swf_list_workflow_definitions` | 1 |
+| Workflow Executions | `swf_list_workflow_executions`, `swf_get_workflow_execution` | 2 |
+| Messages | `swf_list_messages`, `swf_send_message` | 2 |
+| Runs | `swf_list_runs`, `swf_get_run` | 2 |
+| STF Files | `swf_list_stf_files`, `swf_get_stf_file` | 2 |
+| TF Slices | `swf_list_tf_slices`, `swf_get_tf_slice` | 2 |
+| Logs | `swf_list_logs`, `swf_get_log_entry` | 2 |
+| Workflow Control | `swf_start_workflow`, `swf_stop_workflow`, `swf_end_execution` | 3 |
+| Agent Management | `swf_kill_agent` | 1 |
+| User Agent Manager | `swf_check_agent_manager`, `swf_get_testbed_status`, `swf_start_user_testbed`, `swf_stop_user_testbed` | 4 |
+| Workflow Monitoring | `swf_get_workflow_monitor`, `swf_list_workflow_monitors` | 2 |
+| AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
+| AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
+| AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| Action Stream | `epicprod_list_actions` | 1 |
+| PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
+| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
+| PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
+| **Total** | | **59** |
+
+---
+
+## Quick Reference - Example Prompts
+
+          System Readiness
+          - "What's the state of the testbed?"
+          - "Am I ready to run a workflow?"
+          - "Is my agent manager running?"
+          - "Are there any errors in the system?"
+
+          Starting the Testbed
+          - "Start my testbed"
+          - "Start my testbed with the fast_processing config"
+          - "Check if my agents are running"
+
+          Running Workflows
+          - "Start a workflow"
+          - "Run a workflow with 5 STF files"
+          - "Start a workflow with 3 physics periods"
+          - "What's running right now?"
+
+          Monitoring
+          - "What's the status of my workflow?"
+          - "Show me the progress of execution stf_datataking-wenauseic-0045"
+          - "How many STF files have been generated?"
+          - "Are there any errors in my workflow?"
+
+          Stopping
+          - "Stop my running workflow"
+          - "Stop the testbed"
+
+          Troubleshooting
+          - "Why did my workflow fail?"
+          - "Show me the logs for the DAQ simulator"
+          - "What errors happened in the last hour?"
+          - "Kill the stuck daq_simulator agent"
+
+          Combined Operations
+          - "Start my testbed and run a workflow with 10 STF files"
+          - "Check if I'm ready to run, and if so, start a workflow"
+
+---
+
+## Example Prompts - Detailed
+
+### What's Running?
+
+> "What's running in the testbed?"
+
+LLM calls `swf_list_workflow_executions(currently_running=True)` and summarizes the running executions by namespace and workflow type.
+
+> "What's the state of my running workflow?"
+
+LLM calls `get_workflow_monitor(execution_id='...')` for aggregated status, or `swf_list_workflow_executions(currently_running=True, namespace="user_namespace")`.
+
+### System Health
+
+> "What's the current state of the testbed?"
+
+LLM calls `swf_get_system_state(username='wenauseic')` and summarizes user context, agent health, running workflows, and system state.
+
+> "Am I ready to run a workflow?"
+
+LLM calls `swf_get_system_state(username='...')` and checks `ready_to_run` field. If False, explains what's missing (agent manager, workflow runner).
+
+### Starting and Stopping Workflows
+
+> "Start a workflow with 5 STF files"
+
+LLM calls `swf_start_workflow(stf_count=5)` - other parameters default from testbed.toml.
+
+> "Stop my running workflow"
+
+LLM calls `swf_list_workflow_executions(currently_running=True)` to find the execution_id, then `swf_stop_workflow(execution_id='...')`.
+
+### Error Discovery
+
+> "Are there any errors in the system?"
+
+LLM calls `swf_list_logs(level='ERROR')` to find error and critical log entries, then summarizes the issues found.
+
+> "Why did my workflow fail?"
+
+LLM calls:
+1. `swf_list_workflow_executions(status='failed', namespace="user_namespace")` - find failed executions
+2. `get_workflow_monitor(execution_id='...')` - get aggregated errors
+3. `swf_list_logs(execution_id='...', level='ERROR')` - detailed error logs
+
+### Activity Summary
+
+> "Summarize testbed activity for the past week."
+
+LLM makes multiple calls:
+1. `swf_list_workflow_executions(start_time="2026-01-06T00:00:00", end_time="2026-01-13T00:00:00")` - all executions
+2. `swf_list_agents()` - registered agents
+3. `swf_list_namespaces()` - active namespaces
+4. Synthesizes: "In the past week, 47 workflow executions ran across 3 namespaces..."
+
+### Investigating a Run
+
+> "Show me details about run 100042 and its STF files."
+
+LLM calls:
+1. `swf_get_run(run_number=100042)` - run details
+2. `list_stf_files(run_number=100042)` - associated STF files
+
+### Agent Troubleshooting
+
+> "The fast_processing agent seems unresponsive. What's happening?"
+
+LLM calls:
+1. `swf_get_agent(name="fast_processing-agent-wenauseic-123")` - agent status
+2. `swf_list_logs(instance_name="fast_processing-agent-wenauseic-123", level='WARNING')` - recent issues
+3. If needed: `kill_agent(name="...")` to terminate unresponsive agent
+
+### Managing User Testbed
+
+> "Start my testbed"
+
+LLM calls:
+1. `check_agent_manager(username='wenauseic')` - verify agent manager is running
+2. If alive: `start_user_testbed(username='wenauseic')`
+3. If not: Instructs user to run `testbed agent-manager`
+
+### Namespace Activity
+
+> "What's happening in namespace torre1 today?"
+
+LLM calls:
+1. `swf_get_namespace(namespace="torre1", start_time="2026-01-13T00:00:00")` - activity counts
+2. `swf_list_workflow_executions(namespace="torre1", start_time="2026-01-13T00:00:00")` - executions
+3. `swf_list_agents(namespace="torre1")` - agents
+
+### Fast Processing Status
+
+> "What's the status of TF slice processing for run 100042?"
+
+LLM calls:
+1. `list_tf_slices(run_number=100042)` - all slices
+2. Summarizes by status: "Run 100042 has 150 slices: 120 completed, 25 processing, 5 queued."
+
+---

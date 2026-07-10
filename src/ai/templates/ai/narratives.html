@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}Campaign Narratives - epicprod{% endblock %}
+
+{% block content %}
+<style>
+.narrative-entry { border: 1px solid #8a9bad; border-radius: 6px;
+                   margin-bottom: .8rem; max-width: 62em; }
+.narrative-entry summary { list-style: none; cursor: pointer;
+                           padding: .6rem 1rem; display: flex;
+                           align-items: baseline; gap: .8em;
+                           flex-wrap: wrap; }
+.narrative-entry summary::-webkit-details-marker { display: none; }
+.narrative-entry summary::before { content: '\25B8'; font-size: 1.1em;
+                                   transition: transform .15s ease-in-out; }
+.narrative-entry[open] summary::before { transform: rotate(90deg); }
+.narrative-entry summary h4 { margin: 0; display: inline; }
+.narr-detail-link { margin-left: auto; }
+.narrative-body { padding: 0 1.25rem 1rem 2.2rem; }
+.narrative-body h1 { font-size: 1.35rem; }
+.narrative-body h2 { font-size: 1.15rem; }
+.narrative-block-head { border-top: 1px solid #8a9bad; margin-top: 1rem;
+                        padding-top: .6rem; color: #5d6b7a;
+                        font-weight: 600; margin-bottom: .4rem; }
+.narrative-comment { margin: .4rem 0; padding: .4rem .6rem;
+                     background: #f6f8fb; border-radius: 4px; }
+.narrative-comment .nc-meta { color: #5d6b7a; margin-bottom: .15rem; }
+.narrative-comment .nc-body { white-space: pre-wrap; }
+</style>
+
+<div class="container-fluid mt-3">
+  <h1>Campaign Narratives</h1>
+  <p style="max-width: 62em">
+    Narratives describe production campaigns, in general, and specific
+    campaigns. They describe purpose, content, evolution such that AIs can
+    reason with them in assessing campaign progress and status. They also
+    should be useful to humans! See docs/EPICPROD_NARRATIVES.md.
+  </p>
+
+  {% if error %}
+    <div class="border rounded p-2 mb-3" style="max-width: 62em; background-color:#fff3f3; color:#7a1212">
+      {{ error }}
+    </div>
+  {% endif %}
+
+  {% if entries %}
+  <div class="mb-2">
+    {% csrf_token %}
+    <button type="button" id="narr-open-all" class="btn btn-sm btn-secondary">Open all</button>
+    <button type="button" id="narr-close-all" class="btn btn-sm btn-secondary">Close all</button>
+  </div>
+  {% endif %}
+
+  {% if general_entries %}
+  <h3 class="text-muted">General</h3>
+  {% for e in general_entries %}
+    {% include "ai/_narrative_entry.html" %}
+  {% endfor %}
+  {% endif %}
+
+  {% if campaign_entries %}
+  <h3 class="text-muted mt-3">Campaigns</h3>
+  {% for e in campaign_entries %}
+    {% include "ai/_narrative_entry.html" %}
+  {% endfor %}
+  {% endif %}
+
+  {% if not entries and not error %}
+    <div class="text-muted">No narrative entries yet.</div>
+  {% endif %}
+</div>
+
+<script>
+(function () {
+  const all = () => document.querySelectorAll('details.narrative-entry');
+  const openAll = document.getElementById('narr-open-all');
+  const closeAll = document.getElementById('narr-close-all');
+  if (openAll) openAll.addEventListener('click', () => all().forEach(d => d.open = true));
+  if (closeAll) closeAll.addEventListener('click', () => all().forEach(d => d.open = false));
+
+  document.querySelectorAll('[data-narr-comment]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const entry = btn.closest('details');
+      const text = entry.querySelector('.narrative-comment-text').value.trim();
+      if (!text) return;
+      btn.disabled = true;
+      const token = document.querySelector('[name=csrfmiddlewaretoken]').value;
+      try {
+        const r = await fetch('{{ request.META.SCRIPT_NAME }}/ai/api/narratives/comment/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': token },
+          body: JSON.stringify({ group_id: btn.dataset.narrComment, content: text }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || 'comment failed');
+        window.location.reload();
+      } catch (err) {
+        btn.disabled = false;
+        alert('Comment failed: ' + err.message);
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

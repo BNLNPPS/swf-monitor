@@ -206,15 +206,49 @@
 
         <section class="workflow-stage">
             <div class="workflow-stage-header">
-                <div class="workflow-stage-title">Campaign Catalogs</div>
+                <div class="workflow-stage-title">Campaign Management</div>
             </div>
             <div class="workflow-stage-body">
-                <div class="workflow-link-row" title="Tasks/datasets making up current, past and future production campaigns">
+                <div class="workflow-link-row" title="Campaign task catalog: past, current, and future campaigns">
                     <div class="workflow-link-line">
-                        <strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Campaign Task Catalogs</a></strong>
+                        <strong><a href="{% url 'pcs:pcs_catalog' %}" class="text-decoration-none">Campaign Catalog</a></strong>
                         <span class="badge bg-info">{{ prod_tasks_count }}</span>
                     </div>
-                    <div class="workflow-link-desc">Tasks/datasets making up current, past and future production campaigns</div>
+                    <div class="workflow-link-desc">Campaign task catalog: past, current, and future campaigns</div>
+                </div>
+                <div class="workflow-link-row" title="Current campaign production progress">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:pcs_catalog' %}?lifecycle=current&amp;view=progress" class="text-decoration-none">Campaign Progress</a></strong>
+                        <span class="badge bg-info">{{ prod_tasks_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">Current campaign production progress</div>
+                </div>
+                <div class="workflow-link-row" title="Physics configurations with their editions and produced data across campaigns">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:pcs_physics_configs' %}" class="text-decoration-none">Physics configs by campaign</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Physics configurations and their produced data across campaigns</div>
+                </div>
+                <div class="workflow-link-row" title="Campaign narrative documents: purpose, content, and evolution of production campaigns">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'ai:ai_narratives' %}" class="text-decoration-none">Campaign Narratives</a></strong>
+                        <span class="badge bg-info">{{ campaign_narratives_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">Campaign narrative documents: purpose, content, evolution</div>
+                </div>
+                <div class="workflow-link-row" title="AI evaluations across epicprod">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'monitor_app:ai_content_list' %}" class="text-decoration-none ai-attr-text">AI assessments</a></strong>
+                        <span class="badge bg-info">{{ ai_content_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">AI evaluations across epicprod</div>
+                </div>
+                <div class="workflow-link-row" title="AI-proposed actions pending human review, and the decision history">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'ai:ai_proposals' %}" class="text-decoration-none ai-attr-text">AI proposals</a></strong>
+                        <span class="badge bg-info">{{ ai_proposals_pending_count }}</span>
+                    </div>
+                    <div class="workflow-link-desc">AI-proposed actions pending review, and the decision history</div>
                 </div>
             </div>
         </section>

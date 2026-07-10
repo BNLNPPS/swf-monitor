@@ -36,6 +36,18 @@
 .item-entry.selected { background: #e7f1ff; border-left: 3px solid #0d6efd; }
 .item-label { font-weight: 600; }
 .item-meta { color: #6c757d; font-size: .75rem; }
+.pcs-ptask-summary { border: 1px solid #ced4da; border-radius: .375rem; overflow: hidden; margin-bottom: .75rem; }
+.pcs-ptask-head { display:flex; justify-content:space-between; align-items:center; gap:.75rem; padding:.45rem .65rem; background:#f8f9fa; border-bottom:1px solid #ced4da; font-weight:600; }
+.pcs-ptask-head .badge { font-size:.78rem; }
+.pcs-ptask-table { margin:0; font-size:.82rem; }
+.pcs-ptask-table th { white-space:nowrap; background:#f8f9fa; }
+.pcs-ptask-table td { vertical-align:top; }
+.pcs-ptask-name { min-width:18rem; word-break:break-word; }
+.pcs-ptask-datasets { min-width:18rem; word-break:break-word; }
+.pcs-ptask-muted { color:#495057; }
+.pcs-panda-ops { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin:.35rem 0 .75rem; }
+.pcs-panda-ops-label { font-weight:600; margin-right:.2rem; }
+.pcs-panda-op { font-size:.78rem; padding:.18rem .5rem; }
 
 .spec-section { margin-bottom: .75rem; border: 1px solid #dee2e6; border-radius: .375rem; overflow: hidden; }
 .spec-section-header { padding: .5rem .75rem; background: #f8f9fa; font-weight: 600; font-size: .85rem;
@@ -112,8 +124,6 @@
                 <span id="submit-task-wrap" tabindex="0" style="display:none;">
                     <button class="btn btn-success btn-sm" id="btn-submit-task">Submit to PanDA</button>
                 </span>
-                <a class="btn btn-info btn-sm" id="link-panda-task" target="_blank" style="display:none;">PanDA Task</a>
-                <button class="btn pcs-reset-submit-btn btn-sm" id="btn-reset-task" style="display:none;">Reset submission</button>
                 {% endif %}
                 <button class="btn btn-secondary btn-sm" id="btn-clear-suggestions" style="display:none;">Clear</button>
                 <button class="btn btn-secondary btn-sm" id="btn-cancel" style="display:none;">Cancel</button>
@@ -193,6 +203,8 @@
     const currentUser = '{{ username }}';
     const csrfToken   = '{{ csrf_token }}';
     const QUESTIONNAIRE_LIST_URL = "../../questionnaires/";
+    const RUCIO_DID_URL = "../../rucio/";
+    const EDITION_DATA_URL = "../../data/";
 
     // ── Tag-based naming: the new system's names enter the world here ──
     // The dataset's human-facing identity is its tag-composed name
@@ -232,6 +244,208 @@
         if (!s) return '';
         const escaped = htmlEscape(s);
         return isUrl(s) ? `<a href="${escaped}" rel="noopener noreferrer">${escaped}</a>` : escaped;
+    }
+    function inlineMarkdownHtml(text) {
+        return htmlEscape(text)
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    }
+    function markdownHtml(text) {
+        const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+        let html = '';
+        let listOpen = false;
+        const closeList = () => {
+            if (listOpen) {
+                html += '</ul>';
+                listOpen = false;
+            }
+        };
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) {
+                closeList();
+                continue;
+            }
+            const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+            if (heading) {
+                closeList();
+                const level = heading[1].length + 2;
+                html += `<h${level}>${inlineMarkdownHtml(heading[2])}</h${level}>`;
+                continue;
+            }
+            const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+            if (bullet) {
+                if (!listOpen) {
+                    html += '<ul>';
+                    listOpen = true;
+                }
+                html += `<li>${inlineMarkdownHtml(bullet[1])}</li>`;
+                continue;
+            }
+            closeList();
+            html += `<p>${inlineMarkdownHtml(trimmed)}</p>`;
+        }
+        closeList();
+        return html;
+    }
+    function aiAssessmentsHtml(data) {
+        const items = Array.isArray(data) ? data : [];
+        const rows = items
+            .filter(item => item && String(item.assessment || '').trim())
+            .map((item, idx, arr) => {
+                const border = idx + 1 < arr.length ? ' mb-3 pb-3 border-bottom' : '';
+                return `<div class="${border}">
+                    <table class="table table-sm table-bordered mb-2">
+                        <tbody>
+                        <tr>
+                            <td><strong>Created</strong></td><td>${htmlEscape(item.created_at || '')}</td>
+                            <td><strong>User</strong></td><td>${htmlEscape(item.username || '')}</td>
+                            <td><strong>AI</strong></td><td>${htmlEscape(item.ai || '')}</td>
+                        </tr>
+                        <tr><td colspan="6"><div class="ai-assessment-text" style="overflow-wrap:anywhere;">${markdownHtml(item.assessment)}</div></td></tr>
+                        </tbody>
+                    </table>
+                </div>`;
+            }).join('');
+        if (!rows) return '';
+        return `<div class="card mb-3">
+            <div class="card-header"><strong>AI Assessments</strong></div>
+            <div class="card-body">${rows}</div>
+        </div>`;
+    }
+    function pandaStatusCellClass(status) {
+        const value = status || '-';
+        if (['failed', 'aborted', 'broken', 'submit_failed'].includes(value)) return 'failed_fill';
+        if (['done', 'finished', 'completed'].includes(value)) return 'done_fill';
+        if (['running', 'active'].includes(value)) return 'running_fill';
+        if (['defined', 'pending', 'registered', 'scouting', 'submitted'].includes(value)) return 'warning_fill';
+        return 'paused_fill';
+    }
+    function pandaAttemptLabel(pt, rows) {
+        const n = Number(pt.try_number);
+        if (!Number.isFinite(n) || n <= 1) return rows.length > 1 ? 'base' : '';
+        return `try${n}`;
+    }
+    function pandaTasksHtml(t) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks.slice() : [];
+        if (!rows.length && t.panda_task_id) {
+            rows.push({
+                try_number: '?',
+                jedi_task_id: t.panda_task_id,
+                task_name: '',
+                out_ds: '',
+                log_ds: '',
+                site: '',
+                status_snapshot: t.status || '',
+                association_source: 'legacy panda_task_id',
+                match_reason: 'Recorded on campaign task before PandaTasks history was available.',
+                current: true,
+                created_at: '',
+                updated_at: t.updated_at || '',
+            });
+        }
+        if (!rows.length) return '';
+        const showAttempt = rows.some(pt => Number(pt.try_number) > 1);
+        const rowHtml = rows.map(pt => {
+            const jedi = pt.jedi_task_id
+                ? `<a href="/swf-monitor/panda/tasks/${pt.jedi_task_id}/">${pt.jedi_task_id}</a>`
+                : '<span class="pcs-ptask-muted">pending</span>';
+            const current = pt.current ? ' <span class="pcs-ptask-muted">(current)</span>' : '';
+            const attemptLabel = pandaAttemptLabel(pt, rows);
+            const submittedAt = pt.created_at_display || pt.created_at || '';
+            const datasets = [
+                pt.out_ds ? `<div>${htmlEscape(pt.out_ds)}</div>` : '',
+            ].filter(Boolean).join('');
+            return `<tr>
+                <td>${jedi}</td>
+                <td class="${pandaStatusCellClass(pt.status_snapshot)}">${htmlEscape(pt.status_snapshot || '-')}</td>
+                <td class="pcs-ptask-name">${htmlEscape(pt.task_name || '')}</td>
+                <td class="pcs-ptask-datasets">${datasets || '<span class="pcs-ptask-muted">-</span>'}</td>
+                <td>${submittedAt ? htmlEscape(submittedAt) : '<span class="pcs-ptask-muted">-</span>'}</td>
+                ${showAttempt ? `<td>${htmlEscape(attemptLabel)}${current}</td>` : ''}
+            </tr>`;
+        }).join('');
+        const attemptHead = showAttempt ? '<th>Attempt</th>' : '';
+        return `<section class="pcs-ptask-summary" aria-label="PanDA task activity">
+            <div class="pcs-ptask-head">
+                <span>PanDA Tasks</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-bordered pcs-ptask-table">
+                    <thead><tr><th>PanDA task</th><th>Status</th><th>PanDA task name</th><th>Output Datasets</th><th>Submitted</th>${attemptHead}</tr></thead>
+                    <tbody>${rowHtml}</tbody>
+                </table>
+            </div>
+        </section>`;
+    }
+    function currentPandaJediTaskId(t) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
+        const current = rows.find(pt => pt.current && pt.jedi_task_id);
+        if (current) return current.jedi_task_id;
+        for (let i = rows.length - 1; i >= 0; i--) {
+            if (rows[i].jedi_task_id) return rows[i].jedi_task_id;
+        }
+        return t.panda_task_id || null;
+    }
+    function currentPandaTaskRow(t, jediTaskId) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
+        const idText = String(jediTaskId || '');
+        const current = rows.find(pt => pt.current && String(pt.jedi_task_id || '') === idText);
+        if (current) return current;
+        const matching = rows.find(pt => String(pt.jedi_task_id || '') === idText);
+        if (matching) return matching;
+        return t.panda_task_id ? {jedi_task_id: t.panda_task_id, status_snapshot: t.status || ''} : null;
+    }
+    function normalizedPandaStatus(row) {
+        return String((row && (row.status_snapshot || row.status)) || '').trim().toLowerCase();
+    }
+    function pandaOperationState(operation, row) {
+        const status = normalizedPandaStatus(row);
+        const activeStates = new Set([
+            'active', 'assigning', 'defined', 'pending', 'ready', 'registered',
+            'running', 'scouted', 'scouting', 'submitted', 'throttled', 'waiting',
+        ]);
+        const retryableTerminalStates = new Set([
+            'completed', 'done', 'exhausted', 'failed', 'finished',
+        ]);
+        if (!status) return {allowed: false, reason: 'PanDA task status is not known yet.'};
+        if (operation === 'increase_attempts') {
+            return activeStates.has(status)
+                ? {allowed: true, reason: ''}
+                : {allowed: false, reason: `Add retry is only for active PanDA tasks; current status is ${status}.`};
+        }
+        if (operation === 'retry_failures') {
+            return retryableTerminalStates.has(status)
+                ? {allowed: true, reason: ''}
+                : {allowed: false, reason: `Restart/retry failures is only for finished PanDA tasks; current status is ${status}.`};
+        }
+        return {allowed: true, reason: ''};
+    }
+    function pandaOperationButtonHtml(operation, label, row, extraText) {
+        const state = pandaOperationState(operation, row);
+        const btnClass = state.allowed ? 'btn-success' : 'btn-secondary';
+        const disabled = state.allowed ? '' : ' disabled aria-disabled="true"';
+        const title = state.reason ? ` title="${htmlEscape(state.reason)}"` : '';
+        return `<button type="button" class="btn ${btnClass} btn-sm pcs-panda-op" data-panda-op="${operation}"${disabled}${title}>${label}${extraText || ''}</button>`;
+    }
+    function currentMaxAttemptLabel(t, jediTaskId) {
+        const rows = Array.isArray(t.panda_tasks) ? t.panda_tasks : [];
+        const row = rows.find(pt => String(pt.jedi_task_id || '') === String(jediTaskId || ''));
+        const raw = row ? (row.maxattempt || (row.metadata && row.metadata.maxattempt)) : null;
+        const nmax = Number(raw);
+        return Number.isFinite(nmax) && nmax > 0 ? ` (current nmax: ${nmax})` : '';
+    }
+    function pandaOperationsHtml(t) {
+        const jediTaskId = currentPandaJediTaskId(t);
+        if (!currentUser || !jediTaskId) return '';
+        const row = currentPandaTaskRow(t, jediTaskId);
+        return `<div class="pcs-panda-ops" data-jedi-task-id="${htmlEscape(jediTaskId)}">
+            <span class="pcs-panda-ops-label">PanDA Operations</span>
+            ${pandaOperationButtonHtml('increase_attempts', 'Add Another Retry', row, currentMaxAttemptLabel(t, jediTaskId))}
+            ${pandaOperationButtonHtml('retry_failures', 'Restart Finished Task And Retry Failures', row)}
+            <button type="button" class="btn pcs-reset-submit-btn btn-sm pcs-panda-op" data-panda-op="rerun_entire_task">Rerun Entire Task</button>
+        </div>`;
     }
     // Legacy import rows carry an opaque csv_import.<hash> / past.<…> key and a
     // synthetic DID (not a Rucio DID) — both plumbing, hidden from the panels.
@@ -312,6 +526,7 @@
                 if (d.task_params_error !== undefined) t.task_params_error = d.task_params_error;
                 if (d.condor_command !== undefined) t.condor_command = d.condor_command;
                 if (d.panda_command !== undefined) t.panda_command = d.panda_command;
+                if (d.panda_tasks !== undefined) t.panda_tasks = d.panda_tasks;
                 t._hydrated = true;
             }
         } catch (e) { /* leave light */ }
@@ -341,8 +556,7 @@
     const btnLockTask = document.getElementById('btn-lock-task');
     const submitTaskWrap = document.getElementById('submit-task-wrap');
     const btnSubmitTask = document.getElementById('btn-submit-task');
-    const linkPandaTask = document.getElementById('link-panda-task');
-    const btnResetTask = document.getElementById('btn-reset-task');
+    const btnResetTask = null;
     const btnClearSuggestions = document.getElementById('btn-clear-suggestions');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSave = document.getElementById('btn-save');
@@ -376,7 +590,6 @@
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
         if (submitTaskWrap) submitTaskWrap.style.display = 'none';
-        if (linkPandaTask) linkPandaTask.style.display = 'none';
         composeTaskId = null; composeTaskName = null; composeDatasetId = null; composeConfigId = null;
         composeDataset = null; composeConfig = null;
         updateUrl();
@@ -392,7 +605,6 @@
         if (btnDeleteTask) btnDeleteTask.style.display = 'none';
         if (btnLockTask) btnLockTask.style.display = 'none';
         if (submitTaskWrap) submitTaskWrap.style.display = 'none';
-        if (linkPandaTask) linkPandaTask.style.display = 'none';
         btnCancel.style.display = 'inline-block';
         btnSave.style.display = 'inline-block';
         btnSave.disabled = true;
@@ -466,7 +678,6 @@
             if (btnCopyTask) btnCopyTask.style.display = 'none';
             if (btnLockTask) btnLockTask.style.display = 'none';
             if (submitTaskWrap) submitTaskWrap.style.display = 'none';
-            if (linkPandaTask) linkPandaTask.style.display = 'none';
         }
         renderList();
         updateUrl();
@@ -719,11 +930,11 @@
     }
 
     // Dataset/config detail panels are read-only here — hide every task-only
-    // action (Submit/Lock/Edit/Copy/Delete/PanDA link/New) that a prior task
+    // action (Submit/Lock/Edit/Copy/Delete/New) that a prior task
     // view may have left visible. Submit-to-PanDA is task business, not dataset.
     function hideTaskActions() {
         [btnCopyTask, btnEditTask, btnDeleteTask, btnLockTask, submitTaskWrap,
-         linkPandaTask, btnResetTask, btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
+         btnNewTask].forEach(b => { if (b) b.style.display = 'none'; });
     }
 
     // ── BROWSE: Show details ──
@@ -811,6 +1022,52 @@
             <div class="item-meta">Created by ${c.created_by} | ${c.updated_at}</div>`;
     }
 
+    function proposalHtml(t) {
+        // Pending AI proposal (AI_PROPOSALS.md) — same record the
+        // catalog list renders, so list<->detail review cannot fork. Approve
+        // and Deny act through the same decide endpoint as the bulk bar.
+        const p = t.proposal;
+        if (!p || !p.payload) return '';
+        const name = htmlEscape(taskComposedName(t));
+        const buttons = currentUser
+            ? `<span class="ms-2"><button type="button" class="btn btn-success btn-sm" data-proposal-decide="approve" data-task-name="${name}">Approve</button>`
+              + `<button type="button" class="btn btn-secondary btn-sm ms-1" data-proposal-decide="deny" data-task-name="${name}">Deny</button></span>`
+            : '';
+        const replaced = p.payload.replaced_by
+            ? `, replaced by ${htmlEscape(p.payload.replaced_by)}` : '';
+        return `<div class="mb-2 p-2 ai-attr" style="display:block">
+            <strong>AI proposal:</strong> campaign propagation ${htmlEscape(p.prev_state || '')} &rarr; ${htmlEscape(p.payload.state || '')}${replaced}
+            ${buttons}
+            <div class="mt-1">${htmlEscape(p.comment || '')}</div>
+            <div class="item-meta">proposed by ${htmlEscape(p.proposer || 'AI')} ${htmlEscape(String(p.proposed_at || '').slice(0, 10))}</div>
+        </div>`;
+    }
+
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-proposal-decide]');
+        if (!btn) return;
+        const decision = btn.dataset.proposalDecide;
+        const name = btn.dataset.taskName;
+        const verb = decision === 'approve' ? 'Approve and execute' : 'Deny';
+        if (!confirm(`${verb} the AI proposal on ${name}?`)) return;
+        btn.disabled = true;
+        try {
+            const r = await fetch('/swf-monitor/ai/api/proposals/decide/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                body: JSON.stringify({ names: [name], decision: decision }),
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.detail || 'request failed');
+            if (j.stale.length) alert('The record changed since this was proposed — the proposal was withdrawn without executing.');
+            else if (j.no_proposal.length) alert('No pending proposal found on this task.');
+            window.location.reload();
+        } catch (err) {
+            btn.disabled = false;
+            alert('Proposal decision failed: ' + err.message);
+        }
+    });
+
     function showTaskDetail(id) {
         const t = allTasks.find(x => x.id === id);
         if (!t) return;
@@ -856,30 +1113,56 @@
                 submitTaskWrap.style.display = 'none';
             }
         }
-        // PanDA task link once the agent has recorded the jediTaskID.
-        if (linkPandaTask) {
-            if (submitted) {
-                linkPandaTask.style.display = 'inline-block';
-                linkPandaTask.href = `/swf-monitor/panda/tasks/${t.panda_task_id}/`;
-                linkPandaTask.textContent = `PanDA Task ${t.panda_task_id}`;
-            } else {
-                linkPandaTask.style.display = 'none';
-            }
-        }
-        // Reset submission — operator recovery for a task pinned to a dead
-        // jediTaskID; detaches the PanDA reference and returns it to draft.
-        if (btnResetTask) btnResetTask.style.display = (submitted && canOperate) ? 'inline-block' : 'none';
         const statusColors = {draft:'secondary', ready:'primary', submitted:'info', completed:'success', failed:'danger', past_output:'dark'};
+        const hasPandaTasks = Array.isArray(t.panda_tasks) && t.panda_tasks.length > 0;
+        const statusBadge = (t.status === 'submitted' && hasPandaTasks)
+            ? ''
+            : `<span class="badge bg-${statusColors[t.status]||'secondary'}">${htmlEscape(t.status)}</span>`;
 
-        let html = `<p><span class="badge bg-${statusColors[t.status]||'secondary'}">${t.status}</span>
-            <span class="item-meta ms-2">by ${t.created_by} | ${t.updated_at}</span></p>`;
-        if (Array.isArray(t.questionnaire_matches) && t.questionnaire_matches.length) {
-            const requestLinks = t.questionnaire_matches.map(m => {
-                const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
-                return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>`;
-            }).join(', ');
-            html += `<div class="mb-2">${requestLinks}</div>`;
+        let html = `<p>${statusBadge}<span class="item-meta${statusBadge ? ' ms-2' : ''}">by ${htmlEscape(t.created_by)} | ${htmlEscape(t.updated_at)}</span></p>`;
+        html += proposalHtml(t);
+        html += aiAssessmentsHtml(t.ai_content || []);
+        html += pandaTasksHtml(t);
+        html += pandaOperationsHtml(t);
+        const pcRequestLinks = (Array.isArray(t.pc_requests) ? t.pc_requests : []).map(r => {
+            const detail = [r.requestor, r.nevents ? `${r.nevents} events` : '', r.description]
+                .filter(Boolean).join(' · ');
+            const tip = detail ? ` title="${htmlEscape(detail)} — production request on this physics configuration; click for the configuration's data page"` : '';
+            return `<a href="../../data/${encodeURIComponent(t.composed_name)}/"${tip}>Request req#${r.id}</a>`;
+        });
+        const questionnaireLinks = (Array.isArray(t.questionnaire_matches) ? t.questionnaire_matches : []).map(m => {
+            const reason = m.reason ? ` title="${htmlEscape(m.reason)}"` : '';
+            return `<a href="${QUESTIONNAIRE_LIST_URL}${m.id}/"${reason}>Request #${m.id}</a>`;
+        });
+        const requestLinks = pcRequestLinks.concat(questionnaireLinks);
+        if (requestLinks.length) {
+            html += `<div class="mb-2">${requestLinks.join(', ')}</div>`;
         }
+        // Produced data: the task's recorded outputs (unified schema),
+        // each DID linking to the live Rucio detail page.
+        const outs = (t.overrides && Array.isArray(t.overrides.outputs)) ? t.overrides.outputs : [];
+        if (outs.length) {
+            const fmtVol = b => b >= 1e12 ? (b / 1e12).toFixed(2) + ' TB' : (b / 1e9).toFixed(1) + ' GB';
+            const outRows = outs.map(o => {
+                const did = o.did || '';
+                const cut = did.indexOf(':');
+                const sc = cut > 0 ? did.slice(0, cut) : '';
+                const nm = (cut > 0 ? did.slice(cut + 1) : did).replace(/^\/+/, '');
+                const link = did ? `<a href="${RUCIO_DID_URL}${encodeURIComponent(sc)}/${nm}/" title="live Rucio detail">${htmlEscape(did)}</a>` : '';
+                const stage = o.stage === 'FULL' ? 'Simu' : (o.stage === 'RECO' ? 'Reco' : htmlEscape(o.stage || ''));
+                let rses = '';
+                if (Array.isArray(o.rses)) rses = o.rses.map(r => r.rse || '').filter(Boolean).join(', ');
+                else if (o.rses && typeof o.rses === 'object') rses = Object.keys(o.rses).join(', ');
+                const files = (o.file_count !== undefined && o.file_count !== null) ? o.file_count : '?';
+                const vol = o.bytes ? fmtVol(o.bytes) : '';
+                return `<div class="small">${stage}: ${link} — ${files} files${vol ? ' · ' + vol : ''}` +
+                       `${o.complete === false ? ' <span style="color:#dc3545">(incomplete)</span>' : ''}` +
+                       `${rses ? ' · ' + htmlEscape(rses) : ''}</div>`;
+            }).join('');
+            const editionLink = `<a class="small ms-2" href="${EDITION_DATA_URL}${encodeURIComponent(taskComposedName(t))}/" title="the edition's datasets, DIDs, replicas">edition data</a>`;
+            html += `<div class="mb-2"><strong>Produced data</strong>${editionLink}${outRows}</div>`;
+        }
+
         // Submit-readiness. Empty list means the task can produce a submission spec.
         if ((t.status === 'draft' || t.status === 'ready') && Array.isArray(readinessProblems)) {
             html += readinessProblems.length
@@ -1124,47 +1407,109 @@
             alert(msg);
         }
     });
-    if (btnResetTask) btnResetTask.addEventListener('click', async () => {
+    let pendingPandaOperation = null;
+    browseContent.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-panda-op]');
+        if (!btn) return;
         const t = allTasks.find(x => x.id === selectedItemId);
         if (!t) return;
-        if (!confirm(`Reset submission on "${t.name}"? This detaches PanDA Task ${t.panda_task_id} and returns the task to draft so it can be re-submitted. It does not stop or delete the PanDA task itself.`)) return;
-        const resp = await fetch(taskApiUrl(t, 'reset-submission/'),
-            {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
-        if (resp.ok) {
-            const updated = await resp.json();
-            const idx = allTasks.findIndex(x => x.id === t.id);
-            if (idx >= 0) { allTasks[idx].status = updated.status || 'draft'; allTasks[idx].panda_task_id = null; }
-            renderList();
-            showTaskDetail(t.id);   // stay in the panel; Submit returns, PanDA link + Reset vanish
+        const op = btn.dataset.pandaOp;
+        const wrap = btn.closest('.pcs-panda-ops');
+        const jediTaskId = wrap ? wrap.dataset.jediTaskId : currentPandaJediTaskId(t);
+        if (!jediTaskId) return;
+
+        let suffix = '';
+        let body = {jedi_task_id: Number(jediTaskId)};
+        let confirmText = '';
+        if (op === 'increase_attempts') {
+            suffix = 'panda-add-retry/';
+            body.increase = 1;
+            confirmText = `Add one more allowed retry to PanDA task ${jediTaskId}?`;
+        } else if (op === 'retry_failures') {
+            suffix = 'panda-retry-failures/';
+            body.new_parameters = {};
+            confirmText = `Ask PanDA to restart and retry failed work in PanDA task ${jediTaskId}?`;
+        } else if (op === 'rerun_entire_task') {
+            suffix = 'rerun-entire-task/';
+            confirmText = `Rerun the entire campaign task as a new PanDA task attempt? This creates a new output namespace.`;
         } else {
-            let msg = `Reset failed (HTTP ${resp.status})`;
-            try { const d = await resp.json(); msg = d.detail || msg; } catch(e) {}
+            return;
+        }
+        if (!confirm(confirmText)) return;
+
+        const oldText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Queued...';
+        const resp = await fetch(taskApiUrl(t, suffix), {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+            body: JSON.stringify(body),
+        });
+        if (resp.ok) {
+            const updated = await resp.json().catch(() => null);
+            updateTaskFromApiData(t.id, updated);
+            if (op === 'rerun_entire_task') {
+                pendingSubmitName = t.name;
+                subscribeSubmitOutcomes();
+                if (submitPollTimer) clearTimeout(submitPollTimer);
+                pollForPandaTask(t.id, 30);
+                btn.textContent = 'Rerun queued';
+            } else {
+                pendingPandaOperation = {taskName: t.name, operation: op, jediTaskId: String(jediTaskId)};
+                subscribePandaOperationOutcomes();
+                btn.textContent = 'Operation queued';
+            }
+            setTimeout(() => { if (selectedItemId === t.id) showTaskDetail(t.id); }, 800);
+        } else {
+            let msg = `PanDA operation failed (HTTP ${resp.status})`;
+            try { const d = await resp.json(); msg = d.detail || msg; } catch(e2) {}
             alert(msg);
+            btn.disabled = false;
+            btn.textContent = oldText;
         }
     });
 
-    // After submit, the agent records the jediTaskID asynchronously (usually
-    // seconds). Poll the task until panda_task_id appears so the PanDA link
-    // shows on its own — no manual refresh. Bounded so it can't poll forever.
+    // After submit, the agent records the PanDA task id asynchronously (usually
+    // seconds). Poll the task until panda_task_id appears so the PanDA Tasks
+    // table updates on its own. Bounded so it can't poll forever.
     let submitPollTimer = null;
     let pendingSubmitName = null;   // task awaiting a submit outcome; set on submit, cleared by the SSE handlers below
+    function updateTaskFromApiData(taskId, data) {
+        const idx = allTasks.findIndex(x => x.id === taskId);
+        if (idx < 0 || !data) return null;
+        [
+            'status', 'panda_task_id', 'panda_tasks', 'condor_cluster_id',
+            'condor_command', 'panda_command', 'task_params_json',
+            'task_params_error', 'readiness', 'updated_at',
+        ].forEach(key => {
+            if (Object.prototype.hasOwnProperty.call(data, key)) allTasks[idx][key] = data[key];
+        });
+        return allTasks[idx];
+    }
+    async function refreshTaskFromApi(taskId) {
+        const task = allTasks.find(x => x.id === taskId);
+        if (!task) return null;
+        const r = await fetch(taskApiUrl(task, ''));
+        if (!r.ok) return null;
+        const data = await r.json();
+        return updateTaskFromApiData(taskId, data);
+    }
     function pollForPandaTask(taskId, attemptsLeft) {
         submitPollTimer = setTimeout(async () => {
             try {
-                const r = await fetch(taskApiUrl(allTasks.find(x => x.id === taskId), ''));
-                if (r.ok) {
-                    const data = await r.json();
-                    const idx = allTasks.findIndex(x => x.id === taskId);
-                    if (idx >= 0) { allTasks[idx].panda_task_id = data.panda_task_id; allTasks[idx].status = data.status; }
-                    if (data.panda_task_id) {
-                        if (selectedItemId === taskId) showTaskDetail(taskId);
-                        renderList();
-                        return;   // done
-                    }
+                const updated = await refreshTaskFromApi(taskId);
+                if (updated && updated.panda_task_id) {
+                    if (selectedItemId === taskId) showTaskDetail(taskId);
+                    renderList();
+                    return;   // done
                 }
             } catch (e) { /* transient; keep trying */ }
             if (attemptsLeft > 1) pollForPandaTask(taskId, attemptsLeft - 1);
-            else if (pendingSubmitName) resetSubmitButton();   // no confirmation arrived in the window
+            else if (pendingSubmitName) {
+                pendingSubmitName = null;
+                closeSubmitOutcomeStream();
+                resetSubmitButton();   // no confirmation arrived in the window
+            }
         }, 10000);   // every 10s
     }
 
@@ -1177,6 +1522,12 @@
         const resp = await fetch(taskApiUrl(t, 'submit/'),
             {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken}});
         if (resp.ok) {
+            const updated = await resp.json().catch(() => null);
+            updateTaskFromApiData(t.id, updated);
+            refreshTaskFromApi(t.id).then(fresh => {
+                if (fresh && selectedItemId === t.id) showTaskDetail(t.id);
+                if (fresh) renderList();
+            }).catch(() => {});
             pendingSubmitName = t.name;   // the SSE outcome handlers match on this
             subscribeSubmitOutcomes();    // open the live outcome stream now — never on page load
             btnSubmitTask.textContent = 'Submitted — awaiting PanDA ID…';
@@ -1198,22 +1549,40 @@
     function resetSubmitButton() {
         if (btnSubmitTask) { btnSubmitTask.disabled = false; btnSubmitTask.textContent = 'Submit to PanDA'; }
     }
-    function applySubmitted(taskName, jediId) {
+    async function applySubmitted(taskName, jediId) {
         const idx = allTasks.findIndex(x => x.name === taskName);
         if (idx >= 0) { allTasks[idx].panda_task_id = jediId; allTasks[idx].status = 'submitted'; }
         if (submitPollTimer) clearTimeout(submitPollTimer);
         if (pendingSubmitName === taskName) pendingSubmitName = null;
+        closeSubmitOutcomeStream();
+        if (idx >= 0) {
+            await refreshTaskFromApi(allTasks[idx].id).catch(() => null);
+        }
         if (idx >= 0 && allTasks[idx].id === selectedItemId) showTaskDetail(allTasks[idx].id);
         renderList();
     }
-    // Opened only after a submit is fired (called from the Submit handler),
-    // never on page load — so composing pins no streaming worker. Idempotent:
-    // one stream per compose session, reused across repeat submits.
     let submitOutcomeES = null;
+    let submitOutcomeTimeout = null;
+    function closeSubmitOutcomeStream() {
+        if (submitOutcomeTimeout) {
+            clearTimeout(submitOutcomeTimeout);
+            submitOutcomeTimeout = null;
+        }
+        if (submitOutcomeES) {
+            submitOutcomeES.close();
+            submitOutcomeES = null;
+        }
+    }
+    // Button-driven SSE rule: do not create page/session-scoped EventSource
+    // streams here. Every button action that needs an async outcome gets a
+    // short-lived stream, and that stream must close on matching outcome,
+    // timeout, or page unload. Reusing one stream for the whole compose page
+    // has previously leaked workers and choked the server.
     function subscribeSubmitOutcomes() {
-        if (submitOutcomeES) return;
+        closeSubmitOutcomeStream();
         const types = 'prodtask_submitted,prodtask_submit_failed,prodtask_submit_unrecorded';
         const es = submitOutcomeES = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=${types}`);
+        submitOutcomeTimeout = setTimeout(() => closeSubmitOutcomeStream(), 310000);
         es.addEventListener('prodtask_submitted', ev => {
             let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
             if (d.task_name) applySubmitted(d.task_name, d.jedi_task_id);
@@ -1223,6 +1592,7 @@
             if (d.task_name && d.task_name === pendingSubmitName) {
                 if (submitPollTimer) clearTimeout(submitPollTimer);
                 pendingSubmitName = null;
+                closeSubmitOutcomeStream();
                 resetSubmitButton();
                 alert('Submission failed: ' + (d.reason || 'unknown error'));
             }
@@ -1232,15 +1602,55 @@
             if (d.task_name && d.task_name === pendingSubmitName) {
                 if (submitPollTimer) clearTimeout(submitPollTimer);
                 pendingSubmitName = null;
+                closeSubmitOutcomeStream();
                 if (btnSubmitTask) {
                     btnSubmitTask.disabled = true;
-                    btnSubmitTask.textContent = `Submitted (jediTaskID ${d.jedi_task_id}) — recording failed`;
+                    btnSubmitTask.textContent = `Submitted (PanDA task ${d.jedi_task_id}) — recording failed`;
                 }
-                alert(`Submitted to PanDA as jediTaskID ${d.jedi_task_id}, but recording it on the task `
-                    + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this jediTaskID needs re-recording.`);
+                alert(`Submitted to PanDA as task ${d.jedi_task_id}, but recording it on the task `
+                    + `failed (${d.reason || 'unknown'}). Do NOT re-submit — this PanDA task ID needs re-recording.`);
             }
         });
     }
+    let pandaOperationES = null;
+    let pandaOperationTimeout = null;
+    function closePandaOperationStream() {
+        if (pandaOperationTimeout) {
+            clearTimeout(pandaOperationTimeout);
+            pandaOperationTimeout = null;
+        }
+        if (pandaOperationES) {
+            pandaOperationES.close();
+            pandaOperationES = null;
+        }
+    }
+    function subscribePandaOperationOutcomes() {
+        closePandaOperationStream();
+        const es = pandaOperationES = new EventSource(`{{ request.META.SCRIPT_NAME }}/api/messages/stream/?msg_types=panda_task_operation_done`);
+        pandaOperationTimeout = setTimeout(() => {
+            if (pendingPandaOperation) {
+                pendingPandaOperation = null;
+                alert('PanDA operation queued, but no completion event arrived before timeout.');
+            }
+            closePandaOperationStream();
+        }, 150000);
+        es.addEventListener('panda_task_operation_done', ev => {
+            let d = {}; try { d = JSON.parse(ev.data); } catch(_) {}
+            if (!pendingPandaOperation) return;
+            if (d.task_name !== pendingPandaOperation.taskName) return;
+            if (String(d.jedi_task_id) !== String(pendingPandaOperation.jediTaskId)) return;
+            pendingPandaOperation = null;
+            closePandaOperationStream();
+            const ok = !!d.ok;
+            alert(ok ? 'PanDA operation completed.' : ('PanDA operation failed: ' + (d.error || 'unknown error')));
+            const t = allTasks.find(x => x.id === selectedItemId);
+            if (t) refreshTaskFromApi(t.id).then(() => showTaskDetail(t.id)).catch(() => {});
+        });
+    }
+    window.addEventListener('beforeunload', () => {
+        closeSubmitOutcomeStream();
+        closePandaOperationStream();
+    });
     btnClearSuggestions.addEventListener('click', clearAllSuggestions);
     btnCancel.addEventListener('click', () => { enterBrowseMode(); renderList(); });
 

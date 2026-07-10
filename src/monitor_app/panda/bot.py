@@ -45,6 +45,8 @@ MAX_RESULT_LEN = 10000
 MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
+BOT_ASSESSMENT_USERNAME = 'bot'
+AI_MODEL = "claude-haiku-4-5-20251001"
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
@@ -61,7 +63,12 @@ CORUN_CALLBACK_URL = os.environ.get(
 CORUN_SUBSCRIPTION_NAME = os.environ.get(
     'CORUN_SUBSCRIPTION_NAME', 'pandabot-swf-testbed'
 )
-BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_')
+# HTTP MCP tools ingested into the bot's registry: production scope only
+# (the testbed bot carries the swf_ testbed surface). swf_get_log_entry
+# rides along because the #epicprod-live flow drills into action records
+# by log id.
+BOT_TOOL_PREFIXES = ('panda_', 'pcs_', 'epic_', 'epicprod_', 'ai_',
+                     'swf_get_log_entry')
 NO_QUERY_WARN = ":warning: *This response was not based on a live data query.*"
 NO_CITE_WARN = ":warning: *Tool was called live but the Data Provenance ID was not cited in the reply.*"
 THREAD_REPLY_MARKER = "[Thread reply]"
@@ -432,7 +439,7 @@ def _load_system_preamble():
         with open(SYSTEM_PROMPT_FILE) as f:
             return f.read()
     except FileNotFoundError:
-        return "You are the PanDA bot for the ePIC experiment."
+        return "You are DISpatcher, the ePIC production monitoring bot."
 
 
 class MCPClient:
@@ -654,7 +661,7 @@ class PandaBot:
         self.mm_url = os.environ.get('MATTERMOST_URL', 'chat.epic-eic.org')
         self.mm_token = os.environ['MATTERMOST_TOKEN']
         self.mm_team = os.environ.get('MATTERMOST_TEAM', 'main')
-        self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'pandabot')
+        self.mm_channel_name = os.environ.get('MATTERMOST_CHANNEL', 'dispatcher')
         self.mcp_url = MCP_URL
         self.mcp_bearer_token = MCP_BEARER_TOKEN
 
@@ -844,6 +851,32 @@ class PandaBot:
         except Exception:
             logger.exception(f"Failed to record DPID:{dpid}")
 
+    @staticmethod
+    def _stamp_bot_assessment_origin(tool_name, arguments):
+        """Stamp bot-origin metadata before registering an AI assessment."""
+        if tool_name != 'epic_register_ai_assessment':
+            return arguments
+
+        stamped = dict(arguments or {})
+        raw_data = stamped.get('data')
+        data = dict(raw_data) if isinstance(raw_data, dict) else {}
+        existing_origin = data.get('origin')
+        origin = dict(existing_origin) if isinstance(existing_origin, dict) else {}
+        origin.update({
+            'type': 'bot',
+            'client': 'mattermost',
+            'harness': 'bot',
+            'model': AI_MODEL,
+        })
+        data['origin'] = origin
+        data['origin_type'] = 'bot'
+        data['origin_model'] = AI_MODEL
+
+        stamped['username'] = BOT_ASSESSMENT_USERNAME
+        stamped['ai'] = AI_MODEL
+        stamped['data'] = data
+        return stamped
+
     async def _setup_mcp(self):
         """Discover tools from all MCP servers (HTTP + stdio).
 
@@ -933,7 +966,7 @@ class PandaBot:
 
         if not CORUN_CALLBACK_URL.startswith('https://'):
             logger.warning(
-                "Skipping corun subscription: CORUN_CALLBACK_URL must be https"
+                "Skipping corun-ai subscription: CORUN_CALLBACK_URL must be https"
             )
             return
 
@@ -949,7 +982,7 @@ class PandaBot:
             'status': 'active',
             'data': {
                 'client': 'swf-monitor-pandabot',
-                'channel': os.environ.get('MATTERMOST_CHANNEL', 'pandabot'),
+                'channel': os.environ.get('MATTERMOST_CHANNEL', 'dispatcher'),
             },
         }
 
@@ -982,7 +1015,7 @@ class PandaBot:
                         )
                     else:
                         logger.info(
-                            "Corun notification subscription %s already active",
+                            "corun-ai notification subscription %s already active",
                             CORUN_SUBSCRIPTION_NAME,
                         )
                 else:
@@ -1198,6 +1231,32 @@ class PandaBot:
             logger.exception("Failed to fetch thread")
             return None
 
+    async def _build_channel_context(self, channel_id, limit=12):
+        """Recent posts of the channel where the bot was @mentioned.
+
+        A top-level mention in a foreign channel (e.g. #epicprod-live)
+        usually refers to what is on screen — the recent posts are the
+        referent, so they ride into context like a thread would.
+        """
+        try:
+            result = await asyncio.to_thread(
+                self.driver.posts.get_posts_for_channel, channel_id,
+                params={'per_page': limit},
+            )
+            posts = result.get('posts', {})
+            order = result.get('order', [])   # newest first
+            lines = []
+            for pid in reversed(order):
+                p = posts.get(pid)
+                if not p or not p.get('message', '').strip():
+                    continue
+                username = await self._resolve_mm_username(p['user_id'])
+                lines.append(f"{username}: {p['message'].strip()}")
+            return "\n".join(lines) if lines else None
+        except Exception:
+            logger.exception("Failed to fetch channel history")
+            return None
+
     def start(self):
         """Connect to Mattermost and start listening."""
         logger.info(f"Connecting to {self.mm_url}...")
@@ -1324,16 +1383,24 @@ class PandaBot:
         logger.info(f"Message from {mm_username} ({source}): {message_text[:100]}")
 
         direct_addressed = is_dm or is_mention
+        # A top-level mention outside the home channel refers to what's on
+        # screen there — pull that channel's recent posts into context.
+        context_channel = (
+            post_channel
+            if is_mention and not is_dm and not is_our_channel and not root_id
+            else None
+        )
         asyncio.create_task(
             self._respond(
                 tagged_message, post_channel, post_id, root_id,
                 direct_addressed=direct_addressed,
+                context_channel=context_channel,
             )
         )
 
     async def _respond(
         self, tagged_message, reply_channel, post_id, root_id,
-        direct_addressed=False,
+        direct_addressed=False, context_channel=None,
     ):
         """Process any message — channel, DM, or mention.
 
@@ -1343,7 +1410,9 @@ class PandaBot:
         async with self._respond_lock:
             try:
                 messages = await self._load_recent_dialog()
-                reply, dpid_verified, tool_meta = await self._process_message(messages, tagged_message, root_id)
+                reply, dpid_verified, tool_meta = await self._process_message(
+                    messages, tagged_message, root_id,
+                    context_channel=context_channel)
                 reply = self._clean_reply_boilerplate(reply)
                 reply, force_thread_reply = self._extract_thread_reply_directive(reply)
                 if (
@@ -1351,7 +1420,7 @@ class PandaBot:
                     and self._is_silent_reply(reply)
                 ):
                     logger.info(
-                        "PanDA bot chose silence; not posting reply marker: %r",
+                        "DISpatcher chose silence; not posting reply marker: %r",
                         reply,
                     )
                     return
@@ -1365,7 +1434,7 @@ class PandaBot:
                 # Record inside lock so the next load sees this exchange
                 await self._record_exchange(tagged_message, reply, post_id, root_id)
             except Exception:
-                logger.exception("PanDA bot response task failed")
+                logger.exception("DISpatcher response task failed")
                 reply = (
                     "Sorry, I hit an internal error while processing this "
                     "message. The exception was logged."
@@ -1520,7 +1589,8 @@ class PandaBot:
         except Exception:
             logger.exception("Failed to post reply")
 
-    async def _process_message(self, messages, message_text, root_id):
+    async def _process_message(self, messages, message_text, root_id,
+                               context_channel=None):
         """Run the Claude conversation loop for one user message.
 
         Returns (reply_text, dpid_verified).  dpid_verified is True only when
@@ -1535,6 +1605,14 @@ class PandaBot:
                 user_content = (
                     f"[Thread conversation so far:\n{thread_context}\n]\n"
                     f"New reply: {message_text}"
+                )
+        elif context_channel:
+            channel_context = await self._build_channel_context(context_channel)
+            if channel_context:
+                thread_context = channel_context
+                user_content = (
+                    f"[Recent channel history:\n{channel_context}\n]\n"
+                    f"New message: {message_text}"
                 )
 
         messages.append({"role": "user", "content": user_content})
@@ -1571,7 +1649,7 @@ class PandaBot:
             for _round in range(MAX_TOOL_ROUNDS):
                 response = await self.claude.beta.messages.create(
                     # DO NOT change model without user approval
-                    model="claude-haiku-4-5-20251001",
+                    model=AI_MODEL,
                     max_tokens=4096,
                     cache_control={"type": "ephemeral"},
                     system=system_with_catalog,
@@ -1612,6 +1690,7 @@ class PandaBot:
                     if block.name not in ('select_tools', 'bot_manage_servers'):
                         tools_used.append(block.name)
                     try:
+                        tool_input = block.input
                         # Virtual tools handled by the bot itself
                         if block.name == 'select_tools':
                             loaded = []
@@ -1632,14 +1711,17 @@ class PandaBot:
                         elif block.name == 'epic_doc_contents':
                             result_text = await self._doc_handler.contents(block.input)
                         else:
+                            tool_input = self._stamp_bot_assessment_origin(
+                                block.name, tool_input
+                            )
                             # Route to the correct MCP server
                             if block.name in self._tool_router:
                                 mcp_name = self._tool_original_name.get(block.name, block.name)
                                 result = await self._tool_router[block.name].call_tool(
-                                    mcp_name, block.input
+                                    mcp_name, tool_input
                                 )
                             else:
-                                result = await mcp.call_tool(block.name, block.input)
+                                result = await mcp.call_tool(block.name, tool_input)
                             content = result.get("content", [])
                             result_text = ""
                             for item in content:
@@ -1648,7 +1730,7 @@ class PandaBot:
                         # Assign DPID and stamp the result
                         dpid = self._generate_dpid()
                         exchange_dpids.append(dpid)
-                        await self._record_dpid(dpid, block.name, block.input)
+                        await self._record_dpid(dpid, block.name, tool_input)
                         result_text = f"[DPID:{dpid}]\n{result_text}"
                         if len(result_text) > MAX_RESULT_LEN:
                             result_text = (

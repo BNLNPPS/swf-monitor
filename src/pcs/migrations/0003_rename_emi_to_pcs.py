@@ -58,7 +58,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('pcs', '0002_prodconfig'),
-        ('monitor_app', '0001_initial'),
+        ('monitor_app', '0015_persistentstate_and_more'),
     ]
 
     operations = [

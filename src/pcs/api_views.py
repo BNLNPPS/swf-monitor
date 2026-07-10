@@ -10,8 +10,10 @@ Dataset creation requires all four tags to be locked. created_by set from authen
 from rest_framework import viewsets, status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from monitor_app.middleware import TunnelAuthentication
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, SAFE_METHODS, BasePermission
+from rest_framework.decorators import (action, api_view,
+    authentication_classes, permission_classes)
+from rest_framework.permissions import (IsAuthenticated,
+    IsAuthenticatedOrReadOnly, SAFE_METHODS, BasePermission)
 
 
 class IsOwnerOrReadOnly(BasePermission):
@@ -27,10 +29,11 @@ class IsOwnerOrReadOnly(BasePermission):
         return getattr(obj, 'created_by', None) == request.user.username
 from rest_framework.response import Response
 from django.db.models import Count
+from monitor_app.models import UserPreference
 
 from .models import (
     PhysicsCategory, PhysicsTag, EvgenTag, SimuTag, RecoTag, BackgroundTag,
-    Dataset, ProdConfig, ProdTask, Questionnaire,
+    Dataset, ProdConfig, ProdTask, PandaTasks, Questionnaire,
 )
 from .serializers import (
     PhysicsCategorySerializer, PhysicsTagSerializer,
@@ -40,6 +43,7 @@ from .serializers import (
 )
 from .schemas import validate_parameters, get_tag_model
 from . import services
+from monitor_app.epicprod_logging import log_epicprod_action
 from .services import ServiceError
 
 
@@ -248,6 +252,30 @@ class DatasetViewSet(viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(new_block).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=['post'], url_path='propagation')
+    def propagation(self, request):
+        """Single or bulk propagation flip with required comment.
+
+        Body: ``names`` (list of composed names), ``state``
+        (continue|hold|final), ``comment`` (required), ``replaced_by``
+        (optional), ``filter`` (optional — the selecting filter querystring,
+        recorded for audit). Thin wrapper over
+        ``services.dataset_propagation_set``; one action-stream event per
+        call.
+        """
+        try:
+            result = services.dataset_propagation_set(
+                request.data.get('names') or [],
+                request.data.get('state'),
+                request.data.get('comment'),
+                replaced_by=request.data.get('replaced_by', ''),
+                changed_by=request.user.username,
+                filter_state=request.data.get('filter', ''),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_200_OK)
+
 
 class ProdConfigViewSet(viewsets.ModelViewSet):
     """Production configuration templates. Owner-only edit; anyone can create."""
@@ -257,7 +285,22 @@ class ProdConfigViewSet(viewsets.ModelViewSet):
     permission_classes = [IsOwnerOrReadOnly]
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user.username)
+        obj = serializer.save(created_by=self.request.user.username)
+        _record_prod_config_scout_pref(self.request.user.username, obj)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        _record_prod_config_scout_pref(self.request.user.username, obj)
+
+
+def _record_prod_config_scout_pref(username, config):
+    data = config.data or {}
+    if isinstance(data, dict) and 'skip_scout' in data:
+        UserPreference.set_pref(
+            username,
+            'prod_config_scout_mode',
+            not bool(data.get('skip_scout')),
+        )
 
 
 class QuestionnaireViewSet(viewsets.ReadOnlyModelViewSet):
@@ -298,7 +341,7 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
     queryset = ProdTask.objects.select_related(
         'dataset', 'dataset__physics_tag', 'dataset__evgen_tag',
         'dataset__simu_tag', 'dataset__reco_tag', 'prod_config',
-    )
+    ).prefetch_related('panda_tasks')
     serializer_class = ProdTaskSerializer
     authentication_classes = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -383,7 +426,17 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             # failure raises ServiceError (its status) — never a silent empty
             # spec.
             try:
-                return JsonResponse(build_evgen_task_params(task),
+                panda_tasks = None
+                panda_tasks_id = request.query_params.get('panda_tasks_id')
+                if panda_tasks_id:
+                    panda_tasks = PandaTasks.objects.filter(
+                        pk=panda_tasks_id, prod_task=task).first()
+                    if panda_tasks is None:
+                        return Response(
+                            {'detail': f'No PandaTasks association {panda_tasks_id} for this task.'},
+                            status=status.HTTP_404_NOT_FOUND,
+                        )
+                return JsonResponse(build_evgen_task_params(task, panda_tasks=panda_tasks),
                                     json_dumps_params={'indent': 2})
             except ValueError as e:
                 return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -437,20 +490,47 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             data['warnings'] = warnings
         return Response(data)
 
-    @action(detail=True, methods=['post'], url_path='reset-submission')
-    def reset_submission(self, request, name=None):
-        """Detach a broken/aborted submission so a task can be re-submitted:
-        panda_task_id → None, status → draft. Authenticated users may operate
-        production tasks; this is the recovery path for a task pinned to a dead
-        jediTaskID (the submit gate refuses while panda_task_id is set). Does
-        not touch PanDA — the web tier holds no credential. See
-        docs/EPICPROD_OPS.md."""
+    @action(detail=True, methods=['post'], url_path='panda-add-retry')
+    def panda_add_retry(self, request, name=None):
+        """Ask PanDA to increase allowed attempts for an existing JEDI task."""
         task = self.get_object()
         try:
-            services.prodtask_reset_submission(task=task)
+            result = services.prodtask_panda_operation_request(
+                task=task,
+                operation='increase_attempts',
+                jedi_task_id=request.data.get('jedi_task_id'),
+                increase=request.data.get('increase', 1),
+                created_by=getattr(request.user, 'username', '') or 'operator',
+            )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
-        return Response(self.get_serializer(task).data)
+        return Response(result, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=['post'], url_path='panda-retry-failures')
+    def panda_retry_failures(self, request, name=None):
+        """Ask PanDA to retry failed work in an existing JEDI task."""
+        task = self.get_object()
+        try:
+            result = services.prodtask_panda_operation_request(
+                task=task,
+                operation='retry_failures',
+                jedi_task_id=request.data.get('jedi_task_id'),
+                new_parameters=request.data.get('new_parameters') or {},
+                created_by=getattr(request.user, 'username', '') or 'operator',
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(result, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=True, methods=['post'], url_path='rerun-entire-task')
+    def rerun_entire_task(self, request, name=None):
+        """Queue a new full PanDA task attempt for this campaign task."""
+        task = self.get_object()
+        try:
+            services.prodtask_rerun_entire_task_request(task=task)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=False, methods=['post'], url_path='rucio-snapshot-update')
     def rucio_snapshot_update(self, request):
@@ -480,6 +560,34 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
         user = getattr(request.user, 'username', '') or 'evgen_rucio'
         try:
             services.evgen_rucio_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['post'], url_path='questionnaire-match-update')
+    def questionnaire_match_update(self, request):
+        """Request a background rebuild of the task-local questionnaire-match
+        cache. The web tier only queues questionnaire_match_update; the prod-ops
+        agent writes ProdTask.overrides['questionnaire_matches'] and pushes
+        questionnaire_match_ready over the SSE relay."""
+        user = getattr(request.user, 'username', '') or 'questionnaire_match'
+        try:
+            services.questionnaire_match_update_request(created_by=user)
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
+
+    @action(detail=False, methods=['post'], url_path='campaign-progress-refresh')
+    def campaign_progress_refresh(self, request):
+        """Request a background rebuild of the current campaign progress cache.
+
+        The web tier only queues campaign_progress_refresh; the prod-ops agent
+        rebuilds both the PanDA progress snapshot and rendered progress table
+        cache, then pushes campaign_progress_ready over the SSE relay.
+        """
+        user = getattr(request.user, 'username', '') or 'progress_refresh'
+        try:
+            services.campaign_progress_refresh_request(created_by=user)
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
         return Response({'status': 'queued'}, status=status.HTTP_202_ACCEPTED)
@@ -528,6 +636,11 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
             return Response({'detail': e.detail}, status=e.status)
         if not created:
             self.check_object_permissions(request, task)
+        log_epicprod_action(
+            'web', 'task_intake',
+            subject_type='campaign_task', subject_key=task.composed_name,
+            username=request.user.username,
+            sublevel='normal', live_default=True, created=created)
         http_status = status.HTTP_201_CREATED if created else status.HTTP_200_OK
         return Response(self.get_serializer(task).data, status=http_status)
 
@@ -568,7 +681,72 @@ class ProdTaskViewSet(viewsets.ModelViewSet):
                 task=task,
                 jedi_task_id=request.data.get('jedi_task_id'),
                 new_status=request.data.get('status', 'submitted'),
+                panda_tasks_id=request.data.get('panda_tasks_id'),
+                task_name=request.data.get('panda_task_name') or request.data.get('task_name'),
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)
         return Response(self.get_serializer(task).data)
+
+    @action(detail=False, methods=['post'], url_path='record-submission-failure')
+    def record_submission_failure(self, request):
+        """Record a failed pre-JEDI submission attempt on its PandaTasks row."""
+        name = request.query_params.get('name') or request.data.get('name')
+        if not name:
+            return Response({'detail': 'Missing ?name='},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            task = services.resolve_prodtask(name, self.get_queryset())
+        except ProdTask.DoesNotExist:
+            return Response({'detail': f"No task named '{name}'"},
+                            status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, task)
+        try:
+            services.prodtask_record_submission_failure(
+                task=task,
+                panda_tasks_id=request.data.get('panda_tasks_id'),
+                reason=request.data.get('reason', ''),
+            )
+        except ServiceError as e:
+            return Response({'detail': e.detail}, status=e.status)
+        return Response(self.get_serializer(task).data)
+
+
+@api_view(['POST'])
+@authentication_classes([TunnelAuthentication, SessionAuthentication,
+                         TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def prod_request_compose(request):
+    """Create a production request from the request composer page.
+
+    External-safe trigger: a /pcs/api/ POST returning JSON, so it works
+    identically through the swf-remote proxy (EXTERNAL_ACCESS.md). The
+    requester's working group is remembered in their per-user
+    preferences for next time.
+    """
+    username = getattr(request.user, 'username', '') or ''
+    fields = {
+        key: request.data.get(key) or ''
+        for key in ('pwg', 'dsc', 'description', 'process', 'beam',
+                    'species', 'q2', 'generator', 'generator_version',
+                    'sample', 'pc_anchor', 'simu_path', 'contact_name',
+                    'contact_email', 'repository', 'intended_use')
+    }
+    try:
+        result = services.prodrequest_compose(
+            created_by=username,
+            nevents=request.data.get('nevents'),
+            **fields,
+        )
+    except ServiceError as e:
+        return Response({'detail': e.detail}, status=e.status)
+    from monitor_app.models import UserPreference
+    if fields['pwg']:
+        UserPreference.set_pref(username, 'composer_pwg', fields['pwg'])
+    if fields['dsc']:
+        UserPreference.set_pref(username, 'composer_dsc', fields['dsc'])
+    UserPreference.set_pref(username, 'composer_contact_name',
+                            fields['contact_name'])
+    UserPreference.set_pref(username, 'composer_contact_email',
+                            fields['contact_email'])
+    return Response(result, status=status.HTTP_201_CREATED)

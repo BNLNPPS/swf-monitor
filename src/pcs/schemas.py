@@ -131,7 +131,8 @@ TAG_SCHEMAS = {
         'optional': [
             'bg_source', 'bg_mechanism', 'bg_generator',
             'beam_energy_electron', 'beam_energy_hadron', 'beam_species',
-            'cross_section', 'signal_freq', 'bg_tag_prefix', 'evtgen_file',
+            'cross_section', 'signal_freq', 'signal_status',
+            'bg_tag_prefix', 'bg_files', 'evtgen_file',
             'notes',
         ],
         'label': 'Background',

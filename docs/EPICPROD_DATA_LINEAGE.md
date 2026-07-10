@@ -137,7 +137,18 @@ same interim convention that already holds `input_dataset_dids` and the
 The same schema serves current and past campaigns — today's current is
 tomorrow's past, with no reshape on transition. `migrate_outputs_schema()`
 (standalone `scripts/migrate_outputs_schema.py`) folded the legacy `past_output`
-block and the old `csv_import.output` rollup onto it.
+block and the old `csv_import.output` rollup onto it, and the epic-prod
+past-campaign ingest writes this schema directly (one bare-named campaign per
+version, per-stage totals in `data['past_summary'][stage]`), so legacy-shaped
+task overrides are no longer produced.
+
+The past-campaign ingest itself is clockwork: a `catalog_sync` chain step
+(`epic-prod-past-import.py`) pulls the eic/epic-prod bookkeeping clone —
+the production team's nightly-regenerated, Rucio-derived record — and
+re-runs the idempotent import, so every campaign's recorded production
+content tracks what production publishes without operator action. The Past
+tab's "Update from epic-prod" button remains as the on-demand override of
+the same ingest, not the mechanism.
 
 ## Architecture
 
@@ -153,11 +164,42 @@ catalog page receives over the SSE relay (`EventSource`) and refreshes live,
 internally and through the swf-remote streaming proxy. The web tier holds no
 credential.
 
-- Trigger: the **Update from Rucio** button (on demand). No nightly cron and no
-  per-campaign Sweep button are wired today.
+- Trigger: the **Update from Rucio** button (on demand) and the nightly
+  `catalog_sync` chain.
 - Unit of work: the current and last campaigns — for each, fetch the snapshot
   once and match the campaign's `ProdTask` rows against it; the receiver thread
   never blocks.
+
+**Arrivals sweep** *(implemented)* — clockwork detection of new files landing
+in JLab Rucio, complementing the snapshot: where the snapshot is a deep fetch
+of two campaigns, the sweep is a shallow query over all of them.
+`sweep_rucio_arrivals` (`pcs/services.py`; the agent's
+`rucio-arrivals-sweep.py` doer, a `catalog_sync` chain step) runs one
+`created_after` DID query per root (`/RECO`, `/SIMU`) — the server-side
+filter the eic/firehose notification action uses — windowed from the previous
+sweep's timestamp so a missed night is covered by the next. New files are
+grouped by campaign and location; each arriving campaign's row records
+`campaign.data['arrivals']` (last arrival, counts by root, full location
+breakdown) — the signal behind the campaign page's derived **producing**
+status, whatever lifecycle slot the campaign occupies. One live
+`rucio_arrivals` event carries the breakdown when anything arrived; arrivals
+naming a campaign with no catalog row are reported in the event, never
+dropped — an unknown arrival is the first signal of a new campaign
+appearing.
+
+**Firsthand reconciliation** *(implemented — `pcs/reconcile.py`)* — a
+producing campaign's catalog records track Rucio directly, with no
+dependency on the epic-prod bookkeeping cadence. After each snapshot fetch
+of a producing campaign (outside current/last, whose outputs attach through
+the request match and CSV heritage respectively),
+`reconcile_campaign_from_rucio` applies three rules: a known DID
+(``metadata.source.location``) refreshes its row's counts, volume, per-RSE
+status, and the matching task outputs entry; an unknown DID resolves to a
+physics configuration first — matching an existing edition, it joins that
+identity as a physical sibling row and its outputs land on the edition's
+task, never duplicating the edition; only a configuration with no edition
+creates one, past-ingest style. Unresolved physics is reported, never
+created. One `rucio_reconcile` event per campaign per run.
 
 **Reference** *(future, building on the gathered links)* — a catalog read over the stored links, no credential: the existing
 filter set (`EPICPROD_TASK_CATALOG.md` §7) collects the tasks' `outputs`
@@ -195,9 +237,9 @@ doer.
 
 **Phase 4 — capture at source (PanDA data).** PanDA makes the production→Rucio
 connection in flight, so for PanDA-produced tasks the output DID is recorded at
-submission time (extending `record-submission`, which already writes
-`panda_task_id`) rather than reconstructed by a sweep. That DID is the PCS
-composed identity name itself (`group.EIC:…`) — PanDA production uses our
-composed names throughout, so there is no separate `epic:/RECO/…` reference and
-no cross-namespace match. The sweep stays a backfill tool for pre-PanDA
+submission time rather than reconstructed by a sweep. Each physical submission is
+recorded in `PandaTasks`; `ProdTask.panda_task_id` remains the current/preferred
+pointer. The first attempt uses the PCS composed identity name itself
+(`group.EIC:…`); retries and site races append `.tryN` so every concrete PanDA
+task has a unique Rucio namespace. The sweep stays a backfill tool for pre-PanDA
 campaigns, whose legacy DIDs PCS records and presents as found.

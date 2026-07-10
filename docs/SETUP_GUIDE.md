@@ -167,6 +167,6 @@ All tests should pass.
 
 ### Getting Help
 
-- Check the [main documentation](README.md) for architectural overview
+- Check the [main documentation](../README.md) for architectural overview
 - Review the [REST API reference](API_REFERENCE.md) and [MCP documentation](MCP.md) for integration details
 - See the [testbed documentation](../../swf-testbed/README.md) for system context

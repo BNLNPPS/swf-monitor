@@ -565,11 +565,85 @@ class SystemStateEvent(models.Model):
         return f"Event {self.event_id} - {self.event_type} at {self.timestamp}"
 
 
+class SysConfig(models.Model):
+    """
+    Human-set system configuration as one JSON document.
+
+    Distinct from PersistentState, which is machine-maintained state
+    (counters, run numbers): SysConfig holds operator-adjustable knobs —
+    live-stream policy, sweep cadences, report settings — viewable and
+    editable on the System page. All system configuration lives here, in
+    the database, adjustable through the UI without deploys.
+    """
+    id = models.AutoField(primary_key=True)  # single record, id=1
+    config_data = models.JSONField(default=dict)
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.CharField(max_length=100, blank=True, default='')
+
+    class Meta:
+        db_table = 'swf_sys_config'
+
+    @classmethod
+    def get_config(cls):
+        """Get the complete configuration JSON object."""
+        obj, _ = cls.objects.get_or_create(id=1, defaults={'config_data': {}})
+        return obj.config_data
+
+    @classmethod
+    def get_setting(cls, key, default=None):
+        """Read one setting; a missing key is seeded with the default.
+
+        SysConfig sets things: a knob in use may never hide behind a code
+        default. The first read of an unset key writes the default into the
+        document — visible on the System page, recorded in the action
+        stream — and returns it.
+        """
+        config = cls.get_config()
+        if key in config:
+            return config[key]
+        cls.update_config({key: default}, username='autoseed')
+        from .epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'sysconfig_edit', username='autoseed',
+            sublevel='high', live_default=True,
+            message=f'sysconfig_edit ok — autoseeded {key}={default!r} '
+                    f'(first read of unset key)')
+        return default
+
+    @classmethod
+    def update_config(cls, updates, username=''):
+        """Merge updates into the configuration (top-level key merge)."""
+        from django.db import transaction
+        with transaction.atomic():
+            obj, _ = cls.objects.select_for_update().get_or_create(
+                id=1, defaults={'config_data': {}})
+            obj.config_data.update(updates)
+            if username:
+                obj.updated_by = username
+            obj.save()
+            return obj.config_data
+
+    @classmethod
+    def replace_config(cls, config, username=''):
+        """Replace the whole configuration document (System page editor)."""
+        from django.db import transaction
+        if not isinstance(config, dict):
+            raise ValueError('SysConfig document must be a JSON object')
+        with transaction.atomic():
+            obj, _ = cls.objects.select_for_update().get_or_create(
+                id=1, defaults={'config_data': {}})
+            obj.config_data = config
+            if username:
+                obj.updated_by = username
+            obj.save()
+            return obj.config_data
+
+
 class PersistentState(models.Model):
     """
     Persistent state store with stable schema - just stores JSON.
     Never modify this schema - it must remain stable across all deployments.
-    
+
     Single record stores all persistent state as JSON blob.
     Use get_state() and update_state() methods to access nested data.
     """
@@ -694,6 +768,43 @@ class PersistentState(models.Model):
             return current_id
 
 
+class UserPreference(models.Model):
+    """Per-user UI and workflow preferences stored as a JSON object."""
+    username = models.CharField(max_length=150, unique=True)
+    prefs = models.JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'user_preference'
+        ordering = ['username']
+
+    def __str__(self):
+        return self.username
+
+    @classmethod
+    def get_prefs(cls, username):
+        if not username:
+            return {}
+        row = cls.objects.filter(username=username).first()
+        return dict(row.prefs or {}) if row else {}
+
+    @classmethod
+    def set_pref(cls, username, key, value):
+        if not username or not key:
+            return None
+        from django.db import transaction
+        with transaction.atomic():
+            row, _ = cls.objects.select_for_update().get_or_create(
+                username=username,
+                defaults={'prefs': {}},
+            )
+            prefs = dict(row.prefs or {})
+            prefs[key] = value
+            row.prefs = prefs
+            row.save(update_fields=['prefs', 'updated_at'])
+            return row
+
+
 class PandaQueue(models.Model):
     """
     Represents a PanDA compute queue configuration.
@@ -704,6 +815,7 @@ class PandaQueue(models.Model):
     status = models.CharField(max_length=50, default='active')
     queue_type = models.CharField(max_length=50, blank=True)
     config_data = models.JSONField()
+    metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -715,6 +827,41 @@ class PandaQueue(models.Model):
     
     def __str__(self):
         return self.queue_name
+
+    @property
+    def is_site_record(self):
+        return bool(self.queue_name and self.queue_name == self.site)
+
+
+class AIContent(models.Model):
+    """Append-only AI assessment content for production objects.
+
+    Subject references are string keys, not foreign keys, so AI content can
+    assess local rows, PanDA-native objects, queues/sites, Rucio objects, or
+    future production entities through one table.
+    """
+    subject_type = models.CharField(max_length=100, db_index=True)
+    subject_key = models.CharField(max_length=500, db_index=True)
+    subject_label = models.CharField(max_length=500, blank=True, default='')
+    subject_url = models.CharField(max_length=500, blank=True, default='')
+    username = models.CharField(max_length=100)
+    ai = models.CharField(max_length=100)
+    assessment = models.TextField()
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'swf_ai_content'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['subject_type', 'subject_key', '-created_at']),
+            models.Index(fields=['username', '-created_at']),
+        ]
+        verbose_name = 'AI Content'
+        verbose_name_plural = 'AI Content'
+
+    def __str__(self):
+        return f"{self.subject_type}:{self.subject_key} ({self.ai})"
 
 
 class RucioEndpoint(models.Model):

@@ -60,3 +60,71 @@ th {
 .actions a {
     margin-right: 0.5em;
 }
+
+.filter-bar a {
+    margin-right: 0.5em;
+    color: #007bff;
+    text-decoration: none;
+}
+.filter-bar a:hover {
+    text-decoration: underline;
+}
+.filter-bar a.filter-active {
+    font-weight: bold;
+    text-decoration: underline;
+    color: #0056b3;
+}
+
+.ai-assessment-entry {
+    border: 3px solid #343a40;
+    background: #fff;
+}
+.ai-assessment-entry .table {
+    border-collapse: collapse;
+    margin-bottom: 0;
+}
+.ai-assessment-entry .table td,
+.ai-assessment-entry .table th {
+    border: 1px solid #d6d8db;
+    padding: 0.35rem 0.5rem;
+    vertical-align: top;
+}
+.ai-assessment-entry .table .ai-assessment-header td,
+.ai-assessment-entry .table .ai-assessment-header th {
+    --bs-table-bg: #e9ecef;
+    --bs-table-accent-bg: #e9ecef;
+    background-color: #e9ecef !important;
+}
+.ai-assessment-text {
+    overflow-wrap: anywhere;
+}
+.ai-assessment-text h1 {
+    font-size: 1.1rem;
+}
+.ai-assessment-text h2 {
+    font-size: 1rem;
+}
+.ai-assessment-text h3 {
+    font-size: 0.95rem;
+}
+.ai-assessment-text h4,
+.ai-assessment-text h5,
+.ai-assessment-text h6 {
+    font-size: 0.95rem;
+}
+.ai-assessment-text h1,
+.ai-assessment-text h2,
+.ai-assessment-text h3,
+.ai-assessment-text h4,
+.ai-assessment-text h5,
+.ai-assessment-text h6 {
+    margin: 0.45rem 0 0.25rem;
+    line-height: 1.25;
+}
+.ai-assessment-text p,
+.ai-assessment-text ul,
+.ai-assessment-text ol,
+.ai-assessment-text pre,
+.ai-assessment-text table {
+    margin-bottom: 0.45rem;
+}

@@ -59,14 +59,12 @@
     .detail-field { margin-bottom: .75rem; }
     .detail-label { font-size: .75rem; font-weight: 600; color: #6c757d; text-transform: uppercase; letter-spacing: .03em; }
     .detail-value { font-size: .9rem; color: #212529; margin-top: .1rem; }
-    .detail-value code { font-size: .85rem; color: #1a6b3c; }
     .params-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem .75rem; }
     .detail-empty { padding: 3rem; text-align: center; color: #6c757d; }
 
     /* Create mode */
     .field-group { margin-bottom: .85rem; }
     .field-group label { display: block; font-size: .8rem; font-weight: 600; color: #495057; margin-bottom: .2rem; }
-    .field-group label code { font-weight: 600; color: #495057; }
     .field-group .form-control, .field-group .form-select { font-size: .875rem; }
     .field-group .form-control.field-changed, .field-group .form-select.field-changed { color: #1a6b3c; font-weight: 600; }
     .field-group textarea.form-control { resize: vertical; }
@@ -77,7 +75,7 @@
     }
     .suggestion-bar.visible { display: inline-flex; }
     .suggestion-bar .suggestion-source { color: #856404; font-weight: 500; }
-    .suggestion-bar .suggestion-value { flex: 1; font-family: monospace; color: #664d03; }
+    .suggestion-bar .suggestion-value { flex: 1; color: #664d03; }
     .suggestion-bar .btn-apply { padding: .1rem .5rem; font-size: .75rem; border-radius: .25rem; white-space: nowrap; }
     .form-control.suggested, .form-select.suggested { color: #6c757d; font-style: italic; }
     .params-header {
@@ -133,9 +131,8 @@
             </div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem">
                 <h5 style="margin:0">{{ schema.label }} Tags</h5>
-                {% if user.is_authenticated %}
-                <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag">New Tag</button>
-                {% endif %}
+                <button type="button" class="btn btn-primary btn-sm" id="btn-new-tag"
+                        {% if not user.is_authenticated %}disabled title="Compose a new tag — sign in to use"{% endif %}>New Tag</button>
             </div>
             <input type="text" class="tag-search" id="tag-search" placeholder="Search tags...">
             <div class="btn-group btn-group-sm" id="list-sort" role="group" aria-label="Sort" style="margin-bottom:.5rem; align-self:flex-start;">
@@ -163,11 +160,11 @@
                 <h4 id="view-title">Select a tag</h4>
                 <div class="btn-group">
                     <span id="view-status-badge"></span>
-                    {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-edit-tag" style="display:none">Edit</button>
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-copy-tag" style="display:none">Copy</button>
-                    {% endif %}
-                    <button type="button" class="btn btn-outline-success btn-sm" id="btn-lock-tag" style="display:none" onclick="lockTag()">Lock</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-edit-tag" style="display:none"
+                            {% if not user.is_authenticated %}disabled title="Edit your own draft tag — sign in to use"{% endif %}>Edit</button>
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-copy-tag" style="display:none"
+                            {% if not user.is_authenticated %}disabled title="Copy this tag into a new draft — sign in to use"{% endif %}>Copy</button>
+                    <button type="button" class="btn btn-success btn-sm" id="btn-lock-tag" style="display:none" onclick="lockTag()">Lock</button>
                     <button type="button" class="btn btn-danger btn-sm" id="btn-delete-tag" style="display:none" onclick="deleteTag()">Delete</button>
                 </div>
             </div>
@@ -208,15 +205,14 @@
                     <input type="text" id="id_created_by" class="form-control" value="{{ username }}" readonly disabled>
                 </div>
                 <div class="params-header">Parameters
-                    {% if user.is_authenticated %}
-                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-manage-params">Edit parameter fields</button>
-                    {% endif %}
+                    <button type="button" class="btn btn-dark-green btn-sm" id="btn-manage-params"
+                            {% if not user.is_authenticated %}disabled title="Edit the tag type's parameter field definitions — sign in to use"{% endif %}>Edit parameter fields</button>
                 </div>
                 {% for field in form %}
                     {% if field.name|slice:":6" == "param_" %}
                     <div class="field-group" data-param="{{ field.label }}">
                         <label>
-                            <code>{{ field.label }}</code>
+                            {{ field.label }}
                             {% if field.field.required %}<span class="required-star">*</span>{% endif %}
                         </label>
                         <div class="suggestion-bar" data-field="{{ field.name }}"></div>
@@ -280,6 +276,15 @@
     const searchInput = document.getElementById('tag-search');
     const viewPanel = document.getElementById('view-panel');
     const createPanel = document.getElementById('create-panel');
+
+    function htmlEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
     const viewTitle = document.getElementById('view-title');
     const viewBody = document.getElementById('view-body');
     const viewStatusBadge = document.getElementById('view-status-badge');
@@ -499,7 +504,7 @@
         const params = tag.parameters || {};
         const paramHtml = Object.keys(params).length > 0
             ? '<div class="params-grid">' + Object.entries(params).map(([k, v]) =>
-                `<div class="detail-field"><div class="detail-label">${k}</div><div class="detail-value"><code>${v || '—'}</code></div></div>`
+                `<div class="detail-field"><div class="detail-label">${htmlEscape(k)}</div><div class="detail-value">${htmlEscape(v || '—')}</div></div>`
               ).join('') + '</div>'
             : '<div style="color:#6c757d">No parameters</div>';
 
