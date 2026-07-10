@@ -119,6 +119,16 @@ log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
 source .venv/bin/activate
 
+# Freeze swf-epicprod into the deployed venv. The shared dev venv carries it
+# as an editable install (dev ergonomics); shipped verbatim, the deployed venv
+# would import the dev working tree live. Reinstalling non-editable here
+# snapshots the dev tree state at deploy time, so production picks up
+# swf-epicprod changes only on a deliberate deploy.
+if .venv/bin/pip show swf-epicprod >/dev/null 2>&1; then
+    log "Freezing swf-epicprod into the deployed venv (non-editable)..."
+    .venv/bin/pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/swf-epicprod
+fi
+
 # Verify production environment file exists
 if [ ! -f "$DEPLOY_ROOT/config/env/production.env" ]; then
     echo "ERROR: Production environment file not found at $DEPLOY_ROOT/config/env/production.env"
