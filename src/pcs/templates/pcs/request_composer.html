@@ -20,15 +20,11 @@
     Tell us the physics you need. As you fill this in, the panel on the right
     shows what the system already has — if your physics exists, base your
     request on it with one click and the production team sees exactly what to
-    extend. Nothing here is binding: a request opens the conversation.
+    extend. Nothing here is binding: the production team reviews each
+    request and follows up with you.
   </p>
 
-  {% if user.is_authenticated %}
-  <div class="mb-3">
-    <strong>You:</strong> {{ user.username }}
-    <span class="text-muted">— your working group and contact are remembered for next time.</span>
-  </div>
-  {% else %}
+  {% if not user.is_authenticated %}
   <div class="mb-3 text-muted">
     Browsing as a visitor — everything below works except Submit.
     <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Sign in</a> to submit a request.
