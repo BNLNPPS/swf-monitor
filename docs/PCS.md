@@ -10,7 +10,9 @@ system includes the task catalog, PanDA monitor views, production operations
 agent, Rucio lineage/update flows, payload-log retrieval, alarms, system-status
 checks, and external access through the production web face. PCS supplies the
 structured physics/configuration layer for that system: tags, datasets,
-production configs, production tasks, and request/catalog linkage.
+production configs, production tasks, and request/catalog linkage. The
+system-level description of the whole WFMS, above these implementation docs,
+is <https://epic-wfms-docs.readthedocs.io>.
 
 **URL:** `/swf-monitor/pcs/`
 
@@ -321,11 +323,13 @@ Production configs are always mutable — they are working templates. The PanDA 
 ## External Access
 
 PCS pages and REST endpoints reach external users via the swf-remote
-proxy at `epic-devcloud.org`. Every new swf-monitor URL intended for
-external access requires a corresponding `path()` entry in
-`swf-remote/src/remote_app/urls.py` — without it, the page returns
-404 to external users. See [External Access](EXTERNAL_ACCESS.md) for
-the contract.
+proxy at `epic-devcloud.org`. All `pcs/` pages and the `pcs/api/`
+REST surface are proxied wholesale by catch-all routes in
+`swf-remote/src/remote_app/urls.py`, so a new PCS URL needs no
+swf-remote change; explicit named entries are needed only outside the
+proxied trees or where swf-remote resolves the route by `{% url %}`
+name. See [External Access](EXTERNAL_ACCESS.md) for the contract,
+including the write-action trigger rules.
 
 ## JEDI Integration
 

@@ -30,26 +30,21 @@ page itself works on swf-monitor.
 
 ## Contract: adding a new swf-monitor URL intended for external access
 
-When you add a new URL to swf-monitor (typically in `src/pcs/urls.py`
-or `src/monitor_app/urls.py`) and you want external users to reach
-it through `epic-devcloud.org`, you must **also** add a sibling entry
-in `swf-remote/src/remote_app/urls.py` pointing at the appropriate
-proxy view. Without this, the page is BNL-internal only.
+`swf-remote/src/remote_app/urls.py` ends with wholesale catch-alls —
+`re_path(r'^pcs/', views.pcs_proxy)` and `re_path(r'^panda/',
+views.panda_proxy)` — so any `pcs/` or `panda/` page is proxied to
+external users with no per-route maintenance, and the REST API is
+covered by the `pcs/api/<path:path>` catch-all. A new page under those
+trees needs no swf-remote change.
 
-Pattern:
+An explicit named entry is still required in two cases:
 
-```python
-# swf-remote/src/remote_app/urls.py
-path('pcs/<your-path>/', views.pcs_proxy, name='<your-name>'),
-```
-
-The `name=` should mirror the swf-monitor URL name where practical, so
-existing `{% url %}` template references resolve correctly when
-templates are rendered server-side on swf-monitor and proxied through.
-
-REST API endpoints under `/pcs/api/` are already covered by a
-catch-all (`pcs/api/<path:path>`) — those do not need per-endpoint
-entries.
+- a route **outside** the `pcs/` and `panda/` trees (as with `alarms/`
+  and the SSE stream), which no catch-all covers;
+- a route that swf-remote's own code or templates reference by
+  `{% url %}` name — the explicit entries above the catch-alls exist
+  to keep those names resolvable, with `name=` mirroring the
+  swf-monitor URL name.
 
 ## Write actions and triggers (POST/PATCH/DELETE) — read this before adding a button
 
