@@ -267,9 +267,9 @@ Designed-for extensions, reserved now, built when their consumer arrives:
 
 ## Related
 
-- [PCS.md](PCS.md) — the propagation disposition model the pilot proposes on.
+- [PCS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/PCS.md) — the propagation disposition model the pilot proposes on.
 - [ACTION_STREAM.md](ACTION_STREAM.md) — the event record.
-- [EPICPROD_NARRATIVES.md](EPICPROD_NARRATIVES.md) — the context proposers
+- [EPICPROD_NARRATIVES.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_NARRATIVES.md) — the context proposers
   reason against.
-- [EPICPROD_TASK_CATALOG.md](EPICPROD_TASK_CATALOG.md) — the review surface.
-- [EPICPROD_OPS.md](EPICPROD_OPS.md) — the shared review-quality vocabulary.
+- [EPICPROD_TASK_CATALOG.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_TASK_CATALOG.md) — the review surface.
+- [EPICPROD_OPS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS.md) — the shared review-quality vocabulary.

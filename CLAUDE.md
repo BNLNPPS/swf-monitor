@@ -1,8 +1,10 @@
 # swf-monitor — Claude Code Guidelines
 
-Django web app, REST API, MCP server, PCS (Physics Configuration System), and the
-ePIC production-operations agent, for the ePIC streaming-workflow testbed. Part of
-the SWF core (coordinated branches with `swf-testbed` and `swf-common-lib`).
+The common monitor, web, and database services of the swf platform: Django web
+app, REST API, MCP server, and the platform machinery (action stream, SysConfig,
+alarms, SSE relay), hosting the production applications installed from
+`swf-epicprod` and running the ePIC production-operations agent. Part of the SWF
+core (coordinated branches with `swf-testbed` and `swf-common-lib`).
 Shared workspace rules — doc-first, git policy, environment — live in the
 workspace `../CLAUDE.md`. This file is the repo's doc index and the one pattern
 every designer/implementer should hold in mind. The official system-level

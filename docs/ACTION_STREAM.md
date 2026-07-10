@@ -1,7 +1,8 @@
 # Action Stream
 
-The action stream is the structured record of everything epicprod does: one
-record per production action — submissions, task operations, sweeps, imports,
+The action stream is platform machinery: the structured record of what a
+system's services do, riding the logging service. epicprod is its first and
+principal user — one record per production action — submissions, task operations, sweeps, imports,
 configuration edits, assessments — capturing the action, its subject, the
 outcome, and the measured duration. It is the raw material for the live view,
 for the coming digests and alarms, and for LLM assessment and reporting: the
@@ -9,8 +10,8 @@ corpus AI reasons over when it answers "what happened".
 
 ![The action stream](action_stream.svg)
 
-Companion docs: [EPICPROD_OPS_AGENT.md](EPICPROD_OPS_AGENT.md) (the agent
-whose handlers emit most records), [EPICPROD_OPS.md](EPICPROD_OPS.md) (the
+Companion docs: [EPICPROD_OPS_AGENT.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS_AGENT.md) (the agent
+whose handlers emit most records), [EPICPROD_OPS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS.md) (the
 nightly catalog-sync runbook entry). The system-level description lives in the
 [ePIC WFMS documentation](https://epic-wfms-docs.readthedocs.io).
 
@@ -179,7 +180,7 @@ refresh. Each step logs
 its own record with duration; the chain logs a summary record — the
 catalog-freshness timestamp. Measured 2026-07-05: csv 8 s, association sweep
 2.3 s (14-day window), Rucio snapshot 36 s, EVGEN 16 s, match 2 s, progress
-5 s. Runbook: [EPICPROD_OPS.md](EPICPROD_OPS.md#nightly-catalog-sync).
+5 s. Runbook: [EPICPROD_OPS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS.md#nightly-catalog-sync).
 
 ## SysConfig
 

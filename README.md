@@ -1,30 +1,33 @@
 # swf-monitor
 
-**Monitoring and information service for the ePIC streaming workflow testbed.**
+**The common monitor, web, and database services of the ePIC Workflow Management System (WFMS) platform.**
 
-swf-monitor is a core component of the ePIC Workflow Management System (WFMS). The official system-level
-documentation is at <https://epic-wfms-docs.readthedocs.io>; this repository's `docs/` carry the implementation
-detail beneath it.
+swf-monitor serves every WFMS workflow domain — the streaming workflow testbed and the epicprod production
+system today — with browser pages, REST APIs, MCP tools, and the database-backed state beneath them. Production
+applications ship from the [swf-epicprod](https://github.com/BNLNPPS/swf-epicprod) repository and run installed
+within this application's runtime. The official system-level documentation is at
+<https://epic-wfms-docs.readthedocs.io>; this repository's `docs/` carry the platform implementation detail
+beneath it, and `swf-epicprod/docs/` carry the production-domain documentation.
 
 ## System Overview
 
-The application is built on Django infrastructure and comprises three main components, real-time messaging, and PostgreSQL backend.
+The application is built on Django with a PostgreSQL backend and real-time messaging.
 
 ### Core Components
 
-1. **Monitor App (`monitor_app`)**: Primary user-facing component
-   * **Browser UI**: Server-side rendered dashboard for viewing agent statuses with Django session authentication
+1. **Monitor App (`monitor_app`)**: The platform services
+   * **Browser UI**: Server-side rendered pages with Django session authentication
    * **REST API**: Programmatic interface with token-based authentication and OpenAPI schema
-   * **MCP Integration**: Model Context Protocol endpoint for LLM interaction
+   * **MCP Server**: Model Context Protocol tools for LLM interaction
+   * **Platform machinery**: the action stream (structured action logging with a live view), SysConfig, the alarms engine, and cached system status
 
-2. **PCS (`pcs`)**: Physics Configuration System for production task configuration
-   * **Tag System**: Immutable, versioned parameter sets for physics, event generation, simulation, and reconstruction
-   * **Dataset Composition**: Standardized naming from locked tags with automatic block management for Rucio
-   * **REST API + Web UI**: Full CRUD with draft/locked lifecycle enforcement
+2. **Installed production applications**: the production domain (PCS and successors) ships from
+   [swf-epicprod](https://github.com/BNLNPPS/swf-epicprod) as installable Django applications listed in this
+   project's `INSTALLED_APPS`
 
 3. **ActiveMQ Integration**: Built-in message queue connectivity
    * **Automatic Listening**: Connects to ActiveMQ automatically when Django starts
-   * **SSE REST Forwarding**: Server-Sent Events streaming of ActiveMQ messages via HTTPS
+   * **SSE Forwarding**: Server-Sent Events streaming of ActiveMQ messages via HTTPS (Django Channels with a Redis layer)
 
 4. **PostgreSQL Database**: Data store for all persistent system information including agents, logs, runs, STF files, FastMon files, workflows, configuration tags, and application state
 
@@ -52,17 +55,21 @@ The application is built on Django infrastructure and comprises three main compo
 | **[MCP Tool Reference](docs/MCP_TOOL_REFERENCE.md)** | Full MCP tool catalog, parameters, returns, and example prompts | Tool integration |
 | **[MCP Client Setup](docs/MCP_CLIENTS.md)** | Claude Code and Claude Desktop MCP configuration | Local MCP clients |
 | **[PanDA Mattermost Bot](docs/PANDA_BOT.md)** | PanDA bot MCP-client architecture and runtime configuration | Production monitoring chat |
-| **[ePIC Production LLM Operations](docs/EPICPROD_LLM_OPERATIONS.md)** | corun-ai-backed LLM operations, artifacts, comments, and async browser notification | LLM operation architecture |
-| **[PCS](docs/PCS.md)** | Physics Configuration System — tags, datasets, production configuration | Production task configuration |
-| **[PCS Dataset Request Workflow](docs/PCS_DATASET_REQUEST_WORKFLOW.md)** | PCS-centered dataset request intake, external datasets, and public catalogue projection | Production planning workflow |
+| **[Action Stream](docs/ACTION_STREAM.md)** | Structured action logging: sublevel/live axes, live policy, live view | Operational record |
+| **[AI Proposals](docs/AI_PROPOSALS.md)** | LLM proposes, human approves, deterministic execution | AI-assisted operations |
+| **[External Access](docs/EXTERNAL_ACCESS.md)** | The swf-remote proxy contract, including write-action triggers | External face |
 | **[System Status](docs/SYSTEM_STATUS.md)** | Cached production/system health, ops-agent refresh, and red nav indicator | Operations monitoring |
 | **[Test System](docs/TEST_SYSTEM.md)** | Testing approach, structure, and best practices | Quality assurance |
 
+The production-domain documentation — PCS, the task catalog, production
+operations, campaigns, assessments — is in
+[swf-epicprod/docs](https://github.com/BNLNPPS/swf-epicprod/tree/main/docs).
+
 ### Quick Links
 - **Production Monitor**: [https://pandaserver02.sdcc.bnl.gov/swf-monitor/](https://pandaserver02.sdcc.bnl.gov/swf-monitor/)
-- **Interactive API Docs**: [Swagger UI](https://pandasserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/) | [ReDoc](https://pandasserver02.sdcc.bnl.gov/swf-monitor/api/schema/redoc/)
+- **Interactive API Docs**: [Swagger UI](https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/swagger-ui/) | [ReDoc](https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/schema/redoc/)
 - **Database Schema**: [testbed-schema.dbml](testbed-schema.dbml) (auto-generated, view at [dbdiagram.io](https://dbdiagram.io))
-- **Parent Project**: [swf-testbed documentation](../swf-testbed/README.md)
+- **Peer applications**: [swf-testbed](../swf-testbed/README.md) (streaming workflow testbed) | [swf-epicprod](https://github.com/BNLNPPS/swf-epicprod) (production domain)
 
 ## Quick Examples
 
