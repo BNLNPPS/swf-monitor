@@ -19,8 +19,9 @@ CHANGED=$( (git diff --name-only HEAD 2>/dev/null; \
             git diff --cached --name-only 2>/dev/null; \
             git ls-files --others --exclude-standard) | sort -u )
 
-PY_CHANGED=$(echo "$CHANGED" | grep '\.py$' || true)
-HTML_CHANGED=$(echo "$CHANGED" | grep '\.html$' || true)
+# Deleted files still appear in the diff — check only files that exist.
+PY_CHANGED=$(echo "$CHANGED" | grep '\.py$' | while read -r f; do [ -f "$f" ] && echo "$f"; done || true)
+HTML_CHANGED=$(echo "$CHANGED" | grep '\.html$' | while read -r f; do [ -f "$f" ] && echo "$f"; done || true)
 
 if [ -n "$PY_CHANGED" ]; then
     # shellcheck disable=SC2086

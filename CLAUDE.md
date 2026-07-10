@@ -1,8 +1,10 @@
 # swf-monitor — Claude Code Guidelines
 
-Django web app, REST API, MCP server, PCS (Physics Configuration System), and the
-ePIC production-operations agent, for the ePIC streaming-workflow testbed. Part of
-the SWF core (coordinated branches with `swf-testbed` and `swf-common-lib`).
+The common monitor, web, and database services of the swf platform: Django web
+app, REST API, MCP server, and the platform machinery (action stream, SysConfig,
+alarms, SSE relay), hosting the production applications installed from
+`swf-epicprod` and running the ePIC production-operations agent. Part of the SWF
+core (coordinated branches with `swf-testbed` and `swf-common-lib`).
 Shared workspace rules — doc-first, git policy, environment — live in the
 workspace `../CLAUDE.md`. This file is the repo's doc index and the one pattern
 every designer/implementer should hold in mind. The official system-level
@@ -29,8 +31,8 @@ tier:
 > the swf-remote streaming proxy) to remote collaborators.
 
 Worked examples: payload-log fetch and PanDA submit. Read before designing any
-production-ops feature: **`docs/EPICPROD_OPS_AGENT.md`** (the agent and the
-pattern) and **`docs/SSE_PUSH.md`** (the browser push).
+production-ops feature: **`swf-epicprod/docs/EPICPROD_OPS_AGENT.md`** (the
+agent and the pattern) and **`docs/SSE_PUSH.md`** (the browser push).
 
 ## swf-remote tunnel flag
 
@@ -52,24 +54,21 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 
 ## Doc index (`docs/`)
 
-- `EPICPROD_OPS_AGENT.md` — the credentialed ops agent; capability model + the pattern above.
-- `EPICPROD_ACTION_STREAM.md` — the epicprod action stream: structured action logging (sublevel/live axes, SysConfig live policy), live view, nightly catalog_sync, retrieval for LLMs.
-- `EPICPROD_OPS.md` — ops runbook (submit, monitor, logs, systemd unit, cleaner-killer, nightly catalog sync).
-- `EPICPROD_LLM_OPERATIONS.md` — corun-ai-backed LLM operations, artifacts, comments, and async completion.
+The epicprod/PCS documentation set lives in `swf-epicprod/docs/` — see the
+index there (README and `ARCHITECTURE_MAP.md`); permanent stubs remain at
+the old paths here. This repo's docs cover the platform services:
+
+- `ACTION_STREAM.md` — the action stream: structured action logging (sublevel/live axes, SysConfig live policy), live view, retrieval for LLMs (renamed from `EPICPROD_ACTION_STREAM.md`; the stream machinery is platform).
+- `AI_PROPOSALS.md` — AI proposals: LLM proposes, human approves, deterministic execution; record-resident v1, origin-stamped events, the `.ai-attr` UI convention.
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
-- `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.
-- `CAMPAIGN_CONTINUUM.md` — one curated catalog for every campaign; lifecycle as phase attribute; requests over families; instancing design.
-- `EPICPROD_NARRATIVES.md` — campaign narrative documents: classes, naming, draft→locked lifecycle, corun-ai home.
-- `AI_PROPOSALS.md` — AI proposals: LLM proposes, human approves, deterministic execution; record-resident v1, origin-stamped events, the `.ai-attr` UI convention.
-- `EPICPROD_QUESTIONNAIRE.md` — ingest the PWG/DSC production-request Google Form into a PCS Questionnaire entity; public browser, request linkage.
-- `EPICPROD_DATA_LINEAGE.md` — gather produced-dataset Rucio refs onto the catalog; reference + xrootd access.
-- `EPICPROD_EVGEN_INPUTS.md` — assimilate JLab Rucio EVGEN inputs onto the catalog; the request↔Rucio input matcher and its (un)match gaps.
-- `JEDI_INTEGRATION.md` — PCS → JEDI/PanDA submission design.
+- `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
+- `SYSTEM_STATUS.md` — cached system status record and page.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
-- `COMMISSIONING_RELAXATIONS.md` — alpha tag-lock/submission loosenings and exactly how to re-tighten each.
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
+- `alarms.md`, `SETUP_GUIDE.md`, `TEST_SYSTEM.md`, `POSTGRES_MCP.md` — alarms, setup, tests, Postgres MCP.
+- `FASTMON_FILES.md`, `TFSLICE.md` — testbed fast-monitoring docs.
 
 ## Editing discipline (AI sessions)
 

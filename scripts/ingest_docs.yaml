@@ -27,6 +27,13 @@ sources:
     glob: "README.md"
     label: swf-common-lib
 
+  - path: /data/wenauseic/github/swf-epicprod/docs
+    glob: "**/*.md"
+    label: swf-epicprod
+  - path: /data/wenauseic/github/swf-epicprod
+    glob: "README.md"
+    label: swf-epicprod
+
   # ── Bamboo / PanDA ─────────────────────────────────────────────────────
   - path: /data/wenauseic/github/bamboo-mcp/docs
     glob: "**/*.md"

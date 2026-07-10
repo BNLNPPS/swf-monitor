@@ -119,6 +119,22 @@ log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
 source .venv/bin/activate
 
+# Freeze swf-epicprod into the deployed venv. The shared dev venv carries it
+# as an editable install (dev ergonomics); shipped verbatim, the deployed venv
+# would import the dev working tree live. Reinstalling non-editable here
+# snapshots the dev tree state at deploy time, so production picks up
+# swf-epicprod changes only on a deliberate deploy.
+# Invoke pip as python -m pip: the copied venv's bin/pip script keeps a
+# shebang pointing at the source venv, so bare .venv/bin/pip would operate
+# on the dev venv, not this one. The python binary binds to its own venv.
+if .venv/bin/python -m pip show swf-epicprod >/dev/null 2>&1; then
+    log "Freezing swf-epicprod into the deployed venv (non-editable)..."
+    .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/swf-epicprod
+    # The root-run build drops a root-owned build/ into the dev tree, which
+    # breaks later developer builds — remove it.
+    rm -rf /data/wenauseic/github/swf-epicprod/build
+fi
+
 # Verify production environment file exists
 if [ ! -f "$DEPLOY_ROOT/config/env/production.env" ]; then
     echo "ERROR: Production environment file not found at $DEPLOY_ROOT/config/env/production.env"

@@ -43,7 +43,7 @@ Production task configuration for Monte Carlo simulation campaigns:
 - **ProdRequest**: PWG/DSC production request, upstream of ProdTask
 - **ProdTask**: Production task composed from a Dataset and ProdConfig with submission command generation
 
-See **[PCS documentation](PCS.md)** for full details.
+See **[PCS documentation](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/PCS.md)** for full details.
 
 ## ActiveMQ Integration
 
@@ -172,7 +172,7 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 
 ### PCS - Physics Configuration System
 
-All PCS endpoints are under `/pcs/api/`. See **[PCS documentation](PCS.md)** for full API reference with examples.
+All PCS endpoints are under `/pcs/api/`. See **[PCS documentation](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/PCS.md)** for full API reference with examples.
 
 - `GET/POST /pcs/api/physics-categories/` - List/create physics categories
 - `GET/POST /pcs/api/physics-tags/` - List/create physics tags (number auto-assigned)

@@ -84,7 +84,7 @@ action:
    already proxied (`sse_proxy`); the page holds an `EventSource` and updates
    when the agent emits an event or swf-monitor relays a corun-ai completion
    callback. See [SSE_PUSH.md](SSE_PUSH.md) and
-   [EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md).
+   [EPICPROD_LLM_OPERATIONS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_LLM_OPERATIONS.md).
 6. **Verify on `epic-devcloud.org`, not internally.** The internal face
    satisfies session+CSRF and relays redirects, so it passes while the external
    face fails. Test where the users are.

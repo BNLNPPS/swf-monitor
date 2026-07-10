@@ -11,7 +11,7 @@ to remote headless agents (e.g. a monitor in Japan), over WAN/firewall-friendly
 HTTPS. This adds nothing to that pipe. It adds a new *emitter* — the ops agent,
 publishing a small completion event when a credentialed action succeeds — and a
 new *consumer* — a browser page holding an `EventSource` that updates the DOM the
-instant the event arrives. See [EPICPROD_OPS_AGENT.md](EPICPROD_OPS_AGENT.md) for
+instant the event arrives. See [EPICPROD_OPS_AGENT.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_OPS_AGENT.md) for
 the agent and its `run_in_background` capability.
 
 ## Completion events
@@ -37,7 +37,7 @@ corun-ai-backed LLM operations use the same browser notification mechanism with 
 different server-side source. corun-ai posts completion callbacks to swf-monitor,
 and swf-monitor emits the corresponding SSE event. The browser-side rule is the
 same short-lived `EventSource` pattern described below. See
-[EPICPROD_LLM_OPERATIONS.md](EPICPROD_LLM_OPERATIONS.md).
+[EPICPROD_LLM_OPERATIONS.md](https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/EPICPROD_LLM_OPERATIONS.md).
 
 ## Relay — unchanged
 
