@@ -1,0 +1,15 @@
+name: swf-monitor CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration-test:
+    uses: BNLNPPS/swf-testbed/.github/workflows/integration-test.yml@main
+    with:
+      swf_testbed_ref: main
+      swf_monitor_repo: ${{ github.repository }}
+      swf_monitor_ref: ${{ github.sha }}
