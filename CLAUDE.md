@@ -56,6 +56,7 @@ messages. Existing compatibility names such as `CORUN_BASE_URL`,
 - `EPICPROD_ACTION_STREAM.md` — the epicprod action stream: structured action logging (sublevel/live axes, SysConfig live policy), live view, nightly catalog_sync, retrieval for LLMs.
 - `EPICPROD_OPS.md` — ops runbook (submit, monitor, logs, systemd unit, cleaner-killer, nightly catalog sync).
 - `EPICPROD_LLM_OPERATIONS.md` — corun-ai-backed LLM operations, artifacts, comments, and async completion.
+- `EPICPROD_ASSESSMENTS.md` — scheduled nightly/weekly campaign assessments: corun-ai as assessor, campaign analytics library, deterministic artifact schema, harness lifecycle (design).
 - `SSE_PUSH.md` — browser push of agent action completion (design).
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `PCS.md`, `PCS_DATASET_REQUEST_WORKFLOW.md`, `EPICPROD_TASK_CATALOG.md` — Physics Configuration System and the production task catalog.

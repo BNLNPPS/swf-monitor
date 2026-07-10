@@ -105,6 +105,10 @@ swf-monitor rendering or linking it from production pages. On-demand report
 generation may use the same interfaces, but the daily report should not depend
 on an open browser session.
 
+The scheduled campaign assessment design — nightly and weekly assessments,
+the campaign analytics library, the artifact schema, and the harness
+lifecycle — is [EPICPROD_ASSESSMENTS.md](EPICPROD_ASSESSMENTS.md).
+
 ## Asynchronous Completion
 
 swf-monitor has one browser notification mechanism for asynchronous completion:
