@@ -124,9 +124,12 @@ source .venv/bin/activate
 # would import the dev working tree live. Reinstalling non-editable here
 # snapshots the dev tree state at deploy time, so production picks up
 # swf-epicprod changes only on a deliberate deploy.
-if .venv/bin/pip show swf-epicprod >/dev/null 2>&1; then
+# Invoke pip as python -m pip: the copied venv's bin/pip script keeps a
+# shebang pointing at the source venv, so bare .venv/bin/pip would operate
+# on the dev venv, not this one. The python binary binds to its own venv.
+if .venv/bin/python -m pip show swf-epicprod >/dev/null 2>&1; then
     log "Freezing swf-epicprod into the deployed venv (non-editable)..."
-    .venv/bin/pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/swf-epicprod
+    .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/swf-epicprod
 fi
 
 # Verify production environment file exists
