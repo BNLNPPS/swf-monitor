@@ -1,4 +1,6 @@
-"""corun job notification callback endpoint for DISpatcher Mattermost notices."""
+"""corun job notification callback endpoint: DISpatcher Mattermost notices,
+and dispatch of campaign-assessment completions to the prod-ops agent's
+enforcement handler (swf-epicprod docs/EPICPROD_ASSESSMENTS_V1.md)."""
 
 import json
 import logging
@@ -104,6 +106,11 @@ def corun_callback(request):
     if status not in {'completed', 'failed', 'cancelled'}:
         return JsonResponse({'error': 'ignored non-terminal status'}, status=400)
 
+    # Campaign-assessment completions dispatch to the prod-ops agent's
+    # enforcement handler before anything else — a Mattermost failure must
+    # never cost an assessment slot.
+    dispatched = _dispatch_assessment(payload)
+
     try:
         driver = _mattermost_driver()
         driver.login()
@@ -123,4 +130,38 @@ def corun_callback(request):
         "Posted corun callback notice for job %s status=%s",
         payload.get('job_id'), status,
     )
-    return JsonResponse({'ok': True})
+    return JsonResponse({'ok': True, 'assessment_dispatched': dispatched})
+
+
+def _dispatch_assessment(payload):
+    """Queue assessment enforcement for a campaign_assessment job. Returns
+    whether a dispatch happened; a failure is logged to the action stream —
+    a slot that never fills must be visible, not silent."""
+    definition_name = str(payload.get('definition_name') or '')
+    if definition_name != config('CORUN_ASSESSMENT_DEFINITION_NAME',
+                                 default='campaign_assessment'):
+        return False
+    message = {
+        'msg_type': 'assessment_completed',
+        'namespace': 'prodops',
+        'job_id': str(payload.get('job_id') or ''),
+        'prompt_group_id': str(payload.get('prompt_group_id') or ''),
+        'page_group_id': str(payload.get('result_page_group_id') or ''),
+        'status': str(payload.get('status') or ''),
+    }
+    try:
+        from monitor_app.activemq_connection import ActiveMQConnectionManager
+        sent = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(message))
+        if not sent:
+            raise RuntimeError('ops-agent queue unreachable')
+        return True
+    except Exception as exc:
+        logger.exception("assessment_completed dispatch failed")
+        from monitor_app.epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'assessment_enforce', outcome='error', sublevel='high',
+            live_default=True,
+            message=f"assessment_completed dispatch failed for job "
+                    f"{message['job_id']}: {exc}")
+        return False

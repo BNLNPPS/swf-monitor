@@ -37,6 +37,9 @@ Capabilities:
                        (delegates to scripts/import_evgen_rucio.py --apply).
   campaign_progress_refresh — rebuild current campaign progress data and its
                        rendered progress table cache.
+  assessment_completed — enforce and register a finished campaign-assessment
+                       run (corun callback → validation, floor, registration;
+                       swf-epicprod docs/EPICPROD_ASSESSMENTS_V1.md).
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        increase allowed attempts or retry failed work.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
@@ -123,6 +126,7 @@ QUESTIONNAIRE_AUTOMATCH_TIMEOUT = int(os.environ.get("EPICPROD_AUTOMATCH_TIMEOUT
 QUESTIONNAIRE_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_IMPORT_TIMEOUT", "120"))
 CAMPAIGN_PROGRESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-campaign-progress.py"
 CAMPAIGN_PROGRESS_TIMEOUT = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_TIMEOUT", "300"))
+ASSESSMENT_ENFORCE_TIMEOUT = int(os.environ.get("EPICPROD_ASSESSMENT_ENFORCE_TIMEOUT", "300"))
 CAMPAIGN_PROGRESS_MIN_INTERVAL = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_MIN_INTERVAL", "300"))
 
 # EVGEN-input assimilation doer: a live JLab Rucio fetch of epic:/EVGEN/* plus
@@ -169,6 +173,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "questionnaire_automatch",
                    "sync_epicprod_inventory", "refresh_system_status",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
+                   "assessment_completed",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -1320,6 +1325,47 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'campaign_progress_ready', 'ok': True,
                 'summary': summary})
             self._log_action('progress_refresh', t0, username=str(created_by))
+
+    def _handle_assessment_completed(self, m):
+        job_id = str(m.get('job_id') or '')
+        if not job_id:
+            self.logger.warning("PRODOPS assessment_completed: no job_id, dropping")
+            return
+        self.run_in_background(
+            self._do_assessment_enforce, m,
+            dedup_key=f"assessment_enforce:{job_id}",
+            label="assessment_enforce")
+
+    def _do_assessment_enforce(self, m):
+        cmd = [
+            sys.executable, "-m", "swf_epicprod.assessment.enforce",
+            "--job-id", str(m.get('job_id') or ''),
+            "--prompt-group-id", str(m.get('prompt_group_id') or ''),
+            "--page-group-id", str(m.get('page_group_id') or ''),
+            "--status", str(m.get('status') or ''),
+        ]
+        self.logger.info(f"PRODOPS assessment_enforce: job {m.get('job_id')}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ASSESSMENT_ENFORCE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self._log_action('assessment_enforce', t0, outcome='timeout',
+                             reason=f'timed out after {ASSESSMENT_ENFORCE_TIMEOUT}s',
+                             sublevel='high', level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  assessment-enforce: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  assessment-enforce: {line}")
+        if p.returncode != 0:
+            # The doer logs its own detailed outcomes; this catches a doer
+            # that died before it could.
+            self._log_action('assessment_enforce', t0, outcome='error',
+                             reason=self._derive_reason(p), sublevel='high',
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS assessment_enforce done")
 
     # -- action stream --------------------------------------------------------
 
