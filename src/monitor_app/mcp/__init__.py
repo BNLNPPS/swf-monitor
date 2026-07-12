@@ -109,21 +109,13 @@ from .ai_content import (
 )
 
 # AI proposal tools
-from .ai_proposals import (
-    ai_list_proposals,
-    ai_decide_proposal,
-)
 
-# epicprod action-stream tools
-from .epicprod_actions import (
-    epicprod_list_actions,
-)
-
-# epicprod domain tools, hosted in swf-epicprod (registration shim —
-# they register on this package's `mcp` instance; one service downstream)
-from swf_epicprod.mcp_tools import (
-    epicprod_campaign_status,
-)
+# Domain tools and assessment subject types, hosted in swf-epicprod.
+# The import is the registration shim: loading the package registers its
+# tools on this package's `mcp` instance and its subject resolvers on
+# ai_content's registry — one MCP service downstream either way. A plain
+# import (not from-import) keeps both package-entry orders safe.
+import swf_epicprod.mcp_tools  # noqa: F401  (registration side effect)
 
 # PanDA Monitor tools
 from .pandamon import (
@@ -135,21 +127,6 @@ from .pandamon import (
     panda_study_job,
 )
 
-# PCS tools
-from .pcs import (
-    pcs_list_tags,
-    pcs_get_tag,
-    pcs_search_tags,
-    pcs_dataset_list,
-    pcs_dataset_get,
-    pcs_dataset_intake,
-    pcs_prodtask_list,
-    pcs_prodtask_get,
-    pcs_prodtask_artifact,
-    pcs_prodtask_intake,
-    pcs_prodtask_link_input,
-    pcs_prodtask_set_status,
-)
 
 
 # Tool discovery - registered as MCP tool
