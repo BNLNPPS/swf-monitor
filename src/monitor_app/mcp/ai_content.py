@@ -278,16 +278,21 @@ def _register_ai_assessment_sync(
             resolved['target_json_field'],
             page_group_id,
         )
+    # A non-ok verdict raises the record to the live stream, so an
+    # assessment calling for attention reaches operators without any
+    # additional machinery (EPICPROD_ASSESSMENTS.md § Architecture).
+    verdict = str(payload_data.get('verdict') or '').strip().lower()
     log_epicprod_action(
         'mcp', 'assessment_register',
         subject_type=canonical_type,
         subject_key=resolved['subject_key'],
         username=username_value,
         outcome='ok',
-        sublevel='normal',
+        sublevel='high' if verdict not in ('', 'ok') else 'normal',
         live_default=True,
         linked=linked,
         corun_page_group_id=page_group_id,
+        **({'verdict': verdict} if verdict else {}),
     )
     return {
         'success': True,

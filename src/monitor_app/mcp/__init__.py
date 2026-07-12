@@ -119,6 +119,12 @@ from .epicprod_actions import (
     epicprod_list_actions,
 )
 
+# epicprod domain tools, hosted in swf-epicprod (registration shim —
+# they register on this package's `mcp` instance; one service downstream)
+from swf_epicprod.mcp_tools import (
+    epicprod_campaign_status,
+)
+
 # PanDA Monitor tools
 from .pandamon import (
     panda_list_jobs,
