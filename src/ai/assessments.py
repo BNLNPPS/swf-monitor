@@ -137,9 +137,14 @@ def _subject_parts(subject_type, subject_key, subject_label):
 
 def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
                      subject_type, subject_key, subject_label, subject_url,
-                     quality='', comment='', corun_page_group_id=''):
+                     quality='', comment='', corun_page_group_id='',
+                     title='', assessment_kind='', verdict='', quarantined=False):
     subject_kind, subject_id, subject_name, subject_display = _subject_parts(
         subject_type, subject_key, subject_label)
+    # Reports are named by the human cadence: the assessment produced by the
+    # night cron is the DAILY report ('nightly' persists only in older stored
+    # records; display it as daily).
+    kind_display = 'daily' if assessment_kind == 'nightly' else assessment_kind
     return {
         'id': item_id,
         'storage': storage,
@@ -160,6 +165,10 @@ def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
         'subject_name': subject_name,
         'subject_display': subject_display,
         'subject_url': subject_url,
+        'title': title,
+        'assessment_kind': kind_display,
+        'verdict': verdict,
+        'quarantined': quarantined,
     }
 
 
@@ -190,6 +199,10 @@ def ai_content_items(rows):
             subject_key=subject_key,
             subject_label=subject_label,
             subject_url=str(getattr(row, 'subject_url', '') or '').strip(),
+            title=str(data.get('title') or '').strip(),
+            assessment_kind=str(data.get('assessment_kind') or '').strip(),
+            verdict=str(data.get('verdict') or '').strip(),
+            quarantined=data.get('quarantined') is True,
         ))
     return items
 
@@ -223,6 +236,10 @@ def corun_page_items(pages):
             subject_key=str(data.get('subject_key') or '').strip(),
             subject_label=str(data.get('subject_label') or '').strip(),
             subject_url=str(data.get('subject_url') or '').strip(),
+            title=str(data.get('title') or '').strip(),
+            assessment_kind=str(data.get('assessment_kind') or '').strip(),
+            verdict=str(data.get('verdict') or '').strip(),
+            quarantined=data.get('quarantined') is True,
         ))
     return items
 

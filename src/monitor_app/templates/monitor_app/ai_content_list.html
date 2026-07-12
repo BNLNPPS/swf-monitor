@@ -119,15 +119,24 @@
     {% for item in items %}
     <details class="ai-assessment-entry border border-secondary border-3 mb-2">
     <summary>
-        <span>
+        {% if item.title %}
+        <span><strong>{{ item.title }}</strong></span>
+        {% endif %}
+        {% if item.verdict %}
+        <span class="badge {% if item.verdict == 'alarm' %}bg-danger{% elif item.verdict == 'attention' %}bg-warning text-dark{% elif item.verdict == 'ok' %}bg-success{% else %}bg-secondary{% endif %}">{{ item.verdict }}</span>
+        {% endif %}
+        {% if item.assessment_kind %}
+        <span class="badge bg-secondary">{{ item.assessment_kind }}</span>
+        {% endif %}
+        <span{% if item.title %} class="text-muted"{% endif %}>
             <strong>{{ item.subject_kind }}:</strong>
             {% if item.subject_url %}
             <a href="{{ item.subject_url }}">{{ item.subject_id }}</a>
-            {% if item.subject_name and item.subject_name != item.subject_id %}
+            {% if not item.title and item.subject_name and item.subject_name != item.subject_id %}
             <a href="{{ item.subject_url }}" class="ms-3">{{ item.subject_name }}</a>
             {% endif %}
             {% else %}
-            {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-3">{{ item.subject_name }}</span>{% endif %}
+            {{ item.subject_id }}{% if not item.title and item.subject_name and item.subject_name != item.subject_id %}<span class="ms-3">{{ item.subject_name }}</span>{% endif %}
             {% endif %}
         </span>
         <span><strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}</span>

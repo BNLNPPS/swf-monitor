@@ -3231,7 +3231,9 @@ def ai_content_list(request):
         except CorunAPIError as exc:
             logger.warning('corun AI assessment list failed: %s', exc)
 
-    all_items = legacy_items + corun_items
+    # Quarantined artifacts stay retrievable by id (MCP) but never render
+    # on the human page.
+    all_items = [i for i in legacy_items + corun_items if not i.get('quarantined')]
 
     # subject_type accepts a comma-separated list, e.g.
     # ?subject_type=campaign_task,campaign — the Campaigns pulldown's
