@@ -1343,6 +1343,7 @@ class EpicProdOpsAgent(BaseAgent):
             "--prompt-group-id", str(m.get('prompt_group_id') or ''),
             "--page-group-id", str(m.get('page_group_id') or ''),
             "--status", str(m.get('status') or ''),
+            "--timing", str(m.get('timing') or ''),
         ]
         self.logger.info(f"PRODOPS assessment_enforce: job {m.get('job_id')}")
         t0 = time.monotonic()

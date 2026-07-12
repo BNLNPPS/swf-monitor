@@ -148,6 +148,7 @@ def _dispatch_assessment(payload):
         'prompt_group_id': str(payload.get('prompt_group_id') or ''),
         'page_group_id': str(payload.get('result_page_group_id') or ''),
         'status': str(payload.get('status') or ''),
+        'timing': payload.get('timing'),
     }
     try:
         from monitor_app.activemq_connection import ActiveMQConnectionManager
