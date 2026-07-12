@@ -15,6 +15,11 @@ import django  # noqa: E402
 
 django.setup()
 
+# Provenance probe: a warning in this doer's output cited a dev-venv Django
+# path that no direct probe of the deployed venv reproduces; report where
+# this subprocess actually runs from (2026-07-12).
+print(f"interpreter={sys.executable} django={django.__file__}", file=sys.stderr)
+
 from pcs.models import Campaign  # noqa: E402
 from pcs.services import (  # noqa: E402
     load_campaign_progress_snapshot,
