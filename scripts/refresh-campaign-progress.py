@@ -28,36 +28,39 @@ def main():
     parser.add_argument("--generated-by", default="progress_refresh")
     args = parser.parse_args()
 
-    campaign = Campaign.objects.filter(lifecycle="current").order_by("name").first()
-    if campaign is None:
-        print("No current campaign defined.", file=sys.stderr)
+    from pcs.views import _campaigns_with_inflow
+
+    # Producing campaigns are the assessment targets and lead the set;
+    # usually identical to current, distinct around lifecycle transitions.
+    targets = [camp for camp, _ in _campaigns_with_inflow()]
+    current = Campaign.objects.filter(lifecycle="current").order_by("name").first()
+    if current is not None and all(c.pk != current.pk for c in targets):
+        targets.append(current)
+    if not targets:
+        print("No producing or current campaign defined.", file=sys.stderr)
         return 2
 
-    progress = refresh_campaign_progress_snapshot(
-        campaign, generated_by=args.generated_by)
-    snapshot = load_campaign_progress_snapshot(campaign) or {}
-    table = rebuild_current_task_list_html_cache(
-        campaign, "progress", progress_snapshot=snapshot)
-    # The catalog view has no other clockwork rebuilder — without this it
-    # serves its stale copy indefinitely (page-load rebuild is suppressed).
-    catalog_table = rebuild_current_task_list_html_cache(campaign, "catalog")
-    # Producing campaigns render the same cached table (the unified view).
-    from pcs.views import _campaigns_with_inflow
-    for producing_camp, _ in _campaigns_with_inflow():
-        rebuild_current_task_list_html_cache(producing_camp, "catalog")
-
-    print(
-        "campaign={campaign} tasks={tasks} warnings={warnings} "
-        "table_bytes={table_bytes} catalog_table_bytes={catalog_bytes} "
-        "generated_at={generated_at}".format(
-            campaign=progress["campaign"],
-            tasks=progress["tasks"],
-            warnings=len(progress["errors"]),
-            table_bytes=table["html_bytes"],
-            catalog_bytes=catalog_table["html_bytes"],
-            generated_at=progress["generated_at"],
+    for campaign in targets:
+        progress = refresh_campaign_progress_snapshot(
+            campaign, generated_by=args.generated_by)
+        snapshot = load_campaign_progress_snapshot(campaign) or {}
+        table = rebuild_current_task_list_html_cache(
+            campaign, "progress", progress_snapshot=snapshot)
+        # The catalog view has no other clockwork rebuilder — without this it
+        # serves its stale copy indefinitely (page-load rebuild is suppressed).
+        catalog_table = rebuild_current_task_list_html_cache(campaign, "catalog")
+        print(
+            "campaign={campaign} tasks={tasks} warnings={warnings} "
+            "table_bytes={table_bytes} catalog_table_bytes={catalog_bytes} "
+            "generated_at={generated_at}".format(
+                campaign=progress["campaign"],
+                tasks=progress["tasks"],
+                warnings=len(progress["errors"]),
+                table_bytes=table["html_bytes"],
+                catalog_bytes=catalog_table["html_bytes"],
+                generated_at=progress["generated_at"],
+            )
         )
-    )
     return 0
 
 
