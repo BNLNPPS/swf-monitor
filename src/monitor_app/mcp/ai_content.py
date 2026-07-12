@@ -66,6 +66,7 @@ def _register_ai_assessment_sync(
     subject_label,
     subject_url,
     data,
+    title='',
 ):
     canonical_type = _canonical_subject_type(subject_type)
     if not canonical_type:
@@ -124,7 +125,8 @@ def _register_ai_assessment_sync(
     try:
         page = CorunClient().create_page(
             section=CORUN_ASSESSMENT_SECTION,
-            title=f"AI assessment: {canonical_type} {resolved['subject_key']}",
+            title=(str(title).strip()
+                   or f"AI assessment: {canonical_type} {resolved['subject_key']}"),
             content=assessment_text,
             data=page_data,
             tags=[

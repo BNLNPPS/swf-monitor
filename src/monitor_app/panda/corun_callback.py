@@ -137,9 +137,12 @@ def _dispatch_assessment(payload):
     """Queue assessment enforcement for a campaign_assessment job. Returns
     whether a dispatch happened; a failure is logged to the action stream —
     a slot that never fills must be visible, not silent."""
+    # Matches campaign_assessment_nightly / _weekly (one definition per
+    # kind, each with its own system prompt).
     definition_name = str(payload.get('definition_name') or '')
-    if definition_name != config('CORUN_ASSESSMENT_DEFINITION_NAME',
-                                 default='campaign_assessment'):
+    if not definition_name.startswith(
+            config('CORUN_ASSESSMENT_DEFINITION_NAME',
+                   default='campaign_assessment')):
         return False
     message = {
         'msg_type': 'assessment_completed',
