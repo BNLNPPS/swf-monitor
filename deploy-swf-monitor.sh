@@ -134,6 +134,13 @@ if .venv/bin/python -m pip show swf-epicprod >/dev/null 2>&1; then
     # breaks later developer builds — remove it.
     rm -rf /data/wenauseic/github/swf-epicprod/build
 fi
+# swf-common-lib likewise: the copied venv carries its dev editable, which
+# resolved agent library code (BaseAgent) to the dev tree in production.
+if .venv/bin/python -m pip show swf-common-lib >/dev/null 2>&1; then
+    log "Freezing swf-common-lib into the deployed venv (non-editable)..."
+    .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/swf-common-lib
+    rm -rf /data/wenauseic/github/swf-common-lib/build
+fi
 
 # Verify production environment file exists
 if [ ! -f "$DEPLOY_ROOT/config/env/production.env" ]; then
