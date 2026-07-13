@@ -26,6 +26,7 @@ from pcs.services import (  # noqa: E402
     refresh_campaign_progress_snapshot,
 )
 from pcs.views import rebuild_current_task_list_html_cache  # noqa: E402
+from swf_epicprod.analytics.rollup import campaign_status  # noqa: E402
 
 
 def main():
@@ -54,16 +55,20 @@ def main():
         # The catalog view has no other clockwork rebuilder — without this it
         # serves its stale copy indefinitely (page-load rebuild is suppressed).
         catalog_table = rebuild_current_task_list_html_cache(campaign, "catalog")
+        analytics = campaign_status(
+            campaign.name, window_days=1, record=True,
+            generated_by=args.generated_by)
         print(
             "campaign={campaign} tasks={tasks} warnings={warnings} "
             "table_bytes={table_bytes} catalog_table_bytes={catalog_bytes} "
-            "generated_at={generated_at}".format(
+            "generated_at={generated_at} analytics_at={analytics_at}".format(
                 campaign=progress["campaign"],
                 tasks=progress["tasks"],
                 warnings=len(progress["errors"]),
                 table_bytes=table["html_bytes"],
                 catalog_bytes=catalog_table["html_bytes"],
                 generated_at=progress["generated_at"],
+                analytics_at=analytics["generated_at"],
             )
         )
     return 0
