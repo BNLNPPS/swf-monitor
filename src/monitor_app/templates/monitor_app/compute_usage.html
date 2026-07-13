@@ -12,6 +12,14 @@
     <a class="btn btn-sm btn-secondary" href="{% url 'monitor_app:prod_hub' %}">&larr; Production</a>
   </div>
 
+  <div class="d-flex align-items-center flex-wrap gap-1 mb-2">
+    <span class="small text-muted me-1">Quick periods</span>
+    {% for period in periods %}
+    <a class="btn btn-sm {% if period.active %}btn-primary{% else %}btn-outline-primary{% endif %}"
+       href="?start={{ period.start|urlencode }}&amp;end={{ period.end|urlencode }}&amp;bucket={{ bucket|urlencode }}">{{ period.label }}</a>
+    {% endfor %}
+  </div>
+
   <form method="get" class="row g-2 align-items-end mb-3">
     <div class="col-sm-3 col-lg-2">
       <label class="form-label mb-1" for="usage-start">Start date</label>
@@ -47,8 +55,8 @@
   </div>
 
   <div class="row g-3">
-    <div class="col-xl-9">
-      <div class="border rounded p-2">
+    <div class="col-xl-8">
+      <div class="border rounded p-2 h-100">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
           <strong>Core-hours over time</strong>
           <div>
@@ -62,8 +70,12 @@
         <div id="compute-usage-plot" style="height:32rem"></div>
       </div>
     </div>
-    <div class="col-xl-3">
-      <div class="border rounded p-2 h-100">
+    <div class="col-xl-4">
+      <div class="border rounded p-2 mb-3">
+        <strong>Core-hour share by site</strong>
+        <div id="compute-usage-pie" style="height:19rem"></div>
+      </div>
+      <div class="border rounded p-2">
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong>Sites</strong>
           <span>
@@ -72,7 +84,7 @@
             <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-none">none</button>
           </span>
         </div>
-        <div style="max-height:30rem;overflow:auto">
+        <div style="max-height:9rem;overflow:auto">
           {% for site in usage.by_site %}
           <div class="form-check mb-1">
             <input class="form-check-input usage-site" type="checkbox" checked
@@ -85,13 +97,14 @@
     </div>
   </div>
 
-  <div class="table-responsive mt-3">
-    <table class="table table-sm table-striped align-middle" id="usage-site-table">
+  <div class="table-responsive mt-3" style="width:max-content;max-width:100%">
+    <table class="table table-sm table-striped align-middle w-auto" id="usage-site-table">
       <thead><tr><th>Computing site</th><th class="text-end">Jobs</th><th class="text-end">Allocated core-hours</th><th class="text-end">Used core-hours</th><th class="text-end">Efficiency</th></tr></thead>
       <tbody>
         {% for site in usage.by_site %}
         <tr data-site="{{ site.site }}">
-          <td>{{ site.site }}</td>
+          <td><span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
+                    style="width:.75rem;height:.75rem" aria-hidden="true"></span>{{ site.site }}</td>
           <td class="text-end">{{ site.job_count }}</td>
           <td class="text-end">{{ site.allocated_core_hours|floatformat:1 }}</td>
           <td class="text-end">{{ site.used_core_hours|floatformat:1 }}</td>
@@ -117,6 +130,11 @@
     const metric = document.getElementById('usage-metric');
     const selected = () => new Set(boxes.filter(box => box.checked).map(box => box.value));
     const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
+    const siteColors = new Map((usage.by_site || []).map((row, index) => [row.site, colors[index % colors.length]]));
+    document.querySelectorAll('.usage-site-swatch').forEach(swatch => {
+      swatch.style.backgroundColor = siteColors.get(swatch.dataset.site);
+    });
 
     function render() {
       const sites = selected();
@@ -128,6 +146,7 @@
           type: 'bar', name: site,
           x: points.map(point => point.bucket_start),
           y: points.map(point => point[key]),
+          marker: {color: siteColors.get(site)},
           hovertemplate: '%{x}<br>' + site + '<br>%{y:,.1f} core-hours<extra></extra>',
         };
       });
@@ -139,7 +158,23 @@
         legend: {orientation: 'h', y: -0.25},
       }, {responsive: true, displaylogo: false});
 
-      const totals = (usage.by_site || []).filter(row => sites.has(row.site))
+      const siteTotals = (usage.by_site || []).filter(row => sites.has(row.site));
+      const pieRows = siteTotals.filter(row => Number(row[key] || 0) > 0);
+      Plotly.react('compute-usage-pie', pieRows.length ? [{
+        type: 'pie',
+        labels: pieRows.map(row => row.site),
+        values: pieRows.map(row => row[key]),
+        marker: {colors: pieRows.map(row => siteColors.get(row.site))},
+        textinfo: 'percent',
+        hovertemplate: '%{label}<br>%{value:,.1f} core-hours<br>%{percent}<extra></extra>',
+      }] : [], {
+        margin: {l: 10, r: 10, t: 10, b: 30},
+        showlegend: true,
+        legend: {orientation: 'h', y: -0.05},
+        annotations: pieRows.length ? [] : [{text: 'No site data selected', showarrow: false}],
+      }, {responsive: true, displaylogo: false});
+
+      const totals = siteTotals
         .reduce((sum, row) => ({
           jobs: sum.jobs + Number(row.job_count || 0),
           allocated: sum.allocated + Number(row.allocated_core_hours || 0),

@@ -315,12 +315,31 @@ def compute_usage(request):
     """Site-level PanDA core-hour history and interactive production plot."""
     usage, error = _compute_usage(request)
     today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
+    start = request.GET.get('start') or str(today - timedelta(days=29))
+    end = request.GET.get('end') or str(today)
+    periods = []
+    for days, label in (
+        (7, 'Last week'),
+        (14, '2 weeks'),
+        (30, 'Month'),
+        (90, '3 months'),
+        (180, '6 months'),
+    ):
+        period_start = str(today - timedelta(days=days - 1))
+        period_end = str(today)
+        periods.append({
+            'label': label,
+            'start': period_start,
+            'end': period_end,
+            'active': start == period_start and end == period_end,
+        })
     return render(request, 'monitor_app/compute_usage.html', {
         'error': error,
         'usage': usage or {},
-        'start': request.GET.get('start') or str(today - timedelta(days=29)),
-        'end': request.GET.get('end') or str(today),
+        'start': start,
+        'end': end,
         'bucket': (request.GET.get('bucket') or 'day').strip().lower(),
+        'periods': periods,
     })
 
 
