@@ -346,6 +346,8 @@
         values: pieRows.map(row => row[key]),
         marker: {colors: pieRows.map(row => siteColors.get(row.site))},
         textinfo: 'percent',
+        textposition: 'inside',
+        insidetextorientation: 'horizontal',
         insidetextfont: {
           color: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
           weight: 600,
@@ -356,6 +358,7 @@
         margin: {l: 10, r: 10, t: 10, b: 30},
         showlegend: true,
         legend: {orientation: 'h', y: -0.05},
+        uniformtext: {minsize: 11, mode: 'hide'},
         annotations: pieRows.length ? [] : [{text: 'No site data selected', showarrow: false}],
       }, {responsive: true, displayModeBar: false});
 
