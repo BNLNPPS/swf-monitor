@@ -14,19 +14,20 @@
   <div class="d-flex align-items-center flex-wrap gap-1 mb-2">
     <span class="small text-muted me-1">Quick periods</span>
     {% for period in periods %}
-    <a class="btn btn-sm {% if period.active %}btn-primary{% else %}btn-outline-primary{% endif %}"
-       href="?start={{ period.start|urlencode }}&amp;end={{ period.end|urlencode }}&amp;bucket={{ bucket|urlencode }}">{{ period.label }}</a>
+    <button type="button"
+            class="btn btn-sm usage-period {% if period.active %}btn-primary{% else %}btn-outline-primary{% endif %}"
+            data-start="{{ period.start }}" data-end="{{ period.end }}">{{ period.label }}</button>
     {% endfor %}
   </div>
 
-  <form method="get" class="row g-2 align-items-end mb-3">
+  <form method="get" class="row g-2 align-items-end mb-3" id="usage-period-form">
     <div class="col-sm-3 col-lg-2">
       <label class="form-label mb-1" for="usage-start">Start date</label>
-      <input class="form-control form-control-sm" id="usage-start" name="start" type="date" value="{{ start }}">
+      <input class="form-control form-control-sm" id="usage-start" name="start" type="date" value="{{ start }}" required>
     </div>
     <div class="col-sm-3 col-lg-2">
       <label class="form-label mb-1" for="usage-end">End date</label>
-      <input class="form-control form-control-sm" id="usage-end" name="end" type="date" value="{{ end }}">
+      <input class="form-control form-control-sm" id="usage-end" name="end" type="date" value="{{ end }}" required>
     </div>
     <div class="col-sm-3 col-lg-2">
       <label class="form-label mb-1" for="usage-bucket">Time bins</label>
@@ -39,7 +40,7 @@
       <button class="btn btn-sm btn-primary" type="submit">Apply period</button>
     </div>
     <div class="col-lg-4 text-lg-end small">
-      <a href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}">JSON data</a>
+      <a id="usage-json-link" href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}">JSON data</a>
     </div>
   </form>
 
@@ -47,9 +48,9 @@
   <div class="alert alert-danger">{{ error }}</div>
   {% else %}
   <div class="row g-2 mb-3">
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">{{ usage.totals.job_count }}</strong></div></div>
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">{{ usage.totals.allocated_core_hours|floatformat:1 }}</strong></div></div>
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">{{ usage.totals.used_core_hours|floatformat:1 }}</strong></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">—</strong></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
     <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
   </div>
 
@@ -104,10 +105,10 @@
         <tr data-site="{{ site.site }}">
           <td><span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
                     style="width:.75rem;height:.75rem" aria-hidden="true"></span>{{ site.site }}</td>
-          <td class="text-end">{{ site.job_count }}</td>
-          <td class="text-end">{{ site.allocated_core_hours|floatformat:1 }}</td>
-          <td class="text-end">{{ site.used_core_hours|floatformat:1 }}</td>
-          <td class="text-end">{% if site.allocated_core_hours %}{% widthratio site.used_core_hours site.allocated_core_hours 100 %}%{% else %}—{% endif %}</td>
+          <td class="text-end usage-site-jobs">—</td>
+          <td class="text-end usage-site-allocated">—</td>
+          <td class="text-end usage-site-used">—</td>
+          <td class="text-end usage-site-efficiency">—</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -121,26 +122,77 @@
   </p>
 
   {{ usage|json_script:"compute-usage-data" }}
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js"></script>
   <script>
   (function () {
     const usage = JSON.parse(document.getElementById('compute-usage-data').textContent);
+    const series = usage.series || [];
     const boxes = [...document.querySelectorAll('.usage-site')];
+    const periodButtons = [...document.querySelectorAll('.usage-period')];
+    const periodForm = document.getElementById('usage-period-form');
+    const startInput = document.getElementById('usage-start');
+    const endInput = document.getElementById('usage-end');
+    const bucketInput = document.getElementById('usage-bucket');
+    const jsonLink = document.getElementById('usage-json-link');
     const metric = document.getElementById('usage-metric');
     const selected = () => new Set(boxes.filter(box => box.checked).map(box => box.value));
     const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
     const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
     const siteColors = new Map((usage.by_site || []).map((row, index) => [row.site, colors[index % colors.length]]));
+    const loadedStart = usage.window.start_time.slice(0, 10);
+    const loadedEndExclusive = usage.window.end_time.slice(0, 10);
     document.querySelectorAll('.usage-site-swatch').forEach(swatch => {
       swatch.style.backgroundColor = siteColors.get(swatch.dataset.site);
     });
+
+    function emptyUsage() {
+      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0};
+    }
+
+    function addUsage(target, source) {
+      target.job_count += Number(source.job_count || 0);
+      target.allocated_core_hours += Number(source.allocated_core_hours || 0);
+      target.used_core_hours += Number(source.used_core_hours || 0);
+      target.wall_hours += Number(source.wall_hours || 0);
+    }
+
+    function weekStart(dateText) {
+      const parts = dateText.split('-').map(Number);
+      const value = new Date(parts[0], parts[1] - 1, parts[2], 12);
+      value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      const day = String(value.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function selectedData() {
+      const start = startInput.value;
+      const end = endInput.value;
+      const siteTotals = new Map();
+      const plotTotals = new Map();
+      series.forEach(point => {
+        const dateText = point.bucket_start.slice(0, 10);
+        if (dateText < start || dateText > end) return;
+        if (!siteTotals.has(point.site)) siteTotals.set(point.site, emptyUsage());
+        addUsage(siteTotals.get(point.site), point);
+        const bucket = bucketInput.value === 'week' ? weekStart(dateText) : dateText;
+        const key = `${point.site}\u0000${bucket}`;
+        if (!plotTotals.has(key)) {
+          plotTotals.set(key, {site: point.site, bucket_start: bucket, ...emptyUsage()});
+        }
+        addUsage(plotTotals.get(key), point);
+      });
+      return {siteTotals, plotRows: [...plotTotals.values()]};
+    }
 
     function render() {
       const sites = selected();
       const key = metric.value;
       const label = metric.options[metric.selectedIndex].text;
+      const data = selectedData();
       const traces = [...sites].map(site => {
-        const points = (usage.series || []).filter(point => point.site === site);
+        const points = data.plotRows.filter(point => point.site === site);
         return {
           type: 'bar', name: site,
           x: points.map(point => point.bucket_start),
@@ -152,12 +204,13 @@
       Plotly.react('compute-usage-plot', traces, {
         barmode: 'stack',
         margin: {l: 70, r: 20, t: 15, b: 65},
-        xaxis: {title: 'Completion date'},
+        xaxis: {title: bucketInput.value === 'week' ? 'Completion week' : 'Completion date'},
         yaxis: {title: label, rangemode: 'tozero'},
         legend: {orientation: 'h', y: -0.25},
-      }, {responsive: true, displaylogo: false});
+      }, {responsive: true, displayModeBar: false});
 
-      const siteTotals = (usage.by_site || []).filter(row => sites.has(row.site));
+      const siteTotals = [...data.siteTotals].filter(([site]) => sites.has(site))
+        .map(([site, values]) => ({site, ...values}));
       const pieRows = siteTotals.filter(row => Number(row[key] || 0) > 0);
       Plotly.react('compute-usage-pie', pieRows.length ? [{
         type: 'pie',
@@ -171,7 +224,7 @@
         showlegend: true,
         legend: {orientation: 'h', y: -0.05},
         annotations: pieRows.length ? [] : [{text: 'No site data selected', showarrow: false}],
-      }, {responsive: true, displaylogo: false});
+      }, {responsive: true, displayModeBar: false});
 
       const totals = siteTotals
         .reduce((sum, row) => ({
@@ -185,18 +238,63 @@
       document.getElementById('usage-efficiency').textContent = totals.allocated
         ? (100 * totals.used / totals.allocated).toFixed(1) + '%' : '—';
       document.querySelectorAll('#usage-site-table tbody tr').forEach(row => {
-        row.hidden = !sites.has(row.dataset.site);
+        const values = data.siteTotals.get(row.dataset.site);
+        row.hidden = !sites.has(row.dataset.site) || !values;
+        if (!values) return;
+        row.querySelector('.usage-site-jobs').textContent = values.job_count.toLocaleString();
+        row.querySelector('.usage-site-allocated').textContent = fmt(values.allocated_core_hours);
+        row.querySelector('.usage-site-used').textContent = fmt(values.used_core_hours);
+        row.querySelector('.usage-site-efficiency').textContent = values.allocated_core_hours
+          ? (100 * values.used_core_hours / values.allocated_core_hours).toFixed(1) + '%' : '—';
       });
+    }
+
+    function updatePeriodButtons() {
+      periodButtons.forEach(button => {
+        const active = button.dataset.start === startInput.value
+          && button.dataset.end === endInput.value;
+        button.classList.toggle('btn-primary', active);
+        button.classList.toggle('btn-outline-primary', !active);
+      });
+    }
+
+    function updateLocation() {
+      const params = new URLSearchParams(window.location.search);
+      params.set('start', startInput.value);
+      params.set('end', endInput.value);
+      params.set('bucket', bucketInput.value);
+      window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
+      const dataUrl = new URL(jsonLink.href, window.location.href);
+      dataUrl.search = params.toString();
+      jsonLink.href = dataUrl.toString();
+    }
+
+    function applyLoadedRange() {
+      updatePeriodButtons();
+      updateLocation();
+      render();
     }
 
     boxes.forEach(box => box.addEventListener('change', render));
     metric.addEventListener('change', render);
+    periodButtons.forEach(button => button.addEventListener('click', () => {
+      startInput.value = button.dataset.start;
+      endInput.value = button.dataset.end;
+      applyLoadedRange();
+    }));
+    periodForm.addEventListener('submit', event => {
+      if (startInput.value >= loadedStart && endInput.value < loadedEndExclusive) {
+        event.preventDefault();
+        applyLoadedRange();
+      }
+    });
     document.getElementById('usage-sites-all').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = true; }); render();
     });
     document.getElementById('usage-sites-none').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = false; }); render();
     });
+    updatePeriodButtons();
     render();
   })();
   </script>

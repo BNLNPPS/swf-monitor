@@ -278,8 +278,8 @@ def panda_activity(request):
     return render(request, 'monitor_app/panda_activity.html', data)
 
 
-def _compute_usage(request):
-    """Plot/API resource data for an inclusive Eastern calendar-date range."""
+def _compute_usage_dates(request):
+    """Parse an inclusive Eastern calendar-date range from the request."""
     today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
     try:
         start_date = date.fromisoformat(
@@ -292,6 +292,12 @@ def _compute_usage(request):
     bucket = (request.GET.get('bucket') or 'day').strip().lower()
     if bucket not in {'day', 'week'}:
         return None, "bucket must be 'day' or 'week'"
+    return (start_date, end_date, bucket), ''
+
+
+def _query_compute_usage(start_date, end_date, bucket, site=None,
+                         series_rollup=False):
+    """Query plot-ready resource data for an inclusive Eastern date range."""
     tz = ZoneInfo(settings.TIME_ZONE)
     start_time = datetime.combine(start_date, time.min, tzinfo=tz)
     end_time = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
@@ -299,7 +305,8 @@ def _compute_usage(request):
         start_time=start_time,
         end_time=end_time,
         bucket=bucket,
-        site=(request.GET.get('site') or '').strip() or None,
+        site=site,
+        series_rollup=series_rollup,
     )
     if usage.get('error'):
         return None, usage['error']
@@ -311,12 +318,43 @@ def _compute_usage(request):
     return usage, ''
 
 
+def _compute_usage(request):
+    """Plot/API resource data for the request's exact date range."""
+    selection, error = _compute_usage_dates(request)
+    if error:
+        return None, error
+    start_date, end_date, bucket = selection
+    return _query_compute_usage(
+        start_date,
+        end_date,
+        bucket,
+        site=(request.GET.get('site') or '').strip() or None,
+    )
+
+
 def compute_usage(request):
     """Site-level PanDA core-hour history and interactive production plot."""
-    usage, error = _compute_usage(request)
     today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
-    start = request.GET.get('start') or str(today - timedelta(days=29))
-    end = request.GET.get('end') or str(today)
+    selection, error = _compute_usage_dates(request)
+    if selection:
+        selected_start, selected_end, bucket = selection
+        # Keep the standard six-month aggregate in this page. Preset range
+        # changes are then pure client-side filtering, not new requests.
+        loaded_start = min(selected_start, today - timedelta(days=179))
+        loaded_end = max(selected_end, today)
+        usage, error = _query_compute_usage(
+            loaded_start,
+            loaded_end,
+            'day',
+            series_rollup=True,
+        )
+        start = str(selected_start)
+        end = str(selected_end)
+    else:
+        usage = None
+        bucket = (request.GET.get('bucket') or 'day').strip().lower()
+        start = request.GET.get('start') or str(today - timedelta(days=29))
+        end = request.GET.get('end') or str(today)
     periods = []
     for days, label in (
         (7, 'Last week'),
@@ -338,7 +376,7 @@ def compute_usage(request):
         'usage': usage or {},
         'start': start,
         'end': end,
-        'bucket': (request.GET.get('bucket') or 'day').strip().lower(),
+        'bucket': bucket,
         'periods': periods,
     })
 

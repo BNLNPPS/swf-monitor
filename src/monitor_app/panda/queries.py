@@ -1299,7 +1299,8 @@ def get_queue(panda_queue):
 
 
 def resource_usage(days=30, site=None, username=None, taskid=None,
-                   start_time=None, end_time=None, bucket=None):
+                   start_time=None, end_time=None, bucket=None,
+                   series_rollup=False):
     """Aggregate resource usage for finished jobs.
 
     Reports two core-hour metrics:
@@ -1333,6 +1334,8 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     bucket = str(bucket or '').strip().lower()
     if bucket not in {'', 'day', 'week'}:
         return {'error': "bucket must be 'day' or 'week'"}
+    if series_rollup and not bucket:
+        return {'error': 'series_rollup requires a day or week bucket'}
     conn = connections['panda']
 
     filters = ''
@@ -1395,34 +1398,25 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             cursor.execute(sql, base_params + base_params)
             return cursor.fetchall()
 
-    def _parse(row, offset=0):
+    def _raw_metrics(row, offset=0):
         return {
-            'job_count': row[offset],
-            'allocated_core_hours': round(float(row[offset + 1]), 1),
-            'used_core_hours': round(float(row[offset + 2]), 1),
-            'wall_hours': round(float(row[offset + 3]), 1),
+            'job_count': int(row[offset] or 0),
+            'allocated_core_hours': float(row[offset + 1]),
+            'used_core_hours': float(row[offset + 2]),
+            'wall_hours': float(row[offset + 3]),
+        }
+
+    def _rounded_metrics(values, precision=1):
+        return {
+            'job_count': values['job_count'],
+            'allocated_core_hours': round(values['allocated_core_hours'], precision),
+            'used_core_hours': round(values['used_core_hours'], precision),
+            'wall_hours': round(values['wall_hours'], precision),
         }
 
     try:
-        rows = _run()
-        totals = _parse(rows[0]) if rows else {
-            'job_count': 0, 'allocated_core_hours': 0,
-            'used_core_hours': 0, 'wall_hours': 0,
-        }
-
-        by_site = []
-        for row in _run('computingsite'):
-            entry = _parse(row, offset=1)
-            entry['site'] = row[0] or 'unknown'
-            by_site.append(entry)
-
-        by_user = []
-        for row in _run('produsername'):
-            entry = _parse(row, offset=1)
-            entry['user'] = row[0]
-            by_user.append(entry)
-
         series = []
+        series_raw = []
         if bucket:
             bucket_timezone = timezone.get_current_timezone_name()
             sql = f"""
@@ -1445,10 +1439,53 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
                 cursor.execute(sql, [bucket_timezone] + base_params + base_params)
                 time_rows = cursor.fetchall()
             for row in time_rows:
-                entry = _parse(row, offset=2)
+                raw = _raw_metrics(row, offset=2)
+                entry = _rounded_metrics(raw, precision=4)
                 entry['bucket_start'] = row[0].isoformat()
                 entry['site'] = row[1] or 'unknown'
                 series.append(entry)
+                series_raw.append((entry['site'], raw))
+
+        if series_rollup:
+            metric_names = (
+                'job_count', 'allocated_core_hours',
+                'used_core_hours', 'wall_hours',
+            )
+            totals_raw = {name: 0 for name in metric_names}
+            sites_raw = {}
+            for site_name, values in series_raw:
+                site_values = sites_raw.setdefault(
+                    site_name, {name: 0 for name in metric_names})
+                for name in metric_names:
+                    totals_raw[name] += values[name]
+                    site_values[name] += values[name]
+            totals = _rounded_metrics(totals_raw)
+            by_site = []
+            for site_name, values in sites_raw.items():
+                entry = _rounded_metrics(values)
+                entry['site'] = site_name
+                by_site.append(entry)
+            by_site.sort(
+                key=lambda entry: entry['allocated_core_hours'], reverse=True)
+            by_user = []
+        else:
+            rows = _run()
+            totals = _rounded_metrics(_raw_metrics(rows[0])) if rows else {
+                'job_count': 0, 'allocated_core_hours': 0,
+                'used_core_hours': 0, 'wall_hours': 0,
+            }
+
+            by_site = []
+            for row in _run('computingsite'):
+                entry = _rounded_metrics(_raw_metrics(row, offset=1))
+                entry['site'] = row[0] or 'unknown'
+                by_site.append(entry)
+
+            by_user = []
+            for row in _run('produsername'):
+                entry = _rounded_metrics(_raw_metrics(row, offset=1))
+                entry['user'] = row[0]
+                by_user.append(entry)
 
     except Exception as e:
         logger.error(f"resource_usage query failed: {e}")
