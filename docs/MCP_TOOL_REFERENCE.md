@@ -477,7 +477,7 @@ Tools for querying the ePIC PanDA production database (`doma_panda` schema). Rea
 | `panda_study_job` | `pandaid` | Deep study of a single job — full record, files, errors, log URLs, harvester info, parent task. |
 | `panda_list_queues` | `vo`, `status`, `state`, `search` | List EIC PanDA queues from live schedconfig — site, status, corecount, resource type, capability flags. |
 | `panda_get_queue` | `panda_queue` (required) | Full detail for a single PanDA queue. |
-| `panda_resource_usage` | `days`, `site`, `username`, `taskid` | Allocated vs used core-hours by queue/resource, rolled up for the time window. |
+| `panda_resource_usage` | `days`, `site`, `username`, `taskid`, `start_time`, `end_time`, `bucket` | Allocated vs used core-hours by site for an exact time window, with optional daily or weekly site series. |
 | `panda_harvester_workers` | `site`, `hours` | Live Harvester pilot/worker counts (via bamboo `askpanda_atlas`) — totals + breakdown by status, site, and resourcetype. |
 
 **`panda_get_activity`** — Pre-digested overview, no individual records:

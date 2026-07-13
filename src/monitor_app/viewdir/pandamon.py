@@ -15,7 +15,7 @@ import logging
 import os
 import hashlib
 from html import escape
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
@@ -25,7 +25,7 @@ from ..panda import (
     list_jobs_dt, list_tasks_dt,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue,
+    list_queues, get_queue, resource_usage,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
@@ -276,6 +276,60 @@ def panda_activity(request):
         return render(request, 'monitor_app/panda_activity.html', ctx)
     data.update(_days_context(days))
     return render(request, 'monitor_app/panda_activity.html', data)
+
+
+def _compute_usage(request):
+    """Plot/API resource data for an inclusive Eastern calendar-date range."""
+    today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
+    try:
+        start_date = date.fromisoformat(
+            request.GET.get('start') or str(today - timedelta(days=29)))
+        end_date = date.fromisoformat(request.GET.get('end') or str(today))
+    except ValueError:
+        return None, 'start and end must be dates in YYYY-MM-DD form'
+    if start_date > end_date:
+        return None, 'start must be on or before end'
+    bucket = (request.GET.get('bucket') or 'day').strip().lower()
+    if bucket not in {'day', 'week'}:
+        return None, "bucket must be 'day' or 'week'"
+    tz = ZoneInfo(settings.TIME_ZONE)
+    start_time = datetime.combine(start_date, time.min, tzinfo=tz)
+    end_time = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
+    usage = resource_usage(
+        start_time=start_time,
+        end_time=end_time,
+        bucket=bucket,
+        site=(request.GET.get('site') or '').strip() or None,
+    )
+    if usage.get('error'):
+        return None, usage['error']
+    usage['display_window'] = {
+        'start': start_date.isoformat(),
+        'end': end_date.isoformat(),
+        'timezone': settings.TIME_ZONE,
+    }
+    return usage, ''
+
+
+def compute_usage(request):
+    """Site-level PanDA core-hour history and interactive production plot."""
+    usage, error = _compute_usage(request)
+    today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
+    return render(request, 'monitor_app/compute_usage.html', {
+        'error': error,
+        'usage': usage or {},
+        'start': request.GET.get('start') or str(today - timedelta(days=29)),
+        'end': request.GET.get('end') or str(today),
+        'bucket': (request.GET.get('bucket') or 'day').strip().lower(),
+    })
+
+
+def compute_usage_data(request):
+    """Plot-ready JSON peer of the compute-usage production page."""
+    usage, error = _compute_usage(request)
+    if error:
+        return JsonResponse({'error': error}, status=400)
+    return JsonResponse(usage)
 
 
 # ── Job list ─────────────────────────────────────────────────────────────────

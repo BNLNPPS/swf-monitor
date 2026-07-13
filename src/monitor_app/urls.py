@@ -78,6 +78,8 @@ from .viewdir.panda_database import (
 # Import PanDA production monitor views
 from .viewdir.pandamon import (
     panda_activity,
+    compute_usage,
+    compute_usage_data,
     panda_jobs_list,
     panda_jobs_datatable_ajax,
     panda_jobs_filter_counts,
@@ -237,6 +239,9 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
+    path('prod/compute-usage/', compute_usage, name='compute_usage'),
+    path('prod/compute-usage/data/', compute_usage_data,
+         name='compute_usage_data'),
     path('ai/assessments/', ai_content_list, name='ai_content_list'),
     path('ai/assessments/legacy/<int:content_id>/', ai_content_legacy_detail,
          name='ai_content_legacy_detail'),

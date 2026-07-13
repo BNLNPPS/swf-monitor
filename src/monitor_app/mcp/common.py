@@ -308,8 +308,8 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_resource_usage",
-            "description": "Aggregate core-hours for finished jobs — allocated (facility charge) vs used (actual CPU). Breakdowns by site and user.",
-            "parameters": ["days", "site", "username", "taskid"],
+            "description": "Aggregate core-hours for finished jobs — allocated (cores × wall time) vs used (actual CPU), with site/user breakdowns and optional daily or weekly site series.",
+            "parameters": ["days", "site", "username", "taskid", "start_time", "end_time", "bucket"],
         },
         {
             "name": "panda_study_job",

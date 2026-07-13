@@ -8,9 +8,10 @@ directly. Callers in async contexts should wrap with sync_to_async.
 import logging
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import unquote
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.db import connections
 
 from .constants import (
@@ -1297,17 +1298,41 @@ def get_queue(panda_queue):
     return {"queue": config}
 
 
-def resource_usage(days=30, site=None, username=None, taskid=None):
+def resource_usage(days=30, site=None, username=None, taskid=None,
+                   start_time=None, end_time=None, bucket=None):
     """Aggregate resource usage for finished jobs.
 
     Reports two core-hour metrics:
-    - allocated: actualcorecount × wall time (cores reserved by the facility)
+    - allocated: actualcorecount × wall time (cores allocated to the job)
     - used: cpuconsumptiontime (CPU time the job actually consumed)
 
     Only counts jobs that actually ran: jobstatus='finished' with both
     starttime and endtime set. Pre-running queue time is excluded.
     """
-    cutoff = timezone.now() - timedelta(days=days)
+    def _time(value, label):
+        if value in (None, ''):
+            return None
+        parsed = value if isinstance(value, datetime) else parse_datetime(str(value))
+        if parsed is None:
+            raise ValueError(f'{label} must be an ISO-8601 timestamp')
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    explicit_start = start_time not in (None, '')
+    try:
+        window_end = _time(end_time, 'end_time') or timezone.now()
+        window_start = _time(start_time, 'start_time')
+        if window_start is None:
+            window_start = window_end - timedelta(days=float(days))
+        if window_start >= window_end:
+            raise ValueError('start_time must be before end_time')
+    except (TypeError, ValueError) as exc:
+        return {'error': str(exc)}
+
+    bucket = str(bucket or '').strip().lower()
+    if bucket not in {'', 'day', 'week'}:
+        return {'error': "bucket must be 'day' or 'week'"}
     conn = connections['panda']
 
     filters = ''
@@ -1326,13 +1351,14 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
         extra_params.append(taskid)
 
     base_where = (
-        '"modificationtime" >= %s'
+        '"endtime" >= %s'
+        ' AND "endtime" < %s'
         ' AND "jobstatus" = \'finished\''
         ' AND "starttime" IS NOT NULL'
         ' AND "endtime" IS NOT NULL'
         + filters
     )
-    base_params = [cutoff] + extra_params
+    base_params = [window_start, window_end] + extra_params
 
     inner_fields = (
         '"computingsite", "produsername", '
@@ -1387,7 +1413,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
         by_site = []
         for row in _run('computingsite'):
             entry = _parse(row, offset=1)
-            entry['site'] = row[0]
+            entry['site'] = row[0] or 'unknown'
             by_site.append(entry)
 
         by_user = []
@@ -1395,6 +1421,34 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
             entry = _parse(row, offset=1)
             entry['user'] = row[0]
             by_user.append(entry)
+
+        series = []
+        if bucket:
+            bucket_timezone = timezone.get_current_timezone_name()
+            sql = f"""
+                SELECT date_trunc(
+                           '{bucket}',
+                           ("endtime" AT TIME ZONE 'UTC') AT TIME ZONE %s
+                       ) AS bucket_start,
+                       "computingsite", {agg_cols}
+                FROM (
+                    SELECT {inner_fields}
+                    FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {base_where}
+                    UNION ALL
+                    SELECT {inner_fields}
+                    FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {base_where}
+                ) combined
+                GROUP BY bucket_start, "computingsite"
+                ORDER BY bucket_start, "computingsite"
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(sql, [bucket_timezone] + base_params + base_params)
+                time_rows = cursor.fetchall()
+            for row in time_rows:
+                entry = _parse(row, offset=2)
+                entry['bucket_start'] = row[0].isoformat()
+                entry['site'] = row[1] or 'unknown'
+                series.append(entry)
 
     except Exception as e:
         logger.error(f"resource_usage query failed: {e}")
@@ -1404,11 +1458,23 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
         "totals": totals,
         "by_site": by_site,
         "by_user": by_user,
+        "series": series,
+        "window": {
+            "start_time": window_start.isoformat(),
+            "end_time": window_end.isoformat(),
+            "bucket": bucket or None,
+            "bucket_timezone": (timezone.get_current_timezone_name()
+                                if bucket else None),
+            "time_field": "endtime",
+        },
         "filters": {
-            "days": days,
+            "days": None if explicit_start else days,
             "site": site,
             "username": username,
             "taskid": taskid,
+            "start_time": window_start.isoformat(),
+            "end_time": window_end.isoformat(),
+            "bucket": bucket or None,
         },
     }
 
