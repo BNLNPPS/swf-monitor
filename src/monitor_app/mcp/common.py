@@ -78,7 +78,7 @@ def get_available_tools_list() -> list:
     Return the hardcoded list of all available MCP tools.
     Called by swf_list_available_tools in __init__.py.
     """
-    return [
+    tools = [
         {
             "name": "swf_list_available_tools",
             "description": "List all available MCP tools with descriptions",
@@ -251,6 +251,11 @@ def get_available_tools_list() -> list:
             "parameters": ["ids", "corun_page_group_ids"],
         },
         {
+            "name": "epicprod_campaign_status",
+            "description": "Production campaign evidence rollup: progress, PanDA health, arrivals, dispositions, action activity, infrastructure state, exact reporting window, and mechanical assessment floor.",
+            "parameters": ["campaign", "window_days", "targets_only"],
+        },
+        {
             "name": "ai_list_proposals",
             "description": "List AI proposals awaiting human decision (default) or by status. Show the returned display text to the human verbatim; each line starts with the proposal ref (e.g. cp-12).",
             "parameters": ["status", "limit"],
@@ -379,3 +384,6 @@ def get_available_tools_list() -> list:
             "parameters": ["task_name", "status"],
         },
     ]
+    # Import lazily to avoid a package-registration cycle at module import.
+    from .rucio import get_rucio_tool_discovery
+    return tools + get_rucio_tool_discovery()

@@ -409,6 +409,15 @@ curl http://127.0.0.1:8001/swf-monitor/api/mcp-health/
 /opt/swf-monitor/current/.venv/bin/python /opt/swf-monitor/current/scripts/mcp_watchdog.py
 ```
 
+The ASGI worker also hosts the read-only JLab and BNL Rucio toolsets under
+`jlab_rucio_*` and `bnl_rucio_*`. It loads the maintained client from
+`RUCIO_MCP_MODULE_PATH`; JLab uses the local `eicread` configuration and BNL
+uses `RUCIO_BNL_X509_PROXY` (falling back to `X509_USER_PROXY`). The proxy and
+cached catalog tokens remain on swf-testbed. After changing Rucio credentials
+or the client implementation, restart `swf-monitor-mcp-asgi.service` and make
+one read call to each catalog; `tools/list` alone proves registration, not
+authentication.
+
 ### MCP Watchdog
 
 If installed, `swf-monitor-mcp-watchdog.timer` runs once per minute and invokes

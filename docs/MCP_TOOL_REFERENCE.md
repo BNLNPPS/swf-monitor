@@ -572,6 +572,49 @@ Use cases:
 
 ---
 
+### Rucio Data Catalogs
+
+The authenticated SWF MCP endpoint exposes two independent, read-only Rucio
+catalogs. Credentials and the BNL X509 proxy remain on swf-testbed.
+
+- `jlab_rucio_*` is the JLab science-data catalog. Begin with scope `epic` and
+  campaign patterns such as `*26.06.0*`; dataset names commonly begin with
+  `/RECO/` or `/SIMU/`.
+- `bnl_rucio_*` is the BNL PanDA production catalog. Begin with scope
+  `group.EIC`; use it for output and log registration, rules, locks, replicas,
+  and RSE diagnostics.
+
+Each prefix exposes the complete 13-tool surface below:
+
+| Suffix | Parameters | Purpose |
+|---|---|---|
+| `list_scopes` | - | Discover scopes available in that catalog. |
+| `list_dids` | `scope`, `name`, `type`, `filters`, `long`, `page`, `limit` | Search datasets, containers, or files by wildcard name and metadata. |
+| `list_files` | `scope`, `name`, `page`, `limit` | Recursively list files in a dataset or container. |
+| `list_content` | `scope`, `name`, `page`, `limit` | List immediate child DIDs. |
+| `get_did_metadata` | `scope`, `name`, `plugin` | Retrieve system and custom physics metadata. |
+| `get_account_limits` | `account` | Retrieve account storage limits. |
+| `get_account_usage` | `account`, `rse` | Retrieve account usage at one RSE. |
+| `list_rses` | - | List Rucio Storage Elements. |
+| `get_rse_usage` | `rse` | Retrieve used, free, and total storage for an RSE. |
+| `list_rules` | `scope`, `name`, `did`, `filters`, `page`, `limit` | Inspect replication rules, including stuck or replicating rules. |
+| `get_rule_locks` | `rule_id`, `page`, `limit` | Inspect replica locks belonging to a rule. |
+| `list_file_replicas` | `dids`, `page`, `limit` | Resolve file replicas to RSEs and PFNs. |
+| `extract_scope` | `did` | Parse an EIC DID or storage path into scope and name. |
+
+The same suffix is called with the relevant prefix, for example:
+
+```text
+jlab_rucio_list_dids(scope="epic", name="*26.06.0*", type="DATASET")
+bnl_rucio_list_dids(scope="group.EIC", name="*26.06.0*", type="DATASET")
+```
+
+The two catalogs serve different purposes and are not expected to contain the
+same DIDs or counts. An empty result should trigger scope/name verification,
+not an immediate conclusion that data is absent.
+
+---
+
 ## Tool Summary
 
 | Category | Tools | Count |
@@ -594,11 +637,14 @@ Use cases:
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **59** |
+| JLab Rucio | `jlab_rucio_*` | 13 |
+| BNL Rucio | `bnl_rucio_*` | 13 |
+| **Total** | | **86** |
 
 ---
 

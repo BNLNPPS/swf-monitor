@@ -117,6 +117,11 @@ from .ai_content import (
 # import (not from-import) keeps both package-entry orders safe.
 import swf_epicprod.mcp_tools  # noqa: F401  (registration side effect)
 
+# JLab science data and BNL PanDA output/log catalog tools. Both catalog
+# credentials remain local to swf-testbed; this import registers prefixed,
+# read-only wrappers on the authenticated SWF MCP service.
+from .rucio import RUCIO_TOOL_NAMES  # noqa: E402
+
 # PanDA Monitor tools
 from .pandamon import (
     panda_list_jobs,
@@ -194,6 +199,8 @@ __all__ = [
     'panda_error_summary',
     'panda_get_activity',
     'panda_study_job',
+    # Rucio catalogs
+    *RUCIO_TOOL_NAMES,
     # PCS — tag browsing
     'pcs_list_tags',
     'pcs_get_tag',
