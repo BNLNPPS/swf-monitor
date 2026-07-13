@@ -3,6 +3,30 @@
 {% block title %}Compute Usage - epicprod{% endblock %}
 
 {% block content %}
+<style>
+  .usage-sort {
+    align-items: center;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    font-weight: inherit;
+    gap: .25rem;
+    padding: 0;
+    white-space: nowrap;
+  }
+  .usage-sort-arrows {
+    color: #adb5bd;
+    display: inline-flex;
+    flex-direction: column;
+    font-size: .48rem;
+    line-height: .58;
+  }
+  .usage-sort[data-direction="asc"] .usage-sort-up,
+  .usage-sort[data-direction="desc"] .usage-sort-down { color: #212529; }
+</style>
 <div class="container-fluid mt-3">
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
     <div>
@@ -99,7 +123,14 @@
 
   <div class="table-responsive mt-3" style="width:max-content;max-width:100%">
     <table class="table table-sm table-striped align-middle w-auto" id="usage-site-table">
-      <thead><tr><th>Computing site</th><th class="text-end">Jobs</th><th class="text-end">Allocated core-hours</th><th class="text-end">Used core-hours</th><th class="text-end">Efficiency</th><th class="text-end" title="Share of the selected metric across selected sites">Compute usage %</th></tr></thead>
+      <thead><tr>
+        <th aria-sort="none"><button type="button" class="usage-sort" data-sort="site">Computing site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="descending" title="Share of the selected metric across selected sites"><button type="button" class="usage-sort" data-sort="share" data-direction="desc">Compute usage %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+      </tr></thead>
       <tbody>
         {% for site in usage.by_site %}
         <tr data-site="{{ site.site }}">
@@ -136,6 +167,11 @@
     const bucketInput = document.getElementById('usage-bucket');
     const jsonLink = document.getElementById('usage-json-link');
     const metric = document.getElementById('usage-metric');
+    const tableBody = document.querySelector('#usage-site-table tbody');
+    const tableRows = [...tableBody.querySelectorAll('tr')];
+    const sortButtons = [...document.querySelectorAll('.usage-sort')];
+    let sortKey = 'share';
+    let sortDirection = 'desc';
     const selected = () => new Set(boxes.filter(box => box.checked).map(box => box.value));
     const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
     const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
@@ -185,6 +221,34 @@
         addUsage(plotTotals.get(key), point);
       });
       return {siteTotals, plotRows: [...plotTotals.values()]};
+    }
+
+    function updateSortIndicators() {
+      sortButtons.forEach(button => {
+        const active = button.dataset.sort === sortKey;
+        button.dataset.direction = active ? sortDirection : '';
+        button.closest('th').setAttribute(
+          'aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+      });
+    }
+
+    function sortRows() {
+      const multiplier = sortDirection === 'asc' ? 1 : -1;
+      tableRows.sort((left, right) => {
+        let comparison;
+        if (sortKey === 'site') {
+          comparison = left.dataset.site.localeCompare(
+            right.dataset.site, undefined, {numeric: true, sensitivity: 'base'});
+        } else {
+          comparison = Number(left.dataset[sortKey] || 0)
+            - Number(right.dataset[sortKey] || 0);
+        }
+        if (comparison === 0) {
+          comparison = left.dataset.site.localeCompare(right.dataset.site);
+        }
+        return comparison * multiplier;
+      });
+      tableRows.forEach(row => tableBody.appendChild(row));
     }
 
     function render() {
@@ -247,11 +311,20 @@
         row.querySelector('.usage-site-jobs').textContent = values.job_count.toLocaleString();
         row.querySelector('.usage-site-allocated').textContent = fmt(values.allocated_core_hours);
         row.querySelector('.usage-site-used').textContent = fmt(values.used_core_hours);
+        const efficiency = values.allocated_core_hours
+          ? 100 * values.used_core_hours / values.allocated_core_hours : 0;
+        const share = usageTotal ? 100 * Number(values[key] || 0) / usageTotal : 0;
         row.querySelector('.usage-site-efficiency').textContent = values.allocated_core_hours
-          ? (100 * values.used_core_hours / values.allocated_core_hours).toFixed(1) + '%' : '—';
+          ? efficiency.toFixed(1) + '%' : '—';
         row.querySelector('.usage-site-share').textContent = usageTotal
-          ? (100 * Number(values[key] || 0) / usageTotal).toFixed(1) + '%' : '—';
+          ? share.toFixed(1) + '%' : '—';
+        row.dataset.jobs = values.job_count;
+        row.dataset.allocated = values.allocated_core_hours;
+        row.dataset.used = values.used_core_hours;
+        row.dataset.efficiency = efficiency;
+        row.dataset.share = share;
       });
+      sortRows();
     }
 
     function updatePeriodButtons() {
@@ -282,6 +355,17 @@
 
     boxes.forEach(box => box.addEventListener('change', render));
     metric.addEventListener('change', render);
+    sortButtons.forEach(button => button.addEventListener('click', () => {
+      const nextKey = button.dataset.sort;
+      if (nextKey === sortKey) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = nextKey;
+        sortDirection = nextKey === 'site' ? 'asc' : 'desc';
+      }
+      updateSortIndicators();
+      sortRows();
+    }));
     periodButtons.forEach(button => button.addEventListener('click', () => {
       startInput.value = button.dataset.start;
       endInput.value = button.dataset.end;
@@ -300,6 +384,7 @@
       boxes.forEach(box => { box.checked = false; }); render();
     });
     updatePeriodButtons();
+    updateSortIndicators();
     render();
   })();
   </script>
