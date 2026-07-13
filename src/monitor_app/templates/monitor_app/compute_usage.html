@@ -25,7 +25,13 @@
     line-height: .58;
   }
   .usage-sort[data-direction="asc"] .usage-sort-up,
-  .usage-sort[data-direction="desc"] .usage-sort-down { color: #212529; }
+  .usage-sort[data-direction="desc"] .usage-sort-down { color: #0d6efd; }
+  #usage-site-table th.usage-sort-active {
+    background: #e7f1ff;
+  }
+  #usage-site-table th.usage-sort-active .usage-sort {
+    color: #084298;
+  }
 </style>
 <div class="container-fluid mt-3">
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
@@ -108,7 +114,7 @@
             <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-none">none</button>
           </span>
         </div>
-        <div style="max-height:9rem;overflow:auto">
+        <div style="height:26rem;overflow-y:scroll;scrollbar-gutter:stable">
           {% for site in usage.by_site %}
           <div class="form-check mb-1">
             <input class="form-check-input usage-site" type="checkbox" checked
@@ -227,7 +233,9 @@
       sortButtons.forEach(button => {
         const active = button.dataset.sort === sortKey;
         button.dataset.direction = active ? sortDirection : '';
-        button.closest('th').setAttribute(
+        const heading = button.closest('th');
+        heading.classList.toggle('usage-sort-active', active);
+        heading.setAttribute(
           'aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
       });
     }
@@ -252,6 +260,9 @@
     }
 
     function render() {
+      sortKey = 'share';
+      sortDirection = 'desc';
+      updateSortIndicators();
       const sites = selected();
       const key = metric.value;
       const label = metric.options[metric.selectedIndex].text;
