@@ -218,6 +218,20 @@
     const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
     const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
     const siteColors = new Map((usage.by_site || []).map((row, index) => [row.site, colors[index % colors.length]]));
+
+    function contrastTextColor(hex) {
+      const channels = hex.slice(1).match(/.{2}/g).map(value => {
+        const channel = parseInt(value, 16) / 255;
+        return channel <= 0.04045
+          ? channel / 12.92
+          : Math.pow((channel + 0.055) / 1.055, 2.4);
+      });
+      const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+      const whiteContrast = 1.05 / (luminance + 0.05);
+      const blackContrast = (luminance + 0.05) / 0.05;
+      return whiteContrast >= blackContrast ? '#fff' : '#111';
+    }
+
     const loadedStart = usage.window.start_time.slice(0, 10);
     const loadedEndExclusive = usage.window.end_time.slice(0, 10);
     document.querySelectorAll('.usage-site-swatch').forEach(swatch => {
@@ -330,6 +344,11 @@
         values: pieRows.map(row => row[key]),
         marker: {colors: pieRows.map(row => siteColors.get(row.site))},
         textinfo: 'percent',
+        insidetextfont: {
+          color: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
+          weight: 600,
+        },
+        outsidetextfont: {color: '#212529', weight: 600},
         hovertemplate: '%{label}<br>%{value:,.1f} core-hours<br>%{percent}<extra></extra>',
       }] : [], {
         margin: {l: 10, r: 10, t: 10, b: 30},
