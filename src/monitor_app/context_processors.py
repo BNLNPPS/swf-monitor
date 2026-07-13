@@ -241,6 +241,16 @@ def _active_nav(request):
             'panda_diagnostics_list',
             'panda_diagnostics_datatable_ajax',
         },
+        'sites': namespace == 'monitor_app' and url_name in {
+            'compute_usage',
+            'compute_usage_data',
+            'epic_queues_list',
+            'epic_queue_detail',
+        },
+        'compute_usage': namespace == 'monitor_app' and url_name in {
+            'compute_usage',
+            'compute_usage_data',
+        },
         'panda_queues': namespace == 'monitor_app' and url_name in {
             'epic_queues_list',
             'epic_queue_detail',
