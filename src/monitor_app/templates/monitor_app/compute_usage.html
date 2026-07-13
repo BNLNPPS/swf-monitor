@@ -46,6 +46,28 @@
     border: 2px solid #e9ecef;
     border-radius: 6px;
   }
+  .usage-layout {
+    align-items: start;
+    display: grid;
+    gap: 1rem;
+    grid-template-areas:
+      "history side"
+      "table side";
+    grid-template-columns: minmax(0, 2fr) minmax(22rem, 1fr);
+  }
+  .usage-history { grid-area: history; }
+  .usage-side { grid-area: side; }
+  .usage-table {
+    grid-area: table;
+    max-width: 100%;
+    width: max-content;
+  }
+  @media (max-width: 1199.98px) {
+    .usage-layout {
+      grid-template-areas: "history" "side" "table";
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
 </style>
 <div class="container-fluid mt-3">
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
@@ -98,9 +120,9 @@
     <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
   </div>
 
-  <div class="row g-3">
-    <div class="col-xl-8">
-      <div class="border rounded p-2 h-100">
+  <div class="usage-layout">
+    <div class="usage-history">
+      <div class="border rounded p-2">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
           <strong>Core-hours over time</strong>
           <div>
@@ -114,7 +136,7 @@
         <div id="compute-usage-plot" style="height:32rem"></div>
       </div>
     </div>
-    <div class="col-xl-4">
+    <div class="usage-side">
       <div class="border rounded p-2 mb-3">
         <strong>Core-hour share by site</strong>
         <div id="compute-usage-pie" style="height:19rem"></div>
@@ -139,9 +161,8 @@
         </div>
       </div>
     </div>
-  </div>
 
-  <div class="table-responsive mt-3" style="width:max-content;max-width:100%">
+  <div class="usage-table table-responsive">
     <table class="table table-sm table-striped align-middle w-auto" id="usage-site-table">
       <thead><tr>
         <th aria-sort="none"><button type="button" class="usage-sort" data-sort="site">Computing site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
@@ -165,6 +186,7 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
   </div>
 
   <p class="small text-muted">
