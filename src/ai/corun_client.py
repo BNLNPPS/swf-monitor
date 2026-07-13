@@ -123,6 +123,24 @@ class CorunClient:
     def list_pages(self, **filters):
         return self._request('GET', 'pages/', query=filters)
 
+    def list_all_pages(self, **filters):
+        """Return every matching Page across the corun paginated API."""
+        items = []
+        offset = 0
+        while True:
+            payload = self.list_pages(
+                **filters,
+                limit=500,
+                offset=offset,
+            )
+            batch = payload.get('items', []) if isinstance(payload, dict) else payload
+            batch = batch if isinstance(batch, list) else []
+            items.extend(batch)
+            count = payload.get('count') if isinstance(payload, dict) else None
+            if not batch or (isinstance(count, int) and len(items) >= count):
+                return items
+            offset += len(batch)
+
     def list_comments(self, group_id):
         return self._request('GET', f'pages/{group_id}/comments/')
 

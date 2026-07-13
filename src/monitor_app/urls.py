@@ -59,6 +59,10 @@ from .views import (
     mcp_health,
     panda_hub, prod_hub, testbed_hub,
     ai_content_list,
+    ai_content_detail,
+    ai_content_body,
+    ai_content_legacy_detail,
+    ai_content_legacy_body,
     ai_content_set_quality,
 )
 
@@ -234,6 +238,14 @@ urlpatterns = [
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
     path('ai/assessments/', ai_content_list, name='ai_content_list'),
+    path('ai/assessments/legacy/<int:content_id>/', ai_content_legacy_detail,
+         name='ai_content_legacy_detail'),
+    path('ai/assessments/legacy/<int:content_id>/body/',
+         ai_content_legacy_body, name='ai_content_legacy_body'),
+    path('ai/assessments/<uuid:page_group_id>/', ai_content_detail,
+         name='ai_content_detail'),
+    path('ai/assessments/<uuid:page_group_id>/body/', ai_content_body,
+         name='ai_content_body'),
     path('ai/assessments/<int:content_id>/quality/', ai_content_set_quality, name='ai_content_set_quality'),
     path('testbed/', testbed_hub, name='testbed_hub'),
 

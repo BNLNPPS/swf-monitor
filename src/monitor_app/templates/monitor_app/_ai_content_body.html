@@ -1,0 +1,41 @@
+<table class="table table-sm mb-0">
+    <tbody>
+        <tr class="ai-assessment-header table-light">
+            <td colspan="4">
+                {% if request.user.is_authenticated and item.storage == 'legacy' %}
+                <form method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                    <div class="row g-2 align-items-start">
+                        <div class="col-md-2">
+                            <label class="form-label mb-1">Quality</label>
+                            <select class="form-select form-select-sm" name="quality"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>
+                                <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
+                                {% for choice in quality_choices %}
+                                <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-9">
+                            <label class="form-label mb-1">Comment</label>
+                            <textarea class="form-control form-control-sm{% if is_tunnel %} bg-light text-muted{% endif %}" name="comment" rows="3"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>{{ item.comment }}</textarea>
+                        </div>
+                        <div class="col-md-1">
+                            <label class="form-label mb-1">&nbsp;</label>
+                            <button class="btn btn-sm {% if is_tunnel %}btn-secondary disabled{% else %}btn-primary{% endif %} w-100" type="{% if is_tunnel %}button{% else %}submit{% endif %}"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>Save</button>
+                        </div>
+                    </div>
+                </form>
+                {% elif item.comment %}
+                <strong>Comment:</strong>
+                <div class="mt-1" style="white-space: pre-wrap;">{{ item.comment }}</div>
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td colspan="4">
+                <div class="ai-assessment-text">{{ item.assessment_html }}</div>
+            </td>
+        </tr>
+    </tbody>
+</table>

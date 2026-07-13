@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ item.title|default:"AI Assessment" }} - epicprod{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="mb-3">
+        <a href="{% url 'monitor_app:ai_content_list' %}">&larr; All AI assessments</a>
+    </div>
+
+    <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+        <h1 class="mb-0">{{ item.title|default:"AI Assessment" }}</h1>
+        {% if item.verdict %}
+        <span class="badge {% if item.verdict == 'alarm' %}bg-danger{% elif item.verdict == 'attention' %}bg-warning text-dark{% elif item.verdict == 'ok' %}bg-success{% else %}bg-secondary{% endif %}">{{ item.verdict }}</span>
+        {% endif %}
+        {% if item.assessment_kind %}
+        <span class="badge bg-secondary">{{ item.assessment_kind }}</span>
+        {% endif %}
+    </div>
+
+    <div class="text-muted mb-3">
+        <strong>{{ item.subject_kind }}:</strong>
+        {% if item.subject_url %}<a href="{{ item.subject_url }}">{{ item.subject_id }}</a>{% else %}{{ item.subject_id }}{% endif %}
+        &middot; {{ item.ai }}
+        &middot; {{ item.username }}
+        &middot; {{ item.created_display }}
+        &middot; Quality: {{ item.quality|default:"unreviewed" }}
+    </div>
+
+    {% if item.comment %}
+    <div class="alert alert-secondary"><strong>Review comment:</strong><br>{{ item.comment|linebreaksbr }}</div>
+    {% endif %}
+
+    <article class="ai-assessment-text">
+        {{ item.assessment_html }}
+    </article>
+</div>
+{% endblock %}

@@ -27,6 +27,7 @@ from ai.assessments import (
     CORUN_ASSESSMENT_SECTION,
     ai_content_items,
     corun_page_items,
+    render_assessment_markdown,
 )
 from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
@@ -3216,18 +3217,21 @@ def ai_content_list(request):
     ai = (request.GET.get('ai') or '').strip()
     q = (request.GET.get('q') or '').strip()
 
-    legacy_items = ai_content_items(AIContent.objects.all().order_by('-created_at', '-id'))
+    # The index needs the source text for filtering, but report HTML is rendered
+    # only when a row is opened or its dedicated page is visited.
+    legacy_items = ai_content_items(
+        AIContent.objects.all().order_by('-created_at', '-id'),
+        render_body=False,
+    )
     corun_items = []
     if corun_configured():
         try:
-            payload = CorunClient().list_pages(
+            pages = CorunClient().list_all_pages(
                 section=CORUN_ASSESSMENT_SECTION,
                 artifact_type='ai_assessment',
                 source_system='swf-monitor',
-                limit=500,
             )
-            pages = payload.get('items', []) if isinstance(payload, dict) else payload
-            corun_items = corun_page_items(pages)
+            corun_items = corun_page_items(pages, render_body=False)
         except CorunAPIError as exc:
             logger.warning('corun AI assessment list failed: %s', exc)
 
@@ -3281,6 +3285,19 @@ def ai_content_list(request):
     filtered_items.sort(key=item_sort_key, reverse=True)
     paginator = Paginator(filtered_items, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
+    for item in page_obj.object_list:
+        if item.get('storage') == 'corun':
+            item['detail_url'] = reverse(
+                'monitor_app:ai_content_detail',
+                args=[item.get('corun_page_group_id')])
+            item['body_url'] = reverse(
+                'monitor_app:ai_content_body',
+                args=[item.get('corun_page_group_id')])
+        else:
+            item['detail_url'] = reverse(
+                'monitor_app:ai_content_legacy_detail', args=[item.get('id')])
+            item['body_url'] = reverse(
+                'monitor_app:ai_content_legacy_body', args=[item.get('id')])
 
     def filter_url(**updates):
         params = request.GET.copy()
@@ -3370,6 +3387,86 @@ def ai_content_list(request):
         'clear_username_url': filter_url(username=''),
         'clear_ai_url': filter_url(ai=''),
         'page_query': page_params.urlencode(),
+    })
+
+
+def ai_content_detail(request, page_group_id):
+    """Dedicated human page for one corun-backed assessment."""
+    if not corun_configured():
+        return HttpResponse('AI assessment storage is unavailable.', status=503)
+    try:
+        page = CorunClient().get_page(str(page_group_id))
+    except CorunAPIError as exc:
+        if exc.status == 404:
+            return HttpResponse('AI assessment not found.', status=404)
+        logger.warning('corun AI assessment detail failed: %s', exc)
+        return HttpResponse('AI assessment storage is unavailable.', status=502)
+    data = page.get('data') if isinstance(page.get('data'), dict) else {}
+    if (data.get('artifact_type') != 'ai_assessment'
+            or data.get('source_system') != 'swf-monitor'
+            or data.get('quarantined') is True):
+        return HttpResponse('AI assessment not found.', status=404)
+    items = corun_page_items([page], render_body=False)
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    items[0]['assessment_html'] = render_assessment_markdown(
+        items[0]['assessment'], omit_leading_title=items[0]['title'])
+    return render(request, 'monitor_app/ai_content_detail.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+    })
+
+
+def ai_content_body(request, page_group_id):
+    """Lazy report body for an expanded corun-backed list row."""
+    if not corun_configured():
+        return HttpResponse('AI assessment storage is unavailable.', status=503)
+    try:
+        page = CorunClient().get_page(str(page_group_id))
+    except CorunAPIError as exc:
+        if exc.status == 404:
+            return HttpResponse('AI assessment not found.', status=404)
+        logger.warning('corun AI assessment body failed: %s', exc)
+        return HttpResponse('AI assessment storage is unavailable.', status=502)
+    data = page.get('data') if isinstance(page.get('data'), dict) else {}
+    if (data.get('artifact_type') != 'ai_assessment'
+            or data.get('source_system') != 'swf-monitor'
+            or data.get('quarantined') is True):
+        return HttpResponse('AI assessment not found.', status=404)
+    items = corun_page_items([page])
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    return render(request, 'monitor_app/_ai_content_body.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+        'next_url': request.GET.get('next') or reverse('monitor_app:ai_content_list'),
+    })
+
+
+def ai_content_legacy_detail(request, content_id):
+    """Dedicated human page for one legacy assessment."""
+    row = get_object_or_404(AIContent, pk=content_id)
+    items = ai_content_items([row], render_body=False)
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    items[0]['assessment_html'] = render_assessment_markdown(
+        items[0]['assessment'], omit_leading_title=items[0]['title'])
+    return render(request, 'monitor_app/ai_content_detail.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+    })
+
+
+def ai_content_legacy_body(request, content_id):
+    """Lazy report body for an expanded legacy list row."""
+    row = get_object_or_404(AIContent, pk=content_id)
+    items = ai_content_items([row])
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    return render(request, 'monitor_app/_ai_content_body.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+        'next_url': request.GET.get('next') or reverse('monitor_app:ai_content_list'),
     })
 
 

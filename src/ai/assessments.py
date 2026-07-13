@@ -31,10 +31,22 @@ _ALLOWED_ATTRIBUTES = {
 }
 
 
-def render_assessment_markdown(text):
+def render_assessment_markdown(text, *, omit_leading_title=''):
     """Render assessment Markdown to sanitized HTML."""
+    source = text or ''
+    title = ' '.join(str(omit_leading_title or '').split())
+    if title:
+        lines = source.splitlines()
+        first = next((i for i, line in enumerate(lines) if line.strip()), None)
+        if first is not None and lines[first].lstrip().startswith('# '):
+            heading = lines[first].lstrip()[2:].strip().rstrip('#').strip()
+            if ' '.join(heading.split()) == title:
+                del lines[first]
+                if first < len(lines) and not lines[first].strip():
+                    del lines[first]
+                source = '\n'.join(lines)
     html = markdown.markdown(
-        text or '',
+        source,
         extensions=_MARKDOWN_EXTENSIONS,
         output_format='html5',
     )
@@ -138,7 +150,8 @@ def _subject_parts(subject_type, subject_key, subject_label):
 def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
                      subject_type, subject_key, subject_label, subject_url,
                      quality='', comment='', corun_page_group_id='',
-                     title='', assessment_kind='', verdict='', quarantined=False):
+                     title='', assessment_kind='', verdict='', quarantined=False,
+                     render_body=True):
     subject_kind, subject_id, subject_name, subject_display = _subject_parts(
         subject_type, subject_key, subject_label)
     # Reports are named by the human cadence: the assessment produced by the
@@ -154,7 +167,8 @@ def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
         'quality': quality if quality in AI_CONTENT_QUALITY_VALUES else '',
         'comment': comment,
         'assessment': assessment,
-        'assessment_html': render_assessment_markdown(assessment),
+        'assessment_html': (render_assessment_markdown(assessment)
+                            if render_body else ''),
         'created_at': created_at,
         'created_display': _display_time(created_at),
         'subject_type': subject_type,
@@ -172,7 +186,7 @@ def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
     }
 
 
-def ai_content_items(rows):
+def ai_content_items(rows, *, render_body=True):
     """Normalize legacy AIContent rows for display."""
     items = []
     for row in rows:
@@ -203,11 +217,12 @@ def ai_content_items(rows):
             assessment_kind=str(data.get('assessment_kind') or '').strip(),
             verdict=str(data.get('verdict') or '').strip(),
             quarantined=data.get('quarantined') is True,
+            render_body=render_body,
         ))
     return items
 
 
-def corun_page_items(pages):
+def corun_page_items(pages, *, render_body=True):
     """Normalize corun Page API payloads for display."""
     items = []
     for page in pages or []:
@@ -236,10 +251,11 @@ def corun_page_items(pages):
             subject_key=str(data.get('subject_key') or '').strip(),
             subject_label=str(data.get('subject_label') or '').strip(),
             subject_url=str(data.get('subject_url') or '').strip(),
-            title=str(data.get('title') or '').strip(),
+            title=str(data.get('title') or page.get('title') or '').strip(),
             assessment_kind=str(data.get('assessment_kind') or '').strip(),
             verdict=str(data.get('verdict') or '').strip(),
             quarantined=data.get('quarantined') is True,
+            render_body=render_body,
         ))
     return items
 

@@ -108,6 +108,8 @@ def _register_ai_assessment_sync(
     username_value = str(username or 'mcp').strip() or 'mcp'
     ai_value = str(ai or 'unknown').strip() or 'unknown'
     assessment_text = str(assessment).strip()
+    report_title = (str(title).strip()
+                    or f"AI assessment: {canonical_type} {resolved['subject_key']}")
     linked = bool(resolved.get('target_obj') and resolved.get('target_json_field'))
     page_data = {
         **payload_data,
@@ -123,10 +125,10 @@ def _register_ai_assessment_sync(
         'ai': ai_value,
     }
     try:
-        page = CorunClient().create_page(
+        client = CorunClient()
+        page = client.create_page(
             section=CORUN_ASSESSMENT_SECTION,
-            title=(str(title).strip()
-                   or f"AI assessment: {canonical_type} {resolved['subject_key']}"),
+            title=report_title,
             content=assessment_text,
             data=page_data,
             tags=[
@@ -179,6 +181,10 @@ def _register_ai_assessment_sync(
         live_default=True,
         linked=linked,
         corun_page_group_id=page_group_id,
+        report_title=report_title,
+        report_path=(f'/ai/assessments/{page_group_id}/'
+                     if page_group_id else ''),
+        assessment_kind=str(payload_data.get('assessment_kind') or ''),
         **({'verdict': verdict} if verdict else {}),
     )
     return {
