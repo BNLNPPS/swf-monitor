@@ -27,10 +27,24 @@
   .usage-sort[data-direction="asc"] .usage-sort-up,
   .usage-sort[data-direction="desc"] .usage-sort-down { color: #0d6efd; }
   #usage-site-table th.usage-sort-active {
-    background: #e7f1ff;
+    box-shadow: inset 0 -2px #0d6efd;
   }
   #usage-site-table th.usage-sort-active .usage-sort {
     color: #084298;
+  }
+  .usage-site-list {
+    height: 26rem;
+    overflow-y: scroll;
+    scrollbar-color: #6c757d #e9ecef;
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+  }
+  .usage-site-list::-webkit-scrollbar { width: 12px; }
+  .usage-site-list::-webkit-scrollbar-track { background: #e9ecef; }
+  .usage-site-list::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
   }
 </style>
 <div class="container-fluid mt-3">
@@ -114,7 +128,7 @@
             <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-none">none</button>
           </span>
         </div>
-        <div style="height:26rem;overflow-y:scroll;scrollbar-gutter:stable">
+        <div class="usage-site-list">
           {% for site in usage.by_site %}
           <div class="form-check mb-1">
             <input class="form-check-input usage-site" type="checkbox" checked
