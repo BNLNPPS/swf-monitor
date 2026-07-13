@@ -142,9 +142,9 @@
         <div id="compute-usage-pie" style="height:19rem"></div>
       </div>
       <div class="border rounded p-2">
-        <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="d-flex align-items-center mb-2">
           <strong>Sites</strong>
-          <span>
+          <span class="ms-2">
             <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-all">all</button>
             <span class="text-muted">/</span>
             <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-none">none</button>
@@ -355,8 +355,8 @@
         outsidetextfont: {color: '#212529', weight: 600},
         hoverlabel: {
           bgcolor: pieRows.map(row => siteColors.get(row.site)),
-          bordercolor: pieRows.map(row => siteColors.get(row.site)),
-          font: {shadow: 'auto', weight: 600},
+          bordercolor: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
+          font: {color: pieRows.map(row => contrastTextColor(siteColors.get(row.site)))},
         },
         hovertemplate: '%{label}<br>%{value:,.1f} core-hours<br>%{percent}<extra></extra>',
       }] : [], {
