@@ -354,10 +354,9 @@
         },
         outsidetextfont: {color: '#212529', weight: 600},
         hoverlabel: {
-          bgcolor: pieRows.map(row => siteColors.get(row.site)),
-          font: {
-            color: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
-          },
+          bgcolor: '#fff',
+          bordercolor: '#495057',
+          font: {color: '#111'},
         },
         hovertemplate: '%{label}<br>%{value:,.1f} core-hours<br>%{percent}<extra></extra>',
       }] : [], {
