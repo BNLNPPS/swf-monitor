@@ -324,6 +324,10 @@
           x: points.map(point => point.bucket_start),
           y: points.map(point => point[key]),
           marker: {color: siteColors.get(site)},
+          hoverlabel: {
+            bgcolor: siteColors.get(site),
+            font: {color: contrastTextColor(siteColors.get(site))},
+          },
           hovertemplate: '%{x}<br>' + site + '<br>%{y:,.1f} core-hours<extra></extra>',
         };
       });
