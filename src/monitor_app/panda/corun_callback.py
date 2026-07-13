@@ -87,7 +87,7 @@ def _message_from_payload(payload):
 @csrf_exempt
 @require_POST
 def corun_callback(request):
-    """Receive corun terminal-job callbacks and post them to the bot channel."""
+    """Receive corun terminal-job callbacks and post visible results."""
     try:
         if int(request.META.get('CONTENT_LENGTH') or 0) > 8192:
             return JsonResponse({'error': 'payload too large'}, status=413)
@@ -111,6 +111,22 @@ def corun_callback(request):
     # never cost an assessment slot.
     dispatched = _dispatch_assessment(payload)
 
+    # Hidden result pages are internal machine artifacts. Their callbacks must
+    # still drive assessment enforcement above, but must not become human bot
+    # notices. Missing visibility metadata keeps the established behavior for
+    # older corun senders and ordinary jobs.
+    if payload.get('result_page_ui_visible') is False:
+        logger.info(
+            "Suppressed Mattermost notice for ui-hidden corun result job %s "
+            "status=%s",
+            payload.get('job_id'), status,
+        )
+        return JsonResponse({
+            'ok': True,
+            'assessment_dispatched': dispatched,
+            'mattermost_notified': False,
+        })
+
     try:
         driver = _mattermost_driver()
         driver.login()
@@ -130,7 +146,11 @@ def corun_callback(request):
         "Posted corun callback notice for job %s status=%s",
         payload.get('job_id'), status,
     )
-    return JsonResponse({'ok': True, 'assessment_dispatched': dispatched})
+    return JsonResponse({
+        'ok': True,
+        'assessment_dispatched': dispatched,
+        'mattermost_notified': True,
+    })
 
 
 def _dispatch_assessment(payload):
