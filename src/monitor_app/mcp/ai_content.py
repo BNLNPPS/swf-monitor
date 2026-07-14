@@ -185,6 +185,7 @@ def _register_ai_assessment_sync(
         report_path=(f'/ai/assessments/{page_group_id}/'
                      if page_group_id else ''),
         assessment_kind=str(payload_data.get('assessment_kind') or ''),
+        narration=str(payload_data.get('narration') or '')[:600],
         **({'verdict': verdict} if verdict else {}),
     )
     return {

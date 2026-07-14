@@ -3198,10 +3198,15 @@ def _corun_narrative_count():
 
 
 def prod_hub(request):
-    """ePIC Production home — production monitor + PCS sections."""
+    """ePIC Production home — Nav (workflow hub) and Ops (dashboard) tabs."""
     from pcs.views import pcs_hub_counts
     from ai.models import Proposal
+    if request.GET.get('tab') == 'ops':
+        from pcs.dashboard import build_dashboard
+        return render(request, 'monitor_app/prod_hub_workflow.html',
+                      {'active_tab': 'ops', 'dashboard': build_dashboard()})
     context = pcs_hub_counts()
+    context['active_tab'] = 'nav'
     context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
     context['ai_proposals_pending_count'] = Proposal.objects.filter(
         status='proposed').count()
