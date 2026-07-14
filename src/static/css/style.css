@@ -98,6 +98,13 @@ th {
 .ai-assessment-text {
     overflow-wrap: anywhere;
 }
+/* Word-integrity floor for table columns: anywhere lets auto-layout crush
+   narrow columns to fragments; break-word keeps the longest word as the
+   column minimum while still breaking oversized tokens (DIDs) in-cell. */
+.ai-assessment-text table td,
+.ai-assessment-text table th {
+    overflow-wrap: break-word;
+}
 .ai-assessment-text h1 {
     font-size: 1.25rem;
 }
