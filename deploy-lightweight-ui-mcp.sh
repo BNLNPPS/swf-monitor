@@ -161,7 +161,9 @@ rsync "${RSYNC_ARGS[@]}" "${MONITOR_EXCLUDES[@]}" "$SRC_DIR/monitor_app/" "$TARG
 # swf-epicprod dev tree onto the deployed venv's installed copy (migrations
 # and management commands still ride the full deploy only).
 EPICPROD_ROOT="/data/wenauseic/github/swf-epicprod"
-TARGET_PCS=$("$CURRENT_DIR/.venv/bin/python" -c "import pcs, os; print(os.path.dirname(pcs.__file__))")
+# Resolve from $CURRENT_DIR: python -c puts cwd first on sys.path, so running
+# this script from a tree containing pcs/ would shadow the venv copy.
+TARGET_PCS=$(cd "$CURRENT_DIR" && "$CURRENT_DIR/.venv/bin/python" -c "import pcs, os; print(os.path.dirname(pcs.__file__))")
 case "$TARGET_PCS" in
     "$CURRENT_DIR"/.venv/*) ;;
     *)
