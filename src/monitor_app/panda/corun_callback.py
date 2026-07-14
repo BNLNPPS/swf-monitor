@@ -111,6 +111,23 @@ def corun_callback(request):
     # never cost an assessment slot.
     dispatched = _dispatch_assessment(payload)
 
+    # Assessment runs are machine artifacts end to end: their result pages are
+    # UI-hidden and their human notice is the registration action relayed to
+    # epicprod-live. A raw completion notice would duplicate it. An assessment
+    # job whose dispatch failed still falls through — with the ops queue
+    # unreachable, the bot notice is the remaining visibility.
+    if dispatched:
+        logger.info(
+            "Suppressed Mattermost notice for dispatched assessment job %s "
+            "status=%s",
+            payload.get('job_id'), status,
+        )
+        return JsonResponse({
+            'ok': True,
+            'assessment_dispatched': True,
+            'mattermost_notified': False,
+        })
+
     # Hidden result pages are internal machine artifacts. Their callbacks must
     # still drive assessment enforcement above, but must not become human bot
     # notices. Missing visibility metadata keeps the established behavior for
