@@ -3210,7 +3210,11 @@ def prod_hub(request):
         tab = tab_param
         # An explicit tab click is the user's override; remember it.
         if username and prefs.get('home_tab') != tab_param:
-            save_dashboard_prefs(username, {'home_tab': tab_param})
+            try:
+                save_dashboard_prefs(username, {'home_tab': tab_param})
+            except Exception:
+                logger.exception('home_tab preference save failed for %s',
+                                 username)
     else:
         tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
     if tab == 'ops':
