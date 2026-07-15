@@ -121,14 +121,14 @@
         <a class="{% if active_tab == 'ops' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=ops">Ops</a>
     </div>
 
+    {% if active_tab == 'ops' %}
+    {% include 'pcs/dashboard.html' %}
+    {% else %}
     <div class="prod-workflow-header">
         <h1>epicprod - ePIC Production System</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
     </div>
 
-    {% if active_tab == 'ops' %}
-    {% include 'pcs/dashboard.html' %}
-    {% else %}
     <div class="workflow-grid">
         <section class="workflow-stage">
             <div class="workflow-stage-header">

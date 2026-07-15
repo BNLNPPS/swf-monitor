@@ -3201,10 +3201,24 @@ def prod_hub(request):
     """ePIC Production home — Nav (workflow hub) and Ops (dashboard) tabs."""
     from pcs.views import pcs_hub_counts
     from ai.models import Proposal
-    if request.GET.get('tab') == 'ops':
-        from pcs.dashboard import build_dashboard
-        return render(request, 'monitor_app/prod_hub_workflow.html',
-                      {'active_tab': 'ops', 'dashboard': build_dashboard()})
+    from pcs.dashboard import (build_dashboard, get_dashboard_prefs,
+                               save_dashboard_prefs)
+    username = request.user.username if request.user.is_authenticated else ''
+    prefs = get_dashboard_prefs(username)
+    tab_param = request.GET.get('tab')
+    if tab_param in ('nav', 'ops'):
+        tab = tab_param
+        # An explicit tab click is the user's override; remember it.
+        if username and prefs.get('home_tab') != tab_param:
+            save_dashboard_prefs(username, {'home_tab': tab_param})
+    else:
+        tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
+    if tab == 'ops':
+        return render(request, 'monitor_app/prod_hub_workflow.html', {
+            'active_tab': 'ops',
+            'dashboard': build_dashboard(prefs.get('panel_order')),
+            'can_save_layout': bool(username),
+        })
     context = pcs_hub_counts()
     context['active_tab'] = 'nav'
     context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
