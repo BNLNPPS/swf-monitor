@@ -1,6 +1,7 @@
 """Cached system status collection for ePIC production operations."""
 
 import json
+import os
 import socket
 import subprocess
 import urllib.error
@@ -16,6 +17,11 @@ from .models import (SystemAgent, SystemStatus, SystemStatusHistory,
 
 HISTORY_MIN_INTERVAL = timedelta(hours=6)
 STATUS_STALE_AFTER = timedelta(minutes=15)
+
+# Repos whose GitHub Actions workflows feed the ci status collector.
+GITHUB_REPOS = ['BNLNPPS/swf-monitor', 'BNLNPPS/swf-epicprod',
+                'BNLNPPS/swf-testbed', 'BNLNPPS/swf-common-lib']
+_GH_FAIL_CONCLUSIONS = {'failure', 'startup_failure', 'timed_out'}
 
 
 def _status(name, category, status, summary, data=None, checked_at=None):
@@ -170,6 +176,66 @@ def _http_endpoint(name, url):
     return _status(name, 'external', state, f"{url} returned HTTP {data['http_status']}", data)
 
 
+def _github_actions():
+    """Latest completed run of every workflow in the core repos; a failing
+    workflow is an error and reddens the system. Runs only in the agent's
+    cached refresh, never in a page render. GITHUB_TOKEN/GH_TOKEN in the
+    agent environment raises the API rate limit; unauthenticated suffices
+    at the default refresh cadence."""
+    started = timezone.now()
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    headers = {'Accept': 'application/vnd.github+json',
+               'User-Agent': 'swf-monitor-system-status'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    failing, ok_count, api_errors = [], 0, []
+    for repo in GITHUB_REPOS:
+        url = (f'https://api.github.com/repos/{repo}/actions/runs'
+               f'?status=completed&per_page=30')
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.load(resp)
+        except Exception as exc:
+            api_errors.append(f'{repo}: {exc}')
+            continue
+        latest_by_workflow = {}
+        for run in payload.get('workflow_runs', []):
+            # Only main and the coordinated baselines redden the system;
+            # PR-branch failures are the pull request's concern.
+            branch = run.get('head_branch') or ''
+            if branch != 'main' and not branch.startswith('infra/baseline-'):
+                continue
+            latest_by_workflow.setdefault(run.get('workflow_id'), run)
+        for run in latest_by_workflow.values():
+            if run.get('conclusion') in _GH_FAIL_CONCLUSIONS:
+                failing.append({
+                    'repo': repo,
+                    'workflow': run.get('name') or '',
+                    'branch': run.get('head_branch') or '',
+                    'conclusion': run.get('conclusion') or '',
+                    'url': run.get('html_url') or '',
+                })
+            else:
+                ok_count += 1
+    data = {'failing': failing, 'ok_workflows': ok_count,
+            'repos': GITHUB_REPOS, 'api_errors': api_errors,
+            'elapsed_ms': int((timezone.now() - started).total_seconds() * 1000)}
+    if failing:
+        f = failing[0]
+        more = f' (+{len(failing) - 1} more)' if len(failing) > 1 else ''
+        return _status('github-actions', 'ci', 'error',
+                       f"{f['repo'].split('/')[-1]} / {f['workflow']} failing"
+                       f" on {f['branch']}{more}: {f['url']}", data)
+    if api_errors:
+        return _status('github-actions', 'ci', 'warning',
+                       f'GitHub API unreachable for {len(api_errors)} '
+                       f'repo(s): {api_errors[0]}', data)
+    return _status('github-actions', 'ci', 'ok',
+                   f'latest runs green across {ok_count} workflows in '
+                   f'{len(GITHUB_REPOS)} repos', data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
     'swf-panda-bot': _panda_bot,
@@ -180,6 +246,7 @@ COLLECTORS = {
         'epic-devcloud-prod', f'{external_face_base_url()}/prod/'),
     'epic-devcloud-doc': lambda: _http_endpoint(
         'epic-devcloud-doc', f'{external_face_base_url()}/doc/'),
+    'github-actions': _github_actions,
 }
 
 

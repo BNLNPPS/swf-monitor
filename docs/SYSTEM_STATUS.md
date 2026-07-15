@@ -54,10 +54,15 @@ The initial collector set is defined in `monitor_app/system_status.py`:
 | `swf-panda-bot` | `agents` | systemd state plus monitor heartbeat row |
 | `swf-monitor-mcp-asgi` | `services` | systemd state |
 | `httpd` | `services` | systemd state |
-| `epic-devcloud-prod` | `external` | HTTP check of `https://epic-devcloud.org/prod/` |
-| `epic-devcloud-doc` | `external` | HTTP check of `https://epic-devcloud.org/doc/` |
+| `epic-devcloud-prod` | `external` | HTTP check of the external face `/prod/` |
+| `epic-devcloud-doc` | `external` | HTTP check of the external face `/doc/` |
+| `github-actions` | `ci` | Latest completed GitHub Actions run of every workflow in the core repos (`GITHUB_REPOS` in `system_status.py`), on `main` and `infra/baseline-*` branches only; any failing workflow is an error, with the failing run linked in the summary |
 
-The `external` category is rendered as **Public Web Services** in the UI.
+The `external` category is rendered as **Public Web Services** in the UI and
+`ci` as **Continuous Integration**. The external endpoint URLs derive from the
+external-face configuration point (`external_face_base_url`). The GitHub
+collector uses the public API unauthenticated; `GITHUB_TOKEN` or `GH_TOKEN` in
+the agent environment raises the rate limit if ever needed.
 
 ## Refresh mechanism
 

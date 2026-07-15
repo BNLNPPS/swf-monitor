@@ -63,7 +63,7 @@
 
     {% for group in groups %}
         <section class="system-status-section mb-4">
-            <h2 class="h4 mb-3">{% if group.category == 'external' %}Public Web Services{% else %}{{ group.category|title }}{% endif %}</h2>
+            <h2 class="h4 mb-3">{% if group.category == 'external' %}Public Web Services{% elif group.category == 'ci' %}Continuous Integration{% else %}{{ group.category|title }}{% endif %}</h2>
             <div class="system-status-table-wrap">
                 <table class="table table-sm align-middle system-status-table">
                     <thead>
