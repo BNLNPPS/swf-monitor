@@ -42,6 +42,10 @@ jobs:
         DB_PASSWORD: 'dummy'
         DB_HOST: 'localhost'
         DJANGO_LOGGING_MODE: 'none'
+        # Runner-writable scratch: without REDIS_URL the settings fall back
+        # to a file cache under SWF_TMP_DIR, whose /data default is not
+        # creatable on the GitHub runner. Applies to the runner VM only.
+        SWF_TMP_DIR: '/tmp/swf-tmp'
       run: |
         echo "DJANGO_LOGGING_MODE=$DJANGO_LOGGING_MODE"
         cd src

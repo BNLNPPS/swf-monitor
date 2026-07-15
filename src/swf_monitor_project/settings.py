@@ -441,7 +441,8 @@ SWF_TMP_DIR = config('SWF_TMP_DIR', default='/data/swf-tmp')
 EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, cast=int)
 
 # Channel layer settings
-# Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
+# Use Redis in production if REDIS_URL is set; otherwise fall back to a
+# file-based cache under SWF_TMP_DIR (single host only)
 _REDIS_URL_FILE_VALUE = _env_file_value('REDIS_URL')
 REDIS_URL = (
     _REDIS_URL_FILE_VALUE
