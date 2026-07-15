@@ -392,6 +392,8 @@
         </span>
 
         {# ── Production mode ── #}
+        {# SYNC OBLIGATION: swf-remote renders its own copy of this production nav (swf-remote src/templates/base.html) for its natively served pages. #}
+        {# Any change to this nav block must be mirrored there — notify/hand off to the devcloud (ec2dev) side with every nav change. #}
         <span class="nav-mode nav-production">
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
