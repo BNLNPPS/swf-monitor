@@ -19,8 +19,10 @@ accepted (removable in the UI), low lands as suggested (visible on the
 request page, never counted).
 
 Each new match logs a questionnaire_match_found action-stream event
-(normal, live) — new matches are events. The run summary is printed as
-JSON for the calling agent handler.
+(normal, recorded but not live). The live channel gets exactly one line
+per run with new matches — a questionnaire_new_matches summary event
+whose record page lists every new match with confidence and reason. The
+run summary is printed as JSON for the calling agent handler.
 
 Rescanning is event-driven, never habitual: an LLM's second answer to the
 same question differs from its first, so re-asking unchanged questions
@@ -308,6 +310,7 @@ def main():
                "model": MODEL, "transport": "claude-cli-subscription",
                "prompt_version": PROMPT_VERSION,
                "dry_run": bool(args.dry_run)}
+    run_added = []
 
     for i in range(0, len(scan), CHUNK):
         chunk = scan[i:i + CHUNK]
@@ -372,13 +375,14 @@ def main():
                 data['prod_matches'] = existing
                 q.data = data
                 q.save(update_fields=['data', 'updated_at'])
+                run_added.extend((q.pk, record) for record in added)
                 for record in added:
                     log_epicprod_action(
                         'ops-agent', 'questionnaire_match_found',
                         subject_type='campaign_task',
                         subject_key=record['task_name'],
                         username=args.created_by,
-                        sublevel='normal', live_default=True,
+                        sublevel='normal', live_default=False,
                         questionnaire=q.pk, confidence=record['confidence'],
                         match_status=record['status'],
                         summary=f"request #{q.pk} ({record['confidence']}): "
@@ -402,6 +406,24 @@ def main():
                 }
                 q.data = data
                 q.save(update_fields=['data', 'updated_at'])
+
+    if run_added:
+        # The one live line for the whole run; its record page lists every
+        # new match (multi-line message renders in the record's pre block).
+        one_line = (f"{summary['new_matches']} new matches "
+                    f"({summary['accepted']} accepted, "
+                    f"{summary['suggested']} suggested) "
+                    f"from {summary['scanned']} requests scanned")
+        detail = [one_line] + [
+            f"request #{qpk} -> {r['task_name']} "
+            f"({r['confidence']}, {r['status']}): {r['reason']}"
+            for qpk, r in run_added]
+        log_epicprod_action(
+            'ops-agent', 'questionnaire_new_matches',
+            username=args.created_by,
+            sublevel='normal', live_default=True,
+            message="\n".join(detail), summary=one_line,
+            requests_matched=len({qpk for qpk, _ in run_added}))
 
     if not args.dry_run:
         PersistentState.update_state({STATE_KEY: max_task_id})

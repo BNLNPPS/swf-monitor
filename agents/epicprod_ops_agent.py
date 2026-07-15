@@ -835,9 +835,11 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS questionnaire_automatch done")
+            # Recorded, not live: the run's one channel line is the script's
+            # questionnaire_new_matches summary event.
             self._log_action('questionnaire_automatch', t0,
                              username=created_by, sublevel='normal',
-                             live_default=True,
+                             live_default=False,
                              summary=(out.splitlines()[-1] if out else ''))
 
     def _handle_catalog_sync(self, m):

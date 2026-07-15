@@ -199,16 +199,23 @@ ACTION_DEFAULTS = {
                        "CSV: create or update request records.",
     },
     'questionnaire_automatch': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'normal', 'live': False,
         'description': "LLM matching of production requests to catalog tasks "
                        "using the full tag map; each new match logs its own "
-                       "questionnaire_match_found event.",
+                       "questionnaire_match_found record, and a run with new "
+                       "matches posts one live questionnaire_new_matches line.",
     },
     'questionnaire_match_found': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'normal', 'live': False,
         'description': "One new request-to-task match from the automatch, "
                        "with confidence and reason; high/medium confidence "
                        "lands accepted, low lands suggested.",
+    },
+    'questionnaire_new_matches': {
+        'sublevel': 'normal', 'live': True,
+        'description': "One-line summary of an automatch run's new "
+                       "request-to-task matches; the record lists every new "
+                       "match with confidence and reason.",
     },
     'questionnaire_match': {
         'sublevel': 'low', 'live': False,
