@@ -222,9 +222,11 @@ def _github_actions():
             'repos': GITHUB_REPOS, 'api_errors': api_errors,
             'elapsed_ms': int((timezone.now() - started).total_seconds() * 1000)}
     if failing:
+        # Warning, not error: a development CI failure should not redden
+        # the collaboration-facing System indicator.
         f = failing[0]
         more = f' (+{len(failing) - 1} more)' if len(failing) > 1 else ''
-        return _status('github-actions', 'ci', 'error',
+        return _status('github-actions', 'ci', 'warning',
                        f"{f['repo'].split('/')[-1]} / {f['workflow']} failing"
                        f" on {f['branch']}{more}: {f['url']}", data)
     if api_errors:
