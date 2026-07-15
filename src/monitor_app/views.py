@@ -19,7 +19,7 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent, UserPreference
 from ai.assessments import (
     AI_CONTENT_COMMENT_KEY,
     AI_CONTENT_QUALITY_KEY,
@@ -174,20 +174,56 @@ def get_system_agents_data(request):
 
 @login_required
 def account_view(request):
+    """The username page, serving both faces: My Workflows | Account tabs.
+
+    My Workflows lists the PanDA tasks of the mapped PanDA username
+    (user preference 'panda_username', defaulting to the login name).
+    The password section is face-conditional: the internal form here,
+    a link to the swf-remote local password change on the tunnel face.
+    """
     if request.method == 'POST':
         form = PasswordChangeForm(request.user, request.POST)
         if form.is_valid():
             user = form.save()
             update_session_auth_hash(request, user)  # Important!
             messages.success(request, 'Your password was successfully updated!')
-            return redirect('monitor_app:account')
+            return redirect(reverse('monitor_app:account') + '?tab=account')
         else:
             messages.error(request, 'Please correct the error below.')
     else:
         form = PasswordChangeForm(request.user)
+
+    panda_username = ''
+    my_tasks = []
+    my_tasks_error = ''
+    if request.user.is_authenticated:
+        prefs = UserPreference.get_prefs(request.user.username) or {}
+        panda_username = prefs.get('panda_username') or request.user.username
+        try:
+            from django.db import connections
+            cur = connections['panda'].cursor()
+            cur.execute(
+                "SELECT jeditaskid, taskname, status, prodsourcelabel, "
+                "creationdate, modificationtime "
+                "FROM doma_panda.jedi_tasks WHERE username = %s "
+                "AND modificationtime > now() - interval '30 days' "
+                "ORDER BY jeditaskid DESC LIMIT 200",
+                [panda_username])
+            cols = [c[0] for c in cur.description]
+            my_tasks = [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception as exc:
+            my_tasks_error = str(exc)
+
+    active_tab = request.GET.get('tab', 'workflows')
+    if active_tab not in ('workflows', 'account'):
+        active_tab = 'workflows'
     return render(request, 'monitor_app/account.html', {
         'form': form,
-        'user': request.user
+        'user': request.user,
+        'panda_username': panda_username,
+        'my_tasks': my_tasks,
+        'my_tasks_error': my_tasks_error,
+        'active_tab': active_tab,
     })
 
 
