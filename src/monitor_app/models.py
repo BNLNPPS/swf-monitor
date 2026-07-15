@@ -71,8 +71,8 @@ class Entry(models.Model):
             ),
         ]
         indexes = [
-            models.Index(fields=['kind', '-timestamp_created']),
-            models.Index(fields=['context', 'kind', '-timestamp_created']),
+            models.Index(fields=['kind', 'timestamp_created']),
+            models.Index(fields=['context', 'kind', 'timestamp_created']),
             models.Index(fields=['archived']),
             models.Index(fields=['status']),
         ]
@@ -103,7 +103,7 @@ class EntryVersion(models.Model):
             models.UniqueConstraint(fields=['entry', 'version_num'],
                                     name='uniq_entry_version_num'),
         ]
-        indexes = [models.Index(fields=['entry', '-timestamp'])]
+        indexes = [models.Index(fields=['entry', 'timestamp'])]
 
 
 class SystemAgent(models.Model):
@@ -870,8 +870,8 @@ class AIContent(models.Model):
         db_table = 'swf_ai_content'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['subject_type', 'subject_key', '-created_at']),
-            models.Index(fields=['username', '-created_at']),
+            models.Index(fields=['subject_type', 'subject_key', 'created_at']),
+            models.Index(fields=['username', 'created_at']),
         ]
         verbose_name = 'AI Content'
         verbose_name_plural = 'AI Content'
@@ -1073,9 +1073,9 @@ class SystemStatusHistory(models.Model):
         db_table = 'swf_system_status_history'
         ordering = ['-checked_at', 'name']
         indexes = [
-            models.Index(fields=['name', '-checked_at']),
-            models.Index(fields=['category', '-checked_at']),
-            models.Index(fields=['status', '-checked_at']),
+            models.Index(fields=['name', 'checked_at']),
+            models.Index(fields=['category', 'checked_at']),
+            models.Index(fields=['status', 'checked_at']),
         ]
 
     def __str__(self):
@@ -1109,7 +1109,7 @@ class AIMemory(models.Model):
         db_table = 'swf_ai_memory'
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['username', '-created_at']),
+            models.Index(fields=['username', 'created_at']),
         ]
 
     def __str__(self):
