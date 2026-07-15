@@ -11,8 +11,8 @@ from datetime import timedelta
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
 
-from .models import (SystemAgent, SystemStatus, SystemStatusHistory,
-                     external_face_base_url)
+from .models import (AIMemory, SystemAgent, SystemStatus,
+                     SystemStatusHistory, external_face_base_url)
 
 
 HISTORY_MIN_INTERVAL = timedelta(hours=6)
@@ -236,6 +236,28 @@ def _github_actions():
                    f'{len(GITHUB_REPOS)} repos', data)
 
 
+def _bot_usage():
+    """Bot conversation volume from the recorded exchanges — informational,
+    always ok: channel vs DM user turns over the last 7 and 30 days.
+    Aggregate counts only; the page is an open surface, so no per-user
+    detail."""
+    now = timezone.now()
+    base = AIMemory.objects.filter(role='user', session_id='mattermost')
+
+    def split(days):
+        qs = base.filter(created_at__gte=now - timedelta(days=days))
+        return (qs.filter(content__regex=r'^\[[^\]]+ in #').count(),
+                qs.filter(content__regex=r'^\[[^\]]+ in DM\]').count())
+
+    ch7, dm7 = split(7)
+    ch30, dm30 = split(30)
+    data = {'turns_7d': {'channel': ch7, 'dm': dm7},
+            'turns_30d': {'channel': ch30, 'dm': dm30}}
+    return _status('bot-usage', 'agents', 'ok',
+                   f'bot user turns 7d: {ch7} channel, {dm7} DM; '
+                   f'30d: {ch30} channel, {dm30} DM', data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
     'swf-panda-bot': _panda_bot,
@@ -247,6 +269,7 @@ COLLECTORS = {
     'epic-devcloud-doc': lambda: _http_endpoint(
         'epic-devcloud-doc', f'{external_face_base_url()}/doc/'),
     'github-actions': _github_actions,
+    'bot-usage': _bot_usage,
 }
 
 
