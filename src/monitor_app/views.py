@@ -3225,10 +3225,19 @@ def prod_hub(request):
         })
     context = pcs_hub_counts()
     context['active_tab'] = 'nav'
-    context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
+    # The two corun counts are remote REST calls; cached so the Nav tab
+    # renders without network round-trips.
+    from django.core.cache import cache
+    corun_counts = cache.get('prod_hub_corun_counts')
+    if corun_counts is None:
+        corun_counts = {'assessments': _corun_ai_assessment_count(),
+                        'narratives': _corun_narrative_count()}
+        cache.set('prod_hub_corun_counts', corun_counts, 600)
+    context['ai_content_count'] = (AIContent.objects.count()
+                                   + corun_counts['assessments'])
     context['ai_proposals_pending_count'] = Proposal.objects.filter(
         status='proposed').count()
-    context['campaign_narratives_count'] = _corun_narrative_count()
+    context['campaign_narratives_count'] = corun_counts['narratives']
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
