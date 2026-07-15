@@ -4,32 +4,18 @@
 
 {% block content %}
 <style>
-    .user-tabs {
-        display: flex;
-        gap: 6px;
-        border-bottom: 2px solid #ccc;
-        margin: 20px 0 0 0;
-    }
+    .user-tabs { margin: 14px 0 .4rem 0; }
     .user-tabs a {
-        padding: 10px 22px;
-        font-size: 1.05rem;
+        border-bottom: 2px solid transparent;
+        color: #3d85c6;
         font-weight: 600;
-        color: #333;
+        margin-right: 1.1rem;
+        padding-bottom: 2px;
         text-decoration: none;
-        border: 1px solid #ccc;
-        border-bottom: none;
-        border-radius: 6px 6px 0 0;
-        background: #f2f2f2;
     }
-    .user-tabs a.active {
-        background: #fff;
-        color: #000;
-        border-color: #999;
-        border-bottom: 2px solid #fff;
-        margin-bottom: -2px;
-    }
+    .user-tabs a.active { border-bottom-color: #3d85c6; color: #111; }
     .user-tab-panel {
-        padding: 20px 4px;
+        padding: 14px 0;
     }
     .my-workflows-table {
         border-collapse: collapse;
@@ -45,9 +31,7 @@
     }
 </style>
 
-<div class="container">
-    <h2>{{ user.username }}</h2>
-
+<div>
     <div class="user-tabs">
         <a href="?tab=workflows" class="{% if active_tab == 'workflows' %}active{% endif %}">My Workflows</a>
         <a href="?tab=account" class="{% if active_tab == 'account' %}active{% endif %}">Account</a>
