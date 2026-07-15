@@ -1,0 +1,109 @@
+{% extends 'base.html' %}
+
+{% block title %}Analysis{% endblock %}
+
+{% block content %}
+<style>
+    .analysis-section { margin-bottom: 28px; }
+    .analysis-table { border-collapse: collapse; }
+    .analysis-table th, .analysis-table td {
+        padding: 6px 14px;
+        border-bottom: 1px solid #ddd;
+        text-align: left;
+        white-space: nowrap;
+    }
+    .analysis-table th { border-bottom: 2px solid #999; }
+    .analysis-indev {
+        display: inline-block;
+        padding: 2px 10px;
+        margin-left: 12px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #7a5d00;
+        background: #fdf3d7;
+        border-radius: 4px;
+        vertical-align: middle;
+    }
+</style>
+
+<div>
+    <h2 style="margin-top: 14px;">Analysis <span class="analysis-indev">In development</span></h2>
+    <p>User analysis on the ePIC production platform: analysis jobs take open slots up to a fair-share
+       fraction on designated queues. Design and plan:
+       <a href="https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/PANDA_USER_JOBS.md">PANDA_USER_JOBS.md</a>.</p>
+
+    {% if error %}
+    <p class="error_fill" style="padding: 6px 10px;">Data lookup failed: {{ error }}</p>
+    {% endif %}
+
+    <div class="analysis-section">
+        <h4>Analysis Queues</h4>
+        <p>Unified queues serve both production and analysis job classes. The analysis-designated
+           queue set is being established.</p>
+        {% if queues %}
+        <table class="analysis-table">
+            <thead><tr><th>Queue</th><th>Site</th><th>Status</th><th>Type</th></tr></thead>
+            <tbody>
+                {% for q in queues %}
+                <tr>
+                    <td><a href="{% url 'monitor_app:epic_queue_detail' q.queue_name %}">{{ q.queue_name }}</a></td>
+                    <td>{{ q.site }}</td>
+                    <td>{{ q.status }}</td>
+                    <td>{{ q.queue_type }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No unified queues yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="analysis-section">
+        <h4>Analysis Weather</h4>
+        <p>Job wait times per queue (creation to start, last {{ weather_window_days }} days, all job classes).
+           This is the no-shares baseline until fair-share dispatch is configured; refreshed hourly.</p>
+        {% if weather %}
+        <table class="analysis-table">
+            <thead><tr><th>Queue</th><th>Jobs</th><th>Median wait (min)</th><th>90% wait (min)</th></tr></thead>
+            <tbody>
+                {% for w in weather %}
+                <tr>
+                    <td><a href="{% url 'monitor_app:epic_queue_detail' w.computingsite %}">{{ w.computingsite }}</a></td>
+                    <td>{{ w.jobs }}</td>
+                    <td>{{ w.median_wait_min }}</td>
+                    <td>{{ w.p90_wait_min }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No wait-time data available.</p>
+        {% endif %}
+    </div>
+
+    <div class="analysis-section">
+        <h4>Analysis Activity</h4>
+        <p>User-label PanDA tasks, last 30 days.</p>
+        {% if activity %}
+        <table class="analysis-table">
+            <thead><tr><th>Task</th><th>JEDI ID</th><th>User</th><th>Status</th><th>Created</th><th>Modified</th></tr></thead>
+            <tbody>
+                {% for t in activity %}
+                <tr>
+                    <td><a href="{% url 'monitor_app:panda_task_detail' t.jeditaskid %}">{{ t.taskname }}</a></td>
+                    <td>{{ t.jeditaskid }}</td>
+                    <td>{{ t.username }}</td>
+                    <td>{{ t.status }}</td>
+                    <td>{{ t.creationdate|date:"Y-m-d H:i" }}</td>
+                    <td>{{ t.modificationtime|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No user-label tasks in the last 30 days.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

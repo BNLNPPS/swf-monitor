@@ -107,6 +107,7 @@ from .viewdir.system_status import (
 )
 
 # Import iDDS database views from new dedicated module
+from .viewdir.analysis import analysis_view
 from .viewdir.idds_database import (
     idds_database_tables_list,
     idds_database_tables_datatable_ajax,
@@ -212,6 +213,7 @@ urlpatterns = [
 
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
+    path('analysis/', analysis_view, name='analysis'),
     path('panda/system/', system_status_page, name='system_status'),
     path('panda/system/status.json', system_status_json, name='system_status_json'),
     path('panda/system/refresh/', system_status_refresh, name='system_status_refresh'),

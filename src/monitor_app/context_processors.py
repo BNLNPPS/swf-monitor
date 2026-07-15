@@ -256,6 +256,7 @@ def _active_nav(request):
             'epic_queues_list',
             'epic_queue_detail',
         },
+        'analysis': namespace == 'monitor_app' and url_name == 'analysis',
         'ai_content': namespace == 'monitor_app' and url_name == 'ai_content_list',
         'alarms': namespace == 'monitor_app' and url_name in alarm_names,
         'panda_database': namespace == 'monitor_app' and url_name in panda_database_names,
