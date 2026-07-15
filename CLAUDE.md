@@ -100,9 +100,23 @@ One role → one treatment, everywhere (all `btn-sm`, solid variants):
 | Stateful toggles ONLY (fill = on/off) | `btn-outline-*` | Catalog/Progress switch |
 
 Outline is never the default reflex — anything that acts is solid, colored
-by role. For editing large documents in-page, use the base-template
-utility `swfFitEditor(el)` (or class `swf-fit-editor` on the textarea) so
-the editor grows to the visible window.
+by role.
+
+## House UI helpers (base template)
+
+Shared page utilities live at the bottom of `src/templates/base.html` and
+are available on every page. Use these — never reimplement them in a
+page template:
+
+- **Relative time**: give any element
+  `data-relative-time="<ISO timestamp>"` and its text renders and ticks
+  every second as `just now` / `Ns ago` / `Nm ago` / `Nh ago` / `Nd ago`
+  (`window.swfFormatElapsed` is the formatter).
+- **Editor fit**: `swfFitEditor(el)` (or class `swf-fit-editor` on the
+  textarea) grows an in-page document editor to the visible window.
+- **AI attribution**: `.ai-attr` / `.ai-attr-text` (purple-on-lavender
+  chip) and `.ai-fill` (lavender container) mark AI-origin content; the
+  classes are defined in the base template's style block.
 
 ## Deploy
 

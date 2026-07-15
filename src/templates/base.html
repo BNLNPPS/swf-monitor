@@ -595,6 +595,32 @@ function applyNavMode(mode) {
           window.swfFitEditor(e.target);
         }
       });
+
+      /* The app-wide relative-time ticker: give any element
+         data-relative-time="<ISO timestamp>" and its text renders and
+         ticks as 'just now' / 'Ns ago' / 'Nm ago' / 'Nh ago' / 'Nd ago'. */
+      window.swfFormatElapsed = function (seconds) {
+        if (seconds < 5) return 'just now';
+        if (seconds < 60) return seconds + 's ago';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + 'm ago';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 48) return hours + 'h ago';
+        return Math.floor(hours / 24) + 'd ago';
+      };
+      (function () {
+        function tick() {
+          const now = Date.now();
+          document.querySelectorAll('[data-relative-time]').forEach(function (el) {
+            const ts = Date.parse(el.getAttribute('data-relative-time'));
+            if (Number.isNaN(ts)) return;
+            el.textContent = window.swfFormatElapsed(
+              Math.max(0, Math.floor((now - ts) / 1000)));
+          });
+        }
+        tick();
+        setInterval(tick, 1000);
+      })();
     </script>
 </body>
 </html>
