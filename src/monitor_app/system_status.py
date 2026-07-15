@@ -10,7 +10,8 @@ from datetime import timedelta
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
 
-from .models import SystemAgent, SystemStatus, SystemStatusHistory
+from .models import (SystemAgent, SystemStatus, SystemStatusHistory,
+                     external_face_base_url)
 
 
 HISTORY_MIN_INTERVAL = timedelta(hours=6)
@@ -175,8 +176,10 @@ COLLECTORS = {
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
         'swf-monitor-mcp-asgi', 'swf-monitor-mcp-asgi', category='services'),
     'httpd': lambda: _systemctl_unit('httpd', 'httpd', category='services'),
-    'epic-devcloud-prod': lambda: _http_endpoint('epic-devcloud-prod', 'https://epic-devcloud.org/prod/'),
-    'epic-devcloud-doc': lambda: _http_endpoint('epic-devcloud-doc', 'https://epic-devcloud.org/doc/'),
+    'epic-devcloud-prod': lambda: _http_endpoint(
+        'epic-devcloud-prod', f'{external_face_base_url()}/prod/'),
+    'epic-devcloud-doc': lambda: _http_endpoint(
+        'epic-devcloud-doc', f'{external_face_base_url()}/doc/'),
 }
 
 

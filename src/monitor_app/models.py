@@ -565,6 +565,22 @@ class SystemStateEvent(models.Model):
         return f"Event {self.event_id} - {self.event_type} at {self.timestamp}"
 
 
+EXTERNAL_FACE_DEFAULT = 'https://epic-devcloud.org'
+
+
+def external_face_base_url():
+    """Base URL of the system's external web face (the swf-remote host).
+
+    The single code location where the external name is specified; the
+    runtime value is the SysConfig key 'external_face_base_url'. Emitted
+    external links, the external status probes, and the corun-ai URL
+    defaults all derive from here.
+    """
+    base = SysConfig.get_setting('external_face_base_url',
+                                 EXTERNAL_FACE_DEFAULT)
+    return str(base or EXTERNAL_FACE_DEFAULT).rstrip('/')
+
+
 class SysConfig(models.Model):
     """
     Human-set system configuration as one JSON document.

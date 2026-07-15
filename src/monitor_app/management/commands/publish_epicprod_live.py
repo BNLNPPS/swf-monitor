@@ -35,9 +35,17 @@ MM_URL = os.environ.get('MATTERMOST_URL', 'chat.epic-eic.org')
 MM_TOKEN = (os.environ.get('EPICPROD_LIVE_TOKEN')
             or os.environ.get('MATTERMOST_TOKEN', ''))
 MM_TEAM = os.environ.get('MATTERMOST_TEAM', 'main')
-# Open-face link base so event links work for the whole collaboration.
-LINK_BASE = os.environ.get('EPICPROD_LIVE_LINK_BASE',
-                           'https://epic-devcloud.org/prod')
+
+
+def _link_base():
+    """Open-face link base so event links work for the whole
+    collaboration: env override, else the external-face configuration
+    point plus the production path."""
+    env = os.environ.get('EPICPROD_LIVE_LINK_BASE')
+    if env:
+        return env.rstrip('/')
+    from monitor_app.models import external_face_base_url
+    return f"{external_face_base_url()}/prod"
 
 STATE_KEY = 'epicprod_live_last_id'
 DEFAULT_CHANNEL = 'epicprod-live'
@@ -135,7 +143,7 @@ class Command(BaseCommand):
                 live_stream_q(min_sublevel), id__gt=self._get_high_water(),
                 id__lte=newest).count()
             self._post(f"… and {skipped} more events this cycle — see the "
-                       f"[live view]({LINK_BASE}/logs/?app_name=epicprod&live=1)")
+                       f"[live view]({_link_base()}/logs/?app_name=epicprod&live=1)")
             self._set_high_water(newest)
         return poll
 
@@ -171,7 +179,7 @@ class Command(BaseCommand):
             parts.append(summary)
         if isinstance(dur, (int, float)):
             parts.append(f"{dur / 1000:.1f} s")
-        parts.append(f"[record]({LINK_BASE}/logs/{row.id}/)")
+        parts.append(f"[record]({_link_base()}/logs/{row.id}/)")
         return ' · '.join(parts)
 
     def _format_assessment(self, row, extra):
@@ -180,7 +188,7 @@ class Command(BaseCommand):
         path = str(extra.get('report_path') or '').strip()
         if not title or not path.startswith('/ai/assessments/'):
             return ''
-        url = f"{LINK_BASE.rstrip('/')}/{path.lstrip('/')}"
+        url = f"{_link_base()}/{path.lstrip('/')}"
         stamp = timezone.localtime(row.timestamp).strftime('%H:%M %Z')
         subject_type = str(extra.get('subject_type') or '').strip()
         subject_key = str(extra.get('subject_key') or '').strip()
@@ -201,7 +209,7 @@ class Command(BaseCommand):
             parts.append(subject)
         if verdict:
             parts.append(f'Verdict: **{verdict.capitalize()}**')
-        parts.append(f'[record]({LINK_BASE}/logs/{row.id}/)')
+        parts.append(f'[record]({_link_base()}/logs/{row.id}/)')
         return f'### [{title}]({url})\n' + ' · '.join(parts)
 
     # -- plumbing ------------------------------------------------------------

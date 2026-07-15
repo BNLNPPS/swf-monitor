@@ -21,7 +21,9 @@ class CorunAPIError(RuntimeError):
 
 
 def corun_base_url():
-    return str(config('CORUN_BASE_URL', default='https://epic-devcloud.org/doc') or '').rstrip('/')
+    from monitor_app.models import EXTERNAL_FACE_DEFAULT
+    return str(config('CORUN_BASE_URL',
+                      default=EXTERNAL_FACE_DEFAULT + '/doc') or '').rstrip('/')
 
 
 def corun_api_token():

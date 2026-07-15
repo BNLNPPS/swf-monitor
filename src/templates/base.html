@@ -484,8 +484,8 @@
             <a href="https://pandaserver02.sdcc.bnl.gov/swf-monitor{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
                target="_blank" rel="noopener">Go to page at pandaserver02</a> &middot;
             {% else %}
-            <a href="https://epic-devcloud.org/prod{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
-               target="_blank" rel="noopener">Go to page at epic-devcloud.org</a> &middot;
+            <a href="{{ external_face_base_url }}/prod{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
+               target="_blank" rel="noopener">Go to page at {{ external_face_base_url|cut:"https://" }}</a> &middot;
             {% endif %}
             Built at {% now "Ymd H:i:s" %} {% now "T" %}
         </div>
