@@ -58,6 +58,7 @@ The initial collector set is defined in `monitor_app/system_status.py`:
 | `epic-devcloud-doc` | `external` | HTTP check of the external face `/doc/` |
 | `github-actions` | `ci` | Latest completed GitHub Actions run of every workflow in the core repos (`GITHUB_REPOS` in `system_status.py`), on `main` and `infra/baseline-*` branches only; a failing workflow is a warning (development CI does not redden the collaboration-facing indicator), with the failing run linked in the summary |
 | `bot-usage` | `agents` | Informational (always ok): bot user turns over the last 7 and 30 days, channel vs DM, from the recorded exchanges. Aggregate counts only — no per-user detail on this open surface |
+| `campaign-assessments` | `agents` | Scheduled campaign-assessment slots actually filled: ages the newest registered daily/weekly assessment per target campaign against SysConfig thresholds (`assessment_daily_stale_hours`, `assessment_weekly_stale_hours`). A run lost anywhere upstream of registration — trigger, corun run, callback, enforcement — goes red here. Policy in `swf_epicprod.assessment.freshness` |
 
 The `external` category is rendered as **Public Web Services** in the UI and
 `ci` as **Continuous Integration**. The external endpoint URLs derive from the
