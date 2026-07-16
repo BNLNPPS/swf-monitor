@@ -55,7 +55,13 @@ MCP_URL = os.environ.get(
 # not enforce auth; post-cutover this MUST be set in production.env so
 # the bot's POSTs pass the FastMCP guard.
 MCP_BEARER_TOKEN = os.environ.get('MCP_BEARER_TOKEN', '')
-CORUN_BASE_URL = os.environ.get('CORUN_BASE_URL', 'https://epic-devcloud.org/doc')
+def _corun_base_url():
+    from monitor_app.models import EXTERNAL_FACE_DEFAULT
+    return os.environ.get('CORUN_BASE_URL',
+                          EXTERNAL_FACE_DEFAULT + '/doc').rstrip('/')
+
+
+CORUN_BASE_URL = _corun_base_url()
 CORUN_CALLBACK_URL = os.environ.get(
     'CORUN_CALLBACK_URL',
     'https://pandaserver02.sdcc.bnl.gov/swf-monitor/api/corun-callback/',

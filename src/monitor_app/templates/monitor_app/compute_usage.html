@@ -1,0 +1,469 @@
+{% extends 'base.html' %}
+
+{% block title %}Compute Usage - epicprod{% endblock %}
+
+{% block content %}
+<style>
+  .usage-sort {
+    align-items: center;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    font-weight: inherit;
+    gap: .25rem;
+    padding: 0;
+    white-space: nowrap;
+  }
+  .usage-sort-arrows {
+    color: #adb5bd;
+    display: inline-flex;
+    flex-direction: column;
+    font-size: .48rem;
+    line-height: .58;
+  }
+  .usage-sort[data-direction="asc"] .usage-sort-up,
+  .usage-sort[data-direction="desc"] .usage-sort-down { color: #0d6efd; }
+  #usage-site-table th.usage-sort-active {
+    box-shadow: inset 0 -2px #0d6efd;
+  }
+  #usage-site-table th.usage-sort-active .usage-sort {
+    color: #084298;
+  }
+  .usage-site-list {
+    height: 26rem;
+    overflow-y: scroll;
+    scrollbar-color: #6c757d #e9ecef;
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+  }
+  .usage-site-list::-webkit-scrollbar { width: 12px; }
+  .usage-site-list::-webkit-scrollbar-track { background: #e9ecef; }
+  .usage-site-list::-webkit-scrollbar-thumb {
+    background: #6c757d;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+  }
+  .usage-layout {
+    align-items: start;
+    display: grid;
+    gap: 1rem;
+    grid-template-areas:
+      "history side"
+      "table side";
+    grid-template-columns: minmax(0, 2fr) minmax(22rem, 1fr);
+  }
+  .usage-history { grid-area: history; }
+  .usage-side { grid-area: side; }
+  .usage-table {
+    grid-area: table;
+    max-width: 100%;
+    width: max-content;
+  }
+  @media (max-width: 1199.98px) {
+    .usage-layout {
+      grid-template-areas: "history" "side" "table";
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>
+<div class="container-fluid mt-3">
+  <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h1 class="h3 mb-1">Compute Usage</h1>
+      <div class="text-muted">Finished PanDA jobs, grouped by computing site and completion time.</div>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center flex-wrap gap-1 mb-2">
+    <span class="small text-muted me-1">Quick periods</span>
+    {% for period in periods %}
+    <button type="button"
+            class="btn btn-sm usage-period {% if period.active %}btn-primary{% else %}btn-outline-primary{% endif %}"
+            data-start="{{ period.start }}" data-end="{{ period.end }}">{{ period.label }}</button>
+    {% endfor %}
+  </div>
+
+  <form method="get" class="row g-2 align-items-end mb-3" id="usage-period-form">
+    <div class="col-sm-3 col-lg-2">
+      <label class="form-label mb-1" for="usage-start">Start date</label>
+      <input class="form-control form-control-sm" id="usage-start" name="start" type="date" value="{{ start }}" required>
+    </div>
+    <div class="col-sm-3 col-lg-2">
+      <label class="form-label mb-1" for="usage-end">End date</label>
+      <input class="form-control form-control-sm" id="usage-end" name="end" type="date" value="{{ end }}" required>
+    </div>
+    <div class="col-sm-3 col-lg-2">
+      <label class="form-label mb-1" for="usage-bucket">Time bins</label>
+      <select class="form-select form-select-sm" id="usage-bucket" name="bucket">
+        <option value="day"{% if bucket == 'day' %} selected{% endif %}>Daily</option>
+        <option value="week"{% if bucket == 'week' %} selected{% endif %}>Weekly</option>
+      </select>
+    </div>
+    <div class="col-sm-3 col-lg-2">
+      <button class="btn btn-sm btn-primary" type="submit">Apply period</button>
+    </div>
+    <div class="col-lg-4 text-lg-end small">
+      <a id="usage-json-link" href="{% url 'monitor_app:compute_usage_data' %}?start={{ start|urlencode }}&amp;end={{ end|urlencode }}&amp;bucket={{ bucket|urlencode }}">JSON data</a>
+    </div>
+  </form>
+
+  {% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+  {% else %}
+  <div class="row g-2 mb-3">
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">—</strong></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
+    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
+  </div>
+
+  <div class="usage-layout">
+    <div class="usage-history">
+      <div class="border rounded p-2">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+          <strong>Core-hours over time</strong>
+          <div>
+            <label class="me-1" for="usage-metric">Metric</label>
+            <select class="form-select form-select-sm d-inline-block w-auto" id="usage-metric">
+              <option value="allocated_core_hours">Allocated core-hours</option>
+              <option value="used_core_hours">Used core-hours</option>
+            </select>
+          </div>
+        </div>
+        <div id="compute-usage-plot" style="height:32rem"></div>
+      </div>
+    </div>
+    <div class="usage-side">
+      <div class="border rounded p-2 mb-3">
+        <strong>Core-hour share by site</strong>
+        <div id="compute-usage-pie" style="height:19rem"></div>
+      </div>
+      <div class="border rounded p-2">
+        <div class="d-flex align-items-center mb-2">
+          <strong>Sites</strong>
+          <span class="ms-2">
+            <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-all">all</button>
+            <span class="text-muted">/</span>
+            <button type="button" class="btn btn-sm btn-link p-0" id="usage-sites-none">none</button>
+          </span>
+        </div>
+        <div class="usage-site-list">
+          {% for site in usage.by_site %}
+          <div class="form-check mb-1">
+            <input class="form-check-input usage-site" type="checkbox" checked
+                   value="{{ site.site }}" id="usage-site-{{ forloop.counter }}">
+            <label class="form-check-label small" for="usage-site-{{ forloop.counter }}">{{ site.site }}</label>
+          </div>
+          {% empty %}<span class="text-muted">No sites in this period.</span>{% endfor %}
+        </div>
+      </div>
+    </div>
+
+  <div class="usage-table table-responsive">
+    <table class="table table-sm table-striped align-middle w-auto" id="usage-site-table">
+      <thead><tr>
+        <th aria-sort="none"><button type="button" class="usage-sort" data-sort="site">Computing site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="descending" title="Share of the selected metric across selected sites"><button type="button" class="usage-sort" data-sort="share" data-direction="desc">Compute usage %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+      </tr></thead>
+      <tbody>
+        {% for site in usage.by_site %}
+        <tr data-site="{{ site.site }}">
+          <td><span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
+                    style="width:.75rem;height:.75rem" aria-hidden="true"></span>{{ site.site }}</td>
+          <td class="text-end usage-site-jobs">—</td>
+          <td class="text-end usage-site-allocated">—</td>
+          <td class="text-end usage-site-used">—</td>
+          <td class="text-end usage-site-efficiency">—</td>
+          <td class="text-end usage-site-share">—</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  </div>
+
+  <p class="small text-muted">
+    Period boundaries are Eastern time. Jobs are attributed by end time.
+    Allocated core-hours are allocated cores multiplied by wall time; used
+    core-hours are recorded CPU consumption time.
+  </p>
+
+  {{ usage|json_script:"compute-usage-data" }}
+  <script src="https://cdn.plot.ly/plotly-basic-2.35.2.min.js"></script>
+  <script>
+  (function () {
+    const usage = JSON.parse(document.getElementById('compute-usage-data').textContent);
+    const series = usage.series || [];
+    const boxes = [...document.querySelectorAll('.usage-site')];
+    const periodButtons = [...document.querySelectorAll('.usage-period')];
+    const periodForm = document.getElementById('usage-period-form');
+    const startInput = document.getElementById('usage-start');
+    const endInput = document.getElementById('usage-end');
+    const bucketInput = document.getElementById('usage-bucket');
+    const jsonLink = document.getElementById('usage-json-link');
+    const metric = document.getElementById('usage-metric');
+    const tableBody = document.querySelector('#usage-site-table tbody');
+    const tableRows = [...tableBody.querySelectorAll('tr')];
+    const sortButtons = [...document.querySelectorAll('.usage-sort')];
+    let sortKey = 'share';
+    let sortDirection = 'desc';
+    const selected = () => new Set(boxes.filter(box => box.checked).map(box => box.value));
+    const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
+    const siteColors = new Map((usage.by_site || []).map((row, index) => [row.site, colors[index % colors.length]]));
+
+    function contrastTextColor(hex) {
+      const channels = hex.slice(1).match(/.{2}/g).map(value => {
+        const channel = parseInt(value, 16) / 255;
+        return channel <= 0.04045
+          ? channel / 12.92
+          : Math.pow((channel + 0.055) / 1.055, 2.4);
+      });
+      const luminance = 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+      return luminance < 0.35 ? '#fff' : '#111';
+    }
+
+    const loadedStart = usage.window.start_time.slice(0, 10);
+    const loadedEndExclusive = usage.window.end_time.slice(0, 10);
+    document.querySelectorAll('.usage-site-swatch').forEach(swatch => {
+      swatch.style.backgroundColor = siteColors.get(swatch.dataset.site);
+    });
+
+    function emptyUsage() {
+      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0};
+    }
+
+    function addUsage(target, source) {
+      target.job_count += Number(source.job_count || 0);
+      target.allocated_core_hours += Number(source.allocated_core_hours || 0);
+      target.used_core_hours += Number(source.used_core_hours || 0);
+      target.wall_hours += Number(source.wall_hours || 0);
+    }
+
+    function weekStart(dateText) {
+      const parts = dateText.split('-').map(Number);
+      const value = new Date(parts[0], parts[1] - 1, parts[2], 12);
+      value.setDate(value.getDate() - ((value.getDay() + 6) % 7));
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, '0');
+      const day = String(value.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function selectedData() {
+      const start = startInput.value;
+      const end = endInput.value;
+      const siteTotals = new Map();
+      const plotTotals = new Map();
+      series.forEach(point => {
+        const dateText = point.bucket_start.slice(0, 10);
+        if (dateText < start || dateText > end) return;
+        if (!siteTotals.has(point.site)) siteTotals.set(point.site, emptyUsage());
+        addUsage(siteTotals.get(point.site), point);
+        const bucket = bucketInput.value === 'week' ? weekStart(dateText) : dateText;
+        const key = `${point.site}\u0000${bucket}`;
+        if (!plotTotals.has(key)) {
+          plotTotals.set(key, {site: point.site, bucket_start: bucket, ...emptyUsage()});
+        }
+        addUsage(plotTotals.get(key), point);
+      });
+      return {siteTotals, plotRows: [...plotTotals.values()]};
+    }
+
+    function updateSortIndicators() {
+      sortButtons.forEach(button => {
+        const active = button.dataset.sort === sortKey;
+        button.dataset.direction = active ? sortDirection : '';
+        const heading = button.closest('th');
+        heading.classList.toggle('usage-sort-active', active);
+        heading.setAttribute(
+          'aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+      });
+    }
+
+    function sortRows() {
+      const multiplier = sortDirection === 'asc' ? 1 : -1;
+      tableRows.sort((left, right) => {
+        let comparison;
+        if (sortKey === 'site') {
+          comparison = left.dataset.site.localeCompare(
+            right.dataset.site, undefined, {numeric: true, sensitivity: 'base'});
+        } else {
+          comparison = Number(left.dataset[sortKey] || 0)
+            - Number(right.dataset[sortKey] || 0);
+        }
+        if (comparison === 0) {
+          comparison = left.dataset.site.localeCompare(right.dataset.site);
+        }
+        return comparison * multiplier;
+      });
+      tableRows.forEach(row => tableBody.appendChild(row));
+    }
+
+    function render() {
+      sortKey = 'share';
+      sortDirection = 'desc';
+      updateSortIndicators();
+      const sites = selected();
+      const key = metric.value;
+      const label = metric.options[metric.selectedIndex].text;
+      const data = selectedData();
+      const traces = [...sites].map(site => {
+        const points = data.plotRows.filter(point => point.site === site);
+        return {
+          type: 'bar', name: site,
+          x: points.map(point => point.bucket_start),
+          y: points.map(point => point[key]),
+          marker: {color: siteColors.get(site)},
+          hoverlabel: {
+            bgcolor: siteColors.get(site),
+            font: {color: contrastTextColor(siteColors.get(site))},
+          },
+          hovertemplate: '%{x}<br>' + site + '<br>%{y:,.1f} core-hours<extra></extra>',
+        };
+      });
+      Plotly.react('compute-usage-plot', traces, {
+        barmode: 'stack',
+        margin: {l: 70, r: 20, t: 15, b: 65},
+        xaxis: {title: bucketInput.value === 'week' ? 'Completion week' : 'Completion date'},
+        yaxis: {title: label, rangemode: 'tozero'},
+        legend: {orientation: 'h', y: -0.25},
+      }, {responsive: true, displayModeBar: false});
+
+      const siteTotals = [...data.siteTotals].filter(([site]) => sites.has(site))
+        .map(([site, values]) => ({site, ...values}));
+      const pieRows = siteTotals.filter(row => Number(row[key] || 0) > 0);
+      Plotly.react('compute-usage-pie', pieRows.length ? [{
+        type: 'pie',
+        labels: pieRows.map(row => row.site),
+        values: pieRows.map(row => row[key]),
+        marker: {colors: pieRows.map(row => siteColors.get(row.site))},
+        textinfo: 'percent',
+        textposition: 'inside',
+        insidetextorientation: 'horizontal',
+        insidetextfont: {
+          color: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
+          weight: 600,
+        },
+        outsidetextfont: {color: '#212529', weight: 600},
+        hoverlabel: {
+          bgcolor: pieRows.map(row => siteColors.get(row.site)),
+          bordercolor: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
+          font: {color: pieRows.map(row => contrastTextColor(siteColors.get(row.site)))},
+        },
+        hovertemplate: '%{label}<br>%{value:,.1f} core-hours<br>%{percent}<extra></extra>',
+      }] : [], {
+        margin: {l: 10, r: 10, t: 10, b: 30},
+        showlegend: true,
+        legend: {orientation: 'h', y: -0.05},
+        uniformtext: {minsize: 11, mode: 'hide'},
+        annotations: pieRows.length ? [] : [{text: 'No site data selected', showarrow: false}],
+      }, {responsive: true, displayModeBar: false});
+
+      const totals = siteTotals
+        .reduce((sum, row) => ({
+          jobs: sum.jobs + Number(row.job_count || 0),
+          allocated: sum.allocated + Number(row.allocated_core_hours || 0),
+          used: sum.used + Number(row.used_core_hours || 0),
+        }), {jobs: 0, allocated: 0, used: 0});
+      document.getElementById('usage-jobs').textContent = totals.jobs.toLocaleString();
+      document.getElementById('usage-allocated').textContent = fmt(totals.allocated);
+      document.getElementById('usage-used').textContent = fmt(totals.used);
+      document.getElementById('usage-efficiency').textContent = totals.allocated
+        ? (100 * totals.used / totals.allocated).toFixed(1) + '%' : '—';
+      const usageTotal = siteTotals.reduce(
+        (sum, row) => sum + Number(row[key] || 0), 0);
+      document.querySelectorAll('#usage-site-table tbody tr').forEach(row => {
+        const values = data.siteTotals.get(row.dataset.site);
+        row.hidden = !sites.has(row.dataset.site) || !values;
+        if (!values) return;
+        row.querySelector('.usage-site-jobs').textContent = values.job_count.toLocaleString();
+        row.querySelector('.usage-site-allocated').textContent = fmt(values.allocated_core_hours);
+        row.querySelector('.usage-site-used').textContent = fmt(values.used_core_hours);
+        const efficiency = values.allocated_core_hours
+          ? 100 * values.used_core_hours / values.allocated_core_hours : 0;
+        const share = usageTotal ? 100 * Number(values[key] || 0) / usageTotal : 0;
+        row.querySelector('.usage-site-efficiency').textContent = values.allocated_core_hours
+          ? efficiency.toFixed(1) + '%' : '—';
+        row.querySelector('.usage-site-share').textContent = usageTotal
+          ? share.toFixed(1) + '%' : '—';
+        row.dataset.jobs = values.job_count;
+        row.dataset.allocated = values.allocated_core_hours;
+        row.dataset.used = values.used_core_hours;
+        row.dataset.efficiency = efficiency;
+        row.dataset.share = share;
+      });
+      sortRows();
+    }
+
+    function updatePeriodButtons() {
+      periodButtons.forEach(button => {
+        const active = button.dataset.start === startInput.value
+          && button.dataset.end === endInput.value;
+        button.classList.toggle('btn-primary', active);
+        button.classList.toggle('btn-outline-primary', !active);
+      });
+    }
+
+    function updateLocation() {
+      const params = new URLSearchParams(window.location.search);
+      params.set('start', startInput.value);
+      params.set('end', endInput.value);
+      params.set('bucket', bucketInput.value);
+      window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
+      const dataUrl = new URL(jsonLink.href, window.location.href);
+      dataUrl.search = params.toString();
+      jsonLink.href = dataUrl.toString();
+    }
+
+    function applyLoadedRange() {
+      updatePeriodButtons();
+      updateLocation();
+      render();
+    }
+
+    boxes.forEach(box => box.addEventListener('change', render));
+    metric.addEventListener('change', render);
+    sortButtons.forEach(button => button.addEventListener('click', () => {
+      const nextKey = button.dataset.sort;
+      if (nextKey === sortKey) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = nextKey;
+        sortDirection = nextKey === 'site' ? 'asc' : 'desc';
+      }
+      updateSortIndicators();
+      sortRows();
+    }));
+    periodButtons.forEach(button => button.addEventListener('click', () => {
+      startInput.value = button.dataset.start;
+      endInput.value = button.dataset.end;
+      applyLoadedRange();
+    }));
+    periodForm.addEventListener('submit', event => {
+      if (startInput.value >= loadedStart && endInput.value < loadedEndExclusive) {
+        event.preventDefault();
+        applyLoadedRange();
+      }
+    });
+    document.getElementById('usage-sites-all').addEventListener('click', () => {
+      boxes.forEach(box => { box.checked = true; }); render();
+    });
+    document.getElementById('usage-sites-none').addEventListener('click', () => {
+      boxes.forEach(box => { box.checked = false; }); render();
+    });
+    updatePeriodButtons();
+    updateSortIndicators();
+    render();
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endblock %}

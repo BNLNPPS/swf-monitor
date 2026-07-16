@@ -19,7 +19,7 @@ from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import PermissionDenied
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
-from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent
+from .models import SystemAgent, AppLog, Run, StfFile, Subscriber, FastMonFile, PersistentState, PandaQueue, RucioEndpoint, TFSlice, Worker, RunState, SystemStateEvent, AIContent, UserPreference
 from ai.assessments import (
     AI_CONTENT_COMMENT_KEY,
     AI_CONTENT_QUALITY_KEY,
@@ -27,6 +27,7 @@ from ai.assessments import (
     CORUN_ASSESSMENT_SECTION,
     ai_content_items,
     corun_page_items,
+    render_assessment_markdown,
 )
 from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from .workflow_models import STFWorkflow, AgentWorkflowStage, WorkflowMessage, WorkflowStatus, AgentType, WorkflowDefinition, WorkflowExecution
@@ -173,20 +174,56 @@ def get_system_agents_data(request):
 
 @login_required
 def account_view(request):
+    """The username page, serving both faces: My Workflows | Account tabs.
+
+    My Workflows lists the PanDA tasks of the mapped PanDA username
+    (user preference 'panda_username', defaulting to the login name).
+    The password section is face-conditional: the internal form here,
+    a link to the swf-remote local password change on the tunnel face.
+    """
     if request.method == 'POST':
         form = PasswordChangeForm(request.user, request.POST)
         if form.is_valid():
             user = form.save()
             update_session_auth_hash(request, user)  # Important!
             messages.success(request, 'Your password was successfully updated!')
-            return redirect('monitor_app:account')
+            return redirect(reverse('monitor_app:account') + '?tab=account')
         else:
             messages.error(request, 'Please correct the error below.')
     else:
         form = PasswordChangeForm(request.user)
+
+    panda_username = ''
+    my_tasks = []
+    my_tasks_error = ''
+    if request.user.is_authenticated:
+        prefs = UserPreference.get_prefs(request.user.username) or {}
+        panda_username = prefs.get('panda_username') or request.user.username
+        try:
+            from django.db import connections
+            cur = connections['panda'].cursor()
+            cur.execute(
+                "SELECT jeditaskid, taskname, status, prodsourcelabel, "
+                "creationdate, modificationtime "
+                "FROM doma_panda.jedi_tasks WHERE username = %s "
+                "AND modificationtime > now() - interval '30 days' "
+                "ORDER BY jeditaskid DESC LIMIT 200",
+                [panda_username])
+            cols = [c[0] for c in cur.description]
+            my_tasks = [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception as exc:
+            my_tasks_error = str(exc)
+
+    active_tab = request.GET.get('tab', 'workflows')
+    if active_tab not in ('workflows', 'account'):
+        active_tab = 'workflows'
     return render(request, 'monitor_app/account.html', {
         'form': form,
-        'user': request.user
+        'user': request.user,
+        'panda_username': panda_username,
+        'my_tasks': my_tasks,
+        'my_tasks_error': my_tasks_error,
+        'active_tab': active_tab,
     })
 
 
@@ -3197,14 +3234,46 @@ def _corun_narrative_count():
 
 
 def prod_hub(request):
-    """ePIC Production home — production monitor + PCS sections."""
+    """ePIC Production home — Nav (workflow hub) and Ops (dashboard) tabs."""
     from pcs.views import pcs_hub_counts
     from ai.models import Proposal
+    from pcs.dashboard import (build_dashboard, get_dashboard_prefs,
+                               save_dashboard_prefs)
+    username = request.user.username if request.user.is_authenticated else ''
+    prefs = get_dashboard_prefs(username)
+    tab_param = request.GET.get('tab')
+    if tab_param in ('nav', 'ops'):
+        tab = tab_param
+        # An explicit tab click is the user's override; remember it.
+        if username and prefs.get('home_tab') != tab_param:
+            try:
+                save_dashboard_prefs(username, {'home_tab': tab_param})
+            except Exception:
+                logger.exception('home_tab preference save failed for %s',
+                                 username)
+    else:
+        tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
+    if tab == 'ops':
+        return render(request, 'monitor_app/prod_hub_workflow.html', {
+            'active_tab': 'ops',
+            'dashboard': build_dashboard(prefs.get('panel_order')),
+            'can_save_layout': bool(username),
+        })
     context = pcs_hub_counts()
-    context['ai_content_count'] = AIContent.objects.count() + _corun_ai_assessment_count()
+    context['active_tab'] = 'nav'
+    # The two corun counts are remote REST calls; cached so the Nav tab
+    # renders without network round-trips.
+    from django.core.cache import cache
+    corun_counts = cache.get('prod_hub_corun_counts')
+    if corun_counts is None:
+        corun_counts = {'assessments': _corun_ai_assessment_count(),
+                        'narratives': _corun_narrative_count()}
+        cache.set('prod_hub_corun_counts', corun_counts, 600)
+    context['ai_content_count'] = (AIContent.objects.count()
+                                   + corun_counts['assessments'])
     context['ai_proposals_pending_count'] = Proposal.objects.filter(
         status='proposed').count()
-    context['campaign_narratives_count'] = _corun_narrative_count()
+    context['campaign_narratives_count'] = corun_counts['narratives']
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
@@ -3216,22 +3285,27 @@ def ai_content_list(request):
     ai = (request.GET.get('ai') or '').strip()
     q = (request.GET.get('q') or '').strip()
 
-    legacy_items = ai_content_items(AIContent.objects.all().order_by('-created_at', '-id'))
+    # The index needs the source text for filtering, but report HTML is rendered
+    # only when a row is opened or its dedicated page is visited.
+    legacy_items = ai_content_items(
+        AIContent.objects.all().order_by('-created_at', '-id'),
+        render_body=False,
+    )
     corun_items = []
     if corun_configured():
         try:
-            payload = CorunClient().list_pages(
+            pages = CorunClient().list_all_pages(
                 section=CORUN_ASSESSMENT_SECTION,
                 artifact_type='ai_assessment',
                 source_system='swf-monitor',
-                limit=500,
             )
-            pages = payload.get('items', []) if isinstance(payload, dict) else payload
-            corun_items = corun_page_items(pages)
+            corun_items = corun_page_items(pages, render_body=False)
         except CorunAPIError as exc:
             logger.warning('corun AI assessment list failed: %s', exc)
 
-    all_items = legacy_items + corun_items
+    # Quarantined artifacts stay retrievable by id (MCP) but never render
+    # on the human page.
+    all_items = [i for i in legacy_items + corun_items if not i.get('quarantined')]
 
     # subject_type accepts a comma-separated list, e.g.
     # ?subject_type=campaign_task,campaign — the Campaigns pulldown's
@@ -3279,6 +3353,19 @@ def ai_content_list(request):
     filtered_items.sort(key=item_sort_key, reverse=True)
     paginator = Paginator(filtered_items, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
+    for item in page_obj.object_list:
+        if item.get('storage') == 'corun':
+            item['detail_url'] = reverse(
+                'monitor_app:ai_content_detail',
+                args=[item.get('corun_page_group_id')])
+            item['body_url'] = reverse(
+                'monitor_app:ai_content_body',
+                args=[item.get('corun_page_group_id')])
+        else:
+            item['detail_url'] = reverse(
+                'monitor_app:ai_content_legacy_detail', args=[item.get('id')])
+            item['body_url'] = reverse(
+                'monitor_app:ai_content_legacy_body', args=[item.get('id')])
 
     def filter_url(**updates):
         params = request.GET.copy()
@@ -3368,6 +3455,86 @@ def ai_content_list(request):
         'clear_username_url': filter_url(username=''),
         'clear_ai_url': filter_url(ai=''),
         'page_query': page_params.urlencode(),
+    })
+
+
+def ai_content_detail(request, page_group_id):
+    """Dedicated human page for one corun-backed assessment."""
+    if not corun_configured():
+        return HttpResponse('AI assessment storage is unavailable.', status=503)
+    try:
+        page = CorunClient().get_page(str(page_group_id))
+    except CorunAPIError as exc:
+        if exc.status == 404:
+            return HttpResponse('AI assessment not found.', status=404)
+        logger.warning('corun AI assessment detail failed: %s', exc)
+        return HttpResponse('AI assessment storage is unavailable.', status=502)
+    data = page.get('data') if isinstance(page.get('data'), dict) else {}
+    if (data.get('artifact_type') != 'ai_assessment'
+            or data.get('source_system') != 'swf-monitor'
+            or data.get('quarantined') is True):
+        return HttpResponse('AI assessment not found.', status=404)
+    items = corun_page_items([page], render_body=False)
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    items[0]['assessment_html'] = render_assessment_markdown(
+        items[0]['assessment'], omit_leading_title=items[0]['title'])
+    return render(request, 'monitor_app/ai_content_detail.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+    })
+
+
+def ai_content_body(request, page_group_id):
+    """Lazy report body for an expanded corun-backed list row."""
+    if not corun_configured():
+        return HttpResponse('AI assessment storage is unavailable.', status=503)
+    try:
+        page = CorunClient().get_page(str(page_group_id))
+    except CorunAPIError as exc:
+        if exc.status == 404:
+            return HttpResponse('AI assessment not found.', status=404)
+        logger.warning('corun AI assessment body failed: %s', exc)
+        return HttpResponse('AI assessment storage is unavailable.', status=502)
+    data = page.get('data') if isinstance(page.get('data'), dict) else {}
+    if (data.get('artifact_type') != 'ai_assessment'
+            or data.get('source_system') != 'swf-monitor'
+            or data.get('quarantined') is True):
+        return HttpResponse('AI assessment not found.', status=404)
+    items = corun_page_items([page])
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    return render(request, 'monitor_app/_ai_content_body.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+        'next_url': request.GET.get('next') or reverse('monitor_app:ai_content_list'),
+    })
+
+
+def ai_content_legacy_detail(request, content_id):
+    """Dedicated human page for one legacy assessment."""
+    row = get_object_or_404(AIContent, pk=content_id)
+    items = ai_content_items([row], render_body=False)
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    items[0]['assessment_html'] = render_assessment_markdown(
+        items[0]['assessment'], omit_leading_title=items[0]['title'])
+    return render(request, 'monitor_app/ai_content_detail.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+    })
+
+
+def ai_content_legacy_body(request, content_id):
+    """Lazy report body for an expanded legacy list row."""
+    row = get_object_or_404(AIContent, pk=content_id)
+    items = ai_content_items([row])
+    if not items:
+        return HttpResponse('AI assessment not found.', status=404)
+    return render(request, 'monitor_app/_ai_content_body.html', {
+        'item': items[0],
+        'quality_choices': AI_CONTENT_QUALITY_VALUES,
+        'next_url': request.GET.get('next') or reverse('monitor_app:ai_content_list'),
     })
 
 

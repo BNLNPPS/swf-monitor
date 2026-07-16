@@ -1,10 +1,14 @@
-"""MCP tools for append-only AI assessments in epicprod."""
+"""MCP tools for append-only AI assessments — the platform mechanism.
+
+Registration, retrieval, and corun storage live here; what an assessment
+can be about is domain vocabulary, supplied through the subject-type
+registry below (the mechanism/policy split the action registry uses).
+The epicprod subject types register from ``swf_epicprod.ai_subjects``.
+"""
 
 import logging
-from urllib.parse import urlencode
 
 from asgiref.sync import sync_to_async
-from django.urls import reverse
 
 from ai.assessments import (
     CORUN_ASSESSMENT_SECTION,
@@ -14,34 +18,25 @@ from ai.assessments import (
 from ai.corun_client import CorunAPIError, CorunClient, corun_configured
 from monitor_app.epicprod_logging import log_epicprod_action
 from monitor_app.mcp import mcp
-from monitor_app.mcp.common import _monitor_url
 
 logger = logging.getLogger(__name__)
 
 
-SUBJECT_TYPE_ALIASES = {
-    'campaign_task': 'campaign_task',
-    'ctask': 'campaign_task',
-    'prod_task': 'campaign_task',
-    'prodtask': 'campaign_task',
-    'pcs.prod_task': 'campaign_task',
-    'panda_task': 'panda_task',
-    'ptask': 'panda_task',
-    'jedi_task': 'panda_task',
-    'jedi': 'panda_task',
-    'panda_tasks': 'panda_task',
-    'pcs.panda_tasks': 'panda_task',
-    'panda_job': 'panda_job',
-    'job': 'panda_job',
-    'epicprod_job': 'panda_job',
-    'monitor.epicprod_job': 'panda_job',
-    'panda_queue': 'panda_queue',
-    'queue': 'panda_queue',
-    'site': 'panda_queue',
-    'monitor.panda_queue': 'panda_queue',
-    'campaign': 'campaign',
-    'pcs.campaign': 'campaign',
-}
+# Subject-type registry. A domain registers each assessable subject type
+# once at import; unknown types still register unlinked (no local subject
+# pointer), so the mechanism never gates on the registry's contents.
+SUBJECT_TYPE_ALIASES = {}
+SUBJECT_RESOLVERS = {}
+
+
+def register_subject_type(canonical, resolver, aliases=()):
+    """Register a subject type: ``resolver(subject_key, data)`` returns
+    {target_obj, target_json_field, subject_key, subject_label,
+    subject_url} or raises when the key resolves to no object."""
+    SUBJECT_RESOLVERS[canonical] = resolver
+    SUBJECT_TYPE_ALIASES[canonical] = canonical
+    for alias in aliases:
+        SUBJECT_TYPE_ALIASES[alias] = canonical
 
 
 def _canonical_subject_type(subject_type):
@@ -49,120 +44,10 @@ def _canonical_subject_type(subject_type):
     return SUBJECT_TYPE_ALIASES.get(key, str(subject_type or '').strip())
 
 
-def _url(name, *args, query=None):
-    path = reverse(name, args=args)
-    if query:
-        path = f'{path}?{urlencode(query)}'
-    return _monitor_url(path)
-
-
-def _resolve_prod_task(subject_key):
-    from pcs.models import ProdTask
-    from pcs import services
-
-    qs = ProdTask.objects.select_related('dataset', 'prod_config')
-    task = services.resolve_prodtask(subject_key, queryset=qs)
-    name = task.composed_name
-    return {
-        'target_obj': task,
-        'target_json_field': 'overrides',
-        'subject_key': name,
-        'subject_label': name,
-        'subject_url': _url(
-            'pcs:prod_task_compose',
-            query={'tab': 'tasks', 'selected': name},
-        ),
-    }
-
-
-def _resolve_panda_tasks(subject_key):
-    from pcs.models import PandaTasks
-
-    key = str(subject_key).strip()
-    qs = PandaTasks.objects.select_related('prod_task', 'prod_task__dataset')
-    if key.isdigit():
-        row = qs.filter(jedi_task_id=int(key)).first()
-    else:
-        row = qs.filter(task_name=key).first()
-    if row is None:
-        raise PandaTasks.DoesNotExist(f'No PandaTasks row matches {subject_key!r}')
-    display_key = row.jedi_task_id or row.task_name
-    subject_url = ''
-    if row.jedi_task_id:
-        subject_url = _url('monitor_app:panda_task_detail', row.jedi_task_id)
-    return {
-        'target_obj': row,
-        'target_json_field': 'metadata',
-        'subject_key': str(display_key),
-        'subject_label': row.task_name,
-        'subject_url': subject_url,
-    }
-
-
-def _resolve_epicprod_job(subject_key):
-    from monitor_app.models import EpicProdJob
-
-    pandaid = int(str(subject_key).strip())
-    row = EpicProdJob.objects.get(pandaid=pandaid)
-    return {
-        'target_obj': row,
-        'target_json_field': 'data',
-        'subject_key': str(row.pandaid),
-        'subject_label': f'PanDA job {row.pandaid}',
-        'subject_url': _url('monitor_app:panda_job_detail', row.pandaid),
-    }
-
-
-def _resolve_panda_queue(subject_key, data):
-    from monitor_app.models import PandaQueue
-
-    queue_name = str(subject_key).strip()
-    defaults = {
-        'site': str((data or {}).get('site') or queue_name),
-        'status': str((data or {}).get('status') or 'active'),
-        'queue_type': str((data or {}).get('queue_type') or ''),
-        'config_data': (data or {}).get('config_data') or {},
-    }
-    row, _ = PandaQueue.objects.get_or_create(
-        queue_name=queue_name,
-        defaults=defaults,
-    )
-    return {
-        'target_obj': row,
-        'target_json_field': 'metadata',
-        'subject_key': row.queue_name,
-        'subject_label': row.queue_name,
-        'subject_url': _url('monitor_app:epic_queue_detail', row.queue_name),
-    }
-
-
-def _resolve_campaign(subject_key):
-    from pcs.models import Campaign
-
-    campaign = Campaign.objects.get(name=str(subject_key).strip())
-    return {
-        'target_obj': campaign,
-        'target_json_field': 'data',
-        'subject_key': campaign.name,
-        'subject_label': f'Campaign {campaign.name}',
-        'subject_url': _url(
-            'pcs:pcs_catalog',
-            query={'lifecycle': campaign.lifecycle},
-        ),
-    }
-
-
 def _resolve_subject(subject_type, subject_key, data):
-    if subject_type == 'campaign_task':
-        return _resolve_prod_task(subject_key)
-    if subject_type == 'panda_task':
-        return _resolve_panda_tasks(subject_key)
-    if subject_type == 'panda_job':
-        return _resolve_epicprod_job(subject_key)
-    if subject_type == 'panda_queue':
-        return _resolve_panda_queue(subject_key, data)
-    if subject_type == 'campaign':
-        return _resolve_campaign(subject_key)
+    resolver = SUBJECT_RESOLVERS.get(subject_type)
+    if resolver is not None:
+        return resolver(subject_key, data)
     return {
         'target_obj': None,
         'target_json_field': '',
@@ -181,6 +66,7 @@ def _register_ai_assessment_sync(
     subject_label,
     subject_url,
     data,
+    title='',
 ):
     canonical_type = _canonical_subject_type(subject_type)
     if not canonical_type:
@@ -222,6 +108,8 @@ def _register_ai_assessment_sync(
     username_value = str(username or 'mcp').strip() or 'mcp'
     ai_value = str(ai or 'unknown').strip() or 'unknown'
     assessment_text = str(assessment).strip()
+    report_title = (str(title).strip()
+                    or f"AI assessment: {canonical_type} {resolved['subject_key']}")
     linked = bool(resolved.get('target_obj') and resolved.get('target_json_field'))
     page_data = {
         **payload_data,
@@ -237,9 +125,10 @@ def _register_ai_assessment_sync(
         'ai': ai_value,
     }
     try:
-        page = CorunClient().create_page(
+        client = CorunClient()
+        page = client.create_page(
             section=CORUN_ASSESSMENT_SECTION,
-            title=f"AI assessment: {canonical_type} {resolved['subject_key']}",
+            title=report_title,
             content=assessment_text,
             data=page_data,
             tags=[
@@ -278,16 +167,26 @@ def _register_ai_assessment_sync(
             resolved['target_json_field'],
             page_group_id,
         )
+    # A non-ok verdict raises the record to the live stream, so an
+    # assessment calling for attention reaches operators without any
+    # additional machinery (EPICPROD_ASSESSMENTS.md § Architecture).
+    verdict = str(payload_data.get('verdict') or '').strip().lower()
     log_epicprod_action(
         'mcp', 'assessment_register',
         subject_type=canonical_type,
         subject_key=resolved['subject_key'],
         username=username_value,
         outcome='ok',
-        sublevel='normal',
+        sublevel='high' if verdict not in ('', 'ok') else 'normal',
         live_default=True,
         linked=linked,
         corun_page_group_id=page_group_id,
+        report_title=report_title,
+        report_path=(f'/ai/assessments/{page_group_id}/'
+                     if page_group_id else ''),
+        assessment_kind=str(payload_data.get('assessment_kind') or ''),
+        narration=str(payload_data.get('narration') or '')[:600],
+        **({'verdict': verdict} if verdict else {}),
     )
     return {
         'success': True,

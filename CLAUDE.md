@@ -100,9 +100,36 @@ One role → one treatment, everywhere (all `btn-sm`, solid variants):
 | Stateful toggles ONLY (fill = on/off) | `btn-outline-*` | Catalog/Progress switch |
 
 Outline is never the default reflex — anything that acts is solid, colored
-by role. For editing large documents in-page, use the base-template
-utility `swfFitEditor(el)` (or class `swf-fit-editor` on the textarea) so
-the editor grows to the visible window.
+by role.
+
+## House UI helpers (base template)
+
+Shared page utilities live at the bottom of `src/templates/base.html` and
+are available on every page. Use these — never reimplement them in a
+page template:
+
+- **Relative time**: give any element
+  `data-relative-time="<ISO timestamp>"` and its text renders and ticks
+  every second as `just now` / `Ns ago` / `Nm ago` / `Nh ago` / `Nd ago`
+  (`window.swfFormatElapsed` is the formatter).
+- **Editor fit**: `swfFitEditor(el)` (or class `swf-fit-editor` on the
+  textarea) grows an in-page document editor to the visible window.
+- **AI attribution**: `.ai-attr` / `.ai-attr-text` (purple-on-lavender
+  chip) and `.ai-fill` (lavender container) mark AI-origin content; the
+  classes are defined in the base template's style block.
+- **Sortable tables**: DataTables is loaded globally in `base.html`
+  and is the house table widget. Big list pages use the
+  `_datatable_base` / `_datatable_dynamic_base` templates (ajax);
+  static server-rendered tables get class `swf-sortable`, which the
+  base template initializes as a chrome-free DataTable (sort headers
+  only, no paging/search). Table columns are sortable by default
+  everywhere; a non-sortable table is the special case and needs
+  Torre's say-so. Static tables use the house table classes
+  (`table table-striped table-bordered table-sm align-middle w-auto`).
+- **Status cells**: state values render with the BigMon fill classes
+  via `{% load swf_fmt %}` and
+  `<td class="{{ value|state_class }}">{{ value }}</td>` (or
+  `task_badge`/`job_badge` for badge form). Never a bare status cell.
 
 ## Deploy
 

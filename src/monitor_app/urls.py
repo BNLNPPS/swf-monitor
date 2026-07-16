@@ -59,6 +59,10 @@ from .views import (
     mcp_health,
     panda_hub, prod_hub, testbed_hub,
     ai_content_list,
+    ai_content_detail,
+    ai_content_body,
+    ai_content_legacy_detail,
+    ai_content_legacy_body,
     ai_content_set_quality,
 )
 
@@ -74,6 +78,8 @@ from .viewdir.panda_database import (
 # Import PanDA production monitor views
 from .viewdir.pandamon import (
     panda_activity,
+    compute_usage,
+    compute_usage_data,
     panda_jobs_list,
     panda_jobs_datatable_ajax,
     panda_jobs_filter_counts,
@@ -101,6 +107,7 @@ from .viewdir.system_status import (
 )
 
 # Import iDDS database views from new dedicated module
+from .viewdir.analysis import analysis_view
 from .viewdir.idds_database import (
     idds_database_tables_list,
     idds_database_tables_datatable_ajax,
@@ -206,6 +213,7 @@ urlpatterns = [
 
     # System State
     path('persistent-state/', persistent_state_view, name='persistent_state'),
+    path('analysis/', analysis_view, name='analysis'),
     path('panda/system/', system_status_page, name='system_status'),
     path('panda/system/status.json', system_status_json, name='system_status_json'),
     path('panda/system/refresh/', system_status_refresh, name='system_status_refresh'),
@@ -233,7 +241,18 @@ urlpatterns = [
     # PanDA Hub
     path('panda/', panda_hub, name='panda_hub'),
     path('prod/', prod_hub, name='prod_hub'),
+    path('compute-usage/', compute_usage, name='compute_usage'),
+    path('compute-usage/data/', compute_usage_data,
+         name='compute_usage_data'),
     path('ai/assessments/', ai_content_list, name='ai_content_list'),
+    path('ai/assessments/legacy/<int:content_id>/', ai_content_legacy_detail,
+         name='ai_content_legacy_detail'),
+    path('ai/assessments/legacy/<int:content_id>/body/',
+         ai_content_legacy_body, name='ai_content_legacy_body'),
+    path('ai/assessments/<uuid:page_group_id>/', ai_content_detail,
+         name='ai_content_detail'),
+    path('ai/assessments/<uuid:page_group_id>/body/', ai_content_body,
+         name='ai_content_body'),
     path('ai/assessments/<int:content_id>/quality/', ai_content_set_quality, name='ai_content_set_quality'),
     path('testbed/', testbed_hub, name='testbed_hub'),
 

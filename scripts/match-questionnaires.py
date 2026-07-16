@@ -19,8 +19,10 @@ accepted (removable in the UI), low lands as suggested (visible on the
 request page, never counted).
 
 Each new match logs a questionnaire_match_found action-stream event
-(normal, live) — new matches are events. The run summary is printed as
-JSON for the calling agent handler.
+(normal, recorded but not live). The live channel gets exactly one line
+per run with new matches — a questionnaire_new_matches summary event
+whose record page lists every new match with confidence and reason. The
+run summary is printed as JSON for the calling agent handler.
 
 Rescanning is event-driven, never habitual: an LLM's second answer to the
 same question differs from its first, so re-asking unchanged questions
@@ -34,18 +36,29 @@ deliberate re-pass). A night with no changes makes no LLM call and emits
 no events. --all forces a full rescan; --dry-run proposes without writing;
 --limit N bounds the scan (testing). Requests are batched CHUNK per call —
 one model, educated once with the map, serves the whole batch.
+
+The delegate runs through the Claude Code CLI (``claude -p``) under the
+account's subscription login — never the metered API. The API key is
+stripped from the call environment so a misconfigured CLI cannot fall back
+to per-token billing: this automated path exhausted the monthly API budget
+once (2026-07-15) and must not be able to again.
 """
 import argparse
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 
 MODEL = os.environ.get('EPICPROD_MATCHER_MODEL', 'claude-opus-4-8')
 STATE_KEY = 'epicprod_automatch_last_task_id'
 MATCHED_BY = 'automatch'
 CHUNK = 25
-MAX_TOKENS = 8192
+CLAUDE_BIN = os.environ.get('EPICPROD_MATCHER_CLAUDE') or (
+    shutil.which('claude') or os.path.expanduser('~/.local/bin/claude'))
+# Per delegate call; 4 chunk calls must fit the agent handler's 1800s budget.
+CALL_TIMEOUT = 420
 # Bump with ANY change to SYSTEM_PROMPT or the request/catalog presentation:
 # a changed matcher is a changed question, and every questionnaire earns one
 # deliberate re-pass against it.
@@ -196,6 +209,27 @@ def build_requests_block(chunk, existing_names_by_id):
     return "\n".join(lines)
 
 
+def call_delegate(prompt):
+    """One subscription-billed delegate call via the Claude Code CLI.
+
+    Tools and setting sources are disabled — this is a pure text
+    completion, and the account's Claude Code hooks/config must not fire.
+    A non-zero exit or timeout raises: the script fails loudly and the
+    agent handler logs the error to the action stream.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if k not in ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')}
+    cmd = [CLAUDE_BIN, '-p', '--model', MODEL,
+           '--system-prompt', SYSTEM_PROMPT,
+           '--tools', '', '--setting-sources', '']
+    p = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                       timeout=CALL_TIMEOUT, env=env)
+    if p.returncode != 0:
+        raise RuntimeError(
+            f"claude -p failed rc={p.returncode}: {(p.stderr or '')[:500]}")
+    return p.stdout or ''
+
+
 def parse_batch(text):
     start, end = text.find('['), text.rfind(']')
     if start < 0 or end <= start:
@@ -221,7 +255,6 @@ def main():
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "swf_monitor_project.settings")
     import django
     django.setup()
-    import anthropic
     from django.utils import timezone
     from monitor_app.epicprod_logging import log_epicprod_action
     from monitor_app.models import PersistentState
@@ -270,25 +303,22 @@ def main():
     if args.limit > 0:
         scan = scan[:args.limit]
 
-    client = anthropic.Anthropic()
     summary = {"scanned": len(scan), "skipped_unchanged": skipped_unchanged,
                "llm_calls": 0, "new_matches": 0,
                "accepted": 0, "suggested": 0, "unknown_names": 0,
                "beam_rejected": 0, "beam_unverified_demoted": 0,
-               "model": MODEL, "prompt_version": PROMPT_VERSION,
+               "model": MODEL, "transport": "claude-cli-subscription",
+               "prompt_version": PROMPT_VERSION,
                "dry_run": bool(args.dry_run)}
+    run_added = []
 
     for i in range(0, len(scan), CHUNK):
         chunk = scan[i:i + CHUNK]
         by_pk = {q.pk: q for q in chunk}
         prompt = "\n\n".join([tag_map, catalog,
                               build_requests_block(chunk, names_by_id)])
-        response = client.messages.create(
-            model=MODEL, max_tokens=MAX_TOKENS, system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}])
+        reply = call_delegate(prompt)
         summary["llm_calls"] += 1
-        reply = ''.join(b.text for b in (response.content or [])
-                        if getattr(b, 'type', '') == 'text')
 
         for entry in parse_batch(reply):
             q = by_pk.get(int(entry['request_id'])) if str(
@@ -345,13 +375,14 @@ def main():
                 data['prod_matches'] = existing
                 q.data = data
                 q.save(update_fields=['data', 'updated_at'])
+                run_added.extend((q.pk, record) for record in added)
                 for record in added:
                     log_epicprod_action(
                         'ops-agent', 'questionnaire_match_found',
                         subject_type='campaign_task',
                         subject_key=record['task_name'],
                         username=args.created_by,
-                        sublevel='normal', live_default=True,
+                        sublevel='normal', live_default=False,
                         questionnaire=q.pk, confidence=record['confidence'],
                         match_status=record['status'],
                         summary=f"request #{q.pk} ({record['confidence']}): "
@@ -375,6 +406,24 @@ def main():
                 }
                 q.data = data
                 q.save(update_fields=['data', 'updated_at'])
+
+    if run_added:
+        # The one live line for the whole run; its record page lists every
+        # new match (multi-line message renders in the record's pre block).
+        one_line = (f"{summary['new_matches']} new matches "
+                    f"({summary['accepted']} accepted, "
+                    f"{summary['suggested']} suggested) "
+                    f"from {summary['scanned']} requests scanned")
+        detail = [one_line] + [
+            f"request #{qpk} -> {r['task_name']} "
+            f"({r['confidence']}, {r['status']}): {r['reason']}"
+            for qpk, r in run_added]
+        log_epicprod_action(
+            'ops-agent', 'questionnaire_new_matches',
+            username=args.created_by,
+            sublevel='normal', live_default=True,
+            message="\n".join(detail), summary=one_line,
+            requests_matched=len({qpk for qpk, _ in run_added}))
 
     if not args.dry_run:
         PersistentState.update_state({STATE_KEY: max_task_id})

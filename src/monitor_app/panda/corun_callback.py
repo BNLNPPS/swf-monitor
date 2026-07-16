@@ -1,4 +1,6 @@
-"""corun job notification callback endpoint for DISpatcher Mattermost notices."""
+"""corun job notification callback endpoint: DISpatcher Mattermost notices,
+and dispatch of campaign-assessment completions to the prod-ops agent's
+enforcement handler (swf-epicprod docs/EPICPROD_ASSESSMENTS_V1.md)."""
 
 import json
 import logging
@@ -85,7 +87,7 @@ def _message_from_payload(payload):
 @csrf_exempt
 @require_POST
 def corun_callback(request):
-    """Receive corun terminal-job callbacks and post them to the bot channel."""
+    """Receive corun terminal-job callbacks and post visible results."""
     try:
         if int(request.META.get('CONTENT_LENGTH') or 0) > 8192:
             return JsonResponse({'error': 'payload too large'}, status=413)
@@ -103,6 +105,44 @@ def corun_callback(request):
     status = payload.get('status')
     if status not in {'completed', 'failed', 'cancelled'}:
         return JsonResponse({'error': 'ignored non-terminal status'}, status=400)
+
+    # Campaign-assessment completions dispatch to the prod-ops agent's
+    # enforcement handler before anything else — a Mattermost failure must
+    # never cost an assessment slot.
+    dispatched = _dispatch_assessment(payload)
+
+    # Assessment runs are machine artifacts end to end: their result pages are
+    # UI-hidden and their human notice is the registration action relayed to
+    # epicprod-live. A raw completion notice would duplicate it. An assessment
+    # job whose dispatch failed still falls through — with the ops queue
+    # unreachable, the bot notice is the remaining visibility.
+    if dispatched:
+        logger.info(
+            "Suppressed Mattermost notice for dispatched assessment job %s "
+            "status=%s",
+            payload.get('job_id'), status,
+        )
+        return JsonResponse({
+            'ok': True,
+            'assessment_dispatched': True,
+            'mattermost_notified': False,
+        })
+
+    # Hidden result pages are internal machine artifacts. Their callbacks must
+    # still drive assessment enforcement above, but must not become human bot
+    # notices. Missing visibility metadata keeps the established behavior for
+    # older corun senders and ordinary jobs.
+    if payload.get('result_page_ui_visible') is False:
+        logger.info(
+            "Suppressed Mattermost notice for ui-hidden corun result job %s "
+            "status=%s",
+            payload.get('job_id'), status,
+        )
+        return JsonResponse({
+            'ok': True,
+            'assessment_dispatched': dispatched,
+            'mattermost_notified': False,
+        })
 
     try:
         driver = _mattermost_driver()
@@ -123,4 +163,46 @@ def corun_callback(request):
         "Posted corun callback notice for job %s status=%s",
         payload.get('job_id'), status,
     )
-    return JsonResponse({'ok': True})
+    return JsonResponse({
+        'ok': True,
+        'assessment_dispatched': dispatched,
+        'mattermost_notified': True,
+    })
+
+
+def _dispatch_assessment(payload):
+    """Queue assessment enforcement for a campaign_assessment job. Returns
+    whether a dispatch happened; a failure is logged to the action stream —
+    a slot that never fills must be visible, not silent."""
+    # Matches campaign_assessment_daily / _weekly (one definition per
+    # kind, each with its own system prompt; legacy _nightly also matches).
+    definition_name = str(payload.get('definition_name') or '')
+    if not definition_name.startswith(
+            config('CORUN_ASSESSMENT_DEFINITION_NAME',
+                   default='campaign_assessment')):
+        return False
+    message = {
+        'msg_type': 'assessment_completed',
+        'namespace': 'prodops',
+        'job_id': str(payload.get('job_id') or ''),
+        'prompt_group_id': str(payload.get('prompt_group_id') or ''),
+        'page_group_id': str(payload.get('result_page_group_id') or ''),
+        'status': str(payload.get('status') or ''),
+        'timing': payload.get('timing'),
+    }
+    try:
+        from monitor_app.activemq_connection import ActiveMQConnectionManager
+        sent = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(message))
+        if not sent:
+            raise RuntimeError('ops-agent queue unreachable')
+        return True
+    except Exception as exc:
+        logger.exception("assessment_completed dispatch failed")
+        from monitor_app.epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'assessment_enforce', outcome='error', sublevel='high',
+            live_default=True,
+            message=f"assessment_completed dispatch failed for job "
+                    f"{message['job_id']}: {exc}")
+        return False

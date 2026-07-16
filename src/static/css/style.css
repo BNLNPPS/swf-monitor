@@ -98,14 +98,21 @@ th {
 .ai-assessment-text {
     overflow-wrap: anywhere;
 }
+/* Word-integrity floor for table columns: anywhere lets auto-layout crush
+   narrow columns to fragments; break-word keeps the longest word as the
+   column minimum while still breaking oversized tokens (DIDs) in-cell. */
+.ai-assessment-text table td,
+.ai-assessment-text table th {
+    overflow-wrap: break-word;
+}
 .ai-assessment-text h1 {
-    font-size: 1.1rem;
+    font-size: 1.25rem;
 }
 .ai-assessment-text h2 {
-    font-size: 1rem;
+    font-size: 1.15rem;
 }
 .ai-assessment-text h3 {
-    font-size: 0.95rem;
+    font-size: 1.1rem;
 }
 .ai-assessment-text h4,
 .ai-assessment-text h5,
@@ -114,11 +121,21 @@ th {
 }
 .ai-assessment-text h1,
 .ai-assessment-text h2,
-.ai-assessment-text h3,
+.ai-assessment-text h3 {
+    font-weight: 700;
+    margin: 1rem 0 0.35rem;
+    line-height: 1.25;
+}
+.ai-assessment-text h3 {
+    background-color: #e7f1fb;
+    padding: 0.4rem 0.6rem;
+    border-radius: 0.25rem;
+}
 .ai-assessment-text h4,
 .ai-assessment-text h5,
 .ai-assessment-text h6 {
-    margin: 0.45rem 0 0.25rem;
+    font-weight: 700;
+    margin: 0.7rem 0 0.25rem;
     line-height: 1.25;
 }
 .ai-assessment-text p,

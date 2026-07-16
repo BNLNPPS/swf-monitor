@@ -21,7 +21,9 @@ class CorunAPIError(RuntimeError):
 
 
 def corun_base_url():
-    return str(config('CORUN_BASE_URL', default='https://epic-devcloud.org/doc') or '').rstrip('/')
+    from monitor_app.models import EXTERNAL_FACE_DEFAULT
+    return str(config('CORUN_BASE_URL',
+                      default=EXTERNAL_FACE_DEFAULT + '/doc') or '').rstrip('/')
 
 
 def corun_api_token():
@@ -99,14 +101,20 @@ class CorunClient:
 
     def create_version(self, group_id, *, content, title='', status='draft',
                        data=None, tags=None):
-        """New version of an existing page — corun-ai's correction path."""
-        return self._request('POST', f'pages/{group_id}/versions/', payload={
-            'content': content,
-            'title': title,
-            'status': status,
-            'data': data or {},
-            'tags': tags or [],
-        })
+        """New version of an existing page — corun-ai's correction path.
+
+        corun inherits the prior version's data/title and merges supplied
+        keys (explicit null removes); omit what you don't mean to change —
+        an empty value sent explicitly would overwrite inherited metadata.
+        """
+        payload = {'content': content, 'status': status}
+        if title:
+            payload['title'] = title
+        if data is not None:
+            payload['data'] = data
+        if tags is not None:
+            payload['tags'] = tags
+        return self._request('POST', f'pages/{group_id}/versions/', payload=payload)
 
     def list_versions(self, group_id):
         return self._request('GET', f'pages/{group_id}/versions/')
@@ -116,6 +124,24 @@ class CorunClient:
 
     def list_pages(self, **filters):
         return self._request('GET', 'pages/', query=filters)
+
+    def list_all_pages(self, **filters):
+        """Return every matching Page across the corun paginated API."""
+        items = []
+        offset = 0
+        while True:
+            payload = self.list_pages(
+                **filters,
+                limit=500,
+                offset=offset,
+            )
+            batch = payload.get('items', []) if isinstance(payload, dict) else payload
+            batch = batch if isinstance(batch, list) else []
+            items.extend(batch)
+            count = payload.get('count') if isinstance(payload, dict) else None
+            if not batch or (isinstance(count, int) and len(items) >= count):
+                return items
+            offset += len(batch)
 
     def list_comments(self, group_id):
         return self._request('GET', f'pages/{group_id}/comments/')

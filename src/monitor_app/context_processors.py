@@ -1,5 +1,6 @@
 """Global template context for lightweight monitor state."""
 
+from .models import external_face_base_url
 from .system_status import status_summary
 
 
@@ -241,10 +242,21 @@ def _active_nav(request):
             'panda_diagnostics_list',
             'panda_diagnostics_datatable_ajax',
         },
+        'sites': namespace == 'monitor_app' and url_name in {
+            'compute_usage',
+            'compute_usage_data',
+            'epic_queues_list',
+            'epic_queue_detail',
+        },
+        'compute_usage': namespace == 'monitor_app' and url_name in {
+            'compute_usage',
+            'compute_usage_data',
+        },
         'panda_queues': namespace == 'monitor_app' and url_name in {
             'epic_queues_list',
             'epic_queue_detail',
         },
+        'analysis': namespace == 'monitor_app' and url_name == 'analysis',
         'ai_content': namespace == 'monitor_app' and url_name == 'ai_content_list',
         'alarms': namespace == 'monitor_app' and url_name in alarm_names,
         'panda_database': namespace == 'monitor_app' and url_name in panda_database_names,
@@ -266,4 +278,5 @@ def system_status_nav(request):
         'system_status_overall': summary.get('overall_status', 'unknown'),
         'system_status_reason': summary.get('overall_reason', ''),
         'system_status_latest_checked_at': summary.get('latest_checked_at'),
+        'external_face_base_url': external_face_base_url(),
     }

@@ -19,6 +19,10 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
     <link rel="stylesheet" href="{% static 'css/state-colors.css' %}">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
@@ -218,6 +222,9 @@
       .nav-panda-label {
         margin-left: 1.5em;
       }
+      .nav-analysis {
+        margin-left: 1.5em;
+      }
       .nav-system-error { color: #ff8174 !important; font-weight: 700; }
       /* One-click copy icon for IDs — see swf_fmt.copy_btn template tag */
       .copy-btn {
@@ -392,6 +399,8 @@
         </span>
 
         {# ── Production mode ── #}
+        {# SYNC OBLIGATION: swf-remote renders its own copy of this production nav (swf-remote src/templates/base.html) for its natively served pages. #}
+        {# Any change to this nav block must be mirrored there — notify/hand off to the devcloud (ec2dev) side with every nav change. #}
         <span class="nav-mode nav-production">
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.requests %} nav-active{% endif %}">Requests</button>
@@ -441,7 +450,14 @@
         <a href="{% url 'monitor_app:log_list' %}?app_name=epicprod" class="{% if active_nav.logs %}nav-active{% endif %}">Logs</a>
         <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
         <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
-        <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">Queues</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.sites %} nav-active{% endif %}">Sites</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site usage</a>
+                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
+            </div>
+        </div>
+        <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if active_nav.analysis %} nav-active{% endif %}">Analysis</a>
         </span>
         <span class="nav-spacer"></span>
         <div class="dropdown">
@@ -463,7 +479,7 @@
         </div>
         <div class="nav-auth">
             {% if user.is_authenticated %}
-                <a href="{% url 'monitor_app:account' %}" class="{% if active_nav.account %}nav-active{% endif %}">Account</a>
+                <a href="{% url 'monitor_app:account' %}" class="{% if active_nav.account %}nav-active{% endif %}">{{ user.username }}</a>
                 <form method="post" action="{% url 'logout' %}" style="display:inline;margin:0;">{% csrf_token %}<button type="submit" style="background:none;border:none;color:inherit;cursor:pointer;padding:0;font:inherit;">Logout</button></form>
             {% else %}
                 <a href="{% url 'login' %}?next={{ request.get_full_path|urlencode }}">Login</a>
@@ -478,8 +494,8 @@
             <a href="https://pandaserver02.sdcc.bnl.gov/swf-monitor{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
                target="_blank" rel="noopener">Go to page at pandaserver02</a> &middot;
             {% else %}
-            <a href="https://epic-devcloud.org/prod{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
-               target="_blank" rel="noopener">Go to page at epic-devcloud.org</a> &middot;
+            <a href="{{ external_face_base_url }}/prod{{ request.path_info }}{% if request.META.QUERY_STRING %}?{{ request.META.QUERY_STRING }}{% endif %}"
+               target="_blank" rel="noopener">Go to page at {{ external_face_base_url|cut:"https://" }}</a> &middot;
             {% endif %}
             Built at {% now "Ymd H:i:s" %} {% now "T" %}
         </div>
@@ -588,6 +604,42 @@ function applyNavMode(mode) {
         if (e.target.matches && e.target.matches('textarea.swf-fit-editor')) {
           window.swfFitEditor(e.target);
         }
+      });
+
+      /* The app-wide relative-time ticker: give any element
+         data-relative-time="<ISO timestamp>" and its text renders and
+         ticks as 'just now' / 'Ns ago' / 'Nm ago' / 'Nh ago' / 'Nd ago'. */
+      window.swfFormatElapsed = function (seconds) {
+        if (seconds < 5) return 'just now';
+        if (seconds < 60) return seconds + 's ago';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return minutes + 'm ago';
+        const hours = Math.floor(minutes / 60);
+        if (hours < 48) return hours + 'h ago';
+        return Math.floor(hours / 24) + 'd ago';
+      };
+      (function () {
+        function tick() {
+          const now = Date.now();
+          document.querySelectorAll('[data-relative-time]').forEach(function (el) {
+            const ts = Date.parse(el.getAttribute('data-relative-time'));
+            if (Number.isNaN(ts)) return;
+            el.textContent = window.swfFormatElapsed(
+              Math.max(0, Math.floor((now - ts) / 1000)));
+          });
+        }
+        tick();
+        setInterval(tick, 1000);
+      })();
+      // House sortable tables: every <table class="swf-sortable"> gets
+      // DataTables click-to-sort headers (the globally loaded house table
+      // widget), without paging/search chrome. Columns are sortable by
+      // default across the app; opting out is the special case. See
+      // CLAUDE.md, House UI helpers.
+      $(function () {
+        $('table.swf-sortable').DataTable({
+          paging: false, searching: false, info: false, order: []
+        });
       });
     </script>
 </body>

@@ -1,121 +1,109 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
-{% block title %}Account Management{% endblock %}
+{% block title %}{{ user.username }}{% endblock %}
 
 {% block content %}
 <style>
-    .account-container {
-        display: flex;
-        margin-top: 20px;
+    .user-tabs { margin: 14px 0 .4rem 0; }
+    .user-tabs a {
+        border-bottom: 2px solid transparent;
+        color: #3d85c6;
+        font-weight: 600;
+        margin-right: 1.1rem;
+        padding-bottom: 2px;
+        text-decoration: none;
     }
-    .account-nav {
-        width: 200px;
-        border-right: 1px solid #ddd;
-        padding-right: 20px;
+    .user-tabs a.active { border-bottom-color: #3d85c6; color: #111; }
+    .user-tab-panel {
+        padding: 14px 0;
     }
-    .account-nav ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
+    .my-workflows-table {
+        border-collapse: collapse;
     }
-    .account-nav li {
-        padding: 12px 15px;
-        cursor: pointer;
-        border-radius: 5px;
-        margin-bottom: 5px;
+    .my-workflows-table th, .my-workflows-table td {
+        padding: 6px 14px;
+        border-bottom: 1px solid #ddd;
+        text-align: left;
+        white-space: nowrap;
     }
-    .account-nav li:hover {
-        background-color: #f0f0f0;
-    }
-    .account-nav li.active {
-        background-color: #007bff;
-        color: white;
-    }
-    .account-content {
-        padding-left: 20px;
-        flex-grow: 1;
-    }
-    .panel {
-        display: none;
-    }
-    .panel.active {
-        display: block;
+    .my-workflows-table th {
+        border-bottom: 2px solid #999;
     }
 </style>
 
-<div class="container">
-    <h2>Account Management</h2>
-
-    <div class="account-container">
-        <div class="account-nav">
-            <ul>
-                <li class="active" onclick="showPanel(event, 'account')">Account</li>
-                <li onclick="showPanel(event, 'change-password')">Change Password</li>
-            </ul>
-        </div>
-
-        <div class="account-content">
-            <div id="account" class="panel active">
-                <h3>Account Details</h3>
-                <p><strong>Username:</strong> {{ user.username }}</p>
-                <p><strong>Email:</strong> {{ user.email|default:'Not set' }}</p>
-                <p><strong>Roles:</strong>
-                    {% if user.is_superuser %}Superuser{% endif %}
-                    {% if user.is_staff and not user.is_superuser %}Staff{% endif %}
-                    {% if not user.is_superuser and not user.is_staff %}User{% endif %}
-                </p>
-            </div>
-
-            <div id="change-password" class="panel">
-                <h3>Change Password</h3>
-                {% if messages %}
-                    <ul class="messages">
-                        {% for message in messages %}
-                            <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
-                        {% endfor %}
-                    </ul>
-                {% endif %}
-                <form method="post" action="{% url 'monitor_app:account' %}">
-                    {% csrf_token %}
-                    {{ form.as_p }}
-                    <button type="submit">Change Password</button>
-                </form>
-            </div>
-        </div>
+<div>
+    <div class="user-tabs">
+        <a href="?tab=workflows" class="{% if active_tab == 'workflows' %}active{% endif %}">My Workflows</a>
+        <a href="?tab=account" class="{% if active_tab == 'account' %}active{% endif %}">Account</a>
     </div>
+
+    {% if active_tab == 'workflows' %}
+    <div class="user-tab-panel">
+        {% if not user.is_authenticated %}
+        <p>Sign in to see your workflows.</p>
+        {% else %}
+        <p>PanDA tasks for username <strong>{{ panda_username }}</strong>, last 30 days.</p>
+        {% if my_tasks_error %}
+        <p class="error_fill" style="padding: 6px 10px;">PanDA task lookup failed: {{ my_tasks_error }}</p>
+        {% elif my_tasks %}
+        <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+            <thead>
+                <tr><th>Task</th><th>JEDI ID</th><th>Status</th><th>Label</th><th>Created</th><th>Modified</th></tr>
+            </thead>
+            <tbody>
+                {% for t in my_tasks %}
+                <tr>
+                    <td><a href="{% url 'monitor_app:panda_task_detail' t.jeditaskid %}">{{ t.taskname }}</a></td>
+                    <td>{{ t.jeditaskid }}</td>
+                    <td class="{{ t.status|state_class }}">{{ t.status }}</td>
+                    <td>{{ t.prodsourcelabel }}</td>
+                    <td>{{ t.creationdate|date:"Y-m-d H:i" }}</td>
+                    <td>{{ t.modificationtime|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p>No PanDA tasks for <strong>{{ panda_username }}</strong> in the last 30 days.</p>
+        {% endif %}
+        <p style="margin-top: 14px;">
+            <a href="{% url 'monitor_app:panda_tasks_list' %}?username={{ panda_username }}">All tasks for {{ panda_username }} in the PanDA tasks view</a>
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if active_tab == 'account' %}
+    <div class="user-tab-panel">
+        <h3>Account Details</h3>
+        <p><strong>Username:</strong> {{ user.username }}</p>
+        <p><strong>Email:</strong> {{ user.email|default:'Not set' }}</p>
+        <p><strong>Roles:</strong>
+            {% if user.is_superuser %}Superuser{% endif %}
+            {% if user.is_staff and not user.is_superuser %}Staff{% endif %}
+            {% if not user.is_superuser and not user.is_staff %}User{% endif %}
+        </p>
+
+        <h3 style="margin-top: 24px;">Change Password</h3>
+        {% if is_tunnel %}
+        <p><a class="btn btn-primary btn-sm" href="/prod/accounts/password_change/">Change password</a></p>
+        <p>Password changes here apply to your epic-devcloud.org account only and do not propagate upstream.</p>
+        {% else %}
+        {% if messages %}
+            <ul class="messages">
+                {% for message in messages %}
+                    <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <form method="post" action="{% url 'monitor_app:account' %}?tab=account">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit">Change Password</button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
 </div>
-
-<script>
-function showPanel(evt, panelId) {
-    // Hide all panel content
-    document.querySelectorAll('.panel').forEach(panel => panel.classList.remove('active'));
-
-    // Deactivate all nav items
-    document.querySelectorAll('.account-nav li').forEach(nav => nav.classList.remove('active'));
-
-    // Show the selected panel and activate the corresponding nav item
-    document.getElementById(panelId).classList.add('active');
-    if (evt.currentTarget) evt.currentTarget.classList.add('active');
-}
-
-function showInitialPanel(panelId) {
-    const navItem = document.querySelector(`.account-nav li[onclick*="${panelId}"]`);
-    showPanel({currentTarget: navItem}, panelId);
-}
-
-document.addEventListener("DOMContentLoaded", function() {
-    // Check if the password form has errors or success messages
-    const changePasswordPanel = document.getElementById('change-password');
-    const hasErrors = changePasswordPanel.querySelector('.errorlist');
-    const hasMessages = changePasswordPanel.querySelector('.messages');
-
-    if (hasErrors || hasMessages) {
-        // If so, show the 'Change Password' panel by default
-        showInitialPanel('change-password');
-    } else {
-        // Otherwise, show the 'Account' panel
-        showInitialPanel('account');
-    }
-});
-</script>
 {% endblock %}

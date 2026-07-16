@@ -335,34 +335,44 @@ async def panda_resource_usage(
     site: str = None,
     username: str = None,
     taskid: int = None,
+    start_time: str = None,
+    end_time: str = None,
+    bucket: str = None,
 ) -> dict:
     """
     Aggregate resource usage (core-hours) for finished PanDA jobs.
 
     Reports two core-hour metrics:
-    - allocated_core_hours: cores reserved × wall time (what the facility charges)
+    - allocated_core_hours: cores allocated × wall time
     - used_core_hours: CPU time actually consumed by the job
 
     The gap between allocated and used reflects efficiency — e.g. a job that
     requests 1 core but gets 2 allocated uses ~50% of its allocation.
 
     Only counts finished jobs with actual runtime (starttime and endtime set).
-    Queue/waiting time is excluded.
+    Jobs are attributed by endtime; queue/waiting time is excluded.
 
     Args:
-        days: Time window in days (default 30).
+        days: Time window in days ending at end_time (default 30). Used when
+              start_time is not supplied.
         site: Filter by computing site (computingsite). Supports SQL LIKE with %.
               Example: 'NERSC_Perlmutter%' for all Perlmutter queues.
         username: Filter by job owner (produsername). Supports SQL LIKE with %.
         taskid: Filter by JEDI task ID.
+        start_time: Optional ISO-8601 start timestamp, inclusive.
+        end_time: Optional ISO-8601 end timestamp, exclusive. Defaults to now.
+        bucket: Optional time-series bin: 'day' or 'week'.
 
     Returns:
         totals: {job_count, allocated_core_hours, used_core_hours, wall_hours}
         by_site: Breakdown by computing site, sorted by allocated_core_hours.
         by_user: Breakdown by job owner, sorted by allocated_core_hours.
+        series: Site breakdown per day/week when bucket is supplied.
+        window: Exact start, end, bucket, and time field used.
     """
     return await sync_to_async(queries.resource_usage)(
         days=days, site=site, username=username, taskid=taskid,
+        start_time=start_time, end_time=end_time, bucket=bucket,
     )
 
 

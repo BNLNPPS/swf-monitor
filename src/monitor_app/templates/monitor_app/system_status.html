@@ -63,7 +63,7 @@
 
     {% for group in groups %}
         <section class="system-status-section mb-4">
-            <h2 class="h4 mb-3">{% if group.category == 'external' %}Public Web Services{% else %}{{ group.category|title }}{% endif %}</h2>
+            <h2 class="h4 mb-3">{% if group.category == 'external' %}Public Web Services{% elif group.category == 'ci' %}Continuous Integration{% else %}{{ group.category|title }}{% endif %}</h2>
             <div class="system-status-table-wrap">
                 <table class="table table-sm align-middle system-status-table">
                     <thead>
@@ -128,27 +128,5 @@
         {% endif %}
     </section>
 </div>
-<script>
-(function() {
-    function formatElapsed(seconds) {
-        if (seconds < 5) return 'just now';
-        if (seconds < 60) return seconds + 's ago';
-        const minutes = Math.floor(seconds / 60);
-        if (minutes < 60) return minutes + 'm ago';
-        const hours = Math.floor(minutes / 60);
-        if (hours < 48) return hours + 'h ago';
-        return Math.floor(hours / 24) + 'd ago';
-    }
-    function updateRelativeTimes() {
-        const now = Date.now();
-        document.querySelectorAll('[data-relative-time]').forEach(function(el) {
-            const ts = Date.parse(el.getAttribute('data-relative-time'));
-            if (Number.isNaN(ts)) return;
-            el.textContent = formatElapsed(Math.max(0, Math.floor((now - ts) / 1000)));
-        });
-    }
-    updateRelativeTimes();
-    setInterval(updateRelativeTimes, 1000);
-})();
-</script>
+{# Relative times tick via the base-template data-relative-time helper. #}
 {% endblock %}

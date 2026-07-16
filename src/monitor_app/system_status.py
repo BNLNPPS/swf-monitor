@@ -1,6 +1,7 @@
 """Cached system status collection for ePIC production operations."""
 
 import json
+import os
 import socket
 import subprocess
 import urllib.error
@@ -10,11 +11,17 @@ from datetime import timedelta
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
 
-from .models import SystemAgent, SystemStatus, SystemStatusHistory
+from .models import (AIMemory, SystemAgent, SystemStatus,
+                     SystemStatusHistory, external_face_base_url)
 
 
 HISTORY_MIN_INTERVAL = timedelta(hours=6)
 STATUS_STALE_AFTER = timedelta(minutes=15)
+
+# Repos whose GitHub Actions workflows feed the ci status collector.
+GITHUB_REPOS = ['BNLNPPS/swf-monitor', 'BNLNPPS/swf-epicprod',
+                'BNLNPPS/swf-testbed', 'BNLNPPS/swf-common-lib']
+_GH_FAIL_CONCLUSIONS = {'failure', 'startup_failure', 'timed_out'}
 
 
 def _status(name, category, status, summary, data=None, checked_at=None):
@@ -169,14 +176,102 @@ def _http_endpoint(name, url):
     return _status(name, 'external', state, f"{url} returned HTTP {data['http_status']}", data)
 
 
+def _github_actions():
+    """Latest completed run of every workflow in the core repos; a failing
+    workflow is an error and reddens the system. Runs only in the agent's
+    cached refresh, never in a page render. GITHUB_TOKEN/GH_TOKEN in the
+    agent environment raises the API rate limit; unauthenticated suffices
+    at the default refresh cadence."""
+    started = timezone.now()
+    token = os.environ.get('GITHUB_TOKEN') or os.environ.get('GH_TOKEN')
+    headers = {'Accept': 'application/vnd.github+json',
+               'User-Agent': 'swf-monitor-system-status'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
+    failing, ok_count, api_errors = [], 0, []
+    for repo in GITHUB_REPOS:
+        url = (f'https://api.github.com/repos/{repo}/actions/runs'
+               f'?status=completed&per_page=30')
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.load(resp)
+        except Exception as exc:
+            api_errors.append(f'{repo}: {exc}')
+            continue
+        latest_by_workflow = {}
+        for run in payload.get('workflow_runs', []):
+            # Only main and the coordinated baselines redden the system;
+            # PR-branch failures are the pull request's concern.
+            branch = run.get('head_branch') or ''
+            if branch != 'main' and not branch.startswith('infra/baseline-'):
+                continue
+            latest_by_workflow.setdefault(run.get('workflow_id'), run)
+        for run in latest_by_workflow.values():
+            if run.get('conclusion') in _GH_FAIL_CONCLUSIONS:
+                failing.append({
+                    'repo': repo,
+                    'workflow': run.get('name') or '',
+                    'branch': run.get('head_branch') or '',
+                    'conclusion': run.get('conclusion') or '',
+                    'url': run.get('html_url') or '',
+                })
+            else:
+                ok_count += 1
+    data = {'failing': failing, 'ok_workflows': ok_count,
+            'repos': GITHUB_REPOS, 'api_errors': api_errors,
+            'elapsed_ms': int((timezone.now() - started).total_seconds() * 1000)}
+    if failing:
+        # Warning, not error: a development CI failure should not redden
+        # the collaboration-facing System indicator.
+        f = failing[0]
+        more = f' (+{len(failing) - 1} more)' if len(failing) > 1 else ''
+        return _status('github-actions', 'ci', 'warning',
+                       f"{f['repo'].split('/')[-1]} / {f['workflow']} failing"
+                       f" on {f['branch']}{more}: {f['url']}", data)
+    if api_errors:
+        return _status('github-actions', 'ci', 'warning',
+                       f'GitHub API unreachable for {len(api_errors)} '
+                       f'repo(s): {api_errors[0]}', data)
+    return _status('github-actions', 'ci', 'ok',
+                   f'latest runs green across {ok_count} workflows in '
+                   f'{len(GITHUB_REPOS)} repos', data)
+
+
+def _bot_usage():
+    """Bot conversation volume from the recorded exchanges — informational,
+    always ok: channel vs DM user turns over the last 7 and 30 days.
+    Aggregate counts only; the page is an open surface, so no per-user
+    detail."""
+    now = timezone.now()
+    base = AIMemory.objects.filter(role='user', session_id='mattermost')
+
+    def split(days):
+        qs = base.filter(created_at__gte=now - timedelta(days=days))
+        return (qs.filter(content__regex=r'^\[[^\]]+ in #').count(),
+                qs.filter(content__regex=r'^\[[^\]]+ in DM\]').count())
+
+    ch7, dm7 = split(7)
+    ch30, dm30 = split(30)
+    data = {'turns_7d': {'channel': ch7, 'dm': dm7},
+            'turns_30d': {'channel': ch30, 'dm': dm30}}
+    return _status('bot-usage', 'agents', 'ok',
+                   f'bot user turns 7d: {ch7} channel, {dm7} DM; '
+                   f'30d: {ch30} channel, {dm30} DM', data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
     'swf-panda-bot': _panda_bot,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
         'swf-monitor-mcp-asgi', 'swf-monitor-mcp-asgi', category='services'),
     'httpd': lambda: _systemctl_unit('httpd', 'httpd', category='services'),
-    'epic-devcloud-prod': lambda: _http_endpoint('epic-devcloud-prod', 'https://epic-devcloud.org/prod/'),
-    'epic-devcloud-doc': lambda: _http_endpoint('epic-devcloud-doc', 'https://epic-devcloud.org/doc/'),
+    'epic-devcloud-prod': lambda: _http_endpoint(
+        'epic-devcloud-prod', f'{external_face_base_url()}/prod/'),
+    'epic-devcloud-doc': lambda: _http_endpoint(
+        'epic-devcloud-doc', f'{external_face_base_url()}/doc/'),
+    'github-actions': _github_actions,
+    'bot-usage': _bot_usage,
 }
 
 

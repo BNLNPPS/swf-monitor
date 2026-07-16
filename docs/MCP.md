@@ -1,7 +1,8 @@
 # Model Context Protocol (MCP) Integration
 
 SWF Monitor exposes a Model Context Protocol (MCP) server for LLM access to
-testbed state, PCS, epicprod, PanDA monitoring, and selected control actions.
+testbed state, PCS, epicprod, PanDA monitoring, the JLab and BNL Rucio
+catalogs, and selected control actions.
 
 | Item | Value |
 |---|---|
@@ -33,6 +34,13 @@ failures from the browser UI and REST API. `MCPRequestGuard` in
 `mcp_asgi.py` handles the transport and bearer-token gate: `/health` is open for
 the watchdog; other requests require POST plus `Authorization: Bearer
 <MCP_BEARER_TOKEN>`.
+
+JLab and BNL Rucio are credentialed locally on swf-testbed and exposed as
+prefixed read-only tools on this same authenticated endpoint. Remote clients do
+not run Rucio or receive the JLab password, BNL X509 proxy, or cached Rucio
+tokens. The bridge mirrors the complete tool surface of the maintained
+`rucio-eic-mcp-server` implementation under `jlab_rucio_*` and
+`bnl_rucio_*` names.
 
 OAuth 2.1/Auth0 wiring remains available for a future remote-access mode. Leave
 `AUTH0_DOMAIN` empty to disable OAuth. Remote MCP access must not be exposed
@@ -95,11 +103,14 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | AI Memory | `swf_record_ai_memory`, `swf_get_ai_memory` | 2 |
 | AI Content | `epic_register_ai_assessment`, `epic_get_ai_content` | 2 |
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
+| Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| **Total** | | **59** |
+| JLab Rucio | `jlab_rucio_*` — scopes, DIDs, metadata, content/files, rules/locks, replicas, RSEs, account usage | 13 |
+| BNL Rucio | `bnl_rucio_*` — scopes, DIDs, metadata, content/files, rules/locks, replicas, RSEs, account usage | 13 |
+| **Total** | | **86** |
 
 ## Implementation Files
 
@@ -114,6 +125,7 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 | `src/monitor_app/mcp/ai_content.py` | epicprod AI-assessment tools. |
 | `src/monitor_app/mcp/ai_proposals.py` | AI proposal listing and human-decision relay (the bot review flow). |
 | `src/monitor_app/mcp/pandamon.py` | PanDA production monitoring tools. |
+| `src/monitor_app/mcp/rucio.py` | Complete JLab and BNL Rucio service bridge; credentials stay local. |
 | `src/monitor_app/auth0.py` | JWT validation with Auth0 JWKS. |
 | `src/monitor_app/middleware.py` | OAuth-related MCP authentication middleware. |
 | `src/swf_monitor_project/settings.py` | MCP server name, instructions, bearer token, and optional Auth0 settings. |
@@ -124,6 +136,11 @@ The full tool catalog is in [MCP tool reference](MCP_TOOL_REFERENCE.md).
 MCP_SERVER_NAME = "swf-testbed"
 MCP_SERVER_INSTRUCTIONS = """..."""
 MCP_BEARER_TOKEN = config("MCP_BEARER_TOKEN", default="")
+
+RUCIO_MCP_MODULE_PATH = config("RUCIO_MCP_MODULE_PATH", ...)
+RUCIO_JLAB_URL = config("RUCIO_JLAB_URL", ...)
+RUCIO_BNL_URL = config("RUCIO_BNL_URL", ...)
+RUCIO_BNL_X509_PROXY = config("RUCIO_BNL_X509_PROXY", ...)
 
 AUTH0_DOMAIN = config("AUTH0_DOMAIN", default="")
 AUTH0_CLIENT_ID = config("AUTH0_CLIENT_ID", default="")

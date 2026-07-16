@@ -37,6 +37,9 @@ Capabilities:
                        (delegates to scripts/import_evgen_rucio.py --apply).
   campaign_progress_refresh — rebuild current campaign progress data and its
                        rendered progress table cache.
+  assessment_completed — enforce and register a finished campaign-assessment
+                       run (corun callback → validation, floor, registration;
+                       swf-epicprod docs/EPICPROD_ASSESSMENTS_V1.md).
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        increase allowed attempts or retry failed work.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
@@ -123,6 +126,7 @@ QUESTIONNAIRE_AUTOMATCH_TIMEOUT = int(os.environ.get("EPICPROD_AUTOMATCH_TIMEOUT
 QUESTIONNAIRE_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_QUESTIONNAIRE_IMPORT_TIMEOUT", "120"))
 CAMPAIGN_PROGRESS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "refresh-campaign-progress.py"
 CAMPAIGN_PROGRESS_TIMEOUT = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_TIMEOUT", "300"))
+ASSESSMENT_ENFORCE_TIMEOUT = int(os.environ.get("EPICPROD_ASSESSMENT_ENFORCE_TIMEOUT", "300"))
 CAMPAIGN_PROGRESS_MIN_INTERVAL = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_MIN_INTERVAL", "300"))
 
 # EVGEN-input assimilation doer: a live JLab Rucio fetch of epic:/EVGEN/* plus
@@ -169,6 +173,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "questionnaire_automatch",
                    "sync_epicprod_inventory", "refresh_system_status",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
+                   "assessment_completed",
                    "health_ping", "shutdown"}
 
     def __init__(self):
@@ -830,9 +835,11 @@ class EpicProdOpsAgent(BaseAgent):
                              live_default=True, level=logging.ERROR)
         else:
             self.logger.info("PRODOPS questionnaire_automatch done")
+            # Recorded, not live: the run's one channel line is the script's
+            # questionnaire_new_matches summary event.
             self._log_action('questionnaire_automatch', t0,
                              username=created_by, sublevel='normal',
-                             live_default=True,
+                             live_default=False,
                              summary=(out.splitlines()[-1] if out else ''))
 
     def _handle_catalog_sync(self, m):
@@ -850,6 +857,7 @@ class EpicProdOpsAgent(BaseAgent):
         created_by = str(m.get('created_by') or 'catalog_sync')
         t0 = time.monotonic()
         steps = [
+            ('credential_expiry_check', self._do_credential_expiry_check),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -858,6 +866,7 @@ class EpicProdOpsAgent(BaseAgent):
             ('rucio_snapshot_update', self._do_rucio_snapshot_update),
             ('rucio_arrivals_sweep', self._do_rucio_arrivals_sweep),
             ('evgen_rucio_update', self._do_evgen_rucio_update),
+            ('dataset_definitions_sweep', self._do_dataset_definitions_sweep),
             ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
@@ -877,6 +886,92 @@ class EpicProdOpsAgent(BaseAgent):
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
             steps=len(steps), raised=failed)
+
+    def _do_credential_expiry_check(self, m):
+        """Nightly credential-expiry check (catalog_sync chain step): runs
+        the swf_epicprod checker over the PanDA OIDC token and the two x509
+        proxies. A credential inside the warning window, expired, missing,
+        or unverifiable raises the record to the live stream — automation
+        that dies with a credential must not die silently."""
+        t0 = time.monotonic()
+        cmd = [sys.executable, '-m', 'swf_epicprod.credential_check']
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            self._log_action('credential_expiry_check', t0, outcome='timeout',
+                             reason='timed out after 60s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            pass
+        creds = summary.get('credentials', [])
+        days = {c['credential']: c.get('days_left') for c in creds}
+        reason = '; '.join(
+            f"{c['credential']}: {c['status']}"
+            + (f" ({c['days_left']}d left)" if 'days_left' in c else '')
+            for c in creds if c.get('status') != 'ok')
+        if p.returncode == 0:
+            self._log_action('credential_expiry_check', t0,
+                             username=str(m.get('created_by') or ''),
+                             days_left=days)
+        elif p.returncode == 3:
+            self._log_action('credential_expiry_check', t0, outcome='warning',
+                             reason=reason or 'credential inside warning window',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.WARNING, days_left=days)
+        else:
+            self._log_action('credential_expiry_check', t0, outcome='error',
+                             reason=reason or self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, days_left=days)
+
+    def _do_dataset_definitions_sweep(self, m):
+        """Assimilate the simulation_campaign_datasets definitions
+        (catalog_sync chain step): inventory, CI cost model, background
+        configs, and the defined/requested/registered completeness
+        populations. Runs after the EVGEN Rucio assimilation, whose
+        snapshot it matches against."""
+        t0 = time.monotonic()
+        cmd = [sys.executable, '-m', 'pcs.definitions_sweep', '--apply',
+               '--created-by', str(m.get('created_by') or 'prodops_agent')]
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=900)
+        except subprocess.TimeoutExpired:
+            self._log_action('dataset_definitions_sweep', t0,
+                             outcome='timeout',
+                             reason='timed out after 900s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            pass
+        counts = {k: summary.get(k) for k in
+                  ('definitions', 'with_cost', 'cost_absent',
+                   'datasets_matched', 'applied')}
+        counts['sweep_errors'] = len(summary.get('errors') or [])
+        counts.update(summary.get('populations') or {})
+        if p.returncode != 0:
+            self._log_action('dataset_definitions_sweep', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, **counts)
+        else:
+            self._log_action('dataset_definitions_sweep', t0,
+                             username=str(m.get('created_by') or ''),
+                             **counts)
 
     def _handle_rucio_snapshot_update(self, m):
         """Refresh the JLab Rucio snapshot + rematch outputs, off the receiver
@@ -1232,6 +1327,48 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'campaign_progress_ready', 'ok': True,
                 'summary': summary})
             self._log_action('progress_refresh', t0, username=str(created_by))
+
+    def _handle_assessment_completed(self, m):
+        job_id = str(m.get('job_id') or '')
+        if not job_id:
+            self.logger.warning("PRODOPS assessment_completed: no job_id, dropping")
+            return
+        self.run_in_background(
+            self._do_assessment_enforce, m,
+            dedup_key=f"assessment_enforce:{job_id}",
+            label="assessment_enforce")
+
+    def _do_assessment_enforce(self, m):
+        cmd = [
+            sys.executable, "-m", "swf_epicprod.assessment.enforce",
+            "--job-id", str(m.get('job_id') or ''),
+            "--prompt-group-id", str(m.get('prompt_group_id') or ''),
+            "--page-group-id", str(m.get('page_group_id') or ''),
+            "--status", str(m.get('status') or ''),
+            "--timing", str(m.get('timing') or ''),
+        ]
+        self.logger.info(f"PRODOPS assessment_enforce: job {m.get('job_id')}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=ASSESSMENT_ENFORCE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self._log_action('assessment_enforce', t0, outcome='timeout',
+                             reason=f'timed out after {ASSESSMENT_ENFORCE_TIMEOUT}s',
+                             sublevel='high', level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  assessment-enforce: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  assessment-enforce: {line}")
+        if p.returncode != 0:
+            # The doer logs its own detailed outcomes; this catches a doer
+            # that died before it could.
+            self._log_action('assessment_enforce', t0, outcome='error',
+                             reason=self._derive_reason(p), sublevel='high',
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS assessment_enforce done")
 
     # -- action stream --------------------------------------------------------
 

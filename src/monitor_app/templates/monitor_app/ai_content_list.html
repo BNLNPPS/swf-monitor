@@ -119,61 +119,35 @@
     {% for item in items %}
     <details class="ai-assessment-entry border border-secondary border-3 mb-2">
     <summary>
-        <span>
+        {% if item.title %}
+        <span><strong>
+            <a href="{{ item.detail_url }}" onclick="event.stopPropagation()">{{ item.title }}</a>
+        </strong></span>
+        {% endif %}
+        {% if item.verdict %}
+        <span class="badge {% if item.verdict == 'alarm' %}bg-danger{% elif item.verdict == 'attention' %}bg-warning text-dark{% elif item.verdict == 'ok' %}bg-success{% else %}bg-secondary{% endif %}">{{ item.verdict }}</span>
+        {% endif %}
+        {% if item.assessment_kind %}
+        <span class="badge bg-secondary">{{ item.assessment_kind }}</span>
+        {% endif %}
+        <span{% if item.title %} class="text-muted"{% endif %}>
             <strong>{{ item.subject_kind }}:</strong>
             {% if item.subject_url %}
             <a href="{{ item.subject_url }}">{{ item.subject_id }}</a>
-            {% if item.subject_name and item.subject_name != item.subject_id %}
+            {% if not item.title and item.subject_name and item.subject_name != item.subject_id %}
             <a href="{{ item.subject_url }}" class="ms-3">{{ item.subject_name }}</a>
             {% endif %}
             {% else %}
-            {{ item.subject_id }}{% if item.subject_name and item.subject_name != item.subject_id %}<span class="ms-3">{{ item.subject_name }}</span>{% endif %}
+            {{ item.subject_id }}{% if not item.title and item.subject_name and item.subject_name != item.subject_id %}<span class="ms-3">{{ item.subject_name }}</span>{% endif %}
             {% endif %}
         </span>
         <span><strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}</span>
         <span class="text-muted">{{ item.ai }} &middot; {{ item.username }} &middot; {{ item.created_display }}</span>
     </summary>
-    <table class="table table-sm mb-0">
-        <tbody>
-            <tr class="ai-assessment-header table-light">
-                <td colspan="4">
-                    {% if request.user.is_authenticated and item.storage == 'legacy' %}
-                    <form method="post" action="{% url 'monitor_app:ai_content_set_quality' item.id %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
-                        <div class="row g-2 align-items-start">
-                            <div class="col-md-2">
-                                <label class="form-label mb-1">Quality</label>
-                                <select class="form-select form-select-sm" name="quality"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>
-                                    <option value="" {% if not item.quality %}selected{% endif %}>unreviewed</option>
-                                    {% for choice in quality_choices %}
-                                    <option value="{{ choice }}" {% if item.quality == choice %}selected{% endif %}>{{ choice }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-9">
-                                <label class="form-label mb-1">Comment</label>
-                                <textarea class="form-control form-control-sm{% if is_tunnel %} bg-light text-muted{% endif %}" name="comment" rows="3"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>{{ item.comment }}</textarea>
-                            </div>
-                            <div class="col-md-1">
-                                <label class="form-label mb-1">&nbsp;</label>
-                                <button class="btn btn-sm {% if is_tunnel %}btn-secondary disabled{% else %}btn-primary{% endif %} w-100" type="{% if is_tunnel %}button{% else %}submit{% endif %}"{% if is_tunnel %} disabled title="Quality setting and comment entry are available on pandaserver02"{% endif %}>Save</button>
-                            </div>
-                        </div>
-                    </form>
-                    {% elif item.comment %}
-                    <strong>Comment:</strong>
-                    <div class="mt-1" style="white-space: pre-wrap;">{{ item.comment }}</div>
-                    {% endif %}
-                </td>
-            </tr>
-            <tr>
-                <td colspan="4">
-                    <div class="ai-assessment-text">{{ item.assessment_html }}</div>
-                </td>
-            </tr>
-        </tbody>
-    </table>
+    <div class="ai-assessment-lazy-body p-3 text-muted"
+         data-body-url="{{ item.body_url }}?next={{ request.get_full_path|urlencode }}">
+        Open to load assessment.
+    </div>
     </details>
     {% endfor %}
 
@@ -195,6 +169,24 @@
 <script>
 (function () {
   const all = () => document.querySelectorAll('details.ai-assessment-entry');
+  const load = (details) => {
+    if (!details.open) return;
+    const body = details.querySelector('.ai-assessment-lazy-body');
+    if (!body || body.dataset.loaded === '1') return;
+    body.dataset.loaded = '1';
+    body.textContent = 'Loading assessment…';
+    fetch(body.dataset.bodyUrl, {credentials: 'same-origin'})
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.text();
+      })
+      .then(html => { body.outerHTML = html; })
+      .catch(error => {
+        body.dataset.loaded = '0';
+        body.textContent = `Assessment could not be loaded (${error.message}).`;
+      });
+  };
+  all().forEach(details => details.addEventListener('toggle', () => load(details)));
   const openAll = document.getElementById('assess-open-all');
   const closeAll = document.getElementById('assess-close-all');
   if (openAll) openAll.addEventListener('click', () => all().forEach(d => d.open = true));

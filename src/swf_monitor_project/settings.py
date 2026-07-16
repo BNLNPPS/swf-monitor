@@ -45,6 +45,27 @@ for _k in ("X509_USER_PROXY", "RUCIO_ACCOUNT", "RUCIO_HOST", "RUCIO_AUTH_HOST"):
     if _v:
         os.environ[_k] = _v
 
+# Two read-only Rucio catalog instances are exposed through the authenticated
+# SWF MCP endpoint. The implementation and all credentials remain on
+# swf-testbed; remote clients never receive the BNL proxy or JLab password.
+RUCIO_MCP_MODULE_PATH = config(
+    'RUCIO_MCP_MODULE_PATH',
+    default='/data/wenauseic/github/rucio-eic-mcp-server/rucio_eic_mcp_server.py')
+RUCIO_JLAB_URL = config('RUCIO_JLAB_URL', default='https://rucio-server.jlab.org:443')
+RUCIO_JLAB_ACCOUNT = config('RUCIO_JLAB_ACCOUNT', default='eicread')
+RUCIO_JLAB_USERNAME = config('RUCIO_JLAB_USERNAME', default='eicread')
+RUCIO_JLAB_PASSWORD = config('RUCIO_JLAB_PASSWORD', default='eicread')
+RUCIO_JLAB_TOKEN_FILE = config(
+    'RUCIO_JLAB_TOKEN_FILE', default='/tmp/rucio_eic_jlab_swf_mcp_token.txt')
+RUCIO_BNL_URL = config('RUCIO_BNL_URL', default='https://nprucio01.sdcc.bnl.gov:443')
+RUCIO_BNL_ACCOUNT = config('RUCIO_BNL_ACCOUNT', default='panda')
+RUCIO_BNL_VO = config('RUCIO_BNL_VO', default='eic')
+RUCIO_BNL_X509_PROXY = config(
+    'RUCIO_BNL_X509_PROXY', default=config('X509_USER_PROXY', default=''))
+RUCIO_BNL_CA_BUNDLE = config('RUCIO_BNL_CA_BUNDLE', default='')
+RUCIO_BNL_TOKEN_FILE = config(
+    'RUCIO_BNL_TOKEN_FILE', default='/tmp/rucio_eic_bnl_swf_mcp_token.txt')
+
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
@@ -320,6 +341,10 @@ COMMON QUERIES:
 - Queue config? → panda_get_queue(panda_queue='NERSC_Perlmutter_epic')
 - Core-hours this month? → panda_resource_usage(days=30)
 - Core-hours on Perlmutter? → panda_resource_usage(days=30, site='NERSC_Perlmutter%')
+- Find JLab science data for a campaign? → jlab_rucio_list_dids(scope='epic', name='*26.06.0*', type='DATASET')
+- Inspect a JLab science dataset? → jlab_rucio_get_did_metadata(scope='epic', name='/RECO/...') then jlab_rucio_list_files(...)
+- Find BNL PanDA output or log datasets? → bnl_rucio_list_dids(scope='group.EIC', name='*26.06.0*', type='DATASET')
+- Diagnose BNL registration or replication? → bnl_rucio_get_did_metadata(...), bnl_rucio_list_rules(...), then bnl_rucio_get_rule_locks(...)
 - What is PCS? → PCS = Physics Configuration System, manages configuration of production tasks based on physics inputs
 - List physics tags? → pcs_list_tags(tag_type='p')
 - What is tag p1001? → pcs_get_tag(tag_label='p1001')
@@ -366,6 +391,18 @@ organized as tags — named parameter sets for each pipeline stage:
 Physics tags are grouped by category: DIS (p1xxx), DVCS (p2xxx), SIDIS (p3xxx), EXCLUSIVE (p4xxx).
 Tags are draft (editable) or locked (immutable, for production use).
 
+RUCIO CATALOGS:
+- jlab_rucio_* is the JLab science-data catalog. Start in scope 'epic'; ePIC
+  datasets commonly have path-like names under /RECO and /SIMU. Use it to
+  establish actual science content, metadata, files, rules, and placement.
+- bnl_rucio_* is the BNL PanDA production catalog. Start in scope 'group.EIC'.
+  Use it to diagnose output and log registration, replicas, rules, locks, and
+  storage state behind PanDA production problems.
+- The catalogs are independent evidence layers. Do not expect their DID names
+  or counts to agree, and do not treat one empty query as proof of absence.
+- All exposed Rucio operations are read-only. Credentials and the BNL proxy
+  remain on swf-testbed and are never returned to MCP clients.
+
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.
 Report progress to user as it evolves. Check swf_list_logs(level='ERROR') after.
@@ -404,7 +441,8 @@ SWF_TMP_DIR = config('SWF_TMP_DIR', default='/data/swf-tmp')
 EPICPROD_MAX_FETCH_ATTEMPTS = config('EPICPROD_MAX_FETCH_ATTEMPTS', default=3, cast=int)
 
 # Channel layer settings
-# Use Redis in production if REDIS_URL is set; otherwise fall back to in-memory (single process only)
+# Use Redis in production if REDIS_URL is set; otherwise fall back to a
+# file-based cache under SWF_TMP_DIR (single host only)
 _REDIS_URL_FILE_VALUE = _env_file_value('REDIS_URL')
 REDIS_URL = (
     _REDIS_URL_FILE_VALUE

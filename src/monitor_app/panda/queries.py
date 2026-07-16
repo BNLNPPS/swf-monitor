@@ -8,9 +8,10 @@ directly. Callers in async contexts should wrap with sync_to_async.
 import logging
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from urllib.parse import unquote
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.db import connections
 
 from .constants import (
@@ -1297,17 +1298,44 @@ def get_queue(panda_queue):
     return {"queue": config}
 
 
-def resource_usage(days=30, site=None, username=None, taskid=None):
+def resource_usage(days=30, site=None, username=None, taskid=None,
+                   start_time=None, end_time=None, bucket=None,
+                   series_rollup=False):
     """Aggregate resource usage for finished jobs.
 
     Reports two core-hour metrics:
-    - allocated: actualcorecount × wall time (cores reserved by the facility)
+    - allocated: actualcorecount × wall time (cores allocated to the job)
     - used: cpuconsumptiontime (CPU time the job actually consumed)
 
     Only counts jobs that actually ran: jobstatus='finished' with both
     starttime and endtime set. Pre-running queue time is excluded.
     """
-    cutoff = timezone.now() - timedelta(days=days)
+    def _time(value, label):
+        if value in (None, ''):
+            return None
+        parsed = value if isinstance(value, datetime) else parse_datetime(str(value))
+        if parsed is None:
+            raise ValueError(f'{label} must be an ISO-8601 timestamp')
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+        return parsed
+
+    explicit_start = start_time not in (None, '')
+    try:
+        window_end = _time(end_time, 'end_time') or timezone.now()
+        window_start = _time(start_time, 'start_time')
+        if window_start is None:
+            window_start = window_end - timedelta(days=float(days))
+        if window_start >= window_end:
+            raise ValueError('start_time must be before end_time')
+    except (TypeError, ValueError) as exc:
+        return {'error': str(exc)}
+
+    bucket = str(bucket or '').strip().lower()
+    if bucket not in {'', 'day', 'week'}:
+        return {'error': "bucket must be 'day' or 'week'"}
+    if series_rollup and not bucket:
+        return {'error': 'series_rollup requires a day or week bucket'}
     conn = connections['panda']
 
     filters = ''
@@ -1326,13 +1354,14 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
         extra_params.append(taskid)
 
     base_where = (
-        '"modificationtime" >= %s'
+        '"endtime" >= %s'
+        ' AND "endtime" < %s'
         ' AND "jobstatus" = \'finished\''
         ' AND "starttime" IS NOT NULL'
         ' AND "endtime" IS NOT NULL'
         + filters
     )
-    base_params = [cutoff] + extra_params
+    base_params = [window_start, window_end] + extra_params
 
     inner_fields = (
         '"computingsite", "produsername", '
@@ -1369,32 +1398,94 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
             cursor.execute(sql, base_params + base_params)
             return cursor.fetchall()
 
-    def _parse(row, offset=0):
+    def _raw_metrics(row, offset=0):
         return {
-            'job_count': row[offset],
-            'allocated_core_hours': round(float(row[offset + 1]), 1),
-            'used_core_hours': round(float(row[offset + 2]), 1),
-            'wall_hours': round(float(row[offset + 3]), 1),
+            'job_count': int(row[offset] or 0),
+            'allocated_core_hours': float(row[offset + 1]),
+            'used_core_hours': float(row[offset + 2]),
+            'wall_hours': float(row[offset + 3]),
+        }
+
+    def _rounded_metrics(values, precision=1):
+        return {
+            'job_count': values['job_count'],
+            'allocated_core_hours': round(values['allocated_core_hours'], precision),
+            'used_core_hours': round(values['used_core_hours'], precision),
+            'wall_hours': round(values['wall_hours'], precision),
         }
 
     try:
-        rows = _run()
-        totals = _parse(rows[0]) if rows else {
-            'job_count': 0, 'allocated_core_hours': 0,
-            'used_core_hours': 0, 'wall_hours': 0,
-        }
+        series = []
+        series_raw = []
+        if bucket:
+            bucket_timezone = timezone.get_current_timezone_name()
+            sql = f"""
+                SELECT date_trunc(
+                           '{bucket}',
+                           ("endtime" AT TIME ZONE 'UTC') AT TIME ZONE %s
+                       ) AS bucket_start,
+                       "computingsite", {agg_cols}
+                FROM (
+                    SELECT {inner_fields}
+                    FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {base_where}
+                    UNION ALL
+                    SELECT {inner_fields}
+                    FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {base_where}
+                ) combined
+                GROUP BY bucket_start, "computingsite"
+                ORDER BY bucket_start, "computingsite"
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(sql, [bucket_timezone] + base_params + base_params)
+                time_rows = cursor.fetchall()
+            for row in time_rows:
+                raw = _raw_metrics(row, offset=2)
+                entry = _rounded_metrics(raw, precision=4)
+                entry['bucket_start'] = row[0].isoformat()
+                entry['site'] = row[1] or 'unknown'
+                series.append(entry)
+                series_raw.append((entry['site'], raw))
 
-        by_site = []
-        for row in _run('computingsite'):
-            entry = _parse(row, offset=1)
-            entry['site'] = row[0]
-            by_site.append(entry)
+        if series_rollup:
+            metric_names = (
+                'job_count', 'allocated_core_hours',
+                'used_core_hours', 'wall_hours',
+            )
+            totals_raw = {name: 0 for name in metric_names}
+            sites_raw = {}
+            for site_name, values in series_raw:
+                site_values = sites_raw.setdefault(
+                    site_name, {name: 0 for name in metric_names})
+                for name in metric_names:
+                    totals_raw[name] += values[name]
+                    site_values[name] += values[name]
+            totals = _rounded_metrics(totals_raw)
+            by_site = []
+            for site_name, values in sites_raw.items():
+                entry = _rounded_metrics(values)
+                entry['site'] = site_name
+                by_site.append(entry)
+            by_site.sort(
+                key=lambda entry: entry['allocated_core_hours'], reverse=True)
+            by_user = []
+        else:
+            rows = _run()
+            totals = _rounded_metrics(_raw_metrics(rows[0])) if rows else {
+                'job_count': 0, 'allocated_core_hours': 0,
+                'used_core_hours': 0, 'wall_hours': 0,
+            }
 
-        by_user = []
-        for row in _run('produsername'):
-            entry = _parse(row, offset=1)
-            entry['user'] = row[0]
-            by_user.append(entry)
+            by_site = []
+            for row in _run('computingsite'):
+                entry = _rounded_metrics(_raw_metrics(row, offset=1))
+                entry['site'] = row[0] or 'unknown'
+                by_site.append(entry)
+
+            by_user = []
+            for row in _run('produsername'):
+                entry = _rounded_metrics(_raw_metrics(row, offset=1))
+                entry['user'] = row[0]
+                by_user.append(entry)
 
     except Exception as e:
         logger.error(f"resource_usage query failed: {e}")
@@ -1404,11 +1495,23 @@ def resource_usage(days=30, site=None, username=None, taskid=None):
         "totals": totals,
         "by_site": by_site,
         "by_user": by_user,
+        "series": series,
+        "window": {
+            "start_time": window_start.isoformat(),
+            "end_time": window_end.isoformat(),
+            "bucket": bucket or None,
+            "bucket_timezone": (timezone.get_current_timezone_name()
+                                if bucket else None),
+            "time_field": "endtime",
+        },
         "filters": {
-            "days": days,
+            "days": None if explicit_start else days,
             "site": site,
             "username": username,
             "taskid": taskid,
+            "start_time": window_start.isoformat(),
+            "end_time": window_end.isoformat(),
+            "bucket": bucket or None,
         },
     }
 
