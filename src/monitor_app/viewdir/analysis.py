@@ -10,7 +10,7 @@ from django.core.cache import cache
 from django.db import connections
 from django.shortcuts import render
 
-from ..models import PandaQueue
+from ..panda import list_queues
 
 WEATHER_CACHE_KEY = 'analysis_weather_v1'
 WEATHER_CACHE_TTL = 3600  # seconds; hourly refresh is ample for a 14-day window
@@ -18,11 +18,11 @@ WEATHER_WINDOW_DAYS = 14
 
 
 def _analysis_queues():
-    """Unified queues from the local schedconfig registry — the queues
-    that serve both production and analysis job classes."""
-    return list(
-        PandaQueue.objects.filter(queue_type='unified')
-        .values('queue_name', 'site', 'status', 'queue_type'))
+    """Unified queues from live PanDA schedconfig (the source the EIC
+    queues page uses) — the queues serving both job classes."""
+    result = list_queues(vo='eic')
+    return [q for q in result.get('queues', [])
+            if q.get('type') == 'unified']
 
 
 def _analysis_activity(limit=100):

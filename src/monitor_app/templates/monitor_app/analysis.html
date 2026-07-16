@@ -47,10 +47,10 @@
             <tbody>
                 {% for q in queues %}
                 <tr>
-                    <td><a href="{% url 'monitor_app:epic_queue_detail' q.queue_name %}">{{ q.queue_name }}</a></td>
-                    <td>{{ q.site }}</td>
+                    <td><a href="{% url 'monitor_app:epic_queue_detail' q.panda_queue %}">{{ q.panda_queue }}</a></td>
+                    <td>{{ q.atlas_site }}</td>
                     <td class="{{ q.status|state_class }}">{{ q.status }}</td>
-                    <td>{{ q.queue_type }}</td>
+                    <td>{{ q.type }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
