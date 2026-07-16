@@ -624,6 +624,20 @@ This means:
 - Development and production use the same Python packages and versions
 - Your development environment remains unchanged and accessible
 
+## Migration Epoch
+
+The migration history of the project's own applications (`monitor_app`,
+`ai`, `pcs`) was reset on 2026-07-15: each app carries a single
+`0001_initial` matching the models as of that date, and `swfdb` records
+them as applied (faked; the prior 75 history rows are preserved in
+`django_migrations_bak_20260715`). A fresh installation creates the
+current schema in one migration per app; nothing replays historical
+schema evolution. The same reset procedure applies if the history ever
+warrants collapsing again: back up `django_migrations`, delete the
+apps' migration files and rows, `makemigrations`, `migrate --fake`,
+and verify a scratch-database migration from zero matches the live
+schema.
+
 ## Support and Documentation
 
 - **Main Documentation**: [swf-monitor README](../README.md)
