@@ -54,31 +54,37 @@
   <text x="750" y="352" font-size="19" font-weight="bold" fill="#5b21b6" text-anchor="middle">MCP — the AI backplane</text>
 
   <!-- ===== taps: backplane to AI consumers ===== -->
-  <line x1="250" y1="370" x2="250" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
-  <line x1="590" y1="370" x2="590" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
-  <line x1="930" y1="370" x2="930" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
-  <line x1="1260" y1="370" x2="1260" y2="430" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="7,5"/>
+  <line x1="182" y1="370" x2="182" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
+  <line x1="466" y1="370" x2="466" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
+  <line x1="750" y1="370" x2="750" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
+  <line x1="1034" y1="370" x2="1034" y2="430" stroke="#7c3aed" stroke-width="2.5"/>
+  <line x1="1318" y1="370" x2="1318" y2="430" stroke="#7c3aed" stroke-width="2.5" stroke-dasharray="7,5"/>
 
   <!-- ===== AI consumers ===== -->
-  <rect x="100" y="430" width="300" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
-  <text x="250" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">AI assistants</text>
-  <text x="250" y="492" font-size="14" fill="#1f2937" text-anchor="middle">interactive sessions with experts:</text>
-  <text x="250" y="512" font-size="14" fill="#1f2937" text-anchor="middle">operations, development, analysis</text>
+  <rect x="52" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="182" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">AI assistants</text>
+  <text x="182" y="492" font-size="14" fill="#1f2937" text-anchor="middle">interactive expert sessions:</text>
+  <text x="182" y="512" font-size="14" fill="#1f2937" text-anchor="middle">operations, development, analysis</text>
 
-  <rect x="440" y="430" width="300" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
-  <text x="590" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">DISpatcher bot</text>
-  <text x="590" y="492" font-size="14" fill="#1f2937" text-anchor="middle">collaboration chat interface</text>
-  <text x="590" y="512" font-size="14" fill="#1f2937" text-anchor="middle">to the full tool surface</text>
+  <rect x="336" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="466" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">DISpatcher bot</text>
+  <text x="466" y="492" font-size="14" fill="#1f2937" text-anchor="middle">collaboration chat interface</text>
+  <text x="466" y="512" font-size="14" fill="#1f2937" text-anchor="middle">to the full tool surface</text>
 
-  <rect x="780" y="430" width="300" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
-  <text x="930" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">Autonomous agents</text>
-  <text x="930" y="492" font-size="14" fill="#1f2937" text-anchor="middle">assessments, daily reports,</text>
-  <text x="930" y="512" font-size="14" fill="#1f2937" text-anchor="middle">human-gated proposals</text>
+  <rect x="620" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="750" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">Autonomous agents</text>
+  <text x="750" y="492" font-size="14" fill="#1f2937" text-anchor="middle">assessments, daily reports,</text>
+  <text x="750" y="512" font-size="14" fill="#1f2937" text-anchor="middle">human-gated proposals</text>
 
-  <rect x="1120" y="430" width="280" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
-  <text x="1260" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">Validation, control room AI</text>
-  <text x="1260" y="492" font-size="14" fill="#1f2937" text-anchor="middle">data/detector evaluation,</text>
-  <text x="1260" y="512" font-size="14" fill="#1f2937" text-anchor="middle">anomaly detection, ops assistance</text>
+  <rect x="904" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1034" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">AI analytics</text>
+  <text x="1034" y="492" font-size="14" fill="#1f2937" text-anchor="middle">corun-ai — extended</text>
+  <text x="1034" y="512" font-size="14" fill="#1f2937" text-anchor="middle">harnessed-LLM research runs</text>
+
+  <rect x="1188" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
+  <text x="1318" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">Validation, control room AI</text>
+  <text x="1318" y="492" font-size="14" fill="#1f2937" text-anchor="middle">data/detector evaluation,</text>
+  <text x="1318" y="512" font-size="14" fill="#1f2937" text-anchor="middle">anomaly detection, ops assistance</text>
 
   <!-- ===== legend and source ===== -->
   <text x="750" y="580" font-size="15" fill="#333333" text-anchor="middle">Solid connections are deployed and in use; dashed are planned or in discussion.</text>
