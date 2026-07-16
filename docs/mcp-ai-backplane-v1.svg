@@ -68,12 +68,12 @@
 
   <rect x="336" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
   <text x="466" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">DISpatcher bot</text>
-  <text x="466" y="492" font-size="14" fill="#1f2937" text-anchor="middle">collaboration chat interface</text>
+  <text x="466" y="492" font-size="14" fill="#1f2937" text-anchor="middle">Mattermost chat interface</text>
   <text x="466" y="512" font-size="14" fill="#1f2937" text-anchor="middle">to the full tool surface</text>
 
   <rect x="620" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
   <text x="750" y="465" font-size="16" font-weight="bold" fill="#5b21b6" text-anchor="middle">AI analytics</text>
-  <text x="750" y="492" font-size="14" fill="#1f2937" text-anchor="middle">corun-ai extended LLM runs:</text>
+  <text x="750" y="492" font-size="14" fill="#1f2937" text-anchor="middle">extended LLM runs (corun-ai):</text>
   <text x="750" y="512" font-size="14" fill="#1f2937" text-anchor="middle">analytics, assessments, reports</text>
 
   <rect x="904" y="430" width="260" height="105" rx="10" fill="#ede9fe" stroke="#7c3aed" stroke-width="2"/>
