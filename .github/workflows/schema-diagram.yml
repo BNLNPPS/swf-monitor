@@ -1,39 +1,37 @@
 name: Generate Schema Diagram
 
+# Regenerate testbed-schema.dbml on every main push; the commit step is
+# the change test — the generator's timestamp line is stripped, so an
+# unchanged schema produces no diff and no commit.
 on:
   push:
-    paths:
-      - 'src/monitor_app/models.py'
-      - 'src/mcp_app/models.py'
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   generate-schema:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
+    - uses: actions/checkout@v4
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install --no-cache-dir -r requirements.txt
-        # swf-epicprod (pcs app) installs into the venv as a deliberate
-        # local step in dev/deploy; CI takes the current main from git.
-        pip install --no-cache-dir git+https://github.com/BNLNPPS/swf-epicprod
-    
-    - name: Debug environment
-      run: |
-        echo "Current commit SHA: ${{ github.sha }}"
-        echo "DJANGO_LOGGING_MODE will be set to: none"
-        cd src
-        python -c "import os; print(f'Python sees DJANGO_LOGGING_MODE={os.getenv(\"DJANGO_LOGGING_MODE\", \"NOT SET\")}')"
-    
+        # INSTALLED_APPS packages that ship outside requirements.txt
+        # (same set the Dockerfile installs), and the sibling repos:
+        # swf-common-lib and swf-epicprod (the pcs application).
+        pip install --no-cache-dir django-oauth-toolkit django-mcp-server uvicorn
+        pip install --no-cache-dir \
+          git+https://github.com/BNLNPPS/swf-common-lib.git \
+          git+https://github.com/BNLNPPS/swf-epicprod.git
+
     - name: Generate DBML schema
       env:
         SECRET_KEY: 'github-actions-dummy-key-for-schema-generation'
@@ -47,17 +45,18 @@ jobs:
         # creatable on the GitHub runner. Applies to the runner VM only.
         SWF_TMP_DIR: '/tmp/swf-tmp'
       run: |
-        echo "DJANGO_LOGGING_MODE=$DJANGO_LOGGING_MODE"
-        cd src
-        python manage.py dbml > ../testbed-schema.dbml
-    
+        # The wrapper works around django-dbml's KeyError on index
+        # fields declared with a descending prefix.
+        python scripts/generate-schema-dbml.py > testbed-schema.dbml
+        sed -i '/Last Updated At/d' testbed-schema.dbml
+
     - name: Commit schema if changed
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add testbed-schema.dbml
         git diff --staged --quiet || git commit -m "Update database schema diagram"
-    
+
     - name: Push changes
       uses: ad-m/github-push-action@master
       with:
