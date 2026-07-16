@@ -1,6 +1,6 @@
-Project "None" {
+Project "Django DBML" {
   database_type: 'PostgreSQL'
-  Note: '''None
+  Note: '''Generated from Django models.
 }
 
 enum admin.positive_small_integer_logentry_action_flag {
@@ -208,6 +208,7 @@ enum oauth2_provider.char_application_algorithm {
 
 enum oauth2_provider.char_application_authorization_grant_type {
   "authorization-code" [note: '''Authorization code''']
+  "urn:ietf:params:oauth:grant-type:device_code" [note: '''Device Code''']
   "implicit" [note: '''Implicit''']
   "password" [note: '''Resource owner password-based''']
   "client-credentials" [note: '''Client credentials''']
@@ -217,6 +218,13 @@ enum oauth2_provider.char_application_authorization_grant_type {
 enum oauth2_provider.char_application_client_type {
   "confidential" [note: '''Confidential''']
   "public" [note: '''Public''']
+}
+
+enum oauth2_provider.char_devicegrant_status {
+  "authorized" [note: '''Authorized''']
+  "authorization-pending" [note: '''Authorization pending''']
+  "expired" [note: '''Expired''']
+  "denied" [note: '''Denied''']
 }
 
 enum oauth2_provider.char_grant_code_challenge_method {
@@ -266,21 +274,17 @@ Table admin.LogEntry {
   Note: '''
 LogEntry(id, action_time, user, content_type, object_id, object_repr, action_flag, change_message)
 
-*DB table: django_admin_log*'''
+*table: public.django_admin_log*'''
 
-  id auto [pk, unique, not null]
-  action_time date_time [default:`django.utils.timezone.now()`, not null]
-  user_id foreign_key [not null]
-  content_type_id foreign_key [null]
-  object_id text [null]
-  object_repr char [not null]
-  action_flag admin.positive_small_integer_logentry_action_flag [not null]
-  change_message text [not null]
+  id auto [note: '''*ID*''', pk, unique, not null]
+  action_time date_time [note: '''*action time*''', default:`django.utils.timezone.now()`, not null]
+  object_id text [note: '''*object id*''', null]
+  object_repr char [note: '''*object repr*''', not null]
+  action_flag admin.positive_small_integer_logentry_action_flag [note: '''*action flag*''', not null]
+  change_message text [note: '''*change message*''', not null]
 
   indexes {
-    (content_type_id) [name: 'django_admin_log_content_type_id_c4bce8eb', type: btree]
     (id) [pk, unique, name: 'django_admin_log_pkey', type: btree]
-    (user_id) [name: 'django_admin_log_user_id_c564eba6', type: btree]
   }
 }
 ref: admin.LogEntry.user_id > auth.User.id
@@ -301,32 +305,32 @@ render projection in their metadata, written and cleared by the same
 services that write these rows; this table is the truth.
 
 
-*DB table: ai_proposal*'''
+*table: public.ai_proposal*'''
 
-  id big_auto [pk, unique, not null]
-  action char [not null]
-  subject_type char [not null]
-  subject_key char [not null]
-  counterpart_key char [default:`""`, not null]
-  payload json [default:`builtins.dict()`, not null]
-  comment text [not null]
-  confidence char [default:`""`, not null]
-  proposer char [not null]
-  scan_version integer [default:`1`, not null]
-  batch_id char [default:`""`, not null]
-  executor ai.char_proposal_executor [default:`"service"`, not null]
-  precondition json [default:`builtins.dict()`, not null]
-  input_hash char [not null]
-  status ai.char_proposal_status [default:`"proposed"`, not null]
-  quality ai.char_proposal_quality [default:`""`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  decided_by char [default:`""`, not null]
-  decided_at date_time [null]
-  executed_log_id big_integer [null]
-  undone_by char [default:`""`, not null]
-  undone_at date_time [null]
-  undone_log_id big_integer [null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  action char [note: '''*action*''', not null]
+  subject_type char [note: '''*subject type*''', not null]
+  subject_key char [note: '''*subject key*''', not null]
+  counterpart_key char [note: '''*counterpart key*''', default:`""`, not null]
+  payload json [note: '''*payload*''', default:`builtins.dict()`, not null]
+  comment text [note: '''*comment*''', not null]
+  confidence char [note: '''*confidence*''', default:`""`, not null]
+  proposer char [note: '''*proposer*''', not null]
+  scan_version integer [note: '''*scan version*''', default:`1`, not null]
+  batch_id char [note: '''*batch id*''', default:`""`, not null]
+  executor ai.char_proposal_executor [note: '''*executor*''', default:`"service"`, not null]
+  precondition json [note: '''*precondition*''', default:`builtins.dict()`, not null]
+  input_hash char [note: '''*input hash*''', not null]
+  status ai.char_proposal_status [note: '''*status*''', default:`"proposed"`, not null]
+  quality ai.char_proposal_quality [note: '''*quality*''', default:`""`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  decided_by char [note: '''*decided by*''', default:`""`, not null]
+  decided_at date_time [note: '''*decided at*''', null]
+  executed_log_id big_integer [note: '''*executed log id*''', null]
+  undone_by char [note: '''*undone by*''', default:`""`, not null]
+  undone_at date_time [note: '''*undone at*''', null]
+  undone_log_id big_integer [note: '''*undone log id*''', null]
 
   indexes {
     (action,subject_key,status) [name: 'ai_proposal_action_76dc26_idx', type: btree]
@@ -357,10 +361,10 @@ members-only portion of your site, or sending them members-only email
 messages.
 
 
-*DB table: auth_group*'''
+*table: public.auth_group*'''
 
-  id auto [pk, unique, not null]
-  name char [unique, not null]
+  id auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''*name*''', unique, not null]
 
   indexes {
     (name) [unique, name: 'auth_group_name_key', type: btree]
@@ -393,15 +397,13 @@ certain status or publication date."
 The permissions listed above are automatically created for each model.
 
 
-*DB table: auth_permission*'''
+*table: public.auth_permission*'''
 
-  id auto [pk, unique, not null]
-  name char [not null]
-  content_type_id foreign_key [not null]
-  codename char [not null]
+  id auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''*name*''', not null]
+  codename char [note: '''*codename*''', not null]
 
   indexes {
-    (content_type_id) [name: 'auth_permission_content_type_id_2f476e4b', type: btree]
     (content_type_id,codename) [unique, name: 'auth_permission_content_type_id_codename_01ab375a_uniq', type: btree]
     (id) [pk, unique, name: 'auth_permission_pkey', type: btree]
   }
@@ -417,19 +419,27 @@ model.
 Username and password are required. Other fields are optional.
 
 
-*DB table: auth_user*'''
+*table: public.auth_user*'''
 
-  id auto [pk, unique, not null]
-  password char [not null]
-  last_login date_time [null]
-  is_superuser boolean [note: '''Designates that this user has all permissions without explicitly assigning them.''', default:`False`, not null]
-  username char [note: '''Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.''', unique, not null]
-  first_name char [not null]
-  last_name char [not null]
-  email email [not null]
-  is_staff boolean [note: '''Designates whether the user can log into this admin site.''', default:`False`, not null]
-  is_active boolean [note: '''Designates whether this user should be treated as active. Unselect this instead of deleting accounts.''', default:`True`, not null]
-  date_joined date_time [default:`django.utils.timezone.now()`, not null]
+  id auto [note: '''*ID*''', pk, unique, not null]
+  password char [note: '''*password*''', not null]
+  last_login date_time [note: '''*last login*''', null]
+  is_superuser boolean [note: '''
+*superuser status*
+Designates that this user has all permissions without explicitly assigning them.''', default:`False`, not null]
+  username char [note: '''
+*username*
+Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only.''', unique, not null]
+  first_name char [note: '''*first name*''', not null]
+  last_name char [note: '''*last name*''', not null]
+  email email [note: '''*email address*''', not null]
+  is_staff boolean [note: '''
+*staff status*
+Designates whether the user can log into this admin site.''', default:`False`, not null]
+  is_active boolean [note: '''
+*active*
+Designates whether this user should be treated as active. Unselect this instead of deleting accounts.''', default:`True`, not null]
+  date_joined date_time [note: '''*date joined*''', default:`django.utils.timezone.now()`, not null]
 
   indexes {
     (id) [pk, unique, name: 'auth_user_pkey', type: btree]
@@ -445,8 +455,8 @@ This is a Many-To-Many linking table autogenerated by Django.
 *DB table: auth_group_permissions*'''
 
   id auto [pk, not null]
-  permission_id auto
-  group_id auto
+  permission_id auto [not null]
+  group_id auto [not null]
 
   indexes {
     (group_id) [name: 'auth_group_permissions_group_id_b120cbf9', type: btree]
@@ -466,8 +476,8 @@ This is a Many-To-Many linking table autogenerated by Django.
 *DB table: auth_user_groups*'''
 
   id auto [pk, not null]
-  group_id auto
-  user_id auto
+  group_id auto [not null]
+  user_id auto [not null]
 
   indexes {
     (group_id) [name: 'auth_user_groups_group_id_97559544', type: btree]
@@ -487,8 +497,8 @@ This is a Many-To-Many linking table autogenerated by Django.
 *DB table: auth_user_user_permissions*'''
 
   id auto [pk, not null]
-  permission_id auto
-  user_id auto
+  permission_id auto [not null]
+  user_id auto [not null]
 
   indexes {
     (permission_id) [name: 'auth_user_user_permissions_permission_id_1fbb5f2c', type: btree]
@@ -506,15 +516,13 @@ Table authtoken.Token {
 The default authorization token model.
 
 
-*DB table: authtoken_token*'''
+*table: public.authtoken_token*'''
 
-  key char [pk, unique, not null]
-  user_id one_to_one [unique, not null]
-  created date_time [not null]
+  key char [note: '''*Key*''', pk, unique, not null]
+  created date_time [note: '''*Created*''', not null]
 
   indexes {
     (key) [pk, unique, name: 'authtoken_token_pkey', type: btree]
-    (user_id) [unique, name: 'authtoken_token_user_id_key', type: btree]
   }
 }
 ref: authtoken.Token.user_id - auth.User.id
@@ -525,15 +533,13 @@ Table authtoken.TokenProxy {
 Proxy mapping pk to user pk for use in admin.
 
 
-*DB table: authtoken_token*'''
+*table: public.authtoken_token*'''
 
-  key char [pk, unique, not null]
-  user_id one_to_one [unique, not null]
-  created date_time [not null]
+  key char [note: '''*Key*''', pk, unique, not null]
+  created date_time [note: '''*Created*''', not null]
 
   indexes {
     (key) [pk, unique, name: 'authtoken_token_pkey', type: btree]
-    (user_id) [unique, name: 'authtoken_token_user_id_key', type: btree]
   }
 }
 ref: authtoken.TokenProxy.user_id - auth.User.id
@@ -543,11 +549,11 @@ Table contenttypes.ContentType {
   Note: '''
 ContentType(id, app_label, model)
 
-*DB table: django_content_type*'''
+*table: public.django_content_type*'''
 
-  id auto [pk, unique, not null]
-  app_label char [not null]
-  model char [not null]
+  id auto [note: '''*ID*''', pk, unique, not null]
+  app_label char [note: '''*app label*''', not null]
+  model char [note: '''*python model class name*''', not null]
 
   indexes {
     (app_label,model) [unique, name: 'django_content_type_app_label_model_76bd3d3b_uniq', type: btree]
@@ -565,18 +571,18 @@ assess local rows, PanDA-native objects, queues/sites, Rucio objects, or
 future production entities through one table.
 
 
-*DB table: swf_ai_content*'''
+*table: public.swf_ai_content*'''
 
-  id big_auto [pk, unique, not null]
-  subject_type char [not null]
-  subject_key char [not null]
-  subject_label char [default:`""`, not null]
-  subject_url char [default:`""`, not null]
-  username char [not null]
-  ai char [not null]
-  assessment text [not null]
-  data json [default:`builtins.dict()`, not null]
-  created_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  subject_type char [note: '''*subject type*''', not null]
+  subject_key char [note: '''*subject key*''', not null]
+  subject_label char [note: '''*subject label*''', default:`""`, not null]
+  subject_url char [note: '''*subject url*''', default:`""`, not null]
+  username char [note: '''*username*''', not null]
+  ai char [note: '''*ai*''', not null]
+  assessment text [note: '''*assessment*''', not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
 
   indexes {
     (subject_type,subject_key,created_at) [name: 'swf_ai_cont_subject_39722e_idx', type: btree]
@@ -597,16 +603,28 @@ Records exchanges between developers and AI assistants (Claude Code)
 to enable context continuity across sessions. Opt-in via SWF_DIALOGUE_TURNS env var.
 
 
-*DB table: swf_ai_memory*'''
+*table: public.swf_ai_memory*'''
 
-  id auto [pk, unique, not null]
-  username char [note: '''Developer username''', not null]
-  session_id char [note: '''Claude Code session ID''', not null]
-  role char [note: '''"user" or "assistant"''', not null]
-  content text [note: '''Message content''', not null]
-  created_at date_time [not null]
-  namespace char [note: '''Testbed namespace if applicable''', null]
-  project_path char [note: '''Project directory path''', null]
+  id auto [note: '''*id*''', pk, unique, not null]
+  username char [note: '''
+*username*
+Developer username''', not null]
+  session_id char [note: '''
+*session id*
+Claude Code session ID''', not null]
+  role char [note: '''
+*role*
+"user" or "assistant"''', not null]
+  content text [note: '''
+*content*
+Message content''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  namespace char [note: '''
+*namespace*
+Testbed namespace if applicable''', null]
+  project_path char [note: '''
+*project path*
+Project directory path''', null]
 
   indexes {
     (username,created_at) [name: 'swf_ai_memo_usernam_64469e_idx', type: btree]
@@ -626,24 +644,23 @@ This model records when each agent receives, processes, and completes work on an
 providing detailed timing and status information for performance monitoring.
 
 
-*DB table: swf_agent_workflow_stages*'''
+*table: public.swf_agent_workflow_stages*'''
 
-  stage_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
-  workflow_id foreign_key [not null]
-  agent_name char [not null]
-  agent_type monitor_app.char_agentworkflowstage_agent_type [not null]
-  status monitor_app.char_agentworkflowstage_status [default:`"generated"`, not null]
-  received_at date_time [null]
-  started_at date_time [null]
-  completed_at date_time [null]
-  failed_at date_time [null]
-  processing_time_seconds float [null]
-  failure_reason text [null]
-  input_message json [null]
-  output_message json [null]
-  stage_metadata json [null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  stage_id uuid [note: '''*stage id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  agent_name char [note: '''*agent name*''', not null]
+  agent_type monitor_app.char_agentworkflowstage_agent_type [note: '''*agent type*''', not null]
+  status monitor_app.char_agentworkflowstage_status [note: '''*status*''', default:`"generated"`, not null]
+  received_at date_time [note: '''*received at*''', null]
+  started_at date_time [note: '''*started at*''', null]
+  completed_at date_time [note: '''*completed at*''', null]
+  failed_at date_time [note: '''*failed at*''', null]
+  processing_time_seconds float [note: '''*processing time seconds*''', null]
+  failure_reason text [note: '''*failure reason*''', null]
+  input_message json [note: '''*input message*''', null]
+  output_message json [note: '''*output message*''', null]
+  stage_metadata json [note: '''*stage metadata*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (agent_name,status) [name: 'swf_agent_w_agent_n_998699_idx', type: btree]
@@ -651,7 +668,6 @@ providing detailed timing and status information for performance monitoring.
     (workflow_id,agent_type) [name: 'swf_agent_w_workflo_2375d6_idx', type: btree]
     (workflow_id,agent_name,agent_type) [unique, name: 'swf_agent_workflow_stage_workflow_id_agent_name_a_fc327599_uniq', type: btree]
     (stage_id) [pk, unique, name: 'swf_agent_workflow_stages_pkey', type: btree]
-    (workflow_id) [name: 'swf_agent_workflow_stages_workflow_id_060467ec', type: btree]
   }
 }
 ref: monitor_app.AgentWorkflowStage.workflow_id > monitor_app.STFWorkflow.workflow_id
@@ -661,21 +677,21 @@ Table monitor_app.AppLog {
   Note: '''
 AppLog(id, app_name, instance_name, timestamp, level, levelname, message, module, funcname, lineno, process, thread, extra_data)
 
-*DB table: swf_applog*'''
+*table: public.swf_applog*'''
 
-  id big_auto [pk, unique, not null]
-  app_name char [not null]
-  instance_name char [not null]
-  timestamp date_time [not null]
-  level monitor_app.integer_applog_level [default:`0`, not null]
-  levelname char [not null]
-  message text [not null]
-  module char [not null]
-  funcname char [not null]
-  lineno integer [not null]
-  process integer [not null]
-  thread big_integer [not null]
-  extra_data json [null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  app_name char [note: '''*app name*''', not null]
+  instance_name char [note: '''*instance name*''', not null]
+  timestamp date_time [note: '''*timestamp*''', not null]
+  level monitor_app.integer_applog_level [note: '''*level*''', default:`0`, not null]
+  levelname char [note: '''*levelname*''', not null]
+  message text [note: '''*message*''', not null]
+  module char [note: '''*module*''', not null]
+  funcname char [note: '''*funcname*''', not null]
+  lineno integer [note: '''*lineno*''', not null]
+  process integer [note: '''*process*''', not null]
+  thread big_integer [note: '''*thread*''', not null]
+  extra_data json [note: '''*extra data*''', null]
 
   indexes {
     (app_name) [name: 'swf_applog_app_name_66f0dc0f', type: btree]
@@ -695,13 +711,13 @@ Provides an independent verification that data in a bot response
 came from a real tool call, not LLM fabrication.
 
 
-*DB table: swf_data_provenance*'''
+*table: public.swf_data_provenance*'''
 
-  id big_auto [pk, unique, not null]
-  dpid char [unique, not null]
-  tool_name char [not null]
-  tool_args json [default:`builtins.dict()`, not null]
-  created_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  dpid char [note: '''*dpid*''', unique, not null]
+  tool_name char [note: '''*tool name*''', not null]
+  tool_args json [note: '''*tool args*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
 
   indexes {
     (dpid) [unique, name: 'swf_data_provenance_dpid_key', type: btree]
@@ -714,29 +730,25 @@ Table monitor_app.Entry {
   Note: '''
 Generic document-store row used by alarm configs, events, and runs.
 
-*DB table: entry*'''
+*table: public.entry*'''
 
-  id char [pk, unique, default:`monitor_app.models._new_entry_id()`, not null]
-  title char [default:`""`, not null]
-  content text [default:`""`, not null]
-  kind char [not null]
-  context_id foreign_key [null]
-  name char [null]
-  data json [null]
-  priority integer [null]
-  status char [null]
-  archived boolean [default:`False`, not null]
-  parent_id foreign_key [null]
-  timestamp_created float [default:`time.time()`, not null]
-  timestamp_modified float [default:`time.time()`, not null]
-  deleted_at float [null]
+  id char [note: '''*id*''', pk, unique, default:`monitor_app.models._new_entry_id()`, not null]
+  title char [note: '''*title*''', default:`""`, not null]
+  content text [note: '''*content*''', default:`""`, not null]
+  kind char [note: '''*kind*''', not null]
+  name char [note: '''*name*''', null]
+  data json [note: '''*data*''', null]
+  priority integer [note: '''*priority*''', null]
+  status char [note: '''*status*''', null]
+  archived boolean [note: '''*archived*''', default:`False`, not null]
+  timestamp_created float [note: '''*timestamp created*''', default:`time.time()`, not null]
+  timestamp_modified float [note: '''*timestamp modified*''', default:`time.time()`, not null]
+  deleted_at float [note: '''*deleted at*''', null]
 
   indexes {
     (archived) [name: 'entry_archive_579b73_idx', type: btree]
     (context_id,kind,timestamp_created) [name: 'entry_context_4f8a8e_idx', type: btree]
-    (context_id) [name: 'entry_context_id_286b045e', type: btree]
     (kind,timestamp_created) [name: 'entry_kind_5a2419_idx', type: btree]
-    (parent_id) [name: 'entry_parent_id_25c20073', type: btree]
     (id) [pk, unique, name: 'entry_pkey', type: btree]
     (status) [name: 'entry_status_cc9d43_idx', type: btree]
   }
@@ -749,14 +761,14 @@ Table monitor_app.EntryContext {
   Note: '''
 Project/topic grouping for generic entries.
 
-*DB table: entry_context*'''
+*table: public.entry_context*'''
 
-  name char [pk, unique, not null]
-  title char [default:`""`, not null]
-  description text [default:`""`, not null]
-  timestamp_created float [default:`time.time()`, not null]
-  timestamp_modified float [default:`time.time()`, not null]
-  data json [default:`builtins.dict()`, not null]
+  name char [note: '''*name*''', pk, unique, not null]
+  title char [note: '''*title*''', default:`""`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  timestamp_created float [note: '''*timestamp created*''', default:`time.time()`, not null]
+  timestamp_modified float [note: '''*timestamp modified*''', default:`time.time()`, not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
 
   indexes {
     (name) [pk, unique, name: 'entry_context_pkey', type: btree]
@@ -768,20 +780,18 @@ Table monitor_app.EntryVersion {
   Note: '''
 Immutable snapshot of an Entry before substantive edits.
 
-*DB table: entry_version*'''
+*table: public.entry_version*'''
 
-  id big_auto [pk, unique, not null]
-  entry_id foreign_key [not null]
-  version_num integer [not null]
-  title char [default:`""`, not null]
-  content text [default:`""`, not null]
-  data json [null]
-  changed_by char [default:`"unknown"`, not null]
-  timestamp float [default:`time.time()`, not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  version_num integer [note: '''*version num*''', not null]
+  title char [note: '''*title*''', default:`""`, not null]
+  content text [note: '''*content*''', default:`""`, not null]
+  data json [note: '''*data*''', null]
+  changed_by char [note: '''*changed by*''', default:`"unknown"`, not null]
+  timestamp float [note: '''*timestamp*''', default:`time.time()`, not null]
 
   indexes {
     (entry_id,timestamp) [name: 'entry_versi_entry_i_f15f8a_idx', type: btree]
-    (entry_id) [name: 'entry_version_entry_id_c7c5fdd8', type: btree]
     (id) [pk, unique, name: 'entry_version_pkey', type: btree]
   }
 }
@@ -797,30 +807,28 @@ contract the payload uses. Observed rows/status are later updated from
 PanDA, payload logs, and cached Rucio state.
 
 
-*DB table: swf_epicprod_files*'''
+*table: public.swf_epicprod_files*'''
 
-  id big_auto [pk, unique, not null]
-  prod_task_id foreign_key [null]
-  job_id foreign_key [null]
-  jeditaskid big_integer [null]
-  pandaid big_integer [null]
-  seq_number integer [null]
-  job_index integer [null]
-  role monitor_app.char_epicprodfile_role [not null]
-  stage char [default:`""`, not null]
-  scope char [default:`""`, not null]
-  dataset_name char [default:`""`, not null]
-  did_name char [default:`""`, not null]
-  lfn char [default:`""`, not null]
-  rse_expected char [default:`""`, not null]
-  status monitor_app.char_epicprodfile_status [default:`"expected"`, not null]
-  status_detail text [default:`""`, not null]
-  bytes big_integer [null]
-  checksum char [default:`""`, not null]
-  source char [default:`""`, not null]
-  data json [default:`builtins.dict()`, not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  jeditaskid big_integer [note: '''*jeditaskid*''', null]
+  pandaid big_integer [note: '''*pandaid*''', null]
+  seq_number integer [note: '''*seq number*''', null]
+  job_index integer [note: '''*job index*''', null]
+  role monitor_app.char_epicprodfile_role [note: '''*role*''', not null]
+  stage char [note: '''*stage*''', default:`""`, not null]
+  scope char [note: '''*scope*''', default:`""`, not null]
+  dataset_name char [note: '''*dataset name*''', default:`""`, not null]
+  did_name char [note: '''*did name*''', default:`""`, not null]
+  lfn char [note: '''*lfn*''', default:`""`, not null]
+  rse_expected char [note: '''*rse expected*''', default:`""`, not null]
+  status monitor_app.char_epicprodfile_status [note: '''*status*''', default:`"expected"`, not null]
+  status_detail text [note: '''*status detail*''', default:`""`, not null]
+  bytes big_integer [note: '''*bytes*''', null]
+  checksum char [note: '''*checksum*''', default:`""`, not null]
+  source char [note: '''*source*''', default:`""`, not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (jeditaskid,seq_number) [name: 'swf_epicpro_jeditas_59e5b7_idx', type: btree]
@@ -830,11 +838,9 @@ PanDA, payload logs, and cached Rucio state.
     (status,stage) [name: 'swf_epicpro_status_f4300f_idx', type: btree]
     (did_name) [name: 'swf_epicprod_files_did_name_26ab4098', type: btree]
     (jeditaskid) [name: 'swf_epicprod_files_jeditaskid_e978ea3e', type: btree]
-    (job_id) [name: 'swf_epicprod_files_job_id_60c844dc', type: btree]
     (job_index) [name: 'swf_epicprod_files_job_index_7b35db70', type: btree]
     (pandaid) [name: 'swf_epicprod_files_pandaid_fbbce960', type: btree]
     (id) [pk, unique, name: 'swf_epicprod_files_pkey', type: btree]
-    (prod_task_id) [name: 'swf_epicprod_files_prod_task_id_13efeaee', type: btree]
     (role) [name: 'swf_epicprod_files_role_d5f38a8b', type: btree]
     (scope) [name: 'swf_epicprod_files_scope_8835ed03', type: btree]
     (seq_number) [name: 'swf_epicprod_files_seq_number_3195077c', type: btree]
@@ -856,20 +862,19 @@ production-facing diagnosis: derived phase, concise failure reason, and
 extensible parsed job history for the operator pages.
 
 
-*DB table: swf_epicprod_jobs*'''
+*table: public.swf_epicprod_jobs*'''
 
-  pandaid big_integer [pk, unique, not null]
-  jeditaskid big_integer [null]
-  prod_task_id foreign_key [null]
-  seq_number integer [null]
-  job_index integer [null]
-  status char [default:`""`, not null]
-  phase char [default:`""`, not null]
-  failure_summary text [default:`""`, not null]
-  data json [default:`builtins.dict()`, not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
-  last_refreshed_at date_time [null]
+  pandaid big_integer [note: '''*pandaid*''', pk, unique, not null]
+  jeditaskid big_integer [note: '''*jeditaskid*''', null]
+  seq_number integer [note: '''*seq number*''', null]
+  job_index integer [note: '''*job index*''', null]
+  status char [note: '''*status*''', default:`""`, not null]
+  phase char [note: '''*phase*''', default:`""`, not null]
+  failure_summary text [note: '''*failure summary*''', default:`""`, not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
+  last_refreshed_at date_time [note: '''*last refreshed at*''', null]
 
   indexes {
     (jeditaskid,seq_number) [name: 'swf_epicpro_jeditas_b940cb_idx', type: btree]
@@ -879,7 +884,6 @@ extensible parsed job history for the operator pages.
     (job_index) [name: 'swf_epicprod_jobs_job_index_4bb0149c', type: btree]
     (phase) [name: 'swf_epicprod_jobs_phase_fc6dfa50', type: btree]
     (pandaid) [pk, unique, name: 'swf_epicprod_jobs_pkey', type: btree]
-    (prod_task_id) [name: 'swf_epicprod_jobs_prod_task_id_59effaf9', type: btree]
     (seq_number) [name: 'swf_epicprod_jobs_seq_number_d321cd91', type: btree]
     (status) [name: 'swf_epicprod_jobs_status_9b8fb340', type: btree]
   }
@@ -904,24 +908,22 @@ created_at: Timestamp when TF record was created
 updated_at: Timestamp when TF record was last modified
 
 
-*DB table: swf_fastmon_files*'''
+*table: public.swf_fastmon_files*'''
 
-  tf_file_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
-  stf_file_id foreign_key [not null]
-  tf_filename char [unique, not null]
-  file_size_bytes big_integer [null]
-  checksum char [null]
-  status monitor_app.char_fastmonfile_status [default:`"registered"`, not null]
-  metadata json [null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
-  tf_count integer [null]
-  tf_first integer [null]
-  tf_last integer [null]
+  tf_file_id uuid [note: '''*tf file id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  tf_filename char [note: '''*tf filename*''', unique, not null]
+  file_size_bytes big_integer [note: '''*file size bytes*''', null]
+  checksum char [note: '''*checksum*''', null]
+  status monitor_app.char_fastmonfile_status [note: '''*status*''', default:`"registered"`, not null]
+  metadata json [note: '''*metadata*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
+  tf_count integer [note: '''*tf count*''', null]
+  tf_first integer [note: '''*tf first*''', null]
+  tf_last integer [note: '''*tf last*''', null]
 
   indexes {
     (tf_file_id) [pk, unique, name: 'swf_fastmon_files_pkey', type: btree]
-    (stf_file_id) [name: 'swf_fastmon_files_stf_file_id_5994a143', type: btree]
     (tf_filename) [unique, name: 'swf_fastmon_files_tf_filename_key', type: btree]
   }
 }
@@ -934,14 +936,16 @@ Testbed namespace for workflow isolation and multi-user environments.
 Namespaces group agents, executions, and messages for a particular user or purpose.
 
 
-*DB table: swf_namespace*'''
+*table: public.swf_namespace*'''
 
-  name char [pk, unique, not null]
-  owner char [note: '''Username of namespace owner''', not null]
-  description text [not null]
-  metadata json [null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  name char [note: '''*name*''', pk, unique, not null]
+  owner char [note: '''
+*owner*
+Username of namespace owner''', not null]
+  description text [note: '''*description*''', not null]
+  metadata json [note: '''*metadata*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (name) [pk, unique, name: 'swf_namespace_pkey', type: btree]
@@ -955,16 +959,16 @@ Represents a PanDA compute queue configuration.
 Stores the queue name and full configuration as JSON.
 
 
-*DB table: swf_panda_queues*'''
+*table: public.swf_panda_queues*'''
 
-  queue_name char [pk, unique, not null]
-  site char [not null]
-  status char [default:`"active"`, not null]
-  queue_type char [not null]
-  config_data json [not null]
-  metadata json [default:`builtins.dict()`, not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  queue_name char [note: '''*queue name*''', pk, unique, not null]
+  site char [note: '''*site*''', not null]
+  status char [note: '''*status*''', default:`"active"`, not null]
+  queue_type char [note: '''*queue type*''', not null]
+  config_data json [note: '''*config data*''', not null]
+  metadata json [note: '''*metadata*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (queue_name) [pk, unique, name: 'swf_panda_queues_pkey', type: btree]
@@ -981,11 +985,11 @@ Single record stores all persistent state as JSON blob.
 Use get_state() and update_state() methods to access nested data.
 
 
-*DB table: swf_persistent_state*'''
+*table: public.swf_persistent_state*'''
 
-  id auto [pk, unique, not null]
-  state_data json [default:`builtins.dict()`, not null]
-  updated_at date_time [not null]
+  id auto [note: '''*id*''', pk, unique, not null]
+  state_data json [note: '''*state data*''', default:`builtins.dict()`, not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'swf_persistent_state_pkey', type: btree]
@@ -999,16 +1003,16 @@ Represents a Rucio DDM (Distributed Data Management) endpoint configuration.
 Stores the endpoint name and full configuration as JSON.
 
 
-*DB table: swf_rucio_endpoints*'''
+*table: public.swf_rucio_endpoints*'''
 
-  endpoint_name char [pk, unique, not null]
-  site char [not null]
-  endpoint_type char [not null]
-  is_tape boolean [default:`False`, not null]
-  is_active boolean [default:`True`, not null]
-  config_data json [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  endpoint_name char [note: '''*endpoint name*''', pk, unique, not null]
+  site char [note: '''*site*''', not null]
+  endpoint_type char [note: '''*endpoint type*''', not null]
+  is_tape boolean [note: '''*is tape*''', default:`False`, not null]
+  is_active boolean [note: '''*is active*''', default:`True`, not null]
+  config_data json [note: '''*config data*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (endpoint_name) [pk, unique, name: 'swf_rucio_endpoints_pkey', type: btree]
@@ -1028,13 +1032,13 @@ end_time: When the run ended (null if still active)
 run_conditions: JSON field storing experimental conditions
 
 
-*DB table: swf_runs*'''
+*table: public.swf_runs*'''
 
-  run_id auto [pk, unique, not null]
-  run_number integer [unique, not null]
-  start_time date_time [not null]
-  end_time date_time [null]
-  run_conditions json [null]
+  run_id auto [note: '''*run id*''', pk, unique, not null]
+  run_number integer [note: '''*run number*''', unique, not null]
+  start_time date_time [note: '''*start time*''', not null]
+  end_time date_time [note: '''*end time*''', null]
+  run_conditions json [note: '''*run conditions*''', null]
 
   indexes {
     (run_id) [pk, unique, name: 'swf_runs_pkey', type: btree]
@@ -1049,23 +1053,23 @@ Tracks the current processing state for each run in the fast processing workflow
 Provides quick access to run-level statistics and status.
 
 
-*DB table: swf_run_state*'''
+*table: public.swf_run_state*'''
 
-  run_number integer [pk, unique, not null]
-  phase char [not null]
-  state char [not null]
-  substate char [null]
-  target_worker_count integer [not null]
-  active_worker_count integer [default:`0`, not null]
-  stf_samples_received integer [default:`0`, not null]
-  slices_created integer [default:`0`, not null]
-  slices_queued integer [default:`0`, not null]
-  slices_processing integer [default:`0`, not null]
-  slices_completed integer [default:`0`, not null]
-  slices_failed integer [default:`0`, not null]
-  state_changed_at date_time [not null]
-  updated_at date_time [not null]
-  metadata json [null]
+  run_number integer [note: '''*run number*''', pk, unique, not null]
+  phase char [note: '''*phase*''', not null]
+  state char [note: '''*state*''', not null]
+  substate char [note: '''*substate*''', null]
+  target_worker_count integer [note: '''*target worker count*''', not null]
+  active_worker_count integer [note: '''*active worker count*''', default:`0`, not null]
+  stf_samples_received integer [note: '''*stf samples received*''', default:`0`, not null]
+  slices_created integer [note: '''*slices created*''', default:`0`, not null]
+  slices_queued integer [note: '''*slices queued*''', default:`0`, not null]
+  slices_processing integer [note: '''*slices processing*''', default:`0`, not null]
+  slices_completed integer [note: '''*slices completed*''', default:`0`, not null]
+  slices_failed integer [note: '''*slices failed*''', default:`0`, not null]
+  state_changed_at date_time [note: '''*state changed at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
+  metadata json [note: '''*metadata*''', null]
 
   indexes {
     (run_number) [pk, unique, name: 'swf_run_state_pkey', type: btree]
@@ -1081,27 +1085,33 @@ This model extends the existing StfFile model concept to include workflow-specif
 and tracks the STF as it moves through different agents in the pipeline.
 
 
-*DB table: swf_stf_workflows*'''
+*table: public.swf_stf_workflows*'''
 
-  workflow_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
-  filename char [unique, not null]
-  file_id uuid [null]
-  namespace char [note: '''Testbed namespace for workflow delineation''', null]
-  execution_id char [note: '''Workflow execution instance ID''', null]
-  run_id char [note: '''Run number within execution''', null]
-  daq_state monitor_app.char_stfworkflow_daq_state [not null]
-  daq_substate monitor_app.char_stfworkflow_daq_substate [not null]
-  generated_time date_time [not null]
-  stf_start_time date_time [not null]
-  stf_end_time date_time [not null]
-  current_status monitor_app.char_stfworkflow_current_status [default:`"generated"`, not null]
-  current_agent monitor_app.char_stfworkflow_current_agent [default:`"daqsim"`, not null]
-  completed_at date_time [null]
-  failed_at date_time [null]
-  failure_reason text [null]
-  stf_metadata json [null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  workflow_id uuid [note: '''*workflow id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  filename char [note: '''*filename*''', unique, not null]
+  file_id uuid [note: '''*file id*''', null]
+  namespace char [note: '''
+*namespace*
+Testbed namespace for workflow delineation''', null]
+  execution_id char [note: '''
+*execution id*
+Workflow execution instance ID''', null]
+  run_id char [note: '''
+*run id*
+Run number within execution''', null]
+  daq_state monitor_app.char_stfworkflow_daq_state [note: '''*daq state*''', not null]
+  daq_substate monitor_app.char_stfworkflow_daq_substate [note: '''*daq substate*''', not null]
+  generated_time date_time [note: '''*generated time*''', not null]
+  stf_start_time date_time [note: '''*stf start time*''', not null]
+  stf_end_time date_time [note: '''*stf end time*''', not null]
+  current_status monitor_app.char_stfworkflow_current_status [note: '''*current status*''', default:`"generated"`, not null]
+  current_agent monitor_app.char_stfworkflow_current_agent [note: '''*current agent*''', default:`"daqsim"`, not null]
+  completed_at date_time [note: '''*completed at*''', null]
+  failed_at date_time [note: '''*failed at*''', null]
+  failure_reason text [note: '''*failure reason*''', null]
+  stf_metadata json [note: '''*stf metadata*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (current_status,generated_time) [name: 'swf_stf_wor_current_2362bd_idx', type: btree]
@@ -1136,26 +1146,24 @@ status: Current processing status (FileStatus enum)
 metadata: JSON field for additional file metadata
 
 
-*DB table: swf_stf_files*'''
+*table: public.swf_stf_files*'''
 
-  file_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
-  run_id foreign_key [not null]
-  machine_state char [default:`"physics"`, not null]
-  stf_filename char [unique, not null]
-  file_size_bytes big_integer [null]
-  checksum char [null]
-  created_at date_time [not null]
-  status monitor_app.char_stffile_status [default:`"registered"`, not null]
-  metadata json [null]
-  workflow_id uuid [null]
-  daq_state char [null]
-  daq_substate char [null]
-  workflow_status char [null]
-  tf_count integer [null]
+  file_id uuid [note: '''*file id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  machine_state char [note: '''*machine state*''', default:`"physics"`, not null]
+  stf_filename char [note: '''*stf filename*''', unique, not null]
+  file_size_bytes big_integer [note: '''*file size bytes*''', null]
+  checksum char [note: '''*checksum*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  status monitor_app.char_stffile_status [note: '''*status*''', default:`"registered"`, not null]
+  metadata json [note: '''*metadata*''', null]
+  workflow_id uuid [note: '''*workflow id*''', null]
+  daq_state char [note: '''*daq state*''', null]
+  daq_substate char [note: '''*daq substate*''', null]
+  workflow_status char [note: '''*workflow status*''', null]
+  tf_count integer [note: '''*tf count*''', null]
 
   indexes {
     (file_id) [pk, unique, name: 'swf_stf_files_pkey', type: btree]
-    (run_id) [name: 'swf_stf_files_run_id_9a2165d5', type: btree]
     (stf_filename) [unique, name: 'swf_stf_files_stf_filename_key', type: btree]
     (workflow_id) [name: 'swf_stf_files_workflow_id_055cc696', type: btree]
   }
@@ -1188,25 +1196,25 @@ messages_sent: Count of messages sent (SSE)
 messages_dropped: Count of messages dropped due to queue overflow (SSE)
 
 
-*DB table: swf_subscribers*'''
+*table: public.swf_subscribers*'''
 
-  subscriber_id auto [pk, unique, not null]
-  subscriber_name char [unique, not null]
-  fraction float [null]
-  description text [null]
-  is_active boolean [default:`True`, not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
-  delivery_type monitor_app.char_subscriber_delivery_type [default:`"activemq"`, not null]
-  client_ip generic_ip_address [null]
-  client_location char [default:`""`, not null]
-  connected_at date_time [null]
-  disconnected_at date_time [null]
-  last_activity date_time [null]
-  message_filters json [default:`builtins.dict()`, not null]
-  messages_received integer [default:`0`, not null]
-  messages_sent integer [default:`0`, not null]
-  messages_dropped integer [default:`0`, not null]
+  subscriber_id auto [note: '''*subscriber id*''', pk, unique, not null]
+  subscriber_name char [note: '''*subscriber name*''', unique, not null]
+  fraction float [note: '''*fraction*''', null]
+  description text [note: '''*description*''', null]
+  is_active boolean [note: '''*is active*''', default:`True`, not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
+  delivery_type monitor_app.char_subscriber_delivery_type [note: '''*delivery type*''', default:`"activemq"`, not null]
+  client_ip generic_ip_address [note: '''*client ip*''', null]
+  client_location char [note: '''*client location*''', default:`""`, not null]
+  connected_at date_time [note: '''*connected at*''', null]
+  disconnected_at date_time [note: '''*disconnected at*''', null]
+  last_activity date_time [note: '''*last activity*''', null]
+  message_filters json [note: '''*message filters*''', default:`builtins.dict()`, not null]
+  messages_received integer [note: '''*messages received*''', default:`0`, not null]
+  messages_sent integer [note: '''*messages sent*''', default:`0`, not null]
+  messages_dropped integer [note: '''*messages dropped*''', default:`0`, not null]
 
   indexes {
     (delivery_type,is_active) [name: 'swf_subscri_deliver_1836c2_idx', type: btree]
@@ -1227,12 +1235,12 @@ editable on the System page. All system configuration lives here, in
 the database, adjustable through the UI without deploys.
 
 
-*DB table: swf_sys_config*'''
+*table: public.swf_sys_config*'''
 
-  id auto [pk, unique, not null]
-  config_data json [default:`builtins.dict()`, not null]
-  updated_at date_time [not null]
-  updated_by char [default:`""`, not null]
+  id auto [note: '''*id*''', pk, unique, not null]
+  config_data json [note: '''*config data*''', default:`builtins.dict()`, not null]
+  updated_at date_time [note: '''*updated at*''', not null]
+  updated_by char [note: '''*updated by*''', default:`""`, not null]
 
   indexes {
     (id) [pk, unique, name: 'swf_sys_config_pkey', type: btree]
@@ -1244,26 +1252,36 @@ Table monitor_app.SystemAgent {
   Note: '''
 SystemAgent(id, instance_name, agent_type, description, status, last_heartbeat, agent_url, workflow_enabled, current_stf_count, total_stf_processed, last_stf_processed, pid, hostname, operational_state, namespace, metadata, created_at, updated_at)
 
-*DB table: swf_systemagent*'''
+*table: public.swf_systemagent*'''
 
-  id big_auto [pk, unique, not null]
-  instance_name char [unique, not null]
-  agent_type monitor_app.char_systemagent_agent_type [not null]
-  description text [not null]
-  status monitor_app.char_systemagent_status [default:`"UNKNOWN"`, not null]
-  last_heartbeat date_time [null]
-  agent_url url [null]
-  workflow_enabled boolean [default:`True`, not null]
-  current_stf_count integer [default:`0`, not null]
-  total_stf_processed integer [default:`0`, not null]
-  last_stf_processed date_time [null]
-  pid integer [note: '''Process ID for kill operations''', null]
-  hostname char [note: '''Host where agent is running''', null]
-  operational_state monitor_app.char_systemagent_operational_state [note: '''What the agent is doing (STARTING/READY/PROCESSING/EXITED)''', default:`"STARTING"`, not null]
-  namespace char [note: '''Testbed namespace for workflow delineation''', null]
-  metadata json [note: '''Extensible metadata for agent configuration and state''', null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  instance_name char [note: '''*instance name*''', unique, not null]
+  agent_type monitor_app.char_systemagent_agent_type [note: '''*agent type*''', not null]
+  description text [note: '''*description*''', not null]
+  status monitor_app.char_systemagent_status [note: '''*status*''', default:`"UNKNOWN"`, not null]
+  last_heartbeat date_time [note: '''*last heartbeat*''', null]
+  agent_url url [note: '''*agent url*''', null]
+  workflow_enabled boolean [note: '''*workflow enabled*''', default:`True`, not null]
+  current_stf_count integer [note: '''*current stf count*''', default:`0`, not null]
+  total_stf_processed integer [note: '''*total stf processed*''', default:`0`, not null]
+  last_stf_processed date_time [note: '''*last stf processed*''', null]
+  pid integer [note: '''
+*pid*
+Process ID for kill operations''', null]
+  hostname char [note: '''
+*hostname*
+Host where agent is running''', null]
+  operational_state monitor_app.char_systemagent_operational_state [note: '''
+*operational state*
+What the agent is doing (STARTING/READY/PROCESSING/EXITED)''', default:`"STARTING"`, not null]
+  namespace char [note: '''
+*namespace*
+Testbed namespace for workflow delineation''', null]
+  metadata json [note: '''
+*metadata*
+Extensible metadata for agent configuration and state''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (instance_name) [unique, name: 'swf_systemagent_instance_name_key', type: btree]
@@ -1279,15 +1297,15 @@ Event log for time-travel replay of system state.
 Records all significant events in the fast processing workflow.
 
 
-*DB table: swf_system_state_events*'''
+*table: public.swf_system_state_events*'''
 
-  event_id auto [pk, unique, not null]
-  timestamp date_time [not null]
-  run_number integer [not null]
-  event_type char [not null]
-  state char [not null]
-  substate char [null]
-  event_data json [not null]
+  event_id auto [note: '''*event id*''', pk, unique, not null]
+  timestamp date_time [note: '''*timestamp*''', not null]
+  run_number integer [note: '''*run number*''', not null]
+  event_type char [note: '''*event type*''', not null]
+  state char [note: '''*state*''', not null]
+  substate char [note: '''*substate*''', null]
+  event_data json [note: '''*event data*''', not null]
 
   indexes {
     (timestamp,run_number) [name: 'swf_system__timesta_12647a_idx', type: btree]
@@ -1305,17 +1323,17 @@ Table monitor_app.SystemStatus {
   Note: '''
 Current cached system status for operator-facing monitor pages.
 
-*DB table: swf_system_status*'''
+*table: public.swf_system_status*'''
 
-  id big_auto [pk, unique, not null]
-  name char [unique, not null]
-  category char [not null]
-  status monitor_app.char_systemstatus_status [default:`"unknown"`, not null]
-  summary text [default:`""`, not null]
-  data json [default:`builtins.dict()`, not null]
-  checked_at date_time [null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''*name*''', unique, not null]
+  category char [note: '''*category*''', not null]
+  status monitor_app.char_systemstatus_status [note: '''*status*''', default:`"unknown"`, not null]
+  summary text [note: '''*summary*''', default:`""`, not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
+  checked_at date_time [note: '''*checked at*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (category,status) [name: 'swf_system__categor_f47d11_idx', type: btree]
@@ -1333,16 +1351,16 @@ Table monitor_app.SystemStatusHistory {
   Note: '''
 Append-only status observations for later incident/lifecycle review.
 
-*DB table: swf_system_status_history*'''
+*table: public.swf_system_status_history*'''
 
-  id big_auto [pk, unique, not null]
-  name char [not null]
-  category char [not null]
-  status char [not null]
-  summary text [default:`""`, not null]
-  data json [default:`builtins.dict()`, not null]
-  checked_at date_time [not null]
-  created_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''*name*''', not null]
+  category char [note: '''*category*''', not null]
+  status char [note: '''*status*''', not null]
+  summary text [note: '''*summary*''', default:`""`, not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
+  checked_at date_time [note: '''*checked at*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
 
   indexes {
     (category,checked_at) [name: 'swf_system__categor_2ddb2b_idx', type: btree]
@@ -1364,24 +1382,24 @@ Each TF slice is a small portion (~15 per STF sample) that can be
 processed independently by workers in ~30 seconds.
 
 
-*DB table: swf_tf_slices*'''
+*table: public.swf_tf_slices*'''
 
-  id big_auto [pk, unique, not null]
-  slice_id integer [not null]
-  tf_first integer [not null]
-  tf_last integer [not null]
-  tf_count integer [not null]
-  tf_filename char [not null]
-  stf_filename char [not null]
-  run_number integer [not null]
-  status char [default:`"queued"`, not null]
-  retries integer [default:`0`, not null]
-  metadata json [null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
-  assigned_worker char [null]
-  assigned_at date_time [null]
-  completed_at date_time [null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  slice_id integer [note: '''*slice id*''', not null]
+  tf_first integer [note: '''*tf first*''', not null]
+  tf_last integer [note: '''*tf last*''', not null]
+  tf_count integer [note: '''*tf count*''', not null]
+  tf_filename char [note: '''*tf filename*''', not null]
+  stf_filename char [note: '''*stf filename*''', not null]
+  run_number integer [note: '''*run number*''', not null]
+  status char [note: '''*status*''', default:`"queued"`, not null]
+  retries integer [note: '''*retries*''', default:`0`, not null]
+  metadata json [note: '''*metadata*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
+  assigned_worker char [note: '''*assigned worker*''', null]
+  assigned_at date_time [note: '''*assigned at*''', null]
+  completed_at date_time [note: '''*completed at*''', null]
 
   indexes {
     (run_number,status) [name: 'swf_tf_slic_run_num_783be1_idx', type: btree]
@@ -1400,12 +1418,12 @@ Table monitor_app.UserPreference {
   Note: '''
 Per-user UI and workflow preferences stored as a JSON object.
 
-*DB table: user_preference*'''
+*table: public.user_preference*'''
 
-  id big_auto [pk, unique, not null]
-  username char [unique, not null]
-  prefs json [default:`builtins.dict()`, not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  username char [note: '''*username*''', unique, not null]
+  prefs json [note: '''*prefs*''', default:`builtins.dict()`, not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'user_preference_pkey', type: btree]
@@ -1420,20 +1438,20 @@ Tracks workers processing TF slices in the fast processing workflow.
 Records both active and inactive workers for historical analysis.
 
 
-*DB table: swf_workers*'''
+*table: public.swf_workers*'''
 
-  worker_id char [pk, unique, not null]
-  run_number integer [not null]
-  panda_job char [not null]
-  location char [not null]
-  status char [not null]
-  current_slice_id integer [null]
-  tf_filename char [null]
-  slices_completed integer [default:`0`, not null]
-  last_heartbeat date_time [null]
-  started_at date_time [not null]
-  ended_at date_time [null]
-  metadata json [null]
+  worker_id char [note: '''*worker id*''', pk, unique, not null]
+  run_number integer [note: '''*run number*''', not null]
+  panda_job char [note: '''*panda job*''', not null]
+  location char [note: '''*location*''', not null]
+  status char [note: '''*status*''', not null]
+  current_slice_id integer [note: '''*current slice id*''', null]
+  tf_filename char [note: '''*tf filename*''', null]
+  slices_completed integer [note: '''*slices completed*''', default:`0`, not null]
+  last_heartbeat date_time [note: '''*last heartbeat*''', null]
+  started_at date_time [note: '''*started at*''', not null]
+  ended_at date_time [note: '''*ended at*''', null]
+  metadata json [note: '''*metadata*''', null]
 
   indexes {
     (worker_id) [pk, unique, name: 'swf_workers_pkey', type: btree]
@@ -1448,17 +1466,29 @@ Table monitor_app.WorkflowDefinition {
 Defines reusable workflow templates with parameters and execution logic.
 
 
-*DB table: swf_workflow_definitions*'''
+*table: public.swf_workflow_definitions*'''
 
-  id big_auto [pk, unique, not null]
-  workflow_name char [note: '''Unique workflow name''', not null]
-  version char [note: '''Version string''', not null]
-  workflow_type char [note: '''Flexible workflow type classification''', not null]
-  definition text [note: '''Python workflow code content''', not null]
-  parameter_values json [note: '''Default parameter values and schema''', default:`builtins.dict()`, not null]
-  created_by char [note: '''Username who created this workflow''', not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  workflow_name char [note: '''
+*workflow name*
+Unique workflow name''', not null]
+  version char [note: '''
+*version*
+Version string''', not null]
+  workflow_type char [note: '''
+*workflow type*
+Flexible workflow type classification''', not null]
+  definition text [note: '''
+*definition*
+Python workflow code content''', not null]
+  parameter_values json [note: '''
+*parameter values*
+Default parameter values and schema''', default:`builtins.dict()`, not null]
+  created_by char [note: '''
+*created by*
+Username who created this workflow''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'swf_workflow_definitions_pkey', type: btree]
@@ -1472,22 +1502,36 @@ Table monitor_app.WorkflowExecution {
 Tracks individual workflow execution instances.
 
 
-*DB table: swf_workflow_executions*'''
+*table: public.swf_workflow_executions*'''
 
-  execution_id char [note: '''Human-readable execution ID''', pk, unique, not null]
-  workflow_definition_id foreign_key [not null]
-  namespace char [note: '''Testbed namespace for workflow delineation''', null]
-  parameter_values json [note: '''Actual parameter values used for this execution''', not null]
-  performance_metrics json [note: '''Performance metrics and results''', null]
-  status char [note: '''Flexible execution status''', default:`"pending"`, not null]
-  start_time date_time [note: '''Execution start timestamp''', not null]
-  end_time date_time [note: '''Execution completion timestamp''', null]
-  executed_by char [note: '''Username who executed this workflow''', not null]
+  execution_id char [note: '''
+*execution id*
+Human-readable execution ID''', pk, unique, not null]
+  namespace char [note: '''
+*namespace*
+Testbed namespace for workflow delineation''', null]
+  parameter_values json [note: '''
+*parameter values*
+Actual parameter values used for this execution''', not null]
+  performance_metrics json [note: '''
+*performance metrics*
+Performance metrics and results''', null]
+  status char [note: '''
+*status*
+Flexible execution status''', default:`"pending"`, not null]
+  start_time date_time [note: '''
+*start time*
+Execution start timestamp''', not null]
+  end_time date_time [note: '''
+*end time*
+Execution completion timestamp''', null]
+  executed_by char [note: '''
+*executed by*
+Username who executed this workflow''', not null]
 
   indexes {
     (namespace) [name: 'swf_workflow_executions_namespace_da80237b', type: btree]
     (execution_id) [pk, unique, name: 'swf_workflow_executions_pkey', type: btree]
-    (workflow_definition_id) [name: 'swf_workflow_executions_workflow_definition_id_527d2e0a', type: btree]
   }
 }
 ref: monitor_app.WorkflowExecution.workflow_definition_id > monitor_app.WorkflowDefinition.id
@@ -1500,29 +1544,35 @@ Tracks all messages exchanged in the workflow system.
 Provides workflow-specific message tracking with agent identification and message type categorization.
 
 
-*DB table: swf_workflow_messages*'''
+*table: public.swf_workflow_messages*'''
 
-  message_id uuid [pk, unique, default:`uuid.uuid4()`, not null]
-  workflow_id foreign_key [null]
-  stage_id foreign_key [null]
-  message_type char [not null]
-  request_id integer [null]
-  sender_agent char [null]
-  sender_type monitor_app.char_workflowmessage_sender_type [null]
-  recipient_agent char [null]
-  recipient_type monitor_app.char_workflowmessage_recipient_type [null]
-  namespace char [note: '''Testbed namespace for multi-user message filtering''', null]
-  execution_id char [note: '''Workflow execution instance ID''', null]
-  run_id char [note: '''Run number within execution''', null]
-  message_content json [not null]
-  message_metadata json [note: '''Extensible metadata for monitoring, debugging, and system tracking''', default:`builtins.dict()`, null]
-  sent_at date_time [not null]
-  delivered_at date_time [null]
-  acknowledged_at date_time [null]
-  is_successful boolean [default:`None`, null]
-  error_message text [null]
-  queue_name char [null]
-  correlation_id char [null]
+  message_id uuid [note: '''*message id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  message_type char [note: '''*message type*''', not null]
+  request_id integer [note: '''*request id*''', null]
+  sender_agent char [note: '''*sender agent*''', null]
+  sender_type monitor_app.char_workflowmessage_sender_type [note: '''*sender type*''', null]
+  recipient_agent char [note: '''*recipient agent*''', null]
+  recipient_type monitor_app.char_workflowmessage_recipient_type [note: '''*recipient type*''', null]
+  namespace char [note: '''
+*namespace*
+Testbed namespace for multi-user message filtering''', null]
+  execution_id char [note: '''
+*execution id*
+Workflow execution instance ID''', null]
+  run_id char [note: '''
+*run id*
+Run number within execution''', null]
+  message_content json [note: '''*message content*''', not null]
+  message_metadata json [note: '''
+*message metadata*
+Extensible metadata for monitoring, debugging, and system tracking''', default:`builtins.dict()`, null]
+  sent_at date_time [note: '''*sent at*''', not null]
+  delivered_at date_time [note: '''*delivered at*''', null]
+  acknowledged_at date_time [note: '''*acknowledged at*''', null]
+  is_successful boolean [note: '''*is successful*''', default:`None`, null]
+  error_message text [note: '''*error message*''', null]
+  queue_name char [note: '''*queue name*''', null]
+  correlation_id char [note: '''*correlation id*''', null]
 
   indexes {
     (message_type,sent_at) [name: 'swf_workflo_message_cb52f7_idx', type: btree]
@@ -1534,8 +1584,6 @@ Provides workflow-specific message tracking with agent identification and messag
     (namespace) [name: 'swf_workflow_messages_namespace_6ecc2826', type: btree]
     (message_id) [pk, unique, name: 'swf_workflow_messages_pkey', type: btree]
     (run_id) [name: 'swf_workflow_messages_run_id_132ff43b', type: btree]
-    (stage_id) [name: 'swf_workflow_messages_stage_id_221b9ea1', type: btree]
-    (workflow_id) [name: 'swf_workflow_messages_workflow_id_0515ebc8', type: btree]
   }
 }
 ref: monitor_app.WorkflowMessage.workflow_id > monitor_app.STFWorkflow.workflow_id
@@ -1546,27 +1594,19 @@ Table oauth2_provider.AccessToken {
   Note: '''
 AccessToken(id, user, source_refresh_token, token, token_checksum, id_token, application, expires, scope, created, updated)
 
-*DB table: oauth2_provider_accesstoken*'''
+*table: public.oauth2_provider_accesstoken*'''
 
-  id big_auto [pk, unique, not null]
-  user_id foreign_key [null]
-  source_refresh_token_id one_to_one [unique, null]
-  token text [not null]
-  token_checksum token_checksum [unique, not null]
-  id_token_id one_to_one [unique, null]
-  application_id foreign_key [null]
-  expires date_time [not null]
-  scope text [not null]
-  created date_time [not null]
-  updated date_time [not null]
+  id big_auto [note: '''*id*''', pk, unique, not null]
+  token text [note: '''*token*''', not null]
+  token_checksum token_checksum [note: '''*token checksum*''', unique, not null]
+  expires date_time [note: '''*expires*''', not null]
+  scope text [note: '''*scope*''', not null]
+  created date_time [note: '''*created*''', not null]
+  updated date_time [note: '''*updated*''', not null]
 
   indexes {
-    (application_id) [name: 'oauth2_provider_accesstoken_application_id_b22886e1', type: btree]
-    (id_token_id) [unique, name: 'oauth2_provider_accesstoken_id_token_id_key', type: btree]
     (id) [pk, unique, name: 'oauth2_provider_accesstoken_pkey', type: btree]
-    (source_refresh_token_id) [unique, name: 'oauth2_provider_accesstoken_source_refresh_token_id_key', type: btree]
     (token_checksum) [unique, name: 'oauth2_provider_accesstoken_token_checksum_key', type: btree]
-    (user_id) [name: 'oauth2_provider_accesstoken_user_id_6e4c9a65', type: btree]
   }
 }
 ref: oauth2_provider.AccessToken.user_id > auth.User.id
@@ -1579,59 +1619,86 @@ Table oauth2_provider.Application {
   Note: '''
 Application(id, client_id, user, redirect_uris, post_logout_redirect_uris, client_type, authorization_grant_type, client_secret, hash_client_secret, name, skip_authorization, created, updated, algorithm, allowed_origins)
 
-*DB table: oauth2_provider_application*'''
+*table: public.oauth2_provider_application*'''
 
-  id big_auto [pk, unique, not null]
-  client_id char [unique, default:`oauth2_provider.generators.generate_client_id()`, not null]
-  user_id foreign_key [null]
-  redirect_uris text [note: '''Allowed URIs list, space separated''', not null]
-  post_logout_redirect_uris text [note: '''Allowed Post Logout URIs list, space separated''', default:`""`, not null]
-  client_type oauth2_provider.char_application_client_type [not null]
-  authorization_grant_type oauth2_provider.char_application_authorization_grant_type [not null]
-  client_secret client_secret [note: '''Hashed on Save. Copy it now if this is a new secret.''', default:`oauth2_provider.generators.generate_client_secret()`, not null]
-  hash_client_secret boolean [default:`True`, not null]
-  name char [not null]
-  skip_authorization boolean [default:`False`, not null]
-  created date_time [not null]
-  updated date_time [not null]
-  algorithm oauth2_provider.char_application_algorithm [default:`""`, not null]
-  allowed_origins text [note: '''Allowed origins list to enable CORS, space separated''', default:`""`, not null]
+  id big_auto [note: '''*id*''', pk, unique, not null]
+  client_id char [note: '''*client id*''', unique, default:`oauth2_provider.generators.generate_client_id()`, not null]
+  redirect_uris text [note: '''
+*redirect uris*
+Allowed URIs list, space separated''', not null]
+  post_logout_redirect_uris text [note: '''
+*post logout redirect uris*
+Allowed Post Logout URIs list, space separated''', default:`""`, not null]
+  client_type oauth2_provider.char_application_client_type [note: '''*client type*''', not null]
+  authorization_grant_type oauth2_provider.char_application_authorization_grant_type [note: '''*authorization grant type*''', not null]
+  client_secret client_secret [note: '''
+*client secret*
+Client secret for authentication''', default:`oauth2_provider.generators.generate_client_secret()`, not null]
+  hash_client_secret boolean [note: '''*hash client secret*''', default:`True`, not null]
+  name char [note: '''*name*''', not null]
+  skip_authorization boolean [note: '''*skip authorization*''', default:`False`, not null]
+  created date_time [note: '''*created*''', not null]
+  updated date_time [note: '''*updated*''', not null]
+  algorithm oauth2_provider.char_application_algorithm [note: '''*algorithm*''', default:`""`, not null]
+  allowed_origins text [note: '''
+*allowed origins*
+Allowed origins list to enable CORS, space separated''', default:`""`, not null]
 
   indexes {
     (client_id) [unique, name: 'oauth2_provider_application_client_id_key', type: btree]
     (client_secret) [name: 'oauth2_provider_application_client_secret_53133678', type: btree]
     (id) [pk, unique, name: 'oauth2_provider_application_pkey', type: btree]
-    (user_id) [name: 'oauth2_provider_application_user_id_79829054', type: btree]
   }
 }
 ref: oauth2_provider.Application.user_id > auth.User.id
+
+
+Table oauth2_provider.DeviceGrant {
+  Note: '''
+DeviceGrant(id, user, device_code, user_code, scope, interval, expires, status, client_id, last_checked)
+
+*table: public.oauth2_provider_devicegrant*'''
+
+  id big_auto [note: '''*id*''', pk, unique, not null]
+  device_code char [note: '''*device code*''', unique, not null]
+  user_code char [note: '''*user code*''', not null]
+  scope char [note: '''*scope*''', null]
+  interval integer [note: '''*interval*''', default:`5`, not null]
+  expires date_time [note: '''*expires*''', not null]
+  status oauth2_provider.char_devicegrant_status [note: '''*status*''', default:`"authorization-pending"`, not null]
+  client_id char [note: '''*client id*''', not null]
+  last_checked date_time [note: '''*last checked*''', not null]
+
+  indexes {
+    (client_id) [name: 'oauth2_provider_devicegrant_client_id_229dd06d', type: btree]
+    (device_code) [unique, name: 'oauth2_provider_devicegrant_device_code_key', type: btree]
+    (id) [pk, unique, name: 'oauth2_provider_devicegrant_pkey', type: btree]
+  }
+}
+ref: oauth2_provider.DeviceGrant.user_id > auth.User.id
 
 
 Table oauth2_provider.Grant {
   Note: '''
 Grant(id, user, code, application, expires, redirect_uri, scope, created, updated, code_challenge, code_challenge_method, nonce, claims)
 
-*DB table: oauth2_provider_grant*'''
+*table: public.oauth2_provider_grant*'''
 
-  id big_auto [pk, unique, not null]
-  user_id foreign_key [not null]
-  code char [unique, not null]
-  application_id foreign_key [not null]
-  expires date_time [not null]
-  redirect_uri text [not null]
-  scope text [not null]
-  created date_time [not null]
-  updated date_time [not null]
-  code_challenge char [default:`""`, not null]
-  code_challenge_method oauth2_provider.char_grant_code_challenge_method [default:`""`, not null]
-  nonce char [default:`""`, not null]
-  claims text [not null]
+  id big_auto [note: '''*id*''', pk, unique, not null]
+  code char [note: '''*code*''', unique, not null]
+  expires date_time [note: '''*expires*''', not null]
+  redirect_uri text [note: '''*redirect uri*''', not null]
+  scope text [note: '''*scope*''', not null]
+  created date_time [note: '''*created*''', not null]
+  updated date_time [note: '''*updated*''', not null]
+  code_challenge char [note: '''*code challenge*''', default:`""`, not null]
+  code_challenge_method oauth2_provider.char_grant_code_challenge_method [note: '''*code challenge method*''', default:`""`, not null]
+  nonce char [note: '''*nonce*''', default:`""`, not null]
+  claims text [note: '''*claims*''', not null]
 
   indexes {
-    (application_id) [name: 'oauth2_provider_grant_application_id_81923564', type: btree]
     (code) [unique, name: 'oauth2_provider_grant_code_key', type: btree]
     (id) [pk, unique, name: 'oauth2_provider_grant_pkey', type: btree]
-    (user_id) [name: 'oauth2_provider_grant_user_id_e8f62af8', type: btree]
   }
 }
 ref: oauth2_provider.Grant.user_id > auth.User.id
@@ -1642,22 +1709,18 @@ Table oauth2_provider.IDToken {
   Note: '''
 IDToken(id, user, jti, application, expires, scope, created, updated)
 
-*DB table: oauth2_provider_idtoken*'''
+*table: public.oauth2_provider_idtoken*'''
 
-  id big_auto [pk, unique, not null]
-  user_id foreign_key [null]
-  jti uuid [unique, default:`uuid.uuid4()`, not null]
-  application_id foreign_key [null]
-  expires date_time [not null]
-  scope text [not null]
-  created date_time [not null]
-  updated date_time [not null]
+  id big_auto [note: '''*id*''', pk, unique, not null]
+  jti uuid [note: '''*JWT Token ID*''', unique, default:`uuid.uuid4()`, not null]
+  expires date_time [note: '''*expires*''', not null]
+  scope text [note: '''*scope*''', not null]
+  created date_time [note: '''*created*''', not null]
+  updated date_time [note: '''*updated*''', not null]
 
   indexes {
-    (application_id) [name: 'oauth2_provider_idtoken_application_id_08c5ff4f', type: btree]
     (jti) [unique, name: 'oauth2_provider_idtoken_jti_key', type: btree]
     (id) [pk, unique, name: 'oauth2_provider_idtoken_pkey', type: btree]
-    (user_id) [name: 'oauth2_provider_idtoken_user_id_dd512b59', type: btree]
   }
 }
 ref: oauth2_provider.IDToken.user_id > auth.User.id
@@ -1668,24 +1731,18 @@ Table oauth2_provider.RefreshToken {
   Note: '''
 RefreshToken(id, user, token, application, access_token, token_family, created, updated, revoked)
 
-*DB table: oauth2_provider_refreshtoken*'''
+*table: public.oauth2_provider_refreshtoken*'''
 
-  id big_auto [pk, unique, not null]
-  user_id foreign_key [not null]
-  token char [not null]
-  application_id foreign_key [not null]
-  access_token_id one_to_one [unique, null]
-  token_family uuid [null]
-  created date_time [not null]
-  updated date_time [not null]
-  revoked date_time [null]
+  id big_auto [note: '''*id*''', pk, unique, not null]
+  token char [note: '''*token*''', not null]
+  token_family uuid [note: '''*token family*''', null]
+  created date_time [note: '''*created*''', not null]
+  updated date_time [note: '''*updated*''', not null]
+  revoked date_time [note: '''*revoked*''', null]
 
   indexes {
-    (access_token_id) [unique, name: 'oauth2_provider_refreshtoken_access_token_id_key', type: btree]
-    (application_id) [name: 'oauth2_provider_refreshtoken_application_id_2d1c311b', type: btree]
     (id) [pk, unique, name: 'oauth2_provider_refreshtoken_pkey', type: btree]
     (token,revoked) [unique, name: 'oauth2_provider_refreshtoken_token_revoked_af8a5134_uniq', type: btree]
-    (user_id) [name: 'oauth2_provider_refreshtoken_user_id_da837fce', type: btree]
   }
 }
 ref: oauth2_provider.RefreshToken.user_id > auth.User.id
@@ -1699,17 +1756,17 @@ Background tag (k1, k2...). A named, versioned background configuration
 (beam-gas, synchrotron radiation, or overlay samples), independent of any
 physics signal. Number auto-incremented via PersistentState.
 
-*DB table: pcs_background_tag*'''
+*table: public.pcs_background_tag*'''
 
-  id big_auto [pk, unique, not null]
-  tag_number integer [unique, not null]
-  tag_label char [unique, not null]
-  status pcs.char_backgroundtag_status [default:`"draft"`, not null]
-  description text [default:`""`, not null]
-  parameters json [default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  tag_number integer [note: '''*tag number*''', unique, not null]
+  tag_label char [note: '''*tag label*''', unique, not null]
+  status pcs.char_backgroundtag_status [note: '''*status*''', default:`"draft"`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  parameters json [note: '''*parameters*''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'pcs_background_tag_pkey', type: btree]
@@ -1729,22 +1786,24 @@ future (blue). ``set_current`` in the service layer enforces the
 transitions painless.
 
 
-*DB table: pcs_campaign*'''
+*table: public.pcs_campaign*'''
 
-  id big_auto [pk, unique, not null]
-  name char [note: '''Campaign name, e.g. "26.02.0"''', unique, not null]
-  lifecycle char [default:`"future"`, not null]
-  description text [default:`""`, not null]
-  start_date date [null]
-  end_date date [null]
-  clone_of_id foreign_key [note: '''Campaign this was cloned from''', null]
-  data json [note: '''Flexible extension fields (no migration to add new keys)''', default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''
+*name*
+Campaign name, e.g. "26.02.0"''', unique, not null]
+  lifecycle char [note: '''*lifecycle*''', default:`"future"`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  start_date date [note: '''*start date*''', null]
+  end_date date [note: '''*end date*''', null]
+  data json [note: '''
+*data*
+Flexible extension fields (no migration to add new keys)''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
-    (clone_of_id) [name: 'pcs_campaign_clone_of_id_89e6615c', type: btree]
     (name) [unique, name: 'pcs_campaign_name_key', type: btree]
     (id) [pk, unique, name: 'pcs_campaign_pkey', type: btree]
   }
@@ -1762,44 +1821,32 @@ Tags may be draft during alpha; reproducibility locking is enforced at
 submission prep, not at composition.
 
 
-*DB table: pcs_dataset*'''
+*table: public.pcs_dataset*'''
 
-  id big_auto [pk, unique, not null]
-  dataset_name char [not null]
-  composed_name char [default:`""`, not null]
-  scope char [default:`"group.EIC"`, not null]
-  detector_version char [not null]
-  detector_config char [not null]
-  campaign_id foreign_key [null]
-  physics_tag_id foreign_key [not null]
-  evgen_tag_id foreign_key [not null]
-  simu_tag_id foreign_key [not null]
-  reco_tag_id foreign_key [not null]
-  background_tag_id foreign_key [null]
-  sample_name char [default:`""`, not null]
-  propagation pcs.char_dataset_propagation [default:`"continue"`, not null]
-  replaced_by char [default:`""`, not null]
-  block_num positive_integer [default:`1`, not null]
-  blocks positive_integer [default:`1`, not null]
-  did char [unique, not null]
-  file_count integer [default:`0`, not null]
-  data_size big_integer [default:`0`, not null]
-  description text [default:`""`, not null]
-  metadata json [null]
-  created_by char [not null]
-  created_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  dataset_name char [note: '''*dataset name*''', not null]
+  composed_name char [note: '''*composed name*''', default:`""`, not null]
+  scope char [note: '''*scope*''', default:`"group.EIC"`, not null]
+  detector_version char [note: '''*detector version*''', not null]
+  detector_config char [note: '''*detector config*''', not null]
+  sample_name char [note: '''*sample name*''', default:`""`, not null]
+  propagation pcs.char_dataset_propagation [note: '''*propagation*''', default:`"continue"`, not null]
+  replaced_by char [note: '''*replaced by*''', default:`""`, not null]
+  block_num positive_integer [note: '''*block num*''', default:`1`, not null]
+  blocks positive_integer [note: '''*blocks*''', default:`1`, not null]
+  did char [note: '''*did*''', unique, not null]
+  file_count integer [note: '''*file count*''', default:`0`, not null]
+  data_size big_integer [note: '''*data size*''', default:`0`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  metadata json [note: '''*metadata*''', null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
 
   indexes {
-    (background_tag_id) [name: 'pcs_dataset_background_tag_id_2cf7bb33', type: btree]
-    (campaign_id) [name: 'pcs_dataset_campaign_id_029de6cc', type: btree]
     (composed_name) [name: 'pcs_dataset_composed_name_bacc86bb', type: btree]
     (dataset_name,block_num) [unique, name: 'pcs_dataset_dataset_name_block_num_1e4cea76_uniq', type: btree]
     (did) [unique, name: 'pcs_dataset_did_key', type: btree]
-    (evgen_tag_id) [name: 'pcs_dataset_evgen_tag_id_d087bbcb', type: btree]
-    (physics_tag_id) [name: 'pcs_dataset_physics_tag_id_318b7788', type: btree]
     (id) [pk, unique, name: 'pcs_dataset_pkey', type: btree]
-    (reco_tag_id) [name: 'pcs_dataset_reco_tag_id_5036901f', type: btree]
-    (simu_tag_id) [name: 'pcs_dataset_simu_tag_id_a61b4c78', type: btree]
   }
 }
 ref: pcs.Dataset.campaign_id > pcs.Campaign.id
@@ -1814,17 +1861,17 @@ Table pcs.EvgenTag {
   Note: '''
 Event generation tag (e1, e2...). Number auto-incremented via PersistentState.
 
-*DB table: pcs_evgen_tag*'''
+*table: public.pcs_evgen_tag*'''
 
-  id big_auto [pk, unique, not null]
-  tag_number integer [unique, not null]
-  tag_label char [unique, not null]
-  status pcs.char_evgentag_status [default:`"draft"`, not null]
-  description text [default:`""`, not null]
-  parameters json [default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  tag_number integer [note: '''*tag number*''', unique, not null]
+  tag_label char [note: '''*tag label*''', unique, not null]
+  status pcs.char_evgentag_status [note: '''*status*''', default:`"draft"`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  parameters json [note: '''*parameters*''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'pcs_evgen_tag_pkey', type: btree]
@@ -1842,27 +1889,25 @@ The plural class name is intentional: this is the association/history record
 for PanDA task attempts attached to a ProdTask, not a one-to-one peer model.
 
 
-*DB table: pcs_panda_tasks*'''
+*table: public.pcs_panda_tasks*'''
 
-  id big_auto [pk, unique, not null]
-  prod_task_id foreign_key [not null]
-  try_number positive_integer [default:`1`, not null]
-  jedi_task_id big_integer [null]
-  task_name char [unique, not null]
-  out_ds char [default:`""`, not null]
-  log_ds char [default:`""`, not null]
-  site char [default:`""`, not null]
-  status_snapshot char [default:`""`, not null]
-  association_source char [default:`""`, not null]
-  match_reason text [default:`""`, not null]
-  metadata json [default:`builtins.dict()`, not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  try_number positive_integer [note: '''*try number*''', default:`1`, not null]
+  jedi_task_id big_integer [note: '''*jedi task id*''', null]
+  task_name char [note: '''*task name*''', unique, not null]
+  out_ds char [note: '''*out ds*''', default:`""`, not null]
+  log_ds char [note: '''*log ds*''', default:`""`, not null]
+  site char [note: '''*site*''', default:`""`, not null]
+  status_snapshot char [note: '''*status snapshot*''', default:`""`, not null]
+  association_source char [note: '''*association source*''', default:`""`, not null]
+  match_reason text [note: '''*match reason*''', default:`""`, not null]
+  metadata json [note: '''*metadata*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (jedi_task_id) [name: 'pcs_panda_tasks_jedi_task_id_dbbf9c99', type: btree]
     (id) [pk, unique, name: 'pcs_panda_tasks_pkey', type: btree]
-    (prod_task_id) [name: 'pcs_panda_tasks_prod_task_id_54f1c127', type: btree]
     (task_name) [unique, name: 'pcs_panda_tasks_task_name_key', type: btree]
   }
 }
@@ -1873,13 +1918,15 @@ Table pcs.PhysicsCategory {
   Note: '''
 Physics area (e.g. DVCS=3, DIS=4). Digit determines tag number range.
 
-*DB table: pcs_physics_category*'''
+*table: public.pcs_physics_category*'''
 
-  digit positive_small_integer [note: '''Single digit 1-9. Physics tag numbers = digit * 1000 + N.''', pk, unique, not null]
-  name char [unique, not null]
-  description text [default:`""`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
+  digit positive_small_integer [note: '''
+*digit*
+Single digit 1-9. Physics tag numbers = digit * 1000 + N.''', pk, unique, not null]
+  name char [note: '''*name*''', unique, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
 
   indexes {
     (name) [unique, name: 'pcs_physics_category_name_key', type: btree]
@@ -1892,21 +1939,19 @@ Table pcs.PhysicsTag {
   Note: '''
 Physics process tag (p3001, p3002...). Number = category.digit * 1000 + N.
 
-*DB table: pcs_physics_tag*'''
+*table: public.pcs_physics_tag*'''
 
-  id big_auto [pk, unique, not null]
-  tag_number integer [unique, not null]
-  tag_label char [unique, not null]
-  category_id foreign_key [not null]
-  status pcs.char_physicstag_status [default:`"draft"`, not null]
-  description text [default:`""`, not null]
-  parameters json [default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  tag_number integer [note: '''*tag number*''', unique, not null]
+  tag_label char [note: '''*tag label*''', unique, not null]
+  status pcs.char_physicstag_status [note: '''*status*''', default:`"draft"`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  parameters json [note: '''*parameters*''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
-    (category_id) [name: 'pcs_physics_tag_category_id_9a27f87a', type: btree]
     (id) [pk, unique, name: 'pcs_physics_tag_pkey', type: btree]
     (tag_label) [unique, name: 'pcs_physics_tag_tag_label_key', type: btree]
     (tag_number) [unique, name: 'pcs_physics_tag_tag_number_key', type: btree]
@@ -1925,33 +1970,51 @@ software stack, resource targets, condor template, and PanDA/Rucio overrides.
 Always mutable — the PanDA task/job spec is the immutable record.
 
 
-*DB table: pcs_prod_config*'''
+*table: public.pcs_prod_config*'''
 
-  id big_auto [pk, unique, not null]
-  name char [note: '''Human-readable config name, e.g. "DVCS 10x100 standard"''', unique, not null]
-  description text [default:`""`, not null]
-  bg_mixing boolean [default:`False`, not null]
-  bg_cross_section char [default:`""`, not null]
-  bg_evtgen_file char [default:`""`, not null]
-  copy_reco boolean [default:`True`, not null]
-  copy_full boolean [default:`False`, not null]
-  copy_log boolean [default:`True`, not null]
-  use_rucio boolean [default:`True`, not null]
-  jug_xl_tag char [note: '''e.g. 26.02.0-stable''', default:`""`, not null]
-  container_image char [note: '''Singularity/Apptainer image reference''', default:`""`, not null]
-  target_hours_per_job decimal [note: '''Target walltime per job in hours''', null]
-  events_per_task positive_integer [note: '''Total events for the task''', null]
-  condor_template text [note: '''HTCondor submission template''', default:`""`, not null]
-  panda_site char [default:`""`, not null]
-  panda_queue char [default:`""`, not null]
-  panda_working_group char [default:`""`, not null]
-  panda_resource_type char [default:`""`, not null]
-  rucio_rse char [note: '''Rucio Storage Element for output''', default:`""`, not null]
-  rucio_replication_rules json [note: '''Rucio replication rule definitions''', null]
-  data json [note: '''Additional submission parameters (JSON)''', null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''
+*name*
+Human-readable config name, e.g. "DVCS 10x100 standard"''', unique, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  bg_mixing boolean [note: '''*bg mixing*''', default:`False`, not null]
+  bg_cross_section char [note: '''*bg cross section*''', default:`""`, not null]
+  bg_evtgen_file char [note: '''*bg evtgen file*''', default:`""`, not null]
+  copy_reco boolean [note: '''*copy reco*''', default:`True`, not null]
+  copy_full boolean [note: '''*copy full*''', default:`False`, not null]
+  copy_log boolean [note: '''*copy log*''', default:`True`, not null]
+  use_rucio boolean [note: '''*use rucio*''', default:`True`, not null]
+  jug_xl_tag char [note: '''
+*jug xl tag*
+e.g. 26.02.0-stable''', default:`""`, not null]
+  container_image char [note: '''
+*container image*
+Singularity/Apptainer image reference''', default:`""`, not null]
+  target_hours_per_job decimal [note: '''
+*target hours per job*
+Target walltime per job in hours''', null]
+  events_per_task positive_integer [note: '''
+*events per task*
+Total events for the task''', null]
+  condor_template text [note: '''
+*condor template*
+HTCondor submission template''', default:`""`, not null]
+  panda_site char [note: '''*panda site*''', default:`""`, not null]
+  panda_queue char [note: '''*panda queue*''', default:`""`, not null]
+  panda_working_group char [note: '''*panda working group*''', default:`""`, not null]
+  panda_resource_type char [note: '''*panda resource type*''', default:`""`, not null]
+  rucio_rse char [note: '''
+*rucio rse*
+Rucio Storage Element for output''', default:`""`, not null]
+  rucio_replication_rules json [note: '''
+*rucio replication rules*
+Rucio replication rule definitions''', null]
+  data json [note: '''
+*data*
+Additional submission parameters (JSON)''', null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (name) [unique, name: 'pcs_prod_config_name_key', type: btree]
@@ -1970,35 +2033,57 @@ Use flags and requestor are duplicated onto ProdTask at task
 creation; both rows are mutable independently after that.
 
 
-*DB table: pcs_prod_request*'''
+*table: public.pcs_prod_request*'''
 
-  id big_auto [pk, unique, not null]
-  questionnaire_id foreign_key [note: '''Originating Google Form response mirror, if linked''', null]
-  requestor char [note: '''PWG or DSC making the request''', default:`""`, not null]
-  simu_path char [note: '''Declared simulation/EVGEN input location''', default:`""`, not null]
-  gen_config text [note: '''Generator configuration text from the request''', default:`""`, not null]
-  nevents big_integer [note: '''Requested event count''', null]
-  background char [note: '''Requested background condition''', default:`""`, not null]
-  description text [default:`""`, not null]
-  priority integer [note: '''Requester or production priority''', null]
-  pre_tdr_use boolean [default:`False`, not null]
-  early_science_use boolean [default:`False`, not null]
-  other_use boolean [default:`False`, not null]
-  new_request boolean [default:`False`, not null]
-  status char [default:`"new"`, not null]
-  source_url char [note: '''Source spreadsheet or form URL''', default:`""`, not null]
-  source_row char [note: '''Source row identifier for idempotent import''', default:`""`, not null]
-  input_status char [note: '''Whether declared inputs are located/registered/usable''', default:`""`, not null]
-  rucio_source char [note: '''Rucio DID or container for registered input''', default:`""`, not null]
-  validation_status char [note: '''Validation summary''', default:`""`, not null]
-  data json [note: '''Flexible extension fields (no migration to add new keys)''', default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  requestor char [note: '''
+*requestor*
+PWG or DSC making the request''', default:`""`, not null]
+  simu_path char [note: '''
+*simu path*
+Declared simulation/EVGEN input location''', default:`""`, not null]
+  gen_config text [note: '''
+*gen config*
+Generator configuration text from the request''', default:`""`, not null]
+  nevents big_integer [note: '''
+*nevents*
+Requested event count''', null]
+  background char [note: '''
+*background*
+Requested background condition''', default:`""`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  priority integer [note: '''
+*priority*
+Requester or production priority''', null]
+  pre_tdr_use boolean [note: '''*pre tdr use*''', default:`False`, not null]
+  early_science_use boolean [note: '''*early science use*''', default:`False`, not null]
+  other_use boolean [note: '''*other use*''', default:`False`, not null]
+  new_request boolean [note: '''*new request*''', default:`False`, not null]
+  status char [note: '''*status*''', default:`"new"`, not null]
+  source_url char [note: '''
+*source url*
+Source spreadsheet or form URL''', default:`""`, not null]
+  source_row char [note: '''
+*source row*
+Source row identifier for idempotent import''', default:`""`, not null]
+  input_status char [note: '''
+*input status*
+Whether declared inputs are located/registered/usable''', default:`""`, not null]
+  rucio_source char [note: '''
+*rucio source*
+Rucio DID or container for registered input''', default:`""`, not null]
+  validation_status char [note: '''
+*validation status*
+Validation summary''', default:`""`, not null]
+  data json [note: '''
+*data*
+Flexible extension fields (no migration to add new keys)''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'pcs_prod_request_pkey', type: btree]
-    (questionnaire_id) [name: 'pcs_prod_request_questionnaire_id_01db2c3e', type: btree]
   }
 }
 ref: pcs.ProdRequest.questionnaire_id > pcs.Questionnaire.id
@@ -2011,39 +2096,45 @@ Fully defines a production submission from which Condor and PanDA
 commands can be generated.
 
 
-*DB table: pcs_prod_task*'''
+*table: public.pcs_prod_task*'''
 
-  id big_auto [pk, unique, not null]
-  name char [note: '''Task name (auto-derived from dataset or manual)''', unique, not null]
-  description text [default:`""`, not null]
-  status char [default:`"draft"`, not null]
-  dataset_id foreign_key [not null]
-  prod_config_id foreign_key [not null]
-  campaign_id foreign_key [note: '''Campaign this task belongs to''', null]
-  request_id foreign_key [note: '''Originating PWG/DSC request, if any''', null]
-  requestor char [default:`""`, not null]
-  priority integer [null]
-  pre_tdr_use boolean [default:`False`, not null]
-  early_science_use boolean [default:`False`, not null]
-  other_use boolean [default:`False`, not null]
-  new_request boolean [default:`False`, not null]
-  csv_file char [note: '''CSV file path in simulation_campaign_datasets''', default:`""`, not null]
-  overrides json [note: '''Per-task overrides of ProdConfig fields (JSON)''', null]
-  condor_command text [note: '''Generated Condor submission command''', default:`""`, not null]
-  panda_command text [note: '''Generated PanDA submission command''', default:`""`, not null]
-  panda_task_id big_integer [note: '''PanDA task ID after submission''', null]
-  condor_cluster_id char [note: '''Condor cluster ID after submission''', default:`""`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  name char [note: '''
+*name*
+Task name (auto-derived from dataset or manual)''', unique, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  status char [note: '''*status*''', default:`"draft"`, not null]
+  requestor char [note: '''*requestor*''', default:`""`, not null]
+  priority integer [note: '''*priority*''', null]
+  pre_tdr_use boolean [note: '''*pre tdr use*''', default:`False`, not null]
+  early_science_use boolean [note: '''*early science use*''', default:`False`, not null]
+  other_use boolean [note: '''*other use*''', default:`False`, not null]
+  new_request boolean [note: '''*new request*''', default:`False`, not null]
+  csv_file char [note: '''
+*csv file*
+CSV file path in simulation_campaign_datasets''', default:`""`, not null]
+  overrides json [note: '''
+*overrides*
+Per-task overrides of ProdConfig fields (JSON)''', null]
+  condor_command text [note: '''
+*condor command*
+Generated Condor submission command''', default:`""`, not null]
+  panda_command text [note: '''
+*panda command*
+Generated PanDA submission command''', default:`""`, not null]
+  panda_task_id big_integer [note: '''
+*panda task id*
+PanDA task ID after submission''', null]
+  condor_cluster_id char [note: '''
+*condor cluster id*
+Condor cluster ID after submission''', default:`""`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
-    (campaign_id) [name: 'pcs_prod_task_campaign_id_4904c203', type: btree]
-    (dataset_id) [name: 'pcs_prod_task_dataset_id_c973b6bd', type: btree]
     (name) [unique, name: 'pcs_prod_task_name_key', type: btree]
     (id) [pk, unique, name: 'pcs_prod_task_pkey', type: btree]
-    (prod_config_id) [name: 'pcs_prod_task_prod_config_id_18763ab2', type: btree]
-    (request_id) [name: 'pcs_prod_task_request_id_781faee0', type: btree]
   }
 }
 ref: pcs.ProdTask.dataset_id > pcs.Dataset.id
@@ -2060,24 +2151,28 @@ Requesters still submit through the Google Form; PCS mirrors the backend
 export so production records can link to the submitted request provenance.
 
 
-*DB table: pcs_questionnaire*'''
+*table: public.pcs_questionnaire*'''
 
-  id big_auto [pk, unique, not null]
-  submitted_at date_time [note: '''Google Form response timestamp; the intake idempotency key''', unique, not null]
-  description text [note: '''Dataset, generator, and purpose as submitted''', default:`""`, not null]
-  repository text [default:`""`, not null]
-  contact text [default:`""`, not null]
-  nevents text [default:`""`, not null]
-  benchmark text [default:`""`, not null]
-  estimate text [default:`""`, not null]
-  status pcs.char_questionnaire_status [default:`"active"`, not null]
-  source_url char [default:`""`, not null]
-  source_row char [default:`""`, not null]
-  content_hash char [not null]
-  data json [default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  submitted_at date_time [note: '''
+*submitted at*
+Google Form response timestamp; the intake idempotency key''', unique, not null]
+  description text [note: '''
+*description*
+Dataset, generator, and purpose as submitted''', default:`""`, not null]
+  repository text [note: '''*repository*''', default:`""`, not null]
+  contact text [note: '''*contact*''', default:`""`, not null]
+  nevents text [note: '''*nevents*''', default:`""`, not null]
+  benchmark text [note: '''*benchmark*''', default:`""`, not null]
+  estimate text [note: '''*estimate*''', default:`""`, not null]
+  status pcs.char_questionnaire_status [note: '''*status*''', default:`"active"`, not null]
+  source_url char [note: '''*source url*''', default:`""`, not null]
+  source_row char [note: '''*source row*''', default:`""`, not null]
+  content_hash char [note: '''*content hash*''', not null]
+  data json [note: '''*data*''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (content_hash) [name: 'pcs_questionnaire_content_hash_45a57054', type: btree]
@@ -2091,17 +2186,17 @@ Table pcs.RecoTag {
   Note: '''
 Reconstruction tag (r1, r2...). Number auto-incremented via PersistentState.
 
-*DB table: pcs_reco_tag*'''
+*table: public.pcs_reco_tag*'''
 
-  id big_auto [pk, unique, not null]
-  tag_number integer [unique, not null]
-  tag_label char [unique, not null]
-  status pcs.char_recotag_status [default:`"draft"`, not null]
-  description text [default:`""`, not null]
-  parameters json [default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  tag_number integer [note: '''*tag number*''', unique, not null]
+  tag_label char [note: '''*tag label*''', unique, not null]
+  status pcs.char_recotag_status [note: '''*status*''', default:`"draft"`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  parameters json [note: '''*parameters*''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'pcs_reco_tag_pkey', type: btree]
@@ -2115,17 +2210,17 @@ Table pcs.SimuTag {
   Note: '''
 Simulation tag (s1, s2...). Number auto-incremented via PersistentState.
 
-*DB table: pcs_simu_tag*'''
+*table: public.pcs_simu_tag*'''
 
-  id big_auto [pk, unique, not null]
-  tag_number integer [unique, not null]
-  tag_label char [unique, not null]
-  status pcs.char_simutag_status [default:`"draft"`, not null]
-  description text [default:`""`, not null]
-  parameters json [default:`builtins.dict()`, not null]
-  created_by char [not null]
-  created_at date_time [not null]
-  updated_at date_time [not null]
+  id big_auto [note: '''*ID*''', pk, unique, not null]
+  tag_number integer [note: '''*tag number*''', unique, not null]
+  tag_label char [note: '''*tag label*''', unique, not null]
+  status pcs.char_simutag_status [note: '''*status*''', default:`"draft"`, not null]
+  description text [note: '''*description*''', default:`""`, not null]
+  parameters json [note: '''*parameters*''', default:`builtins.dict()`, not null]
+  created_by char [note: '''*created by*''', not null]
+  created_at date_time [note: '''*created at*''', not null]
+  updated_at date_time [note: '''*updated at*''', not null]
 
   indexes {
     (id) [pk, unique, name: 'pcs_simu_tag_pkey', type: btree]
@@ -2153,16 +2248,15 @@ the sessions documentation that is shipped with Django (also available
 on the Django web site).
 
 
-*DB table: django_session*'''
+*table: public.django_session*'''
 
-  session_key char [pk, unique, not null]
-  session_data text [not null]
-  expire_date date_time [not null]
+  session_key char [note: '''*session key*''', pk, unique, not null]
+  session_data text [note: '''*session data*''', not null]
+  expire_date date_time [note: '''*expire date*''', not null]
 
   indexes {
     (expire_date) [name: 'django_session_expire_date_a5c62663', type: btree]
     (session_key) [pk, unique, name: 'django_session_pkey', type: btree]
   }
 }
-
 
