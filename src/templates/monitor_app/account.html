@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}{{ user.username }}{% endblock %}
 
@@ -46,7 +47,7 @@
         {% if my_tasks_error %}
         <p class="error_fill" style="padding: 6px 10px;">PanDA task lookup failed: {{ my_tasks_error }}</p>
         {% elif my_tasks %}
-        <table class="my-workflows-table">
+        <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
             <thead>
                 <tr><th>Task</th><th>JEDI ID</th><th>Status</th><th>Label</th><th>Created</th><th>Modified</th></tr>
             </thead>
@@ -55,7 +56,7 @@
                 <tr>
                     <td><a href="{% url 'monitor_app:panda_task_detail' t.jeditaskid %}">{{ t.taskname }}</a></td>
                     <td>{{ t.jeditaskid }}</td>
-                    <td>{{ t.status }}</td>
+                    <td class="{{ t.status|state_class }}">{{ t.status }}</td>
                     <td>{{ t.prodsourcelabel }}</td>
                     <td>{{ t.creationdate|date:"Y-m-d H:i" }}</td>
                     <td>{{ t.modificationtime|date:"Y-m-d H:i" }}</td>

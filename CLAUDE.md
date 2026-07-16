@@ -117,6 +117,19 @@ page template:
 - **AI attribution**: `.ai-attr` / `.ai-attr-text` (purple-on-lavender
   chip) and `.ai-fill` (lavender container) mark AI-origin content; the
   classes are defined in the base template's style block.
+- **Sortable tables**: DataTables is loaded globally in `base.html`
+  and is the house table widget. Big list pages use the
+  `_datatable_base` / `_datatable_dynamic_base` templates (ajax);
+  static server-rendered tables get class `swf-sortable`, which the
+  base template initializes as a chrome-free DataTable (sort headers
+  only, no paging/search). Table columns are sortable by default
+  everywhere; a non-sortable table is the special case and needs
+  Torre's say-so. Static tables use the house table classes
+  (`table table-striped table-bordered table-sm align-middle w-auto`).
+- **Status cells**: state values render with the BigMon fill classes
+  via `{% load swf_fmt %}` and
+  `<td class="{{ value|state_class }}">{{ value }}</td>` (or
+  `task_badge`/`job_badge` for badge form). Never a bare status cell.
 
 ## Deploy
 

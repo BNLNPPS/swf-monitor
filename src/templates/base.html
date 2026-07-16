@@ -218,6 +218,9 @@
       .nav-panda-label {
         margin-left: 1.5em;
       }
+      .nav-analysis {
+        margin-left: 1.5em;
+      }
       .nav-system-error { color: #ff8174 !important; font-weight: 700; }
       /* One-click copy icon for IDs — see swf_fmt.copy_btn template tag */
       .copy-btn {
@@ -450,7 +453,7 @@
                 <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
             </div>
         </div>
-        <a href="{% url 'monitor_app:analysis' %}" class="{% if active_nav.analysis %}nav-active{% endif %}">Analysis</a>
+        <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if active_nav.analysis %} nav-active{% endif %}">Analysis</a>
         </span>
         <span class="nav-spacer"></span>
         <div class="dropdown">
@@ -624,6 +627,16 @@ function applyNavMode(mode) {
         tick();
         setInterval(tick, 1000);
       })();
+      // House sortable tables: every <table class="swf-sortable"> gets
+      // DataTables click-to-sort headers (the globally loaded house table
+      // widget), without paging/search chrome. Columns are sortable by
+      // default across the app; opting out is the special case. See
+      // CLAUDE.md, House UI helpers.
+      $(function () {
+        $('table.swf-sortable').DataTable({
+          paging: false, searching: false, info: false, order: []
+        });
+      });
     </script>
 </body>
 </html>
