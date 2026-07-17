@@ -39,8 +39,8 @@ trees needs no swf-remote change.
 
 An explicit named entry is still required in two cases:
 
-- a route **outside** the `pcs/` and `panda/` trees (as with `alarms/`
-  and the SSE stream), which no catch-all covers;
+- a route **outside** the `pcs/` and `panda/` trees (as with `alarms/`,
+  `snapper/`, and the SSE stream), which no catch-all covers;
 - a route that swf-remote's own code or templates reference by
   `{% url %}` name — the explicit entries above the catch-alls exist
   to keep those names resolvable, with `name=` mirroring the

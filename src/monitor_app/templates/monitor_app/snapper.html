@@ -1,0 +1,460 @@
+{% extends 'base.html' %}
+{% load swf_fmt %}
+
+{% block title %}Snapper {{ scope_label }} {{ active_tab|title }} - SWF Monitor{% endblock %}
+
+{% block content %}
+<style>
+    .snapper-page {
+        --snapper-border: #d5dce5;
+        --snapper-muted: #5d6b7a;
+    }
+    .snapper-header {
+        align-items: flex-end;
+        display: flex;
+        flex-wrap: wrap;
+        gap: .75rem 1.5rem;
+        justify-content: space-between;
+        margin-bottom: .65rem;
+    }
+    .snapper-header h1 {
+        font-size: 1.7rem;
+        margin: 0 0 .1rem;
+    }
+    .snapper-header p {
+        color: var(--snapper-muted);
+        margin: 0;
+    }
+    .snapper-facts {
+        display: grid;
+        gap: .65rem;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        margin-bottom: 1rem;
+    }
+    .snapper-fact {
+        background: #f8f9fb;
+        border: 1px solid var(--snapper-border);
+        border-radius: .35rem;
+        min-width: 0;
+        padding: .55rem .7rem;
+    }
+    .snapper-fact-label {
+        color: var(--snapper-muted);
+        font-size: .75rem;
+        font-weight: 700;
+        letter-spacing: .02em;
+        margin-bottom: .1rem;
+        text-transform: uppercase;
+    }
+    .snapper-fact-value {
+        font-weight: 600;
+        overflow-wrap: anywhere;
+    }
+    .snapper-component {
+        border: 1px solid var(--snapper-border);
+        border-radius: .4rem;
+        margin-bottom: 1rem;
+    }
+    .snapper-component-header {
+        background: #f6f8fb;
+        border-bottom: 1px solid var(--snapper-border);
+        padding: .6rem .75rem;
+    }
+    .snapper-component-body {
+        padding: .75rem;
+    }
+    .snapper-meta {
+        color: var(--snapper-muted);
+        font-size: .82rem;
+    }
+    .snapper-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+    .snapper-json summary {
+        color: #495057;
+        cursor: pointer;
+        font-weight: 600;
+    }
+    .snapper-json pre {
+        max-height: 34rem;
+        overflow: auto;
+    }
+</style>
+
+<div class="container-fluid mt-0 snapper-page">
+    <header class="snapper-header">
+        <div>
+            <h1>Snapper</h1>
+            <p>Coherent operational state history for SWF systems</p>
+        </div>
+        <div class="btn-group" role="group" aria-label="Snapper scope">
+            {% for option in scope_options %}
+                {% if active_tab == 'report' %}
+                    <a class="btn btn-sm {% if option.active %}btn-secondary active{% else %}btn-outline-secondary{% endif %}"
+                       href="{% url 'monitor_app:snapper_report' scope=option.name %}"
+                       {% if option.active %}aria-current="page"{% endif %}>{{ option.label }}</a>
+                {% else %}
+                    <a class="btn btn-sm {% if option.active %}btn-secondary active{% else %}btn-outline-secondary{% endif %}"
+                       href="{% url 'monitor_app:snapper_system' scope=option.name %}"
+                       {% if option.active %}aria-current="page"{% endif %}>{{ option.label }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </header>
+
+    <nav class="swf-page-tabs" aria-label="Snapper views">
+        <a class="{% if active_tab == 'report' %}active{% endif %}"
+           href="{% url 'monitor_app:snapper_report' scope=scope %}"
+           {% if active_tab == 'report' %}aria-current="page"{% endif %}>Report</a>
+        <a class="{% if active_tab == 'system' %}active{% endif %}"
+           href="{% url 'monitor_app:snapper_system' scope=scope %}"
+           {% if active_tab == 'system' %}aria-current="page"{% endif %}>System</a>
+    </nav>
+
+    {% if active_tab == 'report' %}
+        {% if not selected_snap %}
+            <div class="alert alert-info">No snaps have been recorded for {{ scope_label }}.</div>
+        {% else %}
+            <div class="d-flex align-items-baseline flex-wrap gap-2 mb-2">
+                <h2 class="h4 mb-0">Recorded state at {{ selected_snap.snap_time|fmt_dt }}</h2>
+                {% if selected_snap.id == latest_snap.id %}
+                    <span class="badge text-bg-secondary">Latest</span>
+                {% endif %}
+            </div>
+
+            <div class="snapper-facts">
+                <div class="snapper-fact">
+                    <div class="snapper-fact-label">Snap time</div>
+                    <div class="snapper-fact-value">
+                        {{ selected_snap.snap_time|fmt_dt }}
+                        <span class="text-muted fw-normal"
+                              data-relative-time="{{ selected_snap.snap_time|date:'c' }}"></span>
+                    </div>
+                </div>
+                <div class="snapper-fact">
+                    <div class="snapper-fact-label">Capture reason</div>
+                    <div class="snapper-fact-value">
+                        {% for reason in selected_snap.reasons %}
+                            <span class="badge text-bg-light text-dark border">{{ reason }}</span>
+                        {% empty %}—{% endfor %}
+                    </div>
+                </div>
+                <div class="snapper-fact">
+                    <div class="snapper-fact-label">Changed components</div>
+                    <div class="snapper-fact-value">
+                        {% for name in selected_snap.changed_components %}
+                            <span class="badge text-bg-light text-dark border">{{ name }}</span>
+                        {% empty %}None{% endfor %}
+                    </div>
+                </div>
+                <div class="snapper-fact">
+                    <div class="snapper-fact-label">Capture policy</div>
+                    <div class="snapper-fact-value">{{ selected_snap.capture_policy }}</div>
+                </div>
+                <div class="snapper-fact">
+                    <div class="snapper-fact-label">Observed after boundary</div>
+                    <div class="snapper-fact-value">{{ observation_delay|floatformat:3 }} s</div>
+                </div>
+                <div class="snapper-fact">
+                    <div class="snapper-fact-label">Components</div>
+                    <div class="snapper-fact-value">{{ components|length }}</div>
+                </div>
+            </div>
+
+            {% for component in components %}
+                <article class="snapper-component">
+                    <header class="snapper-component-header">
+                        <div class="d-flex align-items-baseline flex-wrap gap-2">
+                            <h3 class="h5 mb-0">{{ component.title }}</h3>
+                            <code>{{ component.name }}</code>
+                        </div>
+                        {% if component.description %}<div class="snapper-meta mt-1">{{ component.description }}</div>{% endif %}
+                    </header>
+                    <div class="snapper-component-body">
+                        <div class="snapper-meta mb-2">
+                            Revision {{ component.revision }} &middot;
+                            registration {{ component.registration_version }} &middot;
+                            assessed {{ component.assessed_at|fmt_dt|default:'—' }} &middot;
+                            source as of {{ component.source_as_of|fmt_dt|default:'—' }} &middot;
+                            publisher <code>{{ component.publisher_identity }}</code>
+                        </div>
+
+                        {% if component.health %}
+                            <div class="snapper-table-wrap mb-3">
+                                <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                                    <tbody>
+                                        <tr>
+                                            <th>Overall</th>
+                                            <td class="{{ component.health.status|state_class }}">{{ component.health.status|state_label }}</td>
+                                            <td>{{ component.health.reason }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="snapper-table-wrap mb-3">
+                                <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                                    <thead>
+                                        <tr><th>Check</th><th>Category</th><th>Status</th><th>Summary</th></tr>
+                                    </thead>
+                                    <tbody>
+                                    {% for check in component.health.checks %}
+                                        <tr>
+                                            <td class="fw-semibold">{{ check.name }}</td>
+                                            <td>{{ check.category }}</td>
+                                            <td class="{{ check.status|state_class }}">{{ check.status|state_label }}</td>
+                                            <td>{{ check.summary|urlize }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="snapper-table-wrap mb-3">
+                                <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                                    <thead><tr><th>Quantity</th><th>Value</th><th>Description</th></tr></thead>
+                                    <tbody>
+                                    {% for quantity in component.quantities %}
+                                        <tr>
+                                            <td class="fw-semibold">{{ quantity.name }}</td>
+                                            <td>{% if quantity.is_complex %}<pre class="small mb-0">{{ quantity.value }}</pre>{% else %}{{ quantity.value }}{% endif %}</td>
+                                            <td>{{ quantity.description }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% endif %}
+
+                        <details class="snapper-json">
+                            <summary>Component JSON</summary>
+                            <pre class="small bg-light border rounded p-3 mt-2 mb-0">{{ component.payload_json }}</pre>
+                        </details>
+                    </div>
+                </article>
+            {% endfor %}
+
+            <details class="snapper-json mb-4">
+                <summary>Complete snap JSON</summary>
+                <pre class="small bg-light border rounded p-3 mt-2 mb-0">{{ selected_snap_json }}</pre>
+            </details>
+        {% endif %}
+
+        <section>
+            <div class="d-flex align-items-baseline flex-wrap gap-2 mb-2">
+                <h2 class="h4 mb-0">Snap history</h2>
+                <span class="text-muted small">
+                    {{ snap_count }} recorded{% if snap_count > recent_snap_limit %}; showing latest {{ recent_snap_limit }}{% endif %}
+                </span>
+            </div>
+            {% if snap_rows %}
+                <div class="snapper-table-wrap">
+                    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                        <thead>
+                            <tr>
+                                <th>Snap time</th>
+                                <th>Reason</th>
+                                <th>Changed components</th>
+                                <th>Components</th>
+                                <th>Policy</th>
+                                <th>Encoding</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for row in snap_rows %}
+                            <tr{% if selected_snap and row.id == selected_snap.id %} class="table-active"{% endif %}>
+                                <td data-order="{{ row.snap_time|date:'c' }}">
+                                    <a href="{% url 'monitor_app:snapper_report_snap' scope=scope snap_id=row.id %}">{{ row.snap_time|fmt_dt }}</a>
+                                </td>
+                                <td>{{ row.reasons }}</td>
+                                <td>{{ row.changed_components }}</td>
+                                <td>{{ row.component_count }}</td>
+                                <td>{{ row.capture_policy }}</td>
+                                <td>{{ row.encoding }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <p class="text-muted">No snap history is available.</p>
+            {% endif %}
+        </section>
+    {% else %}
+        <section class="mb-4">
+            <h2 class="h4 mb-2">Capture system</h2>
+            {% if scheduler_status %}
+                <div class="snapper-table-wrap mb-3">
+                    <table class="table table-striped table-bordered table-sm align-middle w-auto">
+                        <tbody>
+                            <tr>
+                                <th>Scheduler</th>
+                                <td class="{{ scheduler_status.status|state_class }}">{{ scheduler_status.status|state_label }}</td>
+                                <td>{{ scheduler_status.summary }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-warning">No cached scheduler status is available for {{ scope_label }}.</div>
+            {% endif %}
+
+            {% if cursor %}
+                <div class="snapper-facts">
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Latest outcome</div>
+                        <div class="snapper-fact-value">{{ cursor.scheduler_result.outcome|default:'unknown' }}</div>
+                    </div>
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Latest boundary</div>
+                        <div class="snapper-fact-value">{{ cursor.latest_boundary_at|fmt_dt|default:'—' }}</div>
+                    </div>
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Heartbeat</div>
+                        <div class="snapper-fact-value">
+                            {% if cursor.heartbeat_at %}
+                                <span data-relative-time="{{ cursor.heartbeat_at|date:'c' }}"></span>
+                            {% else %}Never{% endif %}
+                        </div>
+                    </div>
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Baseline progress</div>
+                        <div class="snapper-fact-value">{{ cursor.baseline_progress }}{% if baseline_every %} / {{ baseline_every }}{% endif %}</div>
+                    </div>
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Consecutive failures</div>
+                        <div class="snapper-fact-value">{{ cursor.consecutive_failures }}</div>
+                    </div>
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Coverage gap</div>
+                        <div class="snapper-fact-value">{{ cursor.coverage_gap_started_at|fmt_dt|default:'None' }}</div>
+                    </div>
+                    <div class="snapper-fact">
+                        <div class="snapper-fact-label">Latest snap</div>
+                        <div class="snapper-fact-value">
+                            {% if cursor.latest_snap_id %}
+                                <a href="{% url 'monitor_app:snapper_report_snap' scope=scope snap_id=cursor.latest_snap_id %}">{{ cursor.latest_snap.snap_time|fmt_dt }}</a>
+                            {% else %}None{% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="alert alert-warning">No capture cursor exists for {{ scope_label }}.</div>
+            {% endif %}
+        </section>
+
+        <section class="mb-4">
+            <h2 class="h4 mb-2">Effective capture policy</h2>
+            <div class="snapper-table-wrap">
+                <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                    <thead><tr><th>Setting</th><th>Effective value</th><th>SysConfig key</th></tr></thead>
+                    <tbody>
+                    {% for row in policy_rows %}
+                        <tr>
+                            <td class="fw-semibold">{{ row.setting }}</td>
+                            <td{% if not row.valid %} class="error_fill"{% endif %}>{{ row.value }}</td>
+                            <td><code>{{ row.key }}</code></td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section>
+            <div class="d-flex align-items-baseline flex-wrap gap-2 mb-2">
+                <h2 class="h4 mb-0">Component registry</h2>
+                <span class="text-muted small">{{ components|length }} registered</span>
+            </div>
+            {% if components %}
+                <div class="snapper-table-wrap mb-3">
+                    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                        <thead>
+                            <tr>
+                                <th>Component</th><th>State</th><th>Revision</th><th>Registration</th>
+                                <th>Assessed</th><th>Source as of</th><th>Publisher</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        {% for component in components %}
+                            <tr>
+                                <td><strong>{{ component.title }}</strong><br><code>{{ component.record.name }}</code></td>
+                                <td>{% if component.record.active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Retired</span>{% endif %}</td>
+                                <td>{{ component.record.revision }}</td>
+                                <td>{{ component.record.registration_version }}</td>
+                                <td data-order="{{ component.record.assessed_at|date:'c' }}">{{ component.record.assessed_at|fmt_dt|default:'—' }}</td>
+                                <td data-order="{{ component.record.source_as_of|date:'c' }}">{{ component.record.source_as_of|fmt_dt|default:'—' }}</td>
+                                <td><code>{{ component.record.publisher_identity }}</code></td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                {% for component in components %}
+                    <article class="snapper-component">
+                        <header class="snapper-component-header">
+                            <div class="d-flex align-items-baseline flex-wrap gap-2">
+                                <h3 class="h5 mb-0">{{ component.title }}</h3>
+                                <code>{{ component.record.name }}</code>
+                            </div>
+                            {% if component.description %}<div class="snapper-meta mt-1">{{ component.description }}</div>{% endif %}
+                        </header>
+                        <div class="snapper-component-body">
+                            <div class="snapper-meta mb-2">
+                                Owner {{ component.owning_subsystem|default:'—' }} &middot;
+                                visibility {{ component.visibility|default:'—' }} &middot;
+                                assessment policy <code>{{ component.assessment_policy|default:'—' }}</code> &middot;
+                                size bound {{ component.max_serialized_bytes|default:'—' }} bytes
+                            </div>
+
+                            <h4 class="h6 text-uppercase">Registered quantities</h4>
+                            <div class="snapper-table-wrap mb-3">
+                                <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                                    <thead><tr><th>Quantity</th><th>Path</th><th>Kind</th><th>Type</th><th>Required</th><th>Bounds</th><th>Description</th></tr></thead>
+                                    <tbody>
+                                    {% for quantity in component.quantities %}
+                                        <tr>
+                                            <td class="fw-semibold">{{ quantity.name }}</td>
+                                            <td><code>{{ quantity.path }}</code></td>
+                                            <td>{{ quantity.kind }}</td>
+                                            <td>{{ quantity.type }}</td>
+                                            <td>{{ quantity.required|yesno:'yes,no' }}</td>
+                                            <td>{{ quantity.limits }}</td>
+                                            <td>{{ quantity.description }}</td>
+                                        </tr>
+                                    {% empty %}
+                                        <tr><td colspan="7">No quantities declared.</td></tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {% if component.event_sources %}
+                                <h4 class="h6 text-uppercase">Event sources</h4>
+                                <div class="snapper-table-wrap mb-3">
+                                    <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+                                        <thead><tr><th>Source</th><th>Event kind</th><th>Resolver</th><th>Owner</th><th>Visibility</th></tr></thead>
+                                        <tbody>
+                                        {% for source in component.event_sources %}
+                                            <tr><td>{{ source.name }}</td><td>{{ source.kind }}</td><td><code>{{ source.resolver }}</code></td><td>{{ source.owner }}</td><td>{{ source.visibility }}</td></tr>
+                                        {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            {% endif %}
+
+                            <details class="snapper-json">
+                                <summary>Registration JSON</summary>
+                                <pre class="small bg-light border rounded p-3 mt-2 mb-0">{{ component.registration_json }}</pre>
+                            </details>
+                        </div>
+                    </article>
+                {% endfor %}
+            {% else %}
+                <div class="alert alert-info">No components are registered for {{ scope_label }}.</div>
+            {% endif %}
+        </section>
+    {% endif %}
+</div>
+{% endblock %}

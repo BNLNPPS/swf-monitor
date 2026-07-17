@@ -7,6 +7,32 @@ h1 {
     color: #333;
 }
 
+/* Server-routed page tabs. Each tab is an ordinary link whose URL is the
+   canonical view state; no hidden panels or client-side tab state. */
+.swf-page-tabs {
+    border-bottom: 1px solid #d5dce5;
+    display: flex;
+    gap: 1.4rem;
+    margin-bottom: 1rem;
+}
+.swf-page-tabs a {
+    border-bottom: 3px solid transparent;
+    color: #3d85c6;
+    font-weight: 600;
+    margin-bottom: -1px;
+    padding: .35rem .05rem .4rem;
+    text-decoration: none;
+}
+.swf-page-tabs a:hover,
+.swf-page-tabs a:focus {
+    border-bottom-color: #9bbfdf;
+    color: #245f91;
+}
+.swf-page-tabs a.active {
+    border-bottom-color: #3d85c6;
+    color: #111;
+}
+
 .filter-bar a {
     margin-right: 0.5em;
     color: #007bff;

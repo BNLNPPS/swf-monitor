@@ -117,6 +117,10 @@ page template:
 - **AI attribution**: `.ai-attr` / `.ai-attr-text` (purple-on-lavender
   chip) and `.ai-fill` (lavender container) mark AI-origin content; the
   classes are defined in the base template's style block.
+- **Page tabs**: `.swf-page-tabs` renders first-class page views as an
+  underlined tab row. Every tab is an ordinary server-routed link whose URL
+  contains the selected view state; do not use hidden Bootstrap panels,
+  client-only state, or a remembered preference for these tabs.
 - **Sortable tables**: DataTables is loaded globally in `base.html`
   and is the house table widget. Big list pages use the
   `_datatable_base` / `_datatable_dynamic_base` templates (ajax);

@@ -75,6 +75,28 @@ consecutive failures, open coverage gaps, invalid SysConfig values, and the
 latest scheduler outcome. The heartbeat threshold is derived from the scope's
 opportunity interval, with a 60-second minimum.
 
+## Web presentation
+
+The monitor mounts Snapper beneath the global System navigation. Its primary
+view state is represented by server routes rather than client-side tab state:
+
+```text
+/snapper/<scope>/report/
+/snapper/<scope>/report/<snap-uuid>/
+/snapper/<scope>/system/
+```
+
+`scope` is `testbed` or `epicprod`. The Report tab presents one selected full
+snap and the latest 100 history rows in a sortable table. Component envelopes
+use a generic registration-driven presentation; SWF-owned component presenters
+may add domain-specific rendering while retaining the complete component JSON.
+
+The System tab presents the effective scope policy, scheduler cursor and
+health, and the complete component registration catalog. It is read-only;
+operator configuration remains in the existing System configuration editor.
+Tab, scope, and selected-snap links are durable URL state, so reload, browser
+history, bookmarks, and external proxy links preserve the selected view.
+
 Deployments use the standard `deploy-swf-monitor.sh branch main` path. That
 freezes the generic `snapper-ai` package into the release virtual environment,
 runs migrations, updates `/opt/swf-monitor/current`, and restarts the
