@@ -18,6 +18,10 @@ import django  # noqa: E402
 django.setup()
 
 from monitor_app.system_status import compact_refresh_report, refresh_system_status  # noqa: E402
+from monitor_app.snapper_health import (  # noqa: E402
+    compact_publication_report,
+    publish_health_components,
+)
 
 
 def main(argv):
@@ -28,7 +32,9 @@ def main(argv):
     args = ap.parse_args(argv[1:])
 
     rows = refresh_system_status(selected=args.only or None, source=args.source)
+    publications = publish_health_components()
     print(compact_refresh_report(rows))
+    print(compact_publication_report(publications))
     return 0
 
 
