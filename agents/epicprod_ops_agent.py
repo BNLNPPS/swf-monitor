@@ -782,6 +782,14 @@ class EpicProdOpsAgent(BaseAgent):
                        if item.get('outcome') == 'snap')
         quiet = sum(1 for item in results
                     if item.get('outcome') == 'quiet')
+        executor = self._bg_executor
+        retiring = (
+            executor is not None and getattr(executor, '_shutdown', False))
+        if not ok and retiring:
+            self.logger.info(
+                "PRODOPS capture_system_snap stopped during agent shutdown; "
+                "leaving the next opportunity to the replacement agent")
+            return
         if ok:
             self.logger.info("PRODOPS capture_system_snap done")
         else:
