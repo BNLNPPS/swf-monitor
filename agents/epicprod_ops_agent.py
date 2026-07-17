@@ -46,6 +46,8 @@ Capabilities:
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
                        agents, and external monitor endpoints.
+  capture_system_snap — request a manual coherent Snapper capture at the next
+                       aligned boundary; periodic capture runs independently.
   association_sweep  — batch-associate recent PanDA tasks with PCS campaign
                        tasks (manage.py sweep_panda_associations).
   catalog_sync       — the nightly composite: association sweep, Rucio
@@ -151,6 +153,14 @@ SYSTEM_STATUS_TIMEOUT = int(os.environ.get("EPICPROD_SYSTEM_STATUS_TIMEOUT", "60
 SYSTEM_STATUS_INTERVAL = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INTERVAL", "300"))
 SYSTEM_STATUS_INITIAL_DELAY = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INITIAL_DELAY", "30"))
 
+# Snapper capture doer: the agent is the independently supervised worker while
+# PostgreSQL remains the source of component, cursor, and snap state. The doer
+# reads per-scope opportunity and baseline values from SysConfig on every run.
+SNAPPER_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "capture-system-snap.py"
+SNAPPER_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_SNAPPER_CAPTURE_TIMEOUT", "30"))
+SNAPPER_SCHEDULER_POLL_SECONDS = int(os.environ.get("EPICPROD_SNAPPER_POLL_SECONDS", "10"))
+SNAPPER_SCHEDULER_INITIAL_DELAY = int(os.environ.get("EPICPROD_SNAPPER_INITIAL_DELAY", "5"))
+
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
 # makes the singleton identifiable in the monitor and lets callers address it
 # explicitly — every message to this agent carries namespace=prodops.
@@ -172,6 +182,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "association_sweep", "catalog_sync", "questionnaire_import",
                    "questionnaire_automatch",
                    "sync_epicprod_inventory", "refresh_system_status",
+                   "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "assessment_completed",
                    "health_ping", "shutdown"}
@@ -191,6 +202,12 @@ class EpicProdOpsAgent(BaseAgent):
             daemon=True,
         )
         self._system_status_thread.start()
+        self._snapper_capture_thread = threading.Thread(
+            target=self._snapper_capture_periodic_loop,
+            name="snapper-capture",
+            daemon=True,
+        )
+        self._snapper_capture_thread.start()
 
     def on_message(self, frame):
         message_data, msg_type = self.log_received_message(frame, known_types=self.KNOWN_TYPES)
@@ -701,6 +718,95 @@ class EpicProdOpsAgent(BaseAgent):
                 dedup_key="refresh_system_status",
                 label="refresh_system_status periodic")
             time.sleep(SYSTEM_STATUS_INTERVAL)
+
+    def _handle_capture_system_snap(self, m):
+        """Request manual capture through the privileged operations queue."""
+        scope = str(m.get('scope') or 'all')
+        if scope not in {'testbed', 'epicprod', 'all'}:
+            raise ValueError(f"invalid Snapper scope {scope!r}")
+        request = dict(m, scope=scope, manual=True,
+                       source=str(m.get('source') or 'ops_agent_manual'))
+        self.run_in_background(
+            self._do_snapper_capture, request,
+            dedup_key=f"snapper_capture_manual_{scope}",
+            label=f"capture_system_snap {scope}")
+
+    def _do_snapper_capture(self, m):
+        scope = str(m.get('scope') or 'all')
+        manual = bool(m.get('manual', False))
+        cmd = [sys.executable, str(SNAPPER_CAPTURE_SCRIPT), '--scope', scope]
+        if manual:
+            cmd.append('--manual')
+        self.logger.info(f"PRODOPS capture_system_snap: {' '.join(cmd)}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SNAPPER_CAPTURE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f"timed out after {SNAPPER_CAPTURE_TIMEOUT}s"
+            self.logger.error(f"PRODOPS capture_system_snap TIMEOUT: {reason}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'snapper_capture_ready', 'ok': False,
+                'scope': scope, 'manual': manual, 'error': reason})
+            self._log_action(
+                'snapper_capture', t0, outcome='timeout', reason=reason,
+                level=logging.ERROR, scope=scope, manual=manual)
+            return
+        for line in (p.stderr or '').splitlines():
+            self.logger.info(f"  capture-system-snap: {line}")
+        ok = p.returncode == 0
+        reason = '' if ok else self._derive_reason(p)
+        try:
+            results = json.loads(p.stdout or '[]')
+        except json.JSONDecodeError:
+            results = []
+        if results:
+            summary = ', '.join(
+                f"{item.get('scope')}={item.get('outcome')}"
+                for item in results)
+            self.logger.info(f"PRODOPS capture_system_snap results: {summary}")
+        elif p.stdout:
+            self.logger.info(
+                f"PRODOPS capture_system_snap output: {p.stdout.strip()[:1000]}")
+        captures = sum(1 for item in results
+                       if item.get('outcome') == 'snap')
+        quiet = sum(1 for item in results
+                    if item.get('outcome') == 'quiet')
+        if ok:
+            self.logger.info("PRODOPS capture_system_snap done")
+        else:
+            self.logger.error(
+                f"PRODOPS capture_system_snap FAILED rc={p.returncode}")
+        # Periodic quiet/duplicate evaluations stay in the bounded cursor and
+        # service journal. Only material captures, failures, and manual results
+        # enter the topic and durable action stream.
+        if manual or not ok or captures:
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'snapper_capture_ready', 'ok': ok,
+                'scope': scope, 'manual': manual, 'error': reason,
+                'results': results})
+            self._log_action(
+                'snapper_capture', t0,
+                outcome='ok' if ok else 'error', reason=reason,
+                level=logging.INFO if ok else logging.ERROR,
+                username=str(m.get('created_by') or m.get('username') or ''),
+                scope=scope, manual=manual,
+                captures=captures, quiet=quiet)
+
+    def _snapper_capture_periodic_loop(self):
+        """Evaluate both configured scopes from the supervised worker."""
+        if SNAPPER_SCHEDULER_POLL_SECONDS <= 0:
+            self.logger.info("PRODOPS periodic Snapper capture disabled")
+            return
+        time.sleep(max(SNAPPER_SCHEDULER_INITIAL_DELAY, 0))
+        while True:
+            self.run_in_background(
+                self._do_snapper_capture,
+                {'scope': 'all', 'manual': False,
+                 'source': 'ops_agent_periodic'},
+                dedup_key="snapper_capture_periodic",
+                label="capture_system_snap periodic")
+            time.sleep(max(SNAPPER_SCHEDULER_POLL_SECONDS, 1))
 
     def _handle_association_sweep(self, m):
         """Batch-associate recent PanDA tasks with PCS campaign tasks."""

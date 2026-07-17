@@ -11,7 +11,7 @@ from datetime import timedelta
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
 
-from .models import (AIMemory, SystemAgent, SystemStatus,
+from .models import (AIMemory, SysConfig, SystemAgent, SystemStatus,
                      SystemStatusHistory, external_face_base_url)
 
 
@@ -271,6 +271,93 @@ def _campaign_assessments():
     return _status('campaign-assessments', 'agents', status, summary, data)
 
 
+def _snapper_scheduler(scope):
+    """Assess one PostgreSQL-backed Snapper capture cursor."""
+    from snapper_ai.models import CaptureCursor
+
+    opportunity_key = f'snapper_opportunity_seconds_{scope}'
+    baseline_key = f'snapper_baseline_every_{scope}'
+    opportunity = SysConfig.get_setting(opportunity_key, 10)
+    baseline = SysConfig.get_setting(baseline_key, 10)
+    try:
+        opportunity = int(opportunity)
+        baseline = int(baseline)
+        if opportunity < 10 or baseline < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _status(
+            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'Snapper {scope} scheduler configuration is invalid.',
+            {
+                'scope': scope,
+                opportunity_key: opportunity,
+                baseline_key: baseline,
+            },
+        )
+
+    cursor = CaptureCursor.objects.filter(scope=scope).first()
+    if cursor is None:
+        return _status(
+            f'snapper-{scope}-scheduler', 'agents', 'unknown',
+            f'Snapper {scope} scheduler has no capture cursor.',
+            {
+                'scope': scope,
+                'opportunity_seconds': opportunity,
+                'baseline_every': baseline,
+            },
+        )
+    now = timezone.now()
+    heartbeat_limit = timedelta(seconds=max(3 * opportunity, 60))
+    heartbeat_age = (
+        (now - cursor.heartbeat_at).total_seconds()
+        if cursor.heartbeat_at else None
+    )
+    data = {
+        'scope': scope,
+        'opportunity_seconds': opportunity,
+        'baseline_every': baseline,
+        'heartbeat_at': (
+            cursor.heartbeat_at.isoformat() if cursor.heartbeat_at else None),
+        'heartbeat_age_seconds': heartbeat_age,
+        'heartbeat_limit_seconds': int(heartbeat_limit.total_seconds()),
+        'latest_boundary_at': (
+            cursor.latest_boundary_at.isoformat()
+            if cursor.latest_boundary_at else None),
+        'latest_check_at': (
+            cursor.latest_check_at.isoformat()
+            if cursor.latest_check_at else None),
+        'latest_snap_id': (
+            str(cursor.latest_snap_id) if cursor.latest_snap_id else None),
+        'baseline_progress': cursor.baseline_progress,
+        'consecutive_failures': cursor.consecutive_failures,
+        'coverage_gap_started_at': (
+            cursor.coverage_gap_started_at.isoformat()
+            if cursor.coverage_gap_started_at else None),
+        'scheduler_result': cursor.scheduler_result or {},
+    }
+    if cursor.consecutive_failures:
+        return _status(
+            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'Snapper {scope} scheduler has consecutive capture failures.', data)
+    if cursor.coverage_gap_started_at:
+        return _status(
+            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'Snapper {scope} scheduler has an open coverage gap.', data)
+    if heartbeat_age is None or heartbeat_age > heartbeat_limit.total_seconds():
+        return _status(
+            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'Snapper {scope} scheduler heartbeat is stale.', data)
+    outcome = (cursor.scheduler_result or {}).get('outcome') or 'unknown'
+    if outcome == 'failed':
+        return _status(
+            f'snapper-{scope}-scheduler', 'agents', 'error',
+            f'Snapper {scope} scheduler latest capture failed.', data)
+    return _status(
+        f'snapper-{scope}-scheduler', 'agents', 'ok',
+        f'Snapper {scope} scheduler is evaluating boundaries; '
+        f'latest outcome is {outcome}.', data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
     'swf-panda-bot': _panda_bot,
@@ -284,6 +371,8 @@ COLLECTORS = {
         'epic-devcloud-doc', f'{external_face_base_url()}/doc/'),
     'github-actions': _github_actions,
     'bot-usage': _bot_usage,
+    'snapper-testbed-scheduler': lambda: _snapper_scheduler('testbed'),
+    'snapper-epicprod-scheduler': lambda: _snapper_scheduler('epicprod'),
 }
 
 
