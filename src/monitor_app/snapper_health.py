@@ -101,6 +101,7 @@ _STATUSES = ("ok", "warning", "error", "unknown")
 @dataclass(frozen=True)
 class HealthPublication:
     scope: str
+    registration_update: ComponentUpdate
     update: ComponentUpdate
     projection: dict
     source_as_of: Optional[datetime]
@@ -195,7 +196,7 @@ def publish_health_scope(
 ) -> HealthPublication:
     """Idempotently register and publish one SWF health component."""
     projection, source_as_of, assessed_at = health_projection(scope, assessed_at)
-    register_component(
+    registration_update = register_component(
         scope=scope,
         name="health",
         publisher_identity=PUBLISHER_IDENTITY,
@@ -213,6 +214,7 @@ def publish_health_scope(
     )
     return HealthPublication(
         scope=scope,
+        registration_update=registration_update,
         update=update,
         projection=projection,
         source_as_of=source_as_of,
@@ -235,7 +237,9 @@ def compact_publication_report(publications: Iterable[HealthPublication]) -> str
                 "scope": item.scope,
                 "revision": item.update.revision,
                 "content_changed": item.update.content_changed,
-                "registration_changed": item.update.registration_changed,
+                "registration_changed": (
+                    item.registration_update.registration_changed
+                ),
                 "overall_status": item.projection["overall"]["status"],
                 "source_as_of": (
                     item.source_as_of.isoformat() if item.source_as_of else None
