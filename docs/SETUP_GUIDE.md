@@ -32,14 +32,15 @@ Visit `http://127.0.0.1:8000/` to access the monitoring dashboard.
 ### 1. Set Up the Shared Virtual Environment
 
 swf-monitor has no virtual environment of its own. It runs in the shared
-**swf-testbed** venv, into which swf-common-lib, swf-monitor, and swf-testbed
-are installed editable. Every test runner, the dual-server script, and the
-production deploy use that one venv — the deploy ships it verbatim, so what is
-installed in it is what runs in production.
+**swf-testbed** venv, into which swf-common-lib, swf-monitor, swf-testbed,
+swf-epicprod, and snapper-ai are installed editable. Every test runner, the
+dual-server script, and the production deploy use that one venv — the deploy
+ships it verbatim, so what is installed in it is what runs in production.
 
 Set it up once by following
 **[swf-testbed/docs/installation.md](../../swf-testbed/docs/installation.md)**
-(creates `swf-testbed/.venv` and runs `pip install -e ../swf-common-lib ../swf-monitor .`).
+(creates `swf-testbed/.venv` and installs `swf-common-lib`, `swf-monitor`,
+`swf-epicprod`, `snapper-ai`, and `swf-testbed` editable).
 Then activate it for any swf-monitor work:
 
 ```bash

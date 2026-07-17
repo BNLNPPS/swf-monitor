@@ -113,6 +113,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.humanize",  # intcomma / filesizeformat / naturaltime for swf_fmt
+    "snapper_ai",  # Coherent operational state history
     "pcs",  # Physics Configuration System
     "ai",  # AI proposals and human-in-the-loop automation
     "monitor_app",  # Changed from "swf_monitor_project.monitor_app"
