@@ -725,7 +725,8 @@ class EpicProdOpsAgent(BaseAgent):
         if scope not in {'testbed', 'epicprod', 'all'}:
             raise ValueError(f"invalid Snapper scope {scope!r}")
         request = dict(m, scope=scope, manual=True,
-                       source=str(m.get('source') or 'ops_agent_manual'))
+                       source=str(m.get('source') or 'ops_agent_manual'),
+                       requested_at=datetime.now(timezone.utc).isoformat())
         self.run_in_background(
             self._do_snapper_capture, request,
             dedup_key=f"snapper_capture_manual_{scope}",
@@ -735,6 +736,9 @@ class EpicProdOpsAgent(BaseAgent):
         scope = str(m.get('scope') or 'all')
         manual = bool(m.get('manual', False))
         cmd = [sys.executable, str(SNAPPER_CAPTURE_SCRIPT), '--scope', scope]
+        requested_at = str(
+            m.get('requested_at') or datetime.now(timezone.utc).isoformat())
+        cmd += ['--requested-at', requested_at]
         if manual:
             cmd.append('--manual')
         self.logger.info(f"PRODOPS capture_system_snap: {' '.join(cmd)}")
@@ -803,7 +807,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.run_in_background(
                 self._do_snapper_capture,
                 {'scope': 'all', 'manual': False,
-                 'source': 'ops_agent_periodic'},
+                 'source': 'ops_agent_periodic',
+                 'requested_at': datetime.now(timezone.utc).isoformat()},
                 dedup_key="snapper_capture_periodic",
                 label="capture_system_snap periodic")
             time.sleep(max(SNAPPER_SCHEDULER_POLL_SECONDS, 1))

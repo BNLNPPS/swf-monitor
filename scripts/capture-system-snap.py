@@ -94,7 +94,7 @@ def _scope_config(scope, args):
 def _target_boundary(scope, args, opportunity_seconds):
     if args.boundary is not None:
         return args.boundary
-    now = timezone.now()
+    now = args.requested_at or timezone.now()
     boundary = aligned_boundary(now, opportunity_seconds)
     if not args.manual:
         return boundary
@@ -135,6 +135,8 @@ def main(argv):
                     help='Force a full snap at this boundary.')
     ap.add_argument('--boundary', type=_boundary,
                     help='Aligned ISO timestamp; current boundary by default.')
+    ap.add_argument('--requested-at', type=_boundary,
+                    help='Scheduler invocation time used to select the boundary.')
     ap.add_argument('--opportunity-seconds', type=int,
                     help='Override the scope SysConfig value.')
     ap.add_argument('--baseline-every', type=int,

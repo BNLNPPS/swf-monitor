@@ -22,7 +22,9 @@ The agent polls every 10 seconds by default. The doer reads each scope's
 effective policy from `SysConfig` on every invocation, aligns the opportunity,
 and lets the PostgreSQL capture cursor make duplicate or quiet evaluations
 cheap. The database transaction serializes each scope and locks its registered
-components in stable name order.
+components in stable name order. The agent stamps each invocation before
+starting the Django doer, so process-start latency cannot move an evaluation
+into a later boundary or manufacture a coverage gap.
 
 The first read seeds these operator-visible `SysConfig` keys:
 
