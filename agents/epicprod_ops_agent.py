@@ -759,11 +759,17 @@ class EpicProdOpsAgent(BaseAgent):
         for line in (p.stderr or '').splitlines():
             self.logger.info(f"  capture-system-snap: {line}")
         ok = p.returncode == 0
-        reason = '' if ok else self._derive_reason(p)
         try:
             results = json.loads(p.stdout or '[]')
         except json.JSONDecodeError:
             results = []
+        failed_errors = [
+            str(item.get('error'))
+            for item in results
+            if item.get('outcome') == 'failed' and item.get('error')
+        ]
+        reason = '' if ok else (
+            failed_errors[0] if failed_errors else self._derive_reason(p))
         if results:
             summary = ', '.join(
                 f"{item.get('scope')}={item.get('outcome')}"
@@ -804,6 +810,11 @@ class EpicProdOpsAgent(BaseAgent):
             return
         time.sleep(max(SNAPPER_SCHEDULER_INITIAL_DELAY, 0))
         while True:
+            # BaseAgent drains and shuts down its pool before the daemon threads
+            # disappear. Do not let a retiring scheduler race one last enqueue.
+            executor = self._bg_executor
+            if executor is not None and getattr(executor, '_shutdown', False):
+                return
             self.run_in_background(
                 self._do_snapper_capture,
                 {'scope': 'all', 'manual': False,
