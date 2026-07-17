@@ -25,10 +25,16 @@
         border-radius: 4px;
         vertical-align: middle;
     }
+    .analysis-my-workflows {
+        margin-left: 12px;
+        font-size: 1rem;
+        font-weight: 400;
+        vertical-align: middle;
+    }
 </style>
 
 <div>
-    <h2 style="margin-top: 14px;">User Analysis <span class="analysis-indev">In development</span></h2>
+    <h2 style="margin-top: 14px;">User Analysis <span class="analysis-indev">In development</span>{% if user.is_authenticated %}<a class="analysis-my-workflows" href="{% url 'monitor_app:account' %}?tab=workflows">My Workflows</a>{% endif %}</h2>
     <p>User analysis on the ePIC production platform: analysis jobs take open slots up to a fair-share
        fraction on designated queues. Design and plan:
        <a href="https://github.com/BNLNPPS/swf-epicprod/blob/main/docs/PANDA_USER_JOBS.md">PANDA_USER_JOBS.md</a>.</p>
