@@ -64,13 +64,44 @@ def _analysis_weather():
     return rows
 
 
+def _analysis_shares():
+    """The global-share tree and the latest usage snapshot by share stamp.
+
+    Usage comes from the newest jobs_share_stats aggregation; jobs
+    stamped before the tree existed appear under their old stamp until
+    they drain."""
+    cur = connections['panda'].cursor()
+    cur.execute(
+        "SELECT name, value, prodsourcelabel FROM doma_panda.global_shares "
+        "ORDER BY value DESC")
+    shares = [dict(zip(['name', 'value', 'labels'], r))
+              for r in cur.fetchall()]
+    cur.execute(
+        "SELECT gshare, "
+        "sum(hs) FILTER (WHERE jobstatus IN ('sent','running','starting')) "
+        "AS executing_hs, "
+        "sum(hs) FILTER (WHERE jobstatus = 'activated') AS queued_hs "
+        "FROM doma_panda.jobs_share_stats "
+        "WHERE ts = (SELECT max(ts) FROM doma_panda.jobs_share_stats) "
+        "GROUP BY gshare ORDER BY gshare")
+    usage = [dict(zip(['gshare', 'executing_hs', 'queued_hs'], r))
+             for r in cur.fetchall()]
+    total = sum(float(u['executing_hs'] or 0) for u in usage)
+    for u in usage:
+        u['executing_pct'] = (
+            round(100 * float(u['executing_hs'] or 0) / total, 1)
+            if total else None)
+    return shares, usage
+
+
 def analysis_view(request):
-    queues, activity, weather = [], [], []
+    queues, activity, weather, shares, share_usage = [], [], [], [], []
     error = ''
     try:
         queues = _analysis_queues()
         activity = _analysis_activity()
         weather = _analysis_weather()
+        shares, share_usage = _analysis_shares()
     except Exception as exc:
         error = str(exc)
     return render(request, 'monitor_app/analysis.html', {
@@ -78,5 +109,7 @@ def analysis_view(request):
         'activity': activity,
         'weather': weather,
         'weather_window_days': WEATHER_WINDOW_DAYS,
+        'shares': shares,
+        'share_usage': share_usage,
         'error': error,
     })

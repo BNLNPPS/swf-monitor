@@ -260,9 +260,21 @@ def _bot_usage():
                    f'30d: {ch30} channel, {dm30} DM', data)
 
 
+def _campaign_assessments():
+    """Scheduled campaign-assessment slots actually filled — the freshness
+    alarm for a run lost upstream of registration (trigger, corun run,
+    completion callback, enforcement). Policy lives in
+    swf_epicprod.assessment.freshness; a collector exception surfaces as
+    a red collector-failed row via refresh_system_status."""
+    from swf_epicprod.assessment.freshness import assessment_freshness
+    status, summary, data = assessment_freshness()
+    return _status('campaign-assessments', 'agents', status, summary, data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
     'swf-panda-bot': _panda_bot,
+    'campaign-assessments': _campaign_assessments,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
         'swf-monitor-mcp-asgi', 'swf-monitor-mcp-asgi', category='services'),
     'httpd': lambda: _systemctl_unit('httpd', 'httpd', category='services'),

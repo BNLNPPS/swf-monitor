@@ -46,7 +46,7 @@ MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
 BOT_ASSESSMENT_USERNAME = 'bot'
-AI_MODEL = "claude-haiku-4-5-20251001"
+AI_MODEL = "claude-sonnet-5"
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
@@ -718,7 +718,10 @@ class PandaBot:
         prompt = preamble
         if instructions:
             prompt += "\n" + instructions
-        return f"Current date and time: {now}\n\n{prompt}"
+        return (
+            f"Current date and time: {now}\n"
+            f"DISpatcher runtime model: {AI_MODEL}\n\n{prompt}"
+        )
 
     @staticmethod
     async def _git_version(repo_dir):
@@ -1657,6 +1660,7 @@ class PandaBot:
                     # DO NOT change model without user approval
                     model=AI_MODEL,
                     max_tokens=4096,
+                    output_config={"effort": "high"},
                     cache_control={"type": "ephemeral"},
                     system=system_with_catalog,
                     tools=active_tools,

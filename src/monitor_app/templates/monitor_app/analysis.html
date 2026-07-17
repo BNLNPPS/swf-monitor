@@ -106,5 +106,40 @@
         <p>No user-label tasks in the last 30 days.</p>
         {% endif %}
     </div>
+
+    <div class="analysis-section">
+        <h4>Fair Shares</h4>
+        <p>PanDA global shares divide open slots between production and analysis; dispatch favors
+           the share furthest under its target.</p>
+        {% if shares %}
+        <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+            <thead><tr><th>Share</th><th>Target %</th><th>Matches (prodsourcelabel)</th></tr></thead>
+            <tbody>
+                {% for s in shares %}
+                <tr><td>{{ s.name }}</td><td>{{ s.value }}</td><td>{{ s.labels }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if share_usage %}
+        <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+            <thead><tr><th>Current stamp</th><th>Executing HS06</th><th>Executing %</th><th>Queued HS06</th></tr></thead>
+            <tbody>
+                {% for u in share_usage %}
+                <tr>
+                    <td>{{ u.gshare }}</td>
+                    <td>{{ u.executing_hs|default:0 }}</td>
+                    <td>{{ u.executing_pct|default:'' }}</td>
+                    <td>{{ u.queued_hs|default:0 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p>Jobs stamped before the share tree existed appear under their old stamp
+           (root, Undefined) until they drain; new jobs carry Production or Analysis.</p>
+        {% endif %}
+        {% else %}
+        <p>No share tree defined.</p>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}
