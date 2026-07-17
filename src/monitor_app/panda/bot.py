@@ -718,7 +718,10 @@ class PandaBot:
         prompt = preamble
         if instructions:
             prompt += "\n" + instructions
-        return f"Current date and time: {now}\n\n{prompt}"
+        return (
+            f"Current date and time: {now}\n"
+            f"DISpatcher runtime model: {AI_MODEL}\n\n{prompt}"
+        )
 
     @staticmethod
     async def _git_version(repo_dir):
