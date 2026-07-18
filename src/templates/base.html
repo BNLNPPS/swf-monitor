@@ -461,7 +461,7 @@
         </span>
         <span class="nav-spacer"></span>
         <div class="dropdown">
-            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.about %} nav-active{% endif %}"
+            <button class="dropbtn{% if system_status_overall == 'error' %} nav-system-error{% endif %}{% if active_nav.system or active_nav.snapper or active_nav.canary or active_nav.about %} nav-active{% endif %}"
                     id="system-status-nav-link"
                     data-system-status="{{ system_status_overall|default:'unknown' }}"
                     data-system-status-url="{% url 'monitor_app:system_status_json' %}"
@@ -473,6 +473,8 @@
                    class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}">System Status</a>
                 <a href="{% url 'monitor_app:snapper_report' scope='epicprod' %}"
                    class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper</a>
+                <a href="{% url 'canary:canary_page' %}"
+                   class="{% if active_nav.canary %}nav-active{% endif %}">Canary</a>
                 {% if user.is_authenticated and user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}
