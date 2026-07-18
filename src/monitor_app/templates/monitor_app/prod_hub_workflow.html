@@ -121,6 +121,18 @@
         <a class="{% if active_tab == 'ops' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=ops">Ops</a>
     </div>
 
+    {% if is_tunnel %}
+    <script>
+      {
+        const url = new URL(window.location.href);
+        if (!url.searchParams.has('tab')) {
+          url.searchParams.set('tab', '{{ active_tab }}');
+          window.history.replaceState({}, '', url);
+        }
+      }
+    </script>
+    {% endif %}
+
     {% if active_tab == 'ops' %}
     {% include 'pcs/dashboard.html' %}
     {% else %}
