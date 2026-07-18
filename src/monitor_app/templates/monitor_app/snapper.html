@@ -89,7 +89,7 @@
         <p>Operational state snapshot history for SWF systems</p>
     </header>
 
-    <nav class="snapper-selectors" aria-label="Snapper scope and view">
+    <div class="snapper-selectors" aria-label="Snapper scope and view">
         <div class="btn-group" role="group" aria-label="Snapper scope">
             {% for option in scope_options %}
                 {% if active_tab == 'report' %}
@@ -114,7 +114,7 @@
         {% if active_tab == 'report' %}
             <span class="text-muted small align-self-center" id="snapper-reload-countdown"></span>
         {% endif %}
-    </nav>
+    </div>
 
     {% if active_tab == 'report' %}
         {% if not selected_snap %}
