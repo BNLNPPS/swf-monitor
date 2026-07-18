@@ -142,6 +142,13 @@ if .venv/bin/python -m pip show snapper-ai >/dev/null 2>&1; then
     .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/snapper-ai
     rm -rf /data/wenauseic/github/snapper-ai/build
 fi
+# site-canary likewise: freeze the store, agent doers, and templates the
+# platform serves, so production picks up canary changes only on deploy.
+if .venv/bin/python -m pip show site-canary >/dev/null 2>&1; then
+    log "Freezing site-canary into the deployed venv (non-editable)..."
+    .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/site-canary
+    rm -rf /data/wenauseic/github/site-canary/build
+fi
 # swf-common-lib likewise: the copied venv carries its dev editable, which
 # resolved agent library code (BaseAgent) to the dev tree in production.
 if .venv/bin/python -m pip show swf-common-lib >/dev/null 2>&1; then
