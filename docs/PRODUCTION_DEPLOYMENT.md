@@ -179,12 +179,13 @@ sudo systemctl restart httpd
 Deploy your first production release:
 
 ```bash
-# Deploy main branch
-sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch main
-
-# OR deploy specific infrastructure branch
-sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch infra/baseline-v18
+# From the swf-monitor checkout, deploy the current coordinated baseline
+sudo bash deploy-swf-monitor.sh branch infra/baseline-vNN
 ```
+
+Use main only after the coordinated baseline has reached its delivery boundary
+and has been merged there. During active development, deploying main can omit
+work present only on the baseline.
 
 ### Step 4: Verify Deployment
 
@@ -210,15 +211,18 @@ ls -la /opt/swf-monitor/current
 When your repositories are ready for production update:
 
 ```bash
-# Deploy main branch (most common)
-sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch main
+# From the swf-monitor checkout, deploy the current coordinated baseline
+sudo bash deploy-swf-monitor.sh branch infra/baseline-vNN
 
-# Deploy specific branch
-sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch infra/baseline-v19
-
-# Deploy specific tag
-sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh tag v1.2.3
+# After a coordinated delivery, an explicitly selected tag is also supported
+sudo bash deploy-swf-monitor.sh tag v1.2.3
 ```
+
+Run the command in the foreground. The script creates an isolated release copy
+of the selected Git reference; it does not clone over or switch the shared
+development checkout. Before deploying, inspect every local package checkout
+that the script freezes into the release virtual environment, including
+swf-epicprod, snapper-ai, site-canary, and swf-common-lib.
 
 ### Lightweight UI/MCP Deploy
 
@@ -284,21 +288,23 @@ release baseline.
 The deployment script automatically:
 
 1. **Validates** the branch/tag exists in GitHub repository
-2. **Creates** new release directory: `/opt/swf-monitor/releases/branch-main/`
+2. **Creates** a new release directory named for the selected branch or tag
 3. **Clones** the specified Git reference to the release directory
 4. **Copies** development virtual environment from the configured development path
-5. **Links** shared resources (logs, production.env, SSL certificates) and ensures the shared HuggingFace cache exists with open perms
-6. **Installs** WSGI LoadModule config from release's `config/apache/20-swf-monitor-wsgi.conf` into `/etc/httpd/conf.modules.d/`
-7. **Collects** Django static files with `python manage.py collectstatic`
-8. **Syncs** static files to shared Apache location
-9. **Runs** database migrations with `python manage.py migrate`
-10. **Updates** current symlink to point to new release, sets proper ownership
-11. **Syncs Apache vhost conf** — compares release's `apache-swf-monitor.conf` with live `/etc/httpd/conf.d/swf-monitor.conf`; if different, timestamped backup + install + `httpd -t` validates, rollback on failure
-12. **Reloads** Apache (`systemctl reload httpd`) — required every deploy to recycle mod_wsgi daemon processes so they pick up new Python code; any conf change from step 11 rides along on the same reload
-13. **Restarts** the ASGI worker (`systemctl restart swf-monitor-mcp-asgi.service`) so uvicorn picks up new code (uvicorn loads code once at startup and does not re-read on file change)
-14. **Conditionally restarts bots** (`swf-panda-bot`, `swf-testbed-bot`) — only if bot-specific code changed relative to the previous release
-15. **Health-checks** the deployment by hitting `/swf-monitor/api/`
-16. **Cleans up** old releases (keeps last 5)
+5. **Freezes** editable swf-epicprod, snapper-ai, site-canary, and swf-common-lib checkouts into the release virtual environment when installed
+6. **Links** shared resources (logs, production.env, SSL certificates) and ensures the shared HuggingFace cache exists with open perms
+7. **Installs** WSGI LoadModule config from release's `config/apache/20-swf-monitor-wsgi.conf` into `/etc/httpd/conf.modules.d/`
+8. **Collects** Django static files with `python manage.py collectstatic`
+9. **Syncs** static files to shared Apache location
+10. **Runs** database migrations with `python manage.py migrate`
+11. **Updates** current symlink to point to new release and sets proper ownership
+12. **Syncs Apache vhost conf** — compares release's `apache-swf-monitor.conf` with live `/etc/httpd/conf.d/swf-monitor.conf`; if different, timestamped backup + install + `httpd -t` validates, rollback on failure
+13. **Reloads** Apache (`systemctl reload httpd`) so mod_wsgi processes pick up the new code and any validated configuration change
+14. **Restarts** the ASGI worker (`systemctl restart swf-monitor-mcp-asgi.service`) so uvicorn picks up new code
+15. **Restarts** the epicprod operations agent so its doers use the new release and environment
+16. **Health-checks** the deployment by hitting `/swf-monitor/api/`
+17. **Conditionally restarts** bots and the live publisher when their code changed relative to the previous release
+18. **Cleans up** old releases (keeps the last 5)
 
 
 ### Deployment Output
@@ -307,13 +313,13 @@ Successful deployment shows:
 
 ```
 [2025-01-13 14:30:15] Deployment completed successfully!
-[2025-01-13 14:30:15] Active release: branch-main
+[2025-01-13 14:30:15] Active release: branch-infra-baseline-vNN
 [2025-01-13 14:30:15] Git commit: a1b2c3d
 
 Current deployment status:
-  Release: branch-main
-  Path: /opt/swf-monitor/releases/branch-main
-  Current: /opt/swf-monitor/releases/branch-main
+  Release: branch-infra-baseline-vNN
+  Path: /opt/swf-monitor/releases/branch-infra-baseline-vNN
+  Current: /opt/swf-monitor/releases/branch-infra-baseline-vNN
 ```
 
 ## Apache Configuration

@@ -134,11 +134,21 @@ page template:
   via `{% load swf_fmt %}` and
   `<td class="{{ value|state_class }}">{{ value }}</td>` (or
   `task_badge`/`job_badge` for badge form). Never a bare status cell.
+- **Names and fields**: do not wrap human-facing names, identifiers, field
+  paths, policies, publishers, or resolvers in `<code>`. The active theme
+  renders code text red, which signals an error. Use a descriptive title and,
+  when needed, a plain muted label such as “Internal name: health”.
 
 ## Deploy
 
 `sudo bash deploy-swf-monitor.sh branch <current infra/baseline-vNN>` — pulls from
 git, so commit + push first. Run it in the foreground.
+
+The standard script creates an isolated release copy; “cloning” in its output
+does not mean it is changing the shared development checkout. Before running
+it, inspect every local package tree it freezes into the release, including
+swf-epicprod, snapper-ai, site-canary, and swf-common-lib, so another session's
+uncommitted work is not shipped.
 
 For UI/template/view-only or MCP-tool-only changes, prefer the fast in-place
 sync: `sudo ./deploy-lightweight-ui-mcp.sh --ui` and/or `--mcp` (add

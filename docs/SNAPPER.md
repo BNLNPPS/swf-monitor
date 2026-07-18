@@ -97,18 +97,35 @@ operator configuration remains in the existing System configuration editor.
 Tab, scope, and selected-snap links are durable URL state, so reload, browser
 history, bookmarks, and external proxy links preserve the selected view.
 
-Deployments use the standard `deploy-swf-monitor.sh branch main` path. That
-freezes the generic `snapper-ai` package into the release virtual environment,
-runs migrations, updates `/opt/swf-monitor/current`, and restarts the
-`epicprod-ops-agent` worker.
+Component titles are descriptive human labels. Internal component names,
+publisher identities, policy names, field paths, and resolver names use plain
+text, not HTML code styling: the active theme renders code text red, which
+signals an error. When an internal name is useful, present it explicitly as
+“Internal name: …” beside the descriptive title.
+
+During an active coordinated baseline, deployments use the repository's
+standard script from the current infra/baseline-vNN branch:
+
+```bash
+sudo bash deploy-swf-monitor.sh branch infra/baseline-vNN
+```
+
+The script creates the normal isolated release copy under
+/opt/swf-monitor/releases, freezes the generic snapper-ai package and other
+editable local packages into the release virtual environment, runs migrations,
+updates /opt/swf-monitor/current, restarts the required workers, and performs
+the HTTP health check. Check every local package tree that the script freezes
+for uncommitted work before running it.
 
 ## Component maintainers
 
 The full five-minute System status refresh also maintains two Snapper component
 families before the independent capture scheduler observes them:
 
-- `health` in both scopes, from the bounded System status registry; and
-- `panda` in `epicprod`, from the curated PanDA activity adapter.
+- **System health** in both scopes (internal name: health), from the bounded
+  System status registry; and
+- **PanDA activity** in epicprod (internal name: panda), from the curated PanDA
+  activity adapter.
 
 The PanDA adapter publishes trailing 24-hour job and task counts, current counts
 for every in-flight job state and nonterminal task state, running cores, and

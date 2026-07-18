@@ -132,7 +132,7 @@ For complete production deployment instructions including Apache setup, SSL conf
 
 **Quick Reference:**
 - Initial setup: Run `sudo ./setup-apache-deployment.sh` 
-- Deploy updates: `sudo /opt/swf-monitor/bin/deploy-swf-monitor.sh branch main`
+- Deploy updates from the swf-monitor checkout: `sudo bash deploy-swf-monitor.sh branch infra/baseline-vNN`
 - Configuration: Edit `/opt/swf-monitor/config/env/production.env`
 
 ## Testing
