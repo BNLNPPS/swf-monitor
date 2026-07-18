@@ -9,6 +9,8 @@ logging). Uses the same ACTIVEMQ_* environment the agents use (source ~/.env).
 Usage:
     enqueue-ops-message.py catalog_sync --created-by nightly_cron
     enqueue-ops-message.py association_sweep --created-by backfill --extra days=30
+    enqueue-ops-message.py assess_refresh --queue /queue/canary.ops \
+        --namespace canary --created-by hourly_cron
 """
 
 import argparse
@@ -29,9 +31,13 @@ def main():
                         help="requester recorded in the action stream")
     parser.add_argument('--extra', action='append', default=[],
                         help="extra key=value message fields (int if numeric)")
+    parser.add_argument('--queue', default=OPS_QUEUE,
+                        help="destination queue (default: the epicprod ops queue)")
+    parser.add_argument('--namespace', default='prodops',
+                        help="agent namespace stamped on the message")
     args = parser.parse_args()
 
-    msg = {'msg_type': args.msg_type, 'namespace': 'prodops',
+    msg = {'msg_type': args.msg_type, 'namespace': args.namespace,
            'created_by': args.created_by}
     for item in args.extra:
         key, _, value = item.partition('=')
@@ -52,10 +58,10 @@ def main():
     conn.connect(os.getenv('ACTIVEMQ_USER', 'admin'),
                  os.getenv('ACTIVEMQ_PASSWORD', 'admin'), wait=True)
     try:
-        conn.send(destination=OPS_QUEUE, body=json.dumps(msg))
+        conn.send(destination=args.queue, body=json.dumps(msg))
     finally:
         conn.disconnect()
-    print(f"enqueued {args.msg_type} to {OPS_QUEUE}")
+    print(f"enqueued {args.msg_type} to {args.queue}")
 
 
 if __name__ == '__main__':
