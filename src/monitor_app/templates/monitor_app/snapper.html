@@ -10,11 +10,6 @@
         --snapper-muted: #5d6b7a;
     }
     .snapper-header {
-        align-items: flex-end;
-        display: flex;
-        flex-wrap: wrap;
-        gap: .75rem 1.5rem;
-        justify-content: space-between;
         margin-bottom: .65rem;
     }
     .snapper-header h1 {
@@ -24,6 +19,12 @@
     .snapper-header p {
         color: var(--snapper-muted);
         margin: 0;
+    }
+    .snapper-selectors {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .65rem;
+        margin-bottom: 1rem;
     }
     .snapper-facts {
         display: grid;
@@ -84,10 +85,11 @@
 
 <div class="container-fluid mt-0 snapper-page">
     <header class="snapper-header">
-        <div>
-            <h1>Snapper</h1>
-            <p>Coherent operational state history for SWF systems</p>
-        </div>
+        <h1>Snapper</h1>
+        <p>Operational state history for SWF systems</p>
+    </header>
+
+    <nav class="snapper-selectors" aria-label="Snapper scope and view">
         <div class="btn-group" role="group" aria-label="Snapper scope">
             {% for option in scope_options %}
                 {% if active_tab == 'report' %}
@@ -101,15 +103,17 @@
                 {% endif %}
             {% endfor %}
         </div>
-    </header>
-
-    <nav class="swf-page-tabs" aria-label="Snapper views">
-        <a class="{% if active_tab == 'report' %}active{% endif %}"
-           href="{% url 'monitor_app:snapper_report' scope=scope %}"
-           {% if active_tab == 'report' %}aria-current="page"{% endif %}>Report</a>
-        <a class="{% if active_tab == 'system' %}active{% endif %}"
-           href="{% url 'monitor_app:snapper_system' scope=scope %}"
-           {% if active_tab == 'system' %}aria-current="page"{% endif %}>System</a>
+        <div class="btn-group" role="group" aria-label="Snapper view">
+            <a class="btn btn-sm {% if active_tab == 'report' %}btn-secondary active{% else %}btn-outline-secondary{% endif %}"
+               href="{% url 'monitor_app:snapper_report' scope=scope %}"
+               {% if active_tab == 'report' %}aria-current="page"{% endif %}>Report</a>
+            <a class="btn btn-sm {% if active_tab == 'system' %}btn-secondary active{% else %}btn-outline-secondary{% endif %}"
+               href="{% url 'monitor_app:snapper_system' scope=scope %}"
+               {% if active_tab == 'system' %}aria-current="page"{% endif %}>System</a>
+        </div>
+        {% if active_tab == 'report' %}
+            <span class="text-muted small align-self-center" id="snapper-reload-countdown"></span>
+        {% endif %}
     </nav>
 
     {% if active_tab == 'report' %}
@@ -457,4 +461,27 @@
         </section>
     {% endif %}
 </div>
+
+<script>
+(() => {
+    const refreshIntervalMs = 60000;
+    const refreshAt = Date.now() + refreshIntervalMs;
+    const countdown = document.getElementById('snapper-reload-countdown');
+    const updateCountdown = () => {
+        if (!countdown) return;
+        const seconds = Math.max(0, Math.ceil((refreshAt - Date.now()) / 1000));
+        countdown.textContent = `Page reload in ${seconds} sec`;
+    };
+    updateCountdown();
+    window.setInterval(updateCountdown, 1000);
+    window.setTimeout(() => {
+        if (!document.hidden) window.location.reload();
+    }, refreshIntervalMs);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && Date.now() >= refreshAt) {
+            window.location.reload();
+        }
+    });
+})();
+</script>
 {% endblock %}
