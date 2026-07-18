@@ -41,7 +41,7 @@ from .serializers import (
 from .forms import SystemAgentForm
 from rest_framework.views import APIView
 from django.apps import apps
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 from django.conf import settings as django_settings
 import logging
@@ -391,6 +391,26 @@ class RunStateViewSet(viewsets.ModelViewSet):
     serializer_class = RunStateSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        serializer.save()
+        from .snapper_datataking import publish_datataking_state
+
+        publish_datataking_state()
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        state_fields = ("phase", "state", "substate")
+        previous_state = tuple(
+            getattr(serializer.instance, field) for field in state_fields
+        )
+        run_state = serializer.save()
+        current_state = tuple(getattr(run_state, field) for field in state_fields)
+        if current_state != previous_state:
+            from .snapper_datataking import publish_datataking_state
+
+            publish_datataking_state()
 
 
 class SystemStateEventViewSet(viewsets.ModelViewSet):

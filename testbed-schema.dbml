@@ -270,6 +270,11 @@ enum pcs.char_simutag_status {
   "locked" [note: '''Locked''']
 }
 
+enum snapper_ai.char_systemsnap_encoding {
+  "full" [note: '''Full''']
+  "delta" [note: '''Component delta''']
+}
+
 Table admin.LogEntry {
   Note: '''
 LogEntry(id, action_time, user, content_type, object_id, object_repr, action_flag, change_message)
@@ -2257,6 +2262,95 @@ on the Django web site).
   indexes {
     (expire_date) [name: 'django_session_expire_date_a5c62663', type: btree]
     (session_key) [pk, unique, name: 'django_session_pkey', type: btree]
+  }
+}
+
+
+Table snapper_ai.CaptureCursor {
+  Note: '''
+Bounded scheduler state for one scope.
+
+*table: public.snapper_capture_cursor*'''
+
+  scope char [note: '''*scope*''', pk, unique, not null]
+  observed_revisions json [note: '''*observed revisions*''', default:`builtins.dict()`, not null]
+  observed_hashes json [note: '''*observed hashes*''', default:`builtins.dict()`, not null]
+  latest_boundary_at date_time [note: '''*latest boundary at*''', null]
+  latest_check_at date_time [note: '''*latest check at*''', null]
+  baseline_progress positive_integer [note: '''*baseline progress*''', default:`0`, not null]
+  scheduler_result json [note: '''*scheduler result*''', default:`builtins.dict()`, not null]
+  heartbeat_at date_time [note: '''*heartbeat at*''', null]
+  consecutive_failures positive_integer [note: '''*consecutive failures*''', default:`0`, not null]
+  coverage_gap_started_at date_time [note: '''*coverage gap started at*''', null]
+  modified_at date_time [note: '''*modified at*''', not null]
+
+  indexes {
+    (scope) [pk, unique, name: 'snapper_capture_cursor_pkey', type: btree]
+  }
+}
+ref: snapper_ai.CaptureCursor.latest_snap_id > snapper_ai.SystemSnap.id
+
+
+Table snapper_ai.CurrentComponent {
+  Note: '''
+The latest accepted registration and state for one scoped component.
+
+*table: public.snapper_current_component*'''
+
+  id uuid [note: '''*id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  scope char [note: '''*scope*''', not null]
+  name char [note: '''*name*''', not null]
+  publisher_identity char [note: '''*publisher identity*''', not null]
+  active boolean [note: '''*active*''', default:`True`, not null]
+  retired_at date_time [note: '''*retired at*''', null]
+  registration json [note: '''*registration*''', default:`builtins.dict()`, not null]
+  component_schema_version positive_integer [note: '''*component schema version*''', default:`1`, not null]
+  registration_version positive_big_integer [note: '''*registration version*''', default:`1`, not null]
+  registration_hash char [note: '''*registration hash*''', not null]
+  data json [note: '''*data*''', null]
+  content_hash char [note: '''*content hash*''', default:`""`, not null]
+  revision positive_big_integer [note: '''*revision*''', default:`0`, not null]
+  assessed_at date_time [note: '''*assessed at*''', null]
+  source_as_of date_time [note: '''*source as of*''', null]
+  assessment_policy_version char [note: '''*assessment policy version*''', default:`""`, not null]
+  accepted_at date_time [note: '''*accepted at*''', null]
+  changed_at date_time [note: '''*changed at*''', null]
+  created_at date_time [note: '''*created at*''', not null]
+  modified_at date_time [note: '''*modified at*''', not null]
+
+  indexes {
+    (scope,active,name) [name: 'snapper_comp_scope_active_idx', type: btree]
+    (id) [pk, unique, name: 'snapper_current_component_pkey', type: btree]
+  }
+}
+
+
+Table snapper_ai.SystemSnap {
+  Note: '''
+One immutable logical state captured at an aligned scope boundary.
+
+*table: public.snapper_system_snap*'''
+
+  id uuid [note: '''*id*''', pk, unique, default:`uuid.uuid4()`, not null]
+  scope char [note: '''*scope*''', not null]
+  snap_time date_time [note: '''*snap time*''', not null]
+  observed_at date_time [note: '''*observed at*''', not null]
+  completed_at date_time [note: '''*completed at*''', not null]
+  snap_schema_version positive_integer [note: '''*snap schema version*''', default:`1`, not null]
+  capture_policy char [note: '''*capture policy*''', not null]
+  encoding snapper_ai.char_systemsnap_encoding [note: '''*encoding*''', default:`"full"`, not null]
+  reasons json [note: '''*reasons*''', default:`builtins.list()`, not null]
+  changed_components json [note: '''*changed components*''', default:`builtins.list()`, not null]
+  component_revisions json [note: '''*component revisions*''', default:`builtins.dict()`, not null]
+  registration_versions json [note: '''*registration versions*''', default:`builtins.dict()`, not null]
+  component_hashes json [note: '''*component hashes*''', default:`builtins.dict()`, not null]
+  state_hash char [note: '''*state hash*''', not null]
+  state json [note: '''*state*''', default:`builtins.dict()`, not null]
+  created_at date_time [note: '''*created at*''', not null]
+
+  indexes {
+    (scope,snap_time) [name: 'snapper_snap_scope_time_idx', type: btree]
+    (id) [pk, unique, name: 'snapper_system_snap_pkey', type: btree]
   }
 }
 

@@ -26,11 +26,12 @@ jobs:
         pip install --no-cache-dir -r requirements.txt
         # INSTALLED_APPS packages that ship outside requirements.txt
         # (same set the Dockerfile installs), and the sibling repos:
-        # swf-common-lib and swf-epicprod (the pcs application).
+        # swf-common-lib, swf-epicprod (the pcs application), and snapper-ai.
         pip install --no-cache-dir django-oauth-toolkit django-mcp-server uvicorn
         pip install --no-cache-dir \
           git+https://github.com/BNLNPPS/swf-common-lib.git \
-          git+https://github.com/BNLNPPS/swf-epicprod.git
+          git+https://github.com/BNLNPPS/swf-epicprod.git \
+          git+https://github.com/BNLNPPS/snapper-ai.git
 
     - name: Generate DBML schema
       env:

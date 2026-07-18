@@ -266,6 +266,12 @@ def _active_nav(request):
             'system_status',
             'system_status_root',
         },
+        'snapper': namespace == 'monitor_app' and url_name in {
+            'snapper_root',
+            'snapper_report',
+            'snapper_report_snap',
+            'snapper_system',
+        },
         'about': namespace == 'monitor_app' and url_name == 'about',
         'account': namespace == 'monitor_app' and url_name == 'account',
     }

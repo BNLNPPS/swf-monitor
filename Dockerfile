@@ -33,6 +33,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # from requirements.txt (they ship as separate PyPI packages).
 RUN pip install --no-cache-dir django-mcp-server django-oauth-toolkit uvicorn
 
+# Install snapper-ai, the generic Django application providing coherent state
+# history. It is a separately versioned sibling in development and must be
+# present before Django imports INSTALLED_APPS during image construction.
+ARG SNAPPER_AI_REF=main
+RUN git clone --depth 1 --branch "${SNAPPER_AI_REF}" \
+        https://github.com/BNLNPPS/snapper-ai.git /build/snapper-ai \
+    && pip install --no-cache-dir /build/snapper-ai
+
 # Copy the full project and install it as a package.
 COPY . /build/swf-monitor
 RUN pip install --no-cache-dir -e /build/swf-monitor

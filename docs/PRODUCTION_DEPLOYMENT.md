@@ -76,6 +76,8 @@ To set up an equivalent development environment in any user account:
    git clone https://github.com/BNLNPPS/swf-testbed.git
    git clone https://github.com/BNLNPPS/swf-monitor.git
    git clone https://github.com/BNLNPPS/swf-common-lib.git
+   git clone https://github.com/BNLNPPS/swf-epicprod.git
+   git clone https://github.com/BNLNPPS/snapper-ai.git
    # Clone other swf-* agent repositories as needed
    ```
 
