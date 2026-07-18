@@ -171,7 +171,7 @@
                     <header class="snapper-component-header">
                         <div class="d-flex align-items-baseline flex-wrap gap-2">
                             <h3 class="h5 mb-0">{{ component.title }}</h3>
-                            <code>{{ component.name }}</code>
+                            <span class="snapper-meta">Internal name: {{ component.name }}</span>
                         </div>
                         {% if component.description %}<div class="snapper-meta mt-1">{{ component.description }}</div>{% endif %}
                     </header>
@@ -181,7 +181,7 @@
                             registration {{ component.registration_version }} &middot;
                             assessed {{ component.assessed_at|fmt_dt|default:'—' }} &middot;
                             source as of {{ component.source_as_of|fmt_dt|default:'—' }} &middot;
-                            publisher <code>{{ component.publisher_identity }}</code>
+                            publisher {{ component.publisher_identity }}
                         </div>
 
                         {% if component.health %}
@@ -357,7 +357,7 @@
                         <tr>
                             <td class="fw-semibold">{{ row.setting }}</td>
                             <td{% if not row.valid %} class="error_fill"{% endif %}>{{ row.value }}</td>
-                            <td><code>{{ row.key }}</code></td>
+                            <td>{{ row.key }}</td>
                         </tr>
                     {% endfor %}
                     </tbody>
@@ -382,13 +382,13 @@
                         <tbody>
                         {% for component in components %}
                             <tr>
-                                <td><strong>{{ component.title }}</strong><br><code>{{ component.record.name }}</code></td>
+                                <td><strong>{{ component.title }}</strong><br><span class="snapper-meta">Internal name: {{ component.record.name }}</span></td>
                                 <td>{% if component.record.active %}<span class="badge text-bg-success">Active</span>{% else %}<span class="badge text-bg-secondary">Retired</span>{% endif %}</td>
                                 <td>{{ component.record.revision }}</td>
                                 <td>{{ component.record.registration_version }}</td>
                                 <td data-order="{{ component.record.assessed_at|date:'c' }}">{{ component.record.assessed_at|fmt_dt|default:'—' }}</td>
                                 <td data-order="{{ component.record.source_as_of|date:'c' }}">{{ component.record.source_as_of|fmt_dt|default:'—' }}</td>
-                                <td><code>{{ component.record.publisher_identity }}</code></td>
+                                <td>{{ component.record.publisher_identity }}</td>
                             </tr>
                         {% endfor %}
                         </tbody>
@@ -400,7 +400,7 @@
                         <header class="snapper-component-header">
                             <div class="d-flex align-items-baseline flex-wrap gap-2">
                                 <h3 class="h5 mb-0">{{ component.title }}</h3>
-                                <code>{{ component.record.name }}</code>
+                                <span class="snapper-meta">Internal name: {{ component.record.name }}</span>
                             </div>
                             {% if component.description %}<div class="snapper-meta mt-1">{{ component.description }}</div>{% endif %}
                         </header>
@@ -408,7 +408,7 @@
                             <div class="snapper-meta mb-2">
                                 Owner {{ component.owning_subsystem|default:'—' }} &middot;
                                 visibility {{ component.visibility|default:'—' }} &middot;
-                                assessment policy <code>{{ component.assessment_policy|default:'—' }}</code> &middot;
+                                assessment policy {{ component.assessment_policy|default:'—' }} &middot;
                                 size bound {{ component.max_serialized_bytes|default:'—' }} bytes
                             </div>
 
@@ -420,7 +420,7 @@
                                     {% for quantity in component.quantities %}
                                         <tr>
                                             <td class="fw-semibold">{{ quantity.name }}</td>
-                                            <td><code>{{ quantity.path }}</code></td>
+                                            <td>{{ quantity.path }}</td>
                                             <td>{{ quantity.kind }}</td>
                                             <td>{{ quantity.type }}</td>
                                             <td>{{ quantity.required|yesno:'yes,no' }}</td>
@@ -441,7 +441,7 @@
                                         <thead><tr><th>Source</th><th>Event kind</th><th>Resolver</th><th>Owner</th><th>Visibility</th></tr></thead>
                                         <tbody>
                                         {% for source in component.event_sources %}
-                                            <tr><td>{{ source.name }}</td><td>{{ source.kind }}</td><td><code>{{ source.resolver }}</code></td><td>{{ source.owner }}</td><td>{{ source.visibility }}</td></tr>
+                                            <tr><td>{{ source.name }}</td><td>{{ source.kind }}</td><td>{{ source.resolver }}</td><td>{{ source.owner }}</td><td>{{ source.visibility }}</td></tr>
                                         {% endfor %}
                                         </tbody>
                                     </table>
