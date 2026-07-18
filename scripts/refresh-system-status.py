@@ -22,6 +22,10 @@ from monitor_app.snapper_health import (  # noqa: E402
     compact_publication_report,
     publish_health_components,
 )
+from monitor_app.snapper_panda import (  # noqa: E402
+    compact_panda_publication_report,
+    publish_panda_activity,
+)
 
 
 def main(argv):
@@ -35,6 +39,9 @@ def main(argv):
     publications = publish_health_components()
     print(compact_refresh_report(rows))
     print(compact_publication_report(publications))
+    if not args.only:
+        panda_publication = publish_panda_activity()
+        print(compact_panda_publication_report(panda_publication))
     return 0
 
 

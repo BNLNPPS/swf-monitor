@@ -101,3 +101,19 @@ Deployments use the standard `deploy-swf-monitor.sh branch main` path. That
 freezes the generic `snapper-ai` package into the release virtual environment,
 runs migrations, updates `/opt/swf-monitor/current`, and restarts the
 `epicprod-ops-agent` worker.
+
+## Component maintainers
+
+The full five-minute System status refresh also maintains two Snapper component
+families before the independent capture scheduler observes them:
+
+- `health` in both scopes, from the bounded System status registry; and
+- `panda` in `epicprod`, from the curated PanDA activity adapter.
+
+The PanDA adapter publishes trailing 24-hour job and task counts, current counts
+for every in-flight job state and nonterminal task state, running cores, and
+bounded target-site and task-type maps. It excludes users and individual
+records. Selected
+`refresh-system-status.py --only` runs skip the PanDA query; full manual and
+periodic refreshes publish it. A publication error causes the refresh doer to
+fail visibly while preserving the last accepted component state.
