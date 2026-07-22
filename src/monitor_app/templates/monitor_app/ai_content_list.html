@@ -24,7 +24,8 @@
     {% endif %}
 
     <p>
-        AI assessments performed on PanDA tasks, jobs, and sites/queues are shown here.
+        AI assessments of production campaigns (the scheduled daily and weekly
+        reports) and of PanDA tasks, jobs, and sites/queues are shown here.
     </p>
     <p class="text-muted">
         {{ total_count }} total assessment{{ total_count|pluralize }}{% if subject_counts %}:
@@ -124,9 +125,6 @@
             <a href="{{ item.detail_url }}" onclick="event.stopPropagation()">{{ item.title }}</a>
         </strong></span>
         {% endif %}
-        {% if item.verdict %}
-        <span class="badge {% if item.verdict == 'alarm' %}bg-danger{% elif item.verdict == 'attention' %}bg-warning text-dark{% elif item.verdict == 'ok' %}bg-success{% else %}bg-secondary{% endif %}">{{ item.verdict }}</span>
-        {% endif %}
         {% if item.assessment_kind %}
         <span class="badge bg-secondary">{{ item.assessment_kind }}</span>
         {% endif %}
@@ -143,6 +141,9 @@
         </span>
         <span><strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}</span>
         <span class="text-muted">{{ item.ai }} &middot; {{ item.username }} &middot; {{ item.created_display }}</span>
+        {% if item.narration %}
+        <span class="w-100 mt-1">{{ item.narration }}</span>
+        {% endif %}
     </summary>
     <div class="ai-assessment-lazy-body p-3 text-muted"
          data-body-url="{{ item.body_url }}?next={{ request.get_full_path|urlencode }}">
