@@ -60,7 +60,7 @@ async def panda_list_jobs(
     site: str = None,
     taskid: int = None,
     reqid: int = None,
-    limit: int = 200,
+    limit: int = None,
     before_id: int = None,
 ) -> dict:
     """
@@ -80,7 +80,8 @@ async def panda_list_jobs(
         site: Filter by computing site (computingsite). Supports SQL LIKE with %.
         taskid: Filter by JEDI task ID (jeditaskid).
         reqid: Filter by request ID.
-        limit: Maximum jobs to return (default 200).
+        limit: Maximum jobs to return. An explicit value is always honored.
+            Default: 200, or the complete task population when taskid is given.
         before_id: Pagination cursor — return jobs with pandaid < this value.
 
     Returns:
@@ -105,7 +106,7 @@ async def panda_diagnose_jobs(
     taskid: int = None,
     reqid: int = None,
     error_component: str = None,
-    limit: int = 500,
+    limit: int = None,
     before_id: int = None,
 ) -> dict:
     """
@@ -126,7 +127,8 @@ async def panda_diagnose_jobs(
         reqid: Filter by request ID.
         error_component: Filter to jobs with errors in this component
                          (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).
-        limit: Maximum jobs to return (default 500).
+        limit: Maximum jobs to return. An explicit value is always honored.
+            Default: 500, or the complete task population when taskid is given.
         before_id: Pagination cursor — return jobs with pandaid < this value.
 
     Returns:
@@ -164,7 +166,8 @@ async def panda_list_tasks(
         days: Time window in days (default 7). Tasks with modificationtime within this window.
         status: Filter by task status (e.g. 'done', 'failed', 'running', 'ready', 'broken', 'aborted').
         username: Filter by task owner. Supports SQL LIKE with %.
-        taskname: Filter by task name. Supports SQL LIKE with %.
+        taskname: Filter by task name — substring match (a fragment such as
+            a campaign name matches); % wildcards are honored as given.
         reqid: Filter by request ID.
         workinggroup: Filter by working group (e.g. 'EIC', 'Rubin'). NULL for iDDS automation tasks.
         taskid: Filter by specific JEDI task ID (jeditaskid).

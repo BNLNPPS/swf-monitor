@@ -434,11 +434,12 @@ def _stale_task_filter():
 
 
 def list_jobs(days=7, status=None, username=None, site=None,
-              taskid=None, reqid=None, limit=200, before_id=None):
+              taskid=None, reqid=None, limit=None, before_id=None):
     """List PanDA jobs with summary statistics and cursor-based pagination."""
-    # When scoped to a specific task, return everything — don't truncate
-    if taskid:
-        limit = 100000
+    # An explicit limit is always honored. The default is 200, or the
+    # complete population when scoped to a specific task.
+    if limit is None:
+        limit = 100000 if taskid else 200
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
     params = [cutoff]
@@ -537,17 +538,20 @@ def list_jobs(days=7, status=None, username=None, site=None,
 
 
 def diagnose_jobs(days=7, username=None, site=None, taskid=None,
-                  reqid=None, error_component=None, limit=500, before_id=None):
+                  reqid=None, error_component=None, limit=None, before_id=None):
     """Diagnose failed PanDA jobs with full error details."""
-    # When scoped to a specific task, return everything — don't truncate
-    if taskid:
-        limit = 100000
+    # An explicit limit is always honored. The default is 500, or the
+    # complete population when scoped to a specific task.
+    if limit is None:
+        limit = 100000 if taskid else 500
     cutoff = timezone.now() - timedelta(days=days)
     where = [
         '"modificationtime" >= %s',
-        '"jobstatus" IN %s',
+        # = ANY(array) rather than IN (tuple): psycopg3 adapts a Python
+        # tuple as a composite record literal, which breaks the SQL.
+        '"jobstatus" = ANY(%s)',
     ]
-    params = [cutoff, tuple(FAULTY_STATUSES)]
+    params = [cutoff, list(FAULTY_STATUSES)]
 
     if username:
         clause, val = like_or_eq('produsername', username)
@@ -779,9 +783,11 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         where.append(clause)
         params.extend(vals)
     if taskname:
-        clause, val = like_or_eq('taskname', taskname)
-        where.append(clause)
-        params.append(val)
+        # Substring match by default: task names are long composed strings
+        # and a caller-supplied fragment (e.g. a campaign name) should hit.
+        # Caller-supplied % wildcards are honored as given.
+        where.append('"taskname" LIKE %s')
+        params.append(taskname if '%' in taskname else f'%{taskname}%')
     if reqid:
         where.append('"reqid" = %s')
         params.append(reqid)
@@ -1848,9 +1854,11 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
         where.append(clause)
         params.extend(vals)
     if taskname:
-        clause, val = like_or_eq('taskname', taskname)
-        where.append(clause)
-        params.append(val)
+        # Substring match by default: task names are long composed strings
+        # and a caller-supplied fragment (e.g. a campaign name) should hit.
+        # Caller-supplied % wildcards are honored as given.
+        where.append('"taskname" LIKE %s')
+        params.append(taskname if '%' in taskname else f'%{taskname}%')
     if processingtype:
         if processingtype == '__blank__':
             where.append('("processingtype" IS NULL OR "processingtype" = %s)')
