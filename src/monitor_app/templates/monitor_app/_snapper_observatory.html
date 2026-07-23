@@ -246,8 +246,11 @@
     barmode: 'overlay',
     xaxis: {type: 'date', range: [data.start, data.end], domain: [0, 1]},
     yaxis: {title: 'count', domain: [0, curveDomainTop],
-            rangemode: 'tozero'},
-    yaxis2: {type: 'category',
+            rangemode: 'tozero',
+            // Locked: drag zooms time only, and undo/reset are
+            // exact — a rectangle zoom must never bend the y scale.
+            fixedrange: true},
+    yaxis2: {type: 'category', fixedrange: true,
              domain: [Math.min(curveDomainTop + 0.015, 0.995), 1.0],
              categoryorder: 'array', showgrid: true,
              categoryarray: laneIds.map(id => data.lanes[id].label)},
