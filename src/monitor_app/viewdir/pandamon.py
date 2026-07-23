@@ -177,9 +177,25 @@ ERROR_COLUMNS = [
     {'name': 'error_diag', 'title': 'Diagnostic', 'orderable': False},
     {'name': 'count', 'title': 'Count', 'orderable': False},
     {'name': 'task_count', 'title': 'Tasks', 'orderable': False},
+    {'name': 'avg_time_to_error', 'title': 'Avg time to error',
+     'orderable': False},
     {'name': 'users', 'title': 'Users', 'orderable': False},
     {'name': 'sites', 'title': 'Sites', 'orderable': False},
 ]
+
+
+def _duration_text(seconds):
+    """Compact human duration: 42s, 12.5m, 3.4h, 2.1d."""
+    if seconds is None:
+        return ''
+    seconds = float(seconds)
+    if seconds < 120:
+        return f'{seconds:.0f}s'
+    if seconds < 7200:
+        return f'{seconds / 60:.1f}m'
+    if seconds < 172800:
+        return f'{seconds / 3600:.1f}h'
+    return f'{seconds / 86400:.1f}d'
 
 DIAG_COLUMNS = [
     {'name': 'pandaid', 'title': 'PanDA ID', 'orderable': False},
@@ -1074,7 +1090,7 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v2:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}',
         lambda: error_summary(days=days, username=username, site=site,
                               error_source=error_source, limit=200),
@@ -1111,12 +1127,23 @@ def panda_errors_datatable_ajax(request):
         # title= span would add a second, delayed native floater.
         diag_text = escape(err.get('error_diag', '') or '')
 
+        # Average run time before this error ended the job; patterns
+        # whose jobs never started (pre-run failures) say so instead of
+        # averaging in zeros.
+        avg_text = _duration_text(err.get('avg_seconds_to_error'))
+        never_started = err.get('never_started_count') or 0
+        if not avg_text and never_started:
+            avg_text = 'never started'
+        elif avg_text and never_started:
+            avg_text += f' ({never_started} never started)'
+
         data.append([
             f'<a href="{diag_url}">{err["error_source"]}</a>',
             str(err.get('error_code', '')),
             diag_text,
             str(err.get('count', 0)),
             str(err.get('task_count', 0)),
+            avg_text,
             users_str,
             sites_str,
         ])

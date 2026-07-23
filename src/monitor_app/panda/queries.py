@@ -966,6 +966,8 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    j."jeditaskid",
                    j."produsername",
                    j."computingsite",
+                   j."starttime",
+                   j."endtime",
                    {dest_select}
             FROM "{PANDA_SCHEMA}"."{table}" j
             {dest_join}
@@ -988,7 +990,14 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                COUNT(DISTINCT jeditaskid) as task_count,
                array_agg(DISTINCT produsername) as users,
                array_agg(DISTINCT computingsite) as sites,
-               array_agg(DISTINCT destinationse) as destination_sites
+               array_agg(DISTINCT destinationse) as destination_sites,
+               AVG(EXTRACT(EPOCH FROM (endtime - starttime)))
+                   FILTER (WHERE starttime IS NOT NULL
+                             AND endtime IS NOT NULL
+                             AND endtime >= starttime)
+                   as avg_seconds_to_error,
+               COUNT(*) FILTER (WHERE starttime IS NULL)
+                   as never_started_count
         FROM ({union_sql}) errs
         GROUP BY error_source, error_code, LEFT(error_diag, 256)
         ORDER BY count DESC
@@ -1016,6 +1025,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'users': row[5],
             'sites': row[6],
             'destination_sites': row[7],
+            # Mean start-to-end interval of the failed jobs — how long a
+            # job typically ran before this error ended it. Jobs that
+            # never started (no starttime) are counted separately, not
+            # averaged in as zero.
+            'avg_seconds_to_error': (round(float(row[8]), 1)
+                                     if row[8] is not None else None),
+            'never_started_count': row[9] or 0,
         }
         total += row[3]
         errors.append(entry)
