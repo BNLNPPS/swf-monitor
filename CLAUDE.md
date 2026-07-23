@@ -64,6 +64,7 @@ the old paths here. This repo's docs cover the platform services:
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
 - `SYSTEM_STATUS.md` — cached system status record and page.
+- `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).

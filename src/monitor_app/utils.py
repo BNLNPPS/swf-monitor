@@ -205,24 +205,31 @@ class DataTablesProcessor:
         """
         return queryset[self.start:self.start + self.length]
     
-    def create_response(self, data, records_total, records_filtered):
+    def create_response(self, data, records_total, records_filtered,
+                        extra=None):
         """
         Create standardized DataTables JSON response.
-        
+
         Args:
             data: List of data rows for the table
             records_total: Total number of records before filtering
             records_filtered: Number of records after filtering
-            
+            extra: Optional dict merged into the response — e.g. the
+                cached-product freshness fields the base template's
+                "as of" chip reads (docs/CACHED_PRODUCTS.md).
+
         Returns:
             JsonResponse object
         """
-        return JsonResponse({
+        payload = {
             'draw': self.draw,
             'recordsTotal': records_total,
             'recordsFiltered': records_filtered,
             'data': data
-        })
+        }
+        if extra:
+            payload.update(extra)
+        return JsonResponse(payload)
 
 
 def get_filter_params(request, param_names):

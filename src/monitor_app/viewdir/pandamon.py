@@ -1061,6 +1061,8 @@ def panda_errors_list(request):
 
 
 def panda_errors_datatable_ajax(request):
+    from ..cached_product import get_product
+
     dt = DataTablesProcessor(request, [c['name'] for c in ERROR_COLUMNS],
                              default_order_column=3, default_order_direction='desc')
     days = _get_days(request)
@@ -1068,11 +1070,27 @@ def panda_errors_datatable_ajax(request):
     site = request.GET.get('site', '') or None
     error_source = request.GET.get('error_source', '') or None
 
-    result = error_summary(days=days, username=username, site=site,
-                           error_source=error_source, limit=200)
+    # Served as a cached product: the error aggregation scans the window's
+    # full faulty-job population (multi-second under failure churn), so
+    # requests serve the stored summary and rebuilds run behind them.
+    product = get_product(
+        f'panda_errors:{days}:{username or ""}:{site or ""}'
+        f':{error_source or ""}',
+        lambda: error_summary(days=days, username=username, site=site,
+                              error_source=error_source, limit=200),
+        ttl_seconds=300,
+        refresh=request.GET.get('refresh') == '1',
+    )
+    result = product['value'] or {}
+    product_extra = {
+        'product_built_at': (product['built_at'].isoformat()
+                             if product['built_at'] else None),
+        'product_age_seconds': product['age_seconds'],
+        'product_refreshing': product['refreshing'],
+    }
 
     if 'error' in result:
-        return dt.create_response([], 0, 0)
+        return dt.create_response([], 0, 0, extra=product_extra)
 
     errors = result.get('errors', [])
     total = len(errors)
@@ -1101,7 +1119,7 @@ def panda_errors_datatable_ajax(request):
             sites_str,
         ])
 
-    return dt.create_response(data, total, total)
+    return dt.create_response(data, total, total, extra=product_extra)
 
 
 # ── Diagnostics ──────────────────────────────────────────────────────────────

@@ -115,6 +115,17 @@ Example usage in child template:
     <!-- Custom filter controls go here in child templates -->
     {% endblock %}
 
+    <!-- Cached-product freshness chip (docs/CACHED_PRODUCTS.md): appears
+         only when the ajax response carries product_built_at. -->
+    <div id="dt-product-chip" class="mb-2" hidden>
+        <span class="text-muted">Data as of
+            <strong id="dt-product-built"></strong>
+            <span id="dt-product-refreshing" hidden>· refreshing…</span>
+        </span>
+        <button type="button" id="dt-product-update"
+                class="btn btn-sm btn-secondary ms-2">Update</button>
+    </div>
+
     <!-- DataTable -->
     <div class="table-responsive">
         <table id="main-table" class="table table-striped table-bordered table-sm">
@@ -236,6 +247,31 @@ $(document).ready(function() {
         // Default implementation - child templates should override
         {% endblock %}
     }
+
+    // Cached-product freshness chip: shown when the server marks this
+    // table as a cached product. Update rebuilds synchronously (the
+    // user chose to wait); ordinary reloads never trigger a build.
+    $('#main-table').on('xhr.dt', function (e, settings, json) {
+        if (!json || !json.product_built_at) return;
+        const chip = document.getElementById('dt-product-chip');
+        chip.hidden = false;
+        document.getElementById('dt-product-built').textContent =
+            new Date(json.product_built_at).toLocaleString();
+        document.getElementById('dt-product-refreshing').hidden =
+            !json.product_refreshing;
+    });
+    document.getElementById('dt-product-update')
+        .addEventListener('click', function () {
+        const button = this;
+        button.disabled = true;
+        button.textContent = 'Updating…';
+        currentFilters.refresh = '1';
+        table.ajax.reload(function () {
+            delete currentFilters.refresh;
+            button.disabled = false;
+            button.textContent = 'Update';
+        });
+    });
 
     // Update length menu text to show total entries
     function updateLengthMenuText(table) {
