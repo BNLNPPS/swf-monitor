@@ -18,6 +18,8 @@
       <span>
         <button type="button" id="snapper-curves-all-on" class="btn btn-sm btn-secondary">All on</button>
         <button type="button" id="snapper-curves-all-off" class="btn btn-sm btn-secondary">All off</button>
+        <button type="button" id="snapper-clear-all" class="btn btn-sm btn-secondary"
+                title="Reset everything: window, zoom, cut, and curve selection back to defaults">Clear all</button>
       </span>
       <span id="snapper-observatory-controls" class="d-flex flex-wrap column-gap-3 row-gap-1"></span>
       <span id="snapper-state-key" class="d-flex flex-wrap column-gap-2 row-gap-1 text-muted"></span>
@@ -355,6 +357,25 @@
       .addEventListener('click', function () { setAll(true); });
   document.getElementById('snapper-curves-all-off')
       .addEventListener('click', function () { setAll(false); });
+  // Clear all: window, zoom, cut, and curve selection back to defaults —
+  // remembered preferences included — then load the bare page.
+  document.getElementById('snapper-clear-all')
+      .addEventListener('click', function () {
+        try { localStorage.removeItem(storeKey); } catch (e) { }
+        const finish = function () {
+          window.location = window.location.pathname;
+        };
+        if (!authenticated) { finish(); return; }
+        const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1];
+        fetch('{% url "monitor_app:snapper_prefs" scope=scope %}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json',
+                    'X-CSRFToken': csrf || ''},
+          body: JSON.stringify({
+            curves_off: [],
+            window: '{{ observatory_default_window|escapejs }}'}),
+        }).then(finish, finish);
+      });
   persistPrefs();
 
   // Pixel-to-time over the current x range — the basis for the click
