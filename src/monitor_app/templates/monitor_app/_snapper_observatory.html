@@ -22,7 +22,23 @@
       <span id="snapper-observatory-controls" class="d-flex flex-wrap column-gap-3 row-gap-1"></span>
       <span id="snapper-state-key" class="d-flex flex-wrap column-gap-2 row-gap-1 text-muted"></span>
     </div>
-    <div id="snapper-observatory-plot" style="min-height:620px"></div>
+    <div id="snapper-zoom-bar" class="mb-1 d-flex align-items-center gap-2" hidden>
+      <button type="button" id="snapper-zoom-left" class="btn btn-sm btn-secondary" title="Shift view earlier">◀</button>
+      <button type="button" id="snapper-zoom-right" class="btn btn-sm btn-secondary" title="Shift view later">▶</button>
+      <span id="snapper-zoom-text" class="text-muted"></span>
+      <button type="button" id="snapper-zoom-undo" class="btn btn-sm btn-secondary">Undo zoom</button>
+      <button type="button" id="snapper-zoom-reset" class="btn btn-sm btn-secondary">Reset to full window</button>
+    </div>
+    <div id="snapper-observatory-plot" style="min-height:560px"></div>
+    <div id="snapper-range-indicator" hidden
+         title="Current view within the full window — click to center the view there"
+         style="height:12px; background:var(--bs-secondary-bg,#e0e0e0);
+                border-radius:6px; position:relative; cursor:pointer;
+                margin:4px 0 2px 0;">
+      <div id="snapper-range-view"
+           style="height:12px; background:#1565c0; border-radius:6px;
+                  position:absolute; top:0; min-width:6px;"></div>
+    </div>
     <div id="snapper-observatory-cut" class="mt-3" hidden></div>
   </div>
 </div>
@@ -227,11 +243,7 @@
     font: {size: 15},
     showlegend: false,
     barmode: 'overlay',
-    xaxis: {type: 'date', range: [data.start, data.end], domain: [0, 1],
-            // The always-visible horizontal scroll bar: the slider shows
-            // the full window with the current viewport draggable inside
-            // it — no hidden pan gestures.
-            rangeslider: {visible: true, thickness: 0.07}},
+    xaxis: {type: 'date', range: [data.start, data.end], domain: [0, 1]},
     yaxis: {title: 'count', domain: [0, curveDomainTop],
             rangemode: 'tozero'},
     yaxis2: {type: 'category',
@@ -378,6 +390,92 @@
         history.replaceState(null, '', url);
       });
   }
+
+  // Zoom controls: nothing shows until the view is narrower than the
+  // window; then a labeled bar (shift, undo, reset) above the plot and
+  // a minimap strip below it — the current view as a colored segment
+  // within the full-window track, click to center. Every view change
+  // pushes onto an undo stack, so progressive double-click zooms step
+  // back out one by one.
+  const zoomBar = document.getElementById('snapper-zoom-bar');
+  const rangeIndicator = document.getElementById('snapper-range-indicator');
+  const rangeView = document.getElementById('snapper-range-view');
+  const fullRange = [Date.parse(data.start), Date.parse(data.end)];
+  let rangeStack = [];
+  let lastRange = fullRange.slice();
+  let suppressPush = false;
+  function currentRange() {
+    const xa = plotDiv._fullLayout.xaxis;
+    return [Date.parse(xa.range[0]), Date.parse(xa.range[1])];
+  }
+  function updateZoomBar() {
+    const view = currentRange();
+    if (Math.abs(view[0] - lastRange[0]) > 500
+        || Math.abs(view[1] - lastRange[1]) > 500) {
+      if (!suppressPush) {
+        rangeStack.push(lastRange);
+        if (rangeStack.length > 50) rangeStack.shift();
+      }
+      lastRange = view.slice();
+    }
+    const zoomed = (view[1] - view[0]) < (fullRange[1] - fullRange[0]) * 0.98;
+    zoomBar.hidden = !zoomed;
+    rangeIndicator.hidden = !zoomed;
+    if (zoomed) {
+      document.getElementById('snapper-zoom-text').textContent =
+          'Viewing ' + toNaive(view[0]).slice(5, 16).replace('T', ' ')
+          + ' – ' + toNaive(view[1]).slice(5, 16).replace('T', ' ')
+          + ' ET of the ' + '{{ observatory_window|escapejs }}' + ' window';
+      const span = fullRange[1] - fullRange[0];
+      const left = Math.max((view[0] - fullRange[0]) / span, 0);
+      const width = Math.min((view[1] - view[0]) / span, 1);
+      rangeView.style.left = (left * 100).toFixed(2) + '%';
+      rangeView.style.width = (width * 100).toFixed(2) + '%';
+    }
+  }
+  function setRange(range) {
+    Plotly.relayout(plotDiv, {'xaxis.range': [
+      toNaive(range[0]), toNaive(range[1])]});
+  }
+  function shiftView(direction) {
+    const view = currentRange();
+    const delta = direction * (view[1] - view[0]) / 2;
+    setRange([view[0] + delta, view[1] + delta]);
+  }
+  document.getElementById('snapper-zoom-left')
+      .addEventListener('click', function () { shiftView(-1); });
+  document.getElementById('snapper-zoom-right')
+      .addEventListener('click', function () { shiftView(1); });
+  document.getElementById('snapper-zoom-undo')
+      .addEventListener('click', function () {
+        if (!rangeStack.length) return;
+        const previous = rangeStack.pop();
+        suppressPush = true;
+        setRange(previous);
+        setTimeout(function () {
+          suppressPush = false;
+          lastRange = previous.slice();
+        }, 100);
+      });
+  document.getElementById('snapper-zoom-reset')
+      .addEventListener('click', function () {
+        rangeStack = [];
+        suppressPush = true;
+        setRange(fullRange);
+        setTimeout(function () {
+          suppressPush = false;
+          lastRange = fullRange.slice();
+        }, 100);
+      });
+  rangeIndicator.addEventListener('click', function (event) {
+    const box = rangeIndicator.getBoundingClientRect();
+    const fraction = (event.clientX - box.left) / box.width;
+    const center = fullRange[0] + fraction * (fullRange[1] - fullRange[0]);
+    const view = currentRange();
+    const half = (view[1] - view[0]) / 2;
+    setRange([center - half, center + half]);
+  });
+  plotDiv.on('plotly_relayout', updateZoomBar);
 
   let downAt = null;
   let cutTimer = null;
