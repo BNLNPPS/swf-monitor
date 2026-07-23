@@ -132,6 +132,14 @@ from .pandamon import (
     panda_study_job,
 )
 
+# Snapper temporal-query tools (snapper-ai PLAN.md Phase 5)
+from .snapper import (
+    snapper_latest,
+    snapper_state_at,
+    snapper_component_history,
+    snapper_changes_between,
+)
+
 
 
 # Tool discovery - registered as MCP tool

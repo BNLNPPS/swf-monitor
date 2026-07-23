@@ -14,6 +14,9 @@ from .views import (
 from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
+from .viewdir.snapper_api import (snapper_changes_between,
+                                  snapper_component_history, snapper_latest,
+                                  snapper_state_at)
 
 router = DefaultRouter()
 router.register(r'systemagents', SystemAgentViewSet, basename='systemagent')
@@ -51,6 +54,14 @@ urlpatterns = [
     path('panda/tasks/<int:jeditaskid>/', panda_api.task_detail, name='panda-api-task-detail'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
     path('users/', users_list, name='users-list'),
+    path('snapper/<str:scope>/latest/', snapper_latest,
+         name='snapper-latest'),
+    path('snapper/<str:scope>/state-at/', snapper_state_at,
+         name='snapper-state-at'),
+    path('snapper/<str:scope>/history/', snapper_component_history,
+         name='snapper-component-history'),
+    path('snapper/<str:scope>/changes/', snapper_changes_between,
+         name='snapper-changes-between'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),
     path('messages/stream/status/', sse_status, name='sse-stream-status'),
     path('', include(router.urls)),

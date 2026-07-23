@@ -678,7 +678,6 @@ class EpicProdOpsAgent(BaseAgent):
             selected = [selected]
         for name in selected:
             cmd += ["--only", str(name)]
-        self.logger.info(f"PRODOPS refresh_system_status: {' '.join(cmd)}")
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
@@ -693,17 +692,18 @@ class EpicProdOpsAgent(BaseAgent):
                              level=logging.ERROR,
                              source=str(m.get('source') or 'ops_agent'))
             return
-        for line in (p.stdout or "").splitlines():
-            self.logger.info(f"  refresh-system-status: {line}")
-        for line in (p.stderr or "").splitlines():
-            self.logger.info(f"  refresh-system-status: {line}")
         ok = p.returncode == 0
         reason = ''
         if not ok:
+            # The subprocess output is diagnostic detail; it enters the
+            # durable log only when the refresh failed. Routine five-minute
+            # refresh chatter stays out (material-only logging).
+            for line in (p.stdout or "").splitlines():
+                self.logger.info(f"  refresh-system-status: {line}")
+            for line in (p.stderr or "").splitlines():
+                self.logger.info(f"  refresh-system-status: {line}")
             reason = self._derive_reason(p)
             self.logger.error(f"PRODOPS refresh_system_status FAILED rc={p.returncode}")
-        else:
-            self.logger.info("PRODOPS refresh_system_status done")
         self.send_message('/topic/epictopic', {
             'msg_type': 'system_status_ready', 'ok': ok, 'error': reason})
         self._log_action('system_status_refresh', t0,
