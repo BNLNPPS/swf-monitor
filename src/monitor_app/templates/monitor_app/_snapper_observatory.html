@@ -481,8 +481,13 @@
   });
   plotDiv.on('plotly_relayout', updateZoomBar);
 
+  // Click gestures, self-detected (the browser's native dblclick does
+  // not reliably cross Plotly's drag layer): one click cuts, two quick
+  // clicks zoom in twofold centered on the clicked time. The cut waits
+  // just past the double-click window so a zoom never also cuts.
   let downAt = null;
   let cutTimer = null;
+  let lastClick = null;
   plotDiv.addEventListener('mousedown', function (event) {
     downAt = [event.clientX, event.clientY];
   }, true);
@@ -494,22 +499,21 @@
     if (moved > 6) return;
     const time = eventTime(event);
     if (time === null) return;
+    const now = Date.now();
+    if (lastClick && now - lastClick.at < 450
+        && Math.abs(event.clientX - lastClick.x) < 12) {
+      lastClick = null;
+      clearTimeout(cutTimer);
+      const view = currentRange();
+      const quarter = (view[1] - view[0]) / 4;
+      setRange([time - quarter, time + quarter]);
+      return;
+    }
+    lastClick = {at: now, x: event.clientX};
     clearTimeout(cutTimer);
     cutTimer = setTimeout(function () {
       showCut(new Date(time + basisCorrection).toISOString());
-    }, 280);
-  }, true);
-  plotDiv.addEventListener('dblclick', function (event) {
-    clearTimeout(cutTimer);
-    const time = eventTime(event);
-    if (time === null) return;
-    const xa = plotDiv._fullLayout.xaxis;
-    const r0 = Date.parse(xa.range[0]);
-    const r1 = Date.parse(xa.range[1]);
-    const quarter = (r1 - r0) / 4;
-    Plotly.relayout(plotDiv, {
-      'xaxis.range': [toNaive(time - quarter), toNaive(time + quarter)],
-    });
+    }, 480);
   }, true);
 
   const initialCut = '{{ observatory_cut|escapejs }}';
