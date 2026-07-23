@@ -22,7 +22,8 @@
       <span id="snapper-observatory-controls" class="d-flex flex-wrap column-gap-3 row-gap-1"></span>
       <span id="snapper-state-key" class="d-flex flex-wrap column-gap-2 row-gap-1 text-muted"></span>
     </div>
-    <div id="snapper-zoom-bar" class="mb-1 d-flex align-items-center gap-2" hidden>
+    {# style-based visibility: Bootstrap's d-flex !important would override the hidden attribute #}
+    <div id="snapper-zoom-bar" class="mb-1 align-items-center gap-2" style="display:none">
       <button type="button" id="snapper-zoom-left" class="btn btn-sm btn-secondary" title="Shift view earlier">◀</button>
       <button type="button" id="snapper-zoom-right" class="btn btn-sm btn-secondary" title="Shift view later">▶</button>
       <span id="snapper-zoom-text" class="text-muted"></span>
@@ -147,8 +148,8 @@
 
   const traces = [];
   const laneCount = laneIds.length;
-  const laneBand = laneCount ? Math.min(0.09 * laneCount, 0.4) : 0;
-  const curveDomainTop = laneCount ? 1.0 - laneBand - 0.04 : 1.0;
+  const laneBand = laneCount ? Math.min(0.06 * laneCount, 0.35) : 0;
+  const curveDomainTop = laneCount ? 1.0 - laneBand - 0.015 : 1.0;
   const seenStates = new Set();
 
   // Lane segments as horizontal bars: solid when active, light pastel
@@ -247,7 +248,7 @@
     yaxis: {title: 'count', domain: [0, curveDomainTop],
             rangemode: 'tozero'},
     yaxis2: {type: 'category',
-             domain: [Math.min(curveDomainTop + 0.04, 0.99), 1.0],
+             domain: [Math.min(curveDomainTop + 0.015, 0.995), 1.0],
              categoryorder: 'array', showgrid: true,
              categoryarray: laneIds.map(id => data.lanes[id].label)},
     shapes: gapShapes,
@@ -419,7 +420,7 @@
       lastRange = view.slice();
     }
     const zoomed = (view[1] - view[0]) < (fullRange[1] - fullRange[0]) * 0.98;
-    zoomBar.hidden = !zoomed;
+    zoomBar.style.display = zoomed ? 'flex' : 'none';
     rangeIndicator.hidden = !zoomed;
     if (zoomed) {
       document.getElementById('snapper-zoom-text').textContent =
