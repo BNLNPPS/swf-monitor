@@ -127,9 +127,18 @@ def snapper_root(request):
 
 
 def snapper_report(request, scope, snap_id=None):
+    from django.utils import timezone
+
+    from .snapper_series import (DEFAULT_WINDOW, WINDOW_HOURS,
+                                 observatory_series, parse_window)
+
     scope = _validated_scope(scope)
     snaps = SystemSnap.objects.filter(scope=scope).order_by('-snap_time')
     latest_snap = snaps.first()
+
+    window_start, window_end, window_key = parse_window(
+        request, timezone.now())
+    observatory = observatory_series(scope, window_start, window_end)
     if snap_id is None:
         selected_snap = latest_snap
     else:
@@ -163,6 +172,11 @@ def snapper_report(request, scope, snap_id=None):
         'snap_rows': [_snap_row(snap) for snap in recent],
         'snap_count': snaps.count(),
         'recent_snap_limit': RECENT_SNAP_LIMIT,
+        'observatory': observatory,
+        'observatory_window': window_key,
+        'observatory_windows': list(WINDOW_HOURS),
+        'observatory_default_window': DEFAULT_WINDOW,
+        'observatory_cut': (request.GET.get('cut') or '').strip(),
     })
 
 

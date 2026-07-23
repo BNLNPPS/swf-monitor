@@ -117,6 +117,7 @@
     </div>
 
     {% if active_tab == 'report' %}
+        {% include 'monitor_app/_snapper_observatory.html' %}
         {% if not selected_snap %}
             <div class="alert alert-info">No snaps have been recorded for {{ scope_label }}.</div>
         {% else %}
