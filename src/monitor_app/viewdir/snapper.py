@@ -70,6 +70,24 @@ def _quantity_values(registration, data):
     return rows
 
 
+def _age_text(delta_seconds):
+    """Compact human age ('31s', '2m 31s', '3h 04m', '2d 5h'); None when
+    under a second — the caller then falls back to the absolute time."""
+    seconds = int(round(delta_seconds))
+    if seconds < 1:
+        return None
+    if seconds < 60:
+        return f'{seconds}s'
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f'{minutes}m {seconds:02d}s' if seconds else f'{minutes}m'
+    hours, minutes = divmod(minutes, 60)
+    if hours < 48:
+        return f'{hours}h {minutes:02d}m' if minutes else f'{hours}h'
+    days, hours = divmod(hours, 24)
+    return f'{days}d {hours}h' if hours else f'{days}d'
+
+
 def _present_snap_component(name, payload):
     payload = _dict(payload)
     registration = _dict(payload.get('registration'))
@@ -91,6 +109,8 @@ def _present_snap_component(name, payload):
             'reason': overall.get('reason', ''),
             'counts': _dict(overall.get('counts')),
             'checks': checks,
+            'non_ok': [c for c in checks
+                       if c['status'] not in ('ok', 'healthy')],
         }
     return {
         'name': name,
@@ -548,16 +568,41 @@ def snapper_cut(request, scope):
     except Exception:                                        # noqa: BLE001
         pass  # references are enrichment; the cut renders without them
 
+    # Attention economy: one absolute time, everything else relative to
+    # it; coverage is mentioned only when it is NOT clean, in plain words.
     coverage = result.coverage.as_dict()
+    coverage_notice = None
+    if coverage.get('status') == 'gap':
+        coverage_notice = {
+            'chip': _cut_chip('error'), 'label': 'recording gap',
+            'detail': 'Capture was down at this instant — showing the last '
+                      'state recorded before the outage; the state may have '
+                      'changed unseen.'}
+    elif coverage.get('status') != 'covered':
+        coverage_notice = {
+            'chip': _cut_chip('warning'), 'label': 'coverage unknown',
+            'detail': 'Whether capture was observing at this instant cannot '
+                      'be established — showing the last recorded state.'}
+
+    cards = _cut_components(snap, previous_snap, scope) if snap else []
+    for card in cards:
+        assessed = parse_datetime(str(card.get('assessed_at') or ''))
+        card['assessed_age_text'] = (
+            _age_text((result.requested_at - assessed).total_seconds())
+            if assessed and assessed.tzinfo else None)
+
     return render(request, 'monitor_app/_snapper_cut.html', {
         'scope': scope,
         'requested_at': result.requested_at,
         'actual_snap_time': result.snap_time,
+        'snap_age_text': _age_text(
+            (result.requested_at - result.snap_time).total_seconds()),
         'coverage': coverage,
-        'coverage_chip': _cut_chip(
-            {'covered': 'ok', 'gap': 'error'}.get(
-                coverage.get('status'), 'warning')),
-        'coverage_status': coverage.get('status', 'unknown'),
-        'cards': _cut_components(snap, previous_snap, scope) if snap else [],
+        'coverage_notice': coverage_notice,
+        'previous_age_text': (
+            _age_text((snap.snap_time
+                       - previous_snap.snap_time).total_seconds())
+            if snap and previous_snap else None),
+        'cards': cards,
         'references': references,
     })

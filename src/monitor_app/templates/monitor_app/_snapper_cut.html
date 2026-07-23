@@ -9,14 +9,20 @@
                     border-radius:.4em; padding:.6em .8em; }
 .snapper-stat { text-align:center; }
 .snapper-stat .snapper-stat-value { font-size:1.5em; font-weight:600; }
-.snapper-delta-up { color:#2e7d32; font-weight:600; }
-.snapper-delta-down { color:#c62828; font-weight:600; }
+/* Deltas are movement indicators, not verdicts: neutral color — a drop
+   in a count is not "bad" and red would say it is. */
+.snapper-delta-up, .snapper-delta-down { color:#5d6b7a; font-weight:600; }
 </style>
 <p class="mb-2">
-  State cut at <strong>{{ requested_at|fmt_dt }}</strong>
-  · actual snap <strong>{{ actual_snap_time|fmt_dt }}</strong>
-  · coverage <span class="snapper-chip" style="background:{{ coverage_chip.color }}">{{ coverage_status }}</span>
+  State at <strong>{{ requested_at|fmt_dt }}</strong>
+  {% if snap_age_text %}<span class="text-muted">· snap <span title="{{ actual_snap_time|fmt_dt }}">{{ snap_age_text }}</span> earlier</span>{% endif %}
 </p>
+{% if coverage_notice %}
+<p class="mb-2">
+  <span class="snapper-chip" style="background:{{ coverage_notice.chip.color }}">{{ coverage_notice.label }}</span>
+  {{ coverage_notice.detail }}
+</p>
+{% endif %}
 <div class="d-flex flex-wrap gap-3 align-items-stretch">
   {% for card in cards %}
   <div class="snapper-cut-card {% if card.changed %}border-2{% endif %}">
@@ -26,7 +32,8 @@
       <span class="snapper-chip" style="background:{{ card.chip.color }}">{{ card.chip.value }}</span>
       {% endif %}
       {% if card.changed %}<span class="badge bg-info text-dark">changed in this snap</span>{% endif %}
-      <span class="text-muted small">assessed {{ card.assessed_at|fmt_dt }}</span>
+      <span class="text-muted small"{% if card.assessed_age_text %} title="assessed {{ card.assessed_at|fmt_dt }}"{% endif %}>assessed
+        {% if card.assessed_age_text %}{{ card.assessed_age_text }} earlier{% else %}{{ card.assessed_at|fmt_dt }}{% endif %}</span>
     </div>
 
     {% if card.kind == 'health' %}
@@ -69,6 +76,9 @@
         </div>
         {% endfor %}
       </div>
+      {% if previous_age_text %}
+      <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
+      {% endif %}
       {% if card.types %}
       <div class="mb-1"><strong>In flight by type:</strong>
         {% for type_name, count in card.types %}{{ type_name }} {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}
