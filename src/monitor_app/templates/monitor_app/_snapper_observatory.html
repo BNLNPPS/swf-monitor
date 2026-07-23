@@ -423,6 +423,18 @@
       lastRange = view.slice();
     }
     const zoomed = (view[1] - view[0]) < (fullRange[1] - fullRange[0]) * 0.98;
+    // The zoomed view lives in the URL (?view=start,end true-UTC ISO):
+    // bookmarkable, shareable, and restored across the 60-second
+    // auto-reload for free.
+    const url = new URL(window.location.href);
+    if (zoomed) {
+      url.searchParams.set('view',
+          new Date(view[0] + basisCorrection).toISOString() + ','
+          + new Date(view[1] + basisCorrection).toISOString());
+    } else {
+      url.searchParams.delete('view');
+    }
+    history.replaceState(null, '', url);
     zoomBar.style.display = zoomed ? 'flex' : 'none';
     rangeIndicator.hidden = !zoomed;
     if (zoomed) {
@@ -438,8 +450,14 @@
     }
   }
   function setRange(range) {
+    // Clamp to the window: shifting or dragging never scrolls into
+    // blank space beyond the recorded range.
+    const span = range[1] - range[0];
+    let start = range[0];
+    if (start < fullRange[0]) start = fullRange[0];
+    if (start + span > fullRange[1]) start = fullRange[1] - span;
     Plotly.relayout(plotDiv, {'xaxis.range': [
-      toNaive(range[0]), toNaive(range[1])]});
+      toNaive(start), toNaive(start + span)]});
   }
   function shiftView(direction) {
     const view = currentRange();
@@ -471,7 +489,58 @@
           lastRange = fullRange.slice();
         }, 100);
       });
+  // Live range updates coalesced per animation frame — shared by the
+  // trackpad pan and the minimap drag so movement tracks the gesture.
+  let pendingRange = null;
+  function scheduleRange(range) {
+    const first = pendingRange === null;
+    pendingRange = range;
+    if (first) {
+      requestAnimationFrame(function () {
+        const range = pendingRange;
+        pendingRange = null;
+        if (range) setRange(range);
+      });
+    }
+  }
+
+  // Two-finger horizontal trackpad scroll pans the zoomed view.
+  plotDiv.addEventListener('wheel', function (event) {
+    if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+    const view = currentRange();
+    if ((view[1] - view[0]) >= (fullRange[1] - fullRange[0]) * 0.98) return;
+    event.preventDefault();
+    const delta = (event.deltaX / plotDiv.clientWidth)
+        * (view[1] - view[0]) * 1.5;
+    scheduleRange([view[0] + delta, view[1] + delta]);
+  }, {passive: false});
+
+  // The minimap segment is grabbable, with the plot following live;
+  // clicking elsewhere on the track centers the view there.
+  let indicatorDrag = null;
+  let indicatorMoved = false;
+  rangeView.addEventListener('mousedown', function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    indicatorDrag = {startX: event.clientX, view: currentRange()};
+    indicatorMoved = false;
+  });
+  window.addEventListener('mousemove', function (event) {
+    if (!indicatorDrag) return;
+    const box = rangeIndicator.getBoundingClientRect();
+    const fraction = (event.clientX - indicatorDrag.startX) / box.width;
+    if (Math.abs(event.clientX - indicatorDrag.startX) > 3) {
+      indicatorMoved = true;
+    }
+    const delta = fraction * (fullRange[1] - fullRange[0]);
+    scheduleRange([indicatorDrag.view[0] + delta,
+                   indicatorDrag.view[1] + delta]);
+  });
+  window.addEventListener('mouseup', function () {
+    indicatorDrag = null;
+  });
   rangeIndicator.addEventListener('click', function (event) {
+    if (indicatorMoved) { indicatorMoved = false; return; }
     const box = rangeIndicator.getBoundingClientRect();
     const fraction = (event.clientX - box.left) / box.width;
     const center = fullRange[0] + fraction * (fullRange[1] - fullRange[0]);
@@ -515,6 +584,21 @@
       showCut(new Date(time + basisCorrection).toISOString());
     }, 480);
   }, true);
+
+  // Restore the URL-carried view (?view=start,end) after a reload or
+  // from a shared link, when it lies inside the current window.
+  const viewParam = new URL(window.location.href).searchParams.get('view');
+  if (viewParam) {
+    const parts = viewParam.split(',').map(Date.parse);
+    if (parts.length === 2 && parts.every(isFinite)) {
+      const view = [parts[0] - basisCorrection,
+                    parts[1] - basisCorrection];
+      if (view[0] >= fullRange[0] - 60000 && view[1] <= fullRange[1] + 60000
+          && view[1] > view[0]) {
+        setRange(view);
+      }
+    }
+  }
 
   const initialCut = '{{ observatory_cut|escapejs }}';
   if (initialCut) showCut(initialCut);
