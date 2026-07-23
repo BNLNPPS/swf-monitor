@@ -1,4 +1,13 @@
 {% load swf_fmt %}
+<style>
+/* Precise pointing everywhere on the plot: crosshair, not the resize
+   arrows Plotly shows for x-only drag layers. */
+#snapper-observatory-plot .nsewdrag,
+#snapper-observatory-plot .ewdrag,
+#snapper-observatory-plot .drag {
+  cursor: crosshair !important;
+}
+</style>
 <div class="card mb-3">
   <div class="card-header d-flex align-items-center flex-wrap gap-3">
     <strong>Time history</strong>
