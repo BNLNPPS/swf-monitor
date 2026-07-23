@@ -158,7 +158,14 @@ SYSTEM_STATUS_INITIAL_DELAY = int(os.environ.get("EPICPROD_SYSTEM_STATUS_INITIAL
 # reads per-scope opportunity and baseline values from SysConfig on every run.
 SNAPPER_CAPTURE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "capture-system-snap.py"
 SNAPPER_CAPTURE_TIMEOUT = int(os.environ.get("EPICPROD_SNAPPER_CAPTURE_TIMEOUT", "30"))
-SNAPPER_SCHEDULER_POLL_SECONDS = int(os.environ.get("EPICPROD_SNAPPER_POLL_SECONDS", "10"))
+# One invocation per aligned opportunity boundary (snapper-ai PLAN.md
+# Phase 5): the capture subprocess still decides due-ness from SysConfig;
+# the agent only ticks. <= 0 disables periodic capture. The legacy
+# EPICPROD_SNAPPER_POLL_SECONDS name is honored if set.
+SNAPPER_OPPORTUNITY_SECONDS = int(
+    os.environ.get("EPICPROD_SNAPPER_OPPORTUNITY_SECONDS")
+    or os.environ.get("EPICPROD_SNAPPER_POLL_SECONDS")
+    or "30")
 SNAPPER_SCHEDULER_INITIAL_DELAY = int(os.environ.get("EPICPROD_SNAPPER_INITIAL_DELAY", "5"))
 
 # Dedicated namespace config shipped beside the agent. A fixed 'prodops' namespace
@@ -741,7 +748,10 @@ class EpicProdOpsAgent(BaseAgent):
         cmd += ['--requested-at', requested_at]
         if manual:
             cmd.append('--manual')
-        self.logger.info(f"PRODOPS capture_system_snap: {' '.join(cmd)}")
+        # Routine scheduled invocations stay out of the durable log;
+        # material results, failures, and manual requests are logged below.
+        if manual:
+            self.logger.info(f"PRODOPS capture_system_snap: {' '.join(cmd)}")
         t0 = time.monotonic()
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
@@ -756,9 +766,10 @@ class EpicProdOpsAgent(BaseAgent):
                 'snapper_capture', t0, outcome='timeout', reason=reason,
                 level=logging.ERROR, scope=scope, manual=manual)
             return
-        for line in (p.stderr or '').splitlines():
-            self.logger.info(f"  capture-system-snap: {line}")
         ok = p.returncode == 0
+        if not ok:
+            for line in (p.stderr or '').splitlines():
+                self.logger.info(f"  capture-system-snap: {line}")
         try:
             results = json.loads(p.stdout or '[]')
         except json.JSONDecodeError:
@@ -770,18 +781,23 @@ class EpicProdOpsAgent(BaseAgent):
         ]
         reason = '' if ok else (
             failed_errors[0] if failed_errors else self._derive_reason(p))
-        if results:
-            summary = ', '.join(
-                f"{item.get('scope')}={item.get('outcome')}"
-                for item in results)
-            self.logger.info(f"PRODOPS capture_system_snap results: {summary}")
-        elif p.stdout:
-            self.logger.info(
-                f"PRODOPS capture_system_snap output: {p.stdout.strip()[:1000]}")
         captures = sum(1 for item in results
                        if item.get('outcome') == 'snap')
         quiet = sum(1 for item in results
                     if item.get('outcome') == 'quiet')
+        # Quiet and duplicate evaluations are routine; only material
+        # outcomes, manual requests, and failures reach the log.
+        if manual or not ok or captures:
+            if results:
+                summary = ', '.join(
+                    f"{item.get('scope')}={item.get('outcome')}"
+                    for item in results)
+                self.logger.info(
+                    f"PRODOPS capture_system_snap results: {summary}")
+            elif p.stdout:
+                self.logger.info(
+                    f"PRODOPS capture_system_snap output: "
+                    f"{p.stdout.strip()[:1000]}")
         executor = self._bg_executor
         retiring = (
             executor is not None and getattr(executor, '_shutdown', False))
@@ -790,9 +806,7 @@ class EpicProdOpsAgent(BaseAgent):
                 "PRODOPS capture_system_snap stopped during agent shutdown; "
                 "leaving the next opportunity to the replacement agent")
             return
-        if ok:
-            self.logger.info("PRODOPS capture_system_snap done")
-        else:
+        if not ok:
             self.logger.error(
                 f"PRODOPS capture_system_snap FAILED rc={p.returncode}")
         # Periodic quiet/duplicate evaluations stay in the bounded cursor and
@@ -812,14 +826,29 @@ class EpicProdOpsAgent(BaseAgent):
                 captures=captures, quiet=quiet)
 
     def _snapper_capture_periodic_loop(self):
-        """Evaluate both configured scopes from the supervised worker."""
-        if SNAPPER_SCHEDULER_POLL_SECONDS <= 0:
+        """Invoke capture once at each aligned opportunity boundary.
+
+        The subprocess owns the capture decision (SysConfig opportunity
+        and baseline per scope); this loop only wakes just after each
+        wall-clock multiple of the opportunity interval — never a faster
+        poll that launches duplicate evaluations inside one opportunity.
+        """
+        if SNAPPER_OPPORTUNITY_SECONDS <= 0:
             self.logger.info("PRODOPS periodic Snapper capture disabled")
             return
         time.sleep(max(SNAPPER_SCHEDULER_INITIAL_DELAY, 0))
         while True:
             # BaseAgent drains and shuts down its pool before the daemon threads
             # disappear. Do not let a retiring scheduler race one last enqueue.
+            executor = self._bg_executor
+            if executor is not None and getattr(executor, '_shutdown', False):
+                return
+            now = time.time()
+            boundary = (int(now // SNAPPER_OPPORTUNITY_SECONDS) + 1) \
+                * SNAPPER_OPPORTUNITY_SECONDS
+            # Wake one second past the boundary so the capture subprocess
+            # sees the opportunity as due, not pending.
+            time.sleep(max(boundary + 1.0 - now, 0.05))
             executor = self._bg_executor
             if executor is not None and getattr(executor, '_shutdown', False):
                 return
@@ -830,7 +859,6 @@ class EpicProdOpsAgent(BaseAgent):
                  'requested_at': datetime.now(timezone.utc).isoformat()},
                 dedup_key="snapper_capture_periodic",
                 label="capture_system_snap periodic")
-            time.sleep(max(SNAPPER_SCHEDULER_POLL_SECONDS, 1))
 
     def _handle_association_sweep(self, m):
         """Batch-associate recent PanDA tasks with PCS campaign tasks."""
