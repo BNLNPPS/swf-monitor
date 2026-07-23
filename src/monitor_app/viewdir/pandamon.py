@@ -1105,14 +1105,16 @@ def panda_errors_datatable_ajax(request):
         if len(err.get('sites', [])) > 3:
             sites_str += f' (+{len(err["sites"]) - 3})'
 
-        diag_text = err.get('error_diag', '') or ''
-        if len(diag_text) > 120:
-            diag_text = diag_text[:117] + '...'
+        # Plain escaped text: the cell's CSS ellipsis truncates visually
+        # and the base template titles the td with the full value, which
+        # Bootstrap shows as the one immediate tooltip. An inner
+        # title= span would add a second, delayed native floater.
+        diag_text = escape(err.get('error_diag', '') or '')
 
         data.append([
             f'<a href="{diag_url}">{err["error_source"]}</a>',
             str(err.get('error_code', '')),
-            f'<span title="{err.get("error_diag", "")}">{diag_text}</span>',
+            diag_text,
             str(err.get('count', 0)),
             str(err.get('task_count', 0)),
             users_str,

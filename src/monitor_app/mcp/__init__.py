@@ -138,6 +138,7 @@ from .snapper import (
     snapper_state_at,
     snapper_component_history,
     snapper_changes_between,
+    snapper_context_around,
 )
 
 

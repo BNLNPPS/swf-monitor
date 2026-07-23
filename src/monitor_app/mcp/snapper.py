@@ -122,6 +122,48 @@ async def snapper_component_history(
 
 
 @mcp.tool()
+async def snapper_context_around(scope: str, time: str,
+                                 window_seconds: float = 3600) -> dict:
+    """
+    Full temporal context at an instant: coherent state, nearby changes,
+    and resolvable references to the exact event streams.
+
+    Use this first when investigating an incident time: it returns the
+    recorded system state at the instant, every component change in the
+    window around it, and for each component a reference naming the
+    authoritative service (REST URL and MCP tools in the reference's
+    transport field) that holds the exact transitions — drill down
+    there for event-level truth.
+
+    Args:
+        scope: 'epicprod' (PanDA/production) or 'testbed'.
+        time: the instant, ISO 8601 with timezone.
+        window_seconds: window centered on the instant (default 3600).
+
+    Reading the result: state carries its ACTUAL snap time and coverage
+    ('covered', 'gap', 'unknown' — never infer continuity across gap or
+    unknown intervals); references carry availability and a transport
+    with rest_url, rest_params, and mcp_tools naming exactly how to
+    fetch the underlying events.
+    """
+    from monitor_app.snapper_resolvers import annotate_references
+
+    def call():
+        result = queries.context_around(
+            scope, _time(time, 'time'), window_seconds).as_dict()
+        result['references'] = annotate_references(result['references'])
+        return result
+
+    def guarded():
+        try:
+            return call()
+        except queries.SnapperError as e:
+            return {'error': str(e)}
+
+    return await sync_to_async(guarded)()
+
+
+@mcp.tool()
 async def snapper_changes_between(scope: str, start: str, end: str) -> dict:
     """
     What changed across the whole system between two moments.

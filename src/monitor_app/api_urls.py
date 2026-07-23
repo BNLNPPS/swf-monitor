@@ -15,8 +15,9 @@ from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
 from .viewdir.snapper_api import (snapper_changes_between,
-                                  snapper_component_history, snapper_latest,
-                                  snapper_state_at)
+                                  snapper_component_history, snapper_context,
+                                  snapper_latest, snapper_state_at,
+                                  system_status_history)
 
 router = DefaultRouter()
 router.register(r'systemagents', SystemAgentViewSet, basename='systemagent')
@@ -62,6 +63,10 @@ urlpatterns = [
          name='snapper-component-history'),
     path('snapper/<str:scope>/changes/', snapper_changes_between,
          name='snapper-changes-between'),
+    path('snapper/<str:scope>/context/', snapper_context,
+         name='snapper-context'),
+    path('system-status/history/', system_status_history,
+         name='system-status-history'),
     path('messages/stream/', sse_message_stream, name='sse-message-stream'),
     path('messages/stream/status/', sse_status, name='sse-stream-status'),
     path('', include(router.urls)),

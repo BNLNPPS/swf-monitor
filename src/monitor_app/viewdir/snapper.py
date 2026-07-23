@@ -211,8 +211,21 @@ def snapper_report(request, scope, snap_id=None):
             selected_snap.observed_at - selected_snap.snap_time
         ).total_seconds()
 
-    recent = list(snaps[:RECENT_SNAP_LIMIT])
+    from django.core.paginator import Paginator
+
+    paginator = Paginator(snaps, RECENT_SNAP_LIMIT)
+    try:
+        snap_page_number = max(int(request.GET.get('snap_page') or 1), 1)
+    except ValueError:
+        snap_page_number = 1
+    snap_page = paginator.get_page(snap_page_number)
+    recent = list(snap_page.object_list)
+    pager_params = request.GET.copy()
+    pager_params.pop('snap_page', None)
+    pager_query = pager_params.urlencode()
     return render(request, 'monitor_app/snapper.html', {
+        'snap_page': snap_page,
+        'snap_pager_query': f'{pager_query}&' if pager_query else '',
         'active_tab': 'report',
         'scope': scope,
         'scope_label': 'epicprod' if scope == 'epicprod' else 'Testbed',

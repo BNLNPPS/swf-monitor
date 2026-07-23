@@ -249,8 +249,18 @@
             <div class="d-flex align-items-baseline flex-wrap gap-2 mb-2">
                 <h2 class="h4 mb-0">Snap history</h2>
                 <span class="text-muted small">
-                    {{ snap_count }} recorded{% if snap_count > recent_snap_limit %}; showing latest {{ recent_snap_limit }}{% endif %}
+                    {{ snap_count }} recorded{% if snap_page.paginator.num_pages > 1 %}; page {{ snap_page.number }} of {{ snap_page.paginator.num_pages }} ({{ recent_snap_limit }} per page){% endif %}
                 </span>
+                {% if snap_page.paginator.num_pages > 1 %}
+                <span>
+                    {% if snap_page.has_previous %}
+                    <a class="btn btn-sm btn-outline-secondary" href="?{{ snap_pager_query }}snap_page={{ snap_page.previous_page_number }}">Newer</a>
+                    {% endif %}
+                    {% if snap_page.has_next %}
+                    <a class="btn btn-sm btn-outline-secondary" href="?{{ snap_pager_query }}snap_page={{ snap_page.next_page_number }}">Older</a>
+                    {% endif %}
+                </span>
+                {% endif %}
             </div>
             {% if snap_rows %}
                 <div class="snapper-table-wrap">

@@ -11,7 +11,7 @@
       <span class="badge bg-secondary">custom range</span>
       {% endif %}
     </span>
-    <span class="text-muted">{{ observatory.snap_count }} snaps · click: state cut at that time · double-click: zoom in ×2 · drag: zoom · Esc/reload: reset</span>
+    <span class="text-muted">{{ observatory.snap_count }} snaps · times ET · click: state cut · double-click: zoom in ×2 · drag: zoom · reload: reset</span>
   </div>
   <div class="card-body">
     <div class="mb-2 d-flex flex-wrap align-items-center column-gap-3 row-gap-1">
@@ -28,6 +28,8 @@
       <p class="mb-2">
         Actual snap time <strong id="snapper-cut-actual"></strong>
         · coverage <strong id="snapper-cut-coverage"></strong>
+        · <a id="snapper-cut-context" target="_blank"
+             title="State, changes, and exact-event references around this instant (JSON)">context &amp; exact events</a>
       </p>
       <pre id="snapper-cut-state" class="p-2 border rounded"
            style="max-height:30em; overflow:auto; font-size:0.95em;"></pre>
@@ -48,6 +50,25 @@
   const storeKey = 'snapper-ui-' + data.scope;
   const plotDiv = document.getElementById('snapper-observatory-plot');
   const controls = document.getElementById('snapper-observatory-controls');
+
+  // Plotted strings are Eastern wall time (the app's timezone). Plot
+  // pixel math runs in the browser's Date.parse basis of those naive
+  // strings; basisCorrection converts a basis time to the true instant.
+  const basisCorrection = data.end_ms - Date.parse(data.end);
+  function toNaive(ms) {
+    const d = new Date(ms);
+    const p = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-'
+        + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+        + ':' + p(d.getSeconds());
+  }
+  function etDisplay(trueIso) {
+    return new Date(trueIso).toLocaleString('en-CA', {
+      timeZone: 'America/New_York', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }) + ' ET';
+  }
 
   const laneIds = Object.keys(data.lanes);
   const curveIds = Object.keys(data.curves).sort();
@@ -140,7 +161,7 @@
       traces.push({
         type: 'bar', orientation: 'h',
         y: [lane.label], x: [Math.max(t1 - t0, 1)],
-        base: [new Date(t0).toISOString()],
+        base: [point.t],
         width: 0.55,
         marker: point.active
             ? {color: color, line: {color: '#ffffff', width: 1}}
@@ -150,7 +171,7 @@
       const step = Math.max((t1 - t0) / 40, 30000);
       const text = escapeHtml(lane.label) + ': ' + escapeHtml(point.hover);
       for (let t = t0; t < t1; t += step) {
-        hoverXs.push(new Date(t).toISOString());
+        hoverXs.push(toNaive(t));
         hoverTexts.push(text);
       }
     });
@@ -296,23 +317,31 @@
   // zoom; double-clicks zoom in and cancel the pending cut).
   const cutPanel = document.getElementById('snapper-observatory-cut');
   const stateAtUrl = '{% url "monitor_app:snapper-state-at" scope=scope %}';
+  const contextUrl = '{% url "monitor_app:snapper-context" scope=scope %}';
   function showCut(timeIso) {
+    // timeIso is the true instant (UTC ISO); displays are ET and the
+    // plot line lands at the matching Eastern wall-time position.
+    const basisMs = Date.parse(timeIso) - basisCorrection;
     fetch(stateAtUrl + '?time=' + encodeURIComponent(timeIso))
       .then(r => r.json())
       .then(function (result) {
         cutPanel.hidden = false;
         document.getElementById('snapper-cut-requested').textContent =
-            timeIso;
+            etDisplay(timeIso);
         document.getElementById('snapper-cut-actual').textContent =
-            result.actual_snap_time || '(none)';
+            result.actual_snap_time
+                ? etDisplay(result.actual_snap_time) : '(none)';
         const coverage = result.coverage || {};
         document.getElementById('snapper-cut-coverage').textContent =
             coverage.status || JSON.stringify(coverage);
         document.getElementById('snapper-cut-state').textContent =
             JSON.stringify(result.state || result, null, 2);
+        document.getElementById('snapper-cut-context').href =
+            contextUrl + '?time=' + encodeURIComponent(timeIso)
+            + '&window=3600';
         Plotly.relayout(plotDiv, {shapes: gapShapes.concat([{
           type: 'line', xref: 'x', yref: 'paper',
-          x0: timeIso, x1: timeIso, y0: 0, y1: 1,
+          x0: toNaive(basisMs), x1: toNaive(basisMs), y0: 0, y1: 1,
           line: {color: '#c62828', width: 2, dash: 'dot'},
         }])});
         const url = new URL(window.location.href);
@@ -336,7 +365,7 @@
     if (time === null) return;
     clearTimeout(cutTimer);
     cutTimer = setTimeout(function () {
-      showCut(new Date(time).toISOString());
+      showCut(new Date(time + basisCorrection).toISOString());
     }, 280);
   }, true);
   plotDiv.addEventListener('dblclick', function (event) {
@@ -344,12 +373,11 @@
     const time = eventTime(event);
     if (time === null) return;
     const xa = plotDiv._fullLayout.xaxis;
-    const r0 = new Date(xa.range[0]).getTime();
-    const r1 = new Date(xa.range[1]).getTime();
+    const r0 = Date.parse(xa.range[0]);
+    const r1 = Date.parse(xa.range[1]);
     const quarter = (r1 - r0) / 4;
     Plotly.relayout(plotDiv, {
-      'xaxis.range': [new Date(time - quarter).toISOString(),
-                      new Date(time + quarter).toISOString()],
+      'xaxis.range': [toNaive(time - quarter), toNaive(time + quarter)],
     });
   }, true);
 

@@ -9,9 +9,17 @@ snap at its actual snap time, and known gaps are returned for display
 rather than painted over.
 """
 
+from zoneinfo import ZoneInfo
+
 from django.utils.dateparse import parse_datetime
 
 from snapper_ai.models import SystemSnap
+
+# All plotted time strings are Eastern wall time: Plotly renders date
+# strings literally, and the app presents time in ET everywhere. The
+# series carries a true-UTC anchor (end_ms) so the page can convert a
+# clicked plot position back to a real instant.
+ET_ZONE = ZoneInfo('America/New_York')
 
 # The observatory plot draws every snap point; windows are bounded so
 # assembly stays a bounded read (12-13 snaps/hour at current cadence).
@@ -21,6 +29,13 @@ DEFAULT_WINDOW = '24h'
 
 def _iso(value):
     return value.isoformat().replace('+00:00', 'Z') if value else None
+
+
+def _et_naive(value):
+    """Eastern wall-time string for plotting (no offset suffix)."""
+    if not value:
+        return None
+    return value.astimezone(ET_ZONE).strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _component_data(state, name):
@@ -88,7 +103,10 @@ def _lane_entries(scope, state):
             transition = str(ns_state.get('last_transition_at') or '')
             hover = f'run {run} — {phase}/{value}'
             if transition:
-                hover += f' since {transition}'
+                parsed = parse_datetime(transition)
+                hover += ' since ' + (
+                    parsed.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
+                    if parsed else transition)
             entries[f'ns:{namespace}'] = {
                 'value': value, 'hover': hover,
                 'active': str(ns_state.get('state') or '') == 'running',
@@ -145,30 +163,34 @@ def observatory_series(scope, start, end):
                        'key': entry['key']})
 
     if boundary:
-        boundary_iso = _iso(start)
+        boundary_naive = _et_naive(start)
         for curve_id, value in _curve_values(
                 scope, boundary['state']).items():
-            add_curve_point(curve_id, boundary_iso, value)
+            add_curve_point(curve_id, boundary_naive, value)
         for lane_id, entry in _lane_entries(
                 scope, boundary['state']).items():
-            add_lane_point(lane_id, boundary_iso, entry)
+            add_lane_point(lane_id, boundary_naive, entry)
 
     for row in rows:
-        time_iso = _iso(row['snap_time'])
+        time_naive = _et_naive(row['snap_time'])
         for curve_id, value in _curve_values(scope, row['state']).items():
-            add_curve_point(curve_id, time_iso, value)
+            add_curve_point(curve_id, time_naive, value)
         for lane_id, entry in _lane_entries(scope, row['state']).items():
-            add_lane_point(lane_id, time_iso, entry)
+            add_lane_point(lane_id, time_naive, entry)
         if row['recovered_gap_started_at'] is not None:
-            gaps.append([_iso(row['recovered_gap_started_at']), time_iso,
-                         'gap'])
+            gaps.append([_et_naive(row['recovered_gap_started_at']),
+                         time_naive, 'gap'])
         elif row['recovered_gap_start_unknown']:
-            gaps.append([None, time_iso, 'unknown start'])
+            gaps.append([None, time_naive, 'unknown start'])
 
     return {
         'scope': scope,
-        'start': _iso(start),
-        'end': _iso(end),
+        # Plotted strings are Eastern wall time; end_ms is the true-UTC
+        # anchor for converting a clicked plot position to an instant.
+        'start': _et_naive(start),
+        'end': _et_naive(end),
+        'end_ms': int(end.timestamp() * 1000),
+        'timezone': 'ET',
         'snap_count': len(rows),
         'curves': curves,
         'lanes': lanes,

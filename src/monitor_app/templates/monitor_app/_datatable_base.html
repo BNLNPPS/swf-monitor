@@ -255,8 +255,13 @@ $(document).ready(function() {
         if (!json || !json.product_built_at) return;
         const chip = document.getElementById('dt-product-chip');
         chip.hidden = false;
+        // The app presents time in Eastern everywhere, whatever the
+        // viewer's browser timezone.
         document.getElementById('dt-product-built').textContent =
-            new Date(json.product_built_at).toLocaleString();
+            new Date(json.product_built_at).toLocaleString('en-CA',
+                {timeZone: 'America/New_York', hour12: false,
+                 year: 'numeric', month: '2-digit', day: '2-digit',
+                 hour: '2-digit', minute: '2-digit'}) + ' ET';
         document.getElementById('dt-product-refreshing').hidden =
             !json.product_refreshing;
     });
