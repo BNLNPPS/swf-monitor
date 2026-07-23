@@ -126,6 +126,58 @@ def snapper_root(request):
     return redirect('monitor_app:snapper_report', scope='epicprod')
 
 
+SNAPPER_PREFS_KEY = 'snapper'
+
+
+def _snapper_prefs(request, scope):
+    """The signed-in user's remembered UI state for one scope."""
+    if not request.user.is_authenticated:
+        return {}
+    from ..models import UserPreference
+
+    row = UserPreference.objects.filter(
+        username=request.user.username).first()
+    section = (row.prefs or {}).get(SNAPPER_PREFS_KEY) if row else None
+    per_scope = (section or {}).get(scope) if isinstance(section, dict) else None
+    return per_scope if isinstance(per_scope, dict) else {}
+
+
+def snapper_prefs_save(request, scope):
+    """POST endpoint remembering the observatory UI state per user."""
+    import json as _json_module
+
+    from django.http import JsonResponse
+
+    from ..models import UserPreference
+
+    scope = _validated_scope(scope)
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+    if not request.user.is_authenticated:
+        return JsonResponse({'saved': False, 'reason': 'not signed in'})
+    try:
+        payload = _json_module.loads(request.body or b'{}')
+    except ValueError:
+        return JsonResponse({'error': 'invalid JSON'}, status=400)
+    allowed = {key: payload[key] for key in ('curves_off', 'window')
+               if key in payload}
+    row, _ = UserPreference.objects.get_or_create(
+        username=request.user.username)
+    prefs = row.prefs if isinstance(row.prefs, dict) else {}
+    section = prefs.get(SNAPPER_PREFS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    per_scope = section.get(scope)
+    if not isinstance(per_scope, dict):
+        per_scope = {}
+    per_scope.update(allowed)
+    section[scope] = per_scope
+    prefs[SNAPPER_PREFS_KEY] = section
+    row.prefs = prefs
+    row.save()
+    return JsonResponse({'saved': True})
+
+
 def snapper_report(request, scope, snap_id=None):
     from django.utils import timezone
 
@@ -136,8 +188,10 @@ def snapper_report(request, scope, snap_id=None):
     snaps = SystemSnap.objects.filter(scope=scope).order_by('-snap_time')
     latest_snap = snaps.first()
 
+    user_prefs = _snapper_prefs(request, scope)
     window_start, window_end, window_key = parse_window(
-        request, timezone.now())
+        request, timezone.now(),
+        default_window=str(user_prefs.get('window') or DEFAULT_WINDOW))
     observatory = observatory_series(scope, window_start, window_end)
     if snap_id is None:
         selected_snap = latest_snap
@@ -177,6 +231,7 @@ def snapper_report(request, scope, snap_id=None):
         'observatory_windows': list(WINDOW_HOURS),
         'observatory_default_window': DEFAULT_WINDOW,
         'observatory_cut': (request.GET.get('cut') or '').strip(),
+        'observatory_prefs': user_prefs,
     })
 
 

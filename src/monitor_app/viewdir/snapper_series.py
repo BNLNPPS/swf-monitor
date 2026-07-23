@@ -50,13 +50,30 @@ def _curve_values(scope, state):
     return values
 
 
-def _lane_values(scope, state):
-    """Categorical lane values for one snap, keyed by lane id."""
-    lanes = {}
+def _lane_entries(scope, state):
+    """Categorical lane entries for one snap, keyed by lane id.
+
+    Each entry carries the band value (drives color), a hover text with
+    the detail behind the color, an ``active`` flag (an inactive lane
+    segment renders hollow), and a dedup ``key`` — a namespace's key
+    includes its run number, so a new run starts a new segment even when
+    the state value repeats (daily runs stay visible).
+    """
+    entries = {}
     health = _component_data(state, 'health')
     overall = health.get('overall') or {}
     if overall:
-        lanes['health'] = str(overall.get('status') or 'unknown')
+        status = str(overall.get('status') or 'unknown')
+        reason = str(overall.get('reason') or '').strip()
+        counts = overall.get('counts') or {}
+        hover = status if not reason else f'{status} — {reason}'
+        count_bits = ', '.join(
+            f'{k} {v}' for k, v in sorted(counts.items())
+            if isinstance(v, int) and v and k != 'total')
+        if count_bits:
+            hover += f' ({count_bits})'
+        entries['health'] = {'value': status, 'hover': hover,
+                            'active': True, 'key': f'{status}|{reason}'}
     if scope == 'testbed':
         datataking = _component_data(state, 'datataking')
         for namespace, ns_state in sorted(
@@ -66,8 +83,17 @@ def _lane_values(scope, state):
             substate = ns_state.get('substate')
             if substate:
                 value = f'{value}/{substate}'
-            lanes[f'ns:{namespace}'] = value
-    return lanes
+            run = ns_state.get('run_number')
+            phase = str(ns_state.get('phase') or '')
+            transition = str(ns_state.get('last_transition_at') or '')
+            hover = f'run {run} — {phase}/{value}'
+            if transition:
+                hover += f' since {transition}'
+            entries[f'ns:{namespace}'] = {
+                'value': value, 'hover': hover,
+                'active': str(ns_state.get('state') or '') == 'running',
+                'key': f'{run}|{value}'}
+    return entries
 
 
 def _curve_label(curve_id):
@@ -108,28 +134,31 @@ def observatory_series(scope, start, end):
             curve_id, {'label': _curve_label(curve_id), 'points': []})
         curve['points'].append([time_iso, value])
 
-    def add_lane_point(lane_id, time_iso, value):
+    def add_lane_point(lane_id, time_iso, entry):
         label = lane_id[3:] if lane_id.startswith('ns:') else lane_id
         lane = lanes.setdefault(lane_id, {'label': label, 'points': []})
         points = lane['points']
-        if points and points[-1][1] == value:
+        if points and points[-1].get('key') == entry['key']:
             return
-        points.append([time_iso, value])
+        points.append({'t': time_iso, 'value': entry['value'],
+                       'hover': entry['hover'], 'active': entry['active'],
+                       'key': entry['key']})
 
     if boundary:
         boundary_iso = _iso(start)
         for curve_id, value in _curve_values(
                 scope, boundary['state']).items():
             add_curve_point(curve_id, boundary_iso, value)
-        for lane_id, value in _lane_values(scope, boundary['state']).items():
-            add_lane_point(lane_id, boundary_iso, value)
+        for lane_id, entry in _lane_entries(
+                scope, boundary['state']).items():
+            add_lane_point(lane_id, boundary_iso, entry)
 
     for row in rows:
         time_iso = _iso(row['snap_time'])
         for curve_id, value in _curve_values(scope, row['state']).items():
             add_curve_point(curve_id, time_iso, value)
-        for lane_id, value in _lane_values(scope, row['state']).items():
-            add_lane_point(lane_id, time_iso, value)
+        for lane_id, entry in _lane_entries(scope, row['state']).items():
+            add_lane_point(lane_id, time_iso, entry)
         if row['recovered_gap_started_at'] is not None:
             gaps.append([_iso(row['recovered_gap_started_at']), time_iso,
                          'gap'])
@@ -147,8 +176,12 @@ def observatory_series(scope, start, end):
     }
 
 
-def parse_window(request, now):
-    """(start, end, window_key) from ?window= or ?start=&end=."""
+def parse_window(request, now, default_window=DEFAULT_WINDOW):
+    """(start, end, window_key) from ?window= or ?start=&end=.
+
+    ``default_window`` lets a signed-in user's remembered preference
+    stand in when the URL carries no window.
+    """
     from datetime import timedelta
 
     raw_start = request.GET.get('start')
@@ -158,8 +191,10 @@ def parse_window(request, now):
         end = parse_datetime(raw_end)
         if start and end and start.tzinfo and end.tzinfo and start < end:
             return start, end, 'custom'
-    window = request.GET.get('window') or DEFAULT_WINDOW
+    if default_window not in WINDOW_HOURS:
+        default_window = DEFAULT_WINDOW
+    window = request.GET.get('window') or default_window
     hours = WINDOW_HOURS.get(window)
     if hours is None:
-        window, hours = DEFAULT_WINDOW, WINDOW_HOURS[DEFAULT_WINDOW]
+        window, hours = default_window, WINDOW_HOURS[default_window]
     return now - timedelta(hours=hours), now, window

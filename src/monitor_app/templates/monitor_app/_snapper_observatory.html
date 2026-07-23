@@ -1,7 +1,7 @@
 {% load swf_fmt %}
 <div class="card mb-3">
   <div class="card-header d-flex align-items-center flex-wrap gap-3">
-    <strong>Temporal observatory</strong>
+    <strong>Time history</strong>
     <span>
       {% for w in observatory_windows %}
       <a href="?window={{ w }}"
@@ -14,7 +14,13 @@
     <span class="text-muted">{{ observatory.snap_count }} snaps in window · click the plot for the state cut at that instant</span>
   </div>
   <div class="card-body">
-    <div id="snapper-observatory-controls" class="mb-2 d-flex flex-wrap column-gap-4 row-gap-1"></div>
+    <div class="mb-2 d-flex flex-wrap align-items-center column-gap-3 row-gap-1">
+      <span>
+        <button type="button" id="snapper-curves-all-on" class="btn btn-sm btn-secondary">All on</button>
+        <button type="button" id="snapper-curves-all-off" class="btn btn-sm btn-secondary">All off</button>
+      </span>
+      <span id="snapper-observatory-controls" class="d-flex flex-wrap column-gap-3 row-gap-1"></span>
+    </div>
     <div id="snapper-observatory-plot" style="min-height:560px"></div>
     <div id="snapper-observatory-cut" class="mt-3" hidden>
       <h3 class="h5">State cut at <span id="snapper-cut-requested"></span></h3>
@@ -29,11 +35,16 @@
 </div>
 
 {{ observatory|json_script:"snapper-observatory-data" }}
+{{ observatory_prefs|json_script:"snapper-observatory-prefs" }}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 (function () {
   const data = JSON.parse(
       document.getElementById('snapper-observatory-data').textContent);
+  const serverPrefs = JSON.parse(
+      document.getElementById('snapper-observatory-prefs').textContent) || {};
+  const authenticated = {{ user.is_authenticated|yesno:"true,false" }};
+  const storeKey = 'snapper-ui-' + data.scope;
   const plotDiv = document.getElementById('snapper-observatory-plot');
   const controls = document.getElementById('snapper-observatory-controls');
 
@@ -44,10 +55,40 @@
     return;
   }
 
-  // State colors: lifecycle-ish states get house-status colors; other
-  // values draw from a high-contrast categorical palette per value.
+  // Remembered UI state: signed-in server prefs first, then this
+  // browser's local storage; default is every curve on.
+  let localPrefs = {};
+  try {
+    localPrefs = JSON.parse(localStorage.getItem(storeKey) || '{}');
+  } catch (e) { localPrefs = {}; }
+  const curvesOff = new Set(
+      (serverPrefs.curves_off && serverPrefs.curves_off.length
+          ? serverPrefs.curves_off : localPrefs.curves_off) || []);
+
+  let saveTimer = null;
+  function persistPrefs() {
+    const payload = {curves_off: Array.from(curvesOff),
+                     window: '{{ observatory_window|escapejs }}'};
+    try { localStorage.setItem(storeKey, JSON.stringify(payload)); }
+    catch (e) { /* storage unavailable */ }
+    if (!authenticated) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1];
+      fetch('{% url "monitor_app:snapper_prefs" scope=scope %}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json',
+                  'X-CSRFToken': csrf || ''},
+        body: JSON.stringify(payload),
+      });
+    }, 600);
+  }
+
+  // State colors: house status colors for status-like values, a
+  // high-contrast categorical palette for the rest.
   const STATE_COLORS = {
-    ok: '#2e7d32', healthy: '#2e7d32', warning: '#f9a825', error: '#c62828',
+    ok: '#2e7d32', healthy: '#2e7d32', running: '#2e7d32',
+    warning: '#f9a825', error: '#c62828', ended: '#78909c',
     unknown: '#9e9e9e',
   };
   const PALETTE = ['#1565c0', '#6a1b9a', '#00838f', '#ef6c00', '#33691e',
@@ -62,41 +103,44 @@
     }
     return valueColor[value];
   }
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
   const traces = [];
   const laneCount = laneIds.length;
-  const laneDomainTop = 1.0;
-  // Lanes occupy the top band of the figure, curves the rest.
-  const laneBand = laneCount ? Math.min(0.08 * laneCount, 0.35) : 0;
-  const curveDomainTop = laneCount ? laneDomainTop - laneBand - 0.04 : 1.0;
+  const laneBand = laneCount ? Math.min(0.09 * laneCount, 0.4) : 0;
+  const curveDomainTop = laneCount ? 1.0 - laneBand - 0.04 : 1.0;
 
-  // Lane segments: one thick horizontal line per contiguous state value,
-  // extended to the window end for the final segment.
-  laneIds.forEach(function (laneId, index) {
+  // Lane segments as horizontal bars: hover works across the full
+  // segment; inactive segments render hollow (outline only). A new run
+  // starts a new segment, so daily runs stay visible as bar breaks.
+  laneIds.forEach(function (laneId) {
     const lane = data.lanes[laneId];
-    const points = lane.points;
-    for (let i = 0; i < points.length; i++) {
-      const t0 = points[i][0];
-      const value = points[i][1];
-      const t1 = (i + 1 < points.length) ? points[i + 1][0] : data.end;
+    lane.points.forEach(function (point, i) {
+      const t0 = Date.parse(point.t);
+      const t1 = (i + 1 < lane.points.length)
+          ? Date.parse(lane.points[i + 1].t) : Date.parse(data.end);
+      const color = stateColor(point.value);
       traces.push({
-        x: [t0, t1],
-        y: [lane.label, lane.label],
-        mode: 'lines',
-        line: {color: stateColor(value), width: 18},
-        yaxis: 'y2',
-        name: value,
-        legendgroup: 'lane:' + laneId,
-        showlegend: false,
-        hovertemplate: lane.label + ': <b>' + value +
-            '</b><br>%{x}<extra></extra>',
+        type: 'bar', orientation: 'h',
+        y: [lane.label], x: [Math.max(t1 - t0, 1)],
+        base: [new Date(t0).toISOString()],
+        width: 0.55,
+        marker: point.active
+            ? {color: color, line: {color: '#ffffff', width: 1}}
+            : {color: 'rgba(0,0,0,0)', line: {color: color, width: 2}},
+        yaxis: 'y2', showlegend: false,
+        hoverlabel: {font: {size: 14}},
+        hovertemplate: '<b>' + escapeHtml(lane.label) + '</b>: '
+            + escapeHtml(point.hover) + '<extra></extra>',
       });
-    }
+    });
   });
 
-  // Curves: stepped lines, one trace per measured parameter.
-  const DEFAULT_ON = {jobs_total: true, running_cores: true,
-                      job_running: true, tasks_total: true};
+  // Curves: stepped lines, all on unless remembered off.
   curveIds.forEach(function (curveId) {
     const curve = data.curves[curveId];
     traces.push({
@@ -105,13 +149,14 @@
       mode: 'lines',
       line: {shape: 'hv', width: 2.5},
       name: curve.label,
-      visible: DEFAULT_ON[curveId] ? true : 'legendonly',
+      visible: curvesOff.has(curveId) ? 'legendonly' : true,
+      showlegend: false,
       hovertemplate: curve.label + ': <b>%{y}</b><br>%{x}<extra></extra>',
     });
   });
 
   // Known coverage gaps render as grey spans, never painted over.
-  const shapes = data.gaps.map(function (gap) {
+  const gapShapes = data.gaps.map(function (gap) {
     return {
       type: 'rect', xref: 'x', yref: 'paper',
       x0: gap[0] || data.start, x1: gap[1], y0: 0, y1: 1,
@@ -122,46 +167,61 @@
   const layout = {
     margin: {l: 110, r: 20, t: 10, b: 45},
     font: {size: 15},
-    showlegend: true,
-    legend: {orientation: 'h', y: -0.12, font: {size: 14}},
+    showlegend: false,
+    barmode: 'overlay',
     xaxis: {type: 'date', range: [data.start, data.end], domain: [0, 1]},
     yaxis: {title: 'count', domain: [0, curveDomainTop],
             rangemode: 'tozero'},
-    yaxis2: {type: 'category', domain: [curveDomainTop + 0.04, laneDomainTop],
+    yaxis2: {type: 'category',
+             domain: [Math.min(curveDomainTop + 0.04, 0.99), 1.0],
              categoryorder: 'array', showgrid: true,
              categoryarray: laneIds.map(id => data.lanes[id].label)},
-    shapes: shapes,
+    shapes: gapShapes,
     hovermode: 'closest',
   };
-  Plotly.newPlot(plotDiv, traces, layout, {responsive: true,
-                                           displaylogo: false});
+  Plotly.newPlot(plotDiv, traces, layout,
+                 {responsive: true, displayModeBar: false});
 
-  // Explicit curve tick boxes, synchronized with legend clicks.
+  // Curve tick boxes — horizontal row; All on / All off.
   const curveTraceStart = traces.length - curveIds.length;
+  function setCurve(index, on) {
+    Plotly.restyle(plotDiv, {visible: on ? true : 'legendonly'},
+                   [curveTraceStart + index]);
+  }
   curveIds.forEach(function (curveId, index) {
-    const traceIndex = curveTraceStart + index;
     const id = 'snapper-curve-' + curveId;
     const label = document.createElement('label');
     label.className = 'form-check form-check-inline mb-0';
     label.innerHTML = '<input type="checkbox" class="form-check-input" id="'
-        + id + '"' + (DEFAULT_ON[curveId] ? ' checked' : '')
+        + id + '"' + (curvesOff.has(curveId) ? '' : ' checked')
         + '> <span class="form-check-label">'
-        + data.curves[curveId].label + '</span>';
+        + escapeHtml(data.curves[curveId].label) + '</span>';
     controls.appendChild(label);
     label.querySelector('input').addEventListener('change', function (e) {
-      Plotly.restyle(plotDiv, {visible: e.target.checked ? true
-          : 'legendonly'}, [traceIndex]);
+      if (e.target.checked) curvesOff.delete(curveId);
+      else curvesOff.add(curveId);
+      setCurve(index, e.target.checked);
+      persistPrefs();
     });
   });
-  plotDiv.on('plotly_restyle', function () {
+  function setAll(on) {
     curveIds.forEach(function (curveId, index) {
-      const trace = plotDiv.data[curveTraceStart + index];
+      if (on) curvesOff.delete(curveId);
+      else curvesOff.add(curveId);
       const box = document.getElementById('snapper-curve-' + curveId);
-      if (box) box.checked = trace.visible === true;
+      if (box) box.checked = on;
+      setCurve(index, on);
     });
-  });
+    persistPrefs();
+  }
+  document.getElementById('snapper-curves-all-on')
+      .addEventListener('click', function () { setAll(true); });
+  document.getElementById('snapper-curves-all-off')
+      .addEventListener('click', function () { setAll(false); });
+  persistPrefs();
 
-  // The vertical cut: click a time, fetch state_at, render the cut.
+  // The vertical cut: click anywhere on the plot area — not only on a
+  // drawn point — picks that time and renders state_at below.
   const cutPanel = document.getElementById('snapper-observatory-cut');
   const stateAtUrl = '{% url "monitor_app:snapper-state-at" scope=scope %}';
   function showCut(timeIso) {
@@ -178,21 +238,34 @@
             coverage.status || JSON.stringify(coverage);
         document.getElementById('snapper-cut-state').textContent =
             JSON.stringify(result.state || result, null, 2);
-        const update = {shapes: shapes.concat([{
+        Plotly.relayout(plotDiv, {shapes: gapShapes.concat([{
           type: 'line', xref: 'x', yref: 'paper',
           x0: timeIso, x1: timeIso, y0: 0, y1: 1,
           line: {color: '#c62828', width: 2, dash: 'dot'},
-        }])};
-        Plotly.relayout(plotDiv, update);
+        }])});
         const url = new URL(window.location.href);
         url.searchParams.set('cut', timeIso);
         history.replaceState(null, '', url);
       });
   }
-  plotDiv.on('plotly_click', function (event) {
-    if (event.points && event.points.length) {
-      showCut(new Date(event.points[0].x).toISOString());
-    }
+  let downAt = null;
+  plotDiv.addEventListener('mousedown', function (event) {
+    downAt = [event.clientX, event.clientY];
+  });
+  plotDiv.addEventListener('mouseup', function (event) {
+    if (!downAt) return;
+    const moved = Math.abs(event.clientX - downAt[0])
+        + Math.abs(event.clientY - downAt[1]);
+    downAt = null;
+    if (moved > 6) return;
+    const dragLayer = plotDiv.querySelector('.nsewdrag');
+    const xaxis = plotDiv._fullLayout && plotDiv._fullLayout.xaxis;
+    if (!dragLayer || !xaxis) return;
+    const box = dragLayer.getBoundingClientRect();
+    if (event.clientX < box.left || event.clientX > box.right) return;
+    const xValue = xaxis.p2d(event.clientX - box.left);
+    if (!xValue) return;
+    showCut(new Date(xValue).toISOString());
   });
   const initialCut = '{{ observatory_cut|escapejs }}';
   if (initialCut) showCut(initialCut);
