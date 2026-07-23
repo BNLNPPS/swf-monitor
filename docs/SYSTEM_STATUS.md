@@ -108,6 +108,20 @@ The stale threshold is the `STATUS_STALE_AFTER` constant in
 cycles at the default 5-minute ops-agent refresh interval. Tune this constant if
 the nav produces false stale alarms or reacts too slowly to a dead refresher.
 
+## Snapper health lane exclusions
+
+The snapper `health` component (`monitor_app/snapper_health.py`) projects a
+scoped subset of these checks into each snap, and its overall status drives
+the health lane on the Snapper Time history page. That lane is the
+operational state of the production system itself, so checks that track
+reporting freshness rather than system operation are configured out of the
+projection via the SysConfig key `snapper_health_excluded_checks` (default:
+`campaign-assessments` — "no daily assessment yet" belongs on the System
+page and the assessment surfaces, not on the ops-state lane). Excluded
+names are recorded in the component payload as `excluded_checks`, and the
+System Status record itself is never filtered. History is immutable:
+already-recorded snaps keep the overall computed at their capture time.
+
 ## Navigation indicator
 
 The production nav `System` item is red when the aggregate status is red.
