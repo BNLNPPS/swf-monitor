@@ -936,33 +936,49 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         if not components_to_query:
             return {"error": f"Unknown error_source '{error_source}'. Valid: {[c['name'] for c in ERROR_COMPONENTS]}"}
 
-    parts = []
-    all_params = []
-    join_type = 'JOIN' if destinationse else 'LEFT JOIN'
-    for comp in components_to_query:
-        for table in ['jobsactive4', 'jobsarchived4']:
-            parts.append(f"""
-                SELECT '{comp['name']}' as error_source,
-                       j."{comp['code']}" as error_code,
-                       j."{comp['diag']}" as error_diag,
-                       j."jeditaskid",
-                       j."produsername",
-                       j."computingsite",
-                       f."destinationse"
-                FROM "{PANDA_SCHEMA}"."{table}" j
-                {join_type} (
+    # One window scan per jobs table: the seven error components unpivot
+    # through a LATERAL VALUES row set instead of seven separate UNION
+    # branches per table. The filestable4 join — a DISTINCT over a table
+    # with several rows per job — runs only when a destination filter is
+    # actually requested; the unfiltered summary never touches it.
+    values_rows = ', '.join(
+        f"('{comp['name']}', j.\"{comp['code']}\", j.\"{comp['diag']}\")"
+        for comp in components_to_query)
+    if destinationse:
+        dest_join = f"""
+                JOIN (
                     SELECT DISTINCT "pandaid", "destinationse"
                     FROM "{PANDA_SCHEMA}"."filestable4"
                     WHERE "destinationse" IS NOT NULL
-                ) f ON f."pandaid" = j."pandaid"
-                WHERE j."modificationtime" >= %s
-                  AND j."jobstatus" IN ('failed','cancelled','closed')
-                  AND j."{comp['code']}" IS NOT NULL
-                  AND j."{comp['code']}" != 0
-                  {filters}
-                  {destse_filter}
-            """)
-            all_params.extend([cutoff] + extra_params + destse_params)
+                ) f ON f."pandaid" = j."pandaid" {destse_filter}"""
+        dest_select = 'f."destinationse"'
+    else:
+        dest_join = ''
+        dest_select = 'NULL as "destinationse"'
+
+    parts = []
+    all_params = []
+    for table in ['jobsactive4', 'jobsarchived4']:
+        parts.append(f"""
+            SELECT e.error_source,
+                   e.error_code,
+                   e.error_diag,
+                   j."jeditaskid",
+                   j."produsername",
+                   j."computingsite",
+                   {dest_select}
+            FROM "{PANDA_SCHEMA}"."{table}" j
+            {dest_join}
+            CROSS JOIN LATERAL (
+                VALUES {values_rows}
+            ) AS e(error_source, error_code, error_diag)
+            WHERE j."modificationtime" >= %s
+              AND j."jobstatus" IN ('failed','cancelled','closed')
+              AND e.error_code IS NOT NULL
+              AND e.error_code != 0
+              {filters}
+        """)
+        all_params.extend(destse_params + [cutoff] + extra_params)
 
     union_sql = ' UNION ALL '.join(parts)
     sql = f"""
