@@ -27,6 +27,7 @@ WINDOW_HOURS = 24
 MAX_STATUSES = 32
 MAX_SITES = 32
 MAX_TASK_TYPES = 32
+MAX_JOB_TYPES = 16
 MAX_SERIALIZED_BYTES = 64 * 1024
 TASK_TERMINAL_STATUSES = (
     "done",
@@ -86,6 +87,29 @@ PANDA_REGISTRATION = {
             "kind": "bounded_map",
             "max_items": MAX_STATUSES,
             "description": "Current in-flight job counts by PanDA status.",
+        },
+        "in_flight_by_type_now": {
+            "path": "jobs.in_flight_now.by_type",
+            "type": "object",
+            "required": False,
+            "kind": "bounded_map",
+            "max_items": MAX_JOB_TYPES,
+            "description": (
+                "Current in-flight job counts by processing type; the "
+                "smallest types beyond the bound roll up into 'other'."
+            ),
+        },
+        "in_flight_by_type_status_now": {
+            "path": "jobs.in_flight_now.by_type_status",
+            "type": "object",
+            "required": False,
+            "kind": "bounded_map",
+            "max_items": MAX_JOB_TYPES,
+            "description": (
+                "Sparse current in-flight job counts by processing type "
+                "and PanDA status — e.g. running analysis, waiting "
+                "production."
+            ),
         },
         "running_jobs_now": {
             "path": "jobs.in_flight_now.running_jobs",
@@ -189,14 +213,16 @@ def _in_flight_activity() -> list[dict]:
     sql = f"""
         SELECT "jobstatus",
                COALESCE("computingsite", 'unknown'),
+               COALESCE("processingtype", 'unknown'),
                COUNT(*),
                COALESCE(SUM(
                    COALESCE("actualcorecount", "corecount", 1)
                ), 0)
         FROM "{PANDA_SCHEMA}"."jobsactive4"
         WHERE "jobstatus" IN ({placeholders})
-        GROUP BY "jobstatus", COALESCE("computingsite", 'unknown')
-        ORDER BY "jobstatus", 3 DESC
+        GROUP BY "jobstatus", COALESCE("computingsite", 'unknown'),
+                 COALESCE("processingtype", 'unknown')
+        ORDER BY "jobstatus", 4 DESC
     """
     with connections["panda"].cursor() as cursor:
         cursor.execute(sql, statuses)
@@ -204,10 +230,11 @@ def _in_flight_activity() -> list[dict]:
             {
                 "status": str(status or "unknown"),
                 "site": str(site or "unknown"),
+                "type": str(ptype or "unknown"),
                 "jobs": int(jobs or 0),
                 "cores": int(cores or 0),
             }
-            for status, site, jobs, cores in cursor.fetchall()
+            for status, site, ptype, jobs, cores in cursor.fetchall()
         ]
 
 
@@ -291,15 +318,23 @@ def panda_projection(
         for row in jobs.get("by_site") or []
     }
     in_flight_by_status = {}
+    in_flight_by_type = {}
+    in_flight_by_type_status = {}
     current_sites = {}
     for row in in_flight_rows:
         status = str(row.get("status") or "unknown")
         site = str(row.get("site") or "unknown")
+        ptype = str(row.get("type") or "unknown")
         jobs_now = int(row.get("jobs") or 0)
         cores_now = int(row.get("cores") or 0)
         in_flight_by_status[status] = (
             in_flight_by_status.get(status, 0) + jobs_now
         )
+        in_flight_by_type[ptype] = (
+            in_flight_by_type.get(ptype, 0) + jobs_now
+        )
+        type_states = in_flight_by_type_status.setdefault(ptype, {})
+        type_states[status] = type_states.get(status, 0) + jobs_now
         site_state = current_sites.setdefault(
             site,
             {
@@ -320,6 +355,28 @@ def panda_projection(
         raise ValueError(
             f"in-flight job statuses exceed {MAX_STATUSES} entries"
         )
+    # Bound the type vocabulary by owner curation: keep the largest
+    # types, roll the remainder into 'other' — a rogue submission type
+    # must not balloon the component.
+    if len(in_flight_by_type) > MAX_JOB_TYPES:
+        keep = set(sorted(in_flight_by_type,
+                          key=lambda t: (-in_flight_by_type[t], t))
+                   [:MAX_JOB_TYPES - 1])
+        rolled_total = 0
+        rolled_states: dict = {}
+        for ptype in list(in_flight_by_type):
+            if ptype in keep:
+                continue
+            rolled_total += in_flight_by_type.pop(ptype)
+            for status, jobs_now in in_flight_by_type_status.pop(
+                    ptype, {}).items():
+                rolled_states[status] = (
+                    rolled_states.get(status, 0) + jobs_now)
+        in_flight_by_type["other"] = (
+            in_flight_by_type.get("other", 0) + rolled_total)
+        merged = in_flight_by_type_status.setdefault("other", {})
+        for status, jobs_now in rolled_states.items():
+            merged[status] = merged.get(status, 0) + jobs_now
 
     in_flight_tasks_by_status = {}
     current_task_sites = {}
@@ -398,6 +455,8 @@ def panda_projection(
             "in_flight_now": {
                 "total": in_flight_total,
                 "by_status": in_flight_by_status,
+                "by_type": in_flight_by_type,
+                "by_type_status": in_flight_by_type_status,
                 "running_jobs": running_jobs,
                 "running_cores": running_cores,
             },
@@ -437,7 +496,7 @@ def publish_panda_activity() -> PandaPublication:
                 name="panda",
                 publisher_identity=PUBLISHER_IDENTITY,
                 registration=PANDA_REGISTRATION,
-                component_schema_version=3,
+                component_schema_version=4,
             )
             update = publish_component(
                 scope="epicprod",
@@ -456,7 +515,7 @@ def publish_panda_activity() -> PandaPublication:
                 name="panda",
                 publisher_identity=PUBLISHER_IDENTITY,
                 registration=PANDA_REGISTRATION,
-                component_schema_version=3,
+                component_schema_version=4,
             )
     return PandaPublication(
         registration_update=registration_update,

@@ -58,6 +58,11 @@ def _curve_values(scope, state):
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
         for status, count in (jobs_now.get('by_status') or {}).items():
             values[f'job_{status}'] = int(count or 0)
+        for ptype, count in (jobs_now.get('by_type') or {}).items():
+            values[f'type_{ptype}'] = int(count or 0)
+        for ptype, states in (jobs_now.get('by_type_status') or {}).items():
+            for status, count in (states or {}).items():
+                values[f'ts_{ptype}_{status}'] = int(count or 0)
     if tasks_now:
         values['tasks_total'] = int(tasks_now.get('total') or 0)
         for status, count in (tasks_now.get('by_status') or {}).items():
@@ -125,6 +130,12 @@ def _curve_label(curve_id):
         return f'jobs {curve_id[4:]}'
     if curve_id.startswith('task_'):
         return f'tasks {curve_id[5:]}'
+    if curve_id.startswith('type_'):
+        return f'{curve_id[5:]} (in flight)'
+    if curve_id.startswith('ts_'):
+        remainder = curve_id[3:]
+        ptype, _, status = remainder.rpartition('_')
+        return f'{ptype} · {status}' if ptype else remainder
     return curve_id
 
 

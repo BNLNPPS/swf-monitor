@@ -22,7 +22,7 @@
       <span id="snapper-observatory-controls" class="d-flex flex-wrap column-gap-3 row-gap-1"></span>
       <span id="snapper-state-key" class="d-flex flex-wrap column-gap-2 row-gap-1 text-muted"></span>
     </div>
-    <div id="snapper-observatory-plot" style="min-height:560px"></div>
+    <div id="snapper-observatory-plot" style="min-height:620px"></div>
     <div id="snapper-observatory-cut" class="mt-3" hidden>
       <h3 class="h5">State cut at <span id="snapper-cut-requested"></span></h3>
       <p class="mb-2">
@@ -237,7 +237,11 @@
     font: {size: 15},
     showlegend: false,
     barmode: 'overlay',
-    xaxis: {type: 'date', range: [data.start, data.end], domain: [0, 1]},
+    xaxis: {type: 'date', range: [data.start, data.end], domain: [0, 1],
+            // The always-visible horizontal scroll bar: the slider shows
+            // the full window with the current viewport draggable inside
+            // it — no hidden pan gestures.
+            rangeslider: {visible: true, thickness: 0.07}},
     yaxis: {title: 'count', domain: [0, curveDomainTop],
             rangemode: 'tozero'},
     yaxis2: {type: 'category',
@@ -251,29 +255,76 @@
                  {responsive: true, displayModeBar: false,
                   doubleClick: false});
 
-  // Curve tick boxes with matching color swatches — the one place that
-  // says which curve is which. A compact state color key follows.
+  // Curve tick boxes with matching color swatches, grouped into labeled
+  // sections so the growing curve families stay navigable. Each group
+  // gets its own all/none; the global buttons still cover everything.
+  const GROUPS = [
+    {name: 'In-flight jobs', match: function (id) {
+      return id.indexOf('job_') === 0 || id === 'jobs_total'
+          || id === 'running_cores'; }},
+    {name: 'Tasks', match: function (id) {
+      return id.indexOf('task_') === 0 || id === 'tasks_total'; }},
+    {name: 'Job types', match: function (id) {
+      return id.indexOf('type_') === 0; }},
+    {name: 'Type × state', match: function (id) {
+      return id.indexOf('ts_') === 0; }},
+  ];
+  function groupName(curveId) {
+    for (const group of GROUPS) {
+      if (group.match(curveId)) return group.name;
+    }
+    return 'Other';
+  }
   function setCurve(index, on) {
     Plotly.restyle(plotDiv, {visible: on ? true : 'legendonly'},
                    [curveTraceStart + index]);
   }
-  curveIds.forEach(function (curveId, index) {
-    const id = 'snapper-curve-' + curveId;
-    const label = document.createElement('label');
-    label.className = 'form-check form-check-inline mb-0';
-    label.innerHTML = '<input type="checkbox" class="form-check-input" id="'
-        + id + '"' + (curvesOff.has(curveId) ? '' : ' checked')
-        + '> <span style="display:inline-block;width:1.1em;height:0.28em;'
-        + 'vertical-align:middle;background:' + curveColor[curveId]
-        + '"></span> <span class="form-check-label">'
-        + escapeHtml(data.curves[curveId].label) + '</span>';
-    controls.appendChild(label);
-    label.querySelector('input').addEventListener('change', function (e) {
-      if (e.target.checked) curvesOff.delete(curveId);
+  const groupMembers = {};
+  curveIds.forEach(function (curveId) {
+    const name = groupName(curveId);
+    (groupMembers[name] = groupMembers[name] || []).push(curveId);
+  });
+  function setGroup(name, on) {
+    (groupMembers[name] || []).forEach(function (curveId) {
+      if (on) curvesOff.delete(curveId);
       else curvesOff.add(curveId);
-      setCurve(index, e.target.checked);
-      persistPrefs();
+      const box = document.getElementById('snapper-curve-' + curveId);
+      if (box) box.checked = on;
+      setCurve(curveIds.indexOf(curveId), on);
     });
+    persistPrefs();
+  }
+  Object.keys(groupMembers).forEach(function (name) {
+    const section = document.createElement('span');
+    section.className = 'd-flex flex-wrap align-items-center column-gap-2 me-3';
+    const head = document.createElement('span');
+    head.innerHTML = '<strong>' + escapeHtml(name) + ':</strong> '
+        + '<a href="#" data-group-on>all</a>/<a href="#" data-group-off>none</a>';
+    head.querySelector('[data-group-on]').addEventListener('click',
+        function (e) { e.preventDefault(); setGroup(name, true); });
+    head.querySelector('[data-group-off]').addEventListener('click',
+        function (e) { e.preventDefault(); setGroup(name, false); });
+    section.appendChild(head);
+    groupMembers[name].forEach(function (curveId) {
+      const index = curveIds.indexOf(curveId);
+      const id = 'snapper-curve-' + curveId;
+      const label = document.createElement('label');
+      label.className = 'form-check form-check-inline mb-0';
+      label.innerHTML = '<input type="checkbox" class="form-check-input" id="'
+          + id + '"' + (curvesOff.has(curveId) ? '' : ' checked')
+          + '> <span style="display:inline-block;width:1.1em;height:0.28em;'
+          + 'vertical-align:middle;background:' + curveColor[curveId]
+          + '"></span> <span class="form-check-label">'
+          + escapeHtml(data.curves[curveId].label) + '</span>';
+      section.appendChild(label);
+      label.querySelector('input').addEventListener('change', function (e) {
+        if (e.target.checked) curvesOff.delete(curveId);
+        else curvesOff.add(curveId);
+        setCurve(index, e.target.checked);
+        persistPrefs();
+      });
+    });
+    controls.appendChild(section);
   });
   const stateKey = document.getElementById('snapper-state-key');
   Array.from(seenStates).sort().forEach(function (value) {
