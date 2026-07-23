@@ -1,0 +1,102 @@
+{% load swf_fmt %}
+{% if error %}
+<div class="text-danger">{{ error }}</div>
+{% else %}
+<style>
+.snapper-chip { display:inline-block; padding:0 .55em; border-radius:.5em;
+                color:#fff; font-weight:600; }
+.snapper-cut-card { border:1px solid var(--bs-border-color,#ccc);
+                    border-radius:.4em; padding:.6em .8em; }
+.snapper-stat { text-align:center; }
+.snapper-stat .snapper-stat-value { font-size:1.5em; font-weight:600; }
+.snapper-delta-up { color:#2e7d32; font-weight:600; }
+.snapper-delta-down { color:#c62828; font-weight:600; }
+</style>
+<p class="mb-2">
+  State cut at <strong>{{ requested_at|fmt_dt }}</strong>
+  · actual snap <strong>{{ actual_snap_time|fmt_dt }}</strong>
+  · coverage <span class="snapper-chip" style="background:{{ coverage_chip.color }}">{{ coverage_status }}</span>
+</p>
+<div class="d-flex flex-wrap gap-3 align-items-stretch">
+  {% for card in cards %}
+  <div class="snapper-cut-card {% if card.changed %}border-2{% endif %}">
+    <div class="d-flex align-items-baseline gap-2 mb-1">
+      <strong>{{ card.name }}</strong>
+      {% if card.kind == 'health' %}
+      <span class="snapper-chip" style="background:{{ card.chip.color }}">{{ card.chip.value }}</span>
+      {% endif %}
+      {% if card.changed %}<span class="badge bg-info text-dark">changed in this snap</span>{% endif %}
+      <span class="text-muted small">assessed {{ card.assessed_at|fmt_dt }}</span>
+    </div>
+
+    {% if card.kind == 'health' %}
+      {% if card.reason %}<div class="mb-1">{{ card.reason }}</div>{% endif %}
+      {% if card.non_ok_checks %}
+      <table class="table table-sm mb-1 w-auto">
+        {% for check in card.non_ok_checks %}
+        <tr>
+          <td>{{ check.name }}</td>
+          <td><span class="snapper-chip" style="background:{{ check.chip.color }}">{{ check.chip.value }}</span></td>
+          <td>{{ check.summary }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <div class="text-muted">All checks ok{% if card.counts.ok %} ({{ card.counts.ok }}){% endif %}.</div>
+      {% endif %}
+
+    {% elif card.kind == 'datataking' %}
+      <table class="table table-sm mb-1 w-auto">
+        {% for ns in card.namespaces %}
+        <tr>
+          <td><strong>{{ ns.namespace }}</strong></td>
+          <td><span class="snapper-chip" style="background:{{ ns.chip.color }}">{{ ns.chip.value }}</span></td>
+          <td>run {{ ns.run_number }}</td>
+          <td>{{ ns.phase }}</td>
+          <td class="text-muted small">since {{ ns.since|fmt_dt }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+
+    {% elif card.kind == 'panda' %}
+      <div class="d-flex flex-wrap gap-4 mb-2">
+        {% for stat in card.headline %}
+        <div class="snapper-stat">
+          <div class="snapper-stat-value">{{ stat.value }}
+            {% if stat.delta %}<span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %} fs-6">{{ stat.delta }}</span>{% endif %}
+          </div>
+          <div class="text-muted">{{ stat.label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% if card.types %}
+      <div class="mb-1"><strong>In flight by type:</strong>
+        {% for type_name, count in card.types %}{{ type_name }} {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+      {% if card.type_states %}
+      <div class="mb-1 text-muted">
+        {% for entry in card.type_states %}{{ entry.label }} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% endif %}
+    {% endif %}
+
+    <details class="mt-1">
+      <summary class="text-muted small">raw document</summary>
+      <pre class="p-2 border rounded" style="max-height:22em; overflow:auto; font-size:.9em;">{{ card.payload_json }}</pre>
+    </details>
+  </div>
+  {% endfor %}
+</div>
+{% if references %}
+<div class="mt-2">
+  <strong>Exact events around this instant:</strong>
+  {% for ref in references %}
+  {% if ref.transport.rest_url %}
+  <a class="me-3" href="{{ ref.transport.rest_url }}" target="_blank"
+     title="{{ ref.transport.notes }} Params: {{ ref.transport.rest_params }}">{{ ref.component }} ({{ ref.event_kind }})</a>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}

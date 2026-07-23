@@ -23,17 +23,7 @@
       <span id="snapper-state-key" class="d-flex flex-wrap column-gap-2 row-gap-1 text-muted"></span>
     </div>
     <div id="snapper-observatory-plot" style="min-height:620px"></div>
-    <div id="snapper-observatory-cut" class="mt-3" hidden>
-      <h3 class="h5">State cut at <span id="snapper-cut-requested"></span></h3>
-      <p class="mb-2">
-        Actual snap time <strong id="snapper-cut-actual"></strong>
-        · coverage <strong id="snapper-cut-coverage"></strong>
-        · <a id="snapper-cut-context" target="_blank"
-             title="State, changes, and exact-event references around this instant (JSON)">context &amp; exact events</a>
-      </p>
-      <pre id="snapper-cut-state" class="p-2 border rounded"
-           style="max-height:30em; overflow:auto; font-size:0.95em;"></pre>
-    </div>
+    <div id="snapper-observatory-cut" class="mt-3" hidden></div>
   </div>
 </div>
 
@@ -367,29 +357,17 @@
   // The vertical cut: single-click anywhere on the plot area (drags
   // zoom; double-clicks zoom in and cancel the pending cut).
   const cutPanel = document.getElementById('snapper-observatory-cut');
-  const stateAtUrl = '{% url "monitor_app:snapper-state-at" scope=scope %}';
-  const contextUrl = '{% url "monitor_app:snapper-context" scope=scope %}';
+  const cutUrl = '{% url "monitor_app:snapper_cut" scope=scope %}';
   function showCut(timeIso) {
-    // timeIso is the true instant (UTC ISO); displays are ET and the
+    // timeIso is the true instant (UTC ISO); the cut renders as a
+    // server-built fragment of structured component cards, and the
     // plot line lands at the matching Eastern wall-time position.
     const basisMs = Date.parse(timeIso) - basisCorrection;
-    fetch(stateAtUrl + '?time=' + encodeURIComponent(timeIso))
-      .then(r => r.json())
-      .then(function (result) {
+    fetch(cutUrl + '?time=' + encodeURIComponent(timeIso))
+      .then(r => r.text())
+      .then(function (fragment) {
         cutPanel.hidden = false;
-        document.getElementById('snapper-cut-requested').textContent =
-            etDisplay(timeIso);
-        document.getElementById('snapper-cut-actual').textContent =
-            result.actual_snap_time
-                ? etDisplay(result.actual_snap_time) : '(none)';
-        const coverage = result.coverage || {};
-        document.getElementById('snapper-cut-coverage').textContent =
-            coverage.status || JSON.stringify(coverage);
-        document.getElementById('snapper-cut-state').textContent =
-            JSON.stringify(result.state || result, null, 2);
-        document.getElementById('snapper-cut-context').href =
-            contextUrl + '?time=' + encodeURIComponent(timeIso)
-            + '&window=3600';
+        cutPanel.innerHTML = fragment;
         Plotly.relayout(plotDiv, {shapes: gapShapes.concat([{
           type: 'line', xref: 'x', yref: 'paper',
           x0: toNaive(basisMs), x1: toNaive(basisMs), y0: 0, y1: 1,

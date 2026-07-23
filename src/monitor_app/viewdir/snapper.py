@@ -392,3 +392,172 @@ def snapper_system(request, scope):
         'components': components,
         'baseline_every': baseline,
     })
+
+
+# ── The cut: structured state at an instant ──────────────────────────────
+
+CUT_STATE_COLORS = {
+    # One state-color vocabulary, mirrored by the Time history plot
+    # (_snapper_observatory.html STATE_COLORS). Keep the two in step.
+    'ok': '#2e7d32', 'healthy': '#2e7d32', 'running': '#2e7d32',
+    'warning': '#f9a825', 'error': '#c62828', 'ended': '#78909c',
+    'unknown': '#9e9e9e',
+}
+CUT_FALLBACK_COLOR = '#1565c0'
+
+
+def _cut_chip(value):
+    base = str(value or 'unknown').split('/')[0].lower()
+    return {'value': str(value or 'unknown'),
+            'color': CUT_STATE_COLORS.get(base, CUT_FALLBACK_COLOR)}
+
+
+def _cut_delta(current, previous):
+    if current is None or previous is None:
+        return None
+    difference = int(current) - int(previous)
+    if difference == 0:
+        return None
+    return f'+{difference}' if difference > 0 else str(difference)
+
+
+def _cut_panda_card(data, previous_data):
+    jobs_now = _dict(_dict(data.get('jobs')).get('in_flight_now'))
+    prev_jobs = _dict(_dict(previous_data.get('jobs')).get('in_flight_now'))
+    tasks_now = _dict(_dict(data.get('tasks')).get('in_flight_now'))
+    prev_tasks = _dict(_dict(previous_data.get('tasks')).get('in_flight_now'))
+
+    def stat(label, value, previous):
+        return {'label': label,
+                'value': value if value is not None else '—',
+                'delta': _cut_delta(value, previous)}
+
+    headline = [
+        stat('running jobs', jobs_now.get('running_jobs'),
+             prev_jobs.get('running_jobs')),
+        stat('running cores', jobs_now.get('running_cores'),
+             prev_jobs.get('running_cores')),
+        stat('in-flight jobs', jobs_now.get('total'),
+             prev_jobs.get('total')),
+        stat('queued (activated)',
+             _dict(jobs_now.get('by_status')).get('activated'),
+             _dict(prev_jobs.get('by_status')).get('activated')),
+        stat('in-flight tasks', tasks_now.get('total'),
+             prev_tasks.get('total')),
+    ]
+    types = sorted(_dict(jobs_now.get('by_type')).items(),
+                   key=lambda item: -item[1])
+    type_states = []
+    for ptype, states in sorted(_dict(jobs_now.get('by_type_status')).items()):
+        for status, count in sorted(_dict(states).items()):
+            previous = _dict(_dict(prev_jobs.get('by_type_status'))
+                             .get(ptype)).get(status)
+            type_states.append({
+                'label': f'{ptype} · {status}', 'value': count,
+                'delta': _cut_delta(count, previous)})
+    return {'headline': headline, 'types': types,
+            'type_states': type_states}
+
+
+def _cut_components(snap, previous_snap, scope):
+    state = _dict(snap.state)
+    previous_state = _dict(previous_snap.state) if previous_snap else {}
+    cards = []
+    for name, payload in sorted(_dict(state.get('components')).items()):
+        payload = _dict(payload)
+        data = _dict(payload.get('data'))
+        previous_payload = _dict(
+            _dict(previous_state.get('components')).get(name))
+        previous_data = _dict(previous_payload.get('data'))
+        card = {
+            'name': name,
+            'assessed_at': payload.get('assessed_at'),
+            'changed': (payload.get('revision')
+                        != previous_payload.get('revision')),
+            'payload_json': _json(payload),
+        }
+        if name == 'health':
+            overall = _dict(data.get('overall'))
+            card['kind'] = 'health'
+            card['chip'] = _cut_chip(overall.get('status'))
+            card['reason'] = overall.get('reason', '')
+            card['counts'] = _dict(overall.get('counts'))
+            card['non_ok_checks'] = [
+                {'name': check_name, 'chip': _cut_chip(check.get('status')),
+                 'summary': check.get('summary', ''),
+                 'category': check.get('category', '')}
+                for check_name, check in sorted(
+                    _dict(data.get('checks')).items())
+                if str(check.get('status')) not in ('ok', 'healthy')
+                for check in [_dict(check)]
+            ]
+        elif name == 'datataking':
+            card['kind'] = 'datataking'
+            card['namespaces'] = [
+                {'namespace': namespace,
+                 'chip': _cut_chip(
+                     f"{ns.get('state')}"
+                     + (f"/{ns.get('substate')}" if ns.get('substate') else '')),
+                 'run_number': ns.get('run_number'),
+                 'phase': ns.get('phase'),
+                 'since': ns.get('last_transition_at')}
+                for namespace, ns in sorted(
+                    _dict(data.get('namespaces')).items())
+                for ns in [_dict(ns)]
+            ]
+        elif name == 'panda':
+            card['kind'] = 'panda'
+            card.update(_cut_panda_card(data, previous_data))
+        else:
+            card['kind'] = 'generic'
+        cards.append(card)
+    return cards
+
+
+def snapper_cut(request, scope):
+    """Server-rendered state cut: structured component cards at an
+    instant, with deltas against the previous snap, exact-event context
+    links, and the raw document one click behind (the Time history's
+    selection panel; also the deep-link target for external dashboards)."""
+    from django.utils.dateparse import parse_datetime
+
+    from snapper_ai.queries import SnapNotFound, state_at
+
+    from ..snapper_resolvers import annotate_references
+
+    scope = _validated_scope(scope)
+    requested = parse_datetime((request.GET.get('time') or '').strip())
+    if requested is None or requested.tzinfo is None:
+        return render(request, 'monitor_app/_snapper_cut.html',
+                      {'error': 'time must be ISO 8601 with timezone'})
+    try:
+        result = state_at(scope, requested)
+    except SnapNotFound as e:
+        return render(request, 'monitor_app/_snapper_cut.html',
+                      {'error': str(e)})
+    snap = SystemSnap.objects.filter(id=result.snap_id).first()
+    previous_snap = (SystemSnap.objects
+                     .filter(scope=scope, snap_time__lt=snap.snap_time)
+                     .order_by('-snap_time').first()) if snap else None
+
+    references = []
+    try:
+        from snapper_ai.queries import context_around
+        context = context_around(scope, requested, 3600).as_dict()
+        references = annotate_references(context['references'])
+    except Exception:                                        # noqa: BLE001
+        pass  # references are enrichment; the cut renders without them
+
+    coverage = result.coverage.as_dict()
+    return render(request, 'monitor_app/_snapper_cut.html', {
+        'scope': scope,
+        'requested_at': result.requested_at,
+        'actual_snap_time': result.snap_time,
+        'coverage': coverage,
+        'coverage_chip': _cut_chip(
+            {'covered': 'ok', 'gap': 'error'}.get(
+                coverage.get('status'), 'warning')),
+        'coverage_status': coverage.get('status', 'unknown'),
+        'cards': _cut_components(snap, previous_snap, scope) if snap else [],
+        'references': references,
+    })

@@ -106,6 +106,7 @@ from .viewdir.system_status import (
     system_status_refresh,
 )
 from .viewdir.snapper import (
+    snapper_cut,
     snapper_prefs_save,
     snapper_report,
     snapper_root,
@@ -234,6 +235,7 @@ urlpatterns = [
          name='snapper_report'),
     path('snapper/<str:scope>/prefs/', snapper_prefs_save,
          name='snapper_prefs'),
+    path('snapper/<str:scope>/cut/', snapper_cut, name='snapper_cut'),
     path('snapper/<str:scope>/report/<uuid:snap_id>/', snapper_report,
          name='snapper_report_snap'),
     path('snapper/<str:scope>/system/', snapper_system,
