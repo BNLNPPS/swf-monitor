@@ -162,6 +162,24 @@
       hovertemplate: '%{text}<extra></extra>',
       hoverlabel: {font: {size: 14}},
     });
+    // Run-start pips: a solid tick at each genuine segment start, so a
+    // burst of new runs reads as events even when the state value never
+    // changes. The carried boundary state at the window edge gets none.
+    const pipXs = [], pipColors = [];
+    lane.points.forEach(function (point, i) {
+      if (i === 0 && point.t === data.start) return;
+      pipXs.push(point.t);
+      pipColors.push(stateColor(point.value));
+    });
+    if (pipXs.length) {
+      traces.push({
+        x: pipXs, y: pipXs.map(() => lane.label),
+        mode: 'markers',
+        marker: {symbol: 'line-ns', size: 16,
+                 line: {width: 3, color: pipColors}},
+        yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
+      });
+    }
   });
 
   // Curves: stepped lines with fixed colors shared by the tick boxes.
