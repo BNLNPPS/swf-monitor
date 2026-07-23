@@ -118,6 +118,7 @@
 
     {% if active_tab == 'report' %}
         {% include 'monitor_app/_snapper_observatory.html' %}
+        <div id="snapper-report-rest">
         {% if not selected_snap %}
             <div class="alert alert-info">No snaps have been recorded for {{ scope_label }}.</div>
         {% else %}
@@ -295,6 +296,7 @@
                 <p class="text-muted">No snap history is available.</p>
             {% endif %}
         </section>
+        </div>
     {% else %}
         <section class="mb-4">
             <h2 class="h4 mb-2">Capture system</h2>
@@ -476,22 +478,72 @@
 <script>
 (() => {
     const refreshIntervalMs = 60000;
-    const refreshAt = Date.now() + refreshIntervalMs;
     const countdown = document.getElementById('snapper-reload-countdown');
+    const rest = document.getElementById('snapper-report-rest');
+    let nextAt = Date.now() + refreshIntervalMs;
+    let failed = false;
+    let refreshing = false;
+    // Snapshot the server-rendered content before DataTables decorates
+    // it, so refresh comparisons are server-HTML against server-HTML.
+    let restHtml = rest ? rest.innerHTML : '';
     const updateCountdown = () => {
         if (!countdown) return;
-        const seconds = Math.max(0, Math.ceil((refreshAt - Date.now()) / 1000));
-        countdown.textContent = `Page reload in ${seconds} sec`;
+        const seconds = Math.max(0, Math.ceil((nextAt - Date.now()) / 1000));
+        countdown.textContent = failed
+            ? `Auto-update failed — retrying in ${seconds} sec`
+            : `Auto-update in ${seconds} sec`;
     };
-    updateCountdown();
-    window.setInterval(updateCountdown, 1000);
-    window.setTimeout(() => {
-        if (!document.hidden) window.location.reload();
-    }, refreshIntervalMs);
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && Date.now() >= refreshAt) {
+    // The report page refreshes in place: fetch the page in the
+    // background and apply only what changed — the plot via
+    // snapperObservatory.refresh (zoom, cut, and ticks preserved), the
+    // server-rendered sections below it by swapping the container. No
+    // reload, no flash. The system tab keeps the plain reload.
+    const softRefresh = () => {
+        if (refreshing) return;
+        refreshing = true;
+        fetch(window.location.href, {cache: 'no-store'})
+            .then(r => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            })
+            .then(html => {
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                const newData = doc.getElementById('snapper-observatory-data');
+                if (newData && window.snapperObservatory
+                        && newData.textContent !== window.snapperObservatory.dataText()) {
+                    window.snapperObservatory.refresh(newData.textContent);
+                }
+                const newRest = doc.getElementById('snapper-report-rest');
+                if (newRest && rest && newRest.innerHTML !== restHtml) {
+                    restHtml = newRest.innerHTML;
+                    rest.innerHTML = restHtml;
+                    if (window.jQuery && jQuery.fn.DataTable) {
+                        jQuery('#snapper-report-rest table.swf-sortable').DataTable({
+                            paging: false, searching: false, info: false, order: []
+                        });
+                    }
+                }
+                failed = false;
+            })
+            .catch(() => { failed = true; })
+            .finally(() => {
+                refreshing = false;
+                nextAt = Date.now() + refreshIntervalMs;
+                updateCountdown();
+            });
+    };
+    const tick = () => {
+        if (Date.now() < nextAt || document.hidden) return;
+        if (rest) {
+            softRefresh();
+        } else {
             window.location.reload();
         }
+    };
+    updateCountdown();
+    window.setInterval(() => { updateCountdown(); tick(); }, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) tick();
     });
 })();
 </script>
