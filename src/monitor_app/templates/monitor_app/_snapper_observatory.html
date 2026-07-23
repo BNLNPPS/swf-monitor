@@ -192,6 +192,13 @@
         hoverXs.push(toNaive(t));
         hoverTexts.push(text);
       }
+      // Pin a marker at the segment's last instant: the nearest-marker
+      // rule then flips the hover exactly at the visible edge instead
+      // of half a step early.
+      if (t1 - t0 > 1500) {
+        hoverXs.push(toNaive(t1 - 500));
+        hoverTexts.push(text);
+      }
     });
     traces.push({
       x: hoverXs, y: hoverXs.map(() => lane.label),
