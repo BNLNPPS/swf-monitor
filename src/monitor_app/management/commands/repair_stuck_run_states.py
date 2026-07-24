@@ -59,3 +59,9 @@ class Command(BaseCommand):
                 'updated_at'])
         self.stdout.write(self.style.SUCCESS(
             f'Repaired {len(candidates)} RunState row(s).'))
+
+        # The lanes read the published datataking component, not RunState
+        # directly — a repair is not done until the surface reflects it.
+        from monitor_app.snapper_datataking import publish_datataking_state
+        publish_datataking_state()
+        self.stdout.write('Datataking component republished.')
