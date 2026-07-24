@@ -108,6 +108,19 @@ def _lane_entries(scope, state):
             hover += f' ({count_bits})'
         entries['health'] = {'value': status, 'hover': hover,
                             'active': True, 'key': f'{status}|{reason}'}
+    # Per-check sub-lanes behind the health lane's expandable header.
+    # Every check is emitted here; the assembler drops the always-ok
+    # ones so the expansion shows only checks with a story in the window.
+    for check_name, check in sorted(
+            (health.get('checks') or {}).items()):
+        check = check if isinstance(check, dict) else {}
+        status = str(check.get('status') or 'unknown')
+        summary = str(check.get('summary') or '').strip()
+        entries[f'check:{check_name}'] = {
+            'value': status,
+            'hover': f'{status} — {summary}' if summary else status,
+            'active': True, 'key': f'{status}|{summary}',
+            'parent': 'health'}
     if scope == 'testbed':
         datataking = _component_data(state, 'datataking')
         for namespace, ns_state in sorted(
@@ -188,8 +201,15 @@ def observatory_series(scope, start, end):
         curve['points'].append([time_iso, value])
 
     def add_lane_point(lane_id, time_iso, entry):
-        label = lane_id[3:] if lane_id.startswith('ns:') else lane_id
+        if lane_id.startswith('ns:'):
+            label = lane_id[3:]
+        elif lane_id.startswith('check:'):
+            label = lane_id[6:]
+        else:
+            label = lane_id
         lane = lanes.setdefault(lane_id, {'label': label, 'points': []})
+        if entry.get('parent'):
+            lane['parent'] = entry['parent']
         points = lane['points']
         if points and points[-1].get('key') == entry['key']:
             return
@@ -217,6 +237,14 @@ def observatory_series(scope, start, end):
                          time_naive, 'gap'])
         elif row['recovered_gap_start_unknown']:
             gaps.append([None, time_naive, 'unknown start'])
+
+    # A check sub-lane earns its place only with a non-ok story in the
+    # window; an always-ok check would add a row and say nothing.
+    for lane_id in [key for key, lane in lanes.items()
+                    if lane.get('parent')
+                    and all(point['value'] in ('ok', 'healthy')
+                            for point in lane['points'])]:
+        del lanes[lane_id]
 
     return {
         'scope': scope,

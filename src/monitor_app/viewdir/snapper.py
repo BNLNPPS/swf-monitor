@@ -179,7 +179,8 @@ def snapper_prefs_save(request, scope):
         payload = _json_module.loads(request.body or b'{}')
     except ValueError:
         return JsonResponse({'error': 'invalid JSON'}, status=400)
-    allowed = {key: payload[key] for key in ('curves_off', 'window')
+    allowed = {key: payload[key]
+               for key in ('curves_off', 'window', 'lanes_open')
                if key in payload}
     row, _ = UserPreference.objects.get_or_create(
         username=request.user.username)
