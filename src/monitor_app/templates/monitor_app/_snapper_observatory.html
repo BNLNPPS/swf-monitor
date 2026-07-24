@@ -765,13 +765,19 @@
   const cutPanel = document.getElementById('snapper-observatory-cut');
   const cutUrl = '{% url "monitor_app:snapper_cut" scope=scope %}';
   function showCut(timeIso) {
-    // timeIso is the true instant (UTC ISO); the cut renders as a
-    // server-built fragment of structured component cards, and the
-    // plot line lands at the matching Eastern wall-time position.
+    // timeIso is the true instant the user clicked (UTC ISO): the red
+    // line and the URL land exactly there — the click's x is respected.
+    // The STATE, though, is looked up at the activity the click falls
+    // on: a short run renders as a tile far wider than its true span,
+    // so a click anywhere on that tile resolves to the run it stands
+    // for. Line where you clicked; state of the run you clicked.
     cutTrueMs = confirmedCutTrueMs = Date.parse(timeIso);
     applyShapes();
     updateClearAll();
-    fetch(cutUrl + '?time=' + encodeURIComponent(timeIso))
+    const lookupIso = new Date(
+        snapToActivity(cutTrueMs - basisCorrection) + basisCorrection
+    ).toISOString();
+    fetch(cutUrl + '?time=' + encodeURIComponent(lookupIso))
       .then(r => r.text())
       .then(function (fragment) {
         cutPanel.hidden = false;
@@ -982,13 +988,15 @@
       return;
     }
     lastClick = {at: now, x: event.clientX};
-    const cutBasis = snapToActivity(time);
-    cutTrueMs = cutBasis + basisCorrection;
+    // Line at the clicked instant; showCut resolves the state to the
+    // activity under it. Do not pre-snap the line — it must stay where
+    // the cursor is.
+    cutTrueMs = time + basisCorrection;
     applyShapes();
     updateClearAll();
     clearTimeout(cutTimer);
     cutTimer = setTimeout(function () {
-      showCut(new Date(cutBasis + basisCorrection).toISOString());
+      showCut(new Date(time + basisCorrection).toISOString());
     }, 480);
   }, true);
 
@@ -1032,18 +1040,10 @@
     }
   }
 
-  // A URL-carried cut goes through the same activity snap as a click:
-  // a shared link lands inside the tile it points at, not beside it.
+  // A URL-carried cut restores the line at its saved instant; showCut
+  // resolves its state to the activity under it, exactly like a click.
   const initialCut = '{{ observatory_cut|escapejs }}';
-  if (initialCut) {
-    const parsed = Date.parse(initialCut);
-    if (isFinite(parsed)) {
-      showCut(new Date(snapToActivity(parsed - basisCorrection)
-                       + basisCorrection).toISOString());
-    } else {
-      showCut(initialCut);
-    }
-  }
+  if (initialCut) showCut(initialCut);
 
   // The page-level 60-second soft refresh hands new observatory data in
   // here; the plot updates in place, preserving zoom, cut, and curve
