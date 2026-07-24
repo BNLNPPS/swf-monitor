@@ -368,6 +368,10 @@
   // table. Each row gets its own all/none; the global buttons still
   // cover everything.
   const GROUPS = [
+    {name: 'Workflows', match: function (id) {
+      return id.indexOf('wf_') === 0; }},
+    {name: 'STF tasks', match: function (id) {
+      return id.indexOf('sts_') === 0 || id === 'stf_total'; }},
     {name: 'In-flight jobs', match: function (id) {
       return id.indexOf('job_') === 0 || id === 'jobs_total'
           || id === 'running_cores'; }},

@@ -56,6 +56,7 @@ def apply_run_lifecycle_message(data) -> bool:
         },
     )
 
+    previous = (row.phase, row.state, row.substate)
     if msg_type == 'end_run':
         row.state = 'ended'
         row.substate = None
@@ -87,4 +88,16 @@ def apply_run_lifecycle_message(data) -> bool:
         "RunState %s: %s -> %s/%s (%s)%s",
         run_number, msg_type, row.state, row.substate or '-', row.phase,
         ' [row created]' if created else '')
+
+    # The datataking snapper component republishes on REST-path state
+    # changes (RunStateViewSet); this ORM path must do the same or the
+    # lanes go stale despite a correct RunState.
+    if created or (row.phase, row.state, row.substate) != previous:
+        try:
+            from .snapper_datataking import publish_datataking_state
+            publish_datataking_state()
+        except Exception:
+            logger.exception(
+                "datataking republish failed after RunState %s %s",
+                run_number, msg_type)
     return True

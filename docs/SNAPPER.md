@@ -119,13 +119,15 @@ for uncommitted work before running it.
 
 ## Component maintainers
 
-The full five-minute System status refresh also maintains two Snapper component
-families before the independent capture scheduler observes them:
+The full five-minute System status refresh also maintains three Snapper
+component families before the independent capture scheduler observes them:
 
 - **System health** in both scopes (internal name: health), from the bounded
-  System status registry; and
+  System status registry;
 - **PanDA activity** in epicprod (internal name: panda), from the curated PanDA
-  activity adapter.
+  activity adapter; and
+- **Workflow activity** in testbed (internal name: workflow), from the
+  workflow-execution records and the STF prompt-processing PanDA tasks.
 
 The PanDA adapter publishes trailing 24-hour job and task counts, current counts
 for every in-flight job state and nonterminal task state, running cores, and
@@ -134,3 +136,17 @@ records. Selected
 `refresh-system-status.py --only` runs skip the PanDA query; full manual and
 periodic refreshes publish it. A publication error causes the refresh doer to
 fail visibly while preserving the last accepted component state.
+
+The workflow adapter publishes running and trailing-24-hour workflow execution
+counts (by workflow name) and STF processing task counts (processingtype
+stfprocessing) split by target site and status — the prompt-processing decision
+box's site assignment as recorded state. On the testbed Time history these
+render as curves (workflow executions running; STF tasks by site · status)
+alongside the datataking lanes.
+
+The datataking component's RunState source advances from the run lifecycle
+messages themselves: the ActiveMQ processor applies each stamped transition
+(`monitor_app/run_state_transitions.py`) and republishes the component, so
+lanes track the E0-E1 state machine in real time. The
+`repair_stuck_run_states` management command (dry-run default) terminalizes
+rows from before this write side existed.

@@ -26,6 +26,10 @@ from monitor_app.snapper_panda import (  # noqa: E402
     compact_panda_publication_report,
     publish_panda_activity,
 )
+from monitor_app.snapper_workflow import (  # noqa: E402
+    compact_workflow_publication_report,
+    publish_workflow_activity,
+)
 
 
 def main(argv):
@@ -42,6 +46,8 @@ def main(argv):
     if not args.only:
         panda_publication = publish_panda_activity()
         print(compact_panda_publication_report(panda_publication))
+        workflow_publication = publish_workflow_activity()
+        print(compact_workflow_publication_report(workflow_publication))
     return 0
 
 

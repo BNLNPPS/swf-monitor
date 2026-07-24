@@ -48,6 +48,20 @@ def _component_data(state, name):
 def _curve_values(scope, state):
     """Numeric curve values for one snap, keyed by curve id."""
     values = {}
+    if scope == 'testbed':
+        workflow = _component_data(state, 'workflow')
+        executions = workflow.get('executions') or {}
+        stf_tasks = workflow.get('stf_tasks') or {}
+        if executions:
+            values['wf_active'] = int(executions.get('active') or 0)
+        if stf_tasks:
+            values['stf_total'] = int(
+                stf_tasks.get('in_flight_total') or 0)
+            for key, count in (
+                    stf_tasks.get('by_site_status') or {}).items():
+                site, _, status = str(key).partition('/')
+                values[f'sts_{site}_{status}'] = int(count or 0)
+        return values
     if scope != 'epicprod':
         return values
     panda = _component_data(state, 'panda')
@@ -122,6 +136,14 @@ def _lane_entries(scope, state):
 
 
 def _curve_label(curve_id):
+    if curve_id == 'wf_active':
+        return 'workflow executions (running)'
+    if curve_id == 'stf_total':
+        return 'STF tasks in flight (total)'
+    if curve_id.startswith('sts_'):
+        remainder = curve_id[4:]
+        site, _, status = remainder.rpartition('_')
+        return f'{site} · {status}' if site else remainder
     if curve_id == 'jobs_total':
         return 'in-flight jobs (total)'
     if curve_id == 'tasks_total':
