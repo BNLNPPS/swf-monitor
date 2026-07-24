@@ -114,7 +114,9 @@ def _lane_entries(scope, state):
                     if parsed else transition)
             entries[f'ns:{namespace}'] = {
                 'value': value, 'hover': hover,
-                'active': str(ns_state.get('state') or '') == 'running',
+                # 'run' is the stamped E0-E1 state; 'running' is the
+                # fast-processing agent's legacy value.
+                'active': str(ns_state.get('state') or '') in ('run', 'running'),
                 'key': f'{run}|{value}'}
     return entries
 
