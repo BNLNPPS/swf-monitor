@@ -174,7 +174,7 @@ tasks) is the standing migration metric.
 
 ## Scheduled automation on the stream
 
-The nightly `catalog_sync` (cron 02:15 → `enqueue-ops-message.py` → ops
+The nightly `catalog_sync` (cron 02:47 → `enqueue-ops-message.py` → ops
 agent) chains: csv catalog import → questionnaire import → association sweep
 with auto-intake of direct group.EIC submissions → Rucio output snapshot →
 EVGEN assimilation → questionnaire automatch (new matches are live
