@@ -211,6 +211,21 @@ if [[ "$DO_UI" == true ]]; then
     else
         log "Recycling mod_wsgi app by touching wsgi.py..."
         touch "$TARGET_SRC/swf_monitor_project/wsgi.py"
+        # Warm the recycled app before finishing: the first request after a
+        # recycle pays the cold start, and if that request arrives through
+        # the external face (swf-remote proxies this host over the tunnel)
+        # the System page reddens on a deployment. The full deploy already
+        # health-checks; this is the lightweight equivalent.
+        log "Warming the recycled app..."
+        for _ in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 \
+                "http://localhost/swf-monitor/" || true)
+            if [[ "$code" == "200" || "$code" == "302" ]]; then
+                log "App warm (HTTP $code)"
+                break
+            fi
+            sleep 2
+        done
     fi
 fi
 
