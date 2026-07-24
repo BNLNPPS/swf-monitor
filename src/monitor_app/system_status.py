@@ -493,9 +493,54 @@ def _activemq_broker():
                    ' · '.join(parts), data)
 
 
+def _stale_state():
+    """The garbage detector: state records claiming activity that
+    nothing corroborates. Detection over collection — a scheduled
+    cleaner would hide the producing bug; this check names the lie on
+    the System page so the source gets fixed (operator principle,
+    2026-07-24). Current detections: workflow executions claiming
+    'running' with no end time, and non-terminal run states, both past
+    the staleness threshold."""
+    from .models import RunState
+    from .workflow_models import WorkflowExecution
+
+    hours = float(SysConfig.get_setting('state_stale_hours', 12))
+    cutoff = timezone.now() - timedelta(hours=hours)
+    stuck_executions = list(
+        WorkflowExecution.objects
+        .filter(status='running', end_time__isnull=True,
+                start_time__lt=cutoff)
+        .order_by('start_time')
+        .values_list('execution_id', flat=True)[:20])
+    stale_runs = list(
+        RunState.objects
+        .exclude(state__in=('ended', 'expired', 'abandoned'))
+        .filter(state_changed_at__lt=cutoff)
+        .order_by('state_changed_at')
+        .values_list('run_number', flat=True)[:20])
+    data = {'threshold_hours': hours,
+            'stuck_executions': stuck_executions,
+            'stale_run_states': stale_runs}
+    problems = []
+    if stuck_executions:
+        problems.append(f'{len(stuck_executions)} execution(s) claim '
+                        'running with no recorded end')
+    if stale_runs:
+        problems.append(f'{len(stale_runs)} run state(s) non-terminal '
+                        'and stale')
+    if problems:
+        return _status('stale-state', 'agents', 'warning',
+                       '; '.join(problems)
+                       + f' (older than {hours:.0f}h) — a writer is '
+                         'abandoning state; fix the source', data)
+    return _status('stale-state', 'agents', 'ok',
+                   'no state record claims unbacked activity', data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
     'activemq-broker': _activemq_broker,
+    'stale-state': _stale_state,
     'swf-panda-bot': _panda_bot,
     'campaign-assessments': _campaign_assessments,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(

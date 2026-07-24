@@ -22,7 +22,7 @@
       <td><span class="snapper-chip" style="background:{{ ns.chip.color }}">{{ ns.chip.value }}</span></td>
       <td>{% if ns.run_number %}<a href="{% url 'monitor_app:run_detail' run_number=ns.run_number %}">run {{ ns.run_number }}</a>{% else %}—{% endif %}</td>
       <td>{{ ns.phase }}</td>
-      <td class="text-muted small">since {{ ns.since|fmt_dt }}</td>
+      <td class="text-muted small">{% if ns.since %}since {{ ns.since|fmt_dt }}{% endif %}</td>
     </tr>
     {% endfor %}
   </table>

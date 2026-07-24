@@ -437,6 +437,8 @@ CUT_STATE_COLORS = {
     'ok': '#2e7d32', 'healthy': '#2e7d32', 'running': '#2e7d32',
     'warning': '#f9a825', 'error': '#c62828', 'ended': '#78909c',
     'unknown': '#9e9e9e',
+    # Datataking activity phases, matching the lane tile colors.
+    'datataking': '#2e7d32', 'processing': '#81c784', 'idle': '#90a4ae',
 }
 CUT_FALLBACK_COLOR = '#1565c0'
 
@@ -547,7 +549,7 @@ def _cut_workflow_card(data, previous_data):
             'stf_processing_type': STF_PROCESSING_TYPE}
 
 
-def _cut_components(snap, previous_snap, scope):
+def _cut_components(snap, previous_snap, scope, requested_at=None):
     state = _dict(snap.state)
     previous_state = _dict(previous_snap.state) if previous_snap else {}
     cards = []
@@ -580,8 +582,25 @@ def _cut_components(snap, previous_snap, scope):
                 for check in [_dict(check)]
             ]
         elif name == 'datataking':
+            # The cut and the lanes must tell one story: the namespace
+            # rows come from the run record at the cut instant, the same
+            # source the activity lanes draw. The snap's recorded entry
+            # stays in the card's audit document.
             card['kind'] = 'datataking'
-            card['namespaces'] = _datataking_rows(data)
+            if requested_at is not None:
+                from .snapper_series import namespace_activity_at
+                card['namespaces'] = [
+                    {'namespace': namespace,
+                     'chip': _cut_chip(info['phase']),
+                     'run_number': info['run_number'],
+                     'phase': info['workflow'],
+                     'since': (info['since'].isoformat()
+                               if info['since'] else '')}
+                    for namespace, info in sorted(
+                        namespace_activity_at(requested_at).items())
+                ]
+            else:
+                card['namespaces'] = _datataking_rows(data)
         elif name == 'panda':
             card['kind'] = 'panda'
             card.update(_cut_panda_card(data, previous_data))
@@ -644,7 +663,9 @@ def snapper_cut(request, scope):
             'detail': 'Whether capture was observing at this instant cannot '
                       'be established — showing the last recorded state.'}
 
-    cards = _cut_components(snap, previous_snap, scope) if snap else []
+    cards = (_cut_components(snap, previous_snap, scope,
+                             requested_at=result.requested_at)
+             if snap else [])
     for card in cards:
         assessed = parse_datetime(str(card.get('assessed_at') or ''))
         card['assessed_age_text'] = (

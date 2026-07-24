@@ -121,101 +121,186 @@ def _lane_entries(scope, state):
     return entries
 
 
-# Terminal datataking states end a run period; the terminal value itself
-# is never drawn — the bar simply stops.
-_TERMINAL_RUN_STATES = ('ended', 'expired', 'abandoned')
+def _span_text(seconds):
+    if seconds >= 5400:
+        return f'{seconds / 3600:.1f} h'
+    if seconds >= 90:
+        return f'{seconds / 60:.0f} min'
+    return f'{seconds:.0f} s'
 
 
-def _datataking_observations(state):
-    """Per-namespace run observation for one snap."""
+def _namespace_run_arcs(start, end, dangle_seconds):
+    """Per-namespace workflow-run arcs — THE single source behind both
+    the activity lanes and the cut's instant lookup, so the two can
+    never disagree. An arc is one run's full activity: first observed
+    instant, the end of its datataking window, and its last recorded
+    activity (the processing tail), with workflow identity resolved
+    through the execution record. The state-event record supplies the
+    full arc where it exists; the universal run record covers every
+    other workflow. Returns namespace → [arc, ...] ordered by start;
+    every registered namespace is present."""
+    from django.db.models import Q
+    from django.db.models.fields.json import KeyTextTransform
+
+    from ..models import Run, RunState, SystemStateEvent
+    from ..workflow_models import Namespace, WorkflowExecution
+
+    events = list(
+        SystemStateEvent.objects
+        .filter(timestamp__gte=start, timestamp__lte=end)
+        .values('run_number', 'timestamp', 'event_type', 'event_data'))
+
+    runs = {}
+    for event in events:
+        run = runs.setdefault(event['run_number'], {
+            'first': event['timestamp'], 'last': event['timestamp'],
+            'end_run': None, 'execution': ''})
+        run['first'] = min(run['first'], event['timestamp'])
+        run['last'] = max(run['last'], event['timestamp'])
+        if event['event_type'] == 'end_run':
+            run['end_run'] = event['timestamp']
+        if not run['execution']:
+            data = event['event_data']
+            if isinstance(data, dict) and data.get('execution_id'):
+                run['execution'] = str(data['execution_id'])
+
+    run_executions = dict(
+        RunState.objects
+        .annotate(execution_key=KeyTextTransform(
+            'execution_id', 'metadata'))
+        .exclude(execution_key__isnull=True)
+        .values_list('run_number', 'execution_key'))
+    for row in (Run.objects
+                .filter(Q(end_time__gte=start) | Q(end_time__isnull=True),
+                        start_time__lte=end)
+                .values('run_number', 'start_time', 'end_time')):
+        if row['run_number'] in runs:
+            continue
+        run = {'first': max(row['start_time'], start),
+               'end_run': row['end_time'],
+               'execution': run_executions.get(row['run_number'], '')}
+        if row['end_time'] is not None:
+            run['last'] = min(row['end_time'], end)
+        elif ((end - row['start_time']).total_seconds()
+                <= dangle_seconds):
+            run['last'] = end
+            run['end_run'] = None
+        else:
+            if row['start_time'] < start:
+                continue
+            run['last'] = run['first']
+            run['end_run'] = None
+        runs[row['run_number']] = run
+
+    namespaces = dict(
+        WorkflowExecution.objects
+        .filter(execution_id__in={run['execution']
+                                  for run in runs.values()
+                                  if run['execution']})
+        .values_list('execution_id', 'namespace'))
+
+    arcs = {name: [] for name in
+            Namespace.objects.values_list('name', flat=True)}
+    for run_number, run in sorted(runs.items(),
+                                  key=lambda item: item[1]['first']):
+        execution = run['execution']
+        parts = execution.rsplit('-', 2)
+        namespace = namespaces.get(execution) or 'unknown'
+        arcs.setdefault(namespace, []).append({
+            'run_number': run_number,
+            'workflow': parts[0] if len(parts) == 3 else 'workflow',
+            'execution': execution,
+            'first': run['first'],
+            'end_run': run['end_run'],
+            'last': run['last'],
+            'dangling': (run['end_run'] is None
+                         and (end - run['last']).total_seconds()
+                         > dangle_seconds),
+        })
+    return arcs
+
+
+def namespace_activity_at(instant, dangle_seconds=12 * 3600):
+    """Per-namespace datataking truth at one instant, classified from
+    the same arcs the activity lanes draw. The arc window extends past
+    the instant so a processing tail observed later still counts as
+    ongoing at the instant. Returns namespace → {phase, run_number,
+    workflow, execution_id, since} with phase one of 'datataking',
+    'processing', 'idle'."""
+    from datetime import timedelta
+
+    arcs = _namespace_run_arcs(instant - timedelta(days=30),
+                               instant + timedelta(days=30),
+                               dangle_seconds)
     out = {}
-    datataking = _component_data(state, 'datataking')
-    for namespace, ns_state in sorted(
-            (datataking.get('namespaces') or {}).items()):
-        ns = ns_state if isinstance(ns_state, dict) else {}
-        value = str(ns.get('state') or 'unknown')
-        substate = ns.get('substate')
-        if substate:
-            value = f'{value}/{substate}'
-        transition = str(ns.get('last_transition_at') or '')
-        hover_since = ''
-        if transition:
-            parsed = parse_datetime(transition)
-            hover_since = ' since ' + (
-                parsed.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
-                if parsed else transition)
-        out[namespace] = {
-            'value': value,
-            'run': ns.get('run_number'),
-            'hover': (f"run {ns.get('run_number')} — "
-                      f"{ns.get('phase') or ''}/{value}{hover_since}"),
-            'terminal': str(ns.get('state') or '') in _TERMINAL_RUN_STATES,
-        }
+    for namespace, runs in arcs.items():
+        entry = {'phase': 'idle', 'run_number': None, 'workflow': '',
+                 'execution_id': '', 'since': None}
+        current = None
+        for arc in runs:
+            if arc['first'] <= instant:
+                current = arc
+        if current is not None:
+            entry.update({'run_number': current['run_number'],
+                          'workflow': current['workflow'],
+                          'execution_id': current['execution']})
+            if (current['end_run'] is not None
+                    and instant <= current['end_run']):
+                entry.update({'phase': 'datataking',
+                              'since': current['first']})
+            elif instant <= current['last']:
+                entry.update(
+                    {'phase': ('processing'
+                               if current['end_run'] is not None
+                               else 'datataking'),
+                     'since': current['end_run'] or current['first']})
+            else:
+                entry.update({'phase': 'idle', 'since': current['last']})
+        out[namespace] = entry
     return out
 
 
-class _RunEpisodes:
-    """Assemble one namespace lane as discrete run periods.
-
-    A bar spans a run from its first observation to its terminal
-    transition; idle time between runs is blank, never painted. A run
-    that dangles — no terminal state and no transition for longer than
-    the threshold — is truncated at its last observed change and marked
-    open-ended, so stale bookkeeping cannot paint hours of false state.
-    """
-
-    def __init__(self, label, dangle_seconds):
-        self.label = label
-        self.dangle_seconds = dangle_seconds
-        self.segments = []
-        self.open = None    # {'run', 'value', 'hover', 'seg_start',
-                            #  'last_change'} — times as (dt, naive) pairs
-
-    def _flush_segment(self, end_pair, open_end=False):
-        hover = self.open['hover']
-        if open_end:
-            hover += ' · dangling: no further transitions recorded'
-        self.segments.append({
-            't0': self.open['seg_start'][1], 't1': end_pair[1],
-            'value': self.open['value'], 'hover': hover,
-            'open_end': open_end})
-
-    def _close(self, at_pair, dangling):
-        """End the open episode: at its last change when it dangled, at
-        the given time otherwise."""
-        if dangling:
-            self._flush_segment(self.open['last_change'], open_end=True)
-        else:
-            self._flush_segment(at_pair)
-        self.open = None
-
-    def observe(self, time_pair, obs):
-        if self.open is not None and obs['run'] != self.open['run']:
-            # A new run appeared while the old one never terminated.
-            self._close(time_pair, dangling=True)
-        if obs['terminal']:
-            if self.open is not None:
-                dangling = ((time_pair[0] - self.open['last_change'][0])
-                            .total_seconds() > self.dangle_seconds)
-                self._close(time_pair, dangling)
-            return
-        if self.open is None:
-            self.open = {'run': obs['run'], 'value': obs['value'],
-                         'hover': obs['hover'], 'seg_start': time_pair,
-                         'last_change': time_pair}
-            return
-        if obs['value'] != self.open['value']:
-            self._flush_segment(time_pair)
-            self.open.update({'value': obs['value'], 'hover': obs['hover'],
-                              'seg_start': time_pair,
-                              'last_change': time_pair})
-
-    def finish(self, end_pair):
-        if self.open is not None:
-            dangling = ((end_pair[0] - self.open['last_change'][0])
-                        .total_seconds() > self.dangle_seconds)
-            self._close(end_pair, dangling)
-        return self.segments
+def _run_activity_lanes(start, end, dangle_seconds):
+    """Activity lane segments rendered from the shared per-namespace run
+    arcs: a solid datataking tile opening into a lighter processing
+    tail, hatched when the run never recorded an end. Idle namespaces
+    keep an empty lane (a grey track on the plot)."""
+    lanes = {}
+    for namespace, runs in _namespace_run_arcs(
+            start, end, dangle_seconds).items():
+        segments = lanes.setdefault(namespace, [])
+        for arc in runs:
+            ident = (f"{arc['workflow']} · run {arc['run_number']}"
+                     + (f" · {arc['execution']}" if arc['execution']
+                        else ''))
+            started = arc['first'].astimezone(ET_ZONE).strftime(
+                '%m-%d %H:%M ET')
+            if arc['dangling']:
+                segments.append({
+                    't0': _et_naive(arc['first']),
+                    't1': _et_naive(arc['last']), 'value': 'run',
+                    'hover': (f'{ident} — started {started}, no '
+                              'recorded end; last activity '
+                              + arc['last'].astimezone(
+                                  ET_ZONE).strftime('%m-%d %H:%M ET')),
+                    'open_end': True})
+                continue
+            datataking_end = arc['end_run'] or arc['last']
+            total = _span_text(
+                (arc['last'] - arc['first']).total_seconds())
+            hover = f'{ident} — started {started}, active {total}'
+            segments.append({
+                't0': _et_naive(arc['first']),
+                't1': _et_naive(datataking_end), 'value': 'run',
+                'hover': f'{hover} · datataking window',
+                'open_end': False})
+            if arc['last'] > datataking_end:
+                segments.append({
+                    't0': _et_naive(datataking_end),
+                    't1': _et_naive(arc['last']), 'value': 'processing',
+                    'hover': f'{hover} · processing tail',
+                    'open_end': False})
+    return lanes
 
 
 def _curve_label(curve_id):
@@ -267,7 +352,6 @@ def observatory_series(scope, start, end):
         SysConfig.get_setting('snapper_lane_dangle_hours', 12))
     curves = {}
     lanes = {}
-    episodes = {}
     gaps = []
 
     def add_curve_point(curve_id, time_iso, value):
@@ -287,36 +371,26 @@ def observatory_series(scope, start, end):
                        'hover': entry['hover'], 'active': entry['active'],
                        'key': entry['key']})
 
-    def observe_datataking(time_pair, state):
-        if scope != 'testbed':
-            return
-        for namespace, obs in _datataking_observations(state).items():
-            lane = episodes.setdefault(
-                namespace, _RunEpisodes(namespace, dangle_seconds))
-            lane.observe(time_pair, obs)
-
     if boundary:
-        start_pair = (start, _et_naive(start))
+        start_naive = _et_naive(start)
         for curve_id, value in _curve_values(
                 scope, boundary['state']).items():
-            add_curve_point(curve_id, start_pair[1], value)
+            add_curve_point(curve_id, start_naive, value)
         for lane_id, entry in _lane_entries(
                 scope, boundary['state']).items():
-            add_lane_point(lane_id, start_pair[1], entry)
-        observe_datataking(start_pair, boundary['state'])
+            add_lane_point(lane_id, start_naive, entry)
 
     for row in rows:
-        time_pair = (row['snap_time'], _et_naive(row['snap_time']))
+        time_naive = _et_naive(row['snap_time'])
         for curve_id, value in _curve_values(scope, row['state']).items():
-            add_curve_point(curve_id, time_pair[1], value)
+            add_curve_point(curve_id, time_naive, value)
         for lane_id, entry in _lane_entries(scope, row['state']).items():
-            add_lane_point(lane_id, time_pair[1], entry)
-        observe_datataking(time_pair, row['state'])
+            add_lane_point(lane_id, time_naive, entry)
         if row['recovered_gap_started_at'] is not None:
             gaps.append([_et_naive(row['recovered_gap_started_at']),
-                         time_pair[1], 'gap'])
+                         time_naive, 'gap'])
         elif row['recovered_gap_start_unknown']:
-            gaps.append([None, time_pair[1], 'unknown start'])
+            gaps.append([None, time_naive, 'unknown start'])
 
     # A check sub-lane earns its place only with a non-ok story in the
     # window; an always-ok check would add a row and say nothing.
@@ -326,13 +400,14 @@ def observatory_series(scope, start, end):
                             for point in lane['points'])]:
         del lanes[lane_id]
 
-    # Episodic namespace lanes: discrete run periods, blank when idle.
-    # A namespace with no activity in the window keeps its lane — a
-    # blank grey track says "present and inactive", absence says nothing.
-    end_pair = (end, _et_naive(end))
-    for namespace, builder in sorted(episodes.items()):
-        lanes[f'ns:{namespace}'] = {'label': namespace,
-                                    'segments': builder.finish(end_pair)}
+    # Episodic namespace lanes from the canonical workflow-execution
+    # record: discrete activity with workflow identity, over a grey
+    # idle track.
+    if scope == 'testbed':
+        for namespace, segments in sorted(
+                _run_activity_lanes(start, end, dangle_seconds).items()):
+            lanes[f'ns:{namespace}'] = {'label': namespace,
+                                        'segments': segments}
 
     return {
         'scope': scope,
