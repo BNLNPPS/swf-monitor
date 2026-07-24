@@ -1032,8 +1032,18 @@
     }
   }
 
+  // A URL-carried cut goes through the same activity snap as a click:
+  // a shared link lands inside the tile it points at, not beside it.
   const initialCut = '{{ observatory_cut|escapejs }}';
-  if (initialCut) showCut(initialCut);
+  if (initialCut) {
+    const parsed = Date.parse(initialCut);
+    if (isFinite(parsed)) {
+      showCut(new Date(snapToActivity(parsed - basisCorrection)
+                       + basisCorrection).toISOString());
+    } else {
+      showCut(initialCut);
+    }
+  }
 
   // The page-level 60-second soft refresh hands new observatory data in
   // here; the plot updates in place, preserving zoom, cut, and curve

@@ -88,7 +88,8 @@ def _age_text(delta_seconds):
     return f'{days}d {hours}h' if hours else f'{days}d'
 
 
-def _present_snap_component(name, payload):
+def _present_snap_component(name, payload, scope=None,
+                            reference_time=None):
     payload = _dict(payload)
     registration = _dict(payload.get('registration'))
     data = _dict(payload.get('data'))
@@ -118,7 +119,13 @@ def _present_snap_component(name, payload):
     # table.
     card = {'kind': None}
     if name == 'datataking':
-        card = {'kind': 'datataking', 'namespaces': _datataking_rows(data)}
+        # One truth: at a reference instant (the cut, or the snap's own
+        # time) the rows come from the run record, like the lanes.
+        card = {'kind': 'datataking',
+                'namespaces': (_activity_rows(reference_time)
+                               if scope == 'testbed'
+                               and reference_time is not None
+                               else _datataking_rows(data))}
     elif name == 'panda':
         card = {'kind': 'panda'}
         card.update(_cut_panda_card(data, {}))
@@ -238,7 +245,8 @@ def snapper_report(request, scope, snap_id=None):
     if selected_snap is not None:
         state = _dict(selected_snap.state)
         components = [
-            _present_snap_component(name, payload)
+            _present_snap_component(name, payload, scope=scope,
+                                    reference_time=selected_snap.snap_time)
             for name, payload in sorted(
                 _dict(state.get('components')).items())
         ]
@@ -496,6 +504,21 @@ def _cut_panda_card(data, previous_data):
             'type_states': type_states}
 
 
+def _activity_rows(reference_time):
+    """Datataking rows from the run-record truth at one instant — the
+    single source both the cut card and the recorded-state card use."""
+    from .snapper_series import namespace_activity_at
+    return [
+        {'namespace': namespace,
+         'chip': _cut_chip(info['phase']),
+         'run_number': info['run_number'],
+         'phase': info['workflow'],
+         'since': (info['since'].isoformat() if info['since'] else '')}
+        for namespace, info in sorted(
+            namespace_activity_at(reference_time).items())
+    ]
+
+
 def _datataking_rows(data):
     """Namespace rows shared by the cut card and the recorded-state card."""
     return [
@@ -587,20 +610,9 @@ def _cut_components(snap, previous_snap, scope, requested_at=None):
             # source the activity lanes draw. The snap's recorded entry
             # stays in the card's audit document.
             card['kind'] = 'datataking'
-            if requested_at is not None:
-                from .snapper_series import namespace_activity_at
-                card['namespaces'] = [
-                    {'namespace': namespace,
-                     'chip': _cut_chip(info['phase']),
-                     'run_number': info['run_number'],
-                     'phase': info['workflow'],
-                     'since': (info['since'].isoformat()
-                               if info['since'] else '')}
-                    for namespace, info in sorted(
-                        namespace_activity_at(requested_at).items())
-                ]
-            else:
-                card['namespaces'] = _datataking_rows(data)
+            card['namespaces'] = (_activity_rows(requested_at)
+                                  if requested_at is not None
+                                  else _datataking_rows(data))
         elif name == 'panda':
             card['kind'] = 'panda'
             card.update(_cut_panda_card(data, previous_data))
