@@ -232,36 +232,83 @@
       const label = laneLabelById[laneId];
       const isChild = Boolean(lane.parent);
       const hoverXs = [], hoverTexts = [];
-      lane.points.forEach(function (point, i) {
-        const t0 = Date.parse(point.t);
-        const t1 = (i + 1 < lane.points.length)
-            ? Date.parse(lane.points[i + 1].t) : Date.parse(data.end);
-        const color = stateColor(point.value);
-        seenStates.add(point.value.split('/')[0]);
-        traces.push({
-          type: 'bar', orientation: 'h',
-          y: [label], x: [Math.max(t1 - t0, 1)],
-          base: [point.t],
-          width: isChild ? 0.38 : 0.55,
-          marker: point.active
-              ? {color: color, line: {color: '#ffffff', width: 1}}
-              : {color: pastel(color), line: {color: color, width: 1.5}},
-          yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
-        });
+      const openEndXs = [], openEndColors = [];
+
+      function addHoverSpan(t0, t1, text) {
+        // Always at least one hover point: a zero-length (truncated)
+        // period must still explain itself at the cursor.
+        hoverXs.push(toNaive(t0));
+        hoverTexts.push(text);
         const step = Math.max((t1 - t0) / 40, 30000);
-        const text = escapeHtml(lane.label) + ': ' + escapeHtml(point.hover);
-        for (let t = t0; t < t1; t += step) {
+        for (let t = t0 + step; t < t1; t += step) {
           hoverXs.push(toNaive(t));
           hoverTexts.push(text);
         }
-        // Pin a marker at the segment's last instant: the nearest-marker
+        // Pin a marker at the span's last instant: the nearest-marker
         // rule then flips the hover exactly at the visible edge instead
         // of half a step early.
         if (t1 - t0 > 1500) {
           hoverXs.push(toNaive(t1 - 500));
           hoverTexts.push(text);
         }
-      });
+      }
+
+      if (lane.segments) {
+        // Episodic lane: discrete run periods, solid; idle time is
+        // blank track. An open-ended (dangling) period gets a marker
+        // at its truncation point instead of painting false state.
+        lane.segments.forEach(function (seg) {
+          const t0 = Date.parse(seg.t0), t1 = Date.parse(seg.t1);
+          const color = stateColor(seg.value);
+          seenStates.add(seg.value.split('/')[0]);
+          traces.push({
+            type: 'bar', orientation: 'h',
+            y: [label], x: [Math.max(t1 - t0, 1)],
+            base: [seg.t0],
+            width: 0.55,
+            marker: {color: color, line: {color: '#ffffff', width: 1}},
+            yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
+          });
+          addHoverSpan(t0, t1,
+                       escapeHtml(lane.label) + ': ' + escapeHtml(seg.hover));
+          if (seg.open_end) {
+            openEndXs.push(seg.t1);
+            openEndColors.push(color);
+          }
+        });
+        if (openEndXs.length) {
+          traces.push({
+            x: openEndXs, y: openEndXs.map(() => label),
+            mode: 'markers',
+            marker: {symbol: 'triangle-right', size: 11,
+                     color: openEndColors,
+                     line: {color: '#ffffff', width: 1}},
+            yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
+          });
+        }
+      } else {
+        // Continuous lane (health and its checks): the state always
+        // exists, so segments run edge to edge.
+        lane.points.forEach(function (point, i) {
+          const t0 = Date.parse(point.t);
+          const t1 = (i + 1 < lane.points.length)
+              ? Date.parse(lane.points[i + 1].t) : Date.parse(data.end);
+          const color = stateColor(point.value);
+          seenStates.add(point.value.split('/')[0]);
+          traces.push({
+            type: 'bar', orientation: 'h',
+            y: [label], x: [Math.max(t1 - t0, 1)],
+            base: [point.t],
+            width: isChild ? 0.38 : 0.55,
+            marker: point.active
+                ? {color: color, line: {color: '#ffffff', width: 1}}
+                : {color: pastel(color), line: {color: color, width: 1.5}},
+            yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
+          });
+          addHoverSpan(t0, t1,
+                       escapeHtml(lane.label) + ': ' + escapeHtml(point.hover));
+        });
+      }
       traces.push({
         x: hoverXs, y: hoverXs.map(() => label),
         mode: 'markers', marker: {size: 18, color: 'rgba(0,0,0,0)'},
@@ -270,24 +317,6 @@
         hovertemplate: '%{text}<extra></extra>',
         hoverlabel: {font: {size: 14}},
       });
-      // Run-start pips: a solid tick at each genuine segment start, so a
-      // burst of new runs reads as events even when the state value never
-      // changes. The carried boundary state at the window edge gets none.
-      const pipXs = [], pipColors = [];
-      lane.points.forEach(function (point, i) {
-        if (i === 0 && point.t === data.start) return;
-        pipXs.push(point.t);
-        pipColors.push(stateColor(point.value));
-      });
-      if (pipXs.length) {
-        traces.push({
-          x: pipXs, y: pipXs.map(() => label),
-          mode: 'markers',
-          marker: {symbol: 'line-ns', size: 16,
-                   line: {width: 3, color: pipColors}},
-          yaxis: 'y2', showlegend: false, hoverinfo: 'skip',
-        });
-      }
     });
 
     // Curves: stepped lines with fixed colors shared by the tick boxes,

@@ -85,13 +85,10 @@ def _curve_values(scope, state):
 
 
 def _lane_entries(scope, state):
-    """Categorical lane entries for one snap, keyed by lane id.
-
-    Each entry carries the band value (drives color), a hover text with
-    the detail behind the color, an ``active`` flag (an inactive lane
-    segment renders hollow), and a dedup ``key`` — a namespace's key
-    includes its run number, so a new run starts a new segment even when
-    the state value repeats (daily runs stay visible).
+    """Continuous lane entries for one snap (health and its checks),
+    keyed by lane id: the band value (drives color), hover text, and a
+    dedup ``key``. Datataking namespaces are episodic, not continuous —
+    they are assembled into discrete run periods by the series builder.
     """
     entries = {}
     health = _component_data(state, 'health')
@@ -121,31 +118,104 @@ def _lane_entries(scope, state):
             'hover': f'{status} — {summary}' if summary else status,
             'active': True, 'key': f'{status}|{summary}',
             'parent': 'health'}
-    if scope == 'testbed':
-        datataking = _component_data(state, 'datataking')
-        for namespace, ns_state in sorted(
-                (datataking.get('namespaces') or {}).items()):
-            ns_state = ns_state if isinstance(ns_state, dict) else {}
-            value = str(ns_state.get('state') or 'unknown')
-            substate = ns_state.get('substate')
-            if substate:
-                value = f'{value}/{substate}'
-            run = ns_state.get('run_number')
-            phase = str(ns_state.get('phase') or '')
-            transition = str(ns_state.get('last_transition_at') or '')
-            hover = f'run {run} — {phase}/{value}'
-            if transition:
-                parsed = parse_datetime(transition)
-                hover += ' since ' + (
-                    parsed.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
-                    if parsed else transition)
-            entries[f'ns:{namespace}'] = {
-                'value': value, 'hover': hover,
-                # 'run' is the stamped E0-E1 state; 'running' is the
-                # fast-processing agent's legacy value.
-                'active': str(ns_state.get('state') or '') in ('run', 'running'),
-                'key': f'{run}|{value}'}
     return entries
+
+
+# Terminal datataking states end a run period; the terminal value itself
+# is never drawn — the bar simply stops.
+_TERMINAL_RUN_STATES = ('ended', 'expired', 'abandoned')
+
+
+def _datataking_observations(state):
+    """Per-namespace run observation for one snap."""
+    out = {}
+    datataking = _component_data(state, 'datataking')
+    for namespace, ns_state in sorted(
+            (datataking.get('namespaces') or {}).items()):
+        ns = ns_state if isinstance(ns_state, dict) else {}
+        value = str(ns.get('state') or 'unknown')
+        substate = ns.get('substate')
+        if substate:
+            value = f'{value}/{substate}'
+        transition = str(ns.get('last_transition_at') or '')
+        hover_since = ''
+        if transition:
+            parsed = parse_datetime(transition)
+            hover_since = ' since ' + (
+                parsed.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')
+                if parsed else transition)
+        out[namespace] = {
+            'value': value,
+            'run': ns.get('run_number'),
+            'hover': (f"run {ns.get('run_number')} — "
+                      f"{ns.get('phase') or ''}/{value}{hover_since}"),
+            'terminal': str(ns.get('state') or '') in _TERMINAL_RUN_STATES,
+        }
+    return out
+
+
+class _RunEpisodes:
+    """Assemble one namespace lane as discrete run periods.
+
+    A bar spans a run from its first observation to its terminal
+    transition; idle time between runs is blank, never painted. A run
+    that dangles — no terminal state and no transition for longer than
+    the threshold — is truncated at its last observed change and marked
+    open-ended, so stale bookkeeping cannot paint hours of false state.
+    """
+
+    def __init__(self, label, dangle_seconds):
+        self.label = label
+        self.dangle_seconds = dangle_seconds
+        self.segments = []
+        self.open = None    # {'run', 'value', 'hover', 'seg_start',
+                            #  'last_change'} — times as (dt, naive) pairs
+
+    def _flush_segment(self, end_pair, open_end=False):
+        hover = self.open['hover']
+        if open_end:
+            hover += ' · dangling: no further transitions recorded'
+        self.segments.append({
+            't0': self.open['seg_start'][1], 't1': end_pair[1],
+            'value': self.open['value'], 'hover': hover,
+            'open_end': open_end})
+
+    def _close(self, at_pair, dangling):
+        """End the open episode: at its last change when it dangled, at
+        the given time otherwise."""
+        if dangling:
+            self._flush_segment(self.open['last_change'], open_end=True)
+        else:
+            self._flush_segment(at_pair)
+        self.open = None
+
+    def observe(self, time_pair, obs):
+        if self.open is not None and obs['run'] != self.open['run']:
+            # A new run appeared while the old one never terminated.
+            self._close(time_pair, dangling=True)
+        if obs['terminal']:
+            if self.open is not None:
+                dangling = ((time_pair[0] - self.open['last_change'][0])
+                            .total_seconds() > self.dangle_seconds)
+                self._close(time_pair, dangling)
+            return
+        if self.open is None:
+            self.open = {'run': obs['run'], 'value': obs['value'],
+                         'hover': obs['hover'], 'seg_start': time_pair,
+                         'last_change': time_pair}
+            return
+        if obs['value'] != self.open['value']:
+            self._flush_segment(time_pair)
+            self.open.update({'value': obs['value'], 'hover': obs['hover'],
+                              'seg_start': time_pair,
+                              'last_change': time_pair})
+
+    def finish(self, end_pair):
+        if self.open is not None:
+            dangling = ((end_pair[0] - self.open['last_change'][0])
+                        .total_seconds() > self.dangle_seconds)
+            self._close(end_pair, dangling)
+        return self.segments
 
 
 def _curve_label(curve_id):
@@ -178,6 +248,8 @@ def _curve_label(curve_id):
 
 def observatory_series(scope, start, end):
     """Curves, lanes, and gap spans for one scope and window."""
+    from ..models import SysConfig
+
     rows = list(
         SystemSnap.objects
         .filter(scope=scope, snap_time__gte=start, snap_time__lte=end)
@@ -191,8 +263,11 @@ def observatory_series(scope, start, end):
         .values('snap_time', 'state')
         .first())
 
+    dangle_seconds = 3600.0 * float(
+        SysConfig.get_setting('snapper_lane_dangle_hours', 12))
     curves = {}
     lanes = {}
+    episodes = {}
     gaps = []
 
     def add_curve_point(curve_id, time_iso, value):
@@ -201,12 +276,7 @@ def observatory_series(scope, start, end):
         curve['points'].append([time_iso, value])
 
     def add_lane_point(lane_id, time_iso, entry):
-        if lane_id.startswith('ns:'):
-            label = lane_id[3:]
-        elif lane_id.startswith('check:'):
-            label = lane_id[6:]
-        else:
-            label = lane_id
+        label = lane_id[6:] if lane_id.startswith('check:') else lane_id
         lane = lanes.setdefault(lane_id, {'label': label, 'points': []})
         if entry.get('parent'):
             lane['parent'] = entry['parent']
@@ -217,26 +287,36 @@ def observatory_series(scope, start, end):
                        'hover': entry['hover'], 'active': entry['active'],
                        'key': entry['key']})
 
+    def observe_datataking(time_pair, state):
+        if scope != 'testbed':
+            return
+        for namespace, obs in _datataking_observations(state).items():
+            lane = episodes.setdefault(
+                namespace, _RunEpisodes(namespace, dangle_seconds))
+            lane.observe(time_pair, obs)
+
     if boundary:
-        boundary_naive = _et_naive(start)
+        start_pair = (start, _et_naive(start))
         for curve_id, value in _curve_values(
                 scope, boundary['state']).items():
-            add_curve_point(curve_id, boundary_naive, value)
+            add_curve_point(curve_id, start_pair[1], value)
         for lane_id, entry in _lane_entries(
                 scope, boundary['state']).items():
-            add_lane_point(lane_id, boundary_naive, entry)
+            add_lane_point(lane_id, start_pair[1], entry)
+        observe_datataking(start_pair, boundary['state'])
 
     for row in rows:
-        time_naive = _et_naive(row['snap_time'])
+        time_pair = (row['snap_time'], _et_naive(row['snap_time']))
         for curve_id, value in _curve_values(scope, row['state']).items():
-            add_curve_point(curve_id, time_naive, value)
+            add_curve_point(curve_id, time_pair[1], value)
         for lane_id, entry in _lane_entries(scope, row['state']).items():
-            add_lane_point(lane_id, time_naive, entry)
+            add_lane_point(lane_id, time_pair[1], entry)
+        observe_datataking(time_pair, row['state'])
         if row['recovered_gap_started_at'] is not None:
             gaps.append([_et_naive(row['recovered_gap_started_at']),
-                         time_naive, 'gap'])
+                         time_pair[1], 'gap'])
         elif row['recovered_gap_start_unknown']:
-            gaps.append([None, time_naive, 'unknown start'])
+            gaps.append([None, time_pair[1], 'unknown start'])
 
     # A check sub-lane earns its place only with a non-ok story in the
     # window; an always-ok check would add a row and say nothing.
@@ -245,6 +325,14 @@ def observatory_series(scope, start, end):
                     and all(point['value'] in ('ok', 'healthy')
                             for point in lane['points'])]:
         del lanes[lane_id]
+
+    # Episodic namespace lanes: discrete run periods, blank when idle.
+    # A namespace with no activity in the window keeps its lane — a
+    # blank grey track says "present and inactive", absence says nothing.
+    end_pair = (end, _et_naive(end))
+    for namespace, builder in sorted(episodes.items()):
+        lanes[f'ns:{namespace}'] = {'label': namespace,
+                                    'segments': builder.finish(end_pair)}
 
     return {
         'scope': scope,
