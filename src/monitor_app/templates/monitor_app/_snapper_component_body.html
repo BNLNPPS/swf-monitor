@@ -1,0 +1,88 @@
+{% load swf_fmt %}
+{# One component card body, shared by the Time history cut and the      #}
+{# recorded-state section: every entity reference is a link to its      #}
+{# authoritative surface, and detail is human-usable — the raw document #}
+{# stays behind each surface's explicitly labeled audit foldout.        #}
+{# Context: `card` (kind + fields); deltas render when present.         #}
+<style>
+.snapper-chip { display:inline-block; padding:0 .55em; border-radius:.5em;
+                color:#fff; font-weight:600; }
+.snapper-stat { text-align:center; }
+.snapper-stat .snapper-stat-value { font-size:1.5em; font-weight:600; }
+/* Deltas are movement indicators, not verdicts: neutral color — a drop
+   in a count is not "bad" and red would say it is. */
+.snapper-delta-up, .snapper-delta-down { color:#5d6b7a; font-weight:600; }
+</style>
+
+{% if card.kind == 'datataking' %}
+  <table class="table table-sm mb-1 w-auto">
+    {% for ns in card.namespaces %}
+    <tr>
+      <td><strong>{{ ns.namespace }}</strong></td>
+      <td><span class="snapper-chip" style="background:{{ ns.chip.color }}">{{ ns.chip.value }}</span></td>
+      <td>{% if ns.run_number %}<a href="{% url 'monitor_app:run_detail' run_number=ns.run_number %}">run {{ ns.run_number }}</a>{% else %}—{% endif %}</td>
+      <td>{{ ns.phase }}</td>
+      <td class="text-muted small">since {{ ns.since|fmt_dt }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+{% elif card.kind == 'panda' %}
+  <div class="d-flex flex-wrap gap-4 mb-2">
+    {% for stat in card.headline %}
+    <div class="snapper-stat">
+      <div class="snapper-stat-value">{{ stat.value }}
+        {% if stat.delta %}<span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %} fs-6">{{ stat.delta }}</span>{% endif %}
+      </div>
+      <div class="text-muted">
+        {% if stat.label == 'running jobs' or stat.label == 'running cores' %}<a href="{% url 'monitor_app:panda_jobs_list' %}?status=running">{{ stat.label }}</a>
+        {% elif stat.label == 'in-flight jobs' %}<a href="{% url 'monitor_app:panda_jobs_list' %}">{{ stat.label }}</a>
+        {% elif stat.label == 'queued (activated)' %}<a href="{% url 'monitor_app:panda_jobs_list' %}?status=activated">{{ stat.label }}</a>
+        {% elif stat.label == 'in-flight tasks' %}<a href="{% url 'monitor_app:panda_tasks_list' %}">{{ stat.label }}</a>
+        {% else %}{{ stat.label }}{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if previous_age_text %}
+  <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
+  {% endif %}
+  {% if card.types %}
+  <div class="mb-1"><strong>In flight by type:</strong>
+    {% for type_name, count in card.types %}<a href="{% url 'monitor_app:panda_tasks_list' %}?processingtype={{ type_name|urlencode }}">{{ type_name }}</a> {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  {% if card.type_states %}
+  <div class="mb-1 text-muted">
+    {% for entry in card.type_states %}{{ entry.label }} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
+{% elif card.kind == 'workflow' %}
+  <div class="d-flex flex-wrap gap-4 mb-2">
+    {% for stat in card.headline %}
+    <div class="snapper-stat">
+      <div class="snapper-stat-value">{{ stat.value }}
+        {% if stat.delta %}<span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %} fs-6">{{ stat.delta }}</span>{% endif %}
+      </div>
+      <div class="text-muted">
+        {% if 'executions' in stat.label %}<a href="{% url 'monitor_app:workflow_executions_list' %}">{{ stat.label }}</a>
+        {% else %}<a href="{% url 'monitor_app:panda_tasks_list' %}?processingtype={{ card.stf_processing_type|urlencode }}">{{ stat.label }}</a>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if previous_age_text %}
+  <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
+  {% endif %}
+  {% if card.by_workflow %}
+  <div class="mb-1"><strong>Started (24h) by workflow:</strong>
+    {% for name, count in card.by_workflow %}<a href="{% url 'monitor_app:workflow_executions_list' %}">{{ name }}</a> {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  {% if card.site_states %}
+  <div class="mb-1"><strong>STF tasks by site · status:</strong>
+    {% for entry in card.site_states %}<a href="{% url 'monitor_app:panda_tasks_list' %}?processingtype={{ card.stf_processing_type|urlencode }}&status={{ entry.status|urlencode }}">{{ entry.site }} · {{ entry.status }}</a> {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+{% endif %}

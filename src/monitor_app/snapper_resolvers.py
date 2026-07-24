@@ -18,6 +18,9 @@ RESOLVER_MAP = {
         'mcp_tools': ['swf_get_system_state', 'swf_list_runs'],
         'notes': ('Exact E0-E1 datataking transitions; filter by the '
                   'run_number carried in the datataking lane hover.'),
+        # A human reader lands on a page, never a REST document.
+        'page': 'monitor_app:runs_list',
+        'page_label': 'Runs and their transitions',
     },
     'swf-system-status-history': {
         'rest': 'monitor_app:system-status-history',
@@ -25,6 +28,8 @@ RESOLVER_MAP = {
         'mcp_tools': [],
         'notes': ('Append-only health observations behind the assessed '
                   'health component.'),
+        'page': 'monitor_app:system_status',
+        'page_label': 'System health checks',
     },
     'swf-panda-activity-history': {
         'rest': 'monitor_app:panda-api-tasks-list',
@@ -33,6 +38,8 @@ RESOLVER_MAP = {
                       'panda_error_summary', 'panda_study_job'],
         'notes': ('Authoritative PanDA job and task records; event time '
                   'is modificationtime.'),
+        'page': 'monitor_app:panda_tasks_list',
+        'page_label': 'PanDA tasks and jobs',
     },
 }
 
@@ -59,5 +66,12 @@ def annotate_references(references):
                 'mcp_tools': mapping['mcp_tools'],
                 'notes': mapping['notes'],
             }
+            if mapping.get('page'):
+                try:
+                    entry['page_url'] = reverse(mapping['page'])
+                    entry['page_label'] = mapping.get(
+                        'page_label') or entry.get('component', '')
+                except NoReverseMatch:
+                    pass
         annotated.append(entry)
     return annotated

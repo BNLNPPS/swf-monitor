@@ -112,6 +112,19 @@ def _present_snap_component(name, payload):
             'non_ok': [c for c in checks
                        if c['status'] not in ('ok', 'healthy')],
         }
+    # Known components render as the same structured card the cut uses
+    # (no deltas — there is no previous snap in this presentation); only
+    # a component without a known rendering falls back to the quantity
+    # table.
+    card = {'kind': None}
+    if name == 'datataking':
+        card = {'kind': 'datataking', 'namespaces': _datataking_rows(data)}
+    elif name == 'panda':
+        card = {'kind': 'panda'}
+        card.update(_cut_panda_card(data, {}))
+    elif name == 'workflow':
+        card = {'kind': 'workflow'}
+        card.update(_cut_workflow_card(data, {}))
     return {
         'name': name,
         'title': registration.get('title') or name,
@@ -123,6 +136,7 @@ def _present_snap_component(name, payload):
         'accepted_at': payload.get('accepted_at'),
         'publisher_identity': payload.get('publisher_identity', ''),
         'health': health,
+        'card': card,
         'quantities': _quantity_values(registration, data),
         'payload_json': _json(payload),
     }
@@ -480,6 +494,59 @@ def _cut_panda_card(data, previous_data):
             'type_states': type_states}
 
 
+def _datataking_rows(data):
+    """Namespace rows shared by the cut card and the recorded-state card."""
+    return [
+        {'namespace': namespace,
+         'chip': _cut_chip(
+             f"{ns.get('state')}"
+             + (f"/{ns.get('substate')}" if ns.get('substate') else '')),
+         'run_number': ns.get('run_number'),
+         'phase': ns.get('phase'),
+         'since': ns.get('last_transition_at')}
+        for namespace, ns in sorted(_dict(data.get('namespaces')).items())
+        for ns in [_dict(ns)]
+    ]
+
+
+def _cut_workflow_card(data, previous_data):
+    """The workflow component as usable detail: execution and STF-task
+    activity with links into the workflow and PanDA surfaces — never a
+    bare document."""
+    from ..snapper_workflow import STF_PROCESSING_TYPE
+
+    executions = _dict(data.get('executions'))
+    prev_exec = _dict(previous_data.get('executions'))
+    stf = _dict(data.get('stf_tasks'))
+    prev_stf = _dict(previous_data.get('stf_tasks'))
+
+    def stat(label, value, previous):
+        return {'label': label,
+                'value': value if value is not None else '—',
+                'delta': _cut_delta(value, previous)}
+
+    headline = [
+        stat('executions running', executions.get('active'),
+             prev_exec.get('active')),
+        stat('executions started (24h)', executions.get('started_24h'),
+             prev_exec.get('started_24h')),
+        stat('STF tasks in flight', stf.get('in_flight_total'),
+             prev_stf.get('in_flight_total')),
+    ]
+    by_workflow = sorted(
+        _dict(executions.get('by_workflow')).items(),
+        key=lambda item: -item[1])
+    site_states = []
+    for key, count in sorted(_dict(stf.get('by_site_status')).items()):
+        site, _, status = str(key).partition('/')
+        previous = _dict(prev_stf.get('by_site_status')).get(key)
+        site_states.append({'site': site, 'status': status, 'value': count,
+                            'delta': _cut_delta(count, previous)})
+    return {'headline': headline, 'by_workflow': by_workflow,
+            'site_states': site_states,
+            'stf_processing_type': STF_PROCESSING_TYPE}
+
+
 def _cut_components(snap, previous_snap, scope):
     state = _dict(snap.state)
     previous_state = _dict(previous_snap.state) if previous_snap else {}
@@ -514,21 +581,13 @@ def _cut_components(snap, previous_snap, scope):
             ]
         elif name == 'datataking':
             card['kind'] = 'datataking'
-            card['namespaces'] = [
-                {'namespace': namespace,
-                 'chip': _cut_chip(
-                     f"{ns.get('state')}"
-                     + (f"/{ns.get('substate')}" if ns.get('substate') else '')),
-                 'run_number': ns.get('run_number'),
-                 'phase': ns.get('phase'),
-                 'since': ns.get('last_transition_at')}
-                for namespace, ns in sorted(
-                    _dict(data.get('namespaces')).items())
-                for ns in [_dict(ns)]
-            ]
+            card['namespaces'] = _datataking_rows(data)
         elif name == 'panda':
             card['kind'] = 'panda'
             card.update(_cut_panda_card(data, previous_data))
+        elif name == 'workflow':
+            card['kind'] = 'workflow'
+            card.update(_cut_workflow_card(data, previous_data))
         else:
             card['kind'] = 'generic'
         cards.append(card)
