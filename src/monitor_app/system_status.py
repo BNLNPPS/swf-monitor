@@ -7,6 +7,7 @@ import socket
 import ssl
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
@@ -413,9 +414,14 @@ def _activemq_broker():
     data['handshake_drops_24h'] = drops
 
     # Broker internals via the console's Jolokia endpoint. Pattern-form
-    # POST reads avoid hardcoding the broker's configured name.
+    # POST reads avoid hardcoding the broker's configured name. The
+    # console URL must say "localhost", not 127.0.0.1: Jolokia's strict
+    # CORS policy (jolokia-access.xml) admits only *://localhost*
+    # origins, and the Origin header must match the request host.
     console = os.environ.get(
-        'ACTIVEMQ_CONSOLE_URL', 'http://127.0.0.1:8161/console').rstrip('/')
+        'ACTIVEMQ_CONSOLE_URL', 'http://localhost:8161/console').rstrip('/')
+    console_parts = urllib.parse.urlsplit(console)
+    origin = f'{console_parts.scheme}://{console_parts.netloc}'
     auth = base64.b64encode(
         f"{os.environ.get('ACTIVEMQ_USER', '')}:"
         f"{os.environ.get('ACTIVEMQ_PASSWORD', '')}".encode()).decode()
@@ -427,12 +433,13 @@ def _activemq_broker():
                              'attribute': attributes}).encode(),
             headers={'Content-Type': 'application/json',
                      'Authorization': f'Basic {auth}',
-                     'Origin': 'http://127.0.0.1:8161'})
+                     'Origin': origin})
         with urllib.request.urlopen(req, timeout=8) as resp:
             payload = json.load(resp)
         if payload.get('status') != 200:
             raise RuntimeError(
-                f"jolokia status {payload.get('status')} for {mbean}")
+                f"jolokia {payload.get('status')} for {mbean}: "
+                f"{str(payload.get('error') or '')[:120]}")
         return payload.get('value') or {}
 
     def first_pattern_value(value):
