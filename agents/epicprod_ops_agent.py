@@ -662,10 +662,18 @@ class EpicProdOpsAgent(BaseAgent):
                          level=logging.INFO if ok else logging.ERROR)
 
     def _handle_refresh_system_status(self, m):
-        """Refresh cached system status rows through the shared doer."""
+        """Refresh cached system status rows through the shared doer.
+
+        The dedup key carries the selection: a targeted single-check
+        retry must never be swallowed because the periodic full refresh
+        happens to be running."""
+        selected = m.get("selected") or m.get("only") or []
+        if isinstance(selected, str):
+            selected = [selected]
+        dedup = ",".join(sorted(str(name) for name in selected)) or "all"
         self.run_in_background(
             self._do_refresh_system_status, m,
-            dedup_key="refresh_system_status",
+            dedup_key=f"refresh_system_status:{dedup}",
             label="refresh_system_status")
 
     def _do_refresh_system_status(self, m):

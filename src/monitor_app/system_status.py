@@ -512,6 +512,15 @@ COLLECTORS = {
 }
 
 
+# Checks where a human-triggered re-probe is meaningful: the collector
+# reads recoverable external truth, so a retry can genuinely clear a red.
+# Freshness bookkeeping (campaign-assessments moves only when an
+# assessment registers) and informational rows (bot-usage) are excluded —
+# re-checking cannot change them.
+RETRYABLE_CHECKS = frozenset(COLLECTORS) - {'campaign-assessments',
+                                            'bot-usage'}
+
+
 def _should_append_history(old, new):
     if old is None:
         return True
