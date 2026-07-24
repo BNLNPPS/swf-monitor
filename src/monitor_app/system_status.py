@@ -1,12 +1,14 @@
 """Cached system status collection for ePIC production operations."""
 
+import base64
 import json
 import os
 import socket
+import ssl
 import subprocess
 import urllib.error
 import urllib.request
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
@@ -358,8 +360,135 @@ def _snapper_scheduler(scope):
         f'latest outcome is {outcome}.', data)
 
 
+def _activemq_broker():
+    """The message broker every agent, bot, and fast-processing worker
+    depends on. Three evidence sources: STOMP-TLS reachability measured as
+    a real timed handshake (the exact operation the acceptor's handshake
+    limit cuts for clients), handshake-drop volume from the broker log,
+    and broker internals over the console's Jolokia endpoint where the
+    console role configuration admits us — until then that source reports
+    itself unavailable rather than failing the collector."""
+    heap_warn = float(SysConfig.get_setting('activemq_heap_warn_pct', 90))
+    drops_warn = int(SysConfig.get_setting('activemq_drops_warn_24h', 200))
+
+    host = os.environ.get('ACTIVEMQ_HOST', 'localhost')
+    port = int(os.environ.get('ACTIVEMQ_PORT', '61612'))
+    use_ssl = os.environ.get('ACTIVEMQ_USE_SSL', 'False').lower() == 'true'
+    data = {'host': host, 'port': port, 'ssl': use_ssl}
+    problems = []
+
+    started = timezone.now()
+    try:
+        with socket.create_connection((host, port), timeout=12) as sock:
+            if use_ssl:
+                ctx = ssl.create_default_context(
+                    cafile=os.environ.get('ACTIVEMQ_SSL_CA_CERTS') or None)
+                with ctx.wrap_socket(sock, server_hostname=host):
+                    pass
+        data['handshake_ms'] = int(
+            (timezone.now() - started).total_seconds() * 1000)
+    except Exception as exc:
+        data['error'] = str(exc)
+        return _status('activemq-broker', 'services', 'error',
+                       f'broker unreachable at {host}:{port}: {exc}', data)
+
+    # Handshake drops over the trailing 24h from the broker log (Artemis
+    # AMQ224088, world-readable): today's file plus yesterday's rollover.
+    # Timestamps in the log are machine-local, so compare in local time.
+    log_path = os.environ.get('ACTIVEMQ_BROKER_LOG',
+                              '/var/lib/swfbroker/log/artemis.log')
+    cutoff = datetime.now() - timedelta(hours=24)
+    cutoff_s = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+    drops = 0
+    for path in (f'{log_path}.{cutoff.date().isoformat()}', log_path):
+        try:
+            with open(path, encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if 'AMQ224088' in line and line[:19] >= cutoff_s:
+                        drops += 1
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            problems.append(f'broker log unreadable: {exc}')
+    data['handshake_drops_24h'] = drops
+
+    # Broker internals via the console's Jolokia endpoint. Pattern-form
+    # POST reads avoid hardcoding the broker's configured name.
+    console = os.environ.get(
+        'ACTIVEMQ_CONSOLE_URL', 'http://127.0.0.1:8161/console').rstrip('/')
+    auth = base64.b64encode(
+        f"{os.environ.get('ACTIVEMQ_USER', '')}:"
+        f"{os.environ.get('ACTIVEMQ_PASSWORD', '')}".encode()).decode()
+
+    def jolokia(mbean, attributes):
+        req = urllib.request.Request(
+            f'{console}/jolokia/',
+            data=json.dumps({'type': 'read', 'mbean': mbean,
+                             'attribute': attributes}).encode(),
+            headers={'Content-Type': 'application/json',
+                     'Authorization': f'Basic {auth}',
+                     'Origin': 'http://127.0.0.1:8161'})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.load(resp)
+        if payload.get('status') != 200:
+            raise RuntimeError(
+                f"jolokia status {payload.get('status')} for {mbean}")
+        return payload.get('value') or {}
+
+    def first_pattern_value(value):
+        for entry in value.values():
+            if isinstance(entry, dict):
+                return entry
+        return {}
+
+    console_ok = False
+    heap_pct = connections = messages = dlq = None
+    try:
+        heap = jolokia('java.lang:type=Memory',
+                       ['HeapMemoryUsage'])['HeapMemoryUsage']
+        heap_pct = round(100.0 * heap['used'] / heap['max'], 1)
+        broker = first_pattern_value(jolokia(
+            'org.apache.activemq.artemis:broker=*',
+            ['ConnectionCount', 'TotalMessageCount']))
+        connections = broker.get('ConnectionCount')
+        messages = broker.get('TotalMessageCount')
+        dlq_reply = jolokia(
+            'org.apache.activemq.artemis:broker=*,component=addresses,'
+            'address="DLQ",subcomponent=queues,*', ['MessageCount'])
+        dlq = sum(int((entry or {}).get('MessageCount') or 0)
+                  for entry in dlq_reply.values() if isinstance(entry, dict))
+        console_ok = True
+        data.update({'heap_pct': heap_pct, 'heap': heap,
+                     'connections': connections, 'messages': messages,
+                     'dlq_depth': dlq})
+    except Exception as exc:
+        problems.append(f'console unavailable: {exc}')
+    data['console_available'] = console_ok
+    if problems:
+        data['problems'] = problems
+
+    state = 'ok'
+    parts = [f"broker up ({data['handshake_ms']} ms handshake)"]
+    if console_ok:
+        parts.append(f'{connections} connections')
+        parts.append(f'heap {heap_pct:.0f}%')
+        if heap_pct >= heap_warn:
+            state = 'warning'
+        parts.append('DLQ empty' if not dlq else f'DLQ {dlq}')
+        if dlq:
+            state = 'warning'
+    else:
+        parts.append('console unavailable')
+    parts.append(f'{drops} handshake drops 24h')
+    if drops >= drops_warn:
+        state = 'warning'
+    return _status('activemq-broker', 'services', state,
+                   ' · '.join(parts), data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
+    'activemq-broker': _activemq_broker,
     'swf-panda-bot': _panda_bot,
     'campaign-assessments': _campaign_assessments,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
