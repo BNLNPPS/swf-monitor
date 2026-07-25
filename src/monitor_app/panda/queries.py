@@ -23,7 +23,7 @@ from .sql import (
     build_union_query, build_count_query,
     build_task_query, build_task_count_query,
     build_union_query_dt, build_union_count, build_union_count_by_field,
-    build_task_query_dt, build_task_count, build_task_count_by_field,
+    build_task_count, build_task_count_by_field,
     build_search_clauses,
     row_to_dict, extract_errors, like_or_eq,
 )
@@ -1910,116 +1910,64 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
     return rows, total, filtered
 
 
-def list_tasks_dt(days=7, status=None, username=None, taskname=None,
-                  processingtype=None,
-                  workinggroup=None, order_by='"jeditaskid" DESC',
-                  limit=100, offset=0, search=None):
-    """List JEDI tasks for DataTables (returns rows, total, filtered counts)."""
+def build_tasks_window(days=7, cap=5000):
+    """Build the full tasks window for the cached tasks-list product.
+
+    Every task in the days window (newest first, capped) with the batch
+    job/file aggregates and computed fields. One aggregation pass serves
+    every sort, filter, and page of the tasks list from the cached
+    product; the retired per-draw LATERAL aggregation this replaces cost
+    ~2 s per aggregate-sorted draw (measured 2026-07-25, 476-task window
+    over 465k job records; this batch pass costs under a second, once
+    per TTL).
+
+    Raises on database failure so the cached-product builder surfaces
+    the error instead of storing an empty window.
+    """
     cutoff = timezone.now() - timedelta(days=days)
     where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
-
     _stale = _stale_task_filter()
     where.append(_stale['clause'])
     params.extend(_stale['params'])
 
-    if status:
-        where.append('"status" = %s')
-        params.append(status)
-    if username:
-        clause, vals = _effective_username_filter('username', username)
-        where.append(clause)
-        params.extend(vals)
-    if taskname:
-        # Substring match by default: task names are long composed strings
-        # and a caller-supplied fragment (e.g. a campaign name) should hit.
-        # Caller-supplied % wildcards are honored as given.
-        where.append('"taskname" LIKE %s')
-        params.append(taskname if '%' in taskname else f'%{taskname}%')
-    if processingtype:
-        if processingtype == '__blank__':
-            where.append('("processingtype" IS NULL OR "processingtype" = %s)')
-            params.append('')
-        else:
-            clause, val = like_or_eq('processingtype', processingtype)
-            where.append(clause)
-            params.append(val)
-    if workinggroup:
-        where.append('"workinggroup" = %s')
-        params.append(workinggroup)
+    field_list = ', '.join(f'"{f}"' for f in TASK_LIST_FIELDS)
+    sql = f"""
+        SELECT {field_list}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {' AND '.join(where)}
+        ORDER BY "jeditaskid" DESC
+        LIMIT {int(cap) + 1}
+    """
+    tasks = []
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, params)
+        for row in cursor.fetchall():
+            tasks.append(row_to_dict(row, TASK_LIST_FIELDS))
 
-    conn = connections['panda']
+    truncated = len(tasks) > cap
+    if truncated:
+        logger.warning("build_tasks_window: window exceeds cap "
+                       f"({len(tasks)} > {cap}); truncating — oldest "
+                       "tasks in the window are not in the product")
+        tasks = tasks[:cap]
 
-    # Total count
-    count_sql, count_params = build_task_count(where, params)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(count_sql, count_params)
-            total = cursor.fetchone()[0]
-    except Exception as e:
-        logger.error(f"list_tasks_dt count failed: {e}")
-        return [], 0, 0
-
-    # Apply search filter
-    filtered_where = list(where)
-    filtered_params = list(params)
-    if search:
-        search_clause, search_params = build_search_clauses(TASK_SEARCH_FIELDS, search)
-        filtered_where.append(search_clause)
-        filtered_params.extend(search_params)
-
-    # Filtered count
-    if search:
-        fcount_sql, fcount_params = build_task_count(filtered_where, filtered_params)
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(fcount_sql, fcount_params)
-                filtered = cursor.fetchone()[0]
-        except Exception as e:
-            logger.error(f"list_tasks_dt filtered count failed: {e}")
-            return [], total, 0
-    else:
-        filtered = total
-
-    # Data query
-    sql, full_params = build_task_query_dt(
-        TASK_LIST_FIELDS, filtered_where, filtered_params,
-        order_by=order_by, limit=limit, offset=offset,
-    )
-
-    rows = []
-    n_base = len(TASK_LIST_FIELDS)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(sql, full_params)
-            for row in cursor.fetchall():
-                # build_task_query_dt returns TASK_LIST_FIELDS + 10 aggregate
-                # columns (in order): nactive, nfinished, nfailed, nrunning,
-                # nretries, computed_failurerate, computed_progress,
-                # nfinalfailed, computed_finalfailurerate,
-                # avg_retries_success.
-                task = row_to_dict(row[:n_base], TASK_LIST_FIELDS)
-                task['nactive'] = row[n_base]
-                task['nfinished'] = row[n_base + 1]
-                task['nfailed'] = row[n_base + 2]
-                task['nrunning'] = row[n_base + 3]
-                task['nretries'] = row[n_base + 4]
-                fr = row[n_base + 5]
-                task['computed_failurerate'] = float(fr) if fr is not None else None
-                task['computed_progress'] = row[n_base + 6]  # already integer or None
-                task['nfinalfailed'] = row[n_base + 7]
-                ffr = row[n_base + 8]
-                task['computed_finalfailurerate'] = float(ffr) if ffr is not None else None
-                ars = row[n_base + 9]
-                task['avg_retries_success'] = float(ars) if ars is not None else None
-                rows.append(task)
-    except Exception as e:
-        logger.error(f"list_tasks_dt query failed: {e}")
-        return [], total, filtered
-
-    _apply_effective_owners(rows, 'username')
-    _apply_processing_type_display(rows)
-    return rows, total, filtered
+    zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0,
+            'nretries_finished': 0}
+    job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
+    for t in tasks:
+        c = job_counts.get(t['jeditaskid'], dict(zero))
+        t.update(c)
+        t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
+        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
+        t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
+        t['avg_retries_success'] = _compute_avg_retries(
+            c.get('nretries_finished'), c['nfinished'])
+    _apply_effective_owners(tasks, 'username')
+    _apply_processing_type_display(tasks)
+    return {'tasks': tasks, 'count': len(tasks), 'truncated': truncated,
+            'days': days}
 
 
 def job_filter_counts(days=7, status=None, username=None, site=None,

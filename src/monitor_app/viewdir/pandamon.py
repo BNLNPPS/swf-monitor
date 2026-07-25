@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from ..utils import DataTablesProcessor
 from ..panda import (
     get_activity, study_job, list_jobs,
-    list_jobs_dt, list_tasks_dt,
+    list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
     list_queues, get_queue, resource_usage,
@@ -159,26 +159,19 @@ TASK_COLUMNS = [
 
 TASK_FIELD_NAMES = [c['name'] for c in TASK_COLUMNS]
 
-TASK_ORDER_MAP = {
-    0: '"jeditaskid"', 1: '"taskname"', 2: '"status"',
-    3: '"processingtype"', 4: '"username"', 5: '"creationdate"', 6: '"modificationtime"',
-    # Aggregates surface as SELECT aliases from build_task_query_dt.
-    # Wrapped expressions in ORDER BY can't reference SELECT aliases in PG,
-    # so these stay as bare alias names; the view's order_by construction
-    # appends 'NULLS LAST' for computed_failurerate and computed_progress so
-    # tasks with no terminal jobs (rate/progress=NULL) don't surface at the
-    # top of a DESC ranking.
-    7: 'computed_progress',
-    8: 'nactive',
-    9: 'nfinished',
-    10: 'nfailed',
-    11: 'nrunning',
-    12: 'nretries',
-    13: 'avg_retries_success',
-    14: 'computed_failurerate',
-    15: 'nfinalfailed',
-    16: 'computed_finalfailurerate',
-}
+# The tasks list is served from a cached full-window product
+# (docs/CACHED_PRODUCTS.md): one batch aggregation over the whole days
+# window, built by queries.build_tasks_window, cached in swfdb and
+# reused across users and draws. Sorting, filtering, and paging happen
+# in-process over the product rows, so aggregate-column sorts cost
+# nothing at the PanDA DB (the retired per-draw LATERAL cost ~2 s per
+# aggregate sort). Each product row carries the rendered cells plus a
+# raw record keyed by TASK_FIELD_NAMES for sort/filter/search.
+TASKS_WINDOW_TTL_SECONDS = 120
+TASKS_WINDOW_CAP = 5000
+# Search parity with the retired SQL path (TASK_SEARCH_FIELDS).
+TASKS_WINDOW_SEARCH_FIELDS = ('jeditaskid', 'taskname', 'status', 'username',
+                              'processingtype', 'workinggroup', 'transpath')
 
 ERROR_COLUMNS = [
     {'name': 'error_source', 'title': 'Component', 'orderable': False},
@@ -528,87 +521,138 @@ def panda_tasks_list(request):
     return render(request, 'monitor_app/panda_tasks_list.html', context)
 
 
+def _format_task_row(task, days):
+    """Render one task's 17 display cells, ordered as TASK_COLUMNS."""
+    task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
+    tasks_by_user_url = _url_with_query('monitor_app:panda_tasks_list', days=days, username=task['username']) if task.get('username') else None
+    tasks_by_status_url = _url_with_query('monitor_app:panda_tasks_list', days=days, status=task['status']) if task.get('status') else None
+
+    # Truncate taskname for display
+    taskname_display = task.get('taskname', '') or ''
+    if len(taskname_display) > 80:
+        taskname_display = taskname_display[:77] + '...'
+
+    comp_pr = task.get('computed_progress')
+    comp_pr_str = f'{comp_pr}%' if comp_pr is not None else ''
+
+    comp_fr = task.get('computed_failurerate')
+    comp_fr_str = f'{comp_fr * 100:.1f}%' if comp_fr is not None else ''
+
+    comp_ffr = task.get('computed_finalfailurerate')
+    comp_ffr_str = f'{comp_ffr * 100:.1f}%' if comp_ffr is not None else ''
+
+    avg_rs = task.get('avg_retries_success')
+    avg_rs_str = f'{avg_rs:.2f}' if avg_rs is not None else ''
+
+    processingtype = task.get('processingtype') or ''
+    processingtype_html = escape(processingtype)
+    processingtype_display = (
+        f'<span class="badge bg-warning text-dark">{processingtype_html}</span>'
+        if 'test' in processingtype.lower()
+        else processingtype_html
+    )
+
+    return [
+        f'<a href="{task_url}">{task["jeditaskid"]}</a>',
+        f'<a href="{task_url}" title="{task.get("taskname", "")}">{taskname_display}</a>',
+        _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
+        processingtype_display,
+        f'<a href="{tasks_by_user_url}">{task["username"]}</a>' if tasks_by_user_url else '',
+        _fmt_dt(task.get('creationdate')),
+        _fmt_dt(task.get('modificationtime')),
+        comp_pr_str,
+        _fill_cell(task.get('nactive', 0), 'running') if task.get('nactive', 0) else 0,
+        _fill_cell(task.get('nfinished', 0), 'finished') if task.get('nfinished', 0) else 0,
+        _fill_cell(task.get('nfailed', 0), 'failed') if task.get('nfailed', 0) else 0,
+        _fill_cell(task.get('nrunning', 0), 'running') if task.get('nrunning', 0) else 0,
+        task.get('nretries', 0),
+        avg_rs_str,
+        comp_fr_str,
+        _fill_cell(task.get('nfinalfailed', 0), 'failed') if task.get('nfinalfailed', 0) else 0,
+        comp_ffr_str,
+    ]
+
+
+def _build_tasks_window_product(days):
+    """Builder for the cached tasks-window product: rendered cells plus
+    the raw sort/filter record per task."""
+    window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP)
+    raw_fields = set(TASK_FIELD_NAMES) | set(TASKS_WINDOW_SEARCH_FIELDS)
+    rows = []
+    for task in window['tasks']:
+        rows.append({
+            'cells': _format_task_row(task, days),
+            'raw': {f: task.get(f) for f in raw_fields},
+        })
+    return {'rows': rows, 'count': window['count'],
+            'truncated': window['truncated'], 'days': days}
+
+
+def _window_sort_key(value):
+    """Normalize a raw value for in-process column sorting. Dates are ISO
+    strings (lexical == chronological); strings compare case-insensitively."""
+    if isinstance(value, str):
+        return value.lower()
+    return value
+
+
 def panda_tasks_datatable_ajax(request):
+    from ..cached_product import get_product
+
     dt = DataTablesProcessor(request, TASK_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
     days = _get_days(request)
-    status = request.GET.get('status', '') or None
-    username = request.GET.get('username', '') or None
-    taskname = request.GET.get('taskname', '') or None
-    processingtype = request.GET.get('processingtype', '') or None
 
-    order_col = TASK_ORDER_MAP.get(dt.order_column_idx, '"jeditaskid"')
-    order_dir = 'ASC' if dt.order_direction == 'asc' else 'DESC'
-    # NULL failurerate/progress = no jobs reported yet; push those to the
-    # bottom of any ranking so they don't surface as the extremes view.
-    null_suffix = (' NULLS LAST'
-                   if order_col in ('computed_failurerate', 'computed_progress',
-                                    'avg_retries_success')
-                   else '')
-    order_by = f'{order_col} {order_dir}{null_suffix}'
-
-    # workinggroup no longer exposed in the table view (dropped as low-signal in
-    # this deployment — always EIC or NULL). Still on the task detail page and
-    # in list_tasks_dt's filter contract for backward compat with direct callers.
-    rows, total, filtered = list_tasks_dt(
-        days=days, status=status, username=username, taskname=taskname,
-        processingtype=processingtype,
-        order_by=order_by, limit=dt.length, offset=dt.start,
-        search=dt.search_value or None,
+    product = get_product(
+        f'panda_tasks_window:{days}',
+        lambda: _build_tasks_window_product(days),
+        ttl_seconds=TASKS_WINDOW_TTL_SECONDS,
+        refresh=request.GET.get('refresh') == '1',
     )
+    value = product['value'] or {}
+    rows = value.get('rows') or []
+    total = len(rows)
+    product_extra = {
+        'product_built_at': (product['built_at'].isoformat()
+                             if product['built_at'] else None),
+        'product_age_seconds': product['age_seconds'],
+        'product_refreshing': product['refreshing'],
+    }
 
-    data = []
-    for task in rows:
-        task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
-        tasks_by_user_url = _url_with_query('monitor_app:panda_tasks_list', days=days, username=task['username']) if task.get('username') else None
-        tasks_by_status_url = _url_with_query('monitor_app:panda_tasks_list', days=days, status=task['status']) if task.get('status') else None
+    # Equality filters over the raw record; '__blank__' selects NULL/empty.
+    for key in ('status', 'username', 'processingtype'):
+        wanted = request.GET.get(key, '') or None
+        if wanted is None:
+            continue
+        if wanted == '__blank__':
+            rows = [r for r in rows if not (r['raw'].get(key) or '')]
+        else:
+            rows = [r for r in rows if (r['raw'].get(key) or '') == wanted]
 
-        # Truncate taskname for display
-        taskname_display = task.get('taskname', '') or ''
-        if len(taskname_display) > 80:
-            taskname_display = taskname_display[:77] + '...'
+    search = (dt.search_value or '').strip().lower()
+    if search:
+        rows = [r for r in rows
+                if any(search in str(r['raw'].get(f) or '').lower()
+                       for f in TASKS_WINDOW_SEARCH_FIELDS)]
+    filtered = len(rows)
 
-        comp_pr = task.get('computed_progress')
-        comp_pr_str = f'{comp_pr}%' if comp_pr is not None else ''
+    # Sort on the raw column value; rows missing the value go last in
+    # either direction (parity with the retired SQL NULLS LAST).
+    idx = dt.order_column_idx
+    col = TASK_FIELD_NAMES[idx] if 0 <= idx < len(TASK_FIELD_NAMES) else 'jeditaskid'
+    reverse = dt.order_direction != 'asc'
+    present = [r for r in rows if r['raw'].get(col) not in (None, '')]
+    missing = [r for r in rows if r['raw'].get(col) in (None, '')]
+    present.sort(key=lambda r: _window_sort_key(r['raw'].get(col)), reverse=reverse)
+    rows = present + missing
 
-        comp_fr = task.get('computed_failurerate')
-        comp_fr_str = f'{comp_fr * 100:.1f}%' if comp_fr is not None else ''
+    if dt.length and dt.length > 0:
+        page = rows[dt.start:dt.start + dt.length]
+    else:
+        page = rows[dt.start:] if dt.start else rows
 
-        comp_ffr = task.get('computed_finalfailurerate')
-        comp_ffr_str = f'{comp_ffr * 100:.1f}%' if comp_ffr is not None else ''
-
-        avg_rs = task.get('avg_retries_success')
-        avg_rs_str = f'{avg_rs:.2f}' if avg_rs is not None else ''
-
-        processingtype = task.get('processingtype') or ''
-        processingtype_html = escape(processingtype)
-        processingtype_display = (
-            f'<span class="badge bg-warning text-dark">{processingtype_html}</span>'
-            if 'test' in processingtype.lower()
-            else processingtype_html
-        )
-
-        data.append([
-            f'<a href="{task_url}">{task["jeditaskid"]}</a>',
-            f'<a href="{task_url}" title="{task.get("taskname", "")}">{taskname_display}</a>',
-            _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
-            processingtype_display,
-            f'<a href="{tasks_by_user_url}">{task["username"]}</a>' if tasks_by_user_url else '',
-            _fmt_dt(task.get('creationdate')),
-            _fmt_dt(task.get('modificationtime')),
-            comp_pr_str,
-            _fill_cell(task.get('nactive', 0), 'running') if task.get('nactive', 0) else 0,
-            _fill_cell(task.get('nfinished', 0), 'finished') if task.get('nfinished', 0) else 0,
-            _fill_cell(task.get('nfailed', 0), 'failed') if task.get('nfailed', 0) else 0,
-            _fill_cell(task.get('nrunning', 0), 'running') if task.get('nrunning', 0) else 0,
-            task.get('nretries', 0),
-            avg_rs_str,
-            comp_fr_str,
-            _fill_cell(task.get('nfinalfailed', 0), 'failed') if task.get('nfinalfailed', 0) else 0,
-            comp_ffr_str,
-        ])
-
-    return dt.create_response(data, total, filtered)
+    data = [r['cells'] for r in page]
+    return dt.create_response(data, total, filtered, extra=product_extra)
 
 
 def panda_tasks_filter_counts(request):
