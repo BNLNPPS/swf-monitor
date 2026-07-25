@@ -2,13 +2,21 @@
 
 Yields one Detection per PanDA task whose final-failure rate exceeds the
 configured threshold. Uses `computed_finalfailurerate` (nfinalfailed /
-(nfinalfailed + nfinished)) — nfinalfailed counts only jobs failed with
-attemptnr >= maxattempt (3), i.e. retry-exhausted true failures. Jobs
-that failed once or twice and succeeded on retry don't count.
+(nfinalfailed + nfilesfinished)) — nfinalfailed counts input files that
+exhausted their retry budget, from JEDI's file-level accounting
+(jedi_datasets.nfilesfailed on the master input datasets). Files that
+failed once or twice and succeeded on retry don't count.
 
 Rationale (Rahman, NPPS 2026-04-22): nfailed counts every failed job
 record including retries that later succeeded, which inflates the rate
 and pages on noise. Alarms should trigger only on true failures.
+
+History (2026-07-25, prompted by Rahman): the first implementation
+counted failed job records with attemptnr >= maxattempt, but JEDI sets
+each job record's maxattempt equal to its own attemptnr (legacy
+server-side-retry field), so that predicate matched every failed record
+and the "final" rate silently equalled the all-failures rate. Final
+failures exist only in the file-level bookkeeping.
 
 Falls back to `computed_failurerate` (all-failures rate) with a stderr
 warning if the upstream swf-monitor doesn't yet expose the new field —
@@ -24,7 +32,7 @@ Params (read from the alarm config entry's data.params):
   username           str, optional (supports % LIKE wildcard upstream).
   processingtype     str, optional.
   min_terminal_jobs  int, default 5. Noise floor: tasks with fewer
-                     terminal jobs (nfinalfailed + nfinished) are skipped.
+                     terminal jobs (nfailed + nfinished) are skipped.
   statuses           list[str], optional. Task statuses to consider;
                      defaults to ['running', 'failed', 'broken'].
 """
@@ -111,7 +119,11 @@ def task_failure_rate(client, params: dict):
                 int(t.get("nfinalfailed") or 0) if using_finalrate
                 else nfailed_all
             )
-            if nfinalfailed + nfinished < min_terminal:
+            nfilesfinished = int(t.get("nfilesfinished") or 0)
+            # Noise floor on terminal jobs (finished + failed job records),
+            # matching the param description regardless of which rate is in
+            # use.
+            if nfailed_all + nfinished < min_terminal:
                 continue
             if cfr < threshold:
                 continue
@@ -134,7 +146,9 @@ def task_failure_rate(client, params: dict):
                     task_status=t.get("status") or "?",
                     task_user=t.get("username") or "?",
                     site=t.get("site") or "?",
-                    cfr=cfr, nfailed=nfinalfailed, nfinished=nfinished,
+                    cfr=cfr, nfinalfailed=nfinalfailed,
+                    nfilesfinished=nfilesfinished,
+                    nfailed=nfailed_all, nfinished=nfinished,
                     nactive=int(t.get("nactive") or 0),
                     threshold=threshold, since_days=since_days,
                     native_failurerate=t.get("failurerate"),
@@ -159,6 +173,7 @@ def task_failure_rate(client, params: dict):
                     "nfinished": nfinished,
                     "nfailed": nfailed_all,
                     "nfinalfailed": nfinalfailed,
+                    "nfilesfinished": nfilesfinished,
                     "nretries": int(t.get("nretries") or 0),
                     "threshold": threshold,
                     "since_days": since_days,
@@ -181,8 +196,10 @@ def _body_detail(**k) -> str:
         f"Site:        {k['site']}\n"
         f"\n"
         f"{rate_kind}: {k['cfr']*100:.1f}%  (threshold {k['threshold']*100:.1f}%)\n"
-        f"Jobs: nfinalfailed={k['nfailed']}  nfinished={k['nfinished']}  nactive={k['nactive']}\n"
-        f"(nfinalfailed = failed jobs with attemptnr >= maxattempt 3 — retry-exhausted true failures)\n"
+        f"Input files: retry-exhausted failed={k['nfinalfailed']}  finished={k['nfilesfinished']}\n"
+        f"Jobs: nfailed={k['nfailed']}  nfinished={k['nfinished']}  nactive={k['nactive']}\n"
+        f"(final failures = input files that exhausted all retries, JEDI file-level accounting;\n"
+        f" a job that failed then succeeded on retry does not count)\n"
         f"Since: last {k['since_days']} day(s)\n"
         f"{native_line}\n"
         f"\n"

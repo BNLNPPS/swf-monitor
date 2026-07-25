@@ -188,12 +188,15 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
 
     Includes per-task job-count aggregates (nactive / nfinished / nfailed /
     nrunning / nretries / nfinalfailed) and derived failure-rate columns
-    (computed_failurerate over all failures, computed_finalfailurerate
-    over retry-exhausted failures only — what alarms trigger on). All
-    exposed as SELECT aliases so callers can ORDER BY any of them.
-    Aggregates come from a LATERAL subquery against jobsactive4 +
-    jobsarchived4 filtered by jeditaskid — one indexed lookup per
-    returned task.
+    (computed_failurerate over all failed job records,
+    computed_finalfailurerate over retry-exhausted input files only — what
+    alarms trigger on). All exposed as SELECT aliases so callers can ORDER
+    BY any of them. Job aggregates come from a LATERAL subquery against
+    jobsactive4 + jobsarchived4 filtered by jeditaskid; final-failure
+    aggregates come from a second LATERAL against jedi_datasets (master
+    input rows), JEDI's file-level accounting — job records cannot express
+    exhaustion because JEDI sets each record's maxattempt equal to its own
+    attemptnr. One indexed lookup each per returned task.
 
     order_by must use `"column"` for jedi_tasks columns (e.g. `"jeditaskid" DESC`)
     or a bare alias for the aggregates (e.g. `nfailed DESC`, `computed_failurerate DESC NULLS LAST`).
@@ -229,12 +232,12 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
                         / NULLIF(COALESCE(c.nactive, 0) + COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0), 0)
                     )::integer
                END AS computed_progress,
-               COALESCE(c.nfinalfailed, 0) AS nfinalfailed,
-               CASE WHEN COALESCE(c.nfinalfailed, 0) + COALESCE(c.nfinished, 0) = 0
+               COALESCE(d.nfilesfailed, 0) AS nfinalfailed,
+               CASE WHEN COALESCE(d.nfilesfailed, 0) + COALESCE(d.nfilesfinished, 0) = 0
                     THEN NULL
                     ELSE ROUND(
-                        COALESCE(c.nfinalfailed, 0)::numeric
-                        / NULLIF(COALESCE(c.nfinalfailed, 0) + COALESCE(c.nfinished, 0), 0),
+                        COALESCE(d.nfilesfailed, 0)::numeric
+                        / NULLIF(COALESCE(d.nfilesfailed, 0) + COALESCE(d.nfilesfinished, 0), 0),
                         4)
                END AS computed_finalfailurerate
         FROM "{PANDA_SCHEMA}"."jedi_tasks" t
@@ -244,17 +247,24 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
                 SUM(CASE WHEN jobstatus IN ({finished_list}) THEN 1 ELSE 0 END) AS nfinished,
                 SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed,
                 SUM(CASE WHEN jobstatus = 'running'          THEN 1 ELSE 0 END) AS nrunning,
-                SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries,
-                SUM(CASE WHEN jobstatus = 'failed' AND attemptnr >= COALESCE(maxattempt, 3)
-                                                             THEN 1 ELSE 0 END) AS nfinalfailed
+                SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries
             FROM (
-                SELECT jobstatus, attemptnr, maxattempt FROM "{PANDA_SCHEMA}"."jobsactive4"
+                SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsactive4"
                     WHERE jeditaskid = t.jeditaskid
                 UNION ALL
-                SELECT jobstatus, attemptnr, maxattempt FROM "{PANDA_SCHEMA}"."jobsarchived4"
+                SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsarchived4"
                     WHERE jeditaskid = t.jeditaskid
             ) j
         ) c ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(COALESCE(nfilesfailed, 0))   AS nfilesfailed,
+                SUM(COALESCE(nfilesfinished, 0)) AS nfilesfinished
+            FROM "{PANDA_SCHEMA}"."jedi_datasets"
+            WHERE jeditaskid = t.jeditaskid
+              AND masterid IS NULL
+              AND type IN ('input', 'pseudo_input')
+        ) d ON TRUE
         {where_sql}
         ORDER BY {order_by}
         LIMIT {limit} OFFSET {offset}

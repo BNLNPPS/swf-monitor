@@ -135,17 +135,20 @@ TASK_COLUMNS = [
     # Running is a subset of Active (jobstatus='running').
     {'name': 'nrunning', 'title': 'Running', 'orderable': True},
     # Retries: count of job records with attemptnr > 1. Every retry creates a
-    # new job record in the ePIC PanDA schema. Retry limit is 3.
+    # new job record in the ePIC PanDA schema. The retry ceiling is the
+    # file-level maxattempt in JEDI, set per task at submission.
     {'name': 'nretries', 'title': 'Retries', 'orderable': True},
     # Derived from nfailed / (nfailed+nfinished). The native JEDI failurerate
     # column is always NULL in this deployment (post-processing that populates
     # it isn't running for ePIC task types), so this is the only signal shown.
     {'name': 'computed_failurerate', 'title': 'Fail Rate', 'orderable': True},
-    # Final-failed: jobs that failed AND exhausted the retry budget
-    # (attemptnr >= maxattempt). Subset of Failed. The rate derived from these is
-    # what alarms trigger on — distinguishes true failures from
-    # transient-fail-then-retry-succeeds.
-    {'name': 'nfinalfailed', 'title': 'Final Failed', 'orderable': True},
+    # Final-failed: input files that exhausted the retry budget, from JEDI's
+    # file-level accounting (jedi_datasets.nfilesfailed, master input rows).
+    # The rate derived from these is what alarms trigger on — distinguishes
+    # true failures from transient-fail-then-retry-succeeds. Job records
+    # cannot express this: JEDI sets each record's maxattempt equal to its
+    # own attemptnr.
+    {'name': 'nfinalfailed', 'title': 'Final Failed Files', 'orderable': True},
     {'name': 'computed_finalfailurerate', 'title': 'Final Fail Rate', 'orderable': True},
 ]
 

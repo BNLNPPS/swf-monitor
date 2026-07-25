@@ -407,16 +407,14 @@ def job_completion_details(pandaids):
             for row in cursor.fetchall():
                 item = row_to_dict(row, fields)
                 errors = extract_errors(item)
-                attempt = item.get('attemptnr')
-                maxattempt = item.get('maxattempt') or 3
-                try:
-                    final_attempt = bool(attempt and int(attempt) >= int(maxattempt))
-                except (TypeError, ValueError):
-                    final_attempt = False
+                # No exhaustion flag here: the job record's maxattempt equals
+                # its own attemptnr in JEDI, so no per-record predicate can
+                # tell a final failure from a retried one. File-level
+                # accounting (jedi_datasets) owns that; see
+                # _get_task_job_counts.
                 details[item['pandaid']] = {
-                    'attemptnr': attempt,
-                    'maxattempt': maxattempt,
-                    'final_attempt': final_attempt,
+                    'attemptnr': item.get('attemptnr'),
+                    'maxattempt': item.get('maxattempt'),
                     'errors': errors,
                 }
             return details
@@ -683,7 +681,7 @@ def _compute_progress(nactive, nfinished, nfailed):
 def _get_task_job_counts(jeditaskids):
     """Return per-task job counts:
     {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries,
-    nfinalfailed, maxattempt}}.
+    nfinalfailed, nfilesfinished, maxattempt}}.
 
     Aggregates over jobsactive4 + jobsarchived4 bucketed by JOB_STATUS_CATEGORIES.
     Cancelled and closed are deliberately not reported — alarms surface what
@@ -694,15 +692,22 @@ def _get_task_job_counts(jeditaskids):
     - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
       schema every retry creates a new job record, so this is the total
       retry count for the task.
-    - nfinalfailed: count of job records with jobstatus='failed' AND
-      attemptnr >= maxattempt. These are final failures — the job exhausted
-      its retry budget. Distinguishes true failures from transient-fail-then-
-      retry-succeeds, which matters for alarms.
-    - maxattempt: maximum job-level maxattempt currently seen for the task.
+    - nfinalfailed: count of input files that exhausted their retry budget,
+      from JEDI's file-level accounting (jedi_datasets.nfilesfailed on the
+      master input datasets). These are final failures — no attempt remains.
+      Distinguishes true failures from transient-fail-then-retry-succeeds,
+      which matters for alarms. Job records cannot express this: JEDI sets
+      each job record's maxattempt equal to its own attemptnr (the column is
+      a legacy server-side-retry field), so any job-record predicate on
+      attemptnr/maxattempt counts every failed record.
+    - nfilesfinished: finished input files from the same file-level
+      accounting — the denominator partner for nfinalfailed.
+    - maxattempt: maximum job-level maxattempt currently seen for the task
+      (equals the highest attempt number seen, per the JEDI convention above).
     """
     zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
                    'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0,
-                   'maxattempt': None}
+                   'nfilesfinished': 0, 'maxattempt': None}
     if not jeditaskids:
         return {}
 
@@ -717,7 +722,6 @@ def _get_task_job_counts(jeditaskids):
         SELECT "jeditaskid", "jobstatus",
                COUNT(*) AS n,
                SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
-               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= COALESCE("maxattempt", 3) THEN 1 ELSE 0 END) AS nfinalfailed_part,
                MAX(COALESCE("maxattempt", 3)) AS maxattempt_part
         FROM (
             SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
@@ -736,7 +740,7 @@ def _get_task_job_counts(jeditaskids):
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, params)
-            for tid, jobstatus, n, nretries_part, nfinalfailed_part, maxattempt_part in cursor.fetchall():
+            for tid, jobstatus, n, nretries_part, maxattempt_part in cursor.fetchall():
                 cat = status_to_cat.get(jobstatus)
                 if cat is not None:
                     counts[tid][f'n{cat}'] += n
@@ -744,7 +748,6 @@ def _get_task_job_counts(jeditaskids):
                 if jobstatus == 'running':
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
-                counts[tid]['nfinalfailed'] += nfinalfailed_part or 0
                 if maxattempt_part is not None:
                     current = counts[tid].get('maxattempt')
                     counts[tid]['maxattempt'] = max(
@@ -754,6 +757,27 @@ def _get_task_job_counts(jeditaskids):
     except Exception as e:
         logger.error(f"_get_task_job_counts failed: {e}")
         # On failure, return zeros so caller still gets a consistent shape.
+
+    # Final-failure accounting comes from JEDI's file-level bookkeeping on
+    # the master input datasets, not from job records (see docstring).
+    files_sql = f"""
+        SELECT "jeditaskid",
+               SUM(COALESCE("nfilesfailed", 0)) AS nfilesfailed,
+               SUM(COALESCE("nfilesfinished", 0)) AS nfilesfinished
+        FROM "{PANDA_SCHEMA}"."jedi_datasets"
+        WHERE "jeditaskid" IN ({placeholders})
+          AND "masterid" IS NULL
+          AND "type" IN ('input', 'pseudo_input')
+        GROUP BY "jeditaskid"
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(files_sql, list(jeditaskids))
+            for tid, nfilesfailed, nfilesfinished in cursor.fetchall():
+                counts[tid]['nfinalfailed'] = int(nfilesfailed or 0)
+                counts[tid]['nfilesfinished'] = int(nfilesfinished or 0)
+    except Exception as e:
+        logger.error(f"_get_task_job_counts file-level query failed: {e}")
     return counts
 
 
@@ -852,18 +876,19 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         return {"error": str(e)}
 
     # Per-task job counts (nactive, nfinished, nfailed, nrunning, nretries,
-    # nfinalfailed) — one extra query. computed_failurerate (all failures)
-    # and computed_finalfailurerate (attemptnr>=maxattempt — retry-exhausted)
-    # serve as usable substitutes for the native JEDI failurerate column,
-    # which is NULL in this deployment. Alarms use the final-failure rate.
+    # nfinalfailed, nfilesfinished) — two extra queries. computed_failurerate
+    # (all failed job records) and computed_finalfailurerate (retry-exhausted
+    # input files / terminal input files, JEDI file-level accounting) serve
+    # as usable substitutes for the native JEDI failurerate column, which is
+    # NULL in this deployment. Alarms use the final-failure rate.
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
-            'nretries': 0, 'nfinalfailed': 0}
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0}
     job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
     for t in tasks:
         c = job_counts.get(t['jeditaskid'], dict(zero))
         t.update(c)
         t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
-        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
+        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
         t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     _apply_effective_owners(tasks, 'username')
     _apply_processing_type_display(tasks)
@@ -2132,11 +2157,11 @@ def get_task(jeditaskid):
 
     task = row_to_dict(row, TASK_LIST_FIELDS)
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
-            'nretries': 0, 'nfinalfailed': 0}
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0}
     c = _get_task_job_counts([jeditaskid]).get(jeditaskid, dict(zero))
     task.update(c)
     task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
-    task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
+    task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
     task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     _apply_effective_owners([task], 'username')
     task['datasets'] = _get_task_datasets(jeditaskid)
