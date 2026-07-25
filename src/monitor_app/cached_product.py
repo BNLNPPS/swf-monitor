@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # mid-build) and may be reclaimed.
 BUILD_LOCK_TIMEOUT_SECONDS = 600
 
+# An explicit update that finds another worker mid-build waits up to this
+# long for that build to land before giving up and serving what exists.
+REFRESH_WAIT_SECONDS = 15
+
 
 def _claim(key):
     """Atomically claim the build slot for a key. True when claimed."""
@@ -108,6 +112,28 @@ def get_product(key, builder, ttl_seconds, refresh=False):
             'refreshing': False,
             'built_now': True,
         }
+
+    if refresh and have_product:
+        # Explicit update, but another worker holds the build lock. The
+        # caller chose to wait, so wait briefly for that build to land
+        # rather than returning stale data as if it were the update.
+        prior_built = row.built_at
+        deadline = time.monotonic() + REFRESH_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            row = CachedProduct.objects.filter(key=key).first()
+            if row is not None and row.built_at is not None \
+                    and row.built_at != prior_built:
+                return {
+                    'value': row.value,
+                    'built_at': row.built_at,
+                    'age_seconds': round(
+                        (timezone.now() - row.built_at).total_seconds(), 1),
+                    'refreshing': False,
+                    'built_now': False,
+                }
+        # The in-flight build outlasted the wait; fall through and report
+        # the stored product with refreshing status honestly.
 
     if row is None or row.built_at is None:
         # Another worker holds the first-fill lock; nothing to serve yet.

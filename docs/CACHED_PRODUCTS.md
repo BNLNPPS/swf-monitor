@@ -43,7 +43,8 @@ variant.
 
 | Key | Builder | TTL |
 |---|---|---|
-| `panda_errors:<days>:<user>:<site>:<source>` | PanDA error summary aggregation | 300 s |
+| `panda_errors:v2:<days>:<user>:<site>:<source>` | PanDA error summary aggregation | 300 s |
+| `panda_tasks_window:<days>` | PanDA tasks list full-window aggregation | 120 s |
 | `prod_hub_corun_counts` | corun-ai assessment/narrative counts | 600 s |
 
 ## Migration targets

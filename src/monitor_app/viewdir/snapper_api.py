@@ -105,6 +105,9 @@ def system_status_history(request):
         limit = min(int(request.GET.get('limit') or 500), 2000)
     except ValueError:
         return JsonResponse({'error': 'limit must be an integer'}, status=400)
+    if limit < 0:
+        return JsonResponse({'error': 'limit must be non-negative'},
+                            status=400)
     observations = list(rows.values(
         'name', 'category', 'status', 'summary', 'checked_at')[:limit])
     return JsonResponse({'count': len(observations),
@@ -120,6 +123,12 @@ def snapper_context(request, scope):
     """
     try:
         window = float(request.GET.get('window') or 3600)
+    except ValueError:
+        return JsonResponse({'error': 'window must be a number of seconds'},
+                            status=400)
+    if window <= 0:
+        return JsonResponse({'error': 'window must be positive'}, status=400)
+    try:
         result = context_around(
             scope, _parse_time(request.GET.get('time'), 'time'), window)
     except InvalidQuery as e:
