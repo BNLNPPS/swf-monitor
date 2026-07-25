@@ -9,9 +9,9 @@ resolution, and the host service hooks (preferences, configuration,
 scheduler status, health page). Registered from MonitorAppConfig.ready().
 """
 
+from snapper_ai.presentation import (ET_ZONE, component_data, cut_chip,
+                                     cut_delta, et_naive, span_text)
 from snapper_ai.registry import ScopeProvider, register, register_hooks
-from snapper_ai.series import ET_ZONE, _component_data, _et_naive, _span_text
-from snapper_ai.views import cut_chip, cut_delta
 
 # The host template rendering the provider card kinds below.
 CARD_TEMPLATE = 'monitor_app/_snapper_cards.html'
@@ -165,8 +165,8 @@ def _run_activity_lanes(start, end, dangle_seconds):
                 '%m-%d %H:%M ET')
             if arc['dangling']:
                 segments.append({
-                    't0': _et_naive(arc['first']),
-                    't1': _et_naive(arc['last']), 'value': 'run',
+                    't0': et_naive(arc['first']),
+                    't1': et_naive(arc['last']), 'value': 'run',
                     'hover': (f'{ident} — started {started}, no '
                               'recorded end; last activity '
                               + arc['last'].astimezone(
@@ -174,18 +174,18 @@ def _run_activity_lanes(start, end, dangle_seconds):
                     'open_end': True})
                 continue
             datataking_end = arc['end_run'] or arc['last']
-            total = _span_text(
+            total = span_text(
                 (arc['last'] - arc['first']).total_seconds())
             hover = f'{ident} — started {started}, active {total}'
             segments.append({
-                't0': _et_naive(arc['first']),
-                't1': _et_naive(datataking_end), 'value': 'run',
+                't0': et_naive(arc['first']),
+                't1': et_naive(datataking_end), 'value': 'run',
                 'hover': f'{hover} · datataking window',
                 'open_end': False})
             if arc['last'] > datataking_end:
                 segments.append({
-                    't0': _et_naive(datataking_end),
-                    't1': _et_naive(arc['last']), 'value': 'processing',
+                    't0': et_naive(datataking_end),
+                    't1': et_naive(arc['last']), 'value': 'processing',
                     'hover': f'{hover} · processing tail',
                     'open_end': False})
     return lanes
@@ -195,7 +195,7 @@ def _run_activity_lanes(start, end, dangle_seconds):
 
 def _epicprod_curve_values(state):
     values = {}
-    panda = _component_data(state, 'panda')
+    panda = component_data(state, 'panda')
     jobs_now = (panda.get('jobs') or {}).get('in_flight_now') or {}
     tasks_now = (panda.get('tasks') or {}).get('in_flight_now') or {}
     if jobs_now:
@@ -217,7 +217,7 @@ def _epicprod_curve_values(state):
 
 def _testbed_curve_values(state):
     values = {}
-    workflow = _component_data(state, 'workflow')
+    workflow = component_data(state, 'workflow')
     executions = workflow.get('executions') or {}
     stf_tasks = workflow.get('stf_tasks') or {}
     if executions:
@@ -317,8 +317,7 @@ def _panda_card(data, previous_data, ctx):
             type_states.append({
                 'label': f'{ptype} · {status}', 'value': count,
                 'delta': cut_delta(count, previous)})
-    return {'kind': 'panda', 'template': CARD_TEMPLATE,
-            'headline': headline, 'types': types,
+    return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states}
 
 
@@ -352,7 +351,7 @@ def _workflow_card(data, previous_data, ctx):
         previous = (prev_stf.get('by_site_status') or {}).get(key)
         site_states.append({'site': site, 'status': status, 'value': count,
                             'delta': cut_delta(count, previous)})
-    return {'kind': 'workflow', 'template': CARD_TEMPLATE,
+    return {'kind': 'workflow',
             'headline': headline, 'by_workflow': by_workflow,
             'site_states': site_states,
             'stf_processing_type': STF_PROCESSING_TYPE}
@@ -386,8 +385,7 @@ def _datataking_card(data, previous_data, ctx):
                 (data.get('namespaces') or {}).items())
             for ns in [ns if isinstance(ns, dict) else {}]
         ]
-    return {'kind': 'datataking', 'template': CARD_TEMPLATE,
-            'namespaces': rows}
+    return {'kind': 'datataking', 'namespaces': rows}
 
 
 # ── Host service hooks ───────────────────────────────────────────────────
@@ -457,6 +455,7 @@ def register_snapper_providers():
         curve_label=_epicprod_curve_label,
         curve_groups=EPICPROD_GROUPS,
         component_cards={'panda': _panda_card},
+        card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))
     register(ScopeProvider(
@@ -469,6 +468,7 @@ def register_snapper_providers():
         activity_at=namespace_activity_at,
         component_cards={'workflow': _workflow_card,
                          'datataking': _datataking_card},
+        card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))
     register_hooks(
