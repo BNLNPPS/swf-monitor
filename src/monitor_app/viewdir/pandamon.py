@@ -138,6 +138,11 @@ TASK_COLUMNS = [
     # new job record in the ePIC PanDA schema. The retry ceiling is the
     # file-level maxattempt in JEDI, set per task at submission.
     {'name': 'nretries', 'title': 'Retries', 'orderable': True},
+    # Average retries per successful job — SUM(attemptnr-1) over finished
+    # records / nfinished. 0 = every job passed first attempt. Efficiency
+    # of the successes; complements Final Fail Rate (the permanent
+    # failures). Requested by Rahman 2026-07-25.
+    {'name': 'avg_retries_success', 'title': 'Avg Retries', 'orderable': True},
     # Derived from nfailed / (nfailed+nfinished). The native JEDI failurerate
     # column is always NULL in this deployment (post-processing that populates
     # it isn't running for ePIC task types), so this is the only signal shown.
@@ -169,9 +174,10 @@ TASK_ORDER_MAP = {
     10: 'nfailed',
     11: 'nrunning',
     12: 'nretries',
-    13: 'computed_failurerate',
-    14: 'nfinalfailed',
-    15: 'computed_finalfailurerate',
+    13: 'avg_retries_success',
+    14: 'computed_failurerate',
+    15: 'nfinalfailed',
+    16: 'computed_finalfailurerate',
 }
 
 ERROR_COLUMNS = [
@@ -535,7 +541,10 @@ def panda_tasks_datatable_ajax(request):
     order_dir = 'ASC' if dt.order_direction == 'asc' else 'DESC'
     # NULL failurerate/progress = no jobs reported yet; push those to the
     # bottom of any ranking so they don't surface as the extremes view.
-    null_suffix = ' NULLS LAST' if order_col in ('computed_failurerate', 'computed_progress') else ''
+    null_suffix = (' NULLS LAST'
+                   if order_col in ('computed_failurerate', 'computed_progress',
+                                    'avg_retries_success')
+                   else '')
     order_by = f'{order_col} {order_dir}{null_suffix}'
 
     # workinggroup no longer exposed in the table view (dropped as low-signal in
@@ -568,6 +577,9 @@ def panda_tasks_datatable_ajax(request):
         comp_ffr = task.get('computed_finalfailurerate')
         comp_ffr_str = f'{comp_ffr * 100:.1f}%' if comp_ffr is not None else ''
 
+        avg_rs = task.get('avg_retries_success')
+        avg_rs_str = f'{avg_rs:.2f}' if avg_rs is not None else ''
+
         processingtype = task.get('processingtype') or ''
         processingtype_html = escape(processingtype)
         processingtype_display = (
@@ -590,6 +602,7 @@ def panda_tasks_datatable_ajax(request):
             _fill_cell(task.get('nfailed', 0), 'failed') if task.get('nfailed', 0) else 0,
             _fill_cell(task.get('nrunning', 0), 'running') if task.get('nrunning', 0) else 0,
             task.get('nretries', 0),
+            avg_rs_str,
             comp_fr_str,
             _fill_cell(task.get('nfinalfailed', 0), 'failed') if task.get('nfinalfailed', 0) else 0,
             comp_ffr_str,

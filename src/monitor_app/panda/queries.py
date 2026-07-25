@@ -664,6 +664,15 @@ def _compute_failurerate(nfailed, nfinished):
     return round((nfailed or 0) / denom, 4)
 
 
+def _compute_avg_retries(nretries_finished, nfinished):
+    """Average retries per successful job (0 = every job passed on its
+    first attempt). Efficiency signal over the successes; complements the
+    final-failure rate, which covers the permanent failures."""
+    if not nfinished:
+        return None
+    return round((nretries_finished or 0) / nfinished, 2)
+
+
 def _compute_progress(nactive, nfinished, nfailed):
     """Integer-percent progress derived from job-level counts.
 
@@ -702,12 +711,17 @@ def _get_task_job_counts(jeditaskids):
       attemptnr/maxattempt counts every failed record.
     - nfilesfinished: finished input files from the same file-level
       accounting — the denominator partner for nfinalfailed.
+    - nretries_finished: sum of (attemptnr - 1) over finished job records —
+      the retries consumed by the successes. Divided by nfinished it gives
+      the average retries per successful job (0 = first-attempt pass), the
+      efficiency signal requested by Rahman 2026-07-25.
     - maxattempt: maximum job-level maxattempt currently seen for the task
       (equals the highest attempt number seen, per the JEDI convention above).
     """
     zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
                    'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0,
-                   'nfilesfinished': 0, 'maxattempt': None}
+                   'nfilesfinished': 0, 'nretries_finished': 0,
+                   'maxattempt': None}
     if not jeditaskids:
         return {}
 
@@ -722,6 +736,7 @@ def _get_task_job_counts(jeditaskids):
         SELECT "jeditaskid", "jobstatus",
                COUNT(*) AS n,
                SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
+               SUM(COALESCE("attemptnr", 1) - 1) AS retries_sum_part,
                MAX(COALESCE("maxattempt", 3)) AS maxattempt_part
         FROM (
             SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
@@ -740,7 +755,7 @@ def _get_task_job_counts(jeditaskids):
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, params)
-            for tid, jobstatus, n, nretries_part, maxattempt_part in cursor.fetchall():
+            for tid, jobstatus, n, nretries_part, retries_sum_part, maxattempt_part in cursor.fetchall():
                 cat = status_to_cat.get(jobstatus)
                 if cat is not None:
                     counts[tid][f'n{cat}'] += n
@@ -748,6 +763,8 @@ def _get_task_job_counts(jeditaskids):
                 if jobstatus == 'running':
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
+                if cat == 'finished':
+                    counts[tid]['nretries_finished'] += retries_sum_part or 0
                 if maxattempt_part is not None:
                     current = counts[tid].get('maxattempt')
                     counts[tid]['maxattempt'] = max(
@@ -882,7 +899,8 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     # as usable substitutes for the native JEDI failurerate column, which is
     # NULL in this deployment. Alarms use the final-failure rate.
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
-            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0}
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0,
+            'nretries_finished': 0}
     job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
     for t in tasks:
         c = job_counts.get(t['jeditaskid'], dict(zero))
@@ -890,6 +908,8 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
         t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
         t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
+        t['avg_retries_success'] = _compute_avg_retries(
+            c.get('nretries_finished'), c['nfinished'])
     _apply_effective_owners(tasks, 'username')
     _apply_processing_type_display(tasks)
 
@@ -1973,10 +1993,11 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
         with conn.cursor() as cursor:
             cursor.execute(sql, full_params)
             for row in cursor.fetchall():
-                # build_task_query_dt returns TASK_LIST_FIELDS + 9 aggregate
+                # build_task_query_dt returns TASK_LIST_FIELDS + 10 aggregate
                 # columns (in order): nactive, nfinished, nfailed, nrunning,
                 # nretries, computed_failurerate, computed_progress,
-                # nfinalfailed, computed_finalfailurerate.
+                # nfinalfailed, computed_finalfailurerate,
+                # avg_retries_success.
                 task = row_to_dict(row[:n_base], TASK_LIST_FIELDS)
                 task['nactive'] = row[n_base]
                 task['nfinished'] = row[n_base + 1]
@@ -1989,6 +2010,8 @@ def list_tasks_dt(days=7, status=None, username=None, taskname=None,
                 task['nfinalfailed'] = row[n_base + 7]
                 ffr = row[n_base + 8]
                 task['computed_finalfailurerate'] = float(ffr) if ffr is not None else None
+                ars = row[n_base + 9]
+                task['avg_retries_success'] = float(ars) if ars is not None else None
                 rows.append(task)
     except Exception as e:
         logger.error(f"list_tasks_dt query failed: {e}")
@@ -2157,11 +2180,14 @@ def get_task(jeditaskid):
 
     task = row_to_dict(row, TASK_LIST_FIELDS)
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
-            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0}
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0,
+            'nretries_finished': 0}
     c = _get_task_job_counts([jeditaskid]).get(jeditaskid, dict(zero))
     task.update(c)
     task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
     task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
+    task['avg_retries_success'] = _compute_avg_retries(
+        c.get('nretries_finished'), c['nfinished'])
     task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     _apply_effective_owners([task], 'username')
     task['datasets'] = _get_task_datasets(jeditaskid)

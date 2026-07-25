@@ -73,7 +73,8 @@ def tasks_list(request):
         accounting (retry-exhausted and finished input files), and computed
         helpers computed_failurerate (all failed job records) /
         computed_finalfailurerate (retry-exhausted input files only, used
-        by alarms).
+        by alarms) / avg_retries_success (average retries per finished
+        job; 0 = first-attempt pass).
     """
     limit, err = _int_param(request, 'limit', default=50, min_value=1, max_value=200)
     if err:

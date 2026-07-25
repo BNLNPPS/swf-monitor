@@ -239,7 +239,13 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
                         COALESCE(d.nfilesfailed, 0)::numeric
                         / NULLIF(COALESCE(d.nfilesfailed, 0) + COALESCE(d.nfilesfinished, 0), 0),
                         4)
-               END AS computed_finalfailurerate
+               END AS computed_finalfailurerate,
+               CASE WHEN COALESCE(c.nfinished, 0) = 0
+                    THEN NULL
+                    ELSE ROUND(
+                        COALESCE(c.nretries_finished, 0)::numeric
+                        / c.nfinished, 2)
+               END AS avg_retries_success
         FROM "{PANDA_SCHEMA}"."jedi_tasks" t
         LEFT JOIN LATERAL (
             SELECT
@@ -247,7 +253,9 @@ def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
                 SUM(CASE WHEN jobstatus IN ({finished_list}) THEN 1 ELSE 0 END) AS nfinished,
                 SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed,
                 SUM(CASE WHEN jobstatus = 'running'          THEN 1 ELSE 0 END) AS nrunning,
-                SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries
+                SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries,
+                SUM(CASE WHEN jobstatus IN ({finished_list})
+                         THEN COALESCE(attemptnr, 1) - 1 ELSE 0 END) AS nretries_finished
             FROM (
                 SELECT jobstatus, attemptnr FROM "{PANDA_SCHEMA}"."jobsactive4"
                     WHERE jeditaskid = t.jeditaskid
