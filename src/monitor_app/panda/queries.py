@@ -90,6 +90,14 @@ def _user_filter_values(value):
     return sorted(v for v in values if v)
 
 
+# PCS created_by values that are record-keeping automation, not task
+# owners: the sweeps and the nightly sync create ProdTask records for
+# PanDA tasks they discover, so their created_by is provenance of the
+# record, not ownership of the task. These never override the PanDA
+# username in owner displays or owner filters.
+PCS_AUTOMATION_ACTORS = ('nightly_cron', 'association_sweep', 'prodops_agent')
+
+
 def _pcs_owner_map(jeditaskids):
     """Return {jediTaskID: PCS created_by} for PanDA tasks linked to PCS."""
     ids = [int(tid) for tid in set(jeditaskids or []) if tid]
@@ -101,6 +109,7 @@ def _pcs_owner_map(jeditaskids):
             int(jedi_task_id): _canonical_user(created_by)
             for jedi_task_id, created_by in PandaTasks.objects
             .filter(jedi_task_id__in=ids)
+            .exclude(prod_task__created_by__in=PCS_AUTOMATION_ACTORS)
             .values_list('jedi_task_id', 'prod_task__created_by')
             if jedi_task_id and created_by
         }
@@ -115,7 +124,9 @@ def _pcs_taskids_for_owner(username):
         return [], []
     try:
         from pcs.models import PandaTasks
-        linked = PandaTasks.objects.filter(jedi_task_id__isnull=False)
+        linked = (PandaTasks.objects
+                  .filter(jedi_task_id__isnull=False)
+                  .exclude(prod_task__created_by__in=PCS_AUTOMATION_ACTORS))
         if '%' in username:
             variants = [v.replace('%', '') for v in _user_filter_values(username)]
             owner_ids = set()
