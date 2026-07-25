@@ -307,23 +307,25 @@ def _curve_label(curve_id):
     if curve_id == 'wf_active':
         return 'workflow executions (running)'
     if curve_id == 'stf_total':
-        return 'STF tasks in flight (total)'
+        return 'STF tasks total'
     if curve_id.startswith('sts_'):
         remainder = curve_id[4:]
         site, _, status = remainder.rpartition('_')
         return f'{site} · {status}' if site else remainder
     if curve_id == 'jobs_total':
-        return 'in-flight jobs (total)'
+        return 'jobs total'
     if curve_id == 'tasks_total':
-        return 'in-flight tasks (total)'
+        return 'tasks total'
     if curve_id == 'running_cores':
         return 'running cores'
     if curve_id.startswith('job_'):
         return f'jobs {curve_id[4:]}'
     if curve_id.startswith('task_'):
         return f'tasks {curve_id[5:]}'
+    # Curves in the in-flight families are in flight by construction —
+    # the family title says it once; per-curve qualifiers are noise.
     if curve_id.startswith('type_'):
-        return f'{curve_id[5:]} (in flight)'
+        return curve_id[5:]
     if curve_id.startswith('ts_'):
         remainder = curve_id[3:]
         ptype, _, status = remainder.rpartition('_')

@@ -231,10 +231,45 @@ def snapper_report(request, scope, snap_id=None):
     latest_snap = snaps.first()
 
     user_prefs = _snapper_prefs(request, scope)
+    now = timezone.now()
     window_start, window_end, window_key = parse_window(
-        request, timezone.now(),
+        request, now,
         default_window=str(user_prefs.get('window') or DEFAULT_WINDOW))
     observatory = observatory_series(scope, window_start, window_end)
+
+    # Window stepping: the arrows shift the whole window through the
+    # recorded history, loading older or newer data server-side. No
+    # arrow only at an edge — 'now' on the right, the earliest snap on
+    # the left. The named window key rides along in the URL so stepping
+    # forward to the present restores the rolling named window.
+    from urllib.parse import urlencode as _urlencode
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    earliest_snap = snaps.last()
+    span = window_end - window_start
+    named_key = request.GET.get('window') or ''
+    if named_key not in WINDOW_HOURS:
+        named_key = window_key if window_key in WINDOW_HOURS else DEFAULT_WINDOW
+
+    def _range_url(start, end):
+        return '?' + _urlencode({'start': start.isoformat(),
+                                 'end': end.isoformat(),
+                                 'window': named_key})
+
+    observatory_prev_url = None
+    observatory_next_url = None
+    if earliest_snap and window_start > earliest_snap.snap_time:
+        prev_start = max(window_start - span, earliest_snap.snap_time)
+        observatory_prev_url = _range_url(prev_start, prev_start + span)
+    if window_key == 'custom':
+        if window_end + span >= now:
+            observatory_next_url = f'?window={named_key}'
+        else:
+            observatory_next_url = _range_url(window_end, window_end + span)
+
+    _et = _ZoneInfo('America/New_York')
+    observatory_range_label = (
+        f"{window_start.astimezone(_et).strftime('%m-%d %H:%M')}"
+        f" – {window_end.astimezone(_et).strftime('%m-%d %H:%M')} ET")
     if snap_id is None:
         selected_snap = latest_snap
     else:
@@ -288,6 +323,9 @@ def snapper_report(request, scope, snap_id=None):
         'observatory_default_window': DEFAULT_WINDOW,
         'observatory_cut': (request.GET.get('cut') or '').strip(),
         'observatory_prefs': user_prefs,
+        'observatory_prev_url': observatory_prev_url,
+        'observatory_next_url': observatory_next_url,
+        'observatory_range_label': observatory_range_label,
     })
 
 

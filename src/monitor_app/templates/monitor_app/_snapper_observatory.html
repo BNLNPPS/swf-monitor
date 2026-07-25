@@ -39,12 +39,20 @@
   <div class="card-header d-flex align-items-center flex-wrap gap-3">
     <strong>Time history</strong>
     <span>
+      {% if observatory_prev_url %}
+      <a href="{{ observatory_prev_url }}" class="btn btn-sm btn-secondary"
+         title="Earlier — step the window back through history">◀</a>
+      {% endif %}
       {% for w in observatory_windows %}
       <a href="?window={{ w }}"
          class="btn btn-sm {% if observatory_window == w %}btn-secondary active{% else %}btn-outline-secondary{% endif %}">{{ w }}</a>
       {% endfor %}
+      {% if observatory_next_url %}
+      <a href="{{ observatory_next_url }}" class="btn btn-sm btn-secondary"
+         title="Later — step the window forward toward now">▶</a>
+      {% endif %}
       {% if observatory_window == 'custom' %}
-      <span class="badge bg-secondary">custom range</span>
+      <span class="badge bg-secondary">{{ observatory_range_label }}</span>
       {% endif %}
     </span>
     <span class="text-muted"><span id="snapper-snap-count">{{ observatory.snap_count }}</span> snaps · times ET · click: state cut · double-click: zoom in ×2 · drag: zoom</span>
@@ -582,7 +590,7 @@
           || id === 'running_cores'; }},
     {name: 'Tasks', match: function (id) {
       return id.indexOf('task_') === 0 || id === 'tasks_total'; }},
-    {name: 'Job types', match: function (id) {
+    {name: 'In-flight job types', match: function (id) {
       return id.indexOf('type_') === 0; }},
     {name: 'Type × state', match: function (id) {
       return id.indexOf('ts_') === 0; }},
@@ -839,9 +847,12 @@
     history.replaceState(null, '', url);
     zoomBar.style.display = zoomed ? 'flex' : 'none';
     rangeIndicator.hidden = !zoomed;
-    // Edge pan arrows appear on the side(s) with more to see.
-    panLeftEdge.hidden = !(zoomed && view[0] > fullRange[0] + 1000);
-    panRightEdge.hidden = !(zoomed && view[1] < fullRange[1] - 1000);
+    // Edge pan arrows appear on the side(s) with more to see — within
+    // the loaded window, or beyond it when an adjacent range exists.
+    panLeftEdge.hidden = !(zoomed
+        && (view[0] > fullRange[0] + 1000 || windowPrevUrl));
+    panRightEdge.hidden = !(zoomed
+        && (view[1] < fullRange[1] - 1000 || windowNextUrl));
     if (zoomed) {
       document.getElementById('snapper-zoom-text').textContent =
           'Viewing ' + toNaive(view[0]).slice(5, 16).replace('T', ' ')
@@ -865,8 +876,19 @@
     Plotly.relayout(plotDiv, {'xaxis.range': [
       toNaive(start), toNaive(start + span)]});
   }
+  // Stepping past the loaded window's boundary navigates to the
+  // adjacent window range (server round trip for older/newer data).
+  // No arrow only at a true edge: 'now', or the earliest snap.
+  const windowPrevUrl = '{{ observatory_prev_url|default:""|escapejs }}';
+  const windowNextUrl = '{{ observatory_next_url|default:""|escapejs }}';
   function shiftView(direction) {
     const view = currentRange();
+    if (direction < 0 && view[0] <= fullRange[0] + 1000 && windowPrevUrl) {
+      window.location = windowPrevUrl; return;
+    }
+    if (direction > 0 && view[1] >= fullRange[1] - 1000 && windowNextUrl) {
+      window.location = windowNextUrl; return;
+    }
     const delta = direction * (view[1] - view[0]) / 2;
     setRange([view[0] + delta, view[1] + delta]);
   }
