@@ -105,13 +105,6 @@ from .viewdir.system_status import (
     system_status_page,
     system_status_refresh,
 )
-from .viewdir.snapper import (
-    snapper_cut,
-    snapper_prefs_save,
-    snapper_report,
-    snapper_root,
-    snapper_system,
-)
 
 # Import iDDS database views from new dedicated module
 from .viewdir.analysis import analysis_view
@@ -229,17 +222,8 @@ urlpatterns = [
     path('system/refresh/', system_status_refresh, name='system_status_refresh_root'),
     path('system/sysconfig/', sysconfig_save, name='sysconfig_save'),
 
-    # Snapper coherent operational state history
-    path('snapper/', snapper_root, name='snapper_root'),
-    path('snapper/<str:scope>/report/', snapper_report,
-         name='snapper_report'),
-    path('snapper/<str:scope>/prefs/', snapper_prefs_save,
-         name='snapper_prefs'),
-    path('snapper/<str:scope>/cut/', snapper_cut, name='snapper_cut'),
-    path('snapper/<str:scope>/report/<uuid:snap_id>/', snapper_report,
-         name='snapper_report_snap'),
-    path('snapper/<str:scope>/system/', snapper_system,
-         name='snapper_system'),
+    # Snapper (state history) is mounted at the project level from the
+    # snapper_ai package; scopes and cards register in snapper_providers.
     
     # PanDA Queues
     path('panda-queues/', panda_queues_list, name='panda_queues_list'),

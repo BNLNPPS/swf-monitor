@@ -1,18 +1,9 @@
 {% load swf_fmt %}
-{# One component card body, shared by the Time history cut and the      #}
-{# recorded-state section: every entity reference is a link to its      #}
-{# authoritative surface, and detail is human-usable — the raw document #}
-{# stays behind each surface's explicitly labeled audit foldout.        #}
-{# Context: `card` (kind + fields); deltas render when present.         #}
-<style>
-.snapper-chip { display:inline-block; padding:0 .55em; border-radius:.5em;
-                color:#fff; font-weight:600; }
-.snapper-stat { text-align:center; }
-.snapper-stat .snapper-stat-value { font-size:1.5em; font-weight:600; }
-/* Deltas are movement indicators, not verdicts: neutral color — a drop
-   in a count is not "bad" and red would say it is. */
-.snapper-delta-up, .snapper-delta-down { color:#5d6b7a; font-weight:600; }
-</style>
+{# Host-side Snapper card markup: the experiment-specific component     #}
+{# cards (datataking, panda, workflow) with their links into monitor    #}
+{# surfaces. Included by the snapper_ai component body when a provider  #}
+{# card carries this template; the chip/stat/delta styles come from the #}
+{# including core template.                                             #}
 
 {% if card.kind == 'datataking' %}
   <table class="table table-sm mb-1 w-auto">

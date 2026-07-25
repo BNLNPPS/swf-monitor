@@ -21,6 +21,11 @@ class MonitorAppConfig(AppConfig):
         """
         import monitor_app.signals  # noqa: F401
 
+        # Snapper is an agnostic installed app; the experiment-specific
+        # scope providers and host hooks register here.
+        from .snapper_providers import register_snapper_providers
+        register_snapper_providers()
+
         if self._should_connect_activemq():
             self._initialize_activemq()
     

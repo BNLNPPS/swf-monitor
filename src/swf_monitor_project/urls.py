@@ -33,6 +33,7 @@ urlpatterns = [
     path("canary/", include("canary.store.urls")),  # site-canary site health
     path("pcs/", include("pcs.urls")),  # Physics Configuration System
     path("ai/", include("ai.urls")),  # AI proposals
+    path("snapper/", include("snapper_ai.urls")),  # Snapper state history (UI ships in the package)
     path("", include("monitor_app.urls")),  # Include monitor_app URLs for the root path
     # API Schema and Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

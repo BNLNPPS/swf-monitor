@@ -175,6 +175,23 @@ esac
 log "Syncing pcs lightweight paths (swf-epicprod -> deployed venv)..."
 rsync "${RSYNC_ARGS[@]}" "${PCS_EXCLUDES[@]}" "$EPICPROD_ROOT/pcs/" "$TARGET_PCS/"
 
+# snapper_ai ships from snapper-ai as an installed package (views and
+# templates included since 2026-07-25); lightweight-sync the dev tree
+# onto the deployed venv's installed copy. Migrations ride the full
+# deploy only.
+SNAPPER_ROOT="/data/wenauseic/github/snapper-ai"
+TARGET_SNAPPER=$(cd "$CURRENT_DIR" && "$CURRENT_DIR/.venv/bin/python" -c "import snapper_ai, os; print(os.path.dirname(snapper_ai.__file__))")
+case "$TARGET_SNAPPER" in
+    "$CURRENT_DIR"/.venv/*) ;;
+    *)
+        echo "ERROR: deployed snapper_ai resolves outside the deployed venv: $TARGET_SNAPPER" >&2
+        echo "Run the full deploy to freeze snapper-ai, then retry." >&2
+        exit 1
+        ;;
+esac
+log "Syncing snapper_ai lightweight paths (snapper-ai -> deployed venv)..."
+rsync "${RSYNC_ARGS[@]}" --exclude 'migrations/' --exclude 'tests/' "$SNAPPER_ROOT/snapper_ai/" "$TARGET_SNAPPER/"
+
 log "Syncing ai lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/ai/" "$TARGET_SRC/ai/"
 
