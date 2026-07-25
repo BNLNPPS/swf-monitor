@@ -175,6 +175,23 @@ esac
 log "Syncing pcs lightweight paths (swf-epicprod -> deployed venv)..."
 rsync "${RSYNC_ARGS[@]}" "${PCS_EXCLUDES[@]}" "$EPICPROD_ROOT/pcs/" "$TARGET_PCS/"
 
+# snapper_ai ships from snapper-ai as an installed package (views and
+# templates included since 2026-07-25); lightweight-sync the dev tree
+# onto the deployed venv's installed copy. Migrations ride the full
+# deploy only.
+SNAPPER_ROOT="/data/wenauseic/github/snapper-ai"
+TARGET_SNAPPER=$(cd "$CURRENT_DIR" && "$CURRENT_DIR/.venv/bin/python" -c "import snapper_ai, os; print(os.path.dirname(snapper_ai.__file__))")
+case "$TARGET_SNAPPER" in
+    "$CURRENT_DIR"/.venv/*) ;;
+    *)
+        echo "ERROR: deployed snapper_ai resolves outside the deployed venv: $TARGET_SNAPPER" >&2
+        echo "Run the full deploy to freeze snapper-ai, then retry." >&2
+        exit 1
+        ;;
+esac
+log "Syncing snapper_ai lightweight paths (snapper-ai -> deployed venv)..."
+rsync "${RSYNC_ARGS[@]}" --exclude 'migrations/' --exclude 'tests/' "$SNAPPER_ROOT/snapper_ai/" "$TARGET_SNAPPER/"
+
 log "Syncing ai lightweight paths..."
 rsync "${RSYNC_ARGS[@]}" "${AI_EXCLUDES[@]}" "$SRC_DIR/ai/" "$TARGET_SRC/ai/"
 
@@ -211,6 +228,21 @@ if [[ "$DO_UI" == true ]]; then
     else
         log "Recycling mod_wsgi app by touching wsgi.py..."
         touch "$TARGET_SRC/swf_monitor_project/wsgi.py"
+        # Warm the recycled app before finishing: the first request after a
+        # recycle pays the cold start, and if that request arrives through
+        # the external face (swf-remote proxies this host over the tunnel)
+        # the System page reddens on a deployment. The full deploy already
+        # health-checks; this is the lightweight equivalent.
+        log "Warming the recycled app..."
+        for _ in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 \
+                "http://localhost/swf-monitor/" || true)
+            if [[ "$code" == "200" || "$code" == "302" ]]; then
+                log "App warm (HTTP $code)"
+                break
+            fi
+            sleep 2
+        done
     fi
 fi
 

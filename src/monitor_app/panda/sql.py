@@ -183,83 +183,9 @@ def build_union_count_by_field(field, where_clauses, params):
     return sql, full_params
 
 
-def build_task_query_dt(fields, where_clauses, params, order_by, limit, offset):
-    """Build a task query with OFFSET for DataTables pagination.
-
-    Includes per-task job-count aggregates (nactive / nfinished / nfailed /
-    nrunning / nretries / nfinalfailed) and derived failure-rate columns
-    (computed_failurerate over all failures, computed_finalfailurerate
-    over retry-exhausted failures only — what alarms trigger on). All
-    exposed as SELECT aliases so callers can ORDER BY any of them.
-    Aggregates come from a LATERAL subquery against jobsactive4 +
-    jobsarchived4 filtered by jeditaskid — one indexed lookup per
-    returned task.
-
-    order_by must use `"column"` for jedi_tasks columns (e.g. `"jeditaskid" DESC`)
-    or a bare alias for the aggregates (e.g. `nfailed DESC`, `computed_failurerate DESC NULLS LAST`).
-    """
-    field_list = ', '.join(f't."{f}"' for f in fields)
-    where_sql = ''
-    if where_clauses:
-        # Prefix unqualified column refs — callers pass `"status"` etc.
-        where_sql = ' WHERE ' + ' AND '.join(where_clauses)
-
-    active_list = _job_status_in_list('active')
-    finished_list = _job_status_in_list('finished')
-    failed_list = _job_status_in_list('failed')
-
-    sql = f"""
-        SELECT {field_list},
-               COALESCE(c.nactive, 0) AS nactive,
-               COALESCE(c.nfinished, 0) AS nfinished,
-               COALESCE(c.nfailed, 0) AS nfailed,
-               COALESCE(c.nrunning, 0) AS nrunning,
-               COALESCE(c.nretries, 0) AS nretries,
-               CASE WHEN COALESCE(c.nfailed, 0) + COALESCE(c.nfinished, 0) = 0
-                    THEN NULL
-                    ELSE ROUND(
-                        COALESCE(c.nfailed, 0)::numeric
-                        / NULLIF(COALESCE(c.nfailed, 0) + COALESCE(c.nfinished, 0), 0),
-                        4)
-               END AS computed_failurerate,
-               CASE WHEN COALESCE(c.nactive, 0) + COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0) = 0
-                    THEN NULL
-                    ELSE ROUND(
-                        100.0 * (COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0))::numeric
-                        / NULLIF(COALESCE(c.nactive, 0) + COALESCE(c.nfinished, 0) + COALESCE(c.nfailed, 0), 0)
-                    )::integer
-               END AS computed_progress,
-               COALESCE(c.nfinalfailed, 0) AS nfinalfailed,
-               CASE WHEN COALESCE(c.nfinalfailed, 0) + COALESCE(c.nfinished, 0) = 0
-                    THEN NULL
-                    ELSE ROUND(
-                        COALESCE(c.nfinalfailed, 0)::numeric
-                        / NULLIF(COALESCE(c.nfinalfailed, 0) + COALESCE(c.nfinished, 0), 0),
-                        4)
-               END AS computed_finalfailurerate
-        FROM "{PANDA_SCHEMA}"."jedi_tasks" t
-        LEFT JOIN LATERAL (
-            SELECT
-                SUM(CASE WHEN jobstatus IN ({active_list})   THEN 1 ELSE 0 END) AS nactive,
-                SUM(CASE WHEN jobstatus IN ({finished_list}) THEN 1 ELSE 0 END) AS nfinished,
-                SUM(CASE WHEN jobstatus IN ({failed_list})   THEN 1 ELSE 0 END) AS nfailed,
-                SUM(CASE WHEN jobstatus = 'running'          THEN 1 ELSE 0 END) AS nrunning,
-                SUM(CASE WHEN attemptnr > 1                  THEN 1 ELSE 0 END) AS nretries,
-                SUM(CASE WHEN jobstatus = 'failed' AND attemptnr >= COALESCE(maxattempt, 3)
-                                                             THEN 1 ELSE 0 END) AS nfinalfailed
-            FROM (
-                SELECT jobstatus, attemptnr, maxattempt FROM "{PANDA_SCHEMA}"."jobsactive4"
-                    WHERE jeditaskid = t.jeditaskid
-                UNION ALL
-                SELECT jobstatus, attemptnr, maxattempt FROM "{PANDA_SCHEMA}"."jobsarchived4"
-                    WHERE jeditaskid = t.jeditaskid
-            ) j
-        ) c ON TRUE
-        {where_sql}
-        ORDER BY {order_by}
-        LIMIT {limit} OFFSET {offset}
-    """
-    return sql, list(params)
+# build_task_query_dt (per-draw LATERAL aggregation for the tasks
+# DataTable) was retired 2026-07-25: the tasks list is served from a
+# cached full-window product built by queries.build_tasks_window.
 
 
 def build_task_count(where_clauses, params):

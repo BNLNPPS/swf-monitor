@@ -79,7 +79,7 @@
                     {% for item in group.items %}
                         <tr>
                             <td class="fw-semibold">{{ item.name }}</td>
-                            <td class="{{ item.status|state_class }}" title="{{ item.status|state_title }}">{% if item.status == 'ok' %}OK{% else %}{{ item.status|state_label }}{% endif %}</td>
+                            <td class="{{ item.status|state_class }}" title="{{ item.status|state_title }}">{% if item.status == 'ok' %}OK{% else %}{{ item.status|state_label }}{% if item.name in retryable %}<form method="post" action="{% url 'monitor_app:system_status_refresh' %}" class="d-inline ms-2">{% csrf_token %}<input type="hidden" name="name" value="{{ item.name }}"><button type="submit" class="btn btn-sm btn-secondary" title="Re-run this check now">Retry</button></form>{% endif %}{% endif %}</td>
                             <td class="system-summary-cell">{{ item.summary|urlize }}</td>
                             <td>{{ item.checked_at|date:"Y-m-d H:i:s T"|default:"-" }}</td>
                             <td>
@@ -129,4 +129,12 @@
     </section>
 </div>
 {# Relative times tick via the base-template data-relative-time helper. #}
+<script>
+// A queued retry/refresh flash carries the auto-reload tag: reload once
+// after the check has had time to run, so the fresh row appears without
+// a manual refresh.
+if (document.querySelector('.alert.auto-reload')) {
+  setTimeout(function () { window.location.reload(); }, 8000);
+}
+</script>
 {% endblock %}

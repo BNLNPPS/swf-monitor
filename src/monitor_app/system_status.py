@@ -1,12 +1,15 @@
 """Cached system status collection for ePIC production operations."""
 
+import base64
 import json
 import os
 import socket
+import ssl
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.db import OperationalError, ProgrammingError, transaction
 from django.utils import timezone
@@ -358,8 +361,186 @@ def _snapper_scheduler(scope):
         f'latest outcome is {outcome}.', data)
 
 
+def _activemq_broker():
+    """The message broker every agent, bot, and fast-processing worker
+    depends on. Three evidence sources: STOMP-TLS reachability measured as
+    a real timed handshake (the exact operation the acceptor's handshake
+    limit cuts for clients), handshake-drop volume from the broker log,
+    and broker internals over the console's Jolokia endpoint where the
+    console role configuration admits us — until then that source reports
+    itself unavailable rather than failing the collector."""
+    heap_warn = float(SysConfig.get_setting('activemq_heap_warn_pct', 90))
+    drops_warn = int(SysConfig.get_setting('activemq_drops_warn_24h', 200))
+
+    host = os.environ.get('ACTIVEMQ_HOST', 'localhost')
+    port = int(os.environ.get('ACTIVEMQ_PORT', '61612'))
+    use_ssl = os.environ.get('ACTIVEMQ_USE_SSL', 'False').lower() == 'true'
+    data = {'host': host, 'port': port, 'ssl': use_ssl}
+    problems = []
+
+    started = timezone.now()
+    try:
+        with socket.create_connection((host, port), timeout=12) as sock:
+            if use_ssl:
+                ctx = ssl.create_default_context(
+                    cafile=os.environ.get('ACTIVEMQ_SSL_CA_CERTS') or None)
+                with ctx.wrap_socket(sock, server_hostname=host):
+                    pass
+        data['handshake_ms'] = int(
+            (timezone.now() - started).total_seconds() * 1000)
+    except Exception as exc:
+        data['error'] = str(exc)
+        return _status('activemq-broker', 'services', 'error',
+                       f'broker unreachable at {host}:{port}: {exc}', data)
+
+    # Handshake drops over the trailing 24h from the broker log (Artemis
+    # AMQ224088, world-readable): today's file plus yesterday's rollover.
+    # Timestamps in the log are machine-local, so compare in local time.
+    log_path = os.environ.get('ACTIVEMQ_BROKER_LOG',
+                              '/var/lib/swfbroker/log/artemis.log')
+    cutoff = datetime.now() - timedelta(hours=24)
+    cutoff_s = cutoff.strftime('%Y-%m-%d %H:%M:%S')
+    drops = 0
+    for path in (f'{log_path}.{cutoff.date().isoformat()}', log_path):
+        try:
+            with open(path, encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if 'AMQ224088' in line and line[:19] >= cutoff_s:
+                        drops += 1
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            problems.append(f'broker log unreadable: {exc}')
+    data['handshake_drops_24h'] = drops
+
+    # Broker internals via the console's Jolokia endpoint. Pattern-form
+    # POST reads avoid hardcoding the broker's configured name. The
+    # console URL must say "localhost", not 127.0.0.1: Jolokia's strict
+    # CORS policy (jolokia-access.xml) admits only *://localhost*
+    # origins, and the Origin header must match the request host.
+    console = os.environ.get(
+        'ACTIVEMQ_CONSOLE_URL', 'http://localhost:8161/console').rstrip('/')
+    console_parts = urllib.parse.urlsplit(console)
+    origin = f'{console_parts.scheme}://{console_parts.netloc}'
+    auth = base64.b64encode(
+        f"{os.environ.get('ACTIVEMQ_USER', '')}:"
+        f"{os.environ.get('ACTIVEMQ_PASSWORD', '')}".encode()).decode()
+
+    def jolokia(mbean, attributes):
+        req = urllib.request.Request(
+            f'{console}/jolokia/',
+            data=json.dumps({'type': 'read', 'mbean': mbean,
+                             'attribute': attributes}).encode(),
+            headers={'Content-Type': 'application/json',
+                     'Authorization': f'Basic {auth}',
+                     'Origin': origin})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.load(resp)
+        if payload.get('status') != 200:
+            raise RuntimeError(
+                f"jolokia {payload.get('status')} for {mbean}: "
+                f"{str(payload.get('error') or '')[:120]}")
+        return payload.get('value') or {}
+
+    def first_pattern_value(value):
+        for entry in value.values():
+            if isinstance(entry, dict):
+                return entry
+        return {}
+
+    console_ok = False
+    heap_pct = connections = messages = dlq = None
+    try:
+        heap = jolokia('java.lang:type=Memory',
+                       ['HeapMemoryUsage'])['HeapMemoryUsage']
+        heap_pct = round(100.0 * heap['used'] / heap['max'], 1)
+        broker = first_pattern_value(jolokia(
+            'org.apache.activemq.artemis:broker=*',
+            ['ConnectionCount', 'TotalMessageCount']))
+        connections = broker.get('ConnectionCount')
+        messages = broker.get('TotalMessageCount')
+        dlq_reply = jolokia(
+            'org.apache.activemq.artemis:broker=*,component=addresses,'
+            'address="DLQ",subcomponent=queues,*', ['MessageCount'])
+        dlq = sum(int((entry or {}).get('MessageCount') or 0)
+                  for entry in dlq_reply.values() if isinstance(entry, dict))
+        console_ok = True
+        data.update({'heap_pct': heap_pct, 'heap': heap,
+                     'connections': connections, 'messages': messages,
+                     'dlq_depth': dlq})
+    except Exception as exc:
+        problems.append(f'console unavailable: {exc}')
+    data['console_available'] = console_ok
+    if problems:
+        data['problems'] = problems
+
+    state = 'ok'
+    parts = [f"broker up ({data['handshake_ms']} ms handshake)"]
+    if console_ok:
+        parts.append(f'{connections} connections')
+        parts.append(f'heap {heap_pct:.0f}%')
+        if heap_pct >= heap_warn:
+            state = 'warning'
+        parts.append('DLQ empty' if not dlq else f'DLQ {dlq}')
+        if dlq:
+            state = 'warning'
+    else:
+        parts.append('console unavailable')
+    parts.append(f'{drops} handshake drops 24h')
+    if drops >= drops_warn:
+        state = 'warning'
+    return _status('activemq-broker', 'services', state,
+                   ' · '.join(parts), data)
+
+
+def _stale_state():
+    """The garbage detector: state records claiming activity that
+    nothing corroborates. Detection over collection — a scheduled
+    cleaner would hide the producing bug; this check names the lie on
+    the System page so the source gets fixed (operator principle,
+    2026-07-24). Current detections: workflow executions claiming
+    'running' with no end time, and non-terminal run states, both past
+    the staleness threshold."""
+    from .models import RunState
+    from .workflow_models import WorkflowExecution
+
+    hours = float(SysConfig.get_setting('state_stale_hours', 12))
+    cutoff = timezone.now() - timedelta(hours=hours)
+    stuck_executions = list(
+        WorkflowExecution.objects
+        .filter(status='running', end_time__isnull=True,
+                start_time__lt=cutoff)
+        .order_by('start_time')
+        .values_list('execution_id', flat=True)[:20])
+    stale_runs = list(
+        RunState.objects
+        .exclude(state__in=('ended', 'expired', 'abandoned'))
+        .filter(state_changed_at__lt=cutoff)
+        .order_by('state_changed_at')
+        .values_list('run_number', flat=True)[:20])
+    data = {'threshold_hours': hours,
+            'stuck_executions': stuck_executions,
+            'stale_run_states': stale_runs}
+    problems = []
+    if stuck_executions:
+        problems.append(f'{len(stuck_executions)} execution(s) claim '
+                        'running with no recorded end')
+    if stale_runs:
+        problems.append(f'{len(stale_runs)} run state(s) non-terminal '
+                        'and stale')
+    if problems:
+        return _status('stale-state', 'agents', 'warning',
+                       '; '.join(problems)
+                       + f' (older than {hours:.0f}h) — a writer is '
+                         'abandoning state; fix the source', data)
+    return _status('stale-state', 'agents', 'ok',
+                   'no state record claims unbacked activity', data)
+
+
 COLLECTORS = {
     'epicprod-ops-agent': _ops_agent,
+    'activemq-broker': _activemq_broker,
+    'stale-state': _stale_state,
     'swf-panda-bot': _panda_bot,
     'campaign-assessments': _campaign_assessments,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
@@ -374,6 +555,15 @@ COLLECTORS = {
     'snapper-testbed-scheduler': lambda: _snapper_scheduler('testbed'),
     'snapper-epicprod-scheduler': lambda: _snapper_scheduler('epicprod'),
 }
+
+
+# Checks where a human-triggered re-probe is meaningful: the collector
+# reads recoverable external truth, so a retry can genuinely clear a red.
+# Freshness bookkeeping (campaign-assessments moves only when an
+# assessment registers) and informational rows (bot-usage) are excluded —
+# re-checking cannot change them.
+RETRYABLE_CHECKS = frozenset(COLLECTORS) - {'campaign-assessments',
+                                            'bot-usage'}
 
 
 def _should_append_history(old, new):

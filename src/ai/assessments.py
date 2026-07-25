@@ -150,8 +150,8 @@ def _subject_parts(subject_type, subject_key, subject_label):
 def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
                      subject_type, subject_key, subject_label, subject_url,
                      quality='', comment='', corun_page_group_id='',
-                     title='', assessment_kind='', verdict='', quarantined=False,
-                     render_body=True):
+                     title='', assessment_kind='', verdict='', narration='',
+                     quarantined=False, render_body=True):
     subject_kind, subject_id, subject_name, subject_display = _subject_parts(
         subject_type, subject_key, subject_label)
     # Reports are named by the human cadence: the assessment produced by the
@@ -182,6 +182,7 @@ def _assessment_item(*, item_id, storage, username, ai, assessment, created_at,
         'title': title,
         'assessment_kind': kind_display,
         'verdict': verdict,
+        'narration': narration,
         'quarantined': quarantined,
     }
 
@@ -216,6 +217,7 @@ def ai_content_items(rows, *, render_body=True):
             title=str(data.get('title') or '').strip(),
             assessment_kind=str(data.get('assessment_kind') or '').strip(),
             verdict=str(data.get('verdict') or '').strip(),
+            narration=str(data.get('narration') or '').strip(),
             quarantined=data.get('quarantined') is True,
             render_body=render_body,
         ))
@@ -254,6 +256,7 @@ def corun_page_items(pages, *, render_body=True):
             title=str(data.get('title') or page.get('title') or '').strip(),
             assessment_kind=str(data.get('assessment_kind') or '').strip(),
             verdict=str(data.get('verdict') or '').strip(),
+            narration=str(data.get('narration') or '').strip(),
             quarantined=data.get('quarantined') is True,
             render_body=render_body,
         ))

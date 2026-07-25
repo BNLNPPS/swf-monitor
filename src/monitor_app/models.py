@@ -1136,6 +1136,28 @@ class DataProvenance(models.Model):
         return f"DPID:{self.dpid} {self.tool_name}"
 
 
+class CachedProduct(models.Model):
+    """One expensive-to-build product, served stale-while-revalidate.
+
+    The uniform long-build caching store (docs/CACHED_PRODUCTS.md): a
+    request always serves ``value`` immediately with its ``built_at``;
+    rebuilds happen behind the request or on explicit update, with
+    ``building_since`` as the cross-worker in-flight lock.
+    """
+    key = models.CharField(max_length=300, unique=True)
+    value = models.JSONField(default=dict)
+    built_at = models.DateTimeField(null=True, blank=True)
+    build_seconds = models.FloatField(null=True, blank=True)
+    building_since = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_cached_product'
+
+    def __str__(self):
+        return self.key
+
+
 # Import workflow models to register them with Django
 from .workflow_models import (
     STFWorkflow,

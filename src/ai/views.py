@@ -230,14 +230,25 @@ def ai_narratives(request):
             ]
         except CorunAPIError as exc:
             error = f'corun-ai retrieval failed: {exc}'
-    # General items (standing context) precede campaign-specific ones;
-    # newest first within each block. The series identity is data.name.
+    # General items (standing context) precede campaign-specific ones,
+    # newest first. Campaign narratives order by campaign version,
+    # newest campaign first — stable reverse-chronological order that an
+    # edit to an older campaign's narrative cannot reshuffle. The series
+    # identity is data.name.
+    import re as _re
+
+    def _campaign_version_key(entry):
+        match = _re.fullmatch(r'campaign_(\d+(?:\.\d+)*)', entry['name'])
+        if match:
+            return tuple(int(p) for p in match.group(1).split('.'))
+        return (0,)
+
     general_entries = sorted(
         (e for e in entries if e['name'].startswith('campaign_general')),
         key=lambda e: e['updated'], reverse=True)
     campaign_entries = sorted(
         (e for e in entries if not e['name'].startswith('campaign_general')),
-        key=lambda e: e['updated'], reverse=True)
+        key=lambda e: (_campaign_version_key(e), e['updated']), reverse=True)
     return render(request, 'ai/narratives.html',
                   {'general_entries': general_entries,
                    'campaign_entries': campaign_entries,

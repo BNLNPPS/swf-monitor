@@ -22,10 +22,13 @@ def system_status_page(request):
     except Exception as exc:
         logger.warning('sysconfig read failed on system page: %s', exc)
         sysconfig_json = '{}'
+    from ..system_status import RETRYABLE_CHECKS
+
     return render(request, 'monitor_app/system_status.html', {
         'groups': grouped_current_status(),
         'summary': status_summary(),
         'sysconfig_json': sysconfig_json,
+        'retryable': RETRYABLE_CHECKS,
     })
 
 
@@ -77,18 +80,32 @@ def system_status_json(request):
 
 @require_POST
 def system_status_refresh(request):
+    from ..system_status import RETRYABLE_CHECKS
+
     msg = {
         'msg_type': 'refresh_system_status',
         'namespace': 'prodops',
         'source': 'system_page',
     }
+    name = (request.POST.get('name') or '').strip()
+    if name:
+        if name not in RETRYABLE_CHECKS:
+            messages.error(request, f'{name} is not a retryable check.')
+            return redirect('monitor_app:system_status')
+        msg['selected'] = [name]
     try:
         ok = ActiveMQConnectionManager().send_message('/queue/epicprod.ops', json.dumps(msg))
     except Exception as exc:
         ok = False
         logger.error("system status refresh trigger failed: %s", exc)
-    if ok:
-        messages.info(request, 'System status refresh queued.')
+    if ok and name:
+        messages.info(
+            request,
+            f'Retry queued for {name} — this page reloads shortly with '
+            'the fresh result.', extra_tags='auto-reload')
+    elif ok:
+        messages.info(request, 'System status refresh queued.',
+                      extra_tags='auto-reload')
     else:
         messages.error(request, 'System status refresh could not be queued.')
     return redirect('monitor_app:system_status')

@@ -23,7 +23,7 @@ from .sql import (
     build_union_query, build_count_query,
     build_task_query, build_task_count_query,
     build_union_query_dt, build_union_count, build_union_count_by_field,
-    build_task_query_dt, build_task_count, build_task_count_by_field,
+    build_task_count, build_task_count_by_field,
     build_search_clauses,
     row_to_dict, extract_errors, like_or_eq,
 )
@@ -90,6 +90,14 @@ def _user_filter_values(value):
     return sorted(v for v in values if v)
 
 
+# PCS created_by values that are record-keeping automation, not task
+# owners: the sweeps and the nightly sync create ProdTask records for
+# PanDA tasks they discover, so their created_by is provenance of the
+# record, not ownership of the task. These never override the PanDA
+# username in owner displays or owner filters.
+PCS_AUTOMATION_ACTORS = ('nightly_cron', 'association_sweep', 'prodops_agent')
+
+
 def _pcs_owner_map(jeditaskids):
     """Return {jediTaskID: PCS created_by} for PanDA tasks linked to PCS."""
     ids = [int(tid) for tid in set(jeditaskids or []) if tid]
@@ -101,6 +109,7 @@ def _pcs_owner_map(jeditaskids):
             int(jedi_task_id): _canonical_user(created_by)
             for jedi_task_id, created_by in PandaTasks.objects
             .filter(jedi_task_id__in=ids)
+            .exclude(prod_task__created_by__in=PCS_AUTOMATION_ACTORS)
             .values_list('jedi_task_id', 'prod_task__created_by')
             if jedi_task_id and created_by
         }
@@ -115,7 +124,9 @@ def _pcs_taskids_for_owner(username):
         return [], []
     try:
         from pcs.models import PandaTasks
-        linked = PandaTasks.objects.filter(jedi_task_id__isnull=False)
+        linked = (PandaTasks.objects
+                  .filter(jedi_task_id__isnull=False)
+                  .exclude(prod_task__created_by__in=PCS_AUTOMATION_ACTORS))
         if '%' in username:
             variants = [v.replace('%', '') for v in _user_filter_values(username)]
             owner_ids = set()
@@ -407,16 +418,14 @@ def job_completion_details(pandaids):
             for row in cursor.fetchall():
                 item = row_to_dict(row, fields)
                 errors = extract_errors(item)
-                attempt = item.get('attemptnr')
-                maxattempt = item.get('maxattempt') or 3
-                try:
-                    final_attempt = bool(attempt and int(attempt) >= int(maxattempt))
-                except (TypeError, ValueError):
-                    final_attempt = False
+                # No exhaustion flag here: the job record's maxattempt equals
+                # its own attemptnr in JEDI, so no per-record predicate can
+                # tell a final failure from a retried one. File-level
+                # accounting (jedi_datasets) owns that; see
+                # _get_task_job_counts.
                 details[item['pandaid']] = {
-                    'attemptnr': attempt,
-                    'maxattempt': maxattempt,
-                    'final_attempt': final_attempt,
+                    'attemptnr': item.get('attemptnr'),
+                    'maxattempt': item.get('maxattempt'),
                     'errors': errors,
                 }
             return details
@@ -434,11 +443,12 @@ def _stale_task_filter():
 
 
 def list_jobs(days=7, status=None, username=None, site=None,
-              taskid=None, reqid=None, limit=200, before_id=None):
+              taskid=None, reqid=None, limit=None, before_id=None):
     """List PanDA jobs with summary statistics and cursor-based pagination."""
-    # When scoped to a specific task, return everything — don't truncate
-    if taskid:
-        limit = 100000
+    # An explicit limit is always honored. The default is 200, or the
+    # complete population when scoped to a specific task.
+    if limit is None:
+        limit = 100000 if taskid else 200
     cutoff = timezone.now() - timedelta(days=days)
     where = ['"modificationtime" >= %s']
     params = [cutoff]
@@ -537,17 +547,20 @@ def list_jobs(days=7, status=None, username=None, site=None,
 
 
 def diagnose_jobs(days=7, username=None, site=None, taskid=None,
-                  reqid=None, error_component=None, limit=500, before_id=None):
+                  reqid=None, error_component=None, limit=None, before_id=None):
     """Diagnose failed PanDA jobs with full error details."""
-    # When scoped to a specific task, return everything — don't truncate
-    if taskid:
-        limit = 100000
+    # An explicit limit is always honored. The default is 500, or the
+    # complete population when scoped to a specific task.
+    if limit is None:
+        limit = 100000 if taskid else 500
     cutoff = timezone.now() - timedelta(days=days)
     where = [
         '"modificationtime" >= %s',
-        '"jobstatus" IN %s',
+        # = ANY(array) rather than IN (tuple): psycopg3 adapts a Python
+        # tuple as a composite record literal, which breaks the SQL.
+        '"jobstatus" = ANY(%s)',
     ]
-    params = [cutoff, tuple(FAULTY_STATUSES)]
+    params = [cutoff, list(FAULTY_STATUSES)]
 
     if username:
         clause, val = like_or_eq('produsername', username)
@@ -662,6 +675,15 @@ def _compute_failurerate(nfailed, nfinished):
     return round((nfailed or 0) / denom, 4)
 
 
+def _compute_avg_retries(nretries_finished, nfinished):
+    """Average retries per successful job (0 = every job passed on its
+    first attempt). Efficiency signal over the successes; complements the
+    final-failure rate, which covers the permanent failures."""
+    if not nfinished:
+        return None
+    return round((nretries_finished or 0) / nfinished, 2)
+
+
 def _compute_progress(nactive, nfinished, nfailed):
     """Integer-percent progress derived from job-level counts.
 
@@ -679,7 +701,7 @@ def _compute_progress(nactive, nfinished, nfailed):
 def _get_task_job_counts(jeditaskids):
     """Return per-task job counts:
     {jeditaskid: {nactive, nfinished, nfailed, nrunning, nretries,
-    nfinalfailed, maxattempt}}.
+    nfinalfailed, nfilesfinished, maxattempt}}.
 
     Aggregates over jobsactive4 + jobsarchived4 bucketed by JOB_STATUS_CATEGORIES.
     Cancelled and closed are deliberately not reported — alarms surface what
@@ -690,14 +712,26 @@ def _get_task_job_counts(jeditaskids):
     - nretries: count of job records with attemptnr > 1. In the ePIC PanDA
       schema every retry creates a new job record, so this is the total
       retry count for the task.
-    - nfinalfailed: count of job records with jobstatus='failed' AND
-      attemptnr >= maxattempt. These are final failures — the job exhausted
-      its retry budget. Distinguishes true failures from transient-fail-then-
-      retry-succeeds, which matters for alarms.
-    - maxattempt: maximum job-level maxattempt currently seen for the task.
+    - nfinalfailed: count of input files that exhausted their retry budget,
+      from JEDI's file-level accounting (jedi_datasets.nfilesfailed on the
+      master input datasets). These are final failures — no attempt remains.
+      Distinguishes true failures from transient-fail-then-retry-succeeds,
+      which matters for alarms. Job records cannot express this: JEDI sets
+      each job record's maxattempt equal to its own attemptnr (the column is
+      a legacy server-side-retry field), so any job-record predicate on
+      attemptnr/maxattempt counts every failed record.
+    - nfilesfinished: finished input files from the same file-level
+      accounting — the denominator partner for nfinalfailed.
+    - nretries_finished: sum of (attemptnr - 1) over finished job records —
+      the retries consumed by the successes. Divided by nfinished it gives
+      the average retries per successful job (0 = first-attempt pass), the
+      efficiency signal requested by Rahman 2026-07-25.
+    - maxattempt: maximum job-level maxattempt currently seen for the task
+      (equals the highest attempt number seen, per the JEDI convention above).
     """
     zero_counts = {'nactive': 0, 'nfinished': 0, 'nfailed': 0,
                    'nrunning': 0, 'nretries': 0, 'nfinalfailed': 0,
+                   'nfilesfinished': 0, 'nretries_finished': 0,
                    'maxattempt': None}
     if not jeditaskids:
         return {}
@@ -713,7 +747,7 @@ def _get_task_job_counts(jeditaskids):
         SELECT "jeditaskid", "jobstatus",
                COUNT(*) AS n,
                SUM(CASE WHEN "attemptnr" > 1 THEN 1 ELSE 0 END) AS nretries_part,
-               SUM(CASE WHEN "jobstatus"='failed' AND "attemptnr" >= COALESCE("maxattempt", 3) THEN 1 ELSE 0 END) AS nfinalfailed_part,
+               SUM(COALESCE("attemptnr", 1) - 1) AS retries_sum_part,
                MAX(COALESCE("maxattempt", 3)) AS maxattempt_part
         FROM (
             SELECT "jeditaskid", "jobstatus", "attemptnr", "maxattempt"
@@ -732,7 +766,7 @@ def _get_task_job_counts(jeditaskids):
     try:
         with connections['panda'].cursor() as cursor:
             cursor.execute(sql, params)
-            for tid, jobstatus, n, nretries_part, nfinalfailed_part, maxattempt_part in cursor.fetchall():
+            for tid, jobstatus, n, nretries_part, retries_sum_part, maxattempt_part in cursor.fetchall():
                 cat = status_to_cat.get(jobstatus)
                 if cat is not None:
                     counts[tid][f'n{cat}'] += n
@@ -740,7 +774,8 @@ def _get_task_job_counts(jeditaskids):
                 if jobstatus == 'running':
                     counts[tid]['nrunning'] += n
                 counts[tid]['nretries'] += nretries_part or 0
-                counts[tid]['nfinalfailed'] += nfinalfailed_part or 0
+                if cat == 'finished':
+                    counts[tid]['nretries_finished'] += retries_sum_part or 0
                 if maxattempt_part is not None:
                     current = counts[tid].get('maxattempt')
                     counts[tid]['maxattempt'] = max(
@@ -750,6 +785,27 @@ def _get_task_job_counts(jeditaskids):
     except Exception as e:
         logger.error(f"_get_task_job_counts failed: {e}")
         # On failure, return zeros so caller still gets a consistent shape.
+
+    # Final-failure accounting comes from JEDI's file-level bookkeeping on
+    # the master input datasets, not from job records (see docstring).
+    files_sql = f"""
+        SELECT "jeditaskid",
+               SUM(COALESCE("nfilesfailed", 0)) AS nfilesfailed,
+               SUM(COALESCE("nfilesfinished", 0)) AS nfilesfinished
+        FROM "{PANDA_SCHEMA}"."jedi_datasets"
+        WHERE "jeditaskid" IN ({placeholders})
+          AND "masterid" IS NULL
+          AND "type" IN ('input', 'pseudo_input')
+        GROUP BY "jeditaskid"
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(files_sql, list(jeditaskids))
+            for tid, nfilesfailed, nfilesfinished in cursor.fetchall():
+                counts[tid]['nfinalfailed'] = int(nfilesfailed or 0)
+                counts[tid]['nfilesfinished'] = int(nfilesfinished or 0)
+    except Exception as e:
+        logger.error(f"_get_task_job_counts file-level query failed: {e}")
     return counts
 
 
@@ -779,9 +835,11 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         where.append(clause)
         params.extend(vals)
     if taskname:
-        clause, val = like_or_eq('taskname', taskname)
-        where.append(clause)
-        params.append(val)
+        # Substring match by default: task names are long composed strings
+        # and a caller-supplied fragment (e.g. a campaign name) should hit.
+        # Caller-supplied % wildcards are honored as given.
+        where.append('"taskname" LIKE %s')
+        params.append(taskname if '%' in taskname else f'%{taskname}%')
     if reqid:
         where.append('"reqid" = %s')
         params.append(reqid)
@@ -846,19 +904,23 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
         return {"error": str(e)}
 
     # Per-task job counts (nactive, nfinished, nfailed, nrunning, nretries,
-    # nfinalfailed) — one extra query. computed_failurerate (all failures)
-    # and computed_finalfailurerate (attemptnr>=maxattempt — retry-exhausted)
-    # serve as usable substitutes for the native JEDI failurerate column,
-    # which is NULL in this deployment. Alarms use the final-failure rate.
+    # nfinalfailed, nfilesfinished) — two extra queries. computed_failurerate
+    # (all failed job records) and computed_finalfailurerate (retry-exhausted
+    # input files / terminal input files, JEDI file-level accounting) serve
+    # as usable substitutes for the native JEDI failurerate column, which is
+    # NULL in this deployment. Alarms use the final-failure rate.
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
-            'nretries': 0, 'nfinalfailed': 0}
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0,
+            'nretries_finished': 0}
     job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
     for t in tasks:
         c = job_counts.get(t['jeditaskid'], dict(zero))
         t.update(c)
         t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
-        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
+        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
         t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
+        t['avg_retries_success'] = _compute_avg_retries(
+            c.get('nretries_finished'), c['nfinished'])
     _apply_effective_owners(tasks, 'username')
     _apply_processing_type_display(tasks)
 
@@ -930,33 +992,51 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         if not components_to_query:
             return {"error": f"Unknown error_source '{error_source}'. Valid: {[c['name'] for c in ERROR_COMPONENTS]}"}
 
-    parts = []
-    all_params = []
-    join_type = 'JOIN' if destinationse else 'LEFT JOIN'
-    for comp in components_to_query:
-        for table in ['jobsactive4', 'jobsarchived4']:
-            parts.append(f"""
-                SELECT '{comp['name']}' as error_source,
-                       j."{comp['code']}" as error_code,
-                       j."{comp['diag']}" as error_diag,
-                       j."jeditaskid",
-                       j."produsername",
-                       j."computingsite",
-                       f."destinationse"
-                FROM "{PANDA_SCHEMA}"."{table}" j
-                {join_type} (
+    # One window scan per jobs table: the seven error components unpivot
+    # through a LATERAL VALUES row set instead of seven separate UNION
+    # branches per table. The filestable4 join — a DISTINCT over a table
+    # with several rows per job — runs only when a destination filter is
+    # actually requested; the unfiltered summary never touches it.
+    values_rows = ', '.join(
+        f"('{comp['name']}', j.\"{comp['code']}\", j.\"{comp['diag']}\")"
+        for comp in components_to_query)
+    if destinationse:
+        dest_join = f"""
+                JOIN (
                     SELECT DISTINCT "pandaid", "destinationse"
                     FROM "{PANDA_SCHEMA}"."filestable4"
                     WHERE "destinationse" IS NOT NULL
-                ) f ON f."pandaid" = j."pandaid"
-                WHERE j."modificationtime" >= %s
-                  AND j."jobstatus" IN ('failed','cancelled','closed')
-                  AND j."{comp['code']}" IS NOT NULL
-                  AND j."{comp['code']}" != 0
-                  {filters}
-                  {destse_filter}
-            """)
-            all_params.extend([cutoff] + extra_params + destse_params)
+                ) f ON f."pandaid" = j."pandaid" {destse_filter}"""
+        dest_select = 'f."destinationse"'
+    else:
+        dest_join = ''
+        dest_select = 'NULL as "destinationse"'
+
+    parts = []
+    all_params = []
+    for table in ['jobsactive4', 'jobsarchived4']:
+        parts.append(f"""
+            SELECT e.error_source,
+                   e.error_code,
+                   e.error_diag,
+                   j."jeditaskid",
+                   j."produsername",
+                   j."computingsite",
+                   j."starttime",
+                   j."endtime",
+                   {dest_select}
+            FROM "{PANDA_SCHEMA}"."{table}" j
+            {dest_join}
+            CROSS JOIN LATERAL (
+                VALUES {values_rows}
+            ) AS e(error_source, error_code, error_diag)
+            WHERE j."modificationtime" >= %s
+              AND j."jobstatus" IN ('failed','cancelled','closed')
+              AND e.error_code IS NOT NULL
+              AND e.error_code != 0
+              {filters}
+        """)
+        all_params.extend(destse_params + [cutoff] + extra_params)
 
     union_sql = ' UNION ALL '.join(parts)
     sql = f"""
@@ -966,7 +1046,14 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                COUNT(DISTINCT jeditaskid) as task_count,
                array_agg(DISTINCT produsername) as users,
                array_agg(DISTINCT computingsite) as sites,
-               array_agg(DISTINCT destinationse) as destination_sites
+               array_agg(DISTINCT destinationse) as destination_sites,
+               AVG(EXTRACT(EPOCH FROM (endtime - starttime)))
+                   FILTER (WHERE starttime IS NOT NULL
+                             AND endtime IS NOT NULL
+                             AND endtime >= starttime)
+                   as avg_seconds_to_error,
+               COUNT(*) FILTER (WHERE starttime IS NULL)
+                   as never_started_count
         FROM ({union_sql}) errs
         GROUP BY error_source, error_code, LEFT(error_diag, 256)
         ORDER BY count DESC
@@ -994,6 +1081,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'users': row[5],
             'sites': row[6],
             'destination_sites': row[7],
+            # Mean start-to-end interval of the failed jobs — how long a
+            # job typically ran before this error ended it. Jobs that
+            # never started (no starttime) are counted separately, not
+            # averaged in as zero.
+            'avg_seconds_to_error': (round(float(row[8]), 1)
+                                     if row[8] is not None else None),
+            'never_started_count': row[9] or 0,
         }
         total += row[3]
         errors.append(entry)
@@ -1827,111 +1921,64 @@ def list_jobs_dt(days=7, status=None, username=None, site=None,
     return rows, total, filtered
 
 
-def list_tasks_dt(days=7, status=None, username=None, taskname=None,
-                  processingtype=None,
-                  workinggroup=None, order_by='"jeditaskid" DESC',
-                  limit=100, offset=0, search=None):
-    """List JEDI tasks for DataTables (returns rows, total, filtered counts)."""
+def build_tasks_window(days=7, cap=5000):
+    """Build the full tasks window for the cached tasks-list product.
+
+    Every task in the days window (newest first, capped) with the batch
+    job/file aggregates and computed fields. One aggregation pass serves
+    every sort, filter, and page of the tasks list from the cached
+    product; the retired per-draw LATERAL aggregation this replaces cost
+    ~2 s per aggregate-sorted draw (measured 2026-07-25, 476-task window
+    over 465k job records; this batch pass costs under a second, once
+    per TTL).
+
+    Raises on database failure so the cached-product builder surfaces
+    the error instead of storing an empty window.
+    """
     cutoff = timezone.now() - timedelta(days=days)
     where = ['COALESCE("modificationtime", "creationdate") >= %s']
     params = [cutoff]
-
     _stale = _stale_task_filter()
     where.append(_stale['clause'])
     params.extend(_stale['params'])
 
-    if status:
-        where.append('"status" = %s')
-        params.append(status)
-    if username:
-        clause, vals = _effective_username_filter('username', username)
-        where.append(clause)
-        params.extend(vals)
-    if taskname:
-        clause, val = like_or_eq('taskname', taskname)
-        where.append(clause)
-        params.append(val)
-    if processingtype:
-        if processingtype == '__blank__':
-            where.append('("processingtype" IS NULL OR "processingtype" = %s)')
-            params.append('')
-        else:
-            clause, val = like_or_eq('processingtype', processingtype)
-            where.append(clause)
-            params.append(val)
-    if workinggroup:
-        where.append('"workinggroup" = %s')
-        params.append(workinggroup)
+    field_list = ', '.join(f'"{f}"' for f in TASK_LIST_FIELDS)
+    sql = f"""
+        SELECT {field_list}
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE {' AND '.join(where)}
+        ORDER BY "jeditaskid" DESC
+        LIMIT {int(cap) + 1}
+    """
+    tasks = []
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, params)
+        for row in cursor.fetchall():
+            tasks.append(row_to_dict(row, TASK_LIST_FIELDS))
 
-    conn = connections['panda']
+    truncated = len(tasks) > cap
+    if truncated:
+        logger.warning("build_tasks_window: window exceeds cap "
+                       f"({len(tasks)} > {cap}); truncating — oldest "
+                       "tasks in the window are not in the product")
+        tasks = tasks[:cap]
 
-    # Total count
-    count_sql, count_params = build_task_count(where, params)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(count_sql, count_params)
-            total = cursor.fetchone()[0]
-    except Exception as e:
-        logger.error(f"list_tasks_dt count failed: {e}")
-        return [], 0, 0
-
-    # Apply search filter
-    filtered_where = list(where)
-    filtered_params = list(params)
-    if search:
-        search_clause, search_params = build_search_clauses(TASK_SEARCH_FIELDS, search)
-        filtered_where.append(search_clause)
-        filtered_params.extend(search_params)
-
-    # Filtered count
-    if search:
-        fcount_sql, fcount_params = build_task_count(filtered_where, filtered_params)
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(fcount_sql, fcount_params)
-                filtered = cursor.fetchone()[0]
-        except Exception as e:
-            logger.error(f"list_tasks_dt filtered count failed: {e}")
-            return [], total, 0
-    else:
-        filtered = total
-
-    # Data query
-    sql, full_params = build_task_query_dt(
-        TASK_LIST_FIELDS, filtered_where, filtered_params,
-        order_by=order_by, limit=limit, offset=offset,
-    )
-
-    rows = []
-    n_base = len(TASK_LIST_FIELDS)
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(sql, full_params)
-            for row in cursor.fetchall():
-                # build_task_query_dt returns TASK_LIST_FIELDS + 9 aggregate
-                # columns (in order): nactive, nfinished, nfailed, nrunning,
-                # nretries, computed_failurerate, computed_progress,
-                # nfinalfailed, computed_finalfailurerate.
-                task = row_to_dict(row[:n_base], TASK_LIST_FIELDS)
-                task['nactive'] = row[n_base]
-                task['nfinished'] = row[n_base + 1]
-                task['nfailed'] = row[n_base + 2]
-                task['nrunning'] = row[n_base + 3]
-                task['nretries'] = row[n_base + 4]
-                fr = row[n_base + 5]
-                task['computed_failurerate'] = float(fr) if fr is not None else None
-                task['computed_progress'] = row[n_base + 6]  # already integer or None
-                task['nfinalfailed'] = row[n_base + 7]
-                ffr = row[n_base + 8]
-                task['computed_finalfailurerate'] = float(ffr) if ffr is not None else None
-                rows.append(task)
-    except Exception as e:
-        logger.error(f"list_tasks_dt query failed: {e}")
-        return [], total, filtered
-
-    _apply_effective_owners(rows, 'username')
-    _apply_processing_type_display(rows)
-    return rows, total, filtered
+    zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0,
+            'nretries_finished': 0}
+    job_counts = _get_task_job_counts([t['jeditaskid'] for t in tasks])
+    for t in tasks:
+        c = job_counts.get(t['jeditaskid'], dict(zero))
+        t.update(c)
+        t['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
+        t['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
+        t['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
+        t['avg_retries_success'] = _compute_avg_retries(
+            c.get('nretries_finished'), c['nfinished'])
+    _apply_effective_owners(tasks, 'username')
+    _apply_processing_type_display(tasks)
+    return {'tasks': tasks, 'count': len(tasks), 'truncated': truncated,
+            'days': days}
 
 
 def job_filter_counts(days=7, status=None, username=None, site=None,
@@ -2092,11 +2139,14 @@ def get_task(jeditaskid):
 
     task = row_to_dict(row, TASK_LIST_FIELDS)
     zero = {'nactive': 0, 'nfinished': 0, 'nfailed': 0, 'nrunning': 0,
-            'nretries': 0, 'nfinalfailed': 0}
+            'nretries': 0, 'nfinalfailed': 0, 'nfilesfinished': 0,
+            'nretries_finished': 0}
     c = _get_task_job_counts([jeditaskid]).get(jeditaskid, dict(zero))
     task.update(c)
     task['computed_failurerate'] = _compute_failurerate(c['nfailed'], c['nfinished'])
-    task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfinished'])
+    task['computed_finalfailurerate'] = _compute_failurerate(c['nfinalfailed'], c['nfilesfinished'])
+    task['avg_retries_success'] = _compute_avg_retries(
+        c.get('nretries_finished'), c['nfinished'])
     task['computed_progress'] = _compute_progress(c['nactive'], c['nfinished'], c['nfailed'])
     _apply_effective_owners([task], 'username')
     task['datasets'] = _get_task_datasets(jeditaskid)

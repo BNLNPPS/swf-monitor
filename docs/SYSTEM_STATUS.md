@@ -58,6 +58,8 @@ The initial collector set is defined in `monitor_app/system_status.py`:
 | `epic-devcloud-doc` | `external` | HTTP check of the external face `/doc/` |
 | `github-actions` | `ci` | Latest completed GitHub Actions run of every workflow in the core repos (`GITHUB_REPOS` in `system_status.py`), on `main` and `infra/baseline-*` branches only; a failing workflow is a warning (development CI does not redden the collaboration-facing indicator), with the failing run linked in the summary |
 | `bot-usage` | `agents` | Informational (always ok): bot user turns over the last 7 and 30 days, channel vs DM, from the recorded exchanges. Aggregate counts only — no per-user detail on this open surface |
+| `stale-state` | `agents` | The garbage detector: state records claiming activity nothing corroborates — workflow executions 'running' with no end, non-terminal run states — past `state_stale_hours` (default 12). Warning names the counts; nothing is cleaned up: a scheduled cleaner would hide the producing bug, and the writer gets fixed instead |
+| `activemq-broker` | `services` | The message broker: a real timed STOMP-TLS handshake (unreachable → error), handshake-drop count over the trailing 24 h from the broker log (Artemis AMQ224088), and — where the console role configuration admits — heap occupancy, connection count, and DLQ depth over Jolokia. Warnings at heap ≥ `activemq_heap_warn_pct` (default 90), drops ≥ `activemq_drops_warn_24h` (default 200), or a non-empty DLQ; with the console unreachable those internals report unavailable rather than failing the check |
 | `campaign-assessments` | `agents` | Scheduled campaign-assessment slots actually filled: ages the newest registered daily/weekly assessment per target campaign against SysConfig thresholds (`assessment_daily_stale_hours`, `assessment_weekly_stale_hours`). A run lost anywhere upstream of registration — trigger, corun run, callback, enforcement — goes red here. Policy in `swf_epicprod.assessment.freshness` |
 | `snapper-testbed-scheduler` | `agents` | PostgreSQL capture-cursor heartbeat, failures, coverage gaps, and latest result for the testbed scope |
 | `snapper-epicprod-scheduler` | `agents` | PostgreSQL capture-cursor heartbeat, failures, coverage gaps, and latest result for the epicprod scope |
@@ -107,6 +109,20 @@ The stale threshold is the `STATUS_STALE_AFTER` constant in
 `monitor_app/system_status.py`, currently 15 minutes. That is three missed
 cycles at the default 5-minute ops-agent refresh interval. Tune this constant if
 the nav produces false stale alarms or reacts too slowly to a dead refresher.
+
+## Snapper health lane exclusions
+
+The snapper `health` component (`monitor_app/snapper_health.py`) projects a
+scoped subset of these checks into each snap, and its overall status drives
+the health lane on the Snapper Time history page. That lane is the
+operational state of the production system itself, so checks that track
+reporting freshness rather than system operation are configured out of the
+projection via the SysConfig key `snapper_health_excluded_checks` (default:
+`campaign-assessments` — "no daily assessment yet" belongs on the System
+page and the assessment surfaces, not on the ops-state lane). Excluded
+names are recorded in the component payload as `excluded_checks`, and the
+System Status record itself is never filtered. History is immutable:
+already-recorded snaps keep the overall computed at their capture time.
 
 ## Navigation indicator
 

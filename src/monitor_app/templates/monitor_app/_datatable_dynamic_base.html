@@ -56,6 +56,17 @@ Filter field configuration format:
         </div>
     </div>
 
+    <!-- Cached-product freshness chip (docs/CACHED_PRODUCTS.md): appears
+         only when the ajax response carries product_built_at. -->
+    <div id="dt-product-chip" class="mb-2" hidden>
+        <span class="text-muted">Data as of
+            <strong id="dt-product-built"></strong>
+            <span id="dt-product-refreshing" hidden>· refreshing…</span>
+        </span>
+        <button type="button" id="dt-product-update"
+                class="btn btn-sm btn-secondary ms-2">Update</button>
+    </div>
+
     {% if show_query_count %}
     <div id="query-count" class="query-count mb-2" aria-live="polite">Query count: loading...</div>
     {% endif %}
@@ -272,6 +283,36 @@ $(document).ready(function() {
     window.table = table;
     window.tableCurrentFilters = currentFilters;
     window.tableUpdateFilters = updateFilters;
+
+    // Cached-product freshness chip: shown when the server marks this
+    // table as a cached product. Update rebuilds synchronously (the
+    // user chose to wait); ordinary reloads never trigger a build.
+    $('#main-table').on('xhr.dt', function (e, settings, json) {
+        if (!json || !json.product_built_at) return;
+        const chip = document.getElementById('dt-product-chip');
+        chip.hidden = false;
+        // The app presents time in Eastern everywhere, whatever the
+        // viewer's browser timezone.
+        document.getElementById('dt-product-built').textContent =
+            new Date(json.product_built_at).toLocaleString('en-CA',
+                {timeZone: 'America/New_York', hour12: false,
+                 year: 'numeric', month: '2-digit', day: '2-digit',
+                 hour: '2-digit', minute: '2-digit'}) + ' ET';
+        document.getElementById('dt-product-refreshing').hidden =
+            !json.product_refreshing;
+    });
+    document.getElementById('dt-product-update')
+        .addEventListener('click', function () {
+        const button = this;
+        button.disabled = true;
+        button.textContent = 'Updating…';
+        currentFilters.refresh = '1';
+        table.ajax.reload(function () {
+            delete currentFilters.refresh;
+            button.disabled = false;
+            button.textContent = 'Update';
+        });
+    });
 
 
     // Filter link click handler

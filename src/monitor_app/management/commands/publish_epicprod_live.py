@@ -208,9 +208,19 @@ class Command(BaseCommand):
         if subject:
             parts.append(subject)
         if verdict:
-            parts.append(f'Verdict: **{verdict.capitalize()}**')
+            verdict_text = f'Verdict: **{verdict.capitalize()}**'
+            standing = extra.get('verdict_standing')
+            if isinstance(standing, dict):
+                prior = int(standing.get('prior_consecutive') or 0)
+                if prior >= 1:
+                    verdict_text += f' (standing, {prior + 1} consecutive)'
+            parts.append(verdict_text)
         parts.append(f'[record]({_link_base()}/logs/{row.id}/)')
-        return f'### [{title}]({url})\n' + ' · '.join(parts)
+        notice = f'### [{title}]({url})\n' + ' · '.join(parts)
+        narration = ' '.join(str(extra.get('narration') or '').split())
+        if narration:
+            notice += f'\n{narration}'
+        return notice
 
     # -- plumbing ------------------------------------------------------------
 

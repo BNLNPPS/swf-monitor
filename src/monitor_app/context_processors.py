@@ -272,6 +272,7 @@ def _active_nav(request):
             'snapper_report_snap',
             'snapper_system',
         },
+        'canary': namespace == 'canary',
         'about': namespace == 'monitor_app' and url_name == 'about',
         'account': namespace == 'monitor_app' and url_name == 'account',
     }

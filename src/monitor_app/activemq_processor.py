@@ -5,6 +5,7 @@ import time
 from django.utils import timezone
 from django.db import connection
 from .models import SystemAgent
+from .run_state_transitions import apply_run_lifecycle_message
 from .workflow_models import WorkflowMessage
 from django.conf import settings
 from channels.layers import get_channel_layer
@@ -143,6 +144,16 @@ class WorkflowMessageProcessor(stomp.ConnectionListener if stomp else object):
                 queue_name=getattr(frame, 'destination', 'epictopic'),
                 is_successful=True  # Assume successful since we received it
             )
+
+            # Apply run lifecycle transitions to RunState — the E1 mirror
+            # of the E0-E1 state stamps these messages carry. Failures are
+            # logged, never silent, and never block message recording.
+            try:
+                apply_run_lifecycle_message(data)
+            except Exception as e:
+                self.logger.error(
+                    f"RunState transition failed for {msg_type} "
+                    f"run {run_id}: {e}")
 
             # Enrich message for downstream consumers (SSE filters rely on these)
             enriched = dict(data)

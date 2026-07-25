@@ -82,6 +82,18 @@ HEALTH_REGISTRATION = {
             "max_items": MAX_CHECKS,
             "description": "Bounded map of the checks determining overall health.",
         },
+        "excluded_checks": {
+            "path": "excluded_checks",
+            "type": "array",
+            "required": False,
+            "kind": "bounded_map",
+            "max_items": MAX_CHECKS,
+            "description": (
+                "Check names configured out of this projection "
+                "(snapper_health_excluded_checks); they remain on the "
+                "System Status surfaces."
+            ),
+        },
     },
     "event_sources": [
         {
@@ -152,13 +164,33 @@ def _overall(counts: dict) -> tuple[str, str]:
     return "ok", "All included checks are OK."
 
 
+def _excluded_check_names() -> tuple[str, ...]:
+    """Check names configured out of the snapper health lane.
+
+    The System Status record itself is untouched — excluded checks stay
+    on the System page and the assessment surfaces. The snapper lane is
+    the operational state of the production system; agent-freshness
+    checks (a report not yet generated) are excluded from it by default.
+    """
+    from .models import SysConfig
+
+    value = SysConfig.get_setting(
+        'snapper_health_excluded_checks', ['campaign-assessments'])
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(name) for name in value)
+
+
 def health_projection(scope: str, assessed_at: Optional[datetime] = None):
     """Build one scoped projection and its oldest authoritative source time."""
-    names = HEALTH_SCOPE_CHECKS.get(scope)
-    if names is None:
+    scope_names = HEALTH_SCOPE_CHECKS.get(scope)
+    if scope_names is None:
         raise ValueError(f"unknown Snapper health scope {scope!r}")
-    if len(names) > MAX_CHECKS:
+    if len(scope_names) > MAX_CHECKS:
         raise ValueError(f"health scope {scope!r} exceeds {MAX_CHECKS} checks")
+    excluded = _excluded_check_names()
+    names = tuple(name for name in scope_names if name not in excluded)
+    excluded_here = [name for name in scope_names if name in excluded]
     assessed_at = assessed_at or timezone.now()
     rows = {
         row.name: row
@@ -186,6 +218,8 @@ def health_projection(scope: str, assessed_at: Optional[datetime] = None):
         },
         "checks": checks,
     }
+    if excluded_here:
+        projection["excluded_checks"] = excluded_here
     return projection, source_as_of, assessed_at
 
 

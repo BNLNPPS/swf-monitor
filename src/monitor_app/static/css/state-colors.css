@@ -255,4 +255,13 @@
    csv_import: imported from external CSV, not yet processed by the
    prod team → grey (inert, closed family). */
 .draft_fill { color:black; background-color:#e6f0f6 !important; }
+
+/* Canary health states (healthy/suspect/excluded/recovering/unknown);
+   unknown_fill already above. Excluded is an evaluation — a deliberate
+   set-aside, not a failure — so it takes the calm blue-grey family;
+   red fills mean broken only. */
+.healthy_fill { color:black; background-color:#96ca69 !important; }
+.suspect_fill { color:black; background-color:#FFE38E !important; }
+.excluded_fill { color:black; background-color:#d9efef !important; }
+.recovering_fill { color:black; background-color:#C7E9A9 !important; }
 .csv_import_fill { color:black; background-color:#dedede !important; }
