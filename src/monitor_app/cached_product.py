@@ -132,6 +132,19 @@ def get_product(key, builder, ttl_seconds, refresh=False):
                     'refreshing': False,
                     'built_now': False,
                 }
+            if (row is None or row.building_since is None) and _claim(key):
+                # The other build ended without landing a newer product
+                # (failure or lock expiry). The caller asked for a
+                # synchronous update, so build it here after all.
+                _build_and_store(key, builder)
+                row = CachedProduct.objects.filter(key=key).first()
+                return {
+                    'value': row.value,
+                    'built_at': row.built_at,
+                    'age_seconds': 0.0,
+                    'refreshing': False,
+                    'built_now': True,
+                }
         # The in-flight build outlasted the wait; fall through and report
         # the stored product with refreshing status honestly.
 
