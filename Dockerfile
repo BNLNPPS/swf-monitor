@@ -41,6 +41,13 @@ RUN git clone --depth 1 --branch "${SNAPPER_AI_REF}" \
         https://github.com/BNLNPPS/snapper-ai.git /build/snapper-ai \
     && pip install --no-cache-dir /build/snapper-ai
 
+# Install site-canary, the site health store and page installed in the
+# monitor runtime (the canary application in INSTALLED_APPS).
+ARG SITE_CANARY_REF=main
+RUN git clone --depth 1 --branch "${SITE_CANARY_REF}" \
+        https://github.com/BNLNPPS/site-canary.git /build/site-canary \
+    && pip install --no-cache-dir "/build/site-canary[store]"
+
 # Copy the full project and install it as a package.
 COPY . /build/swf-monitor
 RUN pip install --no-cache-dir -e /build/swf-monitor

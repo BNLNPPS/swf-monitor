@@ -527,10 +527,14 @@ def _format_task_row(task, days):
     tasks_by_user_url = _url_with_query('monitor_app:panda_tasks_list', days=days, username=task['username']) if task.get('username') else None
     tasks_by_status_url = _url_with_query('monitor_app:panda_tasks_list', days=days, status=task['status']) if task.get('status') else None
 
-    # Truncate taskname for display
+    # Truncate taskname for display; escape user-influenced values so a
+    # name containing quotes or markup cannot break out of the cell.
     taskname_display = task.get('taskname', '') or ''
     if len(taskname_display) > 80:
         taskname_display = taskname_display[:77] + '...'
+    taskname_display = escape(taskname_display)
+    taskname_title = escape(task.get('taskname', '') or '')
+    username_html = escape(task.get('username', '') or '')
 
     comp_pr = task.get('computed_progress')
     comp_pr_str = f'{comp_pr}%' if comp_pr is not None else ''
@@ -554,10 +558,10 @@ def _format_task_row(task, days):
 
     return [
         f'<a href="{task_url}">{task["jeditaskid"]}</a>',
-        f'<a href="{task_url}" title="{task.get("taskname", "")}">{taskname_display}</a>',
+        f'<a href="{task_url}" title="{taskname_title}">{taskname_display}</a>',
         _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
         processingtype_display,
-        f'<a href="{tasks_by_user_url}">{task["username"]}</a>' if tasks_by_user_url else '',
+        f'<a href="{tasks_by_user_url}">{username_html}</a>' if tasks_by_user_url else '',
         _fmt_dt(task.get('creationdate')),
         _fmt_dt(task.get('modificationtime')),
         comp_pr_str,
