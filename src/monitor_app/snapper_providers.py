@@ -148,14 +148,46 @@ def namespace_activity_at(instant, dangle_seconds=12 * 3600):
     return out
 
 
+def _arc_summary(exec_row):
+    """One-line story for the numbered activity table, from the
+    execution record: STF volume and the decision-box plan."""
+    if not exec_row:
+        return ''
+    params, executed_by = exec_row
+    sim = params.get('simulation') or {}
+    pp = params.get('prompt_processing') or {}
+    bits = []
+    try:
+        bits.append(f"{int(sim.get('stf_count')) * int(sim.get('physics_period_count'))} STF")
+    except (TypeError, ValueError):
+        pass
+    if pp.get('decision_box_enabled'):
+        sites = ', '.join(str(s) for s in (pp.get('decision_box_sites') or []))
+        policy = str(pp.get('decision_box_policy') or '')
+        bits.append(f'decision box ({policy}) → {sites}')
+    if executed_by:
+        bits.append(f'by {executed_by}')
+    return ' · '.join(bits)
+
+
 def _run_activity_lanes(start, end, dangle_seconds):
     """Activity lane segments rendered from the shared per-namespace run
     arcs: a solid datataking tile opening into a lighter processing
     tail, hatched when the run never recorded an end. Idle namespaces
-    keep an empty lane (a grey track on the plot)."""
+    keep an empty lane (a grey track on the plot). Segments carry the
+    run number as the activity key, with a flag and story summary on
+    the leading tile for the numbered activity table."""
+    from .workflow_models import WorkflowExecution
+    arcs_by_namespace = _namespace_run_arcs(start, end, dangle_seconds)
+    exec_ids = {arc['execution'] for runs in arcs_by_namespace.values()
+                for arc in runs if arc['execution']}
+    exec_rows = {
+        row[0]: (row[1] or {}, row[2] or '')
+        for row in WorkflowExecution.objects
+        .filter(execution_id__in=exec_ids)
+        .values_list('execution_id', 'parameter_values', 'executed_by')}
     lanes = {}
-    for namespace, runs in _namespace_run_arcs(
-            start, end, dangle_seconds).items():
+    for namespace, runs in arcs_by_namespace.items():
         segments = lanes.setdefault(namespace, [])
         for arc in runs:
             ident = (f"{arc['workflow']} · run {arc['run_number']}"
@@ -163,6 +195,9 @@ def _run_activity_lanes(start, end, dangle_seconds):
                         else ''))
             started = arc['first'].astimezone(ET_ZONE).strftime(
                 '%m-%d %H:%M ET')
+            flag = f"{arc['workflow']} · run {arc['run_number']}"
+            key = str(arc['run_number'])
+            summary = _arc_summary(exec_rows.get(arc['execution']))
             if arc['dangling']:
                 segments.append({
                     't0': et_naive(arc['first']),
@@ -171,7 +206,8 @@ def _run_activity_lanes(start, end, dangle_seconds):
                               'recorded end; last activity '
                               + arc['last'].astimezone(
                                   ET_ZONE).strftime('%m-%d %H:%M ET')),
-                    'open_end': True})
+                    'open_end': True, 'flag': flag, 'key': key,
+                    'summary': summary})
                 continue
             datataking_end = arc['end_run'] or arc['last']
             total = span_text(
@@ -181,13 +217,14 @@ def _run_activity_lanes(start, end, dangle_seconds):
                 't0': et_naive(arc['first']),
                 't1': et_naive(datataking_end), 'value': 'run',
                 'hover': f'{hover} · datataking window',
-                'open_end': False})
+                'open_end': False, 'flag': flag, 'key': key,
+                'summary': summary})
             if arc['last'] > datataking_end:
                 segments.append({
                     't0': et_naive(datataking_end),
                     't1': et_naive(arc['last']), 'value': 'processing',
                     'hover': f'{hover} · processing tail',
-                    'open_end': False})
+                    'open_end': False, 'key': key})
     return lanes
 
 
@@ -357,10 +394,115 @@ def _workflow_card(data, previous_data, ctx):
             'stf_processing_type': STF_PROCESSING_TYPE}
 
 
+def _stf_tasks_for_run(run_number):
+    """The run's STF prompt-processing tasks with file progress, from
+    the PanDA mirror (jedi_tasks joined to input-dataset file counts)."""
+    from django.db import connections
+    from django.urls import reverse
+
+    from .panda.constants import PANDA_SCHEMA
+    sql = f"""
+        SELECT t."jeditaskid", COALESCE(t."site", ''),
+               COALESCE(t."status", ''),
+               COALESCE(d."nfiles", 0), COALESCE(d."nfilesfinished", 0),
+               COALESCE(d."nfilesfailed", 0)
+        FROM "{PANDA_SCHEMA}"."jedi_tasks" t
+        LEFT JOIN "{PANDA_SCHEMA}"."jedi_datasets" d
+            ON d."jeditaskid" = t."jeditaskid" AND d."type" = 'input'
+        WHERE t."processingtype" = 'stfprocessing'
+          AND t."taskname" LIKE %s
+        ORDER BY t."jeditaskid"
+    """
+    rows = []
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, [f'%swf.{int(run_number)}.%'])
+        for taskid, site, status, nfiles, nfinished, nfailed in cursor.fetchall():
+            rows.append({
+                'jeditaskid': taskid,
+                'site': site or 'unknown',
+                'status': status or 'unknown',
+                'chip': cut_chip(status or 'unknown'),
+                'files_total': int(nfiles or 0),
+                'files_finished': int(nfinished or 0),
+                'files_failed': int(nfailed or 0),
+                'url': reverse('monitor_app:panda_task_detail',
+                               args=[taskid]),
+            })
+    return rows
+
+
+def _run_story(info):
+    """The activity's story for the cut card, at the level an operator
+    would report it: what the execution set out to do (STF volume, the
+    decision box and its target sites) and what its STF tasks did."""
+    import logging
+
+    from .workflow_models import WorkflowExecution
+    story = {}
+    execution_id = info.get('execution_id') or ''
+    if execution_id:
+        ex = WorkflowExecution.objects.filter(
+            execution_id=execution_id).first()
+        params = (ex.parameter_values or {}) if ex else {}
+        sim = params.get('simulation') or {}
+        pp = params.get('prompt_processing') or {}
+        try:
+            stf_total = (int(sim.get('stf_count'))
+                         * int(sim.get('physics_period_count')))
+        except (TypeError, ValueError):
+            stf_total = None
+        story.update({
+            'executed_by': getattr(ex, 'executed_by', '') or '',
+            'stf_total': stf_total,
+            'decision_box': bool(pp.get('decision_box_enabled')),
+            'policy': str(pp.get('decision_box_policy') or ''),
+            'sites': [str(s) for s in (pp.get('decision_box_sites') or [])],
+        })
+    if info.get('run_number'):
+        try:
+            story['tasks'] = _stf_tasks_for_run(info['run_number'])
+        except Exception as e:
+            logging.getLogger(__name__).error(
+                'STF task story query failed for run %s: %s',
+                info.get('run_number'), e)
+            story['tasks'] = []
+            story['tasks_error'] = str(e)
+    return story
+
+
+def _activity_card(key):
+    """Detail card for one numbered activity: the run's story at the
+    level an operator would report it. The key is the run number."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+    now = timezone.now()
+    arcs = _namespace_run_arcs(now - timedelta(days=90), now, 12 * 3600)
+    for namespace, runs in arcs.items():
+        for arc in runs:
+            if str(arc['run_number']) == str(key):
+                info = {'run_number': arc['run_number'],
+                        'workflow': arc['workflow'],
+                        'execution_id': arc['execution']}
+                return {'kind': 'run_story',
+                        'namespace': namespace,
+                        'workflow': arc['workflow'],
+                        'run_number': arc['run_number'],
+                        'execution_id': arc['execution'],
+                        'started': arc['first'].isoformat(),
+                        'ended': (arc['last'].isoformat()
+                                  if not arc['dangling'] else ''),
+                        'story': _run_story(info)}
+    return None
+
+
 def _datataking_card(data, previous_data, ctx):
     # One truth: at a reference instant (the cut, or the snap's own
     # time) the rows come from the run record, like the lanes; the
     # snap's recorded entry stays in the card's audit document.
+    # Lean by design: the run's story lives in the Time history's
+    # numbered activity table (the activity card); the cut states each
+    # namespace's phase without repeating it.
     requested_at = ctx.get('requested_at')
     if requested_at is not None:
         rows = [
@@ -458,14 +600,18 @@ def register_snapper_providers():
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))
+    # Testbed curves retired 2026-07-26 (operator decision): on the
+    # broad window the spike-train curves said nothing the numbered
+    # activity bars don't say better. The extraction code stays
+    # (_testbed_curve_values and friends) for the day testbed load
+    # becomes continuous; re-registering the three curve fields
+    # restores the panels.
     register(ScopeProvider(
         scope='testbed',
         label='Testbed',
-        curve_values=_testbed_curve_values,
-        curve_label=_testbed_curve_label,
-        curve_groups=TESTBED_GROUPS,
         episodic_lanes=_run_activity_lanes,
         activity_at=namespace_activity_at,
+        activity_card=_activity_card,
         component_cards={'workflow': _workflow_card,
                          'datataking': _datataking_card},
         card_template=CARD_TEMPLATE,
