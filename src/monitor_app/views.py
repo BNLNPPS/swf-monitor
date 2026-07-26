@@ -3376,9 +3376,53 @@ def ai_content_list(request):
     filtered_items.sort(key=item_sort_key, reverse=True)
     paginator = Paginator(filtered_items, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
+    # Human detail URLs for scheduled campaign assessments (house URL
+    # form). Keyed off the registration series; a row that is not the
+    # newest registration of its (campaign, kind, date) slot — e.g. a
+    # salvage superseded by its rerun — keeps the UUID URL so it stays
+    # reachable.
+    from .models import AppLog
+    newest_in_slot = {}
+    for stamp, extra in (AppLog.objects.filter(
+            app_name='epicprod',
+            extra_data__action='assessment_register',
+            extra_data__outcome='ok',
+            extra_data__subject_type='campaign')
+            .order_by('-timestamp')
+            .values_list('timestamp', 'extra_data')[:1000]):
+        extra = extra or {}
+        kind = str(extra.get('assessment_kind') or '')
+        slot = (str(extra.get('subject_key') or ''),
+                'daily' if kind == 'nightly' else kind,
+                timezone.localtime(stamp).date().isoformat())
+        newest_in_slot.setdefault(
+            slot, str(extra.get('corun_page_group_id') or ''))
+
+    def _human_detail_url(item):
+        kind = str(item.get('assessment_kind') or '')
+        route_kind = 'daily' if kind == 'nightly' else kind
+        created = item.get('created_at')
+        if isinstance(created, str):
+            from django.utils.dateparse import parse_datetime
+            created = parse_datetime(created)
+        if (item.get('subject_type') != 'campaign'
+                or route_kind not in ('daily', 'weekly')
+                or created is None or not hasattr(created, 'date')):
+            return ''
+        try:
+            date = timezone.localtime(created).date().isoformat()
+        except ValueError:
+            date = created.date().isoformat()
+        subject = str(item.get('subject_key') or '')
+        if newest_in_slot.get((subject, route_kind, date)) != str(
+                item.get('corun_page_group_id') or ''):
+            return ''
+        return reverse('monitor_app:ai_content_by_name',
+                       args=[subject, route_kind, date])
+
     for item in page_obj.object_list:
         if item.get('storage') == 'corun':
-            item['detail_url'] = reverse(
+            item['detail_url'] = _human_detail_url(item) or reverse(
                 'monitor_app:ai_content_detail',
                 args=[item.get('corun_page_group_id')])
             item['body_url'] = reverse(
@@ -3532,13 +3576,21 @@ def ai_content_by_name(request, campaign, kind, date):
     if date == 'latest':
         row = rows.first()
     else:
-        for cand in rows[:120]:
+        date_rows = []
+        for cand in rows[:200]:
             stamp = timezone.localtime(cand['timestamp']).date().isoformat()
             if stamp == date:
-                row = cand
+                date_rows.append(cand)
+            elif stamp < date:
                 break
-            if stamp < date:
-                break
+        # Family matching serves 'latest'; on an exact date prefer the
+        # row registered under exactly this campaign name (same-day
+        # per-edition reports pre-family).
+        row = next(
+            (r for r in date_rows
+             if str((r['extra_data'] or {}).get('subject_key') or '')
+             == campaign),
+            date_rows[0] if date_rows else None)
     group_id = str(((row or {}).get('extra_data') or {})
                    .get('corun_page_group_id') or '')
     if not group_id:
