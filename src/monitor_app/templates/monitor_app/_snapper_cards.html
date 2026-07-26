@@ -82,7 +82,7 @@
   {% endif %}
   {% if card.site_states %}
   <div class="mb-1"><strong>STF tasks by site · status:</strong>
-    {% for entry in card.site_states %}<a href="{% url 'monitor_app:panda_tasks_list' %}?processingtype={{ card.stf_processing_type|urlencode }}&status={{ entry.status|urlencode }}">{{ entry.site }} · {{ entry.status }}</a> {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+    {% for entry in card.site_states %}<a href="{% url 'monitor_app:panda_tasks_list' %}?processingtype={{ card.stf_processing_type|urlencode }}&status={{ entry.status|urlencode }}">{{ entry.site }}</a> <span class="{{ entry.status|state_class }} px-1">{{ entry.status }}</span> {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
   </div>
   {% endif %}
 {% endif %}

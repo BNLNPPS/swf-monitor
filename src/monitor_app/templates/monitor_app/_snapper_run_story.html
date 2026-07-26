@@ -7,12 +7,12 @@
   {% if story.stf_total %}<strong>{{ story.stf_total }}-STF</strong> {% endif %}{{ phase }} run{% if story.executed_by %} by {{ story.executed_by }}{% endif %}{% if story.decision_box %} &middot; decision box ({{ story.policy }}) &rarr; {{ story.sites|join:", " }}{% endif %}
 </div>
 {% if story.tasks %}
-<table class="table table-sm mb-1 w-auto">
+<table class="table table-sm table-bordered mb-1 w-auto">
   {% for task in story.tasks %}
   <tr>
     <td><strong>{{ task.site }}</strong></td>
     <td><a href="{{ task.url }}">task {{ task.jeditaskid }}</a></td>
-    <td><span class="snapper-chip" style="background:{{ task.chip.color }}">{{ task.chip.value }}</span></td>
+    <td class="{{ task.status|state_class }}">{{ task.status }}</td>
     <td>{{ task.files_finished }}/{{ task.files_total }} files finished{% if task.files_failed %} &middot; {{ task.files_failed }} failed{% endif %}</td>
   </tr>
   {% endfor %}

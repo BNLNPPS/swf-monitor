@@ -421,7 +421,6 @@ def _stf_tasks_for_run(run_number):
                 'jeditaskid': taskid,
                 'site': site or 'unknown',
                 'status': status or 'unknown',
-                'chip': cut_chip(status or 'unknown'),
                 'files_total': int(nfiles or 0),
                 'files_finished': int(nfinished or 0),
                 'files_failed': int(nfailed or 0),
