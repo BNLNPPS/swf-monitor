@@ -13,7 +13,7 @@
     <td><strong>{{ task.site }}</strong></td>
     <td><a href="{{ task.url }}">task {{ task.jeditaskid }}</a></td>
     <td class="{{ task.status|state_class }}">{{ task.status }}</td>
-    <td>{{ task.files_finished }}/{{ task.files_total }} files finished{% if task.files_failed %} &middot; {{ task.files_failed }} failed{% endif %}</td>
+    <td data-files-failed="{{ task.files_failed }}">{{ task.files_finished }}/{{ task.files_total }} files finished{% if task.files_failed %} &middot; {{ task.files_failed }} failed{% endif %}</td>
   </tr>
   {% endfor %}
 </table>
