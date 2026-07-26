@@ -3502,10 +3502,48 @@ def ai_content_detail(request, page_group_id):
         return HttpResponse('AI assessment not found.', status=404)
     items[0]['assessment_html'] = render_assessment_markdown(
         items[0]['assessment'], omit_leading_title=items[0]['title'])
+    item = items[0]
+    latest_weekly_url = ''
+    if (item.get('subject_type') == 'campaign'
+            and item.get('assessment_kind') in ('daily', 'nightly')):
+        from pcs.views import assessment_register_rows, assessment_human_url
+        subject = item.get('subject_key') or ''
+        if assessment_register_rows(subject, ['weekly']).first():
+            latest_weekly_url = assessment_human_url(
+                subject, 'weekly', 'latest')
     return render(request, 'monitor_app/ai_content_detail.html', {
-        'item': items[0],
+        'item': item,
+        'latest_weekly_url': latest_weekly_url,
         'quality_choices': AI_CONTENT_QUALITY_VALUES,
     })
+
+
+def ai_content_by_name(request, campaign, kind, date):
+    """Human-addressed assessment page — campaign + kind + ET date (or
+    'latest') — resolved through the local registration series to the
+    stored report and rendered at this URL. The house URL form; the
+    UUID route serves stored links."""
+    from pcs.views import assessment_register_rows
+    if kind not in ('daily', 'weekly'):
+        return HttpResponse('Unknown assessment kind.', status=404)
+    kinds = ['daily', 'nightly'] if kind == 'daily' else [kind]
+    row = None
+    rows = assessment_register_rows(campaign, kinds)
+    if date == 'latest':
+        row = rows.first()
+    else:
+        for cand in rows[:120]:
+            stamp = timezone.localtime(cand['timestamp']).date().isoformat()
+            if stamp == date:
+                row = cand
+                break
+            if stamp < date:
+                break
+    group_id = str(((row or {}).get('extra_data') or {})
+                   .get('corun_page_group_id') or '')
+    if not group_id:
+        return HttpResponse('No registered assessment matches.', status=404)
+    return ai_content_detail(request, group_id)
 
 
 def ai_content_body(request, page_group_id):

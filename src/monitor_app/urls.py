@@ -60,6 +60,7 @@ from .views import (
     panda_hub, prod_hub, testbed_hub,
     ai_content_list,
     ai_content_detail,
+    ai_content_by_name,
     ai_content_body,
     ai_content_legacy_detail,
     ai_content_legacy_body,
@@ -257,6 +258,8 @@ urlpatterns = [
     path('ai/assessments/<uuid:page_group_id>/body/', ai_content_body,
          name='ai_content_body'),
     path('ai/assessments/<int:content_id>/quality/', ai_content_set_quality, name='ai_content_set_quality'),
+    path('ai/assessments/<str:campaign>/<str:kind>/<str:date>/',
+         ai_content_by_name, name='ai_content_by_name'),
     path('testbed/', testbed_hub, name='testbed_hub'),
 
     # PanDA Production Monitor
