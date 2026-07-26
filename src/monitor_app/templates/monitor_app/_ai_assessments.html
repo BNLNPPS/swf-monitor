@@ -12,7 +12,7 @@
                     <td><strong>AI:</strong> {{ item.ai }}</td>
                     <td><strong>User:</strong> {{ item.username }}</td>
                     <td>
-                        <strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}
+                        {% if item.quality %}<strong>Quality:</strong> {{ item.quality }}{% endif %}
                     </td>
                 </tr>
                 <tr class="ai-assessment-header table-light">

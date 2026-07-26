@@ -139,7 +139,7 @@
             {{ item.subject_id }}{% if not item.title and item.subject_name and item.subject_name != item.subject_id %}<span class="ms-3">{{ item.subject_name }}</span>{% endif %}
             {% endif %}
         </span>
-        <span><strong>Quality:</strong> {{ item.quality|default:"unreviewed" }}</span>
+        {% if item.quality %}<span><strong>Quality:</strong> {{ item.quality }}</span>{% endif %}
         <span class="text-muted">{{ item.ai }} &middot; {{ item.username }} &middot; {{ item.created_display }}</span>
         {% if item.narration %}
         <span class="w-100 mt-1">{{ item.narration }}</span>

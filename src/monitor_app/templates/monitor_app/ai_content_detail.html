@@ -24,7 +24,7 @@
         &middot; {{ item.ai }}
         &middot; {{ item.username }}
         &middot; {{ item.created_display }}
-        &middot; Quality: {{ item.quality|default:"unreviewed" }}
+        {% if item.quality %}&middot; Quality: {{ item.quality }}{% endif %}
     </div>
 
     {% if item.comment %}
