@@ -78,6 +78,22 @@
       {% for group, files in c.groups %}{{ group }} {{ files }}{% if not forloop.last %} · {% endif %}{% endfor %}
     </div>
     {% endif %}
+    {% if c.pcs %}
+    <table class="table table-sm table-bordered w-auto mb-1">
+      <thead><tr><th>PC</th><th>Requestor</th><th>Files placed</th><th>Target events</th></tr></thead>
+      <tbody>
+      {% for pc in c.pcs %}
+      <tr>
+        <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+        <td>{{ pc.groups }}</td>
+        <td class="text-end">{{ pc.files }}</td>
+        <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="text-muted small mb-1">Top configurations by files placed; the <a href="{{ c.plan_url }}">campaign plan</a> lists them all.</div>
+    {% endif %}
   </div>
   {% endfor %}
   {% if previous_age_text %}

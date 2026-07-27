@@ -367,23 +367,67 @@ EPICPROD_GROUPS = (
 )
 
 
-def _delivery_preset_links():
-    """Campaign tabs in the Snapper scope switcher: one preset per
-    target campaign, opening the report page focused on that campaign's
-    delivery family. Resolved at render time, so the tabs track the
-    producing/current campaigns."""
-    from urllib.parse import urlencode
+_CAMPAIGN_START_CACHE = {'at': None, 'starts': {}}
+
+
+def _campaign_delivery_starts():
+    """Campaign name -> first recorded delivery activity, from the
+    daily backfill snaps (small, bounded read), cached for an hour.
+    The campaign focus view clamps its window here: the day count runs
+    from when the campaign began delivering, never into the void
+    before it."""
+    from django.utils import timezone
+
+    from snapper_ai.models import SystemSnap
+
+    now = timezone.now()
+    if (_CAMPAIGN_START_CACHE['at'] is not None
+            and (now - _CAMPAIGN_START_CACHE['at']).total_seconds() < 3600):
+        return _CAMPAIGN_START_CACHE['starts']
+    starts = {}
+    rows = (SystemSnap.objects
+            .filter(scope='epicprod', capture_policy='backfill-v1')
+            .order_by('snap_time')
+            .values_list('snap_time', 'state'))
+    for snap_time, state in rows:
+        campaigns = (((state or {}).get('components') or {})
+                     .get('delivery') or {}).get('data') or {}
+        for name, block in (campaigns.get('campaigns') or {}).items():
+            if name in starts:
+                continue
+            if int(((block.get('totals') or {}).get('files')) or 0) > 0:
+                starts[name] = snap_time
+    _CAMPAIGN_START_CACHE['starts'] = starts
+    _CAMPAIGN_START_CACHE['at'] = now
+    return starts
+
+
+def _delivery_focus_view():
+    """The Campaign focus tab: the report narrowed to one campaign's
+    delivery — its family only, the delivery card in the cut, the
+    window floored at the campaign's first delivery."""
+    from datetime import timedelta
 
     try:
         from swf_epicprod.analytics.rollup import resolve_target_campaigns
-        campaigns = resolve_target_campaigns()
+        campaigns = sorted(resolve_target_campaigns(), reverse=True)
     except Exception:                                       # noqa: BLE001
-        return ()
-    return [
-        {'label': f'Campaign {name}',
-         'query': urlencode({'families': f'Delivery {name}',
-                             'window': '30d'})}
-        for name in sorted(campaigns, reverse=True)]
+        return None
+    if not campaigns:
+        return None
+    starts = _campaign_delivery_starts()
+    return {
+        'param': 'campaign',
+        'label': 'Campaign',
+        'default': campaigns[0],
+        'options': [
+            {'value': name, 'label': name,
+             'families': [f'Delivery {name}'],
+             'component': 'delivery',
+             'start': (starts[name] - timedelta(hours=12))
+                      if name in starts else None}
+            for name in campaigns],
+    }
 
 
 def _delivery_groups():
@@ -469,8 +513,28 @@ def _delivery_card(data, previous_data, ctx):
                 continue
             for group in requestors.get(pc) or ['Unassigned']:
                 by_group[group] = by_group.get(group, 0) + files
+        # The PC drill: the campaign's configurations by files placed,
+        # in physics-configuration terms — pc label linked to its page,
+        # per-group attribution, target beside delivery. Bounded to the
+        # top rows; the plan page is the full list.
+        pcs = []
+        for pc, leaf in sorted(
+                (block.get('leaves') or {}).items(),
+                key=lambda kv: -int(kv[1].get('files') or 0))[:10]:
+            if not int(leaf.get('files') or 0):
+                continue
+            pcs.append({
+                'label': pc,
+                'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                'groups': ', '.join(requestors.get(pc)
+                                    or ['Unassigned']),
+                'files': int(leaf.get('files') or 0),
+                'expected': leaf.get('expected'),
+                'tier': leaf.get('tier') or '',
+            })
         campaigns.append({
             'name': name,
+            'pcs': pcs,
             'headline': [
                 {'label': 'configurations',
                  'value': totals.get('configs'),
@@ -732,7 +796,7 @@ def register_snapper_providers():
         curve_values=_epicprod_curve_values,
         curve_label=_epicprod_curve_label,
         curve_groups=EPICPROD_GROUPS + _delivery_groups(),
-        preset_links=_delivery_preset_links,
+        focus_view=_delivery_focus_view,
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card},
         card_template=CARD_TEMPLATE,
