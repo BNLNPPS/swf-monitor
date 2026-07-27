@@ -147,6 +147,18 @@
                 <div class="workflow-stage-title">Production Requests</div>
             </div>
             <div class="workflow-stage-body">
+                <div class="workflow-link-row" title="Compose a production request: describe the physics and see matching configurations live">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:pcs_request_composer' %}" class="text-decoration-none">Request Production</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Compose a production request against existing configurations</div>
+                </div>
+                <div class="workflow-link-row" title="The Google request form, the current external intake">
+                    <div class="workflow-link-line">
+                        <strong><a href="https://docs.google.com/forms/d/e/1FAIpQLScDqiEaHayAcwBDGAWa4W6k-6yUFzS-XiWuhLolpy64mLk5FA/viewform" target="_blank" rel="noopener" class="text-decoration-none">Google request form</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">The Google Form intake, mirrored into the request list</div>
+                </div>
                 <div class="workflow-link-row" title="Production request questionnaire intake">
                     <div class="workflow-link-line">
                         <strong><a href="{% url 'pcs:questionnaires_list' %}" class="text-decoration-none">Production Requests</a></strong>
@@ -258,6 +270,12 @@
                         <strong><a href="{% url 'pcs:pcs_physics_configs' %}" class="text-decoration-none">Physics configs by campaign</a></strong>
                     </div>
                     <div class="workflow-link-desc">Physics configurations and their produced data across campaigns</div>
+                </div>
+                <div class="workflow-link-row" title="The campaign's physics configurations with target event counts — the production plan">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:pcs_campaign_plan' %}" class="text-decoration-none">Campaign Plan</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Physics configurations with target event counts — the production plan</div>
                 </div>
                 <div class="workflow-link-row" title="Campaign narrative documents: purpose, content, and evolution of production campaigns">
                     <div class="workflow-link-line">
