@@ -3689,5 +3689,39 @@ def ai_content_set_quality(request, content_id):
 
 
 def testbed_hub(request):
-    """ePIC Testbed home — workflow system overview."""
-    return render(request, 'monitor_app/testbed_hub.html')
+    """ePIC Testbed home — workflow system overview, topped by the
+    Snapper namespace-lanes plot as a cached product
+    (docs/CACHED_PRODUCTS.md)."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    from django.utils import timezone as dj_timezone
+
+    from snapper_ai.embed import embed_context
+    from .cached_product import get_product
+
+    def build():
+        now = dj_timezone.now()
+        ctx = embed_context('testbed', now - timedelta(days=7), now,
+                            lanes=True)
+        if ctx.get('error'):
+            raise RuntimeError(ctx['error'])
+        return ctx
+
+    context = {}
+    try:
+        product = get_product(
+            'snapper_embed:v2:testbed:7', build, ttl_seconds=300,
+            refresh=request.GET.get('refresh') == '1')
+        context['snapper_embed'] = product['value'] or {
+            'scope': 'testbed',
+            'error': 'state history is building — reload shortly.'}
+        if product['built_at']:
+            context['product_built_at_text'] = (
+                product['built_at']
+                .astimezone(ZoneInfo(django_settings.TIME_ZONE))
+                .strftime('%Y-%m-%d %H:%M ET'))
+    except Exception as e:
+        logger.error('snapper embed failed for testbed hub: %s', e)
+        context['snapper_embed'] = {'scope': 'testbed', 'error': str(e)}
+    return render(request, 'monitor_app/testbed_hub.html', context)
