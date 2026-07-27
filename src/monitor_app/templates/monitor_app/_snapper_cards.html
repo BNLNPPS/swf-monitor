@@ -73,6 +73,23 @@
       </div>
       {% endfor %}
     </div>
+    {% if c.day_pcs %}
+    <table class="table table-sm table-bordered w-auto mb-1">
+      <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Arrived this day</th><th>Cumulative</th><th>Target events</th></tr></thead>
+      <tbody>
+      {% for pc in c.day_pcs %}
+      <tr>
+        <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+        <td>{{ pc.identity }}</td>
+        <td>{{ pc.groups }}</td>
+        <td class="text-end">{{ pc.arrived }}</td>
+        <td class="text-end">{{ pc.cum }}</td>
+        <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
     {% if c.groups %}
     <div class="mb-1"><strong>Files placed by requestor:</strong>
       {% for group, files in c.groups %}{{ group }} {{ files }}{% if not forloop.last %} · {% endif %}{% endfor %}

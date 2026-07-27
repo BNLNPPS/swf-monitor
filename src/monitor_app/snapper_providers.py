@@ -443,6 +443,7 @@ def _delivery_focus_view():
             {'value': name, 'label': name,
              'families': [f'Arrivals {name}', f'Cumulative {name}'],
              'component': 'delivery',
+             'collapse_below': 0.01,
              'start': (starts[name] - timedelta(hours=12))
                       if name in starts else None}
             for name in campaigns],
@@ -522,17 +523,62 @@ def _panda_card(data, previous_data, ctx):
 
 
 def _delivery_card(data, previous_data, ctx):
-    """The delivery cut card: per campaign, the totals with deltas
-    against the previous snap and the requestor-lens rollup of files
-    placed. Sample-level drilldown lives on the campaign plan page."""
+    """The delivery cut card. On a daily-record snap (the quilt), the
+    breakdown of that day: what arrived, per configuration, with
+    cumulative standing. On a live placed-basis snap, the placement
+    totals with deltas and the top configurations. Full lists live on
+    the campaign plan page."""
     from django.urls import reverse
 
-    requestors = _requestor_map()
+    cache = _pc_cache()
+    requestors = cache['requestors']
+    keys = cache['keys']
     campaigns = []
     for name, block in sorted((data.get('campaigns') or {}).items()):
         totals = block.get('totals') or {}
         previous_totals = (((previous_data.get('campaigns') or {})
                             .get(name) or {}).get('totals') or {})
+        if 'arrived_files' in totals:
+            leaves = block.get('leaves') or {}
+            day_pcs = []
+            for pc, leaf in sorted(
+                    leaves.items(),
+                    key=lambda kv: -int(kv[1].get('arrived_files') or 0)):
+                arrived = int(leaf.get('arrived_files') or 0)
+                if not arrived:
+                    continue
+                day_pcs.append({
+                    'label': pc,
+                    'identity': keys.get(pc, ''),
+                    'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                    'groups': ', '.join(requestors.get(pc)
+                                        or ['Unassigned']),
+                    'arrived': arrived,
+                    'cum': int(leaf.get('cum_files') or 0),
+                    'expected': leaf.get('expected'),
+                    'tier': leaf.get('tier') or '',
+                })
+            campaigns.append({
+                'name': name,
+                'day_pcs': day_pcs,
+                'headline': [
+                    {'label': 'files arrived this day',
+                     'value': totals.get('arrived_files'), 'delta': None},
+                    {'label': 'cumulative files',
+                     'value': totals.get('cum_files'),
+                     'delta': cut_delta(totals.get('cum_files'),
+                                        previous_totals.get('cum_files'))},
+                    {'label': 'cumulative TB',
+                     'value': round(
+                         (totals.get('cum_bytes') or 0) / 1e12, 1),
+                     'delta': None},
+                    {'label': 'configurations delivering',
+                     'value': len(day_pcs), 'delta': None},
+                ],
+                'plan_url': (reverse('pcs:pcs_campaign_plan')
+                             + f'?campaign={name}'),
+            })
+            continue
         by_group = {}
         for pc, leaf in (block.get('leaves') or {}).items():
             files = int(leaf.get('files') or 0)
