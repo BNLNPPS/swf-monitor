@@ -325,6 +325,22 @@ def _snapper_embed_product(days, refresh):
 
 def panda_activity(request):
     days = max(1, min(_get_days(request), 365))
+    if request.GET.get('chip') == '1':
+        # Read-only freshness status for the chip's bounded poll while
+        # "refreshing…" shows. Reads the store rows directly — never
+        # triggers a build.
+        from snapper_ai.embed import MAX_EMBED_DAYS
+
+        from ..models import CachedProduct
+        keys = [f'panda_activity:{days}',
+                f'snapper_embed:epicprod:{min(days, MAX_EMBED_DAYS + 1)}']
+        rows = list(CachedProduct.objects.filter(key__in=keys))
+        built = [row.built_at for row in rows if row.built_at]
+        return JsonResponse({
+            'built_at': (min(built).isoformat()
+                         if len(built) == len(keys) else None),
+            'refreshing': any(row.building_since for row in rows),
+        })
     refresh = request.GET.get('refresh') == '1'
     built_ats = []
     refreshing = False
@@ -356,6 +372,7 @@ def panda_activity(request):
         data['product_built_at_text'] = (
             min(built_ats).astimezone(ZoneInfo(settings.TIME_ZONE))
             .strftime('%Y-%m-%d %H:%M ET'))
+        data['product_built_at_iso'] = min(built_ats).isoformat()
         data['product_refreshing'] = refreshing
     return render(request, 'monitor_app/panda_activity.html', data)
 

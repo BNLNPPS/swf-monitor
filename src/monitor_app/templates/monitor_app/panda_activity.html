@@ -17,17 +17,15 @@
         <a href="?days={{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
         {% endif %}
         {% endfor %}
-    </div>
-
-    <!-- Cached-product freshness chip (docs/CACHED_PRODUCTS.md): the older
-         of the page's two products; Update rebuilds both synchronously. -->
-    {% if product_built_at_text %}
-    <div class="mb-2">
-        <span class="text-muted">Data as of <strong>{{ product_built_at_text }}</strong>
-        {% if product_refreshing %}<span>· refreshing…</span>{% endif %}</span>
-        <a href="?days={{ days }}&refresh=1" class="btn btn-sm btn-secondary ms-2">Update</a>
-    </div>
-    {% endif %}
+        <!-- Cached-product freshness chip (docs/CACHED_PRODUCTS.md): the older
+             of the page's two products; Update rebuilds both synchronously. -->
+        {% if product_built_at_text %}
+        <span style="margin-left:1cm;">
+            <span class="text-muted">Data as of <strong>{{ product_built_at_text }}</strong>
+            {% if product_refreshing %}<span id="chip-refreshing">· refreshing…</span>{% endif %}</span>
+            <a href="?days={{ days }}&refresh=1" class="btn btn-sm btn-secondary ms-2">Update</a>
+        </span>
+        {% endif %}
 
     <!-- Snapper state history: jobs and tasks curves over the selected window -->
     <div class="card mb-4">
@@ -177,4 +175,33 @@
     </div>
     {% endif %}
 </div>
+{% if product_refreshing %}
+<script>
+// The chip is a render-time snapshot; while a behind-the-response
+// rebuild is in flight, poll the read-only status a bounded number of
+// times and offer a user-commanded reload when the fresh build lands.
+// Never an automatic reload.
+(function () {
+    const flag = document.getElementById('chip-refreshing');
+    if (!flag) return;
+    const initial = '{{ product_built_at_iso|escapejs }}';
+    let tries = 10;
+    function poll() {
+        if (tries-- <= 0) return;
+        fetch('?days={{ days }}&chip=1', {headers: {'Accept': 'application/json'}})
+            .then(function (r) { return r.json(); })
+            .then(function (status) {
+                if (status.built_at && status.built_at !== initial
+                        && !status.refreshing) {
+                    flag.innerHTML = '· <a href="?days={{ days }}">fresh data ready — reload</a>';
+                } else {
+                    setTimeout(poll, 3000);
+                }
+            })
+            .catch(function () { /* the next page load shows the truth */ });
+    }
+    setTimeout(poll, 2000);
+})();
+</script>
+{% endif %}
 {% endblock %}
