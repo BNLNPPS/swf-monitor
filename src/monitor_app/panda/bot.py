@@ -1685,7 +1685,8 @@ class PandaBot:
                     },
                 )
                 logger.info(
-                    f"Claude response: stop_reason={response.stop_reason}"
+                    f"Claude response: stop_reason={response.stop_reason} "
+                    f"usage={response.usage}"
                 )
 
                 if response.stop_reason != "tool_use":
