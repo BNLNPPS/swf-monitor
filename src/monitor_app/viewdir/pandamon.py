@@ -659,16 +659,12 @@ def _format_task_row(task, days):
 
 
 def _build_tasks_window_product(days):
-    """Builder for the cached tasks-window product: rendered cells plus
-    the raw sort/filter record per task."""
+    """Builder for the cached tasks-window product: the raw task record
+    per row. Cells render at SERVE time in request context — a builder
+    can run in a background thread with no script prefix, and rendered
+    reverse() links stored from there are dead (CLAUDE.md)."""
     window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP)
-    raw_fields = set(TASK_FIELD_NAMES) | set(TASKS_WINDOW_SEARCH_FIELDS)
-    rows = []
-    for task in window['tasks']:
-        rows.append({
-            'cells': _format_task_row(task, days),
-            'raw': {f: task.get(f) for f in raw_fields},
-        })
+    rows = [{'raw': task} for task in window['tasks']]
     return {'rows': rows, 'count': window['count'],
             'truncated': window['truncated'], 'days': days}
 
@@ -689,7 +685,7 @@ def panda_tasks_datatable_ajax(request):
     days = _get_days(request)
 
     product = get_product(
-        f'panda_tasks_window:{days}',
+        f'panda_tasks_window:v2:{days}',
         lambda: _build_tasks_window_product(days),
         ttl_seconds=TASKS_WINDOW_TTL_SECONDS,
         refresh=request.GET.get('refresh') == '1',
@@ -736,7 +732,7 @@ def panda_tasks_datatable_ajax(request):
     else:
         page = rows[dt.start:] if dt.start else rows
 
-    data = [r['cells'] for r in page]
+    data = [_format_task_row(r['raw'], days) for r in page]
     return dt.create_response(data, total, filtered, extra=product_extra)
 
 
