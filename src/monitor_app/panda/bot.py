@@ -711,17 +711,19 @@ class PandaBot:
             return ''
 
     def _build_system_prompt(self):
-        """System prompt — re-read from file on every message so edits take effect live."""
-        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        """System prompt — re-read from file on every message so edits take effect live.
+
+        No timestamp in here: the system prompt is the cached prompt prefix,
+        and any changing byte in it invalidates the prompt cache for the
+        whole request. Current time is injected into the live user turn
+        in _process_message instead.
+        """
         preamble = _load_system_preamble()
         instructions = getattr(self, '_server_instructions', '')
         prompt = preamble
         if instructions:
             prompt += "\n" + instructions
-        return (
-            f"Current date and time: {now}\n"
-            f"DISpatcher runtime model: {AI_MODEL}\n\n{prompt}"
-        )
+        return f"DISpatcher runtime model: {AI_MODEL}\n\n{prompt}"
 
     @staticmethod
     async def _git_version(repo_dir):
@@ -1623,6 +1625,11 @@ class PandaBot:
                     f"[Recent channel history:\n{channel_context}\n]\n"
                     f"New message: {message_text}"
                 )
+
+        # Time lives in the live user turn, not the system prompt, so the
+        # cached prefix (tools + system + history) stays byte-stable.
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        user_content = f"[Current date and time: {now}]\n{user_content}"
 
         messages.append({"role": "user", "content": user_content})
 

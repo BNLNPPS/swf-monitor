@@ -207,12 +207,16 @@ class TestbedBot:
             return ''
 
     def _build_system_prompt(self, testbed_username):
-        """System prompt personalized for the current user."""
-        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-        preamble = self.system_prompt_base.format(
+        """System prompt personalized for the current user.
+
+        No timestamp in here: the system prompt is the cached prompt prefix,
+        and any changing byte in it invalidates the prompt cache for the
+        whole request. Current time is injected into the live user turn
+        in _process_message instead.
+        """
+        prompt = self.system_prompt_base.format(
             testbed_username=testbed_username,
         )
-        prompt = f"Current date and time: {now}\n\n{preamble}"
         if self.server_instructions:
             prompt += "\n" + self.server_instructions
         return prompt
@@ -469,6 +473,11 @@ class TestbedBot:
                     f"[Thread conversation so far:\n{thread_context}\n]\n"
                     f"New reply: {message_text}"
                 )
+
+        # Time lives in the live user turn, not the system prompt, so the
+        # cached prefix (tools + system + history) stays byte-stable.
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        user_content = f"[Current date and time: {now}]\n{user_content}"
 
         messages.append({"role": "user", "content": user_content})
 
