@@ -230,50 +230,59 @@ def _run_activity_lanes(start, end, dangle_seconds):
 
 # ── Curve extraction and vocabulary ──────────────────────────────────────
 
-_REQUESTOR_CACHE = {'at': None, 'map': {}}
+_PC_CACHE = {'at': None, 'requestors': {}, 'keys': {}}
 
 
-def _requestor_map():
-    """pc label -> requestor labels, cached briefly: series assembly
-    calls curve extraction once per snap, and the lens membership is
-    current-state (lenses apply retroactively across the record)."""
+def _pc_cache():
+    """pc label -> requestor labels and identity key, cached briefly:
+    series assembly calls curve extraction once per snap, and lens
+    membership is current-state (lenses apply retroactively)."""
     from django.utils import timezone
 
     from pcs.models import PhysicsConfig
 
     now = timezone.now()
-    if (_REQUESTOR_CACHE['at'] is None
-            or (now - _REQUESTOR_CACHE['at']).total_seconds() > 60):
-        _REQUESTOR_CACHE['map'] = {
-            label: list(requestors or [])
-            for label, requestors in PhysicsConfig.objects
-            .values_list('label', 'requestors')}
-        _REQUESTOR_CACHE['at'] = now
-    return _REQUESTOR_CACHE['map']
+    if (_PC_CACHE['at'] is None
+            or (now - _PC_CACHE['at']).total_seconds() > 60):
+        requestors, keys = {}, {}
+        for label, groups, key in PhysicsConfig.objects.values_list(
+                'label', 'requestors', 'config_key'):
+            requestors[label] = list(groups or [])
+            keys[label] = key
+        _PC_CACHE.update({'requestors': requestors, 'keys': keys,
+                          'at': now})
+    return _PC_CACHE
+
+
+def _requestor_map():
+    return _pc_cache()['requestors']
 
 
 def _delivery_curve_values(state):
-    """Delivery curves from the leaf-keyed record, projected through
-    the requestor lens at extraction time (CAMPAIGN_DELIVERY.md): per
-    campaign, total files placed and files placed per requesting
-    group, with Unassigned carrying the unlabeled leaves."""
+    """Delivery curves from the DAILY arrivals record only (leaves
+    carrying arrived_files): the per-PC daily bumps (the quilt) and
+    the cumulative series, both on the registered basis throughout.
+    The live placed-basis component feeds cut cards, never curves, so
+    the plotted series ends at the last complete day."""
     values = {}
     delivery = component_data(state, 'delivery')
     requestors = _requestor_map() if delivery.get('campaigns') else {}
     for campaign, block in (delivery.get('campaigns') or {}).items():
-        tag = campaign.replace('.', '_')
         totals = block.get('totals') or {}
-        values[f'dlv_{tag}__total_files'] = int(totals.get('files') or 0)
-        by_group = {}
+        if 'arrived_files' not in totals:
+            continue  # the live placed-basis component: cards only
+        tag = campaign.replace('.', '_')
+        values[f'dlvc_{tag}__total'] = int(totals.get('cum_files') or 0)
+        cum_by_group = {}
         for pc, leaf in (block.get('leaves') or {}).items():
-            files = int(leaf.get('files') or 0)
-            if not files:
-                continue
-            groups = requestors.get(pc) or ['Unassigned']
-            for group in groups:
-                by_group[group] = by_group.get(group, 0) + files
-        for group, files in by_group.items():
-            values[f'dlv_{tag}_{group}_files'] = files
+            values[f'dlvq_{tag}_{pc}'] = int(
+                leaf.get('arrived_files') or 0)
+            cum = int(leaf.get('cum_files') or 0)
+            if cum:
+                for group in requestors.get(pc) or ['Unassigned']:
+                    cum_by_group[group] = cum_by_group.get(group, 0) + cum
+        for group, cum in cum_by_group.items():
+            values[f'dlvc_{tag}_{group}'] = cum
     return values
 
 
@@ -315,18 +324,26 @@ def _testbed_curve_values(state):
     return values
 
 
+def _delivery_curve_parts(curve_id):
+    """(campaign, remainder) from a dlvq_/dlvc_ curve id; campaign
+    tags serialize dots as underscores (26_07)."""
+    remainder = curve_id.split('_', 1)[1]
+    tag, _, rest = remainder.partition('_')
+    while rest and rest[0].isdigit():
+        extra, _, rest = rest.partition('_')
+        tag = f'{tag}_{extra}'
+    return tag.replace('_', '.'), rest.strip('_')
+
+
 def _epicprod_curve_label(curve_id):
-    if curve_id.startswith('dlv_'):
-        remainder = curve_id[4:]
-        tag, _, rest = remainder.partition('_')
-        # Campaign tags serialize dots as underscores (26_07).
-        while rest and rest[0].isdigit():
-            extra, _, rest = rest.partition('_')
-            tag = f'{tag}_{extra}'
-        campaign = tag.replace('_', '.')
-        group = rest.rsplit('_', 1)[0].strip('_') or 'total'
-        return (f'{campaign} files' if group in ('', 'total')
-                else f'{campaign} {group} files')
+    if curve_id.startswith('dlvq_'):
+        campaign, pc = _delivery_curve_parts(curve_id)
+        key = _pc_cache()['keys'].get(pc, '')
+        return f'{pc} {key}' if key else pc
+    if curve_id.startswith('dlvc_'):
+        campaign, group = _delivery_curve_parts(curve_id)
+        return (f'{campaign} cumulative files' if group in ('', 'total')
+                else f'{campaign} {group} cumulative')
     if curve_id == 'tasks_total':
         return 'tasks total'
     if curve_id == 'running_cores':
@@ -395,7 +412,9 @@ def _campaign_delivery_starts():
         for name, block in (campaigns.get('campaigns') or {}).items():
             if name in starts:
                 continue
-            if int(((block.get('totals') or {}).get('files')) or 0) > 0:
+            totals = block.get('totals') or {}
+            if int(totals.get('cum_files')
+                   or totals.get('files') or 0) > 0:
                 starts[name] = snap_time
     _CAMPAIGN_START_CACHE['starts'] = starts
     _CAMPAIGN_START_CACHE['at'] = now
@@ -422,7 +441,7 @@ def _delivery_focus_view():
         'default': campaigns[0],
         'options': [
             {'value': name, 'label': name,
-             'families': [f'Delivery {name}'],
+             'families': [f'Arrivals {name}', f'Cumulative {name}'],
              'component': 'delivery',
              'start': (starts[name] - timedelta(hours=12))
                       if name in starts else None}
@@ -431,19 +450,27 @@ def _delivery_focus_view():
 
 
 def _delivery_groups():
-    """One curve family per target campaign's delivery curves,
-    resolved at registration. A resolution failure yields no delivery
-    families (the curves then land in Other) rather than blocking
-    registration."""
+    """Two curve families per target campaign, resolved at
+    registration: the per-PC daily arrivals quilt (stacked areas, one
+    color per configuration, no per-curve tick boxes) and the
+    cumulative series (off by default — the quilt is the display).
+    A resolution failure yields no delivery families rather than
+    blocking registration."""
     try:
         from swf_epicprod.analytics.rollup import resolve_target_campaigns
         campaigns = resolve_target_campaigns()
     except Exception:                                       # noqa: BLE001
         return ()
-    return tuple(
-        {'name': f'Delivery {name}',
-         'prefixes': [f"dlv_{name.replace('.', '_')}_"], 'ids': []}
-        for name in campaigns)
+    groups = []
+    for name in campaigns:
+        tag = name.replace('.', '_')
+        groups.append({'name': f'Arrivals {name}',
+                       'prefixes': [f'dlvq_{tag}_'], 'ids': [],
+                       'stacked': True, 'compact': True})
+        groups.append({'name': f'Cumulative {name}',
+                       'prefixes': [f'dlvc_{tag}_'], 'ids': [],
+                       'default_off': True})
+    return tuple(groups)
 
 TESTBED_GROUPS = (
     {'name': 'Workflows', 'prefixes': ['wf_'], 'ids': []},
