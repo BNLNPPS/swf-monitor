@@ -19,6 +19,16 @@
         {% endfor %}
     </div>
 
+    <!-- Cached-product freshness chip (docs/CACHED_PRODUCTS.md): the older
+         of the page's two products; Update rebuilds both synchronously. -->
+    {% if product_built_at_text %}
+    <div class="mb-2">
+        <span class="text-muted">Data as of <strong>{{ product_built_at_text }}</strong>
+        {% if product_refreshing %}<span>· refreshing…</span>{% endif %}</span>
+        <a href="?days={{ days }}&refresh=1" class="btn btn-sm btn-secondary ms-2">Update</a>
+    </div>
+    {% endif %}
+
     <!-- Snapper state history: jobs and tasks curves over the selected window -->
     <div class="card mb-4">
         <div class="card-header"><strong>Time history</strong>

@@ -285,29 +285,78 @@ def _days_context(days):
 
 # ── Activity overview ────────────────────────────────────────────────────────
 
-def _snapper_embed_context(days):
+def _activity_product(days, refresh):
+    """PanDA activity aggregates as a cached product
+    (docs/CACHED_PRODUCTS.md): served from the store, rebuilt behind.
+    A builder error raises so a transient failure is never cached."""
+    from ..cached_product import get_product
+
+    def build():
+        data = get_activity(days=days)
+        if 'error' in data:
+            raise RuntimeError(data['error'])
+        return data
+
+    return get_product(f'panda_activity:{days}', build,
+                       ttl_seconds=300, refresh=refresh)
+
+
+def _snapper_embed_product(days, refresh):
     """Curves-only Snapper state-history plot over the page's window
-    (snapper_ai.embed); an embed failure renders visibly in the page
-    without touching the PanDA content."""
+    (snapper_ai.embed), served as a cached product. Windows beyond the
+    embed's 30-day clamp share one key: their content is identical."""
     from django.utils import timezone as dj_timezone
 
-    from snapper_ai.embed import embed_context
-    try:
+    from snapper_ai.embed import MAX_EMBED_DAYS, embed_context
+    from ..cached_product import get_product
+
+    def build():
         now = dj_timezone.now()
-        return embed_context('epicprod', now - timedelta(days=days), now,
-                             families=('In-flight jobs', 'Tasks'))
-    except Exception as e:
-        logger.error('snapper embed failed for panda activity: %s', e)
-        return {'scope': 'epicprod', 'error': str(e)}
+        ctx = embed_context('epicprod', now - timedelta(days=days), now,
+                            families=('In-flight jobs', 'Tasks'))
+        if ctx.get('error'):
+            raise RuntimeError(ctx['error'])
+        return ctx
+
+    key_days = min(days, MAX_EMBED_DAYS + 1)
+    return get_product(f'snapper_embed:epicprod:{key_days}', build,
+                       ttl_seconds=300, refresh=refresh)
 
 
 def panda_activity(request):
-    days = _get_days(request)
-    data = get_activity(days=days)
+    days = max(1, min(_get_days(request), 365))
+    refresh = request.GET.get('refresh') == '1'
+    built_ats = []
+    refreshing = False
+    try:
+        product = _activity_product(days, refresh)
+        data = product['value'] or {
+            'error': 'PanDA activity is building — reload shortly.'}
+        if product['built_at']:
+            built_ats.append(product['built_at'])
+        refreshing = refreshing or product['refreshing']
+    except Exception as e:
+        logger.error('panda activity build failed: %s', e)
+        data = {'error': str(e)}
     if 'error' in data:
         data = {'error': data['error']}
     data.update(_days_context(days))
-    data['snapper_embed'] = _snapper_embed_context(days)
+    try:
+        embed_product = _snapper_embed_product(days, refresh)
+        data['snapper_embed'] = embed_product['value'] or {
+            'scope': 'epicprod',
+            'error': 'state history is building — reload shortly.'}
+        if embed_product['built_at']:
+            built_ats.append(embed_product['built_at'])
+        refreshing = refreshing or embed_product['refreshing']
+    except Exception as e:
+        logger.error('snapper embed failed for panda activity: %s', e)
+        data['snapper_embed'] = {'scope': 'epicprod', 'error': str(e)}
+    if built_ats:
+        data['product_built_at_text'] = (
+            min(built_ats).astimezone(ZoneInfo(settings.TIME_ZONE))
+            .strftime('%Y-%m-%d %H:%M ET'))
+        data['product_refreshing'] = refreshing
     return render(request, 'monitor_app/panda_activity.html', data)
 
 
