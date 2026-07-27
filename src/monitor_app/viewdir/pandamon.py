@@ -285,14 +285,29 @@ def _days_context(days):
 
 # ── Activity overview ────────────────────────────────────────────────────────
 
+def _snapper_embed_context(days):
+    """Curves-only Snapper state-history plot over the page's window
+    (snapper_ai.embed); an embed failure renders visibly in the page
+    without touching the PanDA content."""
+    from django.utils import timezone as dj_timezone
+
+    from snapper_ai.embed import embed_context
+    try:
+        now = dj_timezone.now()
+        return embed_context('epicprod', now - timedelta(days=days), now,
+                             families=('In-flight jobs', 'Tasks'))
+    except Exception as e:
+        logger.error('snapper embed failed for panda activity: %s', e)
+        return {'scope': 'epicprod', 'error': str(e)}
+
+
 def panda_activity(request):
     days = _get_days(request)
     data = get_activity(days=days)
     if 'error' in data:
-        ctx = {'error': data['error']}
-        ctx.update(_days_context(days))
-        return render(request, 'monitor_app/panda_activity.html', ctx)
+        data = {'error': data['error']}
     data.update(_days_context(days))
+    data['snapper_embed'] = _snapper_embed_context(days)
     return render(request, 'monitor_app/panda_activity.html', data)
 
 

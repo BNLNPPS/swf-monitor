@@ -19,6 +19,18 @@
         {% endfor %}
     </div>
 
+    <!-- Snapper state history: jobs and tasks curves over the selected window -->
+    <div class="card mb-4">
+        <div class="card-header"><strong>Time history</strong>
+            {% if snapper_embed.report_url %}
+            <a class="ms-3" href="{{ snapper_embed.report_url }}">Open in Snapper</a>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+        </div>
+    </div>
+
     <div class="mb-4">
         <a href="{% url 'monitor_app:panda_jobs_list' %}?days={{ days }}" class="btn btn-outline-primary me-2">All Jobs</a>
         <a href="{% url 'monitor_app:panda_tasks_list' %}?days={{ days }}" class="btn btn-outline-primary me-2">All Tasks</a>
