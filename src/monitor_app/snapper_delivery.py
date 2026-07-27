@@ -80,50 +80,97 @@ def _campaign_leaves(campaign_name):
         .order_by("composed_name", "block_num", "pk")
         .distinct("composed_name"))
     projection = pc_request_projection(heads)
-    tasks = {
-        task.dataset.composed_name: task
-        for task in ProdTask.objects.filter(campaign__name=campaign_name)
-        .select_related("dataset", "prod_config")}
+    # Placement from the task output records with the progress
+    # accounting rule: unique output DID, most recently checked record
+    # wins (duplicate DIDs across task rows are the documented PCS
+    # multiplicity), each unique output attributed to the winning
+    # record's physics configuration. Verified to reproduce the
+    # progress rollup's figures exactly. Outputs without a DID cannot
+    # be placement-checked and are skipped.
+    task_rows = list(
+        ProdTask.objects.filter(dataset__campaign__name=campaign_name)
+        .select_related("dataset__physics_config", "prod_config"))
+    tasks = {task.dataset.composed_name: task for task in task_rows}
+    # Attribution goes through the HEAD row's configuration per
+    # composed name: multi-row past-output identities can resolve to
+    # different configurations across their physical rows (per-row
+    # metadata feeds the evgen resolution), and leaves are keyed by the
+    # head's resolution.
+    head_pc = {head.composed_name: head.physics_config.label
+               for head in heads if head.physics_config_id}
+    unique = {}
+    for task in task_rows:
+        pc = (head_pc.get(task.dataset.composed_name)
+              or (task.dataset.physics_config.label
+                  if task.dataset.physics_config_id else None))
+        if pc is None:
+            continue
+        for output in task.outputs:
+            did = str(output.get("did") or "").strip()
+            if not did:
+                continue
+            checked = str(output.get("checked_at") or "")
+            prior = unique.get(did)
+            if prior is None or checked >= prior[0]:
+                unique[did] = (checked, pc, output)
+    placed_by_pc = {}
+    for _checked, pc, output in unique.values():
+        slot = placed_by_pc.setdefault(
+            pc, {"files": 0, "bytes": 0, "complete": True})
+        slot["files"] += int(output.get("file_count") or 0)
+        slot["bytes"] += int(output.get("bytes") or 0)
+        if not output.get("complete", True):
+            slot["complete"] = False
+
+    # One leaf per distinct physics configuration: a campaign can hold
+    # several version editions of one PC, and per-edition iteration
+    # would count the PC's placement once per edition.
+    heads_by_pc = {}
+    for head in heads:
+        if head.physics_config_id:
+            heads_by_pc.setdefault(
+                head.physics_config.label, []).append(head)
 
     leaves = {}
     totals = {"configs": 0, "with_target": 0, "events": 0,
               "expected": 0, "files": 0, "bytes": 0}
-    for head in heads:
-        if not head.physics_config_id:
-            continue
-        name = head.composed_name
-        expected = head.expected_events
-        tier = head.expected_events_source
+    for pc, pc_heads in heads_by_pc.items():
+        expected = tier = None
+        for head in pc_heads:
+            if head.expected_events is not None:
+                expected = head.expected_events
+                tier = head.expected_events_source
+                break
         if expected is None:
-            anchored = [r.nevents for r in projection.get(name, ())
+            anchored = [r.nevents
+                        for head in pc_heads
+                        for r in projection.get(head.composed_name, ())
                         if r.nevents]
             if anchored:
-                expected = max(anchored)
-                tier = "requested"
-        task = tasks.get(name)
-        files = bytes_placed = 0
-        complete = True
+                expected, tier = max(anchored), "requested"
         events_per_file = None
-        if task is not None:
-            for output in task.outputs:
-                files += int(output.get("file_count") or 0)
-                bytes_placed += int(output.get("bytes") or 0)
-                if not output.get("complete", True):
-                    complete = False
+        for head in pc_heads:
+            task = tasks.get(head.composed_name)
+            if task is None:
+                continue
             config = task.get_effective_config()
             try:
                 events_per_file = int(
                     (config.get("data") or {}).get("events_per_file"))
+                break
             except (TypeError, ValueError):
                 events_per_file = None
+        placed = placed_by_pc.get(pc) or {}
+        files = int(placed.get("files") or 0)
+        bytes_placed = int(placed.get("bytes") or 0)
         events = files * events_per_file if events_per_file else None
-        leaves[head.physics_config.label] = {
+        leaves[pc] = {
             "events": events,
             "expected": expected,
             "tier": tier or "",
             "files": files,
             "bytes": bytes_placed,
-            "complete": complete,
+            "complete": bool(placed.get("complete", True)),
         }
         totals["configs"] += 1
         if expected is not None:
