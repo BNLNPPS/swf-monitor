@@ -6,6 +6,7 @@ import os
 import socket
 import ssl
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -144,39 +145,64 @@ def _panda_bot():
     return item
 
 
-def _http_endpoint(name, url):
-    started = timezone.now()
-    req = urllib.request.Request(url, method='GET', headers={'User-Agent': 'swf-monitor-system-status/1.0'})
+def _http_endpoint(name, url, attempts=3, retry_wait=3):
+    """Probe a web endpoint, retrying transient failures before judging.
+
+    Deploys recycle the app servers behind these endpoints, and a
+    one-shot probe landing in that window reported a false Error (the
+    one-shot-clients-must-retry rule). Timeouts, connection failures,
+    and 5xx responses retry up to ``attempts`` times with a short wait;
+    only a failure that survives every attempt is an error, and the
+    attempt count is recorded either way.
+    """
     data = {'url': url}
-    try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            body = resp.read(512)
-            code = resp.getcode()
+    last_status = None
+    for attempt in range(1, attempts + 1):
+        started = timezone.now()
+        req = urllib.request.Request(
+            url, method='GET',
+            headers={'User-Agent': 'swf-monitor-system-status/1.0'})
+        data['attempts'] = attempt
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                body = resp.read(512)
+                code = resp.getcode()
+                elapsed_ms = int((timezone.now() - started).total_seconds() * 1000)
+                data.update({
+                    'http_status': code,
+                    'final_url': resp.geturl(),
+                    'elapsed_ms': elapsed_ms,
+                    'sample_bytes': len(body),
+                })
+                recovered = (' (recovered on attempt '
+                             f'{attempt})' if attempt > 1 else '')
+                state = 'ok' if code < 400 else 'warning'
+                return _status(name, 'external', state,
+                               f'{url} returned HTTP {code}{recovered}', data)
+        except urllib.error.HTTPError as exc:
             elapsed_ms = int((timezone.now() - started).total_seconds() * 1000)
             data.update({
-                'http_status': code,
-                'final_url': resp.geturl(),
+                'http_status': exc.code,
+                'final_url': exc.geturl(),
                 'elapsed_ms': elapsed_ms,
-                'sample_bytes': len(body),
+                'error': str(exc),
             })
-    except urllib.error.HTTPError as exc:
-        elapsed_ms = int((timezone.now() - started).total_seconds() * 1000)
-        data.update({
-            'http_status': exc.code,
-            'final_url': exc.geturl(),
-            'elapsed_ms': elapsed_ms,
-            'error': str(exc),
-        })
-        if exc.code >= 500:
-            return _status(name, 'external', 'error', f'{url} returned HTTP {exc.code}', data)
-        return _status(name, 'external', 'warning', f'{url} returned HTTP {exc.code}', data)
-    except Exception as exc:
-        elapsed_ms = int((timezone.now() - started).total_seconds() * 1000)
-        data.update({'elapsed_ms': elapsed_ms, 'error': str(exc)})
-        return _status(name, 'external', 'error', f'{url} check failed: {exc}', data)
-
-    state = 'ok' if data['http_status'] < 400 else 'warning'
-    return _status(name, 'external', state, f"{url} returned HTTP {data['http_status']}", data)
+            if exc.code < 500:
+                return _status(name, 'external', 'warning',
+                               f'{url} returned HTTP {exc.code}', data)
+            last_status = _status(
+                name, 'external', 'error',
+                f'{url} returned HTTP {exc.code} on {attempt} attempt(s)',
+                data)
+        except Exception as exc:
+            elapsed_ms = int((timezone.now() - started).total_seconds() * 1000)
+            data.update({'elapsed_ms': elapsed_ms, 'error': str(exc)})
+            last_status = _status(
+                name, 'external', 'error',
+                f'{url} check failed on {attempt} attempt(s): {exc}', data)
+        if attempt < attempts:
+            time.sleep(retry_wait)
+    return last_status
 
 
 def _github_actions():

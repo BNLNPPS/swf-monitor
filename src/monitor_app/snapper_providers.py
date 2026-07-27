@@ -230,6 +230,53 @@ def _run_activity_lanes(start, end, dangle_seconds):
 
 # ── Curve extraction and vocabulary ──────────────────────────────────────
 
+_REQUESTOR_CACHE = {'at': None, 'map': {}}
+
+
+def _requestor_map():
+    """pc label -> requestor labels, cached briefly: series assembly
+    calls curve extraction once per snap, and the lens membership is
+    current-state (lenses apply retroactively across the record)."""
+    from django.utils import timezone
+
+    from pcs.models import PhysicsConfig
+
+    now = timezone.now()
+    if (_REQUESTOR_CACHE['at'] is None
+            or (now - _REQUESTOR_CACHE['at']).total_seconds() > 60):
+        _REQUESTOR_CACHE['map'] = {
+            label: list(requestors or [])
+            for label, requestors in PhysicsConfig.objects
+            .values_list('label', 'requestors')}
+        _REQUESTOR_CACHE['at'] = now
+    return _REQUESTOR_CACHE['map']
+
+
+def _delivery_curve_values(state):
+    """Delivery curves from the leaf-keyed record, projected through
+    the requestor lens at extraction time (CAMPAIGN_DELIVERY.md): per
+    campaign, total files placed and files placed per requesting
+    group, with Unassigned carrying the unlabeled leaves."""
+    values = {}
+    delivery = component_data(state, 'delivery')
+    requestors = _requestor_map() if delivery.get('campaigns') else {}
+    for campaign, block in (delivery.get('campaigns') or {}).items():
+        tag = campaign.replace('.', '_')
+        totals = block.get('totals') or {}
+        values[f'dlv_{tag}__total_files'] = int(totals.get('files') or 0)
+        by_group = {}
+        for pc, leaf in (block.get('leaves') or {}).items():
+            files = int(leaf.get('files') or 0)
+            if not files:
+                continue
+            groups = requestors.get(pc) or ['Unassigned']
+            for group in groups:
+                by_group[group] = by_group.get(group, 0) + files
+        for group, files in by_group.items():
+            values[f'dlv_{tag}_{group}_files'] = files
+    return values
+
+
 def _epicprod_curve_values(state):
     values = {}
     panda = component_data(state, 'panda')
@@ -249,6 +296,7 @@ def _epicprod_curve_values(state):
         values['tasks_total'] = int(tasks_now.get('total') or 0)
         for status, count in (tasks_now.get('by_status') or {}).items():
             values[f'task_{status}'] = int(count or 0)
+    values.update(_delivery_curve_values(state))
     return values
 
 
@@ -268,8 +316,17 @@ def _testbed_curve_values(state):
 
 
 def _epicprod_curve_label(curve_id):
-    if curve_id == 'jobs_total':
-        return 'jobs total'
+    if curve_id.startswith('dlv_'):
+        remainder = curve_id[4:]
+        tag, _, rest = remainder.partition('_')
+        # Campaign tags serialize dots as underscores (26_07).
+        while rest and rest[0].isdigit():
+            extra, _, rest = rest.partition('_')
+            tag = f'{tag}_{extra}'
+        campaign = tag.replace('_', '.')
+        group = rest.rsplit('_', 1)[0].strip('_') or 'total'
+        return (f'{campaign} files' if group in ('', 'total')
+                else f'{campaign} {group} files')
     if curve_id == 'tasks_total':
         return 'tasks total'
     if curve_id == 'running_cores':
@@ -308,6 +365,41 @@ EPICPROD_GROUPS = (
     {'name': 'In-flight job types', 'prefixes': ['type_'], 'ids': []},
     {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
 )
+
+
+def _delivery_preset_links():
+    """Campaign tabs in the Snapper scope switcher: one preset per
+    target campaign, opening the report page focused on that campaign's
+    delivery family. Resolved at render time, so the tabs track the
+    producing/current campaigns."""
+    from urllib.parse import urlencode
+
+    try:
+        from swf_epicprod.analytics.rollup import resolve_target_campaigns
+        campaigns = resolve_target_campaigns()
+    except Exception:                                       # noqa: BLE001
+        return ()
+    return [
+        {'label': f'Campaign {name}',
+         'query': urlencode({'families': f'Delivery {name}',
+                             'window': '30d'})}
+        for name in sorted(campaigns, reverse=True)]
+
+
+def _delivery_groups():
+    """One curve family per target campaign's delivery curves,
+    resolved at registration. A resolution failure yields no delivery
+    families (the curves then land in Other) rather than blocking
+    registration."""
+    try:
+        from swf_epicprod.analytics.rollup import resolve_target_campaigns
+        campaigns = resolve_target_campaigns()
+    except Exception:                                       # noqa: BLE001
+        return ()
+    return tuple(
+        {'name': f'Delivery {name}',
+         'prefixes': [f"dlv_{name.replace('.', '_')}_"], 'ids': []}
+        for name in campaigns)
 
 TESTBED_GROUPS = (
     {'name': 'Workflows', 'prefixes': ['wf_'], 'ids': []},
@@ -356,6 +448,51 @@ def _panda_card(data, previous_data, ctx):
                 'delta': cut_delta(count, previous)})
     return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states}
+
+
+def _delivery_card(data, previous_data, ctx):
+    """The delivery cut card: per campaign, the totals with deltas
+    against the previous snap and the requestor-lens rollup of files
+    placed. Sample-level drilldown lives on the campaign plan page."""
+    from django.urls import reverse
+
+    requestors = _requestor_map()
+    campaigns = []
+    for name, block in sorted((data.get('campaigns') or {}).items()):
+        totals = block.get('totals') or {}
+        previous_totals = (((previous_data.get('campaigns') or {})
+                            .get(name) or {}).get('totals') or {})
+        by_group = {}
+        for pc, leaf in (block.get('leaves') or {}).items():
+            files = int(leaf.get('files') or 0)
+            if not files:
+                continue
+            for group in requestors.get(pc) or ['Unassigned']:
+                by_group[group] = by_group.get(group, 0) + files
+        campaigns.append({
+            'name': name,
+            'headline': [
+                {'label': 'configurations',
+                 'value': totals.get('configs'),
+                 'delta': cut_delta(totals.get('configs'),
+                                    previous_totals.get('configs'))},
+                {'label': 'with targets',
+                 'value': totals.get('with_target'),
+                 'delta': cut_delta(totals.get('with_target'),
+                                    previous_totals.get('with_target'))},
+                {'label': 'files placed',
+                 'value': totals.get('files'),
+                 'delta': cut_delta(totals.get('files'),
+                                    previous_totals.get('files'))},
+                {'label': 'TB placed',
+                 'value': round((totals.get('bytes') or 0) / 1e12, 1),
+                 'delta': None},
+            ],
+            'groups': sorted(by_group.items(), key=lambda kv: -kv[1]),
+            'plan_url': (reverse('pcs:pcs_campaign_plan')
+                         + f'?campaign={name}'),
+        })
+    return {'kind': 'delivery', 'campaigns': campaigns}
 
 
 def _workflow_card(data, previous_data, ctx):
@@ -594,8 +731,10 @@ def register_snapper_providers():
         label='epicprod',
         curve_values=_epicprod_curve_values,
         curve_label=_epicprod_curve_label,
-        curve_groups=EPICPROD_GROUPS,
-        component_cards={'panda': _panda_card},
+        curve_groups=EPICPROD_GROUPS + _delivery_groups(),
+        preset_links=_delivery_preset_links,
+        component_cards={'panda': _panda_card,
+                         'delivery': _delivery_card},
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))

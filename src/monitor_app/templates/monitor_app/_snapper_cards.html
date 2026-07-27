@@ -58,6 +58,32 @@
   </div>
   {% endif %}
 
+{% elif card.kind == 'delivery' %}
+  {% for c in card.campaigns %}
+  <div class="mb-2">
+    <div class="mb-1"><strong>{{ c.name }}</strong>
+      · <a href="{{ c.plan_url }}">campaign plan</a></div>
+    <div class="d-flex flex-wrap gap-4 mb-1">
+      {% for stat in c.headline %}
+      <div class="snapper-stat">
+        <div class="snapper-stat-value">{{ stat.value }}
+          {% if stat.delta %}<span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %} fs-6">{{ stat.delta }}</span>{% endif %}
+        </div>
+        <div class="text-muted">{{ stat.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if c.groups %}
+    <div class="mb-1"><strong>Files placed by requestor:</strong>
+      {% for group, files in c.groups %}{{ group }} {{ files }}{% if not forloop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if previous_age_text %}
+  <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
+  {% endif %}
+
 {% elif card.kind == 'workflow' %}
   <div class="d-flex flex-wrap gap-4 mb-2">
     {% for stat in card.headline %}
