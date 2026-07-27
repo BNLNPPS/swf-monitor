@@ -266,6 +266,11 @@
         background-color: var(--ai-fg); color: #fff;
         border-color: var(--ai-fg);
       }
+      /* Checkboxes app-wide: Bootstrap's default border is too light
+         to see; an unticked box must read as present. */
+      .form-check-input, input[type="checkbox"] {
+        border: 1.5px solid #495057;
+      }
     </style>
 </head>
 <body>
