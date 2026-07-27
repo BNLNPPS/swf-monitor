@@ -30,8 +30,8 @@
     <!-- Snapper state history: jobs and tasks curves over the selected window -->
     <div class="card mb-4">
         <div class="card-header"><strong>Time history</strong>
-            {% if snapper_embed.report_url %}
-            <a class="ms-3" href="{{ snapper_embed.report_url }}">Open in Snapper</a>
+            {% if snapper_embed.report_query %}
+            <a class="ms-3" href="{% url 'snapper_ai:snapper_report' scope=snapper_embed.scope %}?{{ snapper_embed.report_query }}">Open in Snapper</a>
             {% endif %}
         </div>
         <div class="card-body">

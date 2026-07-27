@@ -319,7 +319,7 @@ def _snapper_embed_product(days, refresh):
         return ctx
 
     key_days = min(days, MAX_EMBED_DAYS + 1)
-    return get_product(f'snapper_embed:epicprod:{key_days}', build,
+    return get_product(f'snapper_embed:v2:epicprod:{key_days}', build,
                        ttl_seconds=300, refresh=refresh)
 
 

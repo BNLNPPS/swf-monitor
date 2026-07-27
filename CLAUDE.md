@@ -73,6 +73,11 @@ the old paths here. This repo's docs cover the platform services:
 
 ## Editing discipline (AI sessions)
 
+- The app is served under the `/swf-monitor/` script prefix, which exists
+  only in request context. Never bake `reverse()` output into values built
+  outside a request — cached products, background threads, shell probes,
+  agents — the path comes out prefix-less and dead. Store query strings or
+  names; resolve the path at render time (`{% url %}`).
 - Templates and HTML are edited with precision edits (the Edit tool), never
   stream editors (`sed`/`awk`) — a regex that clips one attribute quote
   renders as a silently truncated page.
