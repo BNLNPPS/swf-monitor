@@ -528,7 +528,6 @@ def log_summary(request):
         'columns': columns,
         'app_names': app_names,
         'instance_types': instance_types,
-        'instance_names': instance_names,
         'selected_app': app_name,
         'selected_instance_type': instance_type,
         'selected_instance': instance_name,
@@ -1328,8 +1327,9 @@ def stf_files_list(request):
     status_filter = request.GET.get('status')
     machine_state = request.GET.get('machine_state')
     
-    # Get filter options for dropdown links
-    run_numbers = Run.objects.values_list('run_number', flat=True).distinct()
+    # Status and machine state are the humanly-choosable filter sets;
+    # run enumerations are not filters — deep-link parameters still
+    # apply and search covers targeted lookups.
     statuses = [choice[0] for choice in StfFile._meta.get_field('status').choices]
     machine_states = StfFile.objects.values_list('machine_state', flat=True).distinct()
     
@@ -1349,7 +1349,6 @@ def stf_files_list(request):
         'table_description': 'Track STF files by run, machine state, and processing status.',
         'ajax_url': reverse('monitor_app:stf_files_datatable_ajax'),
         'columns': columns,
-        'run_numbers': sorted(run_numbers, reverse=True),
         'statuses': statuses,
         'machine_states': sorted([s for s in machine_states if s]),
         'selected_run_number': run_number,
@@ -1415,9 +1414,9 @@ def stf_files_datatable_ajax(request):
         stf_file_detail_url = reverse('monitor_app:stf_file_detail', args=[file.file_id])
         view_link = f'<a href="{stf_file_detail_url}">View</a>'
 
-        from .cell_fmt import fill_cell
+        from .cell_fmt import fill_cell, short_filename
         data.append([
-            file.stf_filename, run_link, tf_files_link,
+            short_filename(file.stf_filename), run_link, tf_files_link,
             fill_cell(file.machine_state or '', file.machine_state),
             fill_cell(status_text, file.status), timestamp_str, view_link
         ])
@@ -1934,11 +1933,13 @@ def workflow_messages(request):
             {'title': 'workflow', 'orderable': True},
             {'title': 'is_successful', 'orderable': True},
         ],
+        # Selects hold only humanly-choosable sets. Hundreds of
+        # execution UUIDs or per-instance sender names are not filters
+        # — those arrive as deep-link parameters (still honored) or
+        # through search.
         'filter_fields': [
             {'name': 'namespace', 'label': 'namespace', 'type': 'select'},
-            {'name': 'execution_id', 'label': 'execution_id', 'type': 'select'},
             {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
-            {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
             {'name': 'workflow', 'label': 'workflow', 'type': 'select'},
             {'name': 'is_successful', 'label': 'is_successful', 'type': 'select'},
         ],

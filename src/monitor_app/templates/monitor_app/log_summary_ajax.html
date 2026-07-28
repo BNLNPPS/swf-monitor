@@ -25,13 +25,6 @@
                 {% endfor %}
             </div>
             <div style="margin-bottom: 0.5em;">
-                <span style="font-weight: 600;">Agent Instance:</span>
-                <a href="#" data-filter="instance_name" data-value="" class="filter-link {% if not selected_instance %}filter-active{% endif %}">All</a>
-                {% for inst in instance_names %}
-                    <a href="#" data-filter="instance_name" data-value="{{ inst }}" class="filter-link {% if selected_instance == inst %}filter-active{% endif %}">{{ inst }}</a>
-                {% endfor %}
-            </div>
-            <div style="margin-bottom: 0.5em;">
                 <span style="font-weight: 600;">Levels:</span>
                 <a href="#" data-filter="levelname" data-value="" class="filter-link {% if not selected_levelname %}filter-active{% endif %}">All</a>
                 <a href="#" data-filter="levelname" data-value="DEBUG" class="filter-link {% if selected_levelname == 'DEBUG' %}filter-active{% endif %}">DEBUG</a>

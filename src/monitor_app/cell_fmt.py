@@ -42,3 +42,18 @@ def fill_cell(content, state, url=None):
     if url:
         return f'<a href="{url}" style="text-decoration:none;color:inherit;">{wrapper}</a>'
     return wrapper
+
+
+def short_filename(name, head=20, tail=28):
+    """A long file name or URL as a table-fit cell: the basename,
+    middle-elided past head+tail characters, with the full original in
+    the hover title. Long xrootd URLs otherwise push a table far off
+    the page.
+    """
+    from html import escape
+
+    full = name or ''
+    base = full.rsplit('/', 1)[-1]
+    shown = (f'{base[:head]}…{base[-tail:]}'
+             if len(base) > head + tail + 1 else base)
+    return f'<span title="{escape(full)}">{escape(shown)}</span>'
