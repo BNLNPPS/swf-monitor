@@ -148,6 +148,9 @@ def _campaign_leaves(campaign_name):
                         if r.nevents]
             if anchored:
                 expected, tier = max(anchored), "requested"
+        # One payload job generates events_per_job events into one
+        # output file, so the configured events_per_job IS the events
+        # per file. (events_per_file is not a key any config carries.)
         events_per_file = None
         for head in pc_heads:
             task = tasks.get(head.composed_name)
@@ -156,7 +159,7 @@ def _campaign_leaves(campaign_name):
             config = task.get_effective_config()
             try:
                 events_per_file = int(
-                    (config.get("data") or {}).get("events_per_file"))
+                    (config.get("data") or {}).get("events_per_job"))
                 break
             except (TypeError, ValueError):
                 events_per_file = None

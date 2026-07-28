@@ -272,12 +272,16 @@ def _delivery_curve_values(state):
         if 'arrived_files' not in totals:
             continue  # the live placed-basis component: cards only
         tag = campaign.replace('.', '_')
-        values[f'dlvc_{tag}__total'] = int(totals.get('cum_files') or 0)
+        # The plotted quantity is EVENTS — the campaign deliverable —
+        # from the record's measured per-file counts. Files remain in
+        # the record and the cut card; unmeasured coverage is stated
+        # there, never silently mixed into the event sums.
+        values[f'dlvc_{tag}__total'] = int(totals.get('events') or 0)
         cum_by_group = {}
         for pc, leaf in (block.get('leaves') or {}).items():
             values[f'dlvq_{tag}_{pc}'] = int(
-                leaf.get('arrived_files') or 0)
-            cum = int(leaf.get('cum_files') or 0)
+                leaf.get('arrived_events') or 0)
+            cum = int(leaf.get('events') or 0)
             if cum:
                 for group in requestors.get(pc) or ['Unassigned']:
                     cum_by_group[group] = cum_by_group.get(group, 0) + cum
@@ -467,10 +471,11 @@ def _delivery_groups():
         tag = name.replace('.', '_')
         groups.append({'name': f'Arrivals {name}',
                        'prefixes': [f'dlvq_{tag}_'], 'ids': [],
-                       'stacked': True, 'compact': True})
+                       'stacked': True, 'compact': True,
+                       'units': 'events'})
         groups.append({'name': f'Cumulative {name}',
                        'prefixes': [f'dlvc_{tag}_'], 'ids': [],
-                       'default_off': True})
+                       'default_off': True, 'units': 'events'})
     return tuple(groups)
 
 TESTBED_GROUPS = (
@@ -551,7 +556,8 @@ def _delivery_card(data, previous_data, ctx):
             day_pcs = []
             for pc, leaf in sorted(
                     leaves.items(),
-                    key=lambda kv: -int(kv[1].get('arrived_files') or 0)):
+                    key=lambda kv: (-int(kv[1].get('arrived_events') or 0),
+                                    -int(kv[1].get('arrived_files') or 0))):
                 arrived = int(leaf.get('arrived_files') or 0)
                 if not arrived:
                     continue
@@ -564,21 +570,34 @@ def _delivery_card(data, previous_data, ctx):
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
+                    'arrived_events': int(
+                        leaf.get('arrived_events') or 0),
+                    'cum_events': int(leaf.get('events') or 0),
                     'arrived': arrived,
                     'cum': int(leaf.get('cum_files') or 0),
                     'expected': leaf.get('expected'),
                     'tier': leaf.get('tier') or '',
                 })
+            # The day table sits directly under the plot: split into
+            # side-by-side columns so its height stays near the fold.
+            per_col = max(8, -(-len(day_pcs) // 3))
+            day_pcs_cols = [day_pcs[i:i + per_col]
+                            for i in range(0, len(day_pcs), per_col)]
+            unmeasured = int(totals.get('unmeasured_files') or 0)
             campaigns.append({
                 'name': name,
                 'day_pcs': day_pcs,
+                'day_pcs_cols': day_pcs_cols,
                 'headline': [
+                    {'label': 'events arrived this day',
+                     'value': totals.get('arrived_events'),
+                     'delta': None},
+                    {'label': 'cumulative events',
+                     'value': totals.get('events'),
+                     'delta': cut_delta(totals.get('events'),
+                                        previous_totals.get('events'))},
                     {'label': 'files arrived this day',
                      'value': totals.get('arrived_files'), 'delta': None},
-                    {'label': 'cumulative files',
-                     'value': totals.get('cum_files'),
-                     'delta': cut_delta(totals.get('cum_files'),
-                                        previous_totals.get('cum_files'))},
                     {'label': 'cumulative TB',
                      'value': round(
                          (totals.get('cum_bytes') or 0) / 1e12, 1),
@@ -586,6 +605,7 @@ def _delivery_card(data, previous_data, ctx):
                     {'label': 'configurations delivering',
                      'value': len(day_pcs), 'delta': None},
                 ],
+                'unmeasured_files': unmeasured,
                 'plan_url': (reverse('pcs:pcs_campaign_plan')
                              + f'?campaign={name}'),
             })
