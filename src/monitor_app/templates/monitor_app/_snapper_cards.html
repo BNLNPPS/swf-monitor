@@ -61,33 +61,39 @@
 {% elif card.kind == 'delivery' %}
   {% for c in card.campaigns %}
   <div class="mb-2">
-    {% if c.day_pcs %}
-    {# The day cut: one headline line, then the breakdown split into #}
-    {# side-by-side tables so it sits under the plot, not below the fold. #}
-    <div class="mb-1"><strong>{{ c.name }}</strong>
+    {% if c.day_groups %}
+    {# The day cut: one headline line naming campaign and day, then  #}
+    {# the breakdown as one table per lens group — the group swatch  #}
+    {# is the quilt patch color above it — side by side under the    #}
+    {# plot, not below the fold.                                     #}
+    <div class="mb-1"><strong>{{ c.name }}{% if c.day %} · {{ c.day }}{% endif %}</strong>
       {% for stat in c.headline %} · <strong>{{ stat.value }}</strong>{% if stat.delta %} <span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %}">{{ stat.delta }}</span>{% endif %} {{ stat.label }}{% endfor %}
       · <a href="{{ c.plan_url }}">campaign plan</a></div>
     {% if c.unmeasured_files %}
     <div class="mb-1 text-muted">{{ c.unmeasured_files }} files are not yet measured for events; event sums are floors until measurement covers them.</div>
     {% endif %}
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
-      {% for col in c.day_pcs_cols %}
-      <table class="table table-sm table-bordered w-auto mb-1">
-        <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th></tr></thead>
-        <tbody>
-        {% for pc in col %}
-        <tr>
-          <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
-          <td>{{ pc.identity }}</td>
-          <td>{{ pc.groups }}</td>
-          <td class="text-end">{{ pc.arrived_events }}</td>
-          <td class="text-end">{{ pc.cum_events }}</td>
-          <td class="text-end">{{ pc.arrived }}</td>
-          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+      {% for grp in c.day_groups %}
+      <div class="mb-1">
+        <div class="mb-1"><span data-curve="{{ grp.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><strong>{{ grp.name }}</strong>
+          · {{ grp.arrived_events }} events, {{ grp.arrived_files }} files this day</div>
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th></tr></thead>
+          <tbody>
+          {% for pc in grp.rows %}
+          <tr>
+            <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+            <td>{{ pc.identity }}</td>
+            <td>{{ pc.groups }}</td>
+            <td class="text-end">{{ pc.arrived_events }}</td>
+            <td class="text-end">{{ pc.cum_events }}</td>
+            <td class="text-end">{{ pc.arrived }}</td>
+            <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% endfor %}
     </div>
     {% else %}

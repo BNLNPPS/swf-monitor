@@ -230,13 +230,31 @@ def _run_activity_lanes(start, end, dangle_seconds):
 
 # ── Curve extraction and vocabulary ──────────────────────────────────────
 
-_PC_CACHE = {'at': None, 'requestors': {}, 'keys': {}}
+# The categorization lenses of CAMPAIGN_DELIVERY.md: read-time
+# projections of the PC leaves into group curves. 'seg' is the
+# curve-id segment, 'value' the URL selector value. The requestors
+# labeling holds PWG and DSC labels in one multi-membership list — the
+# data does not distinguish them, so they are one lens.
+DELIVERY_LENSES = (
+    {'seg': 'cat', 'value': 'category', 'label': 'physics category'},
+    {'seg': 'req', 'value': 'requestor', 'label': 'PWG/DSC'},
+)
+
+_PC_CACHE = {'at': None, 'requestors': {}, 'keys': {},
+             'categories': {}, 'group_names': {}}
+
+
+def _group_slug(name):
+    import re
+    return re.sub(r'[^a-z0-9]+', '_', str(name).lower()).strip('_')
 
 
 def _pc_cache():
-    """pc label -> requestor labels and identity key, cached briefly:
-    series assembly calls curve extraction once per snap, and lens
-    membership is current-state (lenses apply retroactively)."""
+    """pc label -> requestor labels, physics category, and identity
+    key, cached briefly: series assembly calls curve extraction once
+    per snap, and lens membership is current-state (lenses apply
+    retroactively). group_names maps curve-id slugs back to display
+    names across every lens."""
     from django.utils import timezone
 
     from pcs.models import PhysicsConfig
@@ -244,60 +262,83 @@ def _pc_cache():
     now = timezone.now()
     if (_PC_CACHE['at'] is None
             or (now - _PC_CACHE['at']).total_seconds() > 60):
-        requestors, keys = {}, {}
-        for label, groups, key in PhysicsConfig.objects.values_list(
-                'label', 'requestors', 'config_key'):
+        requestors, keys, categories = {}, {}, {}
+        for label, groups, key, category in (
+                PhysicsConfig.objects.values_list(
+                    'label', 'requestors', 'config_key',
+                    'physics_tag__category__name')):
             requestors[label] = list(groups or [])
             keys[label] = key
+            categories[label] = category or 'Uncategorized'
+        group_names = {}
+        for name in set(categories.values()):
+            group_names[_group_slug(name)] = name
+        for groups in requestors.values():
+            for name in groups:
+                group_names[_group_slug(name)] = name
+        for name in ('Unassigned', 'Uncategorized'):
+            group_names[_group_slug(name)] = name
         _PC_CACHE.update({'requestors': requestors, 'keys': keys,
-                          'at': now})
+                          'categories': categories,
+                          'group_names': group_names, 'at': now})
     return _PC_CACHE
 
 
-def _requestor_map():
-    return _pc_cache()['requestors']
+def _lens_groups(pc, lens_seg, cache):
+    """The lens groups one PC's leaf sums into (N-way for requestors;
+    the empty labeling gets its stated bucket, never silence)."""
+    if lens_seg == 'cat':
+        return [cache['categories'].get(pc) or 'Uncategorized']
+    return cache['requestors'].get(pc) or ['Unassigned']
 
 
 def _delivery_curve_values(state):
     """Delivery curves from the DAILY arrivals record only (leaves
-    carrying arrived_files): the per-PC daily bumps (the quilt) and
-    the cumulative series, both on the registered basis throughout.
-    The live placed-basis component feeds cut cards, never curves, so
-    the plotted series ends at the last complete day."""
+    carrying arrived_files): lens-group daily bumps (the quilt) and
+    lens-group cumulative series with a total, per lens, both on the
+    registered basis throughout. The live placed-basis component feeds
+    cut cards, never curves, so the plotted series ends at the last
+    complete day. Events emit in MILLIONS — the family titles carry
+    (M); files stay raw counts. Unmeasured coverage is stated on the
+    cut card, never silently mixed into the event sums."""
     values = {}
     delivery = component_data(state, 'delivery')
-    requestors = _requestor_map() if delivery.get('campaigns') else {}
+    cache = _pc_cache() if delivery.get('campaigns') else None
     for campaign, block in (delivery.get('campaigns') or {}).items():
         totals = block.get('totals') or {}
         if 'arrived_files' not in totals:
             continue  # the live placed-basis component: cards only
         tag = campaign.replace('.', '_')
-        # Both quantities are served: EVENTS — the campaign
-        # deliverable, from the record's measured per-file counts —
-        # and FILES, as the alternate view the campaign page toggles.
-        # Unmeasured coverage is stated on the cut card, never
-        # silently mixed into the event sums.
-        values[f'dlvc_{tag}__total'] = int(totals.get('events') or 0)
-        values[f'dlvcf_{tag}__total'] = int(totals.get('cum_files') or 0)
-        cum_by_group = {}
-        cum_files_by_group = {}
-        for pc, leaf in (block.get('leaves') or {}).items():
-            values[f'dlvq_{tag}_{pc}'] = int(
-                leaf.get('arrived_events') or 0)
-            values[f'dlvqf_{tag}_{pc}'] = int(
-                leaf.get('arrived_files') or 0)
-            cum = int(leaf.get('events') or 0)
-            cum_files = int(leaf.get('cum_files') or 0)
-            for group in requestors.get(pc) or ['Unassigned']:
-                if cum:
-                    cum_by_group[group] = cum_by_group.get(group, 0) + cum
-                if cum_files:
-                    cum_files_by_group[group] = (
-                        cum_files_by_group.get(group, 0) + cum_files)
-        for group, cum in cum_by_group.items():
-            values[f'dlvc_{tag}_{group}'] = cum
-        for group, cum in cum_files_by_group.items():
-            values[f'dlvcf_{tag}_{group}'] = cum
+        for lens in DELIVERY_LENSES:
+            seg = lens['seg']
+            arr_e, arr_f, cum_e, cum_f = {}, {}, {}, {}
+            for pc, leaf in (block.get('leaves') or {}).items():
+                for group in _lens_groups(pc, seg, cache):
+                    slug = _group_slug(group)
+                    arr_e[slug] = (arr_e.get(slug, 0)
+                                   + int(leaf.get('arrived_events') or 0))
+                    arr_f[slug] = (arr_f.get(slug, 0)
+                                   + int(leaf.get('arrived_files') or 0))
+                    cum_e[slug] = (cum_e.get(slug, 0)
+                                   + int(leaf.get('events') or 0))
+                    cum_f[slug] = (cum_f.get(slug, 0)
+                                   + int(leaf.get('cum_files') or 0))
+            for slug, v in arr_e.items():
+                if v:
+                    values[f'dlvq_{seg}_{tag}_{slug}'] = round(v / 1e6, 2)
+            for slug, v in arr_f.items():
+                if v:
+                    values[f'dlvqf_{seg}_{tag}_{slug}'] = v
+            for slug, v in cum_e.items():
+                if v:
+                    values[f'dlvc_{seg}_{tag}_{slug}'] = round(v / 1e6, 2)
+            for slug, v in cum_f.items():
+                if v:
+                    values[f'dlvcf_{seg}_{tag}_{slug}'] = v
+            values[f'dlvc_{seg}_{tag}__total'] = round(
+                int(totals.get('events') or 0) / 1e6, 2)
+            values[f'dlvcf_{seg}_{tag}__total'] = int(
+                totals.get('cum_files') or 0)
     return values
 
 
@@ -340,26 +381,26 @@ def _testbed_curve_values(state):
 
 
 def _delivery_curve_parts(curve_id):
-    """(campaign, remainder) from a dlvq_/dlvc_ curve id; campaign
-    tags serialize dots as underscores (26_07)."""
+    """(lens_seg, campaign, group_slug) from a delivery curve id
+    (dlvq_cat_26_07_single_particle); campaign tags serialize dots as
+    underscores (26_07)."""
     remainder = curve_id.split('_', 1)[1]
-    tag, _, rest = remainder.partition('_')
+    seg, _, rest = remainder.partition('_')
+    tag, _, rest = rest.partition('_')
     while rest and rest[0].isdigit():
         extra, _, rest = rest.partition('_')
         tag = f'{tag}_{extra}'
-    return tag.replace('_', '.'), rest.strip('_')
+    return seg, tag.replace('_', '.'), rest.strip('_')
 
 
 def _epicprod_curve_label(curve_id):
-    if curve_id.startswith(('dlvq_', 'dlvqf_')):
-        campaign, pc = _delivery_curve_parts(curve_id)
-        key = _pc_cache()['keys'].get(pc, '')
-        return f'{pc} {key}' if key else pc
-    if curve_id.startswith(('dlvc_', 'dlvcf_')):
-        unit = 'files' if curve_id.startswith('dlvcf_') else 'events'
-        campaign, group = _delivery_curve_parts(curve_id)
-        return (f'{campaign} cumulative {unit}' if group in ('', 'total')
-                else f'{campaign} {group} cumulative')
+    if curve_id.startswith(('dlvq_', 'dlvqf_', 'dlvc_', 'dlvcf_')):
+        # The box states the group; the docked family header states
+        # campaign, kind, and unit.
+        _seg, _campaign, slug = _delivery_curve_parts(curve_id)
+        if slug in ('', 'total'):
+            return 'total'
+        return _pc_cache()['group_names'].get(slug, slug)
     if curve_id == 'tasks_total':
         return 'tasks total'
     if curve_id == 'running_cores':
@@ -455,24 +496,30 @@ def _delivery_focus_view():
         'param': 'campaign',
         'label': 'Campaign',
         'default': campaigns[0],
-        # The plotted quantity toggles between the two the record
-        # carries: events (the deliverable) and files.
-        # Files is the default while the measured event rates are
-        # under review; events stays one click away.
-        'quantity': {
-            'param': 'quantity',
-            'label': 'Counting',
-            'default': 'files',
-            'choices': [{'value': 'files', 'label': 'files'},
-                        {'value': 'events', 'label': 'events'}],
-        },
+        # Two selector axes: the plotted quantity (files is the
+        # default while the measured event rates are under review;
+        # events, in millions, stays one click away) and the grouping
+        # lens the quilt factorizes by.
+        'selectors': [
+            {'param': 'quantity', 'label': 'Counting',
+             'default': 'files',
+             'choices': [{'value': 'files', 'label': 'files'},
+                         {'value': 'events', 'label': 'events (M)'}]},
+            {'param': 'lens', 'label': 'Grouping',
+             'default': 'category',
+             'choices': [{'value': lens['value'],
+                          'label': lens['label']}
+                         for lens in DELIVERY_LENSES]},
+        ],
         'options': [
             {'value': name, 'label': name,
              'families_by': {
-                 'events': [f'Arrivals {name}', f'Cumulative {name}'],
-                 'files': [f'Arrivals {name} (files)',
-                           f'Cumulative {name} (files)'],
-             },
+                 f'{quantity}|{lens["value"]}': [
+                     f'Arrivals {name} {quantity} {lens["value"]}',
+                     f'Cumulative {name} {quantity} {lens["value"]}',
+                 ]
+                 for quantity in ('files', 'events')
+                 for lens in DELIVERY_LENSES},
              'component': 'delivery',
              'collapse_below': 0.01,
              'start': (starts[name] - timedelta(hours=12))
@@ -482,12 +529,14 @@ def _delivery_focus_view():
 
 
 def _delivery_groups():
-    """Two curve families per target campaign, resolved at
-    registration: the per-PC daily arrivals quilt (stacked areas, one
-    color per configuration, no per-curve tick boxes) and the
-    cumulative series (off by default — the quilt is the display).
-    A resolution failure yields no delivery families rather than
-    blocking registration."""
+    """Curve families per target campaign × quantity × lens, resolved
+    at registration: the lens-group daily arrivals quilt (stacked
+    areas, group-level tick boxes) and the lens-group cumulative
+    series (off by default — the quilt is the display). The unique
+    registry name carries the selector qualifiers; the display title
+    does not. Only the default combination (files · category) opens on
+    the scope view. A resolution failure yields no delivery families
+    rather than blocking registration."""
     try:
         from swf_epicprod.analytics.rollup import resolve_target_campaigns
         campaigns = resolve_target_campaigns()
@@ -496,20 +545,31 @@ def _delivery_groups():
     groups = []
     for name in campaigns:
         tag = name.replace('.', '_')
-        groups.append({'name': f'Arrivals {name}',
-                       'prefixes': [f'dlvq_{tag}_'], 'ids': [],
-                       'stacked': True, 'compact': True,
-                       'units': 'events'})
-        groups.append({'name': f'Cumulative {name}',
-                       'prefixes': [f'dlvc_{tag}_'], 'ids': [],
-                       'default_off': True, 'units': 'events'})
-        groups.append({'name': f'Arrivals {name} (files)',
-                       'prefixes': [f'dlvqf_{tag}_'], 'ids': [],
-                       'stacked': True, 'compact': True,
-                       'default_off': True, 'units': 'files'})
-        groups.append({'name': f'Cumulative {name} (files)',
-                       'prefixes': [f'dlvcf_{tag}_'], 'ids': [],
-                       'default_off': True, 'units': 'files'})
+        for lens in DELIVERY_LENSES:
+            seg, lens_value = lens['seg'], lens['value']
+            is_default_lens = lens_value == 'category'
+            groups.append({
+                'name': f'Arrivals {name} files {lens_value}',
+                'title': f'Arrivals {name}',
+                'prefixes': [f'dlvqf_{seg}_{tag}_'], 'ids': [],
+                'stacked': True, 'default_off': not is_default_lens,
+                'units': 'files'})
+            groups.append({
+                'name': f'Arrivals {name} events {lens_value}',
+                'title': f'Arrivals {name}',
+                'prefixes': [f'dlvq_{seg}_{tag}_'], 'ids': [],
+                'stacked': True, 'default_off': True,
+                'units': 'events (M)'})
+            groups.append({
+                'name': f'Cumulative {name} files {lens_value}',
+                'title': f'Cumulative {name}',
+                'prefixes': [f'dlvcf_{seg}_{tag}_'], 'ids': [],
+                'default_off': True, 'units': 'files'})
+            groups.append({
+                'name': f'Cumulative {name} events {lens_value}',
+                'title': f'Cumulative {name}',
+                'prefixes': [f'dlvc_{seg}_{tag}_'], 'ids': [],
+                'default_off': True, 'units': 'events (M)'})
     return tuple(groups)
 
 TESTBED_GROUPS = (
@@ -587,21 +647,25 @@ def _delivery_card(data, previous_data, ctx):
                             .get(name) or {}).get('totals') or {})
         if 'arrived_files' in totals:
             leaves = block.get('leaves') or {}
-            day_pcs = []
-            for pc, leaf in sorted(
-                    leaves.items(),
-                    key=lambda kv: (-int(kv[1].get('arrived_events') or 0),
-                                    -int(kv[1].get('arrived_files') or 0))):
+            # The day's arrivals grouped by the ACTIVE lens — the same
+            # projection the quilt draws, so each section's swatch is
+            # the patch color above it. The drilldown inside a group
+            # stays in physics-configuration terms.
+            lens_value = str(params.get('lens') or 'category').strip()
+            lens = next((entry for entry in DELIVERY_LENSES
+                         if entry['value'] == lens_value),
+                        DELIVERY_LENSES[0])
+            seg = lens['seg']
+            tag = name.replace('.', '_')
+            by_group = {}
+            delivering = 0
+            for pc, leaf in leaves.items():
                 arrived = int(leaf.get('arrived_files') or 0)
                 if not arrived:
                     continue
-                day_pcs.append({
+                delivering += 1
+                row = {
                     'label': pc,
-                    # The quilt curve this row is a patch of, in either
-                    # plotted quantity: the swatch painter takes the
-                    # first candidate the plot carries.
-                    'curve': (f"dlvq_{name.replace('.', '_')}_{pc} "
-                              f"dlvqf_{name.replace('.', '_')}_{pc}"),
                     'identity': keys.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
@@ -613,17 +677,38 @@ def _delivery_card(data, previous_data, ctx):
                     'cum': int(leaf.get('cum_files') or 0),
                     'expected': leaf.get('expected'),
                     'tier': leaf.get('tier') or '',
-                })
-            # The day table sits directly under the plot: split into
-            # side-by-side columns so its height stays near the fold.
-            per_col = max(8, -(-len(day_pcs) // 3))
-            day_pcs_cols = [day_pcs[i:i + per_col]
-                            for i in range(0, len(day_pcs), per_col)]
+                }
+                for group in _lens_groups(pc, seg, cache):
+                    slug = _group_slug(group)
+                    slot = by_group.setdefault(group, {
+                        'name': group,
+                        # The quilt curve this section is a patch of,
+                        # in either plotted quantity: the swatch
+                        # painter takes the first the plot carries.
+                        'curve': (f'dlvq_{seg}_{tag}_{slug} '
+                                  f'dlvqf_{seg}_{tag}_{slug}'),
+                        'rows': [], 'arrived_events': 0,
+                        'arrived_files': 0})
+                    slot['rows'].append(row)
+                    slot['arrived_events'] += row['arrived_events']
+                    slot['arrived_files'] += arrived
+            day_groups = sorted(
+                by_group.values(),
+                key=lambda g: (-g['arrived_events'],
+                               -g['arrived_files']))
+            for group in day_groups:
+                group['rows'].sort(
+                    key=lambda r: (-r['arrived_events'], -r['arrived']))
+            requested_at = (ctx or {}).get('requested_at')
             unmeasured = int(totals.get('unmeasured_files') or 0)
             campaigns.append({
                 'name': name,
-                'day_pcs': day_pcs,
-                'day_pcs_cols': day_pcs_cols,
+                # The compact card names its own day — no surrounding
+                # chrome does it anymore.
+                'day': (requested_at.astimezone(ET_ZONE)
+                        .strftime('%b %-d')
+                        if requested_at is not None else ''),
+                'day_groups': day_groups,
                 'headline': [
                     {'label': 'events arrived this day',
                      'value': totals.get('arrived_events'),
@@ -639,7 +724,7 @@ def _delivery_card(data, previous_data, ctx):
                          (totals.get('cum_bytes') or 0) / 1e12, 1),
                      'delta': None},
                     {'label': 'configurations delivering',
-                     'value': len(day_pcs), 'delta': None},
+                     'value': delivering, 'delta': None},
                 ],
                 'unmeasured_files': unmeasured,
                 'plan_url': (reverse('pcs:pcs_campaign_plan')
