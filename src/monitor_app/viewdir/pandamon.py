@@ -396,24 +396,43 @@ def _compute_usage_dates(request):
 
 def _query_compute_usage(start_date, end_date, bucket, site=None,
                          series_rollup=False):
-    """Query plot-ready resource data for an inclusive Eastern date range."""
-    tz = ZoneInfo(settings.TIME_ZONE)
-    start_time = datetime.combine(start_date, time.min, tzinfo=tz)
-    end_time = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
-    usage = resource_usage(
-        start_time=start_time,
-        end_time=end_time,
-        bucket=bucket,
-        site=site,
-        series_rollup=series_rollup,
-    )
-    if usage.get('error'):
-        return None, usage['error']
-    usage['display_window'] = {
-        'start': start_date.isoformat(),
-        'end': end_date.isoformat(),
-        'timezone': settings.TIME_ZONE,
-    }
+    """Plot-ready resource data for an inclusive Eastern date range,
+    served as a cached product (docs/CACHED_PRODUCTS.md): the PanDA-DB
+    aggregation never builds in the request path once a key is
+    filled."""
+    from ..cached_product import get_product
+
+    def build():
+        tz = ZoneInfo(settings.TIME_ZONE)
+        start_time = datetime.combine(start_date, time.min, tzinfo=tz)
+        end_time = datetime.combine(
+            end_date + timedelta(days=1), time.min, tzinfo=tz)
+        usage = resource_usage(
+            start_time=start_time,
+            end_time=end_time,
+            bucket=bucket,
+            site=site,
+            series_rollup=series_rollup,
+        )
+        if usage.get('error'):
+            raise RuntimeError(usage['error'])
+        usage['display_window'] = {
+            'start': start_date.isoformat(),
+            'end': end_date.isoformat(),
+            'timezone': settings.TIME_ZONE,
+        }
+        return usage
+
+    key = (f'compute_usage:v1:{start_date}:{end_date}:{bucket}'
+           f":{site or ''}:{int(series_rollup)}")
+    try:
+        product = get_product(key, build, ttl_seconds=300)
+    except Exception as e:                                  # noqa: BLE001
+        logger.error('compute usage build failed: %s', e)
+        return None, str(e)
+    usage = product['value']
+    if not usage:
+        return None, 'compute usage is building — reload shortly'
     return usage, ''
 
 
