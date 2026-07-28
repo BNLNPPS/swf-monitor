@@ -309,26 +309,28 @@ def _delivery_curve_values(state):
         if 'arrived_files' not in totals:
             continue  # the live placed-basis component: cards only
         tag = campaign.replace('.', '_')
+        # The quilt stays PER-CONFIGURATION — one patch color per PC,
+        # production bursts attributed — the lens only clusters the
+        # tick boxes and the cut card. Cumulative draws at lens-group
+        # level: a handful of lines, plus the total.
+        for pc, leaf in (block.get('leaves') or {}).items():
+            arrived_events = int(leaf.get('arrived_events') or 0)
+            arrived_files = int(leaf.get('arrived_files') or 0)
+            if arrived_events:
+                values[f'dlvq_{tag}_{pc}'] = round(
+                    arrived_events / 1e6, 2)
+            if arrived_files:
+                values[f'dlvqf_{tag}_{pc}'] = arrived_files
         for lens in DELIVERY_LENSES:
             seg = lens['seg']
-            arr_e, arr_f, cum_e, cum_f = {}, {}, {}, {}
+            cum_e, cum_f = {}, {}
             for pc, leaf in (block.get('leaves') or {}).items():
                 for group in _lens_groups(pc, seg, cache):
                     slug = _group_slug(group)
-                    arr_e[slug] = (arr_e.get(slug, 0)
-                                   + int(leaf.get('arrived_events') or 0))
-                    arr_f[slug] = (arr_f.get(slug, 0)
-                                   + int(leaf.get('arrived_files') or 0))
                     cum_e[slug] = (cum_e.get(slug, 0)
                                    + int(leaf.get('events') or 0))
                     cum_f[slug] = (cum_f.get(slug, 0)
                                    + int(leaf.get('cum_files') or 0))
-            for slug, v in arr_e.items():
-                if v:
-                    values[f'dlvq_{seg}_{tag}_{slug}'] = round(v / 1e6, 2)
-            for slug, v in arr_f.items():
-                if v:
-                    values[f'dlvqf_{seg}_{tag}_{slug}'] = v
             for slug, v in cum_e.items():
                 if v:
                     values[f'dlvc_{seg}_{tag}_{slug}'] = round(v / 1e6, 2)
@@ -381,9 +383,19 @@ def _testbed_curve_values(state):
 
 
 def _delivery_curve_parts(curve_id):
-    """(lens_seg, campaign, group_slug) from a delivery curve id
-    (dlvq_cat_26_07_single_particle); campaign tags serialize dots as
-    underscores (26_07)."""
+    """(campaign, remainder) from a per-PC arrivals curve id
+    (dlvq_26_07_pc12); campaign tags serialize dots as underscores."""
+    remainder = curve_id.split('_', 1)[1]
+    tag, _, rest = remainder.partition('_')
+    while rest and rest[0].isdigit():
+        extra, _, rest = rest.partition('_')
+        tag = f'{tag}_{extra}'
+    return tag.replace('_', '.'), rest.strip('_')
+
+
+def _delivery_lens_parts(curve_id):
+    """(lens_seg, campaign, group_slug) from a lens-group cumulative
+    curve id (dlvc_cat_26_07_single_particle)."""
     remainder = curve_id.split('_', 1)[1]
     seg, _, rest = remainder.partition('_')
     tag, _, rest = rest.partition('_')
@@ -394,10 +406,14 @@ def _delivery_curve_parts(curve_id):
 
 
 def _epicprod_curve_label(curve_id):
-    if curve_id.startswith(('dlvq_', 'dlvqf_', 'dlvc_', 'dlvcf_')):
-        # The box states the group; the docked family header states
+    if curve_id.startswith(('dlvq_', 'dlvqf_')):
+        _campaign, pc = _delivery_curve_parts(curve_id)
+        key = _pc_cache()['keys'].get(pc, '')
+        return f'{pc} {key}' if key else pc
+    if curve_id.startswith(('dlvc_', 'dlvcf_')):
+        # The line states the group; the family header states
         # campaign, kind, and unit.
-        _seg, _campaign, slug = _delivery_curve_parts(curve_id)
+        _seg, _campaign, slug = _delivery_lens_parts(curve_id)
         if slug in ('', 'total'):
             return 'total'
         return _pc_cache()['group_names'].get(slug, slug)
@@ -504,7 +520,7 @@ def _delivery_focus_view():
             {'param': 'quantity', 'label': 'Counting',
              'default': 'files',
              'choices': [{'value': 'files', 'label': 'files'},
-                         {'value': 'events', 'label': 'events (M)'}]},
+                         {'value': 'events', 'label': 'events'}]},
             {'param': 'lens', 'label': 'Grouping',
              'default': 'category',
              'choices': [{'value': lens['value'],
@@ -513,9 +529,12 @@ def _delivery_focus_view():
         ],
         'options': [
             {'value': name, 'label': name,
+             # The arrivals family is the same per-PC quilt under
+             # every lens — the lens clusters its tick boxes;
+             # cumulative swaps to the lens's group lines.
              'families_by': {
                  f'{quantity}|{lens["value"]}': [
-                     f'Arrivals {name} {quantity} {lens["value"]}',
+                     f'Arrivals {name} {quantity}',
                      f'Cumulative {name} {quantity} {lens["value"]}',
                  ]
                  for quantity in ('files', 'events')
@@ -528,38 +547,50 @@ def _delivery_focus_view():
     }
 
 
+def _pc_tick_groupings():
+    """pc label -> {lens value: [group display names]} for every PC —
+    the client clusters the per-PC quilt's tick boxes by the active
+    lens with this; a box toggles its PC set, the PC colors stand."""
+    cache = _pc_cache()
+    return {
+        pc: {lens['value']: _lens_groups(pc, lens['seg'], cache)
+             for lens in DELIVERY_LENSES}
+        for pc in cache['keys']
+    }
+
+
 def _delivery_groups():
-    """Curve families per target campaign × quantity × lens, resolved
-    at registration: the lens-group daily arrivals quilt (stacked
-    areas, group-level tick boxes) and the lens-group cumulative
-    series (off by default — the quilt is the display). The unique
-    registry name carries the selector qualifiers; the display title
-    does not. Only the default combination (files · category) opens on
-    the scope view. A resolution failure yields no delivery families
-    rather than blocking registration."""
+    """Curve families per target campaign: the PER-PC daily arrivals
+    quilt per quantity (one patch color per configuration — the basis
+    of the display; tick boxes cluster by the active lens via
+    pc_groups) and the lens-group cumulative series per quantity ×
+    lens (off by default — the quilt is the display). The unique
+    registry name carries selector qualifiers; the display title does
+    not. A resolution failure yields no delivery families rather than
+    blocking registration."""
     try:
         from swf_epicprod.analytics.rollup import resolve_target_campaigns
         campaigns = resolve_target_campaigns()
     except Exception:                                       # noqa: BLE001
         return ()
+    pc_groups = _pc_tick_groupings()
     groups = []
     for name in campaigns:
         tag = name.replace('.', '_')
+        groups.append({
+            'name': f'Arrivals {name} files',
+            'title': f'Arrivals {name}',
+            'prefixes': [f'dlvqf_{tag}_'], 'ids': [],
+            'stacked': True, 'pc_groups': pc_groups,
+            'units': 'files'})
+        groups.append({
+            'name': f'Arrivals {name} events',
+            'title': f'Arrivals {name}',
+            'prefixes': [f'dlvq_{tag}_'], 'ids': [],
+            'stacked': True, 'pc_groups': pc_groups,
+            'default_off': True, 'units': 'events (M)'})
         for lens in DELIVERY_LENSES:
             seg, lens_value = lens['seg'], lens['value']
-            is_default_lens = lens_value == 'category'
-            groups.append({
-                'name': f'Arrivals {name} files {lens_value}',
-                'title': f'Arrivals {name}',
-                'prefixes': [f'dlvqf_{seg}_{tag}_'], 'ids': [],
-                'stacked': True, 'default_off': not is_default_lens,
-                'units': 'files'})
-            groups.append({
-                'name': f'Arrivals {name} events {lens_value}',
-                'title': f'Arrivals {name}',
-                'prefixes': [f'dlvq_{seg}_{tag}_'], 'ids': [],
-                'stacked': True, 'default_off': True,
-                'units': 'events (M)'})
             groups.append({
                 'name': f'Cumulative {name} files {lens_value}',
                 'title': f'Cumulative {name}',
@@ -666,6 +697,10 @@ def _delivery_card(data, previous_data, ctx):
                 delivering += 1
                 row = {
                     'label': pc,
+                    # The quilt curve this row is a patch of, in
+                    # either plotted quantity: the swatch painter
+                    # takes the first candidate the plot carries.
+                    'curve': (f'dlvq_{tag}_{pc} dlvqf_{tag}_{pc}'),
                     'identity': keys.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
@@ -679,14 +714,8 @@ def _delivery_card(data, previous_data, ctx):
                     'tier': leaf.get('tier') or '',
                 }
                 for group in _lens_groups(pc, seg, cache):
-                    slug = _group_slug(group)
                     slot = by_group.setdefault(group, {
                         'name': group,
-                        # The quilt curve this section is a patch of,
-                        # in either plotted quantity: the swatch
-                        # painter takes the first the plot carries.
-                        'curve': (f'dlvq_{seg}_{tag}_{slug} '
-                                  f'dlvqf_{seg}_{tag}_{slug}'),
                         'rows': [], 'arrived_events': 0,
                         'arrived_files': 0})
                     slot['rows'].append(row)

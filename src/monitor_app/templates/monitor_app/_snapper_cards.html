@@ -75,14 +75,14 @@
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       {% for grp in c.day_groups %}
       <div class="mb-1">
-        <div class="mb-1"><span data-curve="{{ grp.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><strong>{{ grp.name }}</strong>
+        <div class="mb-1"><strong>{{ grp.name }}</strong>
           · {{ grp.arrived_events }} events, {{ grp.arrived_files }} files this day</div>
         <table class="table table-sm table-bordered w-auto mb-1">
           <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th></tr></thead>
           <tbody>
           {% for pc in grp.rows %}
           <tr>
-            <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+            <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
             <td>{{ pc.identity }}</td>
             <td>{{ pc.groups }}</td>
             <td class="text-end">{{ pc.arrived_events }}</td>
