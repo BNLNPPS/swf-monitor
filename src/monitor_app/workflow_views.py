@@ -218,6 +218,28 @@ def workflow_executions_datatable_ajax(request):
     queryset = queryset.order_by(dt.get_order_by())
     executions = dt.apply_pagination(queryset)
 
+    # STF counts for the page's executions in two batched queries —
+    # the per-row pair of queries over the message table made this
+    # endpoint scale with page content, not page size.
+    page_execution_ids = [e.execution_id for e in executions]
+    runs_by_execution = {}
+    for execution_id, run_id in (
+            WorkflowMessage.objects
+            .filter(execution_id__in=page_execution_ids,
+                    run_id__isnull=False)
+            .values_list('execution_id', 'run_id').distinct()):
+        if run_id:
+            runs_by_execution.setdefault(execution_id, set()).add(
+                int(run_id))
+    all_run_numbers = sorted(
+        {run for runs in runs_by_execution.values() for run in runs})
+    stf_by_run = {
+        row['run__run_number']: row['n']
+        for row in StfFile.objects
+        .filter(run__run_number__in=all_run_numbers)
+        .values('run__run_number')
+        .annotate(n=Count('file_id'))}
+
     # Format data for DataTables
     data = []
     for execution in executions:
@@ -231,13 +253,9 @@ def workflow_executions_datatable_ajax(request):
         else:
             duration_str = '-'
 
-        # Count actual STF files via run_ids associated with this execution
-        run_ids = WorkflowMessage.objects.filter(
-            execution_id=execution.execution_id,
-            run_id__isnull=False,
-        ).values_list('run_id', flat=True).distinct()
-        run_numbers = [int(r) for r in run_ids if r]
-        stf_count = StfFile.objects.filter(run__run_number__in=run_numbers).count()
+        stf_count = sum(
+            stf_by_run.get(run, 0)
+            for run in runs_by_execution.get(execution.execution_id, ()))
 
         # Format namespace as link
         if execution.namespace:
