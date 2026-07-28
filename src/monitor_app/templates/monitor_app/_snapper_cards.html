@@ -79,7 +79,7 @@
       <tbody>
       {% for pc in c.day_pcs %}
       <tr>
-        <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+        <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
         <td>{{ pc.identity }}</td>
         <td>{{ pc.groups }}</td>
         <td class="text-end">{{ pc.arrived }}</td>

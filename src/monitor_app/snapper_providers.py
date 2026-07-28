@@ -533,8 +533,16 @@ def _delivery_card(data, previous_data, ctx):
     cache = _pc_cache()
     requestors = cache['requestors']
     keys = cache['keys']
+    # The campaign view's selection narrows the card: only the ticked
+    # campaigns' sections render. Without the parameter (a scope-view
+    # cut) every campaign in the snap renders.
+    params = (ctx or {}).get('params') or {}
+    selected = {value for value in
+                (params.get('campaign') or '').split(',') if value}
     campaigns = []
     for name, block in sorted((data.get('campaigns') or {}).items()):
+        if selected and name not in selected:
+            continue
         totals = block.get('totals') or {}
         previous_totals = (((previous_data.get('campaigns') or {})
                             .get(name) or {}).get('totals') or {})
@@ -549,6 +557,9 @@ def _delivery_card(data, previous_data, ctx):
                     continue
                 day_pcs.append({
                     'label': pc,
+                    # The quilt curve this row is a patch of: the card
+                    # swatch takes that curve's plot color.
+                    'curve': f"dlvq_{name.replace('.', '_')}_{pc}",
                     'identity': keys.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
