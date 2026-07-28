@@ -272,21 +272,32 @@ def _delivery_curve_values(state):
         if 'arrived_files' not in totals:
             continue  # the live placed-basis component: cards only
         tag = campaign.replace('.', '_')
-        # The plotted quantity is EVENTS — the campaign deliverable —
-        # from the record's measured per-file counts. Files remain in
-        # the record and the cut card; unmeasured coverage is stated
-        # there, never silently mixed into the event sums.
+        # Both quantities are served: EVENTS — the campaign
+        # deliverable, from the record's measured per-file counts —
+        # and FILES, as the alternate view the campaign page toggles.
+        # Unmeasured coverage is stated on the cut card, never
+        # silently mixed into the event sums.
         values[f'dlvc_{tag}__total'] = int(totals.get('events') or 0)
+        values[f'dlvcf_{tag}__total'] = int(totals.get('cum_files') or 0)
         cum_by_group = {}
+        cum_files_by_group = {}
         for pc, leaf in (block.get('leaves') or {}).items():
             values[f'dlvq_{tag}_{pc}'] = int(
                 leaf.get('arrived_events') or 0)
+            values[f'dlvqf_{tag}_{pc}'] = int(
+                leaf.get('arrived_files') or 0)
             cum = int(leaf.get('events') or 0)
-            if cum:
-                for group in requestors.get(pc) or ['Unassigned']:
+            cum_files = int(leaf.get('cum_files') or 0)
+            for group in requestors.get(pc) or ['Unassigned']:
+                if cum:
                     cum_by_group[group] = cum_by_group.get(group, 0) + cum
+                if cum_files:
+                    cum_files_by_group[group] = (
+                        cum_files_by_group.get(group, 0) + cum_files)
         for group, cum in cum_by_group.items():
             values[f'dlvc_{tag}_{group}'] = cum
+        for group, cum in cum_files_by_group.items():
+            values[f'dlvcf_{tag}_{group}'] = cum
     return values
 
 
@@ -340,13 +351,14 @@ def _delivery_curve_parts(curve_id):
 
 
 def _epicprod_curve_label(curve_id):
-    if curve_id.startswith('dlvq_'):
+    if curve_id.startswith(('dlvq_', 'dlvqf_')):
         campaign, pc = _delivery_curve_parts(curve_id)
         key = _pc_cache()['keys'].get(pc, '')
         return f'{pc} {key}' if key else pc
-    if curve_id.startswith('dlvc_'):
+    if curve_id.startswith(('dlvc_', 'dlvcf_')):
+        unit = 'files' if curve_id.startswith('dlvcf_') else 'events'
         campaign, group = _delivery_curve_parts(curve_id)
-        return (f'{campaign} cumulative files' if group in ('', 'total')
+        return (f'{campaign} cumulative {unit}' if group in ('', 'total')
                 else f'{campaign} {group} cumulative')
     if curve_id == 'tasks_total':
         return 'tasks total'
@@ -443,9 +455,22 @@ def _delivery_focus_view():
         'param': 'campaign',
         'label': 'Campaign',
         'default': campaigns[0],
+        # The plotted quantity toggles between the two the record
+        # carries: events (the deliverable) and files.
+        'quantity': {
+            'param': 'quantity',
+            'label': 'Counting',
+            'default': 'events',
+            'choices': [{'value': 'events', 'label': 'events'},
+                        {'value': 'files', 'label': 'files'}],
+        },
         'options': [
             {'value': name, 'label': name,
-             'families': [f'Arrivals {name}', f'Cumulative {name}'],
+             'families_by': {
+                 'events': [f'Arrivals {name}', f'Cumulative {name}'],
+                 'files': [f'Arrivals {name} (files)',
+                           f'Cumulative {name} (files)'],
+             },
              'component': 'delivery',
              'collapse_below': 0.01,
              'start': (starts[name] - timedelta(hours=12))
@@ -476,6 +501,13 @@ def _delivery_groups():
         groups.append({'name': f'Cumulative {name}',
                        'prefixes': [f'dlvc_{tag}_'], 'ids': [],
                        'default_off': True, 'units': 'events'})
+        groups.append({'name': f'Arrivals {name} (files)',
+                       'prefixes': [f'dlvqf_{tag}_'], 'ids': [],
+                       'stacked': True, 'compact': True,
+                       'default_off': True, 'units': 'files'})
+        groups.append({'name': f'Cumulative {name} (files)',
+                       'prefixes': [f'dlvcf_{tag}_'], 'ids': [],
+                       'default_off': True, 'units': 'files'})
     return tuple(groups)
 
 TESTBED_GROUPS = (
