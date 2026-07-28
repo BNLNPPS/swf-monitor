@@ -457,12 +457,14 @@ def _delivery_focus_view():
         'default': campaigns[0],
         # The plotted quantity toggles between the two the record
         # carries: events (the deliverable) and files.
+        # Files is the default while the measured event rates are
+        # under review; events stays one click away.
         'quantity': {
             'param': 'quantity',
             'label': 'Counting',
-            'default': 'events',
-            'choices': [{'value': 'events', 'label': 'events'},
-                        {'value': 'files', 'label': 'files'}],
+            'default': 'files',
+            'choices': [{'value': 'files', 'label': 'files'},
+                        {'value': 'events', 'label': 'events'}],
         },
         'options': [
             {'value': name, 'label': name,
@@ -595,9 +597,11 @@ def _delivery_card(data, previous_data, ctx):
                     continue
                 day_pcs.append({
                     'label': pc,
-                    # The quilt curve this row is a patch of: the card
-                    # swatch takes that curve's plot color.
-                    'curve': f"dlvq_{name.replace('.', '_')}_{pc}",
+                    # The quilt curve this row is a patch of, in either
+                    # plotted quantity: the swatch painter takes the
+                    # first candidate the plot carries.
+                    'curve': (f"dlvq_{name.replace('.', '_')}_{pc} "
+                              f"dlvqf_{name.replace('.', '_')}_{pc}"),
                     'identity': keys.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
@@ -912,6 +916,17 @@ def _scheduler_status(scope):
         name=f'snapper-{scope}-scheduler').first()
 
 
+def _series_cache(key, builder):
+    """Snapper series as a cached product (docs/CACHED_PRODUCTS.md):
+    served stored, rebuilt behind responses on staleness. A first fill
+    that finds another worker's build lock has nothing to serve —
+    build inline rather than serve nothing."""
+    from .cached_product import get_product
+
+    value = get_product(key, builder, ttl_seconds=90)['value']
+    return value if value is not None else builder()
+
+
 def _health_url():
     from django.urls import reverse
 
@@ -961,4 +976,5 @@ def register_snapper_providers():
         config_get=_config_get,
         scheduler_status=_scheduler_status,
         health_url=_health_url,
+        series_cache=_series_cache,
     )
