@@ -9,6 +9,7 @@ from rest_framework import viewsets, generics
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from django.contrib.auth.decorators import login_required
@@ -313,12 +314,41 @@ class RunViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 
+class _OptInLimitPagination(LimitOffsetPagination):
+    """Paginates only when ?limit= is present: a bare request keeps the
+    unenveloped list shape the deployed agents parse."""
+    default_limit = None
+
+
 class StfFileViewSet(viewsets.ModelViewSet):
-    """API endpoint for STF file tracking."""
+    """API endpoint for STF file tracking.
+
+    Filterable — agents must never need the whole table to find one
+    file: ?stf_filename= (exact), ?run_number=, ?status=,
+    ?workflow_id=. ?limit=/?offset= paginate on request.
+    """
     queryset = StfFile.objects.all()
     serializer_class = StfFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = _OptInLimitPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        stf_filename = (params.get('stf_filename') or '').strip()
+        if stf_filename:
+            qs = qs.filter(stf_filename=stf_filename)
+        run_number = (params.get('run_number') or '').strip()
+        if run_number:
+            qs = qs.filter(run__run_number=run_number)
+        status_value = (params.get('status') or '').strip()
+        if status_value:
+            qs = qs.filter(status=status_value)
+        workflow_id = (params.get('workflow_id') or '').strip()
+        if workflow_id:
+            qs = qs.filter(workflow_id=workflow_id)
+        return qs
 
 
 class SubscriberViewSet(viewsets.ModelViewSet):
@@ -331,11 +361,32 @@ class SubscriberViewSet(viewsets.ModelViewSet):
 
 
 class FastMonFileViewSet(viewsets.ModelViewSet):
-    """API endpoint for Fast Monitoring files."""
+    """API endpoint for Fast Monitoring files.
+
+    Filterable — the fastmon agent's by-filename lookup was previously
+    ignored server-side and answered with the full table: ?tf_filename=
+    (exact, unique-indexed), ?stf_filename= (exact, via the parent
+    STF), ?status=. ?limit=/?offset= paginate on request.
+    """
     queryset = FastMonFile.objects.all()
     serializer_class = FastMonFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = _OptInLimitPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        tf_filename = (params.get('tf_filename') or '').strip()
+        if tf_filename:
+            qs = qs.filter(tf_filename=tf_filename)
+        stf_filename = (params.get('stf_filename') or '').strip()
+        if stf_filename:
+            qs = qs.filter(stf_file__stf_filename=stf_filename)
+        status_value = (params.get('status') or '').strip()
+        if status_value:
+            qs = qs.filter(status=status_value)
+        return qs
 
 
 class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
@@ -433,11 +484,17 @@ def log_summary(request):
     instance_name = request.GET.get('instance_name')
     levelname = request.GET.get('levelname')
 
-    # Get distinct app and instance names for filter links
-    app_names_qs = AppLog.objects.values_list('app_name', flat=True)
-    instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
-    app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
-    instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
+    # Distinct app and instance names for filter links — distinct at
+    # the database on the indexed columns; streaming every row into
+    # Python cost tens of seconds at millions of rows.
+    app_names_qs = (AppLog.objects.order_by()
+                    .values_list('app_name', flat=True).distinct())
+    instance_names_qs = (AppLog.objects.order_by()
+                         .values_list('instance_name', flat=True).distinct())
+    app_names = sorted((name for name in app_names_qs if name),
+                       key=lambda x: x.lower())
+    instance_names = sorted((name for name in instance_names_qs if name),
+                            key=lambda x: x.lower())
 
     # Extract agent types by stripping trailing -number (e.g., "workflow_runner-agent-wenauseic-25" -> "workflow_runner-agent-wenauseic")
     def extract_type(name):
