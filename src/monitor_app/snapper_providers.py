@@ -459,11 +459,20 @@ def _epicprod_curve_color(curve_id):
         status = curve_id.rsplit('_', 1)[1]
         if status == 'running':
             return '#64b5f6'
+        if status == 'activated':
+            # Grey: the queued pool is context, not the story — the
+            # greens belong to completion and the blues to running.
+            return '#8a8a8a'
         return JOB_STATE_COLORS.get(status)
     if curve_id.startswith('job_'):
         return JOB_STATE_COLORS.get(curve_id[4:])
     if curve_id.startswith('stt_'):
-        return TASK_STATE_COLORS.get(curve_id.rsplit('_', 1)[1])
+        status = curve_id.rsplit('_', 1)[1]
+        if status == 'running':
+            # 'Running' is light blue on the site plots — jobs and
+            # tasks alike; green belongs to completion.
+            return '#64b5f6'
+        return TASK_STATE_COLORS.get(status)
     if curve_id.startswith('task_'):
         return TASK_STATE_COLORS.get(curve_id[5:])
     return None
@@ -760,6 +769,7 @@ def _site_groups():
             'name': f'Site tasks {site}',
             'title': f'Tasks · {site}',
             'prefixes': [f'stt_{site}_'], 'ids': [],
+            'focus_closed': True,
             'default_off': True})
     return tuple(groups)
 
