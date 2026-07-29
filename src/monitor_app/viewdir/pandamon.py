@@ -246,6 +246,23 @@ def _fmt_dt(val):
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
+def _exec_duration(job):
+    """Return execution seconds for a terminal job from raw SQL timestamps."""
+    if job.get('jobstatus') not in {'finished', 'failed'}:
+        return None
+    start = job.get('starttime')
+    end = job.get('endtime')
+    try:
+        if isinstance(start, str):
+            start = datetime.fromisoformat(start)
+        if isinstance(end, str):
+            end = datetime.fromisoformat(end)
+        seconds = (end - start).total_seconds()
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
 _fill_cell = fill_cell  # backwards-compat alias within this module
 
 
@@ -694,6 +711,7 @@ def panda_jobs_datatable_ajax(request):
         })
     data = []
     for job in rows:
+        exec_duration = _exec_duration(job)
         job_url = reverse('monitor_app:panda_job_detail', args=[job['pandaid']])
         task_url = reverse('monitor_app:panda_task_detail', args=[job['jeditaskid']]) if job.get('jeditaskid') else None
         jobs_by_user_url = _url_with_query(
@@ -718,13 +736,7 @@ def panda_jobs_datatable_ajax(request):
             _linkify(job.get('transformation', '') or ''),
             _fmt_dt(job.get('creationtime')),
             _fmt_dt(job.get('endtime')),
-            (_duration_text(
-                (job['endtime'] - job['starttime']).total_seconds())
-             if (job.get('jobstatus') in {'finished', 'failed'}
-                 and job.get('starttime') is not None
-                 and job.get('endtime') is not None
-                 and job['endtime'] >= job['starttime'])
-             else ''),
+            _duration_text(exec_duration),
             str(job.get('corecount', '') or ''),
         ])
 
