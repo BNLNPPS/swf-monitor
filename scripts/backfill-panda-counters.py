@@ -191,9 +191,12 @@ def main():
         scope='epicprod', capture_policy=CAPTURE_POLICY).delete()
     written = 0
     for instant, scope_cum, sites in results:
+        # One second past the grid instant: live captures land on
+        # aligned 30-second boundaries, so the stamp never collides
+        # with a real snap under the (scope, snap_time) uniqueness.
         SystemSnap.objects.create(
             scope='epicprod',
-            snap_time=instant,
+            snap_time=instant + dt.timedelta(seconds=1),
             observed_at=now,
             completed_at=now,
             snap_schema_version=1,

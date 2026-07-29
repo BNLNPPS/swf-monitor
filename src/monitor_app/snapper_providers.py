@@ -731,6 +731,7 @@ def _site_groups():
             'prefixes': [f'sj_{site}_'],
             'ids': [f'sjc_{site}'],
             'order': order,
+            'tall': True,
             'default_off': True})
         # Terminal outcomes as window-relative cumulative counters:
         # the staircases rise from zero at the window's left edge and
