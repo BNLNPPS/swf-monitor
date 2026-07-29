@@ -755,6 +755,7 @@ def _site_groups():
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
+            'detail_key': site,
             'prefixes': [f'sj_{site}_'],
             'ids': [f'sjc_{site}', f'sjfw_{site}', f'sjxw_{site}'],
             'order': order,

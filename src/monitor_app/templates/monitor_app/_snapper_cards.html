@@ -64,7 +64,8 @@
   {# since the previous snap, and the in-window integral for the     #}
   {# cumulative rows, failure classes nested under failed.           #}
   {% for s in card.sites %}
-  <div class="{% if not card.site_only %}mt-2 border-top pt-2{% endif %}">
+  <div data-snapper-detail-key="{{ s.site }}"
+       class="{% if not card.site_only %}mt-2 border-top pt-2{% endif %}">
     {% if s.found %}
     {% if s.quiet %}
     <div class="text-muted mb-1">Nothing in flight at this site at this instant.</div>
