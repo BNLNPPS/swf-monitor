@@ -182,6 +182,15 @@ async def snapper_changes_between(scope: str, start: str, end: str) -> dict:
     are returned with the changes; coverage is reported at both
     requested endpoints ('covered', 'gap', or 'unknown'). Never treat a
     gap or unknown interval as if nothing changed within it.
+
+    Counting job outcomes over an interval: the epicprod panda
+    component carries monotonic cumulative terminal-job counters —
+    jobs.cum (finished, failed, cancelled, closed) and, per site,
+    jobs.sites.<site>.cum plus jobs.sites.<site>.cum_failed_by_class
+    (error component classes). Subtract the counter at start from the
+    counter at end to count that interval's outcomes, e.g. how many
+    jobs finished and failed at one site during a production test and
+    which failure classes dominated.
     """
     return await sync_to_async(_call)(
         lambda: queries.changes_between(
