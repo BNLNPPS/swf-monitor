@@ -445,12 +445,21 @@ def _epicprod_curve_color(curve_id):
     several types sharing one status must stay distinguishable."""
     from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
 
+    # Operator-set colors on the site jobs panel: finished takes the
+    # activated green (the state map's finished is too dark beside the
+    # staircase), and the running pair reads as blues — cores strong,
+    # running jobs lighter — so the two connect at a glance.
     if curve_id.startswith('sjfw_'):
-        return JOB_STATE_COLORS.get('finished')
+        return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
         return JOB_STATE_COLORS.get('failed')
+    if curve_id.startswith('sjc_'):
+        return '#1565c0'
     if curve_id.startswith('sj_'):
-        return JOB_STATE_COLORS.get(curve_id.rsplit('_', 1)[1])
+        status = curve_id.rsplit('_', 1)[1]
+        if status == 'running':
+            return '#64b5f6'
+        return JOB_STATE_COLORS.get(status)
     if curve_id.startswith('job_'):
         return JOB_STATE_COLORS.get(curve_id[4:])
     if curve_id.startswith('stt_'):
@@ -722,32 +731,30 @@ def _site_groups():
     scope view — the Site focus is their home."""
     groups = []
     for site in _panda_sites():
+        # One plot tells the site story: the in-flight lifecycle with
+        # the terminal-outcome staircases at its end. The staircases
+        # are window-relative cumulative counters — they rise from
+        # zero at the window's left edge, and the displayed window is
+        # the integration range.
         order = ([f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_EARLY]
                  + [f'sj_{site}_running', f'sjc_{site}']
-                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE])
+                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE]
+                 + [f'sjfw_{site}', f'sjxw_{site}'])
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
             'prefixes': [f'sj_{site}_'],
-            'ids': [f'sjc_{site}'],
+            'ids': [f'sjc_{site}', f'sjfw_{site}', f'sjxw_{site}'],
             'order': order,
+            'window_relative': [f'sjfw_{site}', f'sjxw_{site}'],
             'tall': True,
-            'default_off': True})
-        # Terminal outcomes as window-relative cumulative counters:
-        # the staircases rise from zero at the window's left edge and
-        # the displayed window is the integration range.
-        groups.append({
-            'name': f'Site outcomes {site}',
-            'title': f'Outcomes · {site} (in window)',
-            'prefixes': [], 'ids': [f'sjfw_{site}', f'sjxw_{site}'],
-            'order': [f'sjfw_{site}', f'sjxw_{site}'],
-            'window_relative': True,
             'default_off': True})
         groups.append({
             'name': f'Site failures {site}',
             'title': f'Failures by class · {site} (in window)',
             'prefixes': [f'sjxc_{site}_'], 'ids': [],
             'window_relative': True,
+            'focus_closed': True,
             'default_off': True})
         groups.append({
             'name': f'Site tasks {site}',
@@ -779,7 +786,6 @@ def _site_focus_view():
         'options': [
             {'value': site, 'label': site,
              'families': [f'Site jobs {site}',
-                          f'Site outcomes {site}',
                           f'Site failures {site}',
                           f'Site tasks {site}'],
              'component': 'panda'}
