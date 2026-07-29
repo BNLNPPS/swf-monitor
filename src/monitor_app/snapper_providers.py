@@ -358,10 +358,16 @@ def _site_curve_values(panda):
         if block.get('running_cores_now') is not None:
             values[f'sjc_{site}'] = int(
                 block.get('running_cores_now') or 0)
-        if 'finished_24h' in block:
-            values[f'sjf_{site}'] = int(block.get('finished_24h') or 0)
-        if 'failed_24h' in block:
-            values[f'sjx_{site}'] = int(block.get('failed_24h') or 0)
+        # Cumulative terminal counters (raw absolute values; the
+        # window-relative families rebase them at render).
+        cum = block.get('cum') or {}
+        if 'finished' in cum:
+            values[f'sjfw_{site}'] = int(cum.get('finished') or 0)
+        if 'failed' in cum:
+            values[f'sjxw_{site}'] = int(cum.get('failed') or 0)
+        for cls, count in (block.get('cum_failed_by_class')
+                           or {}).items():
+            values[f'sjxc_{site}_{cls}'] = int(count or 0)
     for site, block in ((panda.get('tasks') or {}).get('sites')
                         or {}).items():
         for status, count in (block.get('by_status_now') or {}).items():
@@ -439,9 +445,9 @@ def _epicprod_curve_color(curve_id):
     several types sharing one status must stay distinguishable."""
     from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
 
-    if curve_id.startswith('sjf_'):
+    if curve_id.startswith('sjfw_'):
         return JOB_STATE_COLORS.get('finished')
-    if curve_id.startswith('sjx_'):
+    if curve_id.startswith('sjxw_'):
         return JOB_STATE_COLORS.get('failed')
     if curve_id.startswith('sj_'):
         return JOB_STATE_COLORS.get(curve_id.rsplit('_', 1)[1])
@@ -461,10 +467,13 @@ def _epicprod_curve_label(curve_id):
     # ambiguous.
     if curve_id.startswith('sjc_'):
         return 'running cores'
-    if curve_id.startswith('sjf_'):
-        return 'finished (24h)'
-    if curve_id.startswith('sjx_'):
-        return 'failed (24h)'
+    if curve_id.startswith('sjfw_'):
+        return 'finished (in window)'
+    if curve_id.startswith('sjxw_'):
+        return 'failed (in window)'
+    if curve_id.startswith('sjxc_'):
+        # Failure-class curves: the class is the last id segment.
+        return curve_id.rsplit('_', 1)[1]
     if curve_id.startswith('sj_'):
         status = curve_id.rsplit('_', 1)[1]
         return 'running jobs' if status == 'running' else status
@@ -715,14 +724,29 @@ def _site_groups():
     for site in _panda_sites():
         order = ([f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_EARLY]
                  + [f'sj_{site}_running', f'sjc_{site}']
-                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE]
-                 + [f'sjf_{site}', f'sjx_{site}'])
+                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE])
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
             'prefixes': [f'sj_{site}_'],
-            'ids': [f'sjc_{site}', f'sjf_{site}', f'sjx_{site}'],
+            'ids': [f'sjc_{site}'],
             'order': order,
+            'default_off': True})
+        # Terminal outcomes as window-relative cumulative counters:
+        # the staircases rise from zero at the window's left edge and
+        # the displayed window is the integration range.
+        groups.append({
+            'name': f'Site outcomes {site}',
+            'title': f'Outcomes · {site} (in window)',
+            'prefixes': [], 'ids': [f'sjfw_{site}', f'sjxw_{site}'],
+            'order': [f'sjfw_{site}', f'sjxw_{site}'],
+            'window_relative': True,
+            'default_off': True})
+        groups.append({
+            'name': f'Site failures {site}',
+            'title': f'Failures by class · {site} (in window)',
+            'prefixes': [f'sjxc_{site}_'], 'ids': [],
+            'window_relative': True,
             'default_off': True})
         groups.append({
             'name': f'Site tasks {site}',
@@ -753,7 +777,10 @@ def _site_focus_view():
         'default': sites[0],
         'options': [
             {'value': site, 'label': site,
-             'families': [f'Site jobs {site}', f'Site tasks {site}'],
+             'families': [f'Site jobs {site}',
+                          f'Site outcomes {site}',
+                          f'Site failures {site}',
+                          f'Site tasks {site}'],
              'component': 'panda'}
             for site in sites],
     }
