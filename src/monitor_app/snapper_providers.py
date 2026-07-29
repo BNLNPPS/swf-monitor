@@ -431,16 +431,44 @@ def _delivery_lens_parts(curve_id):
     return seg, tag.replace('_', '.'), rest.strip('_')
 
 
+def _epicprod_curve_color(curve_id):
+    """House state colors for status-bearing curves — one state-color
+    vocabulary on every surface, red only where failure lives. Curves
+    without semantic color (cores, types, deliveries) take the
+    palette deal. Type-by-state curves stay on the palette too:
+    several types sharing one status must stay distinguishable."""
+    from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
+
+    if curve_id.startswith('sjf_'):
+        return JOB_STATE_COLORS.get('finished')
+    if curve_id.startswith('sjx_'):
+        return JOB_STATE_COLORS.get('failed')
+    if curve_id.startswith('sj_'):
+        return JOB_STATE_COLORS.get(curve_id.rsplit('_', 1)[1])
+    if curve_id.startswith('job_'):
+        return JOB_STATE_COLORS.get(curve_id[4:])
+    if curve_id.startswith('stt_'):
+        return TASK_STATE_COLORS.get(curve_id.rsplit('_', 1)[1])
+    if curve_id.startswith('task_'):
+        return TASK_STATE_COLORS.get(curve_id[5:])
+    return None
+
+
 def _epicprod_curve_label(curve_id):
     # Per-site curves: the family title names the site; the curve
-    # label is the lifecycle stage alone.
+    # label is the lifecycle stage alone. 'running' says 'running
+    # jobs' — 'running cores' sits beside it and the bare word is
+    # ambiguous.
     if curve_id.startswith('sjc_'):
         return 'running cores'
     if curve_id.startswith('sjf_'):
         return 'finished (24h)'
     if curve_id.startswith('sjx_'):
         return 'failed (24h)'
-    if curve_id.startswith(('sj_', 'stt_')):
+    if curve_id.startswith('sj_'):
+        status = curve_id.rsplit('_', 1)[1]
+        return 'running jobs' if status == 'running' else status
+    if curve_id.startswith('stt_'):
         return curve_id.rsplit('_', 1)[1]
     if curve_id.startswith(('dlvq_', 'dlvqf_')):
         _campaign, pc = _delivery_curve_parts(curve_id)
@@ -671,6 +699,13 @@ def _panda_sites():
     return sites
 
 
+# Display order of the site jobs family: submission through queueing
+# to execution (cores beside running jobs) to the trailing outcomes.
+_JOB_LIFECYCLE_EARLY = ('defined', 'waiting', 'assigned', 'activated',
+                        'sent', 'starting')
+_JOB_LIFECYCLE_LATE = ('holding', 'transferring', 'merging')
+
+
 def _site_groups():
     """Per-site curve families: one jobs panel following the lifecycle
     (queued states through running to the trailing finished/failed
@@ -678,11 +713,16 @@ def _site_groups():
     scope view — the Site focus is their home."""
     groups = []
     for site in _panda_sites():
+        order = ([f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_EARLY]
+                 + [f'sj_{site}_running', f'sjc_{site}']
+                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE]
+                 + [f'sjf_{site}', f'sjx_{site}'])
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
             'prefixes': [f'sj_{site}_'],
             'ids': [f'sjc_{site}', f'sjf_{site}', f'sjx_{site}'],
+            'order': order,
             'default_off': True})
         groups.append({
             'name': f'Site tasks {site}',
@@ -1213,6 +1253,7 @@ def register_snapper_providers():
         label='epicprod',
         curve_values=_epicprod_curve_values,
         curve_label=_epicprod_curve_label,
+        curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
         focus_view=(_delivery_focus_view, _site_focus_view),
         component_cards={'panda': _panda_card,
