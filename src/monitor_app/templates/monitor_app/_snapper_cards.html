@@ -67,6 +67,9 @@
   <div class="{% if not card.site_only %}mt-2 border-top pt-2{% endif %}">
     <div class="mb-1"><strong><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ s.site|urlencode }}">{{ s.site }}</a></strong></div>
     {% if s.found %}
+    {% if s.quiet %}
+    <div class="text-muted mb-1">Nothing in flight at this site at this instant.</div>
+    {% endif %}
     <table class="table table-sm table-bordered w-auto mb-1">
       <thead><tr><th></th><th>At cut</th><th>Δ prev snap</th><th>Since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr></thead>
       <tbody>
@@ -80,6 +83,9 @@
       {% endfor %}
       </tbody>
     </table>
+    {% if s.counter_note %}
+    <div class="text-muted small mb-1">{{ s.counter_note }}</div>
+    {% endif %}
     {% else %}
     <div class="text-muted">No recorded activity for this site in this snap.</div>
     {% endif %}

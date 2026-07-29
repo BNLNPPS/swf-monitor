@@ -816,6 +816,29 @@ TESTBED_GROUPS = (
 
 # ── Component cards ──────────────────────────────────────────────────────
 
+def _counter_site_blocks(scope, instant):
+    """The per-site counter blocks of the nearest counter-bearing panda
+    state at or before ``instant``: (sites map, snap time). The
+    cumulative terminal counters ride two interleaved snap chains — the
+    live v5 publications and the hourly backfill reconstruction — and a
+    snap resolved from the pre-counter era carries none, so outcome
+    differencing must find the counter-bearing chain itself."""
+    from snapper_ai.models import SystemSnap
+
+    if instant is None:
+        return {}, None
+    row = (SystemSnap.objects
+           .filter(scope=scope, snap_time__lte=instant,
+                   state__components__panda__data__jobs__has_key='cum')
+           .order_by('-snap_time')
+           .values('snap_time', 'state').first())
+    if not row:
+        return {}, None
+    jobs = (((((row['state'] or {}).get('components') or {})
+              .get('panda') or {}).get('data') or {}).get('jobs') or {})
+    return (jobs.get('sites') or {}), row['snap_time']
+
+
 def _panda_card(data, previous_data, ctx):
     jobs_now = (data.get('jobs') or {}).get('in_flight_now') or {}
     prev_jobs = ((previous_data.get('jobs') or {})
@@ -873,6 +896,18 @@ def _panda_card(data, previous_data, ctx):
                       .strftime('%m-%d %H:%M ET'))
     lifecycle = (list(_JOB_LIFECYCLE_EARLY) + ['running']
                  + list(_JOB_LIFECYCLE_LATE))
+    # Counter sourcing: the resolved snap and the ?since= basis snap
+    # may come from the pre-counter era (no 'cum'); the outcomes rows
+    # then difference the nearest counter-bearing snaps instead — the
+    # finished/failed story must never vanish from the slice.
+    scope = (ctx or {}).get('scope') or 'epicprod'
+    requested_at = (ctx or {}).get('requested_at')
+    counter_cut, counter_cut_time = ({}, None)
+    counter_since = {}
+    if selected:
+        counter_cut, counter_cut_time = _counter_site_blocks(
+            scope, requested_at)
+        counter_since, _ = _counter_site_blocks(scope, since_stamp)
     sites = []
     for site in selected:
         block = ((data.get('jobs') or {}).get('sites')
@@ -882,10 +917,15 @@ def _panda_card(data, previous_data, ctx):
         task_block = ((data.get('tasks') or {}).get('sites')
                       or {}).get(site) or {}
         base = since_sites.get(site) or {}
-        base_cum = base.get('cum') or {}
-        base_classes = base.get('cum_failed_by_class') or {}
-        cum = block.get('cum') or {}
-        classes = block.get('cum_failed_by_class') or {}
+        counter_base = counter_since.get(site) or {}
+        base_cum = base.get('cum') or counter_base.get('cum') or {}
+        base_classes = (base.get('cum_failed_by_class')
+                        or counter_base.get('cum_failed_by_class') or {})
+        counter_block = counter_cut.get(site) or {}
+        own_cum = bool(block.get('cum'))
+        cum = block.get('cum') or counter_block.get('cum') or {}
+        classes = (block.get('cum_failed_by_class')
+                   or counter_block.get('cum_failed_by_class') or {})
 
         def _window(key, _cum=cum, _base=base_cum):
             return max(0, int(_cum.get(key) or 0)
@@ -921,7 +961,12 @@ def _panda_card(data, previous_data, ctx):
                                    prev_block.get('running_cores_now'))
                 or '',
                 'window': '—', 'indent': False})
-        if cum:
+        # The outcomes story renders whenever a counter chain exists —
+        # zero finished and zero failed at a quiet instant are facts,
+        # never omissions.
+        have_counters = bool(cum or base_cum or counter_cut
+                             or counter_since)
+        if have_counters:
             rows.append({
                 'label': 'finished', 'curve': f'sjfw_{site}',
                 'at_cut': '—',
@@ -947,10 +992,17 @@ def _panda_card(data, previous_data, ctx):
                     'delta': cut_delta(count,
                                        prev_classes.get(cls)) or '',
                     'window': str(in_window), 'indent': True})
+        counter_note = ''
+        if have_counters and not own_cum and counter_cut_time:
+            counter_note = ('outcomes from the counter record at '
+                            + counter_cut_time.astimezone(ET_ZONE)
+                            .strftime('%m-%d %H:%M ET'))
         sites.append({
             'site': site,
-            'found': bool(block or task_block),
-            'basis': basis_text if cum else '',
+            'found': bool(block or task_block or have_counters),
+            'quiet': not ordered,
+            'counter_note': counter_note,
+            'basis': basis_text if have_counters else '',
             'rows': rows,
         })
     return {'kind': 'panda', 'headline': headline, 'types': types,
