@@ -834,6 +834,39 @@ def _pie_segment(cx, cy, r_in, r_out, a0, a1):
             f'A {r_in} {r_in} 0 {large} 0 {x0i:.2f} {y0i:.2f} Z')
 
 
+def _avg_exec_times(site, since, until):
+    """Average execution wall time (endtime − starttime) of the site's
+    finished and failed jobs with end times in (since, until] — the
+    same jobs the slice's window outcomes count. Never-started jobs
+    carry no execution time and are excluded."""
+    from django.db import connections
+
+    from .panda.constants import PANDA_SCHEMA
+
+    where = ('"computingsite" = %s AND "jobstatus" IN '
+             "('finished', 'failed') AND \"endtime\" > %s "
+             'AND "endtime" <= %s AND "starttime" IS NOT NULL')
+    sql = f"""
+        SELECT "jobstatus", AVG("endtime" - "starttime")
+        FROM (
+            SELECT "pandaid", "jobstatus", "starttime", "endtime"
+            FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {where}
+            UNION
+            SELECT "pandaid", "jobstatus", "starttime", "endtime"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {where}
+        ) completed
+        GROUP BY "jobstatus"
+    """
+    params = [site, since, until]
+    out = {}
+    with connections['panda'].cursor() as cursor:
+        cursor.execute(sql, params + params)
+        for status, average in cursor.fetchall():
+            if average is not None:
+                out[status] = average.total_seconds()
+    return out
+
+
 def _counter_site_blocks(scope, instant):
     """The per-site counter blocks of the nearest counter-bearing panda
     state at or before ``instant``: (sites map, snap time). The
@@ -1012,6 +1045,18 @@ def _panda_card(data, previous_data, ctx):
                              or counter_since)
         window_finished = _window('finished')
         window_failed = _window('failed')
+        avg_exec = {}
+        avg_note = ''
+        if since_stamp is not None and requested_at is not None:
+            try:
+                avg_exec = _avg_exec_times(site, since_stamp,
+                                           requested_at)
+            except Exception as e:                           # noqa: BLE001
+                import logging
+                logging.getLogger(__name__).error(
+                    'average exec time lookup failed for %s: %s',
+                    site, e)
+                avg_note = 'average execution time lookup failed'
         class_windows = []
         for cls, count in sorted(classes.items(),
                                  key=lambda item: -int(item[1] or 0)):
@@ -1026,14 +1071,20 @@ def _panda_card(data, previous_data, ctx):
                 'at_cut': '—',
                 'delta': cut_delta(cum.get('finished'),
                                    prev_cum.get('finished')) or '',
-                'window': str(window_finished), 'indent': False})
+                'window': str(window_finished),
+                'avg': (span_text(avg_exec['finished'])
+                        if 'finished' in avg_exec else ''),
+                'indent': False})
             rows.append({
                 'label': 'failed', 'curve': f'sjxw_{site}',
                 'url': _jobs_url(site, 'failed'),
                 'at_cut': '—',
                 'delta': cut_delta(cum.get('failed'),
                                    prev_cum.get('failed')) or '',
-                'window': str(window_failed), 'indent': False})
+                'window': str(window_failed),
+                'avg': (span_text(avg_exec['failed'])
+                        if 'failed' in avg_exec else ''),
+                'indent': False})
             for cls, in_window, count in class_windows:
                 rows.append({
                     'label': cls, 'curve': f'sjxc_{site}_{cls}',
@@ -1086,9 +1137,12 @@ def _panda_card(data, previous_data, ctx):
             'found': bool(block or task_block or have_counters),
             'quiet': not ordered,
             'counter_note': counter_note,
+            'avg_note': avg_note,
             'basis': basis_text if have_counters else '',
             'rows': rows,
             'pie': pie,
+            # The pie fills the table's height: sized to the row count.
+            'pie_size': min(400, max(220, 34 * (len(rows) + 1))),
         })
     return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states, 'sites': sites,

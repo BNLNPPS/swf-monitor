@@ -72,7 +72,7 @@
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       <div>
         <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th><a href="{{ s.url }}">{{ s.site }}</a></th><th>At cut</th><th>Δ prev snap</th><th>Since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr></thead>
+          <thead><tr><th><a href="{{ s.url }}">{{ s.site }}</a></th><th>At cut</th><th>Δ prev snap</th><th>Since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th><th>Avg exec</th></tr></thead>
           <tbody>
           {% for r in s.rows %}
           <tr>
@@ -80,6 +80,7 @@
             <td class="text-end">{{ r.at_cut }}</td>
             <td class="text-end">{{ r.delta }}</td>
             <td class="text-end">{{ r.window }}</td>
+            <td class="text-end">{{ r.avg }}</td>
           </tr>
           {% endfor %}
           </tbody>
@@ -87,14 +88,20 @@
         {% if s.counter_note %}
         <div class="text-muted small mb-1">{{ s.counter_note }}</div>
         {% endif %}
+        {% if s.avg_note %}
+        <div class="text-muted small mb-1">{{ s.avg_note }}</div>
+        {% endif %}
       </div>
       {% if s.pie %}
       {# Outcomes pie: inner ring finished|failed in window, outer ring the failure classes — slices drill down like their table rows. #}
-      <svg width="160" height="160" viewBox="0 0 120 120" role="img" aria-label="Window outcomes for {{ s.site }}">
-        {% for seg in s.pie %}
-        <a href="{{ seg.url }}"><path d="{{ seg.path }}" data-curve="{{ seg.curve }}" stroke="rgba(255,255,255,0.65)" stroke-width="1"><title>{{ seg.title }}</title></path></a>
-        {% endfor %}
-      </svg>
+      <div>
+        <div class="mb-1"><strong>Final job state</strong></div>
+        <svg width="{{ s.pie_size }}" height="{{ s.pie_size }}" viewBox="0 0 120 120" role="img" aria-label="Final job state for {{ s.site }}">
+          {% for seg in s.pie %}
+          <a href="{{ seg.url }}"><path d="{{ seg.path }}" data-curve="{{ seg.curve }}" stroke="rgba(255,255,255,0.65)" stroke-width="1"><title>{{ seg.title }}</title></path></a>
+          {% endfor %}
+        </svg>
+      </div>
       {% endif %}
     </div>
     {% else %}
