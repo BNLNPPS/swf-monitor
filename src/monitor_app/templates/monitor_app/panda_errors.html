@@ -14,5 +14,5 @@
 </div>
 {% endblock %}
 
-{% block initial_filters %}{ days: '{{ days }}' }{% endblock %}
+{% block initial_filters %}{ days: '{{ days }}'{% if selected_site %}, site: '{{ selected_site|escapejs }}'{% endif %}{% if selected_error_source %}, error_source: '{{ selected_error_source|escapejs }}'{% endif %} }{% endblock %}
 {% block default_order %}[[3, 'desc']]{% endblock %}

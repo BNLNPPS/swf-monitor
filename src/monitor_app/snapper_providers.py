@@ -816,6 +816,24 @@ TESTBED_GROUPS = (
 
 # ── Component cards ──────────────────────────────────────────────────────
 
+def _pie_segment(cx, cy, r_in, r_out, a0, a1):
+    """SVG path of an annular sector; angles in radians clockwise from
+    12 o'clock. A full circle is clamped a hair short so the arc pair
+    stays well-formed."""
+    import math
+
+    a1 = min(a1, a0 + 2 * math.pi - 0.001)
+    large = 1 if (a1 - a0) > math.pi else 0
+    x0o, y0o = cx + r_out * math.sin(a0), cy - r_out * math.cos(a0)
+    x1o, y1o = cx + r_out * math.sin(a1), cy - r_out * math.cos(a1)
+    x1i, y1i = cx + r_in * math.sin(a1), cy - r_in * math.cos(a1)
+    x0i, y0i = cx + r_in * math.sin(a0), cy - r_in * math.cos(a0)
+    return (f'M {x0o:.2f} {y0o:.2f} '
+            f'A {r_out} {r_out} 0 {large} 1 {x1o:.2f} {y1o:.2f} '
+            f'L {x1i:.2f} {y1i:.2f} '
+            f'A {r_in} {r_in} 0 {large} 0 {x0i:.2f} {y0i:.2f} Z')
+
+
 def _counter_site_blocks(scope, instant):
     """The per-site counter blocks of the nearest counter-bearing panda
     state at or before ``instant``: (sites map, snap time). The
@@ -908,6 +926,30 @@ def _panda_card(data, previous_data, ctx):
         counter_cut, counter_cut_time = _counter_site_blocks(
             scope, requested_at)
         counter_since, _ = _counter_site_blocks(scope, since_stamp)
+    # Every fact in the slice is a drill-down: rows and pie slices link
+    # to the jobs list (site + status) or the error summary (site +
+    # class), scoped to the window via the days filter.
+    import math
+    from urllib.parse import quote
+
+    from django.urls import reverse
+    from django.utils import timezone as _timezone
+
+    jobs_base = reverse('monitor_app:panda_jobs_list')
+    errors_base = reverse('monitor_app:panda_errors_list')
+    days_q = ''
+    if since_stamp is not None:
+        days_q = '&days=' + str(max(1, math.ceil(
+            (_timezone.now() - since_stamp).total_seconds() / 86400)))
+
+    def _jobs_url(site, status=None):
+        return (f'{jobs_base}?site={quote(site)}'
+                + (f'&status={quote(status)}' if status else '') + days_q)
+
+    def _errors_url(site, cls=None):
+        return (f'{errors_base}?site={quote(site)}'
+                + (f'&error_source={quote(cls)}'
+                   if cls and cls != 'other' else '') + days_q)
     sites = []
     for site in selected:
         block = ((data.get('jobs') or {}).get('sites')
@@ -944,6 +986,7 @@ def _panda_card(data, previous_data, ctx):
             {'label': ('running jobs' if status == 'running'
                        else status),
              'curve': f'sj_{site}_{status}',
+             'url': _jobs_url(site, status),
              'at_cut': str(int(statuses.get(status) or 0)),
              'delta': cut_delta(statuses.get(status),
                                 prev_statuses.get(status)) or '',
@@ -955,6 +998,7 @@ def _panda_card(data, previous_data, ctx):
                  if entry['label'] == 'running jobs'), len(rows))
             rows.insert(position, {
                 'label': 'running cores', 'curve': f'sjc_{site}',
+                'url': _jobs_url(site, 'running'),
                 'at_cut': str(int(block.get('running_cores_now')
                                   or 0)),
                 'delta': cut_delta(block.get('running_cores_now'),
@@ -966,32 +1010,71 @@ def _panda_card(data, previous_data, ctx):
         # never omissions.
         have_counters = bool(cum or base_cum or counter_cut
                              or counter_since)
+        window_finished = _window('finished')
+        window_failed = _window('failed')
+        class_windows = []
+        for cls, count in sorted(classes.items(),
+                                 key=lambda item: -int(item[1] or 0)):
+            in_window = max(0, int(count or 0)
+                            - int(base_classes.get(cls) or 0))
+            if in_window:
+                class_windows.append((cls, in_window, count))
         if have_counters:
             rows.append({
                 'label': 'finished', 'curve': f'sjfw_{site}',
+                'url': _jobs_url(site, 'finished'),
                 'at_cut': '—',
                 'delta': cut_delta(cum.get('finished'),
                                    prev_cum.get('finished')) or '',
-                'window': str(_window('finished')), 'indent': False})
+                'window': str(window_finished), 'indent': False})
             rows.append({
                 'label': 'failed', 'curve': f'sjxw_{site}',
+                'url': _jobs_url(site, 'failed'),
                 'at_cut': '—',
                 'delta': cut_delta(cum.get('failed'),
                                    prev_cum.get('failed')) or '',
-                'window': str(_window('failed')), 'indent': False})
-            for cls, count in sorted(classes.items(),
-                                     key=lambda item:
-                                     -int(item[1] or 0)):
-                in_window = max(0, int(count or 0)
-                                - int(base_classes.get(cls) or 0))
-                if not in_window:
-                    continue
+                'window': str(window_failed), 'indent': False})
+            for cls, in_window, count in class_windows:
                 rows.append({
                     'label': cls, 'curve': f'sjxc_{site}_{cls}',
+                    'url': _errors_url(site, cls),
                     'at_cut': '—',
                     'delta': cut_delta(count,
                                        prev_classes.get(cls)) or '',
                     'window': str(in_window), 'indent': True})
+        # The outcomes pie: inner ring finished|failed over the window,
+        # outer ring the failure classes over the failed arc — every
+        # slice the same drill-down as its table row, colored by
+        # data-curve exactly as the plot.
+        pie = []
+        total = window_finished + window_failed
+        if total:
+            tau = 2 * math.pi
+            split = tau * window_finished / total
+            if window_finished:
+                pie.append({
+                    'path': _pie_segment(60, 60, 22, 40, 0, split),
+                    'curve': f'sjfw_{site}',
+                    'url': _jobs_url(site, 'finished'),
+                    'title': (f'finished · {window_finished:,} '
+                              f'({window_finished / total:.0%})')})
+            if window_failed:
+                pie.append({
+                    'path': _pie_segment(60, 60, 22, 40, split, tau),
+                    'curve': f'sjxw_{site}',
+                    'url': _jobs_url(site, 'failed'),
+                    'title': (f'failed · {window_failed:,} '
+                              f'({window_failed / total:.0%})')})
+                angle = split
+                for cls, in_window, _count in class_windows:
+                    span = (tau - split) * in_window / window_failed
+                    pie.append({
+                        'path': _pie_segment(60, 60, 42, 58,
+                                             angle, angle + span),
+                        'curve': f'sjxc_{site}_{cls}',
+                        'url': _errors_url(site, cls),
+                        'title': f'{cls} · {in_window:,}'})
+                    angle += span
         counter_note = ''
         if have_counters and not own_cum and counter_cut_time:
             counter_note = ('outcomes from the counter record at '
@@ -999,11 +1082,13 @@ def _panda_card(data, previous_data, ctx):
                             .strftime('%m-%d %H:%M ET'))
         sites.append({
             'site': site,
+            'url': _jobs_url(site),
             'found': bool(block or task_block or have_counters),
             'quiet': not ordered,
             'counter_note': counter_note,
             'basis': basis_text if have_counters else '',
             'rows': rows,
+            'pie': pie,
         })
     return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states, 'sites': sites,

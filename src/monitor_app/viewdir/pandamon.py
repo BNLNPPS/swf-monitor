@@ -1299,6 +1299,8 @@ def panda_errors_list(request):
         'table_description': f'Top error patterns across failed jobs in the last {days} days.',
         'ajax_url': reverse('monitor_app:panda_errors_datatable_ajax'),
         'columns': ERROR_COLUMNS,
+        'selected_site': request.GET.get('site', ''),
+        'selected_error_source': request.GET.get('error_source', ''),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_errors.html', context)

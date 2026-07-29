@@ -65,28 +65,40 @@
   {# cumulative rows, failure classes nested under failed.           #}
   {% for s in card.sites %}
   <div class="{% if not card.site_only %}mt-2 border-top pt-2{% endif %}">
-    <div class="mb-1"><strong><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ s.site|urlencode }}">{{ s.site }}</a></strong></div>
     {% if s.found %}
     {% if s.quiet %}
     <div class="text-muted mb-1">Nothing in flight at this site at this instant.</div>
     {% endif %}
-    <table class="table table-sm table-bordered w-auto mb-1">
-      <thead><tr><th></th><th>At cut</th><th>Δ prev snap</th><th>Since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr></thead>
-      <tbody>
-      {% for r in s.rows %}
-      <tr>
-        <td>{% if r.indent %}<span class="d-inline-block" style="width:1.2em;"></span>{% endif %}<span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ r.label }}</td>
-        <td class="text-end">{{ r.at_cut }}</td>
-        <td class="text-end">{{ r.delta }}</td>
-        <td class="text-end">{{ r.window }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% if s.counter_note %}
-    <div class="text-muted small mb-1">{{ s.counter_note }}</div>
-    {% endif %}
+    <div class="d-flex flex-wrap column-gap-4 align-items-start">
+      <div>
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <thead><tr><th><a href="{{ s.url }}">{{ s.site }}</a></th><th>At cut</th><th>Δ prev snap</th><th>Since {% if s.basis %}{{ s.basis }}{% else %}window start{% endif %}</th></tr></thead>
+          <tbody>
+          {% for r in s.rows %}
+          <tr>
+            <td>{% if r.indent %}<span class="d-inline-block" style="width:1.2em;"></span>{% endif %}<span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{% if r.url %}<a href="{{ r.url }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}</td>
+            <td class="text-end">{{ r.at_cut }}</td>
+            <td class="text-end">{{ r.delta }}</td>
+            <td class="text-end">{{ r.window }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if s.counter_note %}
+        <div class="text-muted small mb-1">{{ s.counter_note }}</div>
+        {% endif %}
+      </div>
+      {% if s.pie %}
+      {# Outcomes pie: inner ring finished|failed in window, outer ring the failure classes — slices drill down like their table rows. #}
+      <svg width="160" height="160" viewBox="0 0 120 120" role="img" aria-label="Window outcomes for {{ s.site }}">
+        {% for seg in s.pie %}
+        <a href="{{ seg.url }}"><path d="{{ seg.path }}" data-curve="{{ seg.curve }}" stroke="rgba(255,255,255,0.65)" stroke-width="1"><title>{{ seg.title }}</title></path></a>
+        {% endfor %}
+      </svg>
+      {% endif %}
+    </div>
     {% else %}
+    <div class="mb-1"><strong><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ s.site|urlencode }}">{{ s.site }}</a></strong></div>
     <div class="text-muted">No recorded activity for this site in this snap.</div>
     {% endif %}
   </div>
