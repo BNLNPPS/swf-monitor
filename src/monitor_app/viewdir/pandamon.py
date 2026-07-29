@@ -577,7 +577,7 @@ def _jobs_site_graphics_product(days, site, refresh,
         start = ended_after or (end - timedelta(days=days))
         ctx = embed_context(
             'epicprod', start, end,
-            families=(f'Site jobs {site}', f'Site tasks {site}'))
+            families=(f'Site jobs {site}',))
         if ctx.get('error'):
             raise RuntimeError(ctx['error'])
         # This embedded Site plot must open the same focused Site page,
@@ -595,7 +595,7 @@ def _jobs_site_graphics_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f'snapper_site_graphics:v2:epicprod:site:{site}:{days}{exact_key}',
+        f'snapper_site_graphics:v3:epicprod:site:{site}:{days}{exact_key}',
         build,
         ttl_seconds=300, refresh=refresh)
 

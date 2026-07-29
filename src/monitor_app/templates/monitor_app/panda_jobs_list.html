@@ -63,21 +63,124 @@
                cancelled: '#b0b0b0', closed: '#8a8a8a'};
     var LINE = {finished: '#207f20', failed: '#b22222',
                 cancelled: '#777777', closed: '#555555'};
+    var binTimes = data.bins.map(function (value) {
+      return Date.parse(value);
+    });
+    var hoverFloater = document.createElement('div');
+    hoverFloater.style.cssText =
+        'position:fixed;z-index:1000;pointer-events:none;display:none;'
+        + 'font-size:14px;padding:.3rem .55rem;border-radius:4px;'
+        + 'box-shadow:0 1px 5px rgba(0,0,0,.45);white-space:nowrap;';
+    document.body.appendChild(hoverFloater);
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    function textOn(color) {
+      var match = /^#([0-9a-f]{6})$/i.exec(color || '');
+      if (!match) return '#fff';
+      var value = parseInt(match[1], 16);
+      var luma = 0.299 * (value >> 16 & 255)
+          + 0.587 * (value >> 8 & 255) + 0.114 * (value & 255);
+      return luma > 150 ? '#111' : '#fff';
+    }
+    function eventTime(event) {
+      var xa = plotDiv._fullLayout && plotDiv._fullLayout.xaxis;
+      if (!xa) return null;
+      var box = plotDiv.getBoundingClientRect();
+      var px = event.clientX - box.left - xa._offset;
+      if (px < 0 || px > xa._length) return null;
+      var left = Date.parse(xa.range[0]);
+      var right = Date.parse(xa.range[1]);
+      return left + (px / xa._length) * (right - left);
+    }
+    function nearestBin(time) {
+      var best = 0;
+      for (var i = 1; i < binTimes.length; i += 1) {
+        if (Math.abs(binTimes[i] - time)
+            < Math.abs(binTimes[best] - time)) best = i;
+      }
+      return best;
+    }
+    function plotHit(event, time) {
+      var layout = plotDiv._fullLayout;
+      if (!layout || !layout.yaxis || !layout.yaxis2) return null;
+      var box = plotDiv.getBoundingClientRect();
+      var index = nearestBin(time);
+      var best = null;
+      data.series.forEach(function (series) {
+        [
+          {label: series.status + ' / ' + data.bucket,
+           value: series.values[index], axis: layout.yaxis,
+           color: BAR[series.status] || '#999999'},
+          {label: series.status + ' cumulative',
+           value: series.cumulative[index], axis: layout.yaxis2,
+           color: LINE[series.status] || '#555555'},
+        ].forEach(function (candidate) {
+          var py = event.clientY - box.top - candidate.axis._offset;
+          if (py < 0 || py > candidate.axis._length) return;
+          var valuePy = candidate.axis._length
+              * (candidate.axis.range[1] - candidate.value)
+              / (candidate.axis.range[1] - candidate.axis.range[0]);
+          var distance = Math.abs(py - valuePy);
+          if (!best || distance < best.distance) {
+            best = {label: candidate.label, value: candidate.value,
+                    color: candidate.color, distance: distance,
+                    index: index};
+          }
+        });
+      });
+      return best;
+    }
+    function hideFloater() {
+      hoverFloater.style.display = 'none';
+    }
+    function showFloater(event, hit) {
+      var stamp = new Date(binTimes[hit.index]);
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+      var dateText = stamp.getFullYear() + '-'
+          + pad(stamp.getMonth() + 1) + '-' + pad(stamp.getDate());
+      hoverFloater.style.background = hit.color;
+      hoverFloater.style.color = textOn(hit.color);
+      hoverFloater.innerHTML = '<b>' + escapeHtml(hit.label) + '</b>: '
+          + Number(hit.value).toLocaleString() + ' · ' + dateText;
+      hoverFloater.style.display = 'block';
+      var width = hoverFloater.offsetWidth;
+      hoverFloater.style.left = (
+          event.clientX + 16 + width > window.innerWidth
+              ? event.clientX - width - 12 : event.clientX + 16) + 'px';
+      hoverFloater.style.top = (event.clientY - 14) + 'px';
+    }
+    plotDiv.addEventListener('mousemove', function (event) {
+      if (event.buttons) { hideFloater(); return; }
+      var time = eventTime(event);
+      if (time === null) { hideFloater(); return; }
+      var hit = plotHit(event, time);
+      if (!hit) { hideFloater(); return; }
+      showFloater(event, hit);
+    });
+    plotDiv.addEventListener('mouseleave', hideFloater);
+
     function render() {
       var traces = [];
       data.series.forEach(function (s) {
         traces.push({type: 'bar', name: s.status + ' / ' + data.bucket,
                      x: data.bins, y: s.values,
-                     marker: {color: BAR[s.status] || '#999999'}});
+                     marker: {color: BAR[s.status] || '#999999'},
+                     hoverinfo: 'skip'});
       });
       data.series.forEach(function (s) {
         traces.push({type: 'scatter', mode: 'lines',
                      name: s.status + ' cumulative (' + s.total + ')',
                      x: data.bins, y: s.cumulative, yaxis: 'y2',
-                     line: {color: LINE[s.status] || '#555555', width: 2.5}});
+                     line: {color: LINE[s.status] || '#555555', width: 2.5},
+                     hoverinfo: 'skip'});
       });
       Plotly.newPlot(plotDiv, traces, {
         barmode: 'group',
+        hovermode: false,
         margin: {l: 60, r: 65, t: 10, b: 45},
         font: {size: 14},
         height: 300,
