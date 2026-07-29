@@ -891,55 +891,67 @@ def _panda_card(data, previous_data, ctx):
             return max(0, int(_cum.get(key) or 0)
                        - int(_base.get(key) or 0))
 
-        outcomes = []
-        if cum:
-            failed_classes = [
-                {'label': cls,
-                 'value': max(0, int(count or 0)
-                              - int(base_classes.get(cls) or 0)),
-                 'curve': f'sjxc_{site}_{cls}'}
-                for cls, count in sorted(
-                    classes.items(),
-                    key=lambda item: -int(item[1] or 0))]
-            outcomes = [
-                {'label': 'failed', 'value': _window('failed'),
-                 'curve': f'sjxw_{site}',
-                 'classes': [c for c in failed_classes if c['value']]},
-                {'label': 'finished', 'value': _window('finished'),
-                 'curve': f'sjfw_{site}', 'classes': []},
-            ]
+        # One table row per curve, in panel order — swatch-correlated
+        # to the plot, with the in-window integral where the curve is
+        # cumulative and the failure classes nested under failed.
         statuses = block.get('by_status_now') or {}
         prev_statuses = prev_block.get('by_status_now') or {}
+        prev_cum = prev_block.get('cum') or {}
+        prev_classes = prev_block.get('cum_failed_by_class') or {}
         ordered = ([s for s in lifecycle if s in statuses]
                    + sorted(s for s in statuses if s not in lifecycle))
-        inflight = [
+        rows = [
             {'label': ('running jobs' if status == 'running'
                        else status),
-             'value': int(statuses.get(status) or 0),
+             'curve': f'sj_{site}_{status}',
+             'at_cut': str(int(statuses.get(status) or 0)),
              'delta': cut_delta(statuses.get(status),
-                                prev_statuses.get(status)),
-             'curve': f'sj_{site}_{status}'}
+                                prev_statuses.get(status)) or '',
+             'window': '—', 'indent': False}
             for status in ordered]
         if block.get('running_cores_now') is not None:
             position = next(
-                (i + 1 for i, entry in enumerate(inflight)
-                 if entry['label'] == 'running jobs'), len(inflight))
-            inflight.insert(position, {
-                'label': 'running cores',
-                'value': int(block.get('running_cores_now') or 0),
+                (i + 1 for i, entry in enumerate(rows)
+                 if entry['label'] == 'running jobs'), len(rows))
+            rows.insert(position, {
+                'label': 'running cores', 'curve': f'sjc_{site}',
+                'at_cut': str(int(block.get('running_cores_now')
+                                  or 0)),
                 'delta': cut_delta(block.get('running_cores_now'),
-                                   prev_block.get('running_cores_now')),
-                'curve': f'sjc_{site}'})
+                                   prev_block.get('running_cores_now'))
+                or '',
+                'window': '—', 'indent': False})
+        if cum:
+            rows.append({
+                'label': 'finished', 'curve': f'sjfw_{site}',
+                'at_cut': '—',
+                'delta': cut_delta(cum.get('finished'),
+                                   prev_cum.get('finished')) or '',
+                'window': str(_window('finished')), 'indent': False})
+            rows.append({
+                'label': 'failed', 'curve': f'sjxw_{site}',
+                'at_cut': '—',
+                'delta': cut_delta(cum.get('failed'),
+                                   prev_cum.get('failed')) or '',
+                'window': str(_window('failed')), 'indent': False})
+            for cls, count in sorted(classes.items(),
+                                     key=lambda item:
+                                     -int(item[1] or 0)):
+                in_window = max(0, int(count or 0)
+                                - int(base_classes.get(cls) or 0))
+                if not in_window:
+                    continue
+                rows.append({
+                    'label': cls, 'curve': f'sjxc_{site}_{cls}',
+                    'at_cut': '—',
+                    'delta': cut_delta(count,
+                                       prev_classes.get(cls)) or '',
+                    'window': str(in_window), 'indent': True})
         sites.append({
             'site': site,
             'found': bool(block or task_block),
             'basis': basis_text if cum else '',
-            'outcomes': outcomes,
-            'inflight': inflight,
-            'tasks': [
-                {'label': status, 'value': count}
-                for status, count in sorted(
-                    (task_block.get('by_status_now') or {}).items())],
+            'rows': rows,
         })
     return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states, 'sites': sites,
