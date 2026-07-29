@@ -477,9 +477,9 @@ def _epicprod_curve_label(curve_id):
     if curve_id.startswith('sjc_'):
         return 'running cores'
     if curve_id.startswith('sjfw_'):
-        return 'finished (in window)'
+        return 'finished'
     if curve_id.startswith('sjxw_'):
-        return 'failed (in window)'
+        return 'failed'
     if curve_id.startswith('sjxc_'):
         # Failure-class curves: the class is the last id segment.
         return curve_id.rsplit('_', 1)[1]
@@ -751,7 +751,7 @@ def _site_groups():
             'default_off': True})
         groups.append({
             'name': f'Site failures {site}',
-            'title': f'Failures by class · {site} (in window)',
+            'title': f'Failures by class · {site}',
             'prefixes': [f'sjxc_{site}_'], 'ids': [],
             'window_relative': True,
             'focus_closed': True,
@@ -782,6 +782,11 @@ def _site_focus_view():
     return {
         'param': 'site',
         'label': 'Site',
+        'note': ('In-flight counts are the recorded site state through '
+                 'time; finished and failed accumulate from the left '
+                 'edge of the shown window — the window is the '
+                 'integration range, and zooming re-bases it. Click '
+                 'the plot for the full picture at that instant.'),
         'default': sites[0],
         'options': [
             {'value': site, 'label': site,
@@ -839,10 +844,25 @@ def _panda_card(data, previous_data, ctx):
                 'label': f'{ptype} · {status}', 'value': count,
                 'delta': cut_delta(count, previous)})
     # The Site focus narrows the card to the selected sites' detail:
-    # the recorded per-site lifecycle standing at the cut instant.
+    # the germane facts of the slice, color-coded as in the plot —
+    # window outcomes first (differenced against the ?since= basis,
+    # the view's left edge), then the in-flight standing in lifecycle
+    # order, then tasks. One swatch per fact, no repetition.
     params = (ctx or {}).get('params') or {}
     selected = [value for value in
                 (params.get('site') or '').split(',') if value]
+    compact = str(params.get('compact') or '') == '1'
+    since_sites = ((((ctx or {}).get('since_data') or {})
+                    .get('jobs') or {}).get('sites') or {})
+    since_stamp = (ctx or {}).get('since')
+    basis_text = ''
+    if since_stamp is not None:
+        from zoneinfo import ZoneInfo
+        basis_text = (since_stamp
+                      .astimezone(ZoneInfo('America/New_York'))
+                      .strftime('%m-%d %H:%M ET'))
+    lifecycle = (list(_JOB_LIFECYCLE_EARLY) + ['running']
+                 + list(_JOB_LIFECYCLE_LATE))
     sites = []
     for site in selected:
         block = ((data.get('jobs') or {}).get('sites')
@@ -851,32 +871,69 @@ def _panda_card(data, previous_data, ctx):
                       or {}).get(site) or {}
         task_block = ((data.get('tasks') or {}).get('sites')
                       or {}).get(site) or {}
-        statuses = [
-            stat(status, count,
-                 (prev_block.get('by_status_now') or {}).get(status))
-            for status, count in sorted(
-                (block.get('by_status_now') or {}).items())]
+        base = since_sites.get(site) or {}
+        base_cum = base.get('cum') or {}
+        base_classes = base.get('cum_failed_by_class') or {}
+        cum = block.get('cum') or {}
+        classes = block.get('cum_failed_by_class') or {}
+
+        def _window(key, _cum=cum, _base=base_cum):
+            return max(0, int(_cum.get(key) or 0)
+                       - int(_base.get(key) or 0))
+
+        outcomes = []
+        if cum:
+            failed_classes = [
+                {'label': cls,
+                 'value': max(0, int(count or 0)
+                              - int(base_classes.get(cls) or 0)),
+                 'curve': f'sjxc_{site}_{cls}'}
+                for cls, count in sorted(
+                    classes.items(),
+                    key=lambda item: -int(item[1] or 0))]
+            outcomes = [
+                {'label': 'failed', 'value': _window('failed'),
+                 'curve': f'sjxw_{site}',
+                 'classes': [c for c in failed_classes if c['value']]},
+                {'label': 'finished', 'value': _window('finished'),
+                 'curve': f'sjfw_{site}', 'classes': []},
+            ]
+        statuses = block.get('by_status_now') or {}
+        prev_statuses = prev_block.get('by_status_now') or {}
+        ordered = ([s for s in lifecycle if s in statuses]
+                   + sorted(s for s in statuses if s not in lifecycle))
+        inflight = [
+            {'label': ('running jobs' if status == 'running'
+                       else status),
+             'value': int(statuses.get(status) or 0),
+             'delta': cut_delta(statuses.get(status),
+                                prev_statuses.get(status)),
+             'curve': f'sj_{site}_{status}'}
+            for status in ordered]
+        if block.get('running_cores_now') is not None:
+            position = next(
+                (i + 1 for i, entry in enumerate(inflight)
+                 if entry['label'] == 'running jobs'), len(inflight))
+            inflight.insert(position, {
+                'label': 'running cores',
+                'value': int(block.get('running_cores_now') or 0),
+                'delta': cut_delta(block.get('running_cores_now'),
+                                   prev_block.get('running_cores_now')),
+                'curve': f'sjc_{site}'})
         sites.append({
             'site': site,
             'found': bool(block or task_block),
-            'statuses': statuses,
-            'headline': [
-                stat('running cores', block.get('running_cores_now'),
-                     prev_block.get('running_cores_now')),
-                stat('in-flight jobs', block.get('in_flight_jobs_now'),
-                     prev_block.get('in_flight_jobs_now')),
-                stat('finished (24h)', block.get('finished_24h'),
-                     prev_block.get('finished_24h')),
-                stat('failed (24h)', block.get('failed_24h'),
-                     prev_block.get('failed_24h')),
-            ],
+            'basis': basis_text if cum else '',
+            'outcomes': outcomes,
+            'inflight': inflight,
             'tasks': [
                 {'label': status, 'value': count}
                 for status, count in sorted(
                     (task_block.get('by_status_now') or {}).items())],
         })
     return {'kind': 'panda', 'headline': headline, 'types': types,
-            'type_states': type_states, 'sites': sites}
+            'type_states': type_states, 'sites': sites,
+            'site_only': bool(sites) and compact}
 
 
 def _delivery_card(data, previous_data, ctx):
