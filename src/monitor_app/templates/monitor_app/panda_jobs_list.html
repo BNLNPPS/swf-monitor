@@ -16,6 +16,87 @@
     <a href="?days={{ days }}" style="margin-left:0.5em;color:#dc3545;">[clear]</a>
     {% endif %}
 </div>
+
+{% if snapper_embed %}
+<div class="mb-2">
+  <div class="d-flex align-items-baseline">
+    <h5 class="mb-1">State history · {{ selected_site }}</h5>
+    <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">Open in Snapper</a>
+  </div>
+  {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+</div>
+{% endif %}
+
+{% if job_outcomes %}
+<div class="mb-3">
+  <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · last {{ days }} day{{ days|pluralize }}</h5>
+  {% if job_outcomes.error %}
+  <div class="text-muted mb-2">{{ job_outcomes.error }}</div>
+  {% else %}
+  <div id="job-outcomes-plot" style="min-height:320px;"></div>
+  <div class="text-muted small">
+    Bars are completions per {{ job_outcomes.bucket }} (Eastern time); lines are the cumulative integral over the window.
+    {% if job_outcomes.built_at_text %}Built {{ job_outcomes.built_at_text }} ·
+    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}&refresh=1">Update</a>{% endif %}
+  </div>
+  {{ job_outcomes|json_script:"job-outcomes-data" }}
+  <script>
+  (function () {
+    var dataEl = document.getElementById('job-outcomes-data');
+    var plotDiv = document.getElementById('job-outcomes-plot');
+    if (!dataEl || !plotDiv) return;
+    var data = JSON.parse(dataEl.textContent);
+    if (!data.series || !data.series.length) {
+      plotDiv.innerHTML = '<p class="text-muted">No completed jobs in this window.</p>';
+      return;
+    }
+    var BAR = {finished: '#62AC21', failed: '#FF8174',
+               cancelled: '#b0b0b0', closed: '#8a8a8a'};
+    var LINE = {finished: '#207f20', failed: '#b22222',
+                cancelled: '#777777', closed: '#555555'};
+    function render() {
+      var traces = [];
+      data.series.forEach(function (s) {
+        traces.push({type: 'bar', name: s.status + ' / ' + data.bucket,
+                     x: data.bins, y: s.values,
+                     marker: {color: BAR[s.status] || '#999999'}});
+      });
+      data.series.forEach(function (s) {
+        traces.push({type: 'scatter', mode: 'lines',
+                     name: s.status + ' cumulative (' + s.total + ')',
+                     x: data.bins, y: s.cumulative, yaxis: 'y2',
+                     line: {color: LINE[s.status] || '#555555', width: 2.5}});
+      });
+      Plotly.newPlot(plotDiv, traces, {
+        barmode: 'group',
+        margin: {l: 60, r: 65, t: 10, b: 45},
+        font: {size: 14},
+        height: 320,
+        legend: {orientation: 'h'},
+        yaxis: {title: {text: 'jobs / ' + data.bucket}, rangemode: 'tozero'},
+        yaxis2: {title: {text: 'cumulative'}, overlaying: 'y', side: 'right',
+                 rangemode: 'tozero', showgrid: false},
+      }, {responsive: true, displayModeBar: false});
+    }
+    if (window.Plotly) { render(); }
+    else {
+      var loader = document.querySelector('script[data-snapper-plotly]');
+      if (!loader) {
+        loader = document.createElement('script');
+        loader.src = 'https://cdn.plot.ly/plotly-2.35.2.min.js';
+        loader.setAttribute('data-snapper-plotly', '1');
+        document.head.appendChild(loader);
+      }
+      loader.addEventListener('load', render);
+      loader.addEventListener('error', function () {
+        plotDiv.innerHTML = '<p class="text-danger">The plot library failed to load.</p>';
+      });
+    }
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block initial_filters %}

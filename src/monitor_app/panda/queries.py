@@ -1392,6 +1392,103 @@ def get_queue(panda_queue):
     return {"queue": config}
 
 
+def job_outcomes(days=7, site=None):
+    """Completed-job outcomes over time for the jobs page's graphical
+    view: finished/failed/cancelled/closed counts per Eastern-time
+    bucket, each with its cumulative integral over the window. Bins
+    are hourly up to three days, daily beyond. Rows are deduplicated
+    across the active and archived tables by (pandaid, endtime,
+    status)."""
+    from zoneinfo import ZoneInfo
+
+    try:
+        days = float(days)
+    except (TypeError, ValueError):
+        return {'error': 'days must be a number'}
+    window_end = timezone.now()
+    window_start = window_end - timedelta(days=days)
+    bucket = 'hour' if days <= 3 else 'day'
+
+    filters = ''
+    extra_params = []
+    if site:
+        clause, val = like_or_eq('computingsite', site)
+        filters += f' AND {clause}'
+        extra_params.append(val)
+    where = (
+        '"endtime" >= %s AND "endtime" < %s'
+        ' AND "jobstatus" IN'
+        " ('finished', 'failed', 'cancelled', 'closed')"
+        + filters)
+    params = [window_start, window_end] + extra_params
+    sql = f'''
+        SELECT date_trunc(%s, "endtime" AT TIME ZONE 'UTC'
+                              AT TIME ZONE 'America/New_York') AS bin,
+               "jobstatus", COUNT(*)
+        FROM (
+            SELECT "pandaid", "endtime", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {where}
+            UNION
+            SELECT "pandaid", "endtime", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {where}
+        ) completed
+        GROUP BY 1, 2 ORDER BY 1
+    '''
+    conn = connections['panda']
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [bucket] + params + params)
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('job_outcomes query failed: %s', e)
+        return {'error': str(e)}
+
+    # Every bin in the window renders — a quiet day is a zero, not a
+    # missing bar. Bin stamps are naive Eastern wall time, matching
+    # the SQL truncation.
+    et = ZoneInfo('America/New_York')
+    start_local = window_start.astimezone(et)
+    end_local = window_end.astimezone(et)
+    if bucket == 'day':
+        cursor_local = start_local.replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        step = timedelta(days=1)
+    else:
+        cursor_local = start_local.replace(
+            minute=0, second=0, microsecond=0)
+        step = timedelta(hours=1)
+    bins = []
+    while cursor_local <= end_local:
+        bins.append(cursor_local.replace(tzinfo=None))
+        cursor_local = cursor_local + step
+
+    counts = {}
+    for bin_time, status, count in rows:
+        counts.setdefault(status, {})[bin_time] = int(count)
+    series = []
+    for status in ('finished', 'failed', 'cancelled', 'closed'):
+        per_bin = counts.get(status)
+        if not per_bin:
+            continue
+        values = [per_bin.get(b, 0) for b in bins]
+        cumulative = []
+        total = 0
+        for value in values:
+            total += value
+            cumulative.append(total)
+        series.append({'status': status, 'values': values,
+                       'cumulative': cumulative, 'total': total})
+    return {
+        'bucket': bucket,
+        'bins': [b.isoformat() for b in bins],
+        'series': series,
+        'site': site or '',
+        'window': {'start': window_start.isoformat(),
+                   'end': window_end.isoformat(),
+                   'days': days, 'timezone': 'America/New_York'},
+    }
+
+
 def resource_usage(days=30, site=None, username=None, taskid=None,
                    start_time=None, end_time=None, bucket=None,
                    series_rollup=False):

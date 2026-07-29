@@ -344,6 +344,31 @@ def _delivery_curve_values(state):
     return values
 
 
+def _site_curve_values(panda):
+    """Per-site job lifecycle curves from the sites maps recorded in
+    every snap: the in-flight population by status (submission through
+    queueing to execution), running cores, and the trailing-24h
+    finished/failed outcomes. Site names carry underscores, so the
+    status is always the id's last segment."""
+    values = {}
+    for site, block in ((panda.get('jobs') or {}).get('sites')
+                        or {}).items():
+        for status, count in (block.get('by_status_now') or {}).items():
+            values[f'sj_{site}_{status}'] = int(count or 0)
+        if block.get('running_cores_now') is not None:
+            values[f'sjc_{site}'] = int(
+                block.get('running_cores_now') or 0)
+        if 'finished_24h' in block:
+            values[f'sjf_{site}'] = int(block.get('finished_24h') or 0)
+        if 'failed_24h' in block:
+            values[f'sjx_{site}'] = int(block.get('failed_24h') or 0)
+    for site, block in ((panda.get('tasks') or {}).get('sites')
+                        or {}).items():
+        for status, count in (block.get('by_status_now') or {}).items():
+            values[f'stt_{site}_{status}'] = int(count or 0)
+    return values
+
+
 def _epicprod_curve_values(state):
     values = {}
     panda = component_data(state, 'panda')
@@ -363,6 +388,7 @@ def _epicprod_curve_values(state):
         values['tasks_total'] = int(tasks_now.get('total') or 0)
         for status, count in (tasks_now.get('by_status') or {}).items():
             values[f'task_{status}'] = int(count or 0)
+    values.update(_site_curve_values(panda))
     values.update(_delivery_curve_values(state))
     return values
 
@@ -406,6 +432,16 @@ def _delivery_lens_parts(curve_id):
 
 
 def _epicprod_curve_label(curve_id):
+    # Per-site curves: the family title names the site; the curve
+    # label is the lifecycle stage alone.
+    if curve_id.startswith('sjc_'):
+        return 'running cores'
+    if curve_id.startswith('sjf_'):
+        return 'finished (24h)'
+    if curve_id.startswith('sjx_'):
+        return 'failed (24h)'
+    if curve_id.startswith(('sj_', 'stt_')):
+        return curve_id.rsplit('_', 1)[1]
     if curve_id.startswith(('dlvq_', 'dlvqf_')):
         _campaign, pc = _delivery_curve_parts(curve_id)
         key = _pc_cache()['keys'].get(pc, '')
@@ -603,6 +639,86 @@ def _delivery_groups():
                 'default_off': True, 'units': 'events (M)'})
     return tuple(groups)
 
+_SITE_CACHE = {'at': None, 'sites': ()}
+
+
+def _panda_sites():
+    """Sites in the latest snap's PanDA component (union of the job
+    and task site maps, current in-flight jobs first), cached briefly.
+    The list drives the per-site families and the Site focus options;
+    a site drops out when it leaves the component's bounded ranked
+    maps."""
+    from django.utils import timezone
+
+    from snapper_ai.models import SystemSnap
+
+    now = timezone.now()
+    if (_SITE_CACHE['at'] is not None
+            and (now - _SITE_CACHE['at']).total_seconds() < 300):
+        return _SITE_CACHE['sites']
+    state = (SystemSnap.objects.filter(scope='epicprod')
+             .order_by('-snap_time').values_list('state', flat=True)
+             .first())
+    panda = ((((state or {}).get('components') or {})
+              .get('panda') or {}).get('data') or {})
+    job_sites = (panda.get('jobs') or {}).get('sites') or {}
+    task_sites = (panda.get('tasks') or {}).get('sites') or {}
+    sites = tuple(sorted(
+        set(job_sites) | set(task_sites),
+        key=lambda site: (-int((job_sites.get(site) or {})
+                               .get('in_flight_jobs_now') or 0), site)))
+    _SITE_CACHE.update({'sites': sites, 'at': now})
+    return sites
+
+
+def _site_groups():
+    """Per-site curve families: one jobs panel following the lifecycle
+    (queued states through running to the trailing finished/failed
+    outcomes, with cores) and one tasks panel. Off by default on the
+    scope view — the Site focus is their home."""
+    groups = []
+    for site in _panda_sites():
+        groups.append({
+            'name': f'Site jobs {site}',
+            'title': f'Jobs · {site}',
+            'prefixes': [f'sj_{site}_'],
+            'ids': [f'sjc_{site}', f'sjf_{site}', f'sjx_{site}'],
+            'default_off': True})
+        groups.append({
+            'name': f'Site tasks {site}',
+            'title': f'Tasks · {site}',
+            'prefixes': [f'stt_{site}_'], 'ids': [],
+            'default_off': True})
+    return tuple(groups)
+
+
+def _epicprod_groups():
+    """The epicprod curve families, resolved per render (the seam's
+    callable form) so new campaigns and sites appear without an app
+    restart."""
+    return EPICPROD_GROUPS + _delivery_groups() + _site_groups()
+
+
+def _site_focus_view():
+    """The Site focus tab: one site's job lifecycle — submission
+    through queueing to execution to the trailing finished/failed
+    outcomes — with its tasks panel, and the cut narrowed to the panda
+    component's site detail."""
+    sites = _panda_sites()
+    if not sites:
+        return None
+    return {
+        'param': 'site',
+        'label': 'Site',
+        'default': sites[0],
+        'options': [
+            {'value': site, 'label': site,
+             'families': [f'Site jobs {site}', f'Site tasks {site}'],
+             'component': 'panda'}
+            for site in sites],
+    }
+
+
 TESTBED_GROUPS = (
     {'name': 'Workflows', 'prefixes': ['wf_'], 'ids': []},
     {'name': 'STF tasks', 'prefixes': ['sts_'], 'ids': ['stf_total']},
@@ -648,8 +764,45 @@ def _panda_card(data, previous_data, ctx):
             type_states.append({
                 'label': f'{ptype} · {status}', 'value': count,
                 'delta': cut_delta(count, previous)})
+    # The Site focus narrows the card to the selected sites' detail:
+    # the recorded per-site lifecycle standing at the cut instant.
+    params = (ctx or {}).get('params') or {}
+    selected = [value for value in
+                (params.get('site') or '').split(',') if value]
+    sites = []
+    for site in selected:
+        block = ((data.get('jobs') or {}).get('sites')
+                 or {}).get(site) or {}
+        prev_block = ((previous_data.get('jobs') or {}).get('sites')
+                      or {}).get(site) or {}
+        task_block = ((data.get('tasks') or {}).get('sites')
+                      or {}).get(site) or {}
+        statuses = [
+            stat(status, count,
+                 (prev_block.get('by_status_now') or {}).get(status))
+            for status, count in sorted(
+                (block.get('by_status_now') or {}).items())]
+        sites.append({
+            'site': site,
+            'found': bool(block or task_block),
+            'statuses': statuses,
+            'headline': [
+                stat('running cores', block.get('running_cores_now'),
+                     prev_block.get('running_cores_now')),
+                stat('in-flight jobs', block.get('in_flight_jobs_now'),
+                     prev_block.get('in_flight_jobs_now')),
+                stat('finished (24h)', block.get('finished_24h'),
+                     prev_block.get('finished_24h')),
+                stat('failed (24h)', block.get('failed_24h'),
+                     prev_block.get('failed_24h')),
+            ],
+            'tasks': [
+                {'label': status, 'value': count}
+                for status, count in sorted(
+                    (task_block.get('by_status_now') or {}).items())],
+        })
     return {'kind': 'panda', 'headline': headline, 'types': types,
-            'type_states': type_states}
+            'type_states': type_states, 'sites': sites}
 
 
 def _delivery_card(data, previous_data, ctx):
@@ -1060,8 +1213,8 @@ def register_snapper_providers():
         label='epicprod',
         curve_values=_epicprod_curve_values,
         curve_label=_epicprod_curve_label,
-        curve_groups=EPICPROD_GROUPS + _delivery_groups(),
-        focus_view=_delivery_focus_view,
+        curve_groups=_epicprod_groups,
+        focus_view=(_delivery_focus_view, _site_focus_view),
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card},
         card_template=CARD_TEMPLATE,

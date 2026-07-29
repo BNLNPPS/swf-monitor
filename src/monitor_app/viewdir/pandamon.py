@@ -25,7 +25,7 @@ from ..panda import (
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, resource_usage,
+    list_queues, get_queue, resource_usage, job_outcomes,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
@@ -509,6 +509,45 @@ def compute_usage_data(request):
 
 # ── Job list ─────────────────────────────────────────────────────────────────
 
+def _jobs_outcomes_product(days, site, refresh):
+    """Completed-job outcome series (finished/failed per bin with
+    cumulative integrals) for the jobs page's graphical view, served
+    as a cached product."""
+    from ..cached_product import get_product
+
+    def build():
+        outcomes = job_outcomes(days=days, site=site or None)
+        if outcomes.get('error'):
+            raise RuntimeError(outcomes['error'])
+        return outcomes
+
+    return get_product(f"jobs_outcomes:v1:{days}:{site or ''}", build,
+                       ttl_seconds=300, refresh=refresh)
+
+
+def _jobs_site_embed_product(days, site, refresh):
+    """Snapper per-site lifecycle panels (in-flight jobs by status,
+    tasks) over the jobs page's window, served as a cached product."""
+    from django.utils import timezone as dj_timezone
+
+    from snapper_ai.embed import MAX_EMBED_DAYS, embed_context
+    from ..cached_product import get_product
+
+    def build():
+        now = dj_timezone.now()
+        ctx = embed_context(
+            'epicprod', now - timedelta(days=days), now,
+            families=(f'Site jobs {site}', f'Site tasks {site}'))
+        if ctx.get('error'):
+            raise RuntimeError(ctx['error'])
+        return ctx
+
+    key_days = min(days, MAX_EMBED_DAYS + 1)
+    return get_product(
+        f'snapper_embed:v2:epicprod:site:{site}:{key_days}', build,
+        ttl_seconds=300, refresh=refresh)
+
+
 def panda_jobs_list(request):
     days = _get_days(request)
     selected_site = request.GET.get('site', '')
@@ -517,7 +556,36 @@ def panda_jobs_list(request):
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
 
+    refresh = request.GET.get('refresh') == '1'
+    try:
+        outcomes_product = _jobs_outcomes_product(
+            days, selected_site, refresh)
+        job_outcomes_data = outcomes_product['value'] or {
+            'error': 'Outcome history is building — reload shortly.'}
+        if outcomes_product['value'] and outcomes_product['built_at']:
+            job_outcomes_data = dict(job_outcomes_data)
+            job_outcomes_data['built_at_text'] = (
+                outcomes_product['built_at']
+                .astimezone(ZoneInfo(settings.TIME_ZONE))
+                .strftime('%H:%M ET'))
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('jobs outcomes build failed: %s', e)
+        job_outcomes_data = {'error': str(e)}
+    snapper_embed = None
+    if selected_site:
+        try:
+            embed_product = _jobs_site_embed_product(
+                days, selected_site, refresh)
+            snapper_embed = embed_product['value'] or {
+                'scope': 'epicprod',
+                'error': 'state history is building — reload shortly.'}
+        except Exception as e:                               # noqa: BLE001
+            logger.error('snapper embed failed for jobs list: %s', e)
+            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+
     context = {
+        'job_outcomes': job_outcomes_data,
+        'snapper_embed': snapper_embed,
         'table_title': 'PanDA Jobs',
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
