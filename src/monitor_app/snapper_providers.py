@@ -1151,8 +1151,7 @@ def _panda_card(data, previous_data, ctx):
             {'label': ('running jobs' if status == 'running'
                        else status),
              'curve': f'sj_{site}_{status}',
-             'url': ('' if status in {'activated', 'running'}
-                     else _jobs_url(site, status)),
+             'url': '',
              'at_cut': str(int(statuses.get(status) or 0)),
              'delta': cut_delta(statuses.get(status),
                                 prev_statuses.get(status)) or '',
