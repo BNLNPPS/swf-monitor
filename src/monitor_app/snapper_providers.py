@@ -816,6 +816,14 @@ TESTBED_GROUPS = (
 
 # ── Component cards ──────────────────────────────────────────────────────
 
+_CURVE_PALETTE = (
+    '#1565c0', '#6a1b9a', '#00838f', '#ef6c00', '#33691e',
+    '#ad1457', '#4527a0', '#00695c', '#bf360c', '#37474f',
+    '#0277bd', '#8e24aa', '#f4511e', '#558b2f', '#5d4037',
+    '#c2185b',
+)
+
+
 def _pie_segment(cx, cy, r_in, r_out, a0, a1):
     """SVG path of an annular sector; angles in radians clockwise from
     12 o'clock. A full circle is clamped a hair short so the arc pair
@@ -832,6 +840,53 @@ def _pie_segment(cx, cy, r_in, r_out, a0, a1):
             f'A {r_out} {r_out} 0 {large} 1 {x1o:.2f} {y1o:.2f} '
             f'L {x1i:.2f} {y1i:.2f} '
             f'A {r_in} {r_in} 0 {large} 0 {x0i:.2f} {y0i:.2f} Z')
+
+
+def _site_outcomes_pie(site, window_finished, window_failed,
+                       class_windows, class_names, jobs_url, errors_url):
+    """Reusable context for Snapper's site-outcomes pie."""
+    import math
+
+    pie = []
+    total = window_finished + window_failed
+    if not total:
+        return pie
+    class_colors = {
+        name: _CURVE_PALETTE[index % len(_CURVE_PALETTE)]
+        for index, name in enumerate(sorted(class_names))
+    }
+    tau = 2 * math.pi
+    split = tau * window_finished / total
+    if window_finished:
+        curve = f'sjfw_{site}'
+        pie.append({
+            'path': _pie_segment(60, 60, 22, 40, 0, split),
+            'curve': curve,
+            'color': _epicprod_curve_color(curve),
+            'url': jobs_url(site, 'finished'),
+            'title': (f'finished · {window_finished:,} '
+                      f'({window_finished / total:.0%})')})
+    if window_failed:
+        curve = f'sjxw_{site}'
+        pie.append({
+            'path': _pie_segment(60, 60, 22, 40, split, tau),
+            'curve': curve,
+            'color': _epicprod_curve_color(curve),
+            'url': jobs_url(site, 'failed'),
+            'title': (f'failed · {window_failed:,} '
+                      f'({window_failed / total:.0%})')})
+        angle = split
+        for cls, in_window, _count in class_windows:
+            span = (tau - split) * in_window / window_failed
+            pie.append({
+                'path': _pie_segment(60, 60, 42, 58,
+                                     angle, angle + span),
+                'curve': f'sjxc_{site}_{cls}',
+                'color': class_colors.get(cls),
+                'url': errors_url(site, cls),
+                'title': f'{cls} · {in_window:,}'})
+            angle += span
+    return pie
 
 
 def _avg_exec_times(site, since, until):
@@ -888,6 +943,67 @@ def _counter_site_blocks(scope, instant):
     jobs = (((((row['state'] or {}).get('components') or {})
               .get('panda') or {}).get('data') or {}).get('jobs') or {})
     return (jobs.get('sites') or {}), row['snap_time']
+
+
+def panda_site_outcomes_pie(site, since, until, size=270):
+    """Placeable context for the Site page's final-job-state pie."""
+    import math
+    from urllib.parse import quote
+
+    from django.urls import reverse
+
+    cut_sites, _ = _counter_site_blocks('epicprod', until)
+    basis_sites, _ = _counter_site_blocks('epicprod', since)
+    cut = cut_sites.get(site) or {}
+    basis = basis_sites.get(site) or {}
+    cut_cum = cut.get('cum') or {}
+    basis_cum = basis.get('cum') or {}
+    cut_classes = cut.get('cum_failed_by_class') or {}
+    basis_classes = basis.get('cum_failed_by_class') or {}
+
+    def window_count(key):
+        return max(0, int(cut_cum.get(key) or 0)
+                   - int(basis_cum.get(key) or 0))
+
+    class_names = set(cut_classes) | set(basis_classes)
+    class_windows = []
+    for cls in class_names:
+        count = max(0, int(cut_classes.get(cls) or 0)
+                    - int(basis_classes.get(cls) or 0))
+        if count:
+            class_windows.append(
+                (cls, count, int(cut_classes.get(cls) or 0)))
+    class_windows.sort(key=lambda item: (-item[1], item[0]))
+
+    jobs_base = reverse('monitor_app:panda_jobs_list')
+    errors_base = reverse('monitor_app:panda_errors_list')
+    days = max(1, math.ceil((until - since).total_seconds() / 86400))
+    window_q = (
+        f'&days={days}&ended_after=' + quote(since.isoformat())
+        + '&ended_before=' + quote(until.isoformat()))
+
+    def jobs_url(site_name, status=None):
+        return (f'{jobs_base}?site={quote(site_name)}'
+                + (f'&status={quote(status)}' if status else '')
+                + window_q)
+
+    def errors_url(site_name, cls=None):
+        return (f'{errors_base}?site={quote(site_name)}'
+                + '&status=failed'
+                + ('&classified=1' if cls and cls != 'other' else '')
+                + (f'&error_source={quote(cls)}'
+                   if cls and cls != 'other' else '')
+                + window_q)
+
+    finished = window_count('finished')
+    failed = window_count('failed')
+    return {
+        'site': site,
+        'pie': _site_outcomes_pie(
+            site, finished, failed, class_windows, class_names,
+            jobs_url, errors_url),
+        'pie_size': int(size),
+    }
 
 
 def _panda_card(data, previous_data, ctx):
@@ -970,19 +1086,28 @@ def _panda_card(data, previous_data, ctx):
 
     jobs_base = reverse('monitor_app:panda_jobs_list')
     errors_base = reverse('monitor_app:panda_errors_list')
-    days_q = ''
-    if since_stamp is not None:
-        days_q = '&days=' + str(max(1, math.ceil(
+    window_q = ''
+    if since_stamp is not None and requested_at is not None:
+        window_days = max(1, math.ceil(
+            (requested_at - since_stamp).total_seconds() / 86400))
+        window_q = (
+            f'&days={window_days}&ended_after='
+            + quote(since_stamp.isoformat())
+            + '&ended_before=' + quote(requested_at.isoformat()))
+    elif since_stamp is not None:
+        window_q = '&days=' + str(max(1, math.ceil(
             (_timezone.now() - since_stamp).total_seconds() / 86400)))
 
     def _jobs_url(site, status=None):
         return (f'{jobs_base}?site={quote(site)}'
-                + (f'&status={quote(status)}' if status else '') + days_q)
+                + (f'&status={quote(status)}' if status else '') + window_q)
 
     def _errors_url(site, cls=None):
         return (f'{errors_base}?site={quote(site)}'
+                + '&status=failed'
+                + ('&classified=1' if cls and cls != 'other' else '')
                 + (f'&error_source={quote(cls)}'
-                   if cls and cls != 'other' else '') + days_q)
+                   if cls and cls != 'other' else '') + window_q)
     sites = []
     for site in selected:
         block = ((data.get('jobs') or {}).get('sites')
@@ -1097,35 +1222,9 @@ def _panda_card(data, previous_data, ctx):
         # outer ring the failure classes over the failed arc — every
         # slice the same drill-down as its table row, colored by
         # data-curve exactly as the plot.
-        pie = []
-        total = window_finished + window_failed
-        if total:
-            tau = 2 * math.pi
-            split = tau * window_finished / total
-            if window_finished:
-                pie.append({
-                    'path': _pie_segment(60, 60, 22, 40, 0, split),
-                    'curve': f'sjfw_{site}',
-                    'url': _jobs_url(site, 'finished'),
-                    'title': (f'finished · {window_finished:,} '
-                              f'({window_finished / total:.0%})')})
-            if window_failed:
-                pie.append({
-                    'path': _pie_segment(60, 60, 22, 40, split, tau),
-                    'curve': f'sjxw_{site}',
-                    'url': _jobs_url(site, 'failed'),
-                    'title': (f'failed · {window_failed:,} '
-                              f'({window_failed / total:.0%})')})
-                angle = split
-                for cls, in_window, _count in class_windows:
-                    span = (tau - split) * in_window / window_failed
-                    pie.append({
-                        'path': _pie_segment(60, 60, 42, 58,
-                                             angle, angle + span),
-                        'curve': f'sjxc_{site}_{cls}',
-                        'url': _errors_url(site, cls),
-                        'title': f'{cls} · {in_window:,}'})
-                    angle += span
+        pie = _site_outcomes_pie(
+            site, window_finished, window_failed, class_windows,
+            classes, _jobs_url, _errors_url)
         counter_note = ''
         if have_counters and not own_cum and counter_cut_time:
             counter_note = ('outcomes from the counter record at '

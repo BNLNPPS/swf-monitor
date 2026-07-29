@@ -29,15 +29,24 @@
 
 {% if job_outcomes %}
 <div class="mb-3">
-  <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · last {{ days }} day{{ days|pluralize }}</h5>
+  <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
   {% if job_outcomes.error %}
   <div class="text-muted mb-2">{{ job_outcomes.error }}</div>
   {% else %}
-  <div id="job-outcomes-plot" style="min-height:320px;"></div>
+  <div class="row g-2 align-items-stretch">
+    <div class="{% if job_outcomes_pie.pie %}col-lg-8{% else %}col-12{% endif %}">
+      <div id="job-outcomes-plot" style="min-height:300px;"></div>
+    </div>
+    {% if job_outcomes_pie.pie %}
+    <div class="col-lg-4 d-flex justify-content-center">
+      {% include 'monitor_app/_snapper_site_outcomes_pie.html' with site_outcomes=job_outcomes_pie %}
+    </div>
+    {% endif %}
+  </div>
   <div class="text-muted small">
     Bars are completions per {{ job_outcomes.bucket }} (Eastern time); lines are the cumulative integral over the window.
     {% if job_outcomes.built_at_text %}Built {{ job_outcomes.built_at_text }} ·
-    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}&refresh=1">Update</a>{% endif %}
+    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1">Update</a>{% endif %}
   </div>
   {{ job_outcomes|json_script:"job-outcomes-data" }}
   <script>
@@ -71,7 +80,7 @@
         barmode: 'group',
         margin: {l: 60, r: 65, t: 10, b: 45},
         font: {size: 14},
-        height: 320,
+        height: 300,
         legend: {orientation: 'h'},
         yaxis: {title: {text: 'jobs / ' + data.bucket}, rangemode: 'tozero'},
         yaxis2: {title: {text: 'cumulative'}, overlaying: 'y', side: 'right',
@@ -105,7 +114,9 @@
     username: '{{ selected_username|default:"" }}',
     site: '{{ selected_site|default:"" }}',
     days: '{{ days }}',
-    taskid: '{{ selected_taskid|default:"" }}'
+    taskid: '{{ selected_taskid|default:"" }}',
+    ended_after: '{{ ended_after|escapejs }}',
+    ended_before: '{{ ended_before|escapejs }}'
 }
 {% endblock %}
 

@@ -951,13 +951,29 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
 
 
 def error_summary(days=10, username=None, site=None, destinationse=None,
-                  taskid=None, error_source=None, limit=20):
+                  taskid=None, error_source=None, limit=20,
+                  ended_after=None, ended_before=None, status=None,
+                  classified=False):
     """Aggregate error summary across failed PanDA jobs, ranked by frequency."""
     # When scoped to a specific task, return all error patterns
     if taskid:
         limit = 10000
-    cutoff = timezone.now() - timedelta(days=days)
     conn = connections['panda']
+    if ended_after is not None and ended_before is not None:
+        time_filter = 'j."endtime" > %s AND j."endtime" <= %s'
+        time_params = [ended_after, ended_before]
+    else:
+        time_filter = 'j."modificationtime" >= %s'
+        time_params = [timezone.now() - timedelta(days=days)]
+    faulty_statuses = ('failed', 'cancelled', 'closed')
+    if status is not None and status not in faulty_statuses:
+        return {'error': f"status must be one of {faulty_statuses}"}
+    if status:
+        status_filter = 'j."jobstatus" = %s'
+        status_params = [status]
+    else:
+        status_filter = "j.\"jobstatus\" IN ('failed','cancelled','closed')"
+        status_params = []
 
     extra_params = []
     filters = ''
@@ -991,6 +1007,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         components_to_query = [c for c in ERROR_COMPONENTS if c['name'] == error_source]
         if not components_to_query:
             return {"error": f"Unknown error_source '{error_source}'. Valid: {[c['name'] for c in ERROR_COMPONENTS]}"}
+        if classified:
+            selected_index = next(
+                i for i, component in enumerate(ERROR_COMPONENTS)
+                if component['name'] == error_source)
+            for component in ERROR_COMPONENTS[:selected_index]:
+                filters += (
+                    f' AND COALESCE("{component["code"]}", 0) <= 0')
 
     # One window scan per jobs table: the seven error components unpivot
     # through a LATERAL VALUES row set instead of seven separate UNION
@@ -1030,13 +1053,14 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             CROSS JOIN LATERAL (
                 VALUES {values_rows}
             ) AS e(error_source, error_code, error_diag)
-            WHERE j."modificationtime" >= %s
-              AND j."jobstatus" IN ('failed','cancelled','closed')
+            WHERE {time_filter}
+              AND {status_filter}
               AND e.error_code IS NOT NULL
               AND e.error_code != 0
               {filters}
         """)
-        all_params.extend(destse_params + [cutoff] + extra_params)
+        all_params.extend(destse_params + time_params + status_params
+                          + extra_params)
 
     union_sql = ' UNION ALL '.join(parts)
     sql = f"""
@@ -1392,7 +1416,7 @@ def get_queue(panda_queue):
     return {"queue": config}
 
 
-def job_outcomes(days=7, site=None):
+def job_outcomes(days=7, site=None, start_time=None, end_time=None):
     """Completed-job outcomes over time for the jobs page's graphical
     view: finished/failed/cancelled/closed counts per Eastern-time
     bucket, each with its cumulative integral over the window. Bins
@@ -1401,12 +1425,20 @@ def job_outcomes(days=7, site=None):
     status)."""
     from zoneinfo import ZoneInfo
 
-    try:
-        days = float(days)
-    except (TypeError, ValueError):
-        return {'error': 'days must be a number'}
-    window_end = timezone.now()
-    window_start = window_end - timedelta(days=days)
+    if start_time is not None or end_time is not None:
+        if (start_time is None or end_time is None
+                or start_time >= end_time):
+            return {'error': 'start_time and end_time must form a range'}
+        window_start = start_time
+        window_end = end_time
+        days = (window_end - window_start).total_seconds() / 86400
+    else:
+        try:
+            days = float(days)
+        except (TypeError, ValueError):
+            return {'error': 'days must be a number'}
+        window_end = timezone.now()
+        window_start = window_end - timedelta(days=days)
     bucket = 'hour' if days <= 3 else 'day'
 
     filters = ''
@@ -1416,7 +1448,7 @@ def job_outcomes(days=7, site=None):
         filters += f' AND {clause}'
         extra_params.append(val)
     where = (
-        '"endtime" >= %s AND "endtime" < %s'
+        '"endtime" > %s AND "endtime" <= %s'
         ' AND "jobstatus" IN'
         " ('finished', 'failed', 'cancelled', 'closed')"
         + filters)
@@ -1939,13 +1971,22 @@ TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
                       'processingtype', 'workinggroup', 'transpath']
 
 
+def _job_window_filter(days, ended_after=None, ended_before=None):
+    """Exact completion interval when supplied; rolling activity otherwise."""
+    if ended_after is not None and ended_before is not None:
+        return (['"endtime" > %s', '"endtime" <= %s'],
+                [ended_after, ended_before])
+    cutoff = timezone.now() - timedelta(days=days)
+    return ['"modificationtime" >= %s'], [cutoff]
+
+
 def list_jobs_dt(days=7, status=None, username=None, site=None,
                  taskid=None, reqid=None,
-                 order_by='"pandaid" DESC', limit=100, offset=0, search=None):
+                 order_by='"pandaid" DESC', limit=100, offset=0, search=None,
+                 ended_after=None, ended_before=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
-    cutoff = timezone.now() - timedelta(days=days)
-    where = ['"modificationtime" >= %s']
-    params = [cutoff]
+    where, params = _job_window_filter(
+        days, ended_after=ended_after, ended_before=ended_before)
 
     if status:
         where.append('"jobstatus" = %s')
@@ -2079,11 +2120,11 @@ def build_tasks_window(days=7, cap=5000):
 
 
 def job_filter_counts(days=7, status=None, username=None, site=None,
-                      taskid=None, reqid=None):
+                      taskid=None, reqid=None,
+                      ended_after=None, ended_before=None):
     """Get filter option counts for job list (status, user, site)."""
-    cutoff = timezone.now() - timedelta(days=days)
-    base_where = ['"modificationtime" >= %s']
-    base_params = [cutoff]
+    base_where, base_params = _job_window_filter(
+        days, ended_after=ended_after, ended_before=ended_before)
 
     if taskid:
         base_where.append('"jeditaskid" = %s')

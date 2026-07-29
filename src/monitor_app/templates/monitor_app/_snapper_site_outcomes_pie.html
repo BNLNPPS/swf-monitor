@@ -1,0 +1,18 @@
+{% if site_outcomes.pie %}
+<div>
+  <div class="mb-1 text-center"><strong>Final job state</strong></div>
+  <svg width="{{ site_outcomes.pie_size }}"
+       height="{{ site_outcomes.pie_size }}"
+       viewBox="0 0 120 120"
+       style="display:block; max-width:100%; height:auto;"
+       role="img"
+       aria-label="Final job state for {{ site_outcomes.site }}">
+    {% for seg in site_outcomes.pie %}
+    <a href="{{ seg.url }}"><path d="{{ seg.path }}"
+      data-curve="{{ seg.curve }}"
+      {% if seg.color %}fill="{{ seg.color }}"{% endif %}
+      stroke="rgba(255,255,255,0.65)" stroke-width="1"><title>{{ seg.title }}</title></path></a>
+    {% endfor %}
+  </svg>
+</div>
+{% endif %}
