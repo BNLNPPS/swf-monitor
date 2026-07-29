@@ -453,6 +453,9 @@ def _epicprod_curve_color(curve_id):
         return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
         return JOB_STATE_COLORS.get('failed')
+    if curve_id.startswith('sjxc_'):
+        return _FAILURE_CLASS_COLORS.get(
+            curve_id.rsplit('_', 1)[1], '#424242')
     if curve_id.startswith('sjc_'):
         return '#1565c0'
     if curve_id.startswith('sj_'):
@@ -816,12 +819,16 @@ TESTBED_GROUPS = (
 
 # ── Component cards ──────────────────────────────────────────────────────
 
-_CURVE_PALETTE = (
-    '#1565c0', '#6a1b9a', '#00838f', '#ef6c00', '#33691e',
-    '#ad1457', '#4527a0', '#00695c', '#bf360c', '#37474f',
-    '#0277bd', '#8e24aa', '#f4511e', '#558b2f', '#5d4037',
-    '#c2185b',
-)
+_FAILURE_CLASS_COLORS = {
+    'brokerage': '#8d6e63',
+    'ddm': '#0277bd',
+    'executor': '#c2185b',
+    'dispatcher': '#00838f',
+    'pilot': '#ef6c00',
+    'supervisor': '#6a1b9a',
+    'taskbuffer': '#455a64',
+    'other': '#757575',
+}
 
 
 def _pie_segment(cx, cy, r_in, r_out, a0, a1):
@@ -852,8 +859,8 @@ def _site_outcomes_pie(site, window_finished, window_failed,
     if not total:
         return pie
     class_colors = {
-        name: _CURVE_PALETTE[index % len(_CURVE_PALETTE)]
-        for index, name in enumerate(sorted(class_names))
+        name: _FAILURE_CLASS_COLORS.get(name, '#424242')
+        for name in class_names
     }
     tau = 2 * math.pi
     split = tau * window_finished / total
