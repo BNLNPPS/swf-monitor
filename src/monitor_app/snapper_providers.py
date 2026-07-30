@@ -445,10 +445,11 @@ def _epicprod_curve_color(curve_id):
     several types sharing one status must stay distinguishable."""
     from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
 
-    # Operator-set colors on the site jobs panel: finished takes the
-    # activated green (the state map's finished is too dark beside the
-    # staircase), and the running pair reads as blues — cores strong,
-    # running jobs lighter — so the two connect at a glance.
+    # Operator-set colors on every jobs panel: the running pair reads
+    # as blues — cores strong, running jobs lighter — and activated is
+    # grey context rather than health/completion green.
+    if curve_id == 'running_cores':
+        return '#1565c0'
     if curve_id.startswith('sjfw_'):
         return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
@@ -468,7 +469,12 @@ def _epicprod_curve_color(curve_id):
             return '#8a8a8a'
         return JOB_STATE_COLORS.get(status)
     if curve_id.startswith('job_'):
-        return JOB_STATE_COLORS.get(curve_id[4:])
+        status = curve_id[4:]
+        if status == 'running':
+            return '#64b5f6'
+        if status == 'activated':
+            return '#8a8a8a'
+        return JOB_STATE_COLORS.get(status)
     if curve_id.startswith('stt_'):
         status = curve_id.rsplit('_', 1)[1]
         if status == 'running':
