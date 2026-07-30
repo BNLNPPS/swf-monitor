@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Iterable, Optional
 
 from django.db import connections, transaction
 from django.utils import timezone
@@ -152,13 +152,13 @@ PANDA_REGISTRATION = {
             "kind": "bounded_map",
             "max_items": MAX_SITES,
             "description": (
-                "Top PanDA target sites with trailing job outcomes, current "
+                "PanDA target sites with trailing job outcomes, current "
                 "in-flight status counts, running jobs and cores, and "
                 "cumulative terminal counters ('cum' by status; "
-                "'cum_failed_by_class' by error component). A site evicted "
-                "from the ranked map loses its per-site counters and "
-                "restarts them on return; the scope-level counters are "
-                "unaffected."
+                "'cum_failed_by_class' by error component). Every non-test "
+                "Canary queue is retained, including explicit zero state "
+                "when inactive; remaining slots contain the highest-ranked "
+                "activity-derived sites."
             ),
         },
         "tasks_total_24h": {
@@ -207,7 +207,8 @@ PANDA_REGISTRATION = {
             "max_items": MAX_SITES,
             "description": (
                 "Current nonterminal JEDI task counts by target site and "
-                "status."
+                "status. Every non-test Canary queue is retained with "
+                "explicit zero state when inactive."
             ),
         },
     },
@@ -286,11 +287,28 @@ def _in_flight_task_activity() -> list[dict]:
         ]
 
 
-def _terminal_outcome_rows(mark, until):
+def _canary_queue_names() -> set[str]:
+    """Non-test queues in Canary's catalog."""
+    from canary.store.models import Queue
+
+    return {
+        str(name)
+        for name in (
+            Queue.objects
+            .exclude(name__icontains="test")
+            .values_list("name", flat=True)
+        )
+    }
+
+
+def _terminal_outcome_rows(mark, until, sites=None):
     """Terminal job transitions with end times in (mark, until] — or
     the full recorded history when mark is None (the counter seed) —
     per site, by status and, for failures, by error component class.
     Rows are deduplicated across the active and archived tables."""
+    site_names = tuple(sorted({str(site) for site in sites or ()}))
+    if sites is not None and not site_names:
+        return []
     class_case = " ".join(
         f'WHEN "{c["code"]}" > 0 THEN \'{c["name"]}\''
         for c in ERROR_COMPONENTS
@@ -302,6 +320,13 @@ def _terminal_outcome_rows(mark, until):
     if mark is not None:
         bounds = f'"endtime" > %s AND {bounds}'
         params = [mark, *params]
+    if sites is not None:
+        site_placeholders = ", ".join(["%s"] * len(site_names))
+        bounds = (
+            f"{bounds} AND COALESCE(\"computingsite\", 'unknown') "
+            f"IN ({site_placeholders})"
+        )
+        params.extend(site_names)
     sql = f"""
         SELECT COALESCE("computingsite", 'unknown'), "jobstatus",
                CASE WHEN "jobstatus" = 'failed'
@@ -330,7 +355,8 @@ def _accumulate_outcomes(scope_cum, site_cums, rows):
         count = int(count or 0)
         if not count:
             continue
-        scope_cum[status] = int(scope_cum.get(status) or 0) + count
+        if scope_cum is not None:
+            scope_cum[status] = int(scope_cum.get(status) or 0) + count
         entry = site_cums.setdefault(
             str(site or "unknown"), {"cum": {}, "classes": {}})
         entry["cum"][status] = (
@@ -383,11 +409,32 @@ def _count_map(values, label, maximum):
     return result
 
 
+def _bounded_site_names(
+    names: Iterable[str],
+    required: Iterable[str],
+    ranking_key,
+) -> list[str]:
+    """Retain every required site, then fill remaining bounded slots."""
+    required = {str(name) for name in required}
+    if len(required) > MAX_SITES:
+        raise ValueError(
+            f"required Canary queues exceed {MAX_SITES} entries"
+        )
+    ranked = sorted({str(name) for name in names} | required, key=ranking_key)
+    selected = set(required)
+    for name in ranked:
+        if len(selected) >= MAX_SITES:
+            break
+        selected.add(name)
+    return [name for name in ranked if name in selected]
+
+
 def panda_projection(
     activity: Optional[dict] = None,
     in_flight_activity: Optional[list[dict]] = None,
     in_flight_task_activity: Optional[list[dict]] = None,
     terminal_outcome_rows: Optional[list] = None,
+    catalog_sites: Optional[Iterable[str]] = None,
 ) -> tuple[dict, datetime]:
     """Build the bounded revision-driving PanDA activity projection."""
     observed_at = timezone.now()
@@ -409,6 +456,18 @@ def panda_projection(
         if in_flight_task_activity is not None
         else _in_flight_task_activity()
     )
+    catalog_site_names = {
+        str(name)
+        for name in (
+            catalog_sites
+            if catalog_sites is not None
+            else _canary_queue_names()
+        )
+    }
+    if len(catalog_site_names) > MAX_SITES:
+        raise ValueError(
+            f"required Canary queues exceed {MAX_SITES} entries"
+        )
 
     jobs_by_status = _count_map(
         jobs.get("by_status"), "job statuses", MAX_STATUSES
@@ -514,40 +573,58 @@ def panda_projection(
             f"in-flight task statuses exceed {MAX_STATUSES} entries"
         )
 
-    ranked_task_sites = sorted(
+    ranked_task_sites = _bounded_site_names(
         current_task_sites,
-        key=lambda name: (
+        catalog_site_names,
+        lambda name: (
             -int(current_task_sites[name]["in_flight_tasks"]),
             name,
-        ),
-    )[:MAX_SITES]
+        ) if name in current_task_sites else (0, name),
+    )
     task_sites = {
         name: {
             "in_flight_tasks_now": int(
-                current_task_sites[name]["in_flight_tasks"]
+                (current_task_sites.get(name) or {}).get(
+                    "in_flight_tasks"
+                ) or 0
             ),
-            "by_status_now": current_task_sites[name]["by_status"],
+            "by_status_now": (
+                (current_task_sites.get(name) or {}).get("by_status") or {}
+            ),
         }
         for name in ranked_task_sites
     }
 
     scope_cum, site_cums, mark = _previous_counters()
+    missing_catalog_counters = catalog_site_names - set(site_cums)
+    if mark is not None and missing_catalog_counters:
+        historical_rows = _terminal_outcome_rows(
+            None, mark, sites=missing_catalog_counters
+        )
+        _accumulate_outcomes(None, site_cums, historical_rows)
     outcome_rows = (
         terminal_outcome_rows
         if terminal_outcome_rows is not None
         else _terminal_outcome_rows(mark, observed_at)
     )
     _accumulate_outcomes(scope_cum, site_cums, outcome_rows)
+    for name in catalog_site_names:
+        counters = site_cums.setdefault(
+            name, {"cum": {}, "classes": {}}
+        )
+        for status in TERMINAL_JOB_STATUSES:
+            counters["cum"].setdefault(status, 0)
 
-    site_names = set(recent_sites) | set(current_sites)
-    ranked_sites = sorted(
+    site_names = set(recent_sites) | set(current_sites) | catalog_site_names
+    ranked_sites = _bounded_site_names(
         site_names,
-        key=lambda name: (
+        catalog_site_names,
+        lambda name: (
             -int((current_sites.get(name) or {}).get("in_flight_jobs") or 0),
             -int((recent_sites.get(name) or {}).get("total") or 0),
             name,
         ),
-    )[:MAX_SITES]
+    )
     sites = {}
     for name in ranked_sites:
         recent = recent_sites.get(name) or {}
