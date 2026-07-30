@@ -708,13 +708,15 @@ _SITE_CACHE = {'at': None, 'sites': ()}
 
 
 def _panda_sites():
-    """Sites in the latest snap's PanDA component (union of the job
-    and task site maps, current in-flight jobs first), cached briefly.
-    The list drives the per-site families and the Site focus options;
-    a site drops out when it leaves the component's bounded ranked
-    maps."""
+    """Queue names from current PanDA activity plus Canary's queue list.
+
+    Canary queues whose names contain ``test`` are deliberately excluded.
+    Current in-flight jobs still determine the display order. The union is
+    cached briefly and drives the per-queue families and Site focus options.
+    """
     from django.utils import timezone
 
+    from canary.store.models import Queue as CanaryQueue
     from snapper_ai.models import SystemSnap
 
     now = timezone.now()
@@ -728,8 +730,12 @@ def _panda_sites():
               .get('panda') or {}).get('data') or {})
     job_sites = (panda.get('jobs') or {}).get('sites') or {}
     task_sites = (panda.get('tasks') or {}).get('sites') or {}
+    canary_sites = set(
+        CanaryQueue.objects
+        .exclude(name__icontains='test')
+        .values_list('name', flat=True))
     sites = tuple(sorted(
-        set(job_sites) | set(task_sites),
+        set(job_sites) | set(task_sites) | canary_sites,
         key=lambda site: (-int((job_sites.get(site) or {})
                                .get('in_flight_jobs_now') or 0), site)))
     _SITE_CACHE.update({'sites': sites, 'at': now})
