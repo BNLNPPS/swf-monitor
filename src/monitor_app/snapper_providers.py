@@ -543,10 +543,11 @@ def _testbed_curve_label(curve_id):
 
 
 EPICPROD_GROUPS = (
-    {'name': 'In-flight jobs', 'prefixes': ['job_'],
+    {'name': 'In-flight jobs', 'title': 'Jobs', 'prefixes': ['job_'],
      'ids': ['jobs_total', 'running_cores']},
     {'name': 'Tasks', 'prefixes': ['task_'], 'ids': ['tasks_total']},
-    {'name': 'In-flight job types', 'prefixes': ['type_'], 'ids': []},
+    {'name': 'In-flight job types', 'title': 'Job types',
+     'prefixes': ['type_'], 'ids': []},
     {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
 )
 
