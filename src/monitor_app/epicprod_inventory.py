@@ -5,6 +5,7 @@ import os
 import re
 from io import StringIO
 from pathlib import PurePosixPath
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.db import OperationalError, ProgrammingError, transaction
@@ -256,7 +257,130 @@ def _rucio_conflict_details(text):
     return detail, data
 
 
-def _timeline_from_log_text(text):
+def _rucio_transfer_details(text):
+    """Extract the failed Rucio operation and its actual storage target."""
+    out_rses = re.findall(
+        r'(?m)^\s*(?:export\s+)?OUT_RSE\s*=\s*[\'"]?([^\'"\s]+)',
+        text,
+    )
+    out_rse = out_rses[-1] if out_rses else ''
+    attempts = []
+    current = None
+    for line in text.splitlines():
+        match = re.search(r'Trying upload with (\S+) to (\S+)', line)
+        if match:
+            current = {
+                'protocol': match.group(1).lower(),
+                'rse': match.group(2),
+                'endpoint': '',
+                'failed': False,
+            }
+            attempts.append(current)
+            continue
+        if current and 'Successful upload of temporary file.' in line:
+            url_match = re.search(r'((?:root|https?|davs)://\S+)', line)
+            if url_match:
+                current['endpoint'] = (
+                    urlparse(url_match.group(1)).hostname or '')
+        if current and (
+                'Upload attempt failed' in line
+                or 'RSE checksum unavailable' in line
+                or 'RSEChecksumUnavailable' in line):
+            current['failed'] = True
+
+    failed_attempts = [attempt for attempt in attempts if attempt['failed']]
+    relevant = failed_attempts or attempts
+    rse = next(
+        (attempt['rse'] for attempt in reversed(relevant)
+         if attempt.get('rse')),
+        out_rse,
+    )
+    endpoints = list(dict.fromkeys(
+        attempt['endpoint'] for attempt in relevant
+        if attempt.get('endpoint')
+    ))
+    protocols_failed = list(dict.fromkeys(
+        attempt['protocol'] for attempt in failed_attempts
+        if attempt.get('protocol')
+    ))
+
+    conflict = _rucio_conflict_details(text)
+    if not rse:
+        copy_match = re.search(
+            r'Found COPYING replica .* on (\S+)\s+[—-]\s+deleting',
+            text,
+        )
+        if copy_match:
+            rse = copy_match.group(1)
+
+    checksum_unavailable = bool(
+        re.search(
+            r'(?:RSE checksum unavailable|RSEChecksumUnavailable|'
+            r'Could not get the checksum)',
+            text,
+            re.IGNORECASE,
+        )
+    )
+    upload_failed = bool(
+        re.search(
+            r'(?:Upload attempt failed|NoFilesUploaded|'
+            r'None of the given files have been uploaded)',
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+    operation = ''
+    cause_layer = 'unknown'
+    cause_confidence = 'unresolved'
+    failure_summary = ''
+    if checksum_unavailable:
+        operation = 'remote_checksum'
+        cause_layer = 'storage'
+        cause_confidence = (
+            'confirmed' if rse and endpoints
+            else 'supported' if rse
+            else 'unresolved'
+        )
+        target = rse or (endpoints[0] if endpoints else 'remote storage')
+        if rse and endpoints:
+            target = f'{rse} at {endpoints[0]}'
+        protocols = (
+            f" over {' and '.join(protocols_failed)}"
+            if protocols_failed else ''
+        )
+        failure_summary = f'{target} remote checksum unavailable{protocols}'
+    elif conflict:
+        operation = 'rucio_replica_conflict'
+        cause_layer = 'data_management'
+        cause_confidence = 'confirmed' if rse else 'supported'
+        failure_summary = conflict[0]
+        if rse:
+            failure_summary = f'{rse}: {failure_summary}'
+    elif upload_failed:
+        operation = 'output_upload'
+        cause_layer = 'storage'
+        cause_confidence = (
+            'supported' if rse or endpoints else 'unresolved')
+        target = rse or (endpoints[0] if endpoints else 'remote storage')
+        failure_summary = f'Output upload failed at {target}'
+
+    return {
+        'operation': operation,
+        'rse': rse,
+        'endpoint': endpoints[0] if endpoints else '',
+        'protocols_failed': protocols_failed,
+        'cause_layer': cause_layer,
+        'cause_entity': rse or (endpoints[0] if endpoints else ''),
+        'cause_confidence': cause_confidence,
+        'failure_summary': failure_summary,
+        'conflict': conflict,
+        'attempted': bool(attempts or 'register_to_rucio.py' in text),
+    }
+
+
+def _timeline_from_log_text(text, transfer=None):
+    transfer = transfer or _rucio_transfer_details(text)
     events = []
     if 'Finished processing.' in text:
         events.append({'phase': 'reconstruction_complete',
@@ -266,14 +390,31 @@ def _timeline_from_log_text(text):
         events.append({'phase': 'reco_validation_passed',
                        'message': 'RECO ROOT file validation passed',
                        'path': valid.group(1)})
-    if 'register_to_rucio.py' in text:
-        events.append({'phase': 'rucio_registration_attempted',
-                       'message': 'Payload attempted JLab Rucio registration'})
-    conflict = _rucio_conflict_details(text)
-    if conflict:
-        events.append({'phase': 'rucio_registration_failed',
-                       'message': conflict[0],
-                       'details': conflict[1]})
+    if transfer['attempted']:
+        details = {
+            key: transfer[key]
+            for key in ('rse', 'endpoint')
+            if transfer.get(key)
+        }
+        events.append({
+            'phase': 'output_registration_attempted',
+            'message': 'Payload attempted Rucio output registration',
+            'details': details,
+        })
+    if transfer['operation']:
+        details = {
+            key: transfer[key]
+            for key in (
+                'operation', 'rse', 'endpoint', 'protocols_failed',
+                'cause_layer', 'cause_entity', 'cause_confidence',
+            )
+            if transfer.get(key) not in ('', [], None)
+        }
+        events.append({
+            'phase': 'output_registration_failed',
+            'message': transfer['failure_summary'],
+            'details': details,
+        })
     return events
 
 
@@ -324,20 +465,58 @@ def cached_payload_log_texts(jeditaskid, pandaid):
 
 
 def diagnosis_from_log_texts(log_texts, job=None):
-    """Derive the ePIC production phase from payload log text."""
+    """Derive production phase and causal attribution from job evidence."""
     job = job or {}
     combined_log_text = '\n'.join(t for t in log_texts if t)
-    timeline = _timeline_from_log_text(combined_log_text)
-    conflict = _rucio_conflict_details(combined_log_text)
+    transfer = _rucio_transfer_details(combined_log_text)
+    timeline = _timeline_from_log_text(combined_log_text, transfer=transfer)
+    conflict = transfer.get('conflict')
 
     phase = ''
     failure_summary = ''
-    if conflict:
-        phase = 'rucio_registration_failed'
-        failure_summary = conflict[0]
+    operation = transfer['operation']
+    cause_layer = transfer['cause_layer']
+    cause_entity = transfer['cause_entity']
+    cause_confidence = transfer['cause_confidence']
+    if operation:
+        phase = 'output_registration'
+        failure_summary = transfer['failure_summary']
     elif timeline:
         phase = timeline[-1]['phase']
-    elif job.get('jobstatus') in ('failed', 'closed'):
+    else:
+        worker_diag = ' | '.join(str(job.get(key) or '') for key in (
+            'superrordiag', 'taskbuffererrordiag',
+            'piloterrordiag', 'jobdispatchererrordiag',
+        ))
+        worker_lower = worker_diag.lower()
+        site = str(job.get('computingsite') or '')
+        if 'backofflimitexceeded' in worker_lower:
+            phase = 'worker_execution'
+            operation = 'worker_backoff_limit'
+            cause_layer = 'compute'
+            cause_entity = site
+            cause_confidence = 'confirmed' if site else 'supported'
+            failure_summary = 'Worker reached its backoff limit'
+        elif 'imminent node shutdown' in worker_lower:
+            phase = 'worker_execution'
+            operation = 'node_shutdown'
+            cause_layer = 'compute'
+            cause_entity = site
+            cause_confidence = 'confirmed' if site else 'supported'
+            failure_summary = 'Worker terminated for imminent node shutdown'
+        elif 'kill by ' in worker_lower:
+            phase = 'operator_cancelled'
+            operation = 'operator_cancel'
+            cause_layer = 'operator'
+            cause_entity = str(job.get('produsername') or '')
+            cause_confidence = 'confirmed'
+            failure_summary = next(
+                (str(job.get(key) or '').strip() for key in (
+                    'taskbuffererrordiag', 'piloterrordiag')
+                 if 'kill by ' in str(job.get(key) or '').lower()),
+                'Job cancelled by operator',
+            )
+    if not phase and job.get('jobstatus') in ('failed', 'closed', 'cancelled'):
         phase = 'failed'
         failure_summary = (job.get('piloterrordiag') or '').strip()
 
@@ -347,36 +526,57 @@ def diagnosis_from_log_texts(log_texts, job=None):
         'failure_summary': failure_summary,
         'timeline': timeline,
         'conflict': conflict,
+        'operation': operation,
+        'rse': transfer['rse'],
+        'endpoint': transfer['endpoint'],
+        'protocols_failed': transfer['protocols_failed'],
+        'payload_completed': 'Finished processing.' in combined_log_text,
+        'validation_passed': bool(
+            re.search(r'(?:RECO ROOT file validation passed|✓\s+VALID:)',
+                      combined_log_text)),
+        'cause_layer': cause_layer,
+        'cause_entity': cause_entity,
+        'cause_confidence': cause_confidence,
         'guidance': (
             'Use phase/failure_summary as the production-facing diagnosis. '
-            'This is parsed from payload logs and app inventory, and can be '
-            'more specific than the top-level PanDA pilot error for '
-            'payload-managed input/output workflows.'
+            'Causal claims require cause_layer, cause_entity, and '
+            'cause_confidence from this structured evidence; execution site '
+            'or a top-level PanDA diagnostic alone is not causal attribution.'
         ),
     }
 
 
-def diagnosis_for_study_data(study_data, epicprod_job=None):
+def diagnosis_for_study_data(study_data, epicprod_job=None, fetch_logs=False):
     """Return persisted or cache-derived production diagnosis for a job page/tool."""
     if epicprod_job:
         data = epicprod_job.data or {}
-        return {
-            'available': True,
-            'phase': epicprod_job.phase,
-            'failure_summary': epicprod_job.failure_summary,
-            'timeline': data.get('timeline') or [],
-            'last_refreshed_at': (
-                epicprod_job.last_refreshed_at.isoformat()
-                if epicprod_job.last_refreshed_at else ''
-            ),
-            'source': 'epicprod_inventory',
-            'guidance': (
-                'Use phase/failure_summary as the production-facing diagnosis. '
-                'This is parsed from payload logs and app inventory, and can be '
-                'more specific than the top-level PanDA pilot error for '
-                'payload-managed input/output workflows.'
-            ),
-        }
+        stored = data.get('diagnosis') or {}
+        if stored or not fetch_logs:
+            return {
+                'available': True,
+                'phase': epicprod_job.phase,
+                'failure_summary': epicprod_job.failure_summary,
+                'timeline': data.get('timeline') or [],
+                'operation': stored.get('operation', ''),
+                'rse': stored.get('rse', ''),
+                'endpoint': stored.get('endpoint', ''),
+                'protocols_failed': stored.get('protocols_failed') or [],
+                'payload_completed': bool(stored.get('payload_completed')),
+                'validation_passed': bool(stored.get('validation_passed')),
+                'cause_layer': stored.get('cause_layer', 'unknown'),
+                'cause_entity': stored.get('cause_entity', ''),
+                'cause_confidence': stored.get(
+                    'cause_confidence', 'unresolved'),
+                'last_refreshed_at': (
+                    epicprod_job.last_refreshed_at.isoformat()
+                    if epicprod_job.last_refreshed_at else ''
+                ),
+                'source': 'epicprod_inventory',
+                'guidance': (
+                    'Causal claims require cause_layer, cause_entity, and '
+                    'cause_confidence from this structured evidence.'
+                ),
+            }
 
     job = study_data.get('job') or {}
     pandaid = study_data.get('pandaid') or job.get('pandaid')
@@ -385,9 +585,17 @@ def diagnosis_for_study_data(study_data, epicprod_job=None):
     log_texts = [log_analysis.get('log_excerpt') or '']
     cached_texts = cached_payload_log_texts(jeditaskid, pandaid)
     log_texts.extend(cached_texts)
+    fetched_texts = []
+    if fetch_logs and not cached_texts:
+        fetched_texts = _fetch_job_log_texts(pandaid)
+        log_texts.extend(fetched_texts)
     diagnosis = diagnosis_from_log_texts(log_texts, job=job)
     diagnosis['last_refreshed_at'] = ''
-    diagnosis['source'] = 'payload_log_cache' if cached_texts else 'study_job'
+    diagnosis['source'] = (
+        'payload_log_cache' if cached_texts
+        else 'live_payload_logs' if fetched_texts
+        else 'study_job'
+    )
     return diagnosis
 
 
@@ -425,6 +633,14 @@ def sync_job_from_study_data(study_data):
             if k in job
         },
         'timeline': timeline,
+        'diagnosis': {
+            key: _jsonable(diagnosis.get(key))
+            for key in (
+                'operation', 'rse', 'endpoint', 'protocols_failed',
+                'payload_completed', 'validation_passed', 'cause_layer',
+                'cause_entity', 'cause_confidence',
+            )
+        },
         'log_analysis': _jsonable(log_analysis),
     }
 

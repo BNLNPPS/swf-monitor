@@ -288,7 +288,7 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_error_summary",
-            "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows most common errors with affected tasks, users, sites.",
+            "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows task/site distributions and representative PandaIDs for evidence-based causal drill-down.",
             "parameters": ["days", "username", "site", "taskid", "error_source", "limit"],
         },
         {

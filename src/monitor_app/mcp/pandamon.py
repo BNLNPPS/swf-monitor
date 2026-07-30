@@ -47,7 +47,8 @@ def _study_job_sync(pandaid):
         return result
     from monitor_app.models import EpicProdJob
     row = EpicProdJob.objects.filter(pandaid=pandaid).first()
-    result['epicprod_diagnosis'] = diagnosis_for_study_data(result, epicprod_job=row)
+    result['epicprod_diagnosis'] = diagnosis_for_study_data(
+        result, epicprod_job=row, fetch_logs=True)
     result['ai_content'] = ai_content_retrieval_guidance(row.data if row else {})
     return result
 
@@ -242,7 +243,12 @@ async def panda_error_summary(
         total_errors: Total error occurrences across all components.
         errors: Ranked list of error patterns, each with:
             error_source, error_code, error_diag, count,
-            task_count, users, sites, destination_sites.
+            task_count, users, sites, destination_sites, site_counts,
+            task_counts, site_task_counts, representative_pandaids, multi_site.
+            A compute site is an execution location, not causal attribution.
+            Before assigning cause, inspect a representative_pandaid from the
+            exact pattern with panda_study_job and use its structured
+            epicprod_diagnosis.
     """
     return await sync_to_async(queries.error_summary)(
         days=days, username=username, site=site,

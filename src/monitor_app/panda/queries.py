@@ -950,6 +950,47 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     }
 
 
+def _error_distribution_views(site_task_counts):
+    """Normalize one error pattern's task/site correlations for MCP output."""
+    if isinstance(site_task_counts, str):
+        site_task_counts = json.loads(site_task_counts)
+    normalized = []
+    site_totals = {}
+    task_totals = {}
+    representative_pandaids = []
+    for item in site_task_counts or []:
+        distribution = dict(item)
+        distribution_count = int(distribution.get('count') or 0)
+        distribution['count'] = distribution_count
+        distribution_site = distribution.get('site') or ''
+        distribution_task = distribution.get('taskid')
+        site_totals[distribution_site] = (
+            site_totals.get(distribution_site, 0) + distribution_count)
+        task_totals[distribution_task] = (
+            task_totals.get(distribution_task, 0) + distribution_count)
+        representative = distribution.get('representative_pandaid')
+        if representative and representative not in representative_pandaids:
+            representative_pandaids.append(representative)
+        normalized.append(distribution)
+    site_counts = [
+        {'site': distribution_site, 'count': count}
+        for distribution_site, count in sorted(
+            site_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    task_counts = [
+        {'taskid': distribution_task, 'count': count}
+        for distribution_task, count in sorted(
+            task_totals.items(), key=lambda item: (-item[1], str(item[0])))
+    ]
+    return {
+        'site_counts': site_counts,
+        'task_counts': task_counts,
+        'site_task_counts': normalized,
+        'representative_pandaids': representative_pandaids,
+        'multi_site': len(site_counts) > 1,
+    }
+
+
 def error_summary(days=10, username=None, site=None, destinationse=None,
                   taskid=None, error_source=None, limit=20,
                   ended_after=None, ended_before=None, status=None,
@@ -1042,6 +1083,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             SELECT e.error_source,
                    e.error_code,
                    e.error_diag,
+                   j."pandaid",
                    j."jeditaskid",
                    j."produsername",
                    j."computingsite",
@@ -1064,24 +1106,65 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
 
     union_sql = ' UNION ALL '.join(parts)
     sql = f"""
-        SELECT error_source, error_code,
-               LEFT(error_diag, 256) as error_diag,
-               COUNT(*) as count,
-               COUNT(DISTINCT jeditaskid) as task_count,
-               array_agg(DISTINCT produsername) as users,
-               array_agg(DISTINCT computingsite) as sites,
-               array_agg(DISTINCT destinationse) as destination_sites,
-               AVG(EXTRACT(EPOCH FROM (endtime - starttime)))
-                   FILTER (WHERE starttime IS NOT NULL
-                             AND endtime IS NOT NULL
-                             AND endtime >= starttime)
-                   as avg_seconds_to_error,
-               COUNT(*) FILTER (WHERE starttime IS NULL)
-                   as never_started_count
-        FROM ({union_sql}) errs
-        GROUP BY error_source, error_code, LEFT(error_diag, 256)
-        ORDER BY count DESC
-        LIMIT %s
+        WITH errs AS ({union_sql}),
+        pattern_totals AS (
+            SELECT error_source, error_code,
+                   COALESCE(LEFT(error_diag, 256), '') as error_diag,
+                   COUNT(*) as count,
+                   COUNT(DISTINCT jeditaskid) as task_count,
+                   array_agg(DISTINCT produsername) as users,
+                   array_agg(DISTINCT computingsite) as sites,
+                   array_agg(DISTINCT destinationse) as destination_sites,
+                   AVG(EXTRACT(EPOCH FROM (endtime - starttime)))
+                       FILTER (WHERE starttime IS NOT NULL
+                                 AND endtime IS NOT NULL
+                                 AND endtime >= starttime)
+                       as avg_seconds_to_error,
+                   COUNT(*) FILTER (WHERE starttime IS NULL)
+                       as never_started_count
+            FROM errs
+            GROUP BY error_source, error_code,
+                     COALESCE(LEFT(error_diag, 256), '')
+            ORDER BY count DESC
+            LIMIT %s
+        ),
+        site_task_distribution AS (
+            SELECT e.error_source, e.error_code,
+                   COALESCE(LEFT(e.error_diag, 256), '') as error_diag,
+                   e.computingsite, e.jeditaskid,
+                   COUNT(*) as count,
+                   MAX(e.pandaid) as representative_pandaid
+            FROM errs e
+            JOIN pattern_totals p
+              ON p.error_source = e.error_source
+             AND p.error_code = e.error_code
+             AND p.error_diag = COALESCE(LEFT(e.error_diag, 256), '')
+            GROUP BY e.error_source, e.error_code,
+                     COALESCE(LEFT(e.error_diag, 256), ''),
+                     e.computingsite, e.jeditaskid
+        )
+        SELECT p.error_source, p.error_code, p.error_diag,
+               p.count, p.task_count, p.users, p.sites,
+               p.destination_sites, p.avg_seconds_to_error,
+               p.never_started_count,
+               COALESCE((
+                   SELECT jsonb_agg(
+                       jsonb_build_object(
+                           'site', d.computingsite,
+                           'taskid', d.jeditaskid,
+                           'count', d.count,
+                           'representative_pandaid',
+                               d.representative_pandaid
+                       )
+                       ORDER BY d.count DESC, d.computingsite, d.jeditaskid
+                   )
+                   FROM site_task_distribution d
+                   WHERE d.error_source = p.error_source
+                     AND d.error_code = p.error_code
+                     AND d.error_diag = p.error_diag
+               ), '[]'::jsonb) as site_task_counts
+        FROM pattern_totals p
+        ORDER BY p.count DESC
     """
     all_params.append(limit)
 
@@ -1096,6 +1179,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
     errors = []
     total = 0
     for row in rows:
+        distribution_views = _error_distribution_views(row[10])
         entry = {
             'error_source': row[0],
             'error_code': row[1],
@@ -1112,7 +1196,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'avg_seconds_to_error': (round(float(row[8]), 1)
                                      if row[8] is not None else None),
             'never_started_count': row[9] or 0,
+            'attribution_guidance': (
+                'computingsite is the execution location, not causal '
+                'attribution; inspect a representative_pandaid with '
+                'panda_study_job before assigning cause.'
+            ),
         }
+        entry.update(distribution_views)
         total += row[3]
         errors.append(entry)
 
