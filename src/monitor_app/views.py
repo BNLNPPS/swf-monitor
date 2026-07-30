@@ -3336,9 +3336,11 @@ def prod_hub(request):
             'active_tab': 'ops',
             'dashboard': build_dashboard(prefs.get('panel_order')),
             'can_save_layout': bool(username),
+            'nav_mode': 'production',
         })
     context = pcs_hub_counts()
     context['active_tab'] = 'nav'
+    context['nav_mode'] = 'production'
     # The two corun counts are remote REST calls; served as a cached
     # product (docs/CACHED_PRODUCTS.md) so the Nav tab renders from the
     # store and stale rebuilds run behind the response.
@@ -3766,7 +3768,7 @@ def testbed_hub(request):
             raise RuntimeError(ctx['error'])
         return ctx
 
-    context = {}
+    context = {'nav_mode': 'testbed'}
     try:
         product = get_product(
             'snapper_embed:v2:testbed:7', build, ttl_seconds=300,

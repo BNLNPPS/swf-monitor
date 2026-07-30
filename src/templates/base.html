@@ -7,9 +7,15 @@
     <title>{% block title %}SWF Monitor{% endblock %}</title>
     <script>
     (function() {
+        var routeMode = '{{ nav_mode|default:""|escapejs }}';
         var mode = 'production';
         try {
-            mode = localStorage.getItem('navMode') || 'production';
+            if (routeMode === 'testbed' || routeMode === 'production') {
+                mode = routeMode;
+                localStorage.setItem('navMode', mode);
+            } else {
+                mode = localStorage.getItem('navMode') || 'production';
+            }
         } catch (e) {}
         if (mode !== 'testbed') mode = 'production';
         document.documentElement.setAttribute('data-nav-mode', mode);
@@ -539,7 +545,8 @@ function applyNavMode(mode) {
     if (fp) fp.classList.toggle('nav-active', mode === 'production');
 }
 (function() {
-    var mode = localStorage.getItem('navMode') || 'production';
+    var mode = document.documentElement.getAttribute('data-nav-mode')
+            || 'production';
     applyNavMode(mode);
 })();
 (function() {
