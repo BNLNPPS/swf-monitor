@@ -1666,6 +1666,7 @@ def register_snapper_providers():
         curve_label=_epicprod_curve_label,
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
+        scope_curve_groups=EPICPROD_GROUPS,
         focus_view=(_delivery_focus_view, _site_focus_view),
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card},
