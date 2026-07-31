@@ -334,6 +334,12 @@ class StfFileViewSet(viewsets.ModelViewSet):
     pagination_class = _OptInLimitPagination
 
     def get_queryset(self):
+        # Typed filter values must be validated here: a malformed value fed
+        # straight into .filter() raises django ValidationError, which DRF
+        # reports as a 500 — a client sending ?workflow_id=<execution id>
+        # took the endpoint down for every caller until restart.
+        from uuid import UUID
+        from rest_framework.exceptions import ValidationError as DRFValidationError
         qs = super().get_queryset()
         params = self.request.query_params
         stf_filename = (params.get('stf_filename') or '').strip()
@@ -341,12 +347,21 @@ class StfFileViewSet(viewsets.ModelViewSet):
             qs = qs.filter(stf_filename=stf_filename)
         run_number = (params.get('run_number') or '').strip()
         if run_number:
+            if not run_number.isdigit():
+                raise DRFValidationError(
+                    {'run_number': 'must be an integer run number'})
             qs = qs.filter(run__run_number=run_number)
         status_value = (params.get('status') or '').strip()
         if status_value:
             qs = qs.filter(status=status_value)
         workflow_id = (params.get('workflow_id') or '').strip()
         if workflow_id:
+            try:
+                UUID(workflow_id)
+            except ValueError:
+                raise DRFValidationError(
+                    {'workflow_id': 'must be a UUID; to select a '
+                     "workflow's files filter by run_number/status"})
             qs = qs.filter(workflow_id=workflow_id)
         return qs
 
