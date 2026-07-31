@@ -123,6 +123,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "rest_framework.authtoken",
+    "django_filters",  # DRF filter backend for filterset_fields
     "django_seed",
     "django_extensions",
 ]
@@ -274,6 +275,12 @@ REST_FRAMEWORK = {
     # or allow read-only access for unauthenticated users.
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.DjangoModelPermissionsOrAnonReadOnly"
+    ],
+    # Makes filterset_fields declarations on ViewSets effective. Without
+    # this backend they are silently ignored and filtered list requests
+    # return the whole table.
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend"
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_RENDERER_CLASSES": [

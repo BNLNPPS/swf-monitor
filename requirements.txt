@@ -16,6 +16,7 @@ mattermostdriver>=7.3.2
 python-jose>=3.5.0
 django-seed>=0.3.1
 djangorestframework>=3.16.0
+django-filter>=25.1
 docopt>=0.6.2
 drf-spectacular>=0.28.0
 hyperlink>=21.0.0
