@@ -237,8 +237,9 @@ async def swf_list_messages(
         execution_id: Filter to messages for this workflow execution
         agent: Filter to messages from this sender agent
         message_type: Filter by type (e.g., 'stf_gen', 'start_run')
-        start_time: Filter messages sent >= this ISO datetime (default: last 1 hour)
-        end_time: Filter messages sent <= this ISO datetime
+        start_time: Filter messages sent >= this ISO datetime (default: last 1 hour).
+            Times without a timezone offset are read as UTC.
+        end_time: Filter messages sent <= this ISO datetime. Naive times are UTC.
 
     Returns list of messages (max 200) with: message_type, sender_agent, namespace,
     sent_at, execution_id, run_id, payload_summary
