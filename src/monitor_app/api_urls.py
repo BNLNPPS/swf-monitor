@@ -56,6 +56,7 @@ urlpatterns = [
     # See monitor_app/panda/api.py.
     path('panda/tasks/', panda_api.tasks_list, name='panda-api-tasks-list'),
     path('panda/tasks/<int:jeditaskid>/', panda_api.task_detail, name='panda-api-task-detail'),
+    path('panda/jobs/', panda_api.jobs_list, name='panda-api-jobs-list'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
     path('users/', users_list, name='users-list'),
     # Episode ingest (token-authenticated writes from the episode

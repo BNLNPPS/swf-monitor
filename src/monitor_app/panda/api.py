@@ -117,6 +117,67 @@ def tasks_list(request):
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([AllowAny])
+def jobs_list(request):
+    """GET /api/panda/jobs/ — list PanDA jobs.
+
+    Query params:
+        days (int, default 7)   — modificationtime window
+        status (str)            — jobstatus filter
+        username (str, supports %)
+        site (str, supports %)  — computingsite
+        taskid (int)            — jeditaskid; scoping to a task returns
+                                  its complete job population by default
+        reqid (int)
+        limit (int)             — explicit values always honored
+        before_id (int)         — cursor
+
+    Returns:
+        { items, total_count, has_more, next_before_id, summary, filters }
+        Each job carries creation, start, and end times, site, and
+        output metadata — the per-worker record.
+    """
+    days, err = _int_param(request, 'days', default=7, min_value=1)
+    if err:
+        return err
+    taskid, err = _int_param(request, 'taskid')
+    if err:
+        return err
+    reqid, err = _int_param(request, 'reqid')
+    if err:
+        return err
+    limit, err = _int_param(request, 'limit', min_value=1)
+    if err:
+        return err
+    before_id, err = _int_param(request, 'before_id')
+    if err:
+        return err
+
+    result = queries.list_jobs(
+        days=days,
+        status=request.query_params.get('status'),
+        username=request.query_params.get('username'),
+        site=request.query_params.get('site'),
+        taskid=taskid,
+        reqid=reqid,
+        limit=limit,
+        before_id=before_id,
+    )
+    if 'error' in result:
+        return Response(result, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'items': result['jobs'],
+        'total_count': result['total_in_window'],
+        'has_more': result['pagination']['has_more'],
+        'next_before_id': result['pagination']['next_before_id'],
+        'summary': result['summary'],
+        'filters': result['filters'],
+    })
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([AllowAny])
 def task_detail(request, jeditaskid):
     """GET /api/panda/tasks/<jeditaskid>/ — one task with per-task job counts."""
     task = queries.get_task(jeditaskid)
