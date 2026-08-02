@@ -18,6 +18,9 @@ from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
                                   snapper_latest, snapper_state_at,
                                   system_status_history)
+from .viewdir.snapper_episodes_api import (episode_detail_view,
+                                           episodes_append, episodes_close,
+                                           episodes_list_view, episodes_open)
 
 router = DefaultRouter()
 router.register(r'systemagents', SystemAgentViewSet, basename='systemagent')
@@ -55,6 +58,17 @@ urlpatterns = [
     path('panda/tasks/<int:jeditaskid>/', panda_api.task_detail, name='panda-api-task-detail'),
     path('panda/activity/', panda_api.activity, name='panda-api-activity'),
     path('users/', users_list, name='users-list'),
+    # Episode ingest (token-authenticated writes from the episode
+    # builder agent) and read surfaces; snapper_episodes_api.py.
+    path('snapper/episodes/open/', episodes_open, name='snapper-episodes-open'),
+    path('snapper/episodes/append/', episodes_append,
+         name='snapper-episodes-append'),
+    path('snapper/episodes/close/', episodes_close,
+         name='snapper-episodes-close'),
+    path('snapper/<str:scope>/episodes/', episodes_list_view,
+         name='snapper-episodes-list'),
+    path('snapper/<str:scope>/episodes/<str:episode_id>/',
+         episode_detail_view, name='snapper-episode-detail'),
     path('snapper/<str:scope>/latest/', snapper_latest,
          name='snapper-latest'),
     path('snapper/<str:scope>/state-at/', snapper_state_at,
