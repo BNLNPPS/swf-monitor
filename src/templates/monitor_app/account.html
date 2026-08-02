@@ -40,6 +40,17 @@
 
     {% if active_tab == 'workflows' %}
     <div class="user-tab-panel">
+        <!-- Snapper state history: testbed activity lanes over the last 7 days -->
+        <div class="card mb-4">
+            <div class="card-header"><strong>Time history</strong>
+                {% if snapper_embed.report_query %}
+                <a class="ms-3" href="{% url 'snapper_ai:snapper_report' scope=snapper_embed.scope %}?{{ snapper_embed.report_query }}">Open in Snapper</a>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+            </div>
+        </div>
         {% if not user.is_authenticated %}
         <p>Sign in to see your workflows.</p>
         {% else %}

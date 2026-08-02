@@ -218,6 +218,34 @@ def account_view(request):
     active_tab = request.GET.get('tab', 'workflows')
     if active_tab not in ('workflows', 'account'):
         active_tab = 'workflows'
+
+    snapper_embed = None
+    if active_tab == 'workflows':
+        try:
+            from datetime import timedelta
+
+            from snapper_ai.embed import embed_context
+
+            from .cached_product import get_product
+
+            def _build():
+                end = timezone.now()
+                ctx = embed_context('testbed', end - timedelta(days=7), end,
+                                    lanes=True)
+                if ctx.get('error'):
+                    raise RuntimeError(ctx['error'])
+                return ctx
+
+            product = get_product('snapper_embed:v1:testbed:lanes:7', _build,
+                                  ttl_seconds=300,
+                                  refresh=request.GET.get('refresh') == '1')
+            snapper_embed = product['value'] or {
+                'scope': 'testbed',
+                'error': 'state history is building — reload shortly.'}
+        except Exception as exc:
+            logger.error('snapper embed failed for account page: %s', exc)
+            snapper_embed = {'scope': 'testbed', 'error': str(exc)}
+
     return render(request, 'monitor_app/account.html', {
         'form': form,
         'user': request.user,
@@ -225,6 +253,7 @@ def account_view(request):
         'my_tasks': my_tasks,
         'my_tasks_error': my_tasks_error,
         'active_tab': active_tab,
+        'snapper_embed': snapper_embed,
     })
 
 
