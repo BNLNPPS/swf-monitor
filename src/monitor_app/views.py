@@ -319,11 +319,22 @@ class AgentWorkflowStageViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 class WorkflowMessageViewSet(viewsets.ModelViewSet):
-    """API endpoint for Workflow Messages."""
+    """API endpoint for Workflow Messages.
+
+    ?execution_id= narrows to one workflow execution's messages in
+    sent order — the episode backfill's read path.
+    """
     queryset = WorkflowMessage.objects.all()
     serializer_class = WorkflowMessageSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        qs = WorkflowMessage.objects.all()
+        execution_id = self.request.query_params.get('execution_id')
+        if execution_id:
+            qs = qs.filter(execution_id=execution_id).order_by('sent_at')
+        return qs
 
 
 class AppLogViewSet(viewsets.ModelViewSet):
