@@ -76,15 +76,11 @@ def capcom_state(request):
                 failed += int(count or 0)
         decided = finished + failed
         pct = round(100.0 * finished / decided, 1) if decided else None
-        value = f'{running_jobs} running'
+        value = f'{running_jobs} jobs'
         if pct is not None:
-            value += f' · {pct:g}% ok/12h'
-        entry = {'source': 'swf-panda', 'value': value,
-                 'url': f'{REMOTE_FACE}/panda/jobs/'}
-        if pct is not None:
-            entry['color'] = ('green' if pct >= 90
-                              else 'yellow' if pct >= 50 else 'red')
-        states.append(entry)
+            value += f' · {pct:.0f}%'
+        states.append({'source': 'swf-panda', 'value': value,
+                       'url': f'{REMOTE_FACE}/panda/jobs/'})
         detail['panda'] = {
             'running_jobs': running_jobs,
             'finished_12h': finished,
