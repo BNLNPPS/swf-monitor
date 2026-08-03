@@ -115,6 +115,17 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 
 ## REST API Endpoints
 
+### Capcom state
+- `GET /api/capcom/state/` - Display-ready SWF state for the tjai Capcom
+  page. `states` carries tile-exact entries shaped as tjai's
+  `capcom.set_state(source, value, color, url)` expects: `swf-system`
+  (the cached System page verdict) and `swf-panda` (running jobs now
+  with the success percentage over the trailing 12 hours). `detail`
+  carries the numbers behind them. Open read, polled every few minutes;
+  externally reachable through the swf-remote proxy
+  (`/prod/api/capcom/state/`). Each section degrades independently,
+  contributing an UNAVAILABLE tile and `error_text` on failure.
+
 ### System Agents
 - `GET /api/systemagents/` - List all agents
 - `POST /api/systemagents/` - Create new agent
