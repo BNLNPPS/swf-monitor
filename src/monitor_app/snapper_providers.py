@@ -1555,7 +1555,19 @@ def _activity_card(key):
                 info = {'run_number': arc['run_number'],
                         'workflow': arc['workflow'],
                         'execution_id': arc['execution']}
+                episode_id = ''
+                if arc['execution']:
+                    # A live episode links like a finished one: watching
+                    # a workflow unfold is the view's purpose. Integrity
+                    # comes from the builder never orphaning a record,
+                    # not from hiding in-progress ones.
+                    from snapper_ai.models import Episode
+                    if Episode.objects.filter(
+                            scope='testbed',
+                            episode_id=arc['execution']).exists():
+                        episode_id = arc['execution']
                 return {'kind': 'run_story',
+                        'episode_id': episode_id,
                         'namespace': namespace,
                         'workflow': arc['workflow'],
                         'run_number': arc['run_number'],

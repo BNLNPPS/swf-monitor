@@ -23,6 +23,9 @@
     <strong>{{ card.namespace }}</strong> &middot; {{ card.workflow }} &middot;
     <a href="{% url 'monitor_app:run_detail' run_number=card.run_number %}">run {{ card.run_number }}</a>
     {% if card.execution_id %}<span class="text-muted">&middot; {{ card.execution_id }}</span>{% endif %}
+    {% if card.episode_id %}&middot;
+    <a href="{% url 'snapper_ai:snapper_episode' scope='testbed' episode_id=card.episode_id %}">workflow viewer</a>
+    {% endif %}
   </div>
   <div class="text-muted small mb-2">{% if card.started %}started {{ card.started|fmt_dt }}{% endif %}{% if card.ended %} &middot; last activity {{ card.ended|fmt_dt }}{% else %} &middot; no recorded end{% endif %}</div>
   {% include 'monitor_app/_snapper_run_story.html' with story=card.story phase=card.workflow %}
