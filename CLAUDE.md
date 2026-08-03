@@ -136,6 +136,11 @@ page template:
   everywhere; a non-sortable table is the special case and needs
   Torre's say-so. Static tables use the house table classes
   (`table table-striped table-bordered table-sm align-middle w-auto`).
+- **Latching table headers**: the page scrolls until a table's header row
+  reaches the nav bar, where it latches while the body scrolls on. Automatic
+  for DataTables and `swf-sortable` tables; class `swf-latch-head` opts in
+  any other table. A table wanting the latch must not sit inside an
+  overflow wrapper (`.table-responsive` defeats `position: sticky`).
 - **Status cells**: state values render with the BigMon fill classes
   via `{% load swf_fmt %}` and
   `<td class="{{ value|state_class }}">{{ value }}</td>` (or
