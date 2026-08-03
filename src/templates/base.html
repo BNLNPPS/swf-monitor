@@ -148,7 +148,9 @@
       table.dataTable thead th,
       table.swf-sortable thead th,
       table.swf-latch-head thead th {
-        position: sticky;
+        /* !important: DataTables' stylesheet pins sortable th to
+           position:relative with a more specific selector. */
+        position: sticky !important;
         top: var(--swf-nav-height, 0px);
         z-index: 100;
         background-color: var(--bs-body-bg, #fff);
