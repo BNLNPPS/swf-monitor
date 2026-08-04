@@ -124,6 +124,12 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
+
+# Capcom listen source: the agent (the credential holder) posts the
+# campaign-delivery event to the tjai feed at the moment it happens.
+CAPCOM_INGEST_URL = "https://etaverse.com/tjai/api/capcom/notice"
+CAPCOM_CAMPAIGN_URL = "https://epic-devcloud.org/prod/snapper/epicprod/campaign/"
+CAPCOM_LOGS_URL = "https://epic-devcloud.org/prod/logs/"
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -1298,6 +1304,77 @@ class EpicProdOpsAgent(BaseAgent):
             self._do_delivery_daily_rebuild, m,
             dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
 
+    def _post_capcom_notice(self, payload):
+        """One POST to the tjai Capcom ingest (listen source
+        swf-campaign-delivery): one attempt per event, never resent; a
+        failed post is logged loudly and the event is dropped — record
+        staleness has its own alarm."""
+        token = os.environ.get("TJAI_API_KEY", "")
+        if not token:
+            self.logger.error(
+                "PRODOPS capcom notice: TJAI_API_KEY unset; notice dropped")
+            return
+        try:
+            r = requests.post(
+                CAPCOM_INGEST_URL, json=payload, timeout=20,
+                headers={"Authorization": f"Bearer {token}"})
+            if r.status_code != 200:
+                self.logger.error(
+                    f"PRODOPS capcom notice: HTTP {r.status_code} "
+                    f"for {payload.get('dedup_key')}")
+            else:
+                self.logger.info(
+                    f"PRODOPS capcom notice posted: {payload.get('dedup_key')}")
+        except Exception as e:
+            self.logger.error(f"PRODOPS capcom notice: post failed: {e}")
+
+    def _emit_delivery_notice(self, outcome, reason, summary):
+        """The campaign-delivery Capcom event: an info notice stating the
+        newest recorded day's arrivals, or a warning when the rebuild
+        failed."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        et_today = datetime.now(ZoneInfo("America/New_York")).date()
+        if outcome != "ok":
+            self._post_capcom_notice({
+                "source": "swf-campaign-delivery",
+                "severity": "warning",
+                "title": f"Campaign delivery nightly rebuild failed ({reason})",
+                "url": CAPCOM_LOGS_URL,
+                "dedup_key": f"delivery-daily-fail:{et_today.isoformat()}",
+            })
+            return
+        day = str((summary or {}).get("newest_day") or "")
+        if not day:
+            self.logger.error(
+                "PRODOPS capcom notice: no newest_day in rebuild summary; "
+                "notice dropped")
+            return
+        parts = []
+        for name, block in sorted(
+                ((summary or {}).get("newest_arrivals") or {}).items()):
+            files = int((block or {}).get("files") or 0)
+            if not files:
+                continue
+            part = f"{name}: {files:,} files"
+            events = int((block or {}).get("events") or 0)
+            if events >= 1_000_000:
+                part += f" ({events / 1e6:.1f}M events)"
+            elif events:
+                part += f" ({events:,} events)"
+            parts.append(part)
+        day_label = datetime.fromisoformat(day).strftime("%b %-d")
+        title = (f"Campaign delivery updated through {day_label} ET · "
+                 + (" · ".join(parts) if parts else "no new files"))
+        self._post_capcom_notice({
+            "source": "swf-campaign-delivery",
+            "severity": "info",
+            "title": title,
+            "url": CAPCOM_CAMPAIGN_URL,
+            "dedup_key": f"delivery-daily:{day}",
+        })
+
     def _do_delivery_daily_rebuild(self, m):
         """Rebuild the per-ET-day, per-PC registered-basis delivery
         record from the JLab Rucio inventory — the record the Snapper
@@ -1319,6 +1396,8 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              level=logging.ERROR)
+            self._emit_delivery_notice(
+                'timeout', f'timed out after {DELIVERY_DAILY_TIMEOUT}s', None)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  delivery-daily-rebuild: {line}")
@@ -1332,12 +1411,23 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              level=logging.ERROR)
+            self._emit_delivery_notice('error', reason, None)
         else:
             self.logger.info("PRODOPS delivery_daily_rebuild done")
             self._log_action('delivery_daily_rebuild', t0,
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[-1])
+            summary = {}
+            for line in (p.stdout or "").splitlines():
+                if line.startswith('SUMMARY '):
+                    try:
+                        summary = json.loads(line[len('SUMMARY '):])
+                    except ValueError as e:
+                        self.logger.error(
+                            f"PRODOPS delivery_daily_rebuild: bad SUMMARY "
+                            f"line: {e}")
+            self._emit_delivery_notice('ok', '', summary)
 
     def _handle_epic_prod_past_import(self, m):
         """Run the past-campaign output ingest off the receiver thread —
