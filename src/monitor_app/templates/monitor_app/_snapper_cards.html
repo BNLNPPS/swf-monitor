@@ -62,7 +62,7 @@
   </div>
   {% endif %}
   {% endif %}
-  {# Site slice: one table row per curve, in panel order, the swatch #}
+  {# Queue slice: one table row per curve, in panel order, the swatch #}
   {# correlating each row to its curve — at-cut standing, change     #}
   {# since the previous snap, and the in-window integral for the     #}
   {# cumulative rows, failure classes nested under failed.           #}
@@ -71,7 +71,7 @@
        class="{% if not card.site_only %}mt-2 border-top pt-2{% endif %}">
     {% if s.found %}
     {% if s.quiet %}
-    <div class="text-muted mb-1">Nothing in flight at this site at this instant.</div>
+    <div class="text-muted mb-1">Nothing in flight on this queue at this instant.</div>
     {% endif %}
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       <div>
@@ -103,7 +103,7 @@
     </div>
     {% else %}
     <div class="mb-1"><strong><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ s.site|urlencode }}">{{ s.site }}</a></strong></div>
-    <div class="text-muted">No recorded activity for this site in this snap.</div>
+    <div class="text-muted">No recorded activity for this queue in this snap.</div>
     {% endif %}
   </div>
   {% endfor %}

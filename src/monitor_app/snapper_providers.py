@@ -741,7 +741,8 @@ def _panda_sites():
 
     Canary queues whose names contain ``test`` are deliberately excluded.
     Current in-flight jobs still determine the display order. The union is
-    cached briefly and drives the per-queue families and Site focus options.
+    cached briefly and drives the per-queue families and Site-page queue
+    options.
     """
     from django.utils import timezone
 
@@ -779,31 +780,36 @@ _JOB_LIFECYCLE_LATE = ('holding', 'transferring', 'merging')
 
 
 def _site_groups():
-    """Per-site curve families: one jobs panel following the lifecycle
-    (queued states through running to the trailing finished/failed
-    outcomes, with cores) and one tasks panel. Off by default on the
-    scope view — the Site focus is their home."""
+    """Per-queue curve families on the Site page: in-flight jobs with cores,
+    window-relative terminal outcomes, and tasks. Off by default on the
+    scope view — the Site focus page is their home."""
     groups = []
     for site in _panda_sites():
-        # One plot tells the site story: the in-flight lifecycle with
-        # the terminal-outcome staircases at its end. The staircases
-        # are window-relative cumulative counters — they rise from
-        # zero at the window's left edge, and the displayed window is
-        # the integration range.
+        # Keep instantaneous job populations and terminal flow on
+        # separate scales. Outcome staircases rise from zero at the
+        # window's left edge; the displayed window is their integration
+        # range.
         order = ([f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_EARLY]
                  + [f'sj_{site}_running', f'sjc_{site}']
-                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE]
-                 + [f'sjfw_{site}', f'sjxw_{site}'])
+                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE])
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
             'detail_key': site,
             'prefixes': [f'sj_{site}_'],
-            'ids': [f'sjc_{site}', f'sjfw_{site}', f'sjxw_{site}'],
+            'ids': [f'sjc_{site}'],
             'order': order,
-            'window_relative': [f'sjfw_{site}', f'sjxw_{site}'],
             'default_off_ids': [f'sj_{site}_activated'],
             'tall': True,
+            'default_off': True})
+        groups.append({
+            'name': f'Site outcomes {site}',
+            'title': f'Job outcomes · {site}',
+            'detail_key': site,
+            'prefixes': [],
+            'ids': [f'sjfw_{site}', f'sjxw_{site}'],
+            'order': [f'sjfw_{site}', f'sjxw_{site}'],
+            'window_relative': True,
             'default_off': True})
         groups.append({
             'name': f'Site failures {site}',
@@ -829,17 +835,18 @@ def _epicprod_groups():
 
 
 def _site_focus_view():
-    """The Site focus tab: one site's job lifecycle — submission
+    """The Site focus tab: one queue's job lifecycle — submission
     through queueing to execution to the trailing finished/failed
     outcomes — with its tasks panel, and the cut narrowed to the panda
-    component's site detail."""
+    component's queue detail."""
     sites = _panda_sites()
     if not sites:
         return None
     return {
         'param': 'site',
         'label': 'Site',
-        'note': ('In-flight counts are the recorded site state through '
+        'selector_label': 'Queue',
+        'note': ('In-flight counts are the recorded queue state through '
                  'time; finished and failed accumulate from the left '
                  'edge of the shown window — the window is the '
                  'integration range, and zooming re-bases it. Click '
@@ -848,6 +855,7 @@ def _site_focus_view():
         'options': [
             {'value': site, 'label': site,
              'families': [f'Site jobs {site}',
+                          f'Site outcomes {site}',
                           f'Site failures {site}',
                           f'Site tasks {site}'],
              'component': 'panda'}
