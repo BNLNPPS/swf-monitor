@@ -115,7 +115,8 @@ def capcom_state(request):
             created_at__gte=since).count()
         states.append({
             'source': 'swf-dispatcher',
-            'value': f'{posts} posts · {queries} queries/24h',
+            'value': (f'{posts} post{"s" if posts != 1 else ""} · '
+                      f'{queries} quer{"ies" if queries != 1 else "y"}/24h'),
             'url': 'https://chat.epic-eic.org/main/channels/dispatcher'})
         detail['dispatcher'] = {'posts_24h': posts, 'queries_24h': queries,
                                 'min_sublevel': min_sublevel}
