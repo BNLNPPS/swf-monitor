@@ -384,13 +384,20 @@ def _epicprod_curve_values(state):
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
         for status, count in (jobs_now.get('by_status') or {}).items():
             values[f'job_{status}'] = int(count or 0)
+        type_states = jobs_now.get('by_type_status') or {}
         for ptype, count in (jobs_now.get('by_type') or {}).items():
-            values[f'type_{ptype}'] = int(count or 0)
-        for ptype, states in (jobs_now.get('by_type_status') or {}).items():
+            activated = int(
+                (type_states.get(ptype) or {}).get('activated') or 0)
+            values[f'type_{ptype}'] = max(0, int(count or 0) - activated)
+        for ptype, states in type_states.items():
             for status, count in (states or {}).items():
+                if status == 'activated':
+                    continue
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
     if tasks_now:
         for status, count in (tasks_now.get('by_status') or {}).items():
+            if status == 'defined':
+                continue
             values[f'task_{status}'] = int(count or 0)
     values.update(_site_curve_values(panda))
     values.update(_delivery_curve_values(state))
