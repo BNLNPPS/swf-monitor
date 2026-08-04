@@ -563,7 +563,7 @@ _CAMPAIGN_START_CACHE = {'at': None, 'starts': {}}
 
 def _campaign_delivery_starts():
     """Campaign name -> first recorded delivery activity, from the
-    daily backfill snaps (small, bounded read), cached for an hour.
+    daily delivery snaps (small, bounded read), cached for an hour.
     The campaign focus view clamps its window here: the day count runs
     from when the campaign began delivering, never into the void
     before it."""
@@ -577,7 +577,8 @@ def _campaign_delivery_starts():
         return _CAMPAIGN_START_CACHE['starts']
     starts = {}
     rows = (SystemSnap.objects
-            .filter(scope='epicprod', capture_policy='backfill-v1')
+            .filter(scope='epicprod',
+                    capture_policy__in=('backfill-v1', 'delivery-daily-v1'))
             .order_by('snap_time')
             .values_list('snap_time', 'state'))
     for snap_time, state in rows:

@@ -118,6 +118,12 @@ RUCIO_ARRIVALS_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_ARRIVALS_TIMEOUT", "
 # Past-campaign output ingest: pull the epic-prod clone + idempotent re-import.
 PAST_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "epic-prod-past-import.py"
 PAST_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_PAST_IMPORT_TIMEOUT", "600"))
+
+FILE_EVENTS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "measure-file-events.py"
+FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600"))
+
+DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
+DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -191,6 +197,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "sync_epicprod_inventory", "refresh_system_status",
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
+                   "file_events_measure", "delivery_daily_rebuild",
                    "assessment_completed",
                    "health_ping", "shutdown"}
 
@@ -1036,6 +1043,8 @@ class EpicProdOpsAgent(BaseAgent):
             ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
+            ('file_events_measure', self._do_file_events_measure),
+            ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
         ]
         failed = []
         for name, step in steps:
@@ -1235,6 +1244,100 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[0])
+
+    def _handle_file_events_measure(self, m):
+        """Run the per-file event measurement off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_file_events_measure, m,
+            dedup_key="file_events_measure", label="file_events_measure")
+
+    def _do_file_events_measure(self, m):
+        """Measure events for newly delivered files (disk replicas only,
+        never tape): anchor each new byte-size class with one xrootd
+        read, fill members at the anchored rate; the daily delivery
+        record joins the store at build time."""
+        cmd = [sys.executable, str(FILE_EVENTS_SCRIPT)]
+        self.logger.info("PRODOPS file_events_measure: measuring new files")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=FILE_EVENTS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS file_events_measure TIMEOUT after {FILE_EVENTS_TIMEOUT}s")
+            self._log_action('file_events_measure', t0, outcome='timeout',
+                             reason=f'timed out after {FILE_EVENTS_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  measure-file-events: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  measure-file-events: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS file_events_measure FAILED rc={p.returncode}")
+            self._log_action('file_events_measure', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS file_events_measure done")
+            self._log_action('file_events_measure', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_delivery_daily_rebuild(self, m):
+        """Run the daily delivery-record rebuild off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_delivery_daily_rebuild, m,
+            dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
+
+    def _do_delivery_daily_rebuild(self, m):
+        """Rebuild the per-ET-day, per-PC registered-basis delivery
+        record from the JLab Rucio inventory — the record the Snapper
+        campaign view's curves draw from. Full idempotent reconstruction
+        through end of yesterday (CAMPAIGN_DELIVERY.md, Ongoing
+        production)."""
+        cmd = [sys.executable, str(DELIVERY_DAILY_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS delivery_daily_rebuild: reconstructing")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=DELIVERY_DAILY_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS delivery_daily_rebuild TIMEOUT after {DELIVERY_DAILY_TIMEOUT}s")
+            self._log_action('delivery_daily_rebuild', t0, outcome='timeout',
+                             reason=f'timed out after {DELIVERY_DAILY_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  delivery-daily-rebuild: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  delivery-daily-rebuild: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS delivery_daily_rebuild FAILED rc={p.returncode}")
+            self._log_action('delivery_daily_rebuild', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS delivery_daily_rebuild done")
+            self._log_action('delivery_daily_rebuild', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=((p.stdout or '').splitlines() or [''])[-1])
 
     def _handle_epic_prod_past_import(self, m):
         """Run the past-campaign output ingest off the receiver thread —
