@@ -350,7 +350,7 @@ def _snapper_embed_product(days, refresh):
         return ctx
 
     key_days = min(days, MAX_EMBED_DAYS + 1)
-    return get_product(f'snapper_embed:v2:epicprod:{key_days}', build,
+    return get_product(f'snapper_embed:v3:epicprod:{key_days}', build,
                        ttl_seconds=300, refresh=refresh)
 
 
@@ -364,7 +364,8 @@ def panda_activity(request):
 
         from ..models import CachedProduct
         keys = [f'panda_activity:{days}',
-                f'snapper_embed:epicprod:{min(days, MAX_EMBED_DAYS + 1)}']
+                f'snapper_embed:v3:epicprod:'
+                f'{min(days, MAX_EMBED_DAYS + 1)}']
         rows = list(CachedProduct.objects.filter(key__in=keys))
         built = [row.built_at for row in rows if row.built_at]
         return JsonResponse({
@@ -595,7 +596,7 @@ def _jobs_site_graphics_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f'snapper_site_graphics:v3:epicprod:site:{site}:{days}{exact_key}',
+        f'snapper_site_graphics:v4:epicprod:site:{site}:{days}{exact_key}',
         build,
         ttl_seconds=300, refresh=refresh)
 

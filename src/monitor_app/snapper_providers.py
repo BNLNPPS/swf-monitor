@@ -381,7 +381,6 @@ def _epicprod_curve_values(state):
     jobs_now = (panda.get('jobs') or {}).get('in_flight_now') or {}
     tasks_now = (panda.get('tasks') or {}).get('in_flight_now') or {}
     if jobs_now:
-        values['jobs_total'] = int(jobs_now.get('total') or 0)
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
         for status, count in (jobs_now.get('by_status') or {}).items():
             values[f'job_{status}'] = int(count or 0)
@@ -391,7 +390,6 @@ def _epicprod_curve_values(state):
             for status, count in (states or {}).items():
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
     if tasks_now:
-        values['tasks_total'] = int(tasks_now.get('total') or 0)
         for status, count in (tasks_now.get('by_status') or {}).items():
             values[f'task_{status}'] = int(count or 0)
     values.update(_site_curve_values(panda))
@@ -463,6 +461,8 @@ def _epicprod_curve_color(curve_id):
         status = curve_id.rsplit('_', 1)[1]
         if status == 'running':
             return '#64b5f6'
+        if status == 'sent':
+            return '#6a1b9a'
         if status == 'activated':
             # Grey: the queued pool is context, not the story — the
             # greens belong to completion and the blues to running.
@@ -472,6 +472,8 @@ def _epicprod_curve_color(curve_id):
         status = curve_id[4:]
         if status == 'running':
             return '#64b5f6'
+        if status == 'sent':
+            return '#6a1b9a'
         if status == 'activated':
             return '#8a8a8a'
         return JOB_STATE_COLORS.get(status)
@@ -517,8 +519,6 @@ def _epicprod_curve_label(curve_id):
         if slug in ('', 'total'):
             return 'total'
         return _pc_cache()['group_names'].get(slug, slug)
-    if curve_id == 'tasks_total':
-        return 'tasks total'
     if curve_id == 'running_cores':
         return 'running cores'
     if curve_id.startswith('job_'):
@@ -550,8 +550,8 @@ def _testbed_curve_label(curve_id):
 
 EPICPROD_GROUPS = (
     {'name': 'In-flight jobs', 'title': 'Jobs', 'prefixes': ['job_'],
-     'ids': ['jobs_total', 'running_cores']},
-    {'name': 'Tasks', 'prefixes': ['task_'], 'ids': ['tasks_total']},
+     'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
+    {'name': 'Tasks', 'prefixes': ['task_'], 'ids': []},
     {'name': 'In-flight job types', 'title': 'Job types',
      'prefixes': ['type_'], 'ids': []},
     {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
@@ -773,6 +773,7 @@ def _site_groups():
             'ids': [f'sjc_{site}', f'sjfw_{site}', f'sjxw_{site}'],
             'order': order,
             'window_relative': [f'sjfw_{site}', f'sjxw_{site}'],
+            'default_off_ids': [f'sj_{site}_activated'],
             'tall': True,
             'default_off': True})
         groups.append({
