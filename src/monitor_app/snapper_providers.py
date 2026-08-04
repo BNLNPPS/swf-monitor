@@ -396,7 +396,7 @@ def _epicprod_curve_values(state):
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
     if tasks_now:
         for status, count in (tasks_now.get('by_status') or {}).items():
-            if status == 'defined':
+            if status in ('defined', 'ready'):
                 continue
             values[f'task_{status}'] = int(count or 0)
     values.update(_site_curve_values(panda))
