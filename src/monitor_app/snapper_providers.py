@@ -380,7 +380,8 @@ def _site_curve_values(panda):
 def _epicprod_curve_values(state):
     values = {}
     panda = component_data(state, 'panda')
-    jobs_now = (panda.get('jobs') or {}).get('in_flight_now') or {}
+    jobs = panda.get('jobs') or {}
+    jobs_now = jobs.get('in_flight_now') or {}
     tasks_now = (panda.get('tasks') or {}).get('in_flight_now') or {}
     if jobs_now:
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
@@ -399,6 +400,10 @@ def _epicprod_curve_values(state):
                 if status in ('activated', 'starting'):
                     continue
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
+    for status in ('finished', 'failed'):
+        if status in (jobs.get('cum') or {}):
+            values[f'outcome_{status}'] = int(
+                jobs['cum'].get(status) or 0)
     if tasks_now:
         for status, count in (tasks_now.get('by_status') or {}).items():
             if status in ('defined', 'ready'):
@@ -489,6 +494,8 @@ def _epicprod_curve_color(curve_id):
         if status == 'activated':
             return '#8a8a8a'
         return JOB_STATE_COLORS.get(status)
+    if curve_id.startswith('outcome_'):
+        return JOB_STATE_COLORS.get(curve_id[8:])
     if curve_id.startswith('stt_'):
         status = curve_id.rsplit('_', 1)[1]
         if status == 'running':
@@ -535,6 +542,8 @@ def _epicprod_curve_label(curve_id):
         return 'running cores'
     if curve_id.startswith('job_'):
         return f'jobs {curve_id[4:]}'
+    if curve_id.startswith('outcome_'):
+        return curve_id[8:]
     if curve_id.startswith('task_'):
         return f'tasks {curve_id[5:]}'
     # Curves in the in-flight families are in flight by construction —
@@ -563,6 +572,9 @@ def _testbed_curve_label(curve_id):
 EPICPROD_GROUPS = (
     {'name': 'In-flight jobs', 'title': 'Jobs', 'prefixes': ['job_'],
      'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
+    {'name': 'Job outcomes', 'prefixes': ['outcome_'], 'ids': [],
+     'order': ['outcome_finished', 'outcome_failed'],
+     'window_relative': True},
     {'name': 'Tasks', 'prefixes': ['task_'], 'ids': []},
     {'name': 'In-flight job types', 'title': 'Job types',
      'prefixes': ['type_'], 'ids': []},
