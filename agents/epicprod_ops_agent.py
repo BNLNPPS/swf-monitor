@@ -1353,19 +1353,15 @@ class EpicProdOpsAgent(BaseAgent):
             return
         # The title states the newest recorded day's arrivals — the
         # one-day (ET calendar day) counts, never cumulative totals.
+        # Files only: event coverage is incomplete, so event numbers
+        # stay off the notice until measurement is reliable.
         parts = []
         for name, block in sorted(
                 ((summary or {}).get("newest_arrivals") or {}).items()):
             files = int((block or {}).get("files") or 0)
             if not files:
                 continue
-            part = f"{name} +{files:,} files"
-            events = int((block or {}).get("events") or 0)
-            if events >= 1_000_000:
-                part += f" ({events / 1e6:.1f}M events)"
-            elif events:
-                part += f" ({events:,} events)"
-            parts.append(part)
+            parts.append(f"{name} +{files:,} files")
         day_label = datetime.fromisoformat(day).strftime("%b %-d")
         title = (f"Campaign delivery {day_label}: "
                  + (" · ".join(parts) if parts else "no new files"))
