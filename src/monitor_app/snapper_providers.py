@@ -354,6 +354,8 @@ def _site_curve_values(panda):
     for site, block in ((panda.get('jobs') or {}).get('sites')
                         or {}).items():
         for status, count in (block.get('by_status_now') or {}).items():
+            if status == 'starting':
+                continue
             values[f'sj_{site}_{status}'] = int(count or 0)
         if block.get('running_cores_now') is not None:
             values[f'sjc_{site}'] = int(
@@ -383,15 +385,18 @@ def _epicprod_curve_values(state):
     if jobs_now:
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
         for status, count in (jobs_now.get('by_status') or {}).items():
+            if status == 'starting':
+                continue
             values[f'job_{status}'] = int(count or 0)
         type_states = jobs_now.get('by_type_status') or {}
         for ptype, count in (jobs_now.get('by_type') or {}).items():
-            activated = int(
-                (type_states.get(ptype) or {}).get('activated') or 0)
-            values[f'type_{ptype}'] = max(0, int(count or 0) - activated)
+            states = type_states.get(ptype) or {}
+            waiting = sum(int(states.get(status) or 0)
+                          for status in ('activated', 'starting'))
+            values[f'type_{ptype}'] = max(0, int(count or 0) - waiting)
         for ptype, states in type_states.items():
             for status, count in (states or {}).items():
-                if status == 'activated':
+                if status in ('activated', 'starting'):
                     continue
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
     if tasks_now:
@@ -757,7 +762,7 @@ def _panda_sites():
 # Display order of the site jobs family: submission through queueing
 # to execution (cores beside running jobs) to the trailing outcomes.
 _JOB_LIFECYCLE_EARLY = ('defined', 'waiting', 'assigned', 'activated',
-                        'sent', 'starting')
+                        'sent')
 _JOB_LIFECYCLE_LATE = ('holding', 'transferring', 'merging')
 
 
