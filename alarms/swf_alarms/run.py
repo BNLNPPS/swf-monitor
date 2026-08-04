@@ -47,7 +47,6 @@ import sys
 import time
 import traceback
 
-from . import capcom
 from . import config as config_mod
 from . import db
 from .common import Detection
@@ -208,13 +207,6 @@ def main(argv: list[str] | None = None) -> int:
                         extra_data=det.extra_data,
                         alarm_config_uuid=alarm["id"],
                     )
-                    # Curated transition to the Capcom feed: fire only,
-                    # independent of the email-enable flag (which gates
-                    # email alone); dry runs post nothing.
-                    if not args.dry_run:
-                        capcom.post_transition(
-                            alarm_entry_id, det.dedupe_key,
-                            "fired", det.subject)
                     new_bundle.append((event_uuid, det))
                     continue
 
@@ -262,12 +254,6 @@ def main(argv: list[str] | None = None) -> int:
                         db.clear_event(conn, ev["id"])
                     except Exception as e:  # noqa: BLE001
                         log.error("clear_event failed for %s: %s", ev["id"], e)
-                        continue
-                    if not args.dry_run:
-                        capcom.post_transition(
-                            alarm_entry_id, str(key or ""), "cleared",
-                            str((ev.get("data") or {}).get("subject")
-                                or key or alarm_entry_id))
 
         # One email per alarm per tick. Compose the bundle whenever
         # there's anything to bundle — store its identifiers on the

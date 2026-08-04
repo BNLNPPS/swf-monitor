@@ -96,6 +96,30 @@ def capcom_state(request):
         detail['panda'] = {'error_text': str(exc)}
 
     try:
+        from ..alarms_data import active_event_count, alarm_configs
+
+        counts = {}
+        for cfg in alarm_configs():
+            entry_id = cfg.get('entry_id') or ''
+            if entry_id:
+                counts[cfg.get('name') or entry_id] = (
+                    active_event_count(entry_id))
+        active = sum(counts.values())
+        states.append({
+            'source': 'swf-alarms',
+            'value': f'{active} active' if active else 'OK',
+            'color': 'red' if active else 'green',
+            'url': f'{REMOTE_FACE}/alarms/'})
+        detail['alarms'] = {
+            'active': active,
+            'by_alarm': {name: n for name, n in counts.items() if n}}
+    except Exception as exc:
+        logger.error('capcom state: alarm counts failed: %s', exc)
+        states.append({'source': 'swf-alarms', 'value': 'UNAVAILABLE',
+                       'url': f'{REMOTE_FACE}/alarms/'})
+        detail['alarms'] = {'error_text': str(exc)}
+
+    try:
         from ..epicprod_logging import SUBLEVEL_VALUES, live_stream_q
         from ..models import AIMemory, AppLog, SysConfig
 
