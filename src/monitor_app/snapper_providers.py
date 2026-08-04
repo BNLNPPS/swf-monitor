@@ -612,6 +612,10 @@ def _delivery_focus_view():
     return {
         'param': 'campaign',
         'label': 'Campaign',
+        # The natural campaign span carries thousands of unrelated
+        # scope snaps and curves. Persist the selected campaign
+        # families as their own small product for immediate display.
+        'cache_series': True,
         'default': campaigns[0],
         # Two selector axes: the plotted quantity (files is the
         # default while the measured event rates are under review;
@@ -1662,13 +1666,18 @@ def _scheduler_status(scope):
 
 def _series_cache(key, builder):
     """Snapper series as a cached product (docs/CACHED_PRODUCTS.md):
-    served stored, rebuilt behind responses on staleness. A first fill
-    that finds another worker's build lock has nothing to serve —
-    build inline rather than serve nothing."""
+    served stored, rebuilt behind responses on staleness. Refresh state
+    is returned with the value so the page can fetch the newly built
+    product promptly; a concurrent first fill never duplicates work."""
     from .cached_product import get_product
 
-    value = get_product(key, builder, ttl_seconds=90)['value']
-    return value if value is not None else builder()
+    product = get_product(key, builder, ttl_seconds=90)
+    return {
+        'value': product['value'],
+        'refreshing': product['refreshing'],
+        'built_at': product['built_at'],
+        'age_seconds': product['age_seconds'],
+    }
 
 
 def _health_url():
