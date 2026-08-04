@@ -1351,13 +1351,15 @@ class EpicProdOpsAgent(BaseAgent):
                 "PRODOPS capcom notice: no newest_day in rebuild summary; "
                 "notice dropped")
             return
+        # The title states the newest recorded day's arrivals — the
+        # one-day (ET calendar day) counts, never cumulative totals.
         parts = []
         for name, block in sorted(
                 ((summary or {}).get("newest_arrivals") or {}).items()):
             files = int((block or {}).get("files") or 0)
             if not files:
                 continue
-            part = f"{name}: {files:,} files"
+            part = f"{name} +{files:,} files"
             events = int((block or {}).get("events") or 0)
             if events >= 1_000_000:
                 part += f" ({events / 1e6:.1f}M events)"
@@ -1365,7 +1367,7 @@ class EpicProdOpsAgent(BaseAgent):
                 part += f" ({events:,} events)"
             parts.append(part)
         day_label = datetime.fromisoformat(day).strftime("%b %-d")
-        title = (f"Campaign delivery updated through {day_label} ET · "
+        title = (f"Campaign delivery {day_label}: "
                  + (" · ".join(parts) if parts else "no new files"))
         self._post_capcom_notice({
             "source": "swf-campaign-delivery",
