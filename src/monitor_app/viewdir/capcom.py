@@ -95,5 +95,36 @@ def capcom_state(request):
                        'url': f'{REMOTE_FACE}/panda/jobs/'})
         detail['panda'] = {'error_text': str(exc)}
 
+    try:
+        from ..epicprod_logging import SUBLEVEL_VALUES, live_stream_q
+        from ..models import AIMemory, AppLog, SysConfig
+
+        since = now - timedelta(hours=24)
+        # Posts: what the epicprod-live publisher put on the channel —
+        # the same SysConfig-governed selection it publishes from.
+        min_sublevel = str(SysConfig.get_setting(
+            'epicprod_live_min_sublevel', 'normal') or '')
+        if min_sublevel not in SUBLEVEL_VALUES:
+            min_sublevel = 'normal'
+        posts = AppLog.objects.filter(
+            live_stream_q(min_sublevel), timestamp__gte=since).count()
+        # Queries: DISpatcher-handled questions (channel, mentions, DMs)
+        # — one user-role memory row is recorded per handled exchange.
+        queries = AIMemory.objects.filter(
+            username='pandabot', session_id='mattermost', role='user',
+            created_at__gte=since).count()
+        states.append({
+            'source': 'swf-dispatcher',
+            'value': f'{posts} posts · {queries} queries/24h',
+            'url': 'https://chat.epic-eic.org/main/channels/dispatcher'})
+        detail['dispatcher'] = {'posts_24h': posts, 'queries_24h': queries,
+                                'min_sublevel': min_sublevel}
+    except Exception as exc:
+        logger.error('capcom state: dispatcher counts failed: %s', exc)
+        states.append({
+            'source': 'swf-dispatcher', 'value': 'UNAVAILABLE',
+            'url': 'https://chat.epic-eic.org/main/channels/dispatcher'})
+        detail['dispatcher'] = {'error_text': str(exc)}
+
     return JsonResponse({'built_at': now.isoformat(),
                          'states': states, 'detail': detail})
