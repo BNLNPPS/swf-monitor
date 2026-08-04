@@ -82,6 +82,9 @@ def fastmon_files_datatable_ajax(request):
     fastmon_files = dt.apply_pagination(queryset)
 
     # Format data for DataTables
+    from django.urls import reverse
+
+    from .cell_fmt import fill_cell, short_filename
     data = []
     for file in fastmon_files:
         # Use plain text status (consistent with STF files view)
@@ -91,7 +94,6 @@ def fastmon_files_datatable_ajax(request):
         file_size = f"{file.file_size_bytes:,}" if file.file_size_bytes else "N/A"
 
         # Make STF filename clickable to go to STF detail page
-        from django.urls import reverse
         stf_detail_url = reverse('monitor_app:stf_file_detail', args=[file.stf_file.file_id])
         stf_link = (f'<a href="{stf_detail_url}">'
                     f'{short_filename(file.stf_file.stf_filename)}</a>')
@@ -100,7 +102,6 @@ def fastmon_files_datatable_ajax(request):
         run_detail_url = reverse('monitor_app:run_detail', args=[file.stf_file.run.run_number])
         run_link = f'<a href="{run_detail_url}">{file.stf_file.run.run_number}</a>'
 
-        from .cell_fmt import fill_cell, short_filename
         data.append([
             short_filename(file.tf_filename),
             stf_link,
