@@ -129,9 +129,9 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
 
-# Capcom listen source: the agent (the credential holder) posts the
-# campaign-delivery event to the tjai feed at the moment it happens.
-CAPCOM_INGEST_URL = "https://etaverse.com/tjai/api/capcom/notice"
+# Capcom events are buffered in the monitor's notice store; feed
+# consumers drain /api/capcom/notices/ from their own side. No external
+# feed credential lives in this system.
 CAPCOM_CAMPAIGN_URL = "https://epic-devcloud.org/prod/snapper/epicprod/campaign/"
 CAPCOM_LOGS_URL = "https://epic-devcloud.org/prod/logs/"
 CAPCOM_PANDA_TASK_URL = "https://epic-devcloud.org/prod/panda/tasks/{jedi_task_id}/"
@@ -1514,26 +1514,25 @@ class EpicProdOpsAgent(BaseAgent):
             dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
 
     def _post_capcom_notice(self, payload):
-        """One POST to the tjai Capcom ingest (listen source
-        swf-campaign-delivery): one attempt per event, never resent; a
-        failed post is logged loudly and the event is dropped — record
-        staleness has its own alarm."""
-        token = os.environ.get("TJAI_API_KEY", "")
-        if not token:
-            self.logger.error(
-                "PRODOPS capcom notice: TJAI_API_KEY unset; notice dropped")
-            return
+        """Buffer one discrete Capcom event in the monitor's notice store
+        (/api/capcom/notices/ingest/, ordinary monitor token); feed
+        consumers drain it from their own side. One attempt per event,
+        never resent; a failed post is logged loudly and the event is
+        dropped — record staleness has its own alarm."""
+        headers = {}
+        if MONITOR_API_TOKEN:
+            headers['Authorization'] = f'Token {MONITOR_API_TOKEN}'
         try:
             r = requests.post(
-                CAPCOM_INGEST_URL, json=payload, timeout=20,
-                headers={"Authorization": f"Bearer {token}"})
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/capcom/notices/ingest/",
+                json=payload, timeout=ACTION_LOG_TIMEOUT, headers=headers)
             if r.status_code != 200:
                 self.logger.error(
                     f"PRODOPS capcom notice: HTTP {r.status_code} "
                     f"for {payload.get('dedup_key')}")
             else:
                 self.logger.info(
-                    f"PRODOPS capcom notice posted: {payload.get('dedup_key')}")
+                    f"PRODOPS capcom notice stored: {payload.get('dedup_key')}")
         except Exception as e:
             self.logger.error(f"PRODOPS capcom notice: post failed: {e}")
 

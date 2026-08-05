@@ -1196,6 +1196,28 @@ class PandaTaskOperation(models.Model):
         return f"{self.operation} PanDA task {self.jedi_task_id}: {self.status}"
 
 
+class CapcomNotice(models.Model):
+    """One discrete SWF event, buffered for feed consumers that poll
+    /api/capcom/notices/ from their own side. External feed systems hold
+    the poll credential story entirely on their side; no external
+    credential lives in SWF (viewdir/capcom.py module docstring)."""
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    source = models.CharField(max_length=100)
+    severity = models.CharField(max_length=20, default='info')
+    title = models.CharField(max_length=300)
+    detail = models.TextField(blank=True, default='')
+    url = models.CharField(max_length=500, blank=True, default='')
+    dedup_key = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        db_table = 'swf_capcom_notice'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"[{self.source}] {self.title}"
+
+
 class CachedProduct(models.Model):
     """One expensive-to-build product, served stale-while-revalidate.
 

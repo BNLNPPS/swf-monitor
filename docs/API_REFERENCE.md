@@ -132,6 +132,19 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   activity over the trailing 24 hours. The endpoint contract is generic; the
   Capcom collector supplies the configured username. Invalid or missing
   usernames return HTTP 400.
+- `GET /api/capcom/notices/?since=ISO8601` - Buffered discrete SWF events
+  (campaign-delivery and task-operation notices) created strictly after
+  `since`; a naive timestamp is read as UTC, and the default window is the
+  trailing 24 hours. Rows return oldest-first so a consumer's next cursor is
+  the last row's `created_at`; `more` flags a page-capped response that
+  should be drained again immediately. Open read. Malformed `since` returns
+  HTTP 400. Rows past a 30-day retention window are pruned at ingest;
+  consumers keep their own history.
+- `POST /api/capcom/notices/ingest/` - Token-authenticated notice write from
+  the production operations agent: `{source, title, severity?, detail?,
+  url?, dedup_key?}`. No external feed system is contacted from SWF, and no
+  external feed credential is held in SWF; feed consumers drain the read
+  endpoint from their own side.
 
 ### PanDA task operations
 

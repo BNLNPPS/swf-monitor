@@ -1,25 +1,41 @@
-"""Capcom state endpoint: display-ready SWF state for the tjai Capcom page.
+"""Capcom endpoints: display-ready SWF state and buffered SWF events.
 
-Capcom polls this open read endpoint every few minutes (through the
-swf-remote proxy for external reach) and renders the entries on its state
-tiles. Each entry under 'states' is shaped exactly as tjai's
-capcom.set_state(source, value, color, url) expects, following the
-pax-eden Ahbazon producer, so the capcom-side collector can apply each
-entry as delivered. This endpoint is state-only: discrete SWF events
-(the campaign-delivery feed) are listen sources, posted to the Capcom
-ingest endpoint by the prod-ops agent — the credential holder — at the
-moment they occur.
+Capcom polls the open read endpoints every few minutes (through the
+swf-remote proxy for external reach). Each entry under 'states' is shaped
+exactly as tjai's capcom.set_state(source, value, color, url) expects,
+following the pax-eden Ahbazon producer, so the capcom-side collector can
+apply each entry as delivered.
+
+Discrete SWF events (the campaign-delivery and task-operation feeds) are
+buffered here in CapcomNotice rows and served by the open notices
+endpoint; the consumer drains them with a since-cursor on its own poll.
+SWF never posts into an external feed and holds no external credential —
+the producing agent writes notices to this monitor with its ordinary
+monitor token, and the feed system's credentials stay entirely on the
+feed system's side.
 """
 
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
+from datetime import timezone as datetime_timezone
 from urllib.parse import urlencode
 
 from django.http import JsonResponse
 from django.utils import timezone
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.decorators import (api_view, authentication_classes,
+                                       permission_classes)
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
+
+# The notice buffer is a hand-off, not an archive: consumers keep their
+# own history, so rows past this window are pruned on each ingest.
+NOTICE_RETENTION_DAYS = 30
+# Page cap on one notices read; 'more' flags a truncated response.
+NOTICE_PAGE_MAX = 500
 
 REMOTE_FACE = 'https://epic-devcloud.org/prod'
 CAPCOM_WORKLOAD_CHECKS = frozenset({'stale-state'})
@@ -347,6 +363,81 @@ def capcom_state(request):
 
     return JsonResponse({'built_at': now.isoformat(),
                          'states': states, 'detail': detail})
+
+
+def capcom_notices(request):
+    """Open read: buffered discrete SWF events after a consumer's cursor.
+
+    Query params:
+        since (ISO-8601 timestamp, optional) — return notices created
+        strictly after this instant; a naive value is read as UTC.
+        Default: the trailing 24 hours.
+
+    Rows come back oldest-first so the consumer's next cursor is the last
+    row's created_at; 'more' is true when the page cap truncated the
+    response and another read should follow immediately.
+    """
+    from ..models import CapcomNotice
+
+    now = timezone.now()
+    since_raw = (request.GET.get('since') or '').strip()
+    if since_raw:
+        try:
+            since = datetime.fromisoformat(since_raw)
+        except ValueError:
+            return JsonResponse(
+                {'error': 'since must be an ISO-8601 timestamp'}, status=400)
+        if timezone.is_naive(since):
+            since = since.replace(tzinfo=datetime_timezone.utc)
+    else:
+        since = now - timedelta(hours=24)
+
+    rows = list(CapcomNotice.objects.filter(created_at__gt=since)
+                .order_by('created_at')[:NOTICE_PAGE_MAX + 1])
+    more = len(rows) > NOTICE_PAGE_MAX
+    rows = rows[:NOTICE_PAGE_MAX]
+    return JsonResponse({
+        'built_at': now.isoformat(),
+        'since': since.isoformat(),
+        'more': more,
+        'notices': [{
+            'created_at': row.created_at.isoformat(),
+            'source': row.source,
+            'severity': row.severity,
+            'title': row.title,
+            'detail': row.detail,
+            'url': row.url,
+            'dedup_key': row.dedup_key,
+        } for row in rows],
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def capcom_notice_ingest(request):
+    """Token-authenticated notice write from the prod-ops agent."""
+    from ..models import CapcomNotice
+
+    source = str(request.data.get('source') or '').strip()
+    title = str(request.data.get('title') or '').strip()
+    if not source or not title:
+        return Response({'error': 'source and title are required'},
+                        status=400)
+    notice = CapcomNotice.objects.create(
+        source=source[:100],
+        severity=str(request.data.get('severity') or 'info')[:20],
+        title=title[:300],
+        detail=str(request.data.get('detail') or ''),
+        url=str(request.data.get('url') or '')[:500],
+        dedup_key=str(request.data.get('dedup_key') or '')[:200],
+    )
+    purged, _ = CapcomNotice.objects.filter(
+        created_at__lt=timezone.now()
+        - timedelta(days=NOTICE_RETENTION_DAYS)).delete()
+    if purged:
+        logger.info('capcom notices: purged %d expired rows', purged)
+    return Response({'status': 'ok', 'id': notice.id})
 
 
 def capcom_user_state(request):
