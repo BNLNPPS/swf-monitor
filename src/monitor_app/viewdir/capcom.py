@@ -75,22 +75,17 @@ def _user_testbed_summary(username, now):
         start_time__lt=stale_before).count()
 
     if stale_workflows:
-        label = (f'testbed {stale_workflows} stale workflow'
-                 f'{"s" if stale_workflows != 1 else ""}')
         color = 'yellow'
     elif error_agents or (manager_is_fresh and manager.status == 'ERROR'):
-        label = 'testbed error'
         color = 'red'
     elif running_workflows:
-        label = (f'testbed {running_workflows} workflow'
-                 f'{"s" if running_workflows != 1 else ""}')
         color = 'green'
     elif fresh_agents:
-        label = f'testbed ready ({len(fresh_agents)})'
         color = 'green'
     else:
-        label = 'testbed off'
         color = None
+    display_count = len(fresh_agents)
+    label = f'testbed {display_count}'
 
     return {
         'label': label,
@@ -104,6 +99,7 @@ def _user_testbed_summary(username, now):
                 if manager and manager.last_heartbeat else None),
         },
         'agents': {
+            'display_count': display_count,
             'fresh': len(fresh_agents),
             'stale': len(stale_agents),
             'error': len(error_agents),
@@ -146,24 +142,17 @@ def _user_panda_summary(username):
                       for status in ('failed', 'cancelled', 'closed'))
 
     if running_jobs:
-        label = (f'PanDA {running_jobs} running job'
-                 f'{"s" if running_jobs != 1 else ""}')
+        display_count = running_jobs
     elif active_tasks:
-        label = (f'PanDA {active_tasks} active task'
-                 f'{"s" if active_tasks != 1 else ""}')
-    elif finished_jobs or failed_jobs:
-        outcomes = []
-        if finished_jobs:
-            outcomes.append(f'{finished_jobs} finished')
-        if failed_jobs:
-            outcomes.append(f'{failed_jobs} failed')
-        label = f'PanDA {", ".join(outcomes)}/24h'
+        display_count = active_tasks
     else:
-        label = 'PanDA idle'
+        display_count = finished_jobs + failed_jobs
+    label = f'PanDA {display_count}'
 
     return {
         'label': label,
         'window_hours': 24,
+        'display_count': display_count,
         'running_jobs': running_jobs,
         'active_tasks': active_tasks,
         'finished_jobs': finished_jobs,
