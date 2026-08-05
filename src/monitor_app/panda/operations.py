@@ -8,7 +8,9 @@ from django.utils import timezone
 from monitor_app.activemq_connection import ActiveMQConnectionManager
 from monitor_app.models import PandaTaskOperation
 
-from .queries import TERMINAL_TASK_STATUSES
+PAUSE_REJECTED_TASK_STATUSES = frozenset(
+    ('finished', 'failed', 'done', 'aborted', 'broken', 'paused'))
+RESUMABLE_TASK_STATUSES = frozenset(('paused', 'throttled', 'staging'))
 
 
 class PandaTaskOperationError(Exception):
@@ -42,13 +44,23 @@ def serialize_operation(operation):
     }
 
 
-def operation_controls(task, *, authenticated, pending=None):
+def operation_controls(task, *, authenticated, internal_monitor, pending=None):
     """Return enabled state and concise disabled reasons for both controls."""
     status = str(task.get('status') or '').lower()
+    pause_state_valid = bool(status) and status not in PAUSE_REJECTED_TASK_STATUSES
+    resume_state_valid = status in RESUMABLE_TASK_STATUSES
     controls = {
+        'visible': pause_state_valid or resume_state_valid,
         'pause': {'enabled': False, 'reason': ''},
         'resume': {'enabled': False, 'reason': ''},
     }
+    if not controls['visible']:
+        return controls
+    if not internal_monitor:
+        reason = 'Available on the internal monitor.'
+        controls['pause']['reason'] = reason
+        controls['resume']['reason'] = reason
+        return controls
     if not authenticated:
         controls['pause']['reason'] = 'Sign in to pause this task.'
         controls['resume']['reason'] = 'Sign in to resume this task.'
@@ -58,19 +70,17 @@ def operation_controls(task, *, authenticated, pending=None):
         controls['pause']['reason'] = reason
         controls['resume']['reason'] = reason
         return controls
+    if resume_state_valid:
+        controls['resume']['enabled'] = True
+        controls['resume']['reason'] = f'Resume this {status} task.'
+    else:
+        controls['resume']['reason'] = 'Task is not resumable.'
     if status == 'paused':
         controls['pause']['reason'] = 'Task is already paused.'
-        controls['resume']['enabled'] = True
-        controls['resume']['reason'] = 'Resume this paused task.'
         return controls
-    if status in TERMINAL_TASK_STATUSES:
-        reason = f'Task is terminal ({status}).'
-        controls['pause']['reason'] = reason
-        controls['resume']['reason'] = reason
-        return controls
-    controls['pause']['enabled'] = True
-    controls['pause']['reason'] = 'Pause this task.'
-    controls['resume']['reason'] = 'Task is not paused.'
+    if pause_state_valid:
+        controls['pause']['enabled'] = True
+        controls['pause']['reason'] = 'Pause this task.'
     return controls
 
 
@@ -98,13 +108,12 @@ def queue_task_operation(*, task, operation, requested_by, source='manual',
 
     status = str(task.get('status') or '').lower()
     if operation == 'pause':
-        if status == 'paused':
-            raise PandaTaskOperationError('Task is already paused.', 409)
-        if status in TERMINAL_TASK_STATUSES:
+        if status in PAUSE_REJECTED_TASK_STATUSES:
             raise PandaTaskOperationError(
-                f'Task cannot be paused from terminal status {status}.', 409)
-    elif status != 'paused':
-        raise PandaTaskOperationError('Only a paused task can be resumed.', 409)
+                f'Task cannot be paused from status {status}.', 409)
+    elif status not in RESUMABLE_TASK_STATUSES:
+        raise PandaTaskOperationError(
+            f'Task cannot be resumed from status {status}.', 409)
 
     try:
         with transaction.atomic():

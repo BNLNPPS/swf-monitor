@@ -1338,6 +1338,7 @@ def panda_task_detail(request, jeditaskid):
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
     completion_details = job_completion_details([job.get('pandaid') for job in jobs])
     from ..models import EpicProdJob, PandaTaskOperation
+    from ..middleware import is_tunnel_request
     from ..panda.operations import operation_controls, serialize_operation
     epicprod_jobs = {
         row.pandaid: row
@@ -1381,6 +1382,7 @@ def panda_task_detail(request, jeditaskid):
     task_operation_controls = operation_controls(
         task,
         authenticated=request.user.is_authenticated,
+        internal_monitor=not is_tunnel_request(request),
         pending=pending_operation,
     )
 

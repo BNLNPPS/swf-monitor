@@ -16,7 +16,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status as http_status
 
-from monitor_app.middleware import TunnelAuthentication
+from monitor_app.middleware import TunnelAuthentication, is_tunnel_request
 
 from . import operations, queries
 
@@ -194,6 +194,11 @@ def task_detail(request, jeditaskid):
 @permission_classes([IsAuthenticated])
 def task_operation_request(request, jeditaskid):
     """Queue a durable manual pause/resume request for the prod-ops agent."""
+    if is_tunnel_request(request):
+        return Response(
+            {'error': 'Pause and resume are available on the internal monitor.'},
+            status=http_status.HTTP_403_FORBIDDEN,
+        )
     task = queries.get_task(jeditaskid)
     if 'error' in task:
         response_status = (http_status.HTTP_404_NOT_FOUND

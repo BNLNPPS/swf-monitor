@@ -8,6 +8,7 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>PanDA Task {{ jeditaskid }}</h2>
         <div class="d-flex align-items-center gap-2">
+            {% if task_operation_controls.visible %}
             <form id="panda-task-operation-form" class="d-flex align-items-center gap-2 mb-0">
                 {% csrf_token %}
                 <button type="button" id="panda-task-pause" class="btn btn-success btn-sm"
@@ -19,14 +20,16 @@
                         title="{{ task_operation_controls.resume.reason }}"
                         {% if not task_operation_controls.resume.enabled %}disabled aria-disabled="true"{% endif %}>Resume</button>
             </form>
+            <div id="panda-task-operation-status"
+                 class="fw-semibold text-primary{% if not pending_task_operation %} d-none{% endif %}"
+                 role="status">
+                {% if pending_task_operation %}
+                {{ pending_task_operation.operation|title }} requested · waiting for PanDA…
+                {% endif %}
+            </div>
+            {% endif %}
             <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
         </div>
-    </div>
-
-    <div id="panda-task-operation-status" class="small mb-3{% if not pending_task_operation %} d-none{% endif %}" role="status">
-        {% if pending_task_operation %}
-        {{ pending_task_operation.operation|title }} requested; waiting for verified PanDA state…
-        {% endif %}
     </div>
 
     {% if error %}
@@ -305,7 +308,7 @@
     {% endif %}
 </div>
 
-{% if request.user.is_authenticated %}
+{% if task_operation_controls.visible and request.user.is_authenticated and not is_tunnel %}
 <script>
 (function () {
     const form = document.getElementById('panda-task-operation-form');
@@ -321,10 +324,10 @@
     let pollTimer = null;
     let stopTimer = null;
 
-    function showStatus(message, error) {
+    function showStatus(message, state) {
         statusNode.textContent = message;
-        statusNode.classList.remove('d-none', 'text-danger', 'text-muted');
-        statusNode.classList.add(error ? 'text-danger' : 'text-muted');
+        statusNode.classList.remove('d-none', 'text-primary', 'text-success', 'text-danger');
+        statusNode.classList.add(`text-${state}`);
     }
 
     function disableControls() {
@@ -349,7 +352,7 @@
         const label = verified
             ? `${record.operation === 'pause' ? 'Pause' : 'Resume'} verified by PanDA.`
             : (record.diagnostic || `Operation ${record.status}.`);
-        showStatus(label, !verified);
+        showStatus(label, verified ? 'success' : 'danger');
         window.setTimeout(function () { window.location.reload(); }, 700);
     }
 
@@ -383,7 +386,7 @@
 
     async function requestOperation(operation) {
         disableControls();
-        showStatus(`${operation === 'pause' ? 'Pause' : 'Resume'} requested; waiting for verified PanDA state…`, false);
+        showStatus(`${operation === 'pause' ? 'Pause' : 'Resume'} requested · waiting for PanDA…`, 'primary');
         watchOperation();
         try {
             const response = await fetch(requestUrl, {
@@ -402,7 +405,7 @@
             checkStatus();
         } catch (error) {
             closeWatch();
-            showStatus(error.message, true);
+            showStatus(error.message, 'danger');
             window.setTimeout(function () { window.location.reload(); }, 1200);
         }
     }
