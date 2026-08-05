@@ -49,9 +49,23 @@
 
 {% block default_order %}[[1, 'desc']]{% endblock %}
 
+{% block extra_styles %}
+#main-table_wrapper .top {
+    justify-content: space-between !important;
+    align-items: center;
+    gap: 1rem;
+}
+{% endblock %}
+
 {% block extra_scripts %}
-{% if bulk_controls_operable %}
 const bulkForm = document.getElementById('panda-bulk-operation-form');
+const bulkToolbar = document.querySelector('#main-table_wrapper .top');
+if (bulkForm && bulkToolbar) {
+    bulkForm.classList.remove('mb-2');
+    bulkForm.classList.add('mb-0');
+    bulkToolbar.prepend(bulkForm);
+}
+{% if bulk_controls_operable %}
 const bulkAll = document.getElementById('panda-bulk-all');
 const bulkNone = document.getElementById('panda-bulk-none');
 const bulkAction = document.getElementById('panda-bulk-action');
