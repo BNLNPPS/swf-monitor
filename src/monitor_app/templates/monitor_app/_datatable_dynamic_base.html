@@ -71,6 +71,8 @@ Filter field configuration format:
     <div id="query-count" class="query-count mb-2" aria-live="polite">Query count: loading...</div>
     {% endif %}
 
+    {% block before_table %}{% endblock %}
+
     <!-- DataTable. No .table-responsive wrapper: its overflow clipping
          would defeat the latching header (see base.html). -->
     <div>
