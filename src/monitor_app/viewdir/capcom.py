@@ -280,7 +280,7 @@ def capcom_state(request):
             username='pandabot', session_id='mattermost', role='user',
             created_at__gte=since).count()
         states.append({
-            'source': 'swf-dispatcher',
+            'source': 'swf-bot',
             'value': (f'{posts} post{"s" if posts != 1 else ""} · '
                       f'{queries} quer{"ies" if queries != 1 else "y"}/24h'),
             'url': 'https://chat.epic-eic.org/main/channels/dispatcher'})
@@ -289,7 +289,7 @@ def capcom_state(request):
     except Exception as exc:
         logger.error('capcom state: dispatcher counts failed: %s', exc)
         states.append({
-            'source': 'swf-dispatcher', 'value': 'UNAVAILABLE',
+            'source': 'swf-bot', 'value': 'UNAVAILABLE',
             'url': 'https://chat.epic-eic.org/main/channels/dispatcher'})
         detail['dispatcher'] = {'error_text': str(exc)}
 
