@@ -12,7 +12,9 @@ moment they occur.
 """
 
 import logging
+import re
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.http import JsonResponse
 from django.utils import timezone
@@ -20,6 +22,155 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 REMOTE_FACE = 'https://epic-devcloud.org/prod'
+CAPCOM_WORKLOAD_CHECKS = frozenset({'stale-state'})
+USERNAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$')
+
+
+def _user_testbed_summary(username, now):
+    """Return display and detail state for one user's SWF testbed."""
+    from ..models import SysConfig, SystemAgent
+    from ..workflow_models import Namespace, WorkflowExecution
+
+    healthy_after = now - timedelta(minutes=5)
+    stale_hours = float(SysConfig.get_setting('state_stale_hours', 12))
+    stale_before = now - timedelta(hours=stale_hours)
+
+    manager = SystemAgent.objects.filter(
+        instance_name=f'agent-manager-{username}').first()
+    executions = WorkflowExecution.objects.filter(executed_by=username)
+    latest_execution = executions.order_by('-start_time').first()
+
+    manager_is_fresh = bool(
+        manager and manager.last_heartbeat
+        and manager.last_heartbeat >= healthy_after
+        and manager.operational_state != 'EXITED')
+    owned_namespace = (Namespace.objects.filter(owner=username)
+                       .order_by('-updated_at')
+                       .values_list('name', flat=True).first())
+    namespace = None
+    if manager_is_fresh and manager.namespace:
+        namespace = manager.namespace
+    elif latest_execution and latest_execution.namespace:
+        namespace = latest_execution.namespace
+    elif manager and manager.namespace:
+        namespace = manager.namespace
+    else:
+        namespace = owned_namespace
+
+    agents = []
+    if namespace:
+        agents = list(SystemAgent.objects.filter(namespace=namespace)
+                      .exclude(instance_name=f'agent-manager-{username}')
+                      .exclude(operational_state='EXITED')
+                      .order_by('-last_heartbeat'))
+    fresh_agents = [
+        agent for agent in agents
+        if agent.last_heartbeat and agent.last_heartbeat >= healthy_after
+    ]
+    stale_agents = [agent for agent in agents if agent not in fresh_agents]
+    error_agents = [agent for agent in fresh_agents if agent.status == 'ERROR']
+    running_workflows = executions.filter(status='running').count()
+    stale_workflows = executions.filter(
+        status='running', end_time__isnull=True,
+        start_time__lt=stale_before).count()
+
+    if stale_workflows:
+        label = (f'testbed {stale_workflows} stale workflow'
+                 f'{"s" if stale_workflows != 1 else ""}')
+        color = 'yellow'
+    elif error_agents or (manager_is_fresh and manager.status == 'ERROR'):
+        label = 'testbed error'
+        color = 'red'
+    elif running_workflows:
+        label = (f'testbed {running_workflows} workflow'
+                 f'{"s" if running_workflows != 1 else ""}')
+        color = 'green'
+    elif fresh_agents:
+        label = f'testbed ready ({len(fresh_agents)})'
+        color = 'green'
+    else:
+        label = 'testbed off'
+        color = None
+
+    return {
+        'label': label,
+        'color': color,
+        'namespace': namespace,
+        'agent_manager': {
+            'alive': manager_is_fresh,
+            'status': manager.status if manager else None,
+            'last_heartbeat': (
+                manager.last_heartbeat.isoformat()
+                if manager and manager.last_heartbeat else None),
+        },
+        'agents': {
+            'fresh': len(fresh_agents),
+            'stale': len(stale_agents),
+            'error': len(error_agents),
+        },
+        'workflows': {
+            'running': running_workflows,
+            'stale': stale_workflows,
+            'stale_after_hours': stale_hours,
+        },
+        'last_execution': ({
+            'execution_id': latest_execution.execution_id,
+            'status': latest_execution.status,
+            'start_time': (latest_execution.start_time.isoformat()
+                           if latest_execution.start_time else None),
+            'end_time': (latest_execution.end_time.isoformat()
+                         if latest_execution.end_time else None),
+        } if latest_execution else None),
+    }
+
+
+def _user_panda_summary(username):
+    """Return a compact trailing-day PanDA summary for one effective user."""
+    from ..panda.queries import get_activity
+
+    activity = get_activity(days=1, username=username)
+    if activity.get('error'):
+        raise RuntimeError(activity['error'])
+    jobs = activity.get('jobs') or {}
+    tasks = activity.get('tasks') or {}
+    job_status = jobs.get('by_status') or {}
+    task_status = tasks.get('by_status') or {}
+
+    running_jobs = int(job_status.get('running', 0) or 0)
+    terminal_tasks = {'done', 'failed', 'aborted', 'broken', 'finished'}
+    active_tasks = sum(
+        int(count or 0) for status, count in task_status.items()
+        if status not in terminal_tasks)
+    finished_jobs = int(job_status.get('finished', 0) or 0)
+    failed_jobs = sum(int(job_status.get(status, 0) or 0)
+                      for status in ('failed', 'cancelled', 'closed'))
+
+    if running_jobs:
+        label = (f'PanDA {running_jobs} running job'
+                 f'{"s" if running_jobs != 1 else ""}')
+    elif active_tasks:
+        label = (f'PanDA {active_tasks} active task'
+                 f'{"s" if active_tasks != 1 else ""}')
+    elif finished_jobs or failed_jobs:
+        outcomes = []
+        if finished_jobs:
+            outcomes.append(f'{finished_jobs} finished')
+        if failed_jobs:
+            outcomes.append(f'{failed_jobs} failed')
+        label = f'PanDA {", ".join(outcomes)}/24h'
+    else:
+        label = 'PanDA idle'
+
+    return {
+        'label': label,
+        'window_hours': 24,
+        'running_jobs': running_jobs,
+        'active_tasks': active_tasks,
+        'finished_jobs': finished_jobs,
+        'failed_jobs': failed_jobs,
+        'jobs_by_status': job_status,
+        'tasks_by_status': task_status,
+    }
 
 
 def capcom_state(request):
@@ -38,7 +189,7 @@ def capcom_state(request):
     detail = {}
 
     try:
-        summary = status_summary()
+        summary = status_summary(exclude_names=CAPCOM_WORKLOAD_CHECKS)
         status = summary.get('overall_status', 'unknown')
         bad = int(summary.get('warning', 0)) + int(summary.get('error', 0))
         value = status.upper() + (f' ({bad})' if bad else '')
@@ -51,6 +202,8 @@ def capcom_state(request):
         states.append(entry)
         latest = summary.get('latest_checked_at')
         detail['system'] = {
+            'scope': 'infrastructure-operations',
+            'excluded_checks': sorted(CAPCOM_WORKLOAD_CHECKS),
             'status': status,
             'reason': summary.get('overall_reason', ''),
             'ok': summary.get('ok', 0),
@@ -153,3 +306,53 @@ def capcom_state(request):
 
     return JsonResponse({'built_at': now.isoformat(),
                          'states': states, 'detail': detail})
+
+
+def capcom_user_state(request):
+    """One display-ready SWF tile for a requested user's own activity/state."""
+    username = (request.GET.get('username') or '').strip()
+    if not USERNAME_RE.fullmatch(username):
+        return JsonResponse({
+            'error': ('username is required and may contain only letters, '
+                      'numbers, dot, underscore, and hyphen'),
+        }, status=400)
+
+    now = timezone.now()
+    detail = {'username': username}
+    color = None
+    try:
+        testbed = _user_testbed_summary(username, now)
+        testbed_label = testbed.pop('label')
+        color = testbed.pop('color')
+        detail['testbed'] = testbed
+    except Exception as exc:
+        logger.error('capcom user state: testbed query for %s failed: %s',
+                     username, exc)
+        testbed_label = 'testbed unavailable'
+        color = 'red'
+        detail['testbed'] = {'error_text': str(exc)}
+
+    try:
+        panda = _user_panda_summary(username)
+        panda_label = panda.pop('label')
+        detail['panda'] = panda
+    except Exception as exc:
+        logger.error('capcom user state: PanDA query for %s failed: %s',
+                     username, exc)
+        panda_label = 'PanDA unavailable'
+        color = 'red'
+        detail['panda'] = {'error_text': str(exc)}
+
+    entry = {
+        'source': 'swf-user',
+        'value': f'{testbed_label} · {panda_label}',
+        'url': f'{REMOTE_FACE}/panda/jobs/?{urlencode({"days": 1, "username": username})}',
+    }
+    if color:
+        entry['color'] = color
+    return JsonResponse({
+        'built_at': now.isoformat(),
+        'username': username,
+        'states': [entry],
+        'detail': detail,
+    })

@@ -41,7 +41,7 @@ _NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
 _PANDA_USER_EQUIVALENCES = {
     # Canonical monitor display name -> equivalent login/name variants.
-    'Torre Wenaus': ('wenaus',),
+    'Torre Wenaus': ('wenaus', 'wenauseic'),
 }
 _PANDA_USER_TO_CANONICAL = {
     name: canonical

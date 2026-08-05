@@ -668,10 +668,19 @@ def grouped_current_status():
     return groups
 
 
-def status_summary():
+def status_summary(exclude_names=None):
+    """Summarize cached checks, optionally omitting named check rows.
+
+    The System page calls this without exclusions. Narrow consumers such as
+    Capcom can deliberately summarize only the checks in their own scope
+    without changing collection or hiding rows from the System page.
+    """
     now = timezone.now()
     try:
-        rows = list(SystemStatus.objects.all())
+        queryset = SystemStatus.objects.all()
+        if exclude_names:
+            queryset = queryset.exclude(name__in=exclude_names)
+        rows = list(queryset)
     except (OperationalError, ProgrammingError):
         return {
             'ok': 0,

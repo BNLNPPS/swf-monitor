@@ -119,12 +119,18 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 - `GET /api/capcom/state/` - Display-ready SWF state for the tjai Capcom
   page. `states` carries tile-exact entries shaped as tjai's
   `capcom.set_state(source, value, color, url)` expects: `swf-system`
-  (the cached System page verdict) and `swf-panda` (running jobs now
-  with the success percentage over the trailing 12 hours). `detail`
+  (the cached infrastructure/operations verdict, excluding user workload
+  state) and `swf-panda` (running jobs now with the success percentage over
+  the trailing 12 hours). `detail`
   carries the numbers behind them. Open read, polled every few minutes;
   externally reachable through the swf-remote proxy
   (`/prod/api/capcom/state/`). Each section degrades independently,
   contributing an UNAVAILABLE tile and `error_text` on failure.
+- `GET /api/capcom/user-state/?username=USERNAME` - Display-ready `swf-user`
+  tile combining that user's testbed activity/state and effective-user PanDA
+  activity over the trailing 24 hours. The endpoint contract is generic; the
+  Capcom collector supplies the configured username. Invalid or missing
+  usernames return HTTP 400.
 
 ### System Agents
 - `GET /api/systemagents/` - List all agents
