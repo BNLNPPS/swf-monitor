@@ -30,6 +30,8 @@ def _run_inside_pclient(args):
         "new_parameters": args.new_parameters,
         "verify_timeout": args.verify_timeout,
         "poll_interval": args.poll_interval,
+        "send_interval": args.send_interval,
+        "items": args.items,
     }
     with tempfile.TemporaryDirectory(prefix="panda-task-operation.") as tmpdir:
         payload_path = os.path.join(tmpdir, "payload.json")
@@ -64,6 +66,18 @@ def _inside_pclient(payload_path):
     operation = payload["operation"]
     jedi_task_id = int(payload["jedi_task_id"])
 
+    if payload.get("items"):
+        output = _run_batch_panda_operations(
+            Client,
+            operation,
+            payload["items"],
+            verify_timeout=float(payload.get("verify_timeout") or 90),
+            poll_interval=float(payload.get("poll_interval") or 5),
+            send_interval=float(payload.get("send_interval") or 1),
+        )
+        print(json.dumps(output, default=str))
+        return 0
+
     if operation == "increase_attempts":
         result = client.increase_attempt_nr(jedi_task_id, int(payload.get("increase") or 1))
     elif operation == "retry_failures":
@@ -95,8 +109,7 @@ def _inside_pclient(payload_path):
                 observed_status, status_diagnostic = _panda_task_status(status_result)
                 if observed_status:
                     output["observed_status"] = observed_status
-                    if ((operation == "pause" and observed_status == "paused")
-                            or (operation == "resume" and observed_status != "paused")):
+                    if _task_state_verified(operation, observed_status):
                         output["verified"] = True
                         break
                 else:
@@ -149,6 +162,72 @@ def _panda_task_status(result):
     return status, ""
 
 
+def _task_state_verified(operation, observed_status):
+    if operation == "pause":
+        return observed_status == "paused"
+    if operation == "resume":
+        return observed_status not in ("paused", "throttled", "staging")
+    return False
+
+
+def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
+                                poll_interval, send_interval):
+    """Submit scalar commands with pacing, then verify on one shared clock."""
+    action = Client.pauseTask if operation == "pause" else Client.resumeTask
+    results = []
+    for index, item in enumerate(items):
+        operation_id = str(item.get("operation_id") or "")
+        jedi_task_id = int(item["jedi_task_id"])
+        try:
+            panda_result = action(jedi_task_id, False)
+            accepted, diagnostic = _panda_result_ok(panda_result)
+        except Exception as exc:
+            panda_result = None
+            accepted = False
+            diagnostic = str(exc)
+        results.append({
+            "operation_id": operation_id,
+            "jedi_task_id": jedi_task_id,
+            "accepted": accepted,
+            "verified": False,
+            "observed_status": "",
+            "diagnostic": diagnostic,
+            "result": panda_result,
+        })
+        if index + 1 < len(items):
+            time.sleep(max(0.0, send_interval))
+
+    pending = {index for index, result in enumerate(results)
+               if result["accepted"]}
+    deadline = time.monotonic() + verify_timeout
+    while pending:
+        for index in list(pending):
+            result = results[index]
+            try:
+                status_result = Client.getTaskStatus(
+                    result["jedi_task_id"], False)
+            except Exception as exc:
+                result["status_diagnostic"] = str(exc)
+                continue
+            observed_status, status_diagnostic = _panda_task_status(status_result)
+            if observed_status:
+                result["observed_status"] = observed_status
+                if _task_state_verified(operation, observed_status):
+                    result["verified"] = True
+                    pending.remove(index)
+            elif status_diagnostic:
+                result["status_diagnostic"] = status_diagnostic
+        if not pending or time.monotonic() >= deadline:
+            break
+        time.sleep(max(1.0, poll_interval))
+
+    return {
+        "operation": operation,
+        "batch": True,
+        "results": results,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run an existing PanDA task operation.")
     ap.add_argument(
@@ -163,9 +242,12 @@ def main():
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--verify-timeout", type=int, default=90)
     ap.add_argument("--poll-interval", type=float, default=5)
+    ap.add_argument("--send-interval", type=float, default=1)
+    ap.add_argument("--batch", action="store_true")
     ap.add_argument("--inside-pclient", action="store_true")
     ap.add_argument("--payload")
     args = ap.parse_args()
+    args.items = []
 
     if args.inside_pclient:
         if not args.payload:
@@ -174,8 +256,22 @@ def main():
         return _inside_pclient(args.payload)
 
     if not args.operation or not args.jedi_task_id:
-        _log("ERROR: --operation and --jedi-task-id are required")
-        return 2
+        if not args.batch or not args.operation:
+            _log("ERROR: --operation and --jedi-task-id are required")
+            return 2
+    if args.batch:
+        try:
+            args.items = json.load(sys.stdin)
+        except (ValueError, TypeError) as exc:
+            _log(f"ERROR: batch stdin is not valid JSON: {exc}")
+            return 2
+        if not isinstance(args.items, list) or not args.items:
+            _log("ERROR: batch stdin must be a non-empty JSON list")
+            return 2
+        if args.operation not in ("pause", "resume"):
+            _log("ERROR: batch mode supports pause or resume")
+            return 2
+        args.jedi_task_id = int(args.items[0]["jedi_task_id"])
     if args.increase < 1:
         _log("ERROR: --increase must be >= 1")
         return 2

@@ -118,6 +118,7 @@ JOB_ORDER_MAP = {
 }
 
 TASK_COLUMNS = [
+    {'name': 'select', 'title': '', 'orderable': False},
     {'name': 'jeditaskid', 'title': 'Task ID', 'orderable': True},
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
@@ -764,6 +765,8 @@ def panda_jobs_filter_counts(request):
 
 def panda_tasks_list(request):
     days = _get_days(request)
+    from ..middleware import is_tunnel_request
+
     context = {
         'table_title': 'PanDA Tasks',
         'table_description': f'JEDI tasks from the last {days} days.',
@@ -780,13 +783,15 @@ def panda_tasks_list(request):
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_processingtype': request.GET.get('processingtype', ''),
+        'bulk_controls_operable': (
+            request.user.is_authenticated and not is_tunnel_request(request)),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_tasks_list.html', context)
 
 
-def _format_task_row(task, days):
-    """Render one task's 17 display cells, ordered as TASK_COLUMNS."""
+def _format_task_row(task, days, *, controls_operable):
+    """Render one task row, including its bulk-action selection contract."""
     task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
     tasks_by_user_url = _url_with_query('monitor_app:panda_tasks_list', days=days, username=task['username']) if task.get('username') else None
     tasks_by_status_url = _url_with_query('monitor_app:panda_tasks_list', days=days, status=task['status']) if task.get('status') else None
@@ -819,8 +824,22 @@ def _format_task_row(task, days):
         if 'test' in processingtype.lower()
         else processingtype_html
     )
+    task_status = str(task.get('status') or '').lower()
+    pause_eligible = task_status == 'running'
+    resume_eligible = task_status == 'paused'
+    actionable = pause_eligible or resume_eligible
+    checkbox_disabled = not controls_operable or not actionable
+    checkbox = (
+        f'<input type="checkbox" class="panda-task-select" '
+        f'data-task-id="{int(task["jeditaskid"])}" '
+        f'data-pause-eligible="{1 if pause_eligible else 0}" '
+        f'data-resume-eligible="{1 if resume_eligible else 0}" '
+        f'aria-label="Select PanDA task {int(task["jeditaskid"])}"'
+        f'{" disabled" if checkbox_disabled else ""}>'
+    )
 
     return [
+        checkbox,
         f'<a href="{task_url}">{task["jeditaskid"]}</a>',
         f'<a href="{task_url}" title="{taskname_title}">{taskname_display}</a>',
         _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
@@ -862,6 +881,7 @@ def _window_sort_key(value):
 
 def panda_tasks_datatable_ajax(request):
     from ..cached_product import get_product
+    from ..middleware import is_tunnel_request
 
     dt = DataTablesProcessor(request, TASK_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
@@ -915,7 +935,12 @@ def panda_tasks_datatable_ajax(request):
     else:
         page = rows[dt.start:] if dt.start else rows
 
-    data = [_format_task_row(r['raw'], days) for r in page]
+    controls_operable = (
+        request.user.is_authenticated and not is_tunnel_request(request))
+    data = [
+        _format_task_row(r['raw'], days, controls_operable=controls_operable)
+        for r in page
+    ]
     return dt.create_response(data, total, filtered, extra=product_extra)
 
 

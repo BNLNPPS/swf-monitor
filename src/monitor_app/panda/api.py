@@ -222,6 +222,53 @@ def task_operation_request(request, jeditaskid):
     )
 
 
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def task_operations_request(request):
+    """Queue one internal bulk pause/resume request with per-task records."""
+    if is_tunnel_request(request):
+        return Response(
+            {'error': 'Bulk task actions are available on the internal monitor.'},
+            status=http_status.HTTP_403_FORBIDDEN,
+        )
+    raw_ids = request.data.get('jedi_task_ids')
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return Response({'error': 'jedi_task_ids must be a non-empty list.'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+    if len(raw_ids) > operations.MAX_BULK_TASKS:
+        return Response(
+            {'error': f'At most {operations.MAX_BULK_TASKS} tasks may be submitted at once.'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        task_ids = list(dict.fromkeys(int(task_id) for task_id in raw_ids))
+    except (TypeError, ValueError):
+        return Response({'error': 'Every JEDI task ID must be an integer.'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+    try:
+        tasks = queries.get_task_operation_targets(task_ids)
+        result = operations.queue_task_operations(
+            tasks=tasks,
+            operation=str(request.data.get('operation') or ''),
+            requested_by=getattr(request.user, 'username', '') or 'operator',
+        )
+    except operations.PandaTaskOperationError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    found_ids = {task['jeditaskid'] for task in tasks}
+    for missing_id in (task_id for task_id in task_ids
+                       if task_id not in found_ids):
+        result['rejected'].append({
+            'jedi_task_id': missing_id,
+            'status': '',
+            'error': 'Task not found.',
+        })
+    if not result['records']:
+        result['error'] = 'None of the selected tasks is eligible for this action.'
+        return Response(result, status=http_status.HTTP_409_CONFLICT)
+    return Response(result, status=http_status.HTTP_202_ACCEPTED)
+
+
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([IsAuthenticated])

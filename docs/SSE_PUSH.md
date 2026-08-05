@@ -26,7 +26,7 @@ topic the monitor's listener consumes and the relay broadcasts — using
 | `_do_submit_task` / `_do_submit_evgen_task` (after record-submission OK) | `prodtask_submitted` | `task_name`, `jedi_task_id` |
 | Submit failure before a JEDI id is recorded | `prodtask_submit_failed` | `task_name`, `reason` |
 | Submit succeeded but PCS record update failed | `prodtask_submit_unrecorded` | `task_name`, `jedi_task_id`, `reason` |
-| Existing PanDA task operation finished | `panda_task_operation_done` | `operation_id`, `task_name`, `jedi_task_id`, `operation`, verified `status`, `ok`, `summary` or `error` |
+| Existing PanDA task operation finished | `panda_task_operation_done` | `operation_id`, optional bulk `batch_id`, `task_name`, `jedi_task_id`, `operation`, verified `status`, `ok`, `summary` or `error` |
 
 These ride the existing workflow topic rather than a dedicated channel: zero new
 relay infrastructure, and the events become a useful ops audit trail as enriched

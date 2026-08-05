@@ -41,7 +41,8 @@ Capabilities:
                        run (corun callback → validation, floor, registration;
                        swf-epicprod docs/EPICPROD_ASSESSMENTS_V1.md).
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
-                       increase allowed attempts or retry failed work.
+                       pause/resume, increase attempts, or retry failed work.
+  panda_task_operations — run one paced bulk pause/resume request.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -109,6 +110,7 @@ SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "subm
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
+PANDA_TASK_BULK_SEND_INTERVAL = 1.0
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
 # the per-task rematch — slow and network-bound, so generously bounded.
@@ -133,6 +135,7 @@ CAPCOM_INGEST_URL = "https://etaverse.com/tjai/api/capcom/notice"
 CAPCOM_CAMPAIGN_URL = "https://epic-devcloud.org/prod/snapper/epicprod/campaign/"
 CAPCOM_LOGS_URL = "https://epic-devcloud.org/prod/logs/"
 CAPCOM_PANDA_TASK_URL = "https://epic-devcloud.org/prod/panda/tasks/{jedi_task_id}/"
+CAPCOM_PANDA_TASKS_URL = "https://epic-devcloud.org/prod/panda/tasks/"
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -198,7 +201,7 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
-                   "panda_task_operation",
+                   "panda_task_operation", "panda_task_operations",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "association_sweep", "catalog_sync", "questionnaire_import",
@@ -670,6 +673,143 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
                              operation=operation, task_name=task_name)
+
+    def _handle_panda_task_operations(self, m):
+        """Run one paced batch of scalar PanDA pause/resume commands."""
+        operation = m.get('operation')
+        items = m.get('items')
+        batch_id = str(m.get('batch_id') or '')
+        if operation not in ('pause', 'resume'):
+            self.logger.error(
+                f"PRODOPS panda_task_operations: bad operation {operation!r}")
+            return
+        if not batch_id or not isinstance(items, list) or not items:
+            self.logger.error(
+                "PRODOPS panda_task_operations: missing batch_id/items")
+            return
+        if any(not item.get('operation_id') or not item.get('jedi_task_id')
+               for item in items):
+            self.logger.error(
+                "PRODOPS panda_task_operations: invalid batch item")
+            return
+        self.run_in_background(
+            self._do_panda_task_operations, m,
+            dedup_key=f'panda-bulk:{batch_id}',
+            label=f'panda_task_operations {operation} {len(items)} tasks')
+
+    def _do_panda_task_operations(self, m):
+        operation = str(m['operation'])
+        items = list(m['items'])
+        batch_id = str(m['batch_id'])
+        username = str(m.get('created_by') or '')
+        paced_seconds = max(
+            0, int(PANDA_TASK_BULK_SEND_INTERVAL * (len(items) - 1) + 0.999))
+        doer_timeout = PANDA_TASK_OPERATION_TIMEOUT + paced_seconds
+        cmd = [
+            sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
+            '--batch',
+            '--operation', operation,
+            '--send-interval', str(PANDA_TASK_BULK_SEND_INTERVAL),
+            '--timeout', str(doer_timeout),
+        ]
+        for item in items:
+            self._record_panda_operation_state(item['operation_id'], 'running')
+        self._emit_panda_bulk_notice(m, 'requested')
+        self.logger.info(
+            f"PRODOPS panda_task_operations: {operation} batch={batch_id} "
+            f"tasks={len(items)} interval={PANDA_TASK_BULK_SEND_INTERVAL}s")
+        t0 = time.monotonic()
+        try:
+            process = subprocess.run(
+                cmd, input=json.dumps(items), capture_output=True, text=True,
+                timeout=doer_timeout + 30)
+        except subprocess.TimeoutExpired:
+            reason = f'bulk operation timed out after {doer_timeout}s'
+            for item in items:
+                self._settle_panda_bulk_item(
+                    m, item, 'timeout', diagnostic=reason)
+            self._emit_panda_bulk_notice(
+                m, 'completed', counts={'timeout': len(items)})
+            self._log_action(
+                'panda_task_operation', t0, outcome='timeout', reason=reason,
+                subject_type='panda_task_batch', subject_key=batch_id,
+                username=username, sublevel='high', live_default=True,
+                level=logging.ERROR, operation=operation, tasks=len(items))
+            return
+
+        for line in (process.stderr or '').splitlines():
+            self.logger.info(f'  panda-task-operations: {line}')
+        try:
+            output = json.loads((process.stdout or '').strip().splitlines()[-1])
+            result_rows = output.get('results') or []
+        except (AttributeError, IndexError, json.JSONDecodeError):
+            result_rows = []
+        by_operation_id = {
+            str(row.get('operation_id') or ''): row
+            for row in result_rows
+            if isinstance(row, dict)
+        }
+        counts = {'verified': 0, 'failed': 0, 'unverified': 0}
+        process_reason = self._derive_reason(process) if process.returncode else ''
+        for item in items:
+            result = by_operation_id.get(str(item['operation_id']))
+            if not result:
+                status = 'failed'
+                diagnostic = process_reason or 'No result returned for task.'
+            elif not result.get('accepted'):
+                status = 'failed'
+                diagnostic = str(result.get('diagnostic') or 'PanDA refused the request.')
+            elif result.get('verified'):
+                status = 'verified'
+                diagnostic = str(result.get('diagnostic') or '')
+            else:
+                status = 'unverified'
+                diagnostic = ('PanDA accepted the request but the task state '
+                              'was not verified before the deadline')
+            counts[status] = counts.get(status, 0) + 1
+            self._settle_panda_bulk_item(
+                m, item, status,
+                diagnostic=diagnostic,
+                observed_status=str((result or {}).get('observed_status') or ''),
+                evidence={
+                    'panda_diagnostic': str(
+                        (result or {}).get('diagnostic') or ''),
+                    'status_diagnostic': str(
+                        (result or {}).get('status_diagnostic') or ''),
+                },
+            )
+        self._emit_panda_bulk_notice(m, 'completed', counts=counts)
+        problems = counts.get('failed', 0) + counts.get('unverified', 0)
+        outcome = 'ok' if not problems else 'error'
+        self._log_action(
+            'panda_task_operation', t0, outcome=outcome,
+            reason=(f'{problems} task outcomes were not verified'
+                    if problems else ''),
+            subject_type='panda_task_batch', subject_key=batch_id,
+            username=username, sublevel='high', live_default=True,
+            level=logging.WARNING if problems else logging.INFO,
+            operation=operation, tasks=len(items), **counts)
+
+    def _settle_panda_bulk_item(self, message, item, status, *,
+                                diagnostic='', observed_status='',
+                                evidence=None):
+        operation_id = str(item['operation_id'])
+        self._record_panda_operation_state(
+            operation_id, status, diagnostic=diagnostic,
+            observed_status=observed_status, evidence=evidence or {})
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'panda_task_operation_done',
+            'batch_id': str(message.get('batch_id') or ''),
+            'operation_id': operation_id,
+            'task_name': str(item.get('task_name') or ''),
+            'jedi_task_id': str(item['jedi_task_id']),
+            'operation': str(message['operation']),
+            'status': status,
+            'observed_status': observed_status,
+            'accepted': status in ('verified', 'unverified'),
+            'ok': status == 'verified',
+            'error': diagnostic if status != 'verified' else '',
+        })
 
     def _handle_sync_epicprod_inventory(self, m):
         """Refresh one job/task inventory record on the worker pool."""
@@ -1457,6 +1597,45 @@ class EpicProdOpsAgent(BaseAgent):
             'detail': str(detail or '')[:500],
             'url': CAPCOM_PANDA_TASK_URL.format(jedi_task_id=jedi_task_id),
             'dedup_key': f'panda-task-operation:{operation_id}:{stage}',
+        })
+
+    def _emit_panda_bulk_notice(self, message, stage, *, counts=None):
+        """Publish one Capcom notice for the whole manual bulk request."""
+        operation = str(message.get('operation') or '')
+        batch_id = str(message.get('batch_id') or '')
+        items = message.get('items') or []
+        if operation not in ('pause', 'resume') or not batch_id or not items:
+            return
+        total = len(items)
+        counts = counts or {}
+        if stage == 'requested':
+            title = f'PanDA bulk {operation}: {total} requested'
+            detail = f'Requested by {message.get("created_by") or "operator"}.'
+            severity = 'info'
+        else:
+            verified = int(counts.get('verified') or 0)
+            failed = int(counts.get('failed') or 0)
+            unverified = int(counts.get('unverified') or 0)
+            timed_out = int(counts.get('timeout') or 0)
+            title = f'PanDA bulk {operation}: {verified}/{total} verified'
+            parts = [f'{verified} verified']
+            if failed:
+                parts.append(f'{failed} failed')
+            if unverified:
+                parts.append(f'{unverified} unverified')
+            if timed_out:
+                parts.append(f'{timed_out} timed out')
+            detail = ' · '.join(parts)
+            severity = ('info' if verified == total
+                        and not failed and not unverified and not timed_out
+                        else 'warning')
+        self._post_capcom_notice({
+            'source': 'swf-panda-operations',
+            'severity': severity,
+            'title': title,
+            'detail': detail,
+            'url': CAPCOM_PANDA_TASKS_URL,
+            'dedup_key': f'panda-task-bulk:{batch_id}:{stage}',
         })
 
     def _emit_delivery_notice(self, outcome, reason, summary):

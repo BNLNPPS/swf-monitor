@@ -12,6 +12,26 @@
     {% endif %}
     {% endfor %}
 </div>
+
+<form id="panda-bulk-operation-form" class="d-flex align-items-center gap-2 mb-3">
+    {% csrf_token %}
+    <span class="fw-semibold">Select:</span>
+    <button type="button" id="panda-bulk-all" class="btn btn-link btn-sm p-0"
+            {% if not bulk_controls_operable %}disabled{% endif %}>All</button>
+    <span>/</span>
+    <button type="button" id="panda-bulk-none" class="btn btn-link btn-sm p-0"
+            {% if not bulk_controls_operable %}disabled{% endif %}>None</button>
+    <span class="fw-semibold ms-2">Action:</span>
+    <select id="panda-bulk-action" class="form-select form-select-sm w-auto"
+            aria-label="Bulk task action"
+            {% if not bulk_controls_operable %}disabled{% endif %}>
+        <option value=""></option>
+        <option value="pause">Pause</option>
+        <option value="resume">Resume</option>
+    </select>
+    <button type="submit" id="panda-bulk-submit" class="btn btn-success btn-sm" disabled>Submit</button>
+    <span id="panda-bulk-status" class="fw-semibold d-none" role="status"></span>
+</form>
 {% endblock %}
 
 {% block initial_filters %}
@@ -23,4 +43,183 @@
 }
 {% endblock %}
 
-{% block default_order %}[[0, 'desc']]{% endblock %}
+{% block default_order %}[[1, 'desc']]{% endblock %}
+
+{% block extra_scripts %}
+{% if bulk_controls_operable %}
+const bulkForm = document.getElementById('panda-bulk-operation-form');
+const bulkAll = document.getElementById('panda-bulk-all');
+const bulkNone = document.getElementById('panda-bulk-none');
+const bulkAction = document.getElementById('panda-bulk-action');
+const bulkSubmit = document.getElementById('panda-bulk-submit');
+const bulkStatus = document.getElementById('panda-bulk-status');
+const bulkRequestUrl = "{% url 'monitor_app:panda-task-operations-request' %}";
+const operationBase = "{{ request.META.SCRIPT_NAME }}/api/panda/task-operations/";
+const operationStreamUrl = "{% url 'monitor_app:sse-message-stream' %}?msg_types=panda_task_operation_done";
+const bulkCsrfToken = bulkForm.querySelector('[name=csrfmiddlewaretoken]').value;
+let bulkOperationIds = new Map();
+let bulkRejected = 0;
+let bulkEventSource = null;
+let bulkPollTimer = null;
+let bulkStopTimer = null;
+let bulkBusy = false;
+
+function taskCheckboxes() {
+    return Array.from(document.querySelectorAll('.panda-task-select'));
+}
+
+function checkboxEligible(checkbox, action) {
+    return action && checkbox.dataset[`${action}Eligible`] === '1';
+}
+
+function selectedTaskIds() {
+    return taskCheckboxes()
+        .filter(checkbox => checkbox.checked && !checkbox.disabled)
+        .map(checkbox => Number(checkbox.dataset.taskId));
+}
+
+function refreshBulkControls() {
+    const action = bulkAction.value;
+    taskCheckboxes().forEach(function (checkbox) {
+        const actionable = (checkbox.dataset.pauseEligible === '1'
+                            || checkbox.dataset.resumeEligible === '1');
+        const enabled = !bulkBusy && (action ? checkboxEligible(checkbox, action) : actionable);
+        if (!enabled) checkbox.checked = false;
+        checkbox.disabled = !enabled;
+    });
+    bulkAction.disabled = bulkBusy;
+    bulkAll.disabled = bulkBusy;
+    bulkNone.disabled = bulkBusy;
+    bulkSubmit.disabled = bulkBusy || !action || selectedTaskIds().length === 0;
+}
+
+function showBulkStatus(message, state) {
+    bulkStatus.textContent = message;
+    bulkStatus.classList.remove('d-none', 'text-primary', 'text-success', 'text-danger');
+    bulkStatus.classList.add(`text-${state}`);
+}
+
+function closeBulkWatch() {
+    if (bulkEventSource) bulkEventSource.close();
+    bulkEventSource = null;
+    if (bulkPollTimer) window.clearInterval(bulkPollTimer);
+    if (bulkStopTimer) window.clearTimeout(bulkStopTimer);
+    bulkPollTimer = null;
+    bulkStopTimer = null;
+}
+
+function summarizeBulk() {
+    const counts = {};
+    bulkOperationIds.forEach(record => {
+        counts[record.status] = (counts[record.status] || 0) + 1;
+    });
+    const pending = (counts.queued || 0) + (counts.running || 0) + (counts.accepted || 0);
+    if (pending) {
+        showBulkStatus(`${pending} waiting for PanDA…`, 'primary');
+        return;
+    }
+    closeBulkWatch();
+    const parts = [];
+    if (counts.verified) parts.push(`${counts.verified} verified`);
+    if (counts.failed) parts.push(`${counts.failed} failed`);
+    if (counts.timeout) parts.push(`${counts.timeout} timed out`);
+    if (counts.unverified) parts.push(`${counts.unverified} unverified`);
+    if (bulkRejected) parts.push(`${bulkRejected} rejected`);
+    const clean = !counts.failed && !counts.timeout && !counts.unverified && !bulkRejected;
+    showBulkStatus(parts.join(' · '), clean ? 'success' : 'danger');
+    bulkBusy = false;
+    window.tableCurrentFilters.refresh = '1';
+    table.ajax.reload(function () {
+        delete window.tableCurrentFilters.refresh;
+        bulkAction.value = '';
+        refreshBulkControls();
+    }, false);
+}
+
+async function pollBulkOperations() {
+    const pendingIds = Array.from(bulkOperationIds.entries())
+        .filter(([_id, record]) => record.pending)
+        .map(([id]) => id);
+    if (!pendingIds.length) {
+        summarizeBulk();
+        return;
+    }
+    await Promise.all(pendingIds.map(async function (operationId) {
+        try {
+            const response = await fetch(`${operationBase}${operationId}/`, {
+                credentials: 'same-origin',
+                headers: {'Accept': 'application/json'},
+            });
+            if (response.ok) bulkOperationIds.set(operationId, await response.json());
+        } catch (_error) {
+            // The next bounded poll remains the reliability backstop.
+        }
+    }));
+    summarizeBulk();
+}
+
+function watchBulkOperations(taskCount) {
+    closeBulkWatch();
+    bulkEventSource = new EventSource(operationStreamUrl);
+    bulkEventSource.addEventListener('panda_task_operation_done', function (event) {
+        const payload = JSON.parse(event.data);
+        if (!bulkOperationIds.has(String(payload.operation_id || ''))) return;
+        pollBulkOperations();
+    });
+    bulkPollTimer = window.setInterval(pollBulkOperations, 5000);
+    bulkStopTimer = window.setTimeout(closeBulkWatch,
+        Math.max(180000, taskCount * 1000 + 150000));
+    pollBulkOperations();
+}
+
+bulkAll.addEventListener('click', function () {
+    taskCheckboxes().forEach(checkbox => {
+        if (!checkbox.disabled) checkbox.checked = true;
+    });
+    refreshBulkControls();
+});
+bulkNone.addEventListener('click', function () {
+    taskCheckboxes().forEach(checkbox => { checkbox.checked = false; });
+    refreshBulkControls();
+});
+bulkAction.addEventListener('change', refreshBulkControls);
+document.addEventListener('change', function (event) {
+    if (event.target.classList.contains('panda-task-select')) refreshBulkControls();
+});
+table.on('draw', refreshBulkControls);
+
+bulkForm.addEventListener('submit', async function (event) {
+    event.preventDefault();
+    const operation = bulkAction.value;
+    const taskIds = selectedTaskIds();
+    if (!operation || !taskIds.length) return;
+    bulkBusy = true;
+    refreshBulkControls();
+    showBulkStatus(`Submitting ${taskIds.length} ${operation} request${taskIds.length === 1 ? '' : 's'}…`, 'primary');
+    try {
+        const response = await fetch(bulkRequestUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRFToken': bulkCsrfToken,
+            },
+            body: JSON.stringify({operation: operation, jedi_task_ids: taskIds}),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Bulk operation could not be queued.');
+        bulkOperationIds = new Map(result.records.map(record => [String(record.id), record]));
+        bulkRejected = (result.rejected || []).length;
+        showBulkStatus(`${result.records.length} queued · waiting for PanDA…`, 'primary');
+        watchBulkOperations(result.records.length);
+    } catch (error) {
+        showBulkStatus(error.message, 'danger');
+        bulkBusy = false;
+        refreshBulkControls();
+    }
+});
+window.addEventListener('beforeunload', closeBulkWatch);
+refreshBulkControls();
+{% endif %}
+{% endblock %}

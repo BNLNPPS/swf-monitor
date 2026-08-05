@@ -140,6 +140,11 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   operation record and queues the credentialed work to prod-ops; HTTP 202 means
   queued, not completed. This action is restricted to the internal monitor;
   requests arriving through the swf-remote tunnel receive HTTP 403.
+- `POST /api/panda/task-operations/` - Authenticated internal-monitor bulk
+  pause/resume request with `{"operation": "pause|resume", "jedi_task_ids":
+  [...]}`. The endpoint re-reads current PanDA state and queues only `running`
+  tasks for pause or `paused` tasks for resume. Prod-ops sends the accepted
+  scalar PanDA commands one second apart and records each task's outcome.
 - `GET /api/panda/task-operations/{operation_id}/` - Authenticated durable
   operation state for the task page's bounded SSE backstop. `verified` is the
   only successful terminal state; `unverified` means PanDA accepted the request

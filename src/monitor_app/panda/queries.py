@@ -2381,3 +2381,29 @@ def get_task(jeditaskid):
     task['taskparams'], task['job_parameters'] = _get_task_parameters(jeditaskid)
     task['task_record'] = _get_task_record(jeditaskid)
     return task
+
+
+def get_task_operation_targets(jedi_task_ids):
+    """Return current identity/status fields for a bounded task-id list."""
+    ids = [int(task_id) for task_id in jedi_task_ids]
+    if not ids:
+        return []
+    placeholders = ', '.join(['%s'] * len(ids))
+    sql = f"""
+        SELECT "jeditaskid", "taskname", "status"
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE "jeditaskid" IN ({placeholders})
+    """
+    connection = connections['panda']
+    with connection.cursor() as cursor:
+        cursor.execute(sql, ids)
+        rows = cursor.fetchall()
+    by_id = {
+        int(row[0]): {
+            'jeditaskid': int(row[0]),
+            'taskname': row[1] or '',
+            'status': row[2] or '',
+        }
+        for row in rows
+    }
+    return [by_id[task_id] for task_id in ids if task_id in by_id]
