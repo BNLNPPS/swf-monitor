@@ -120,8 +120,8 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   page. `states` carries tile-exact entries shaped as tjai's
   `capcom.set_state(source, value, color, url)` expects: `swf-system`
   (the cached infrastructure/operations verdict, excluding user workload
-  state) and `swf-panda` (running jobs now with the success percentage over
-  the trailing 12 hours plus the current paused-task count). State values are
+  state) and `swf-panda` (running jobs, running tasks, paused tasks, and
+  the success percentage over the trailing 12 hours). State values are
   capped at 50 characters; paused-task identities remain in `detail`. `detail`
   carries the numbers behind them. Open read, polled every few minutes;
   externally reachable through the swf-remote proxy

@@ -51,6 +51,21 @@ def _compact_value(value):
     return value[:CAPCOM_VALUE_MAX_CHARS - 1].rstrip() + '…'
 
 
+def _running_panda_task_count():
+    """Return the count of PanDA tasks currently in status running."""
+    from django.db import connections
+    from ..panda.queries import PANDA_SCHEMA
+
+    connection = connections['panda']
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f'SELECT COUNT(*) FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+            'WHERE "status" = %s',
+            ['running'],
+        )
+        return int(cursor.fetchone()[0] or 0)
+
+
 def _paused_panda_tasks(limit=20):
     """Return the complete paused count plus recent task detail."""
     from django.db import connections
@@ -277,10 +292,10 @@ def capcom_state(request):
                 failed += int(count or 0)
         decided = finished + failed
         pct = round(100.0 * finished / decided, 1) if decided else None
+        running_tasks = _running_panda_task_count()
         paused_count, paused_tasks = _paused_panda_tasks()
-        value_parts = [f'{running_jobs} jobs']
-        if paused_count:
-            value_parts.append(f'{paused_count} paused')
+        value_parts = [f'{running_jobs} jobs', f'{running_tasks} tasks',
+                       f'{paused_count} paused']
         if pct is not None:
             value_parts.append(f'{pct:.0f}%')
         entry = {
@@ -293,6 +308,7 @@ def capcom_state(request):
         states.append(entry)
         detail['panda'] = {
             'running_jobs': running_jobs,
+            'running_tasks': running_tasks,
             'finished_12h': finished,
             'failed_12h': failed,
             'success_pct_12h': pct,
