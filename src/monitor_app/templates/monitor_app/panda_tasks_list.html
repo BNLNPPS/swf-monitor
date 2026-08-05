@@ -13,8 +13,12 @@
     {% endfor %}
 </div>
 
-<form id="panda-bulk-operation-form" class="d-flex align-items-center gap-2 mb-3">
+{% endblock %}
+
+{% block before_table %}
+<form id="panda-bulk-operation-form" class="d-flex align-items-center gap-2 mb-2">
     {% csrf_token %}
+    <span class="fw-semibold">Act on tasks:</span>
     <span class="fw-semibold">Select:</span>
     <button type="button" id="panda-bulk-all" class="btn btn-link btn-sm p-0"
             {% if not bulk_controls_operable %}disabled{% endif %}>All</button>
