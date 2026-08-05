@@ -49,18 +49,13 @@
 
 {% block default_order %}[[1, 'desc']]{% endblock %}
 
-{% block extra_styles %}
-#main-table_wrapper .top {
-    justify-content: space-between !important;
-    align-items: center;
-    gap: 1rem;
-}
-{% endblock %}
-
 {% block extra_scripts %}
 const bulkForm = document.getElementById('panda-bulk-operation-form');
 const bulkToolbar = document.querySelector('#main-table_wrapper .top');
 if (bulkForm && bulkToolbar) {
+    bulkToolbar.style.justifyContent = 'space-between';
+    bulkToolbar.style.alignItems = 'center';
+    bulkToolbar.style.gap = '1rem';
     bulkForm.classList.remove('mb-2');
     bulkForm.classList.add('mb-0');
     bulkToolbar.prepend(bulkForm);
