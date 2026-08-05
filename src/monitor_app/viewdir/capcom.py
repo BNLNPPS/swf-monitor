@@ -24,6 +24,47 @@ logger = logging.getLogger(__name__)
 REMOTE_FACE = 'https://epic-devcloud.org/prod'
 CAPCOM_WORKLOAD_CHECKS = frozenset({'stale-state'})
 USERNAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$')
+CAPCOM_VALUE_MAX_CHARS = 50
+
+
+def _compact_value(value):
+    """Keep state-tile summaries within Capcom's usual 50 characters."""
+    value = str(value)
+    if len(value) <= CAPCOM_VALUE_MAX_CHARS:
+        return value
+    return value[:CAPCOM_VALUE_MAX_CHARS - 1].rstrip() + '…'
+
+
+def _paused_panda_tasks(limit=20):
+    """Return the complete paused count plus recent task detail."""
+    from django.db import connections
+    from ..panda.queries import PANDA_SCHEMA
+
+    connection = connections['panda']
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f'SELECT COUNT(*) FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+            'WHERE "status" = %s',
+            ['paused'],
+        )
+        count = int(cursor.fetchone()[0] or 0)
+        cursor.execute(
+            f'SELECT "jeditaskid", "taskname", "username", '
+            f'"modificationtime" FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+            'WHERE "status" = %s ORDER BY "modificationtime" DESC '
+            'LIMIT %s',
+            ['paused', limit],
+        )
+        tasks = [
+            {
+                'jedi_task_id': row[0],
+                'task_name': row[1] or '',
+                'username': row[2] or '',
+                'modified_at': row[3].isoformat() if row[3] else None,
+            }
+            for row in cursor.fetchall()
+        ]
+    return count, tasks
 
 
 def _user_testbed_summary(username, now):
@@ -220,16 +261,27 @@ def capcom_state(request):
                 failed += int(count or 0)
         decided = finished + failed
         pct = round(100.0 * finished / decided, 1) if decided else None
-        value = f'{running_jobs} jobs'
+        paused_count, paused_tasks = _paused_panda_tasks()
+        value_parts = [f'{running_jobs} jobs']
+        if paused_count:
+            value_parts.append(f'{paused_count} paused')
         if pct is not None:
-            value += f' · {pct:.0f}%'
-        states.append({'source': 'swf-panda', 'value': value,
-                       'url': f'{REMOTE_FACE}/panda/jobs/'})
+            value_parts.append(f'{pct:.0f}%')
+        entry = {
+            'source': 'swf-panda',
+            'value': _compact_value(' · '.join(value_parts)),
+            'url': f'{REMOTE_FACE}/panda/jobs/',
+        }
+        if paused_count:
+            entry['color'] = 'yellow'
+        states.append(entry)
         detail['panda'] = {
             'running_jobs': running_jobs,
             'finished_12h': finished,
             'failed_12h': failed,
             'success_pct_12h': pct,
+            'paused_tasks': paused_count,
+            'paused_task_detail': paused_tasks,
         }
     except Exception as exc:
         logger.error('capcom state: panda queries failed: %s', exc)

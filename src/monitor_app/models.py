@@ -1136,6 +1136,66 @@ class DataProvenance(models.Model):
         return f"DPID:{self.dpid} {self.tool_name}"
 
 
+class PandaTaskOperation(models.Model):
+    """Durable request and verified outcome for a PanDA task operation."""
+
+    OPERATION_CHOICES = [
+        ('pause', 'Pause'),
+        ('resume', 'Resume'),
+    ]
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('running', 'Running'),
+        ('accepted', 'Accepted by PanDA'),
+        ('verified', 'Verified'),
+        ('failed', 'Failed'),
+        ('timeout', 'Timed out'),
+        ('unverified', 'Accepted but unverified'),
+    ]
+    PENDING_STATUSES = ('queued', 'running', 'accepted')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    jedi_task_id = models.BigIntegerField(db_index=True)
+    task_name = models.CharField(max_length=500, blank=True, default='')
+    operation = models.CharField(max_length=20, choices=OPERATION_CHOICES)
+    source = models.CharField(max_length=40, default='manual')
+    requested_by = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='queued', db_index=True)
+    diagnostic = models.TextField(blank=True, default='')
+    observed_status = models.CharField(max_length=50, blank=True, default='')
+    evidence = models.JSONField(default=dict, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_panda_task_operation'
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['jedi_task_id', 'requested_at'],
+                         name='swf_panda_t_jedi_ta_709a65_idx'),
+            models.Index(fields=['status', 'requested_at'],
+                         name='swf_panda_t_status_39c5b0_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['jedi_task_id'],
+                condition=models.Q(status__in=('queued', 'running', 'accepted')),
+                name='uniq_pending_panda_task_operation',
+            ),
+        ]
+
+    @property
+    def is_pending(self):
+        return self.status in self.PENDING_STATUSES
+
+    def __str__(self):
+        return f"{self.operation} PanDA task {self.jedi_task_id}: {self.status}"
+
+
 class CachedProduct(models.Model):
     """One expensive-to-build product, served stale-while-revalidate.
 

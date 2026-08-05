@@ -82,6 +82,8 @@ OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
 # REST log handler posts to).
 MONITOR_HTTP_URL = os.environ.get("SWF_MONITOR_HTTP_URL", "http://localhost:8002")
 ACTION_LOG_TIMEOUT = int(os.environ.get("EPICPROD_ACTION_LOG_TIMEOUT", "5"))
+MONITOR_API_TOKEN = (os.environ.get("SWFMON_TOKEN")
+                     or os.environ.get("SWF_MONITOR_TOKEN", ""))
 
 # Managed scratch/cache root (shared with the doer and the web view).
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
@@ -130,6 +132,7 @@ DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "
 CAPCOM_INGEST_URL = "https://etaverse.com/tjai/api/capcom/notice"
 CAPCOM_CAMPAIGN_URL = "https://epic-devcloud.org/prod/snapper/epicprod/campaign/"
 CAPCOM_LOGS_URL = "https://epic-devcloud.org/prod/logs/"
+CAPCOM_PANDA_TASK_URL = "https://epic-devcloud.org/prod/panda/tasks/{jedi_task_id}/"
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -520,7 +523,7 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m.get("operation")
         task_name = m.get("task_name")
         jedi_task_id = m.get("jedi_task_id")
-        if operation not in ("increase_attempts", "retry_failures"):
+        if operation not in ("increase_attempts", "retry_failures", "pause", "resume"):
             self.logger.error(f"PRODOPS panda_task_operation: bad operation {operation!r}")
             return
         if not task_name or not jedi_task_id:
@@ -550,6 +553,12 @@ class EpicProdOpsAgent(BaseAgent):
             f"PRODOPS panda_task_operation: {operation} task={task_name} "
             f"jediTaskID={jedi_task_id}")
         t0 = time.monotonic()
+        operation_id = str(m.get('operation_id') or '')
+        is_state_change = operation in ('pause', 'resume')
+        if is_state_change:
+            self._record_panda_operation_state(operation_id, 'running')
+            self._emit_panda_operation_notice(
+                m, 'requested', detail=f'Requested by {m.get("created_by") or "operator"}')
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
@@ -557,10 +566,16 @@ class EpicProdOpsAgent(BaseAgent):
             reason = f'operation timed out after {PANDA_TASK_OPERATION_TIMEOUT}s'
             self.logger.error(
                 f"PRODOPS panda_task_operation TIMEOUT: {operation} {jedi_task_id}")
+            if is_state_change:
+                self._record_panda_operation_state(
+                    operation_id, 'timeout', diagnostic=reason)
+                self._emit_panda_operation_notice(m, 'timeout', detail=reason)
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
-                'operation': operation, 'ok': False, 'error': reason})
+                'operation_id': operation_id,
+                'operation': operation, 'status': 'timeout',
+                'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='timeout',
                              reason=reason,
                              subject_type='panda_task', subject_key=jedi_task_id,
@@ -573,14 +588,60 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  panda-task-operation: {line}")
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  panda-task-operation: {line}")
+        result = {}
+        if is_state_change:
+            try:
+                result = json.loads((p.stdout or '').strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError):
+                result = {}
         if p.returncode == 0:
             summary = (p.stdout or "").strip()
+            if is_state_change and not result.get('verified'):
+                reason = ('PanDA accepted the request but the task state was '
+                          'not verified before the deadline')
+                observed_status = str(result.get('observed_status') or '')
+                self.logger.warning(
+                    f"PRODOPS panda_task_operation UNVERIFIED: {operation} "
+                    f"{jedi_task_id} observed={observed_status or 'unknown'}")
+                self._record_panda_operation_state(
+                    operation_id, 'unverified', diagnostic=reason,
+                    observed_status=observed_status,
+                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                self._emit_panda_operation_notice(m, 'unverified', detail=reason)
+                self.send_message('/topic/epictopic', {
+                    'msg_type': 'panda_task_operation_done',
+                    'operation_id': operation_id,
+                    'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                    'operation': operation, 'status': 'unverified',
+                    'observed_status': observed_status,
+                    'accepted': True, 'ok': False, 'error': reason})
+                self._log_action(
+                    'panda_task_operation', t0, outcome='unverified',
+                    reason=reason, subject_type='panda_task',
+                    subject_key=jedi_task_id,
+                    username=str(m.get('created_by') or ''),
+                    sublevel='high', live_default=True, level=logging.WARNING,
+                    operation=operation, task_name=task_name,
+                    observed_status=observed_status)
+                return
+            observed_status = str(result.get('observed_status') or '')
             self.logger.info(
                 f"PRODOPS panda_task_operation done: {operation} {jedi_task_id}")
+            if is_state_change:
+                self._record_panda_operation_state(
+                    operation_id, 'verified', observed_status=observed_status,
+                    diagnostic=str(result.get('diagnostic') or ''),
+                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                self._emit_panda_operation_notice(
+                    m, 'verified', detail=f'Observed PanDA state: {observed_status}')
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
+                'operation_id': operation_id,
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
-                'operation': operation, 'ok': True, 'summary': summary})
+                'operation': operation,
+                'status': 'verified' if is_state_change else 'done',
+                'observed_status': observed_status,
+                'ok': True, 'summary': summary})
             self._log_action('panda_task_operation', t0,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
@@ -591,10 +652,18 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(
                 f"PRODOPS panda_task_operation FAILED rc={p.returncode}: "
                 f"{operation} {jedi_task_id}")
+            if is_state_change:
+                self._record_panda_operation_state(
+                    operation_id, 'failed', diagnostic=reason,
+                    observed_status=str(result.get('observed_status') or ''),
+                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                self._emit_panda_operation_notice(m, 'failed', detail=reason)
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
+                'operation_id': operation_id,
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
-                'operation': operation, 'ok': False, 'error': reason})
+                'operation': operation, 'status': 'failed',
+                'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='error',
                              reason=reason,
                              subject_type='panda_task', subject_key=jedi_task_id,
@@ -1327,6 +1396,68 @@ class EpicProdOpsAgent(BaseAgent):
                     f"PRODOPS capcom notice posted: {payload.get('dedup_key')}")
         except Exception as e:
             self.logger.error(f"PRODOPS capcom notice: post failed: {e}")
+
+    def _record_panda_operation_state(self, operation_id, status, *,
+                                      diagnostic='', observed_status='',
+                                      evidence=None):
+        """Persist an agent lifecycle transition through the monitor API."""
+        if not operation_id:
+            return False
+        headers = {}
+        if MONITOR_API_TOKEN:
+            headers['Authorization'] = f'Token {MONITOR_API_TOKEN}'
+        try:
+            response = requests.post(
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/panda/task-operations/"
+                f"{operation_id}/state/",
+                json={
+                    'status': status,
+                    'diagnostic': diagnostic,
+                    'observed_status': observed_status,
+                    'evidence': evidence or {},
+                },
+                headers=headers,
+                timeout=ACTION_LOG_TIMEOUT,
+            )
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            self.logger.error(
+                f"PRODOPS panda operation state post failed "
+                f"({operation_id} {status}): {exc}")
+            return False
+
+    def _emit_panda_operation_notice(self, message, stage, *, detail=''):
+        """Publish one concise Capcom notice for a pause/resume transition."""
+        operation = str(message.get('operation') or '')
+        operation_id = str(message.get('operation_id') or '')
+        jedi_task_id = str(message.get('jedi_task_id') or '')
+        if operation not in ('pause', 'resume') or not operation_id:
+            return
+        if stage == 'requested':
+            title = f'PanDA {jedi_task_id}: {operation} requested'
+            severity = 'info'
+        elif stage == 'verified':
+            result = 'paused' if operation == 'pause' else 'resumed'
+            title = f'PanDA {jedi_task_id}: {result}'
+            severity = 'info'
+        elif stage == 'unverified':
+            title = f'PanDA {jedi_task_id}: {operation} not verified'
+            severity = 'warning'
+        elif stage == 'timeout':
+            title = f'PanDA {jedi_task_id}: {operation} timed out'
+            severity = 'warning'
+        else:
+            title = f'PanDA {jedi_task_id}: {operation} failed'
+            severity = 'warning'
+        self._post_capcom_notice({
+            'source': 'swf-panda-operations',
+            'severity': severity,
+            'title': title,
+            'detail': str(detail or '')[:500],
+            'url': CAPCOM_PANDA_TASK_URL.format(jedi_task_id=jedi_task_id),
+            'dedup_key': f'panda-task-operation:{operation_id}:{stage}',
+        })
 
     def _emit_delivery_notice(self, outcome, reason, summary):
         """The campaign-delivery Capcom event: an info notice stating the

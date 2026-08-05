@@ -121,7 +121,8 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   `capcom.set_state(source, value, color, url)` expects: `swf-system`
   (the cached infrastructure/operations verdict, excluding user workload
   state) and `swf-panda` (running jobs now with the success percentage over
-  the trailing 12 hours). `detail`
+  the trailing 12 hours plus the current paused-task count). State values are
+  capped at 50 characters; paused-task identities remain in `detail`. `detail`
   carries the numbers behind them. Open read, polled every few minutes;
   externally reachable through the swf-remote proxy
   (`/prod/api/capcom/state/`). Each section degrades independently,
@@ -131,6 +132,20 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   activity over the trailing 24 hours. The endpoint contract is generic; the
   Capcom collector supplies the configured username. Invalid or missing
   usernames return HTTP 400.
+
+### PanDA task operations
+
+- `POST /api/panda/tasks/{jeditaskid}/operations/` - Authenticated request for
+  `{"operation": "pause"}` or `{"operation": "resume"}`. Creates a durable
+  operation record and queues the credentialed work to prod-ops; HTTP 202 means
+  queued, not completed.
+- `GET /api/panda/task-operations/{operation_id}/` - Authenticated durable
+  operation state for the task page's bounded SSE backstop. `verified` is the
+  only successful terminal state; `unverified` means PanDA accepted the request
+  but the expected task-state transition was not observed before the deadline.
+- `POST /api/panda/task-operations/{operation_id}/state/` - Token-authenticated
+  prod-ops lifecycle callback. This is an internal executor endpoint, not a
+  browser action.
 
 ### System Agents
 - `GET /api/systemagents/` - List all agents

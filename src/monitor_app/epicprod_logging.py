@@ -88,8 +88,8 @@ ACTION_DEFAULTS = {
     'panda_task_operation': {
         'sublevel': 'high', 'live': True,
         'description': "Run a native PanDA operation on an existing JEDI "
-                       "task: raise the allowed attempt count or retry "
-                       "failed work.",
+                       "task: pause or resume the task, raise the allowed "
+                       "attempt count, or retry failed work.",
     },
     'rucio_sweep': {
         'sublevel': 'high', 'live': True,

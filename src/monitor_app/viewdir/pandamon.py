@@ -1337,7 +1337,8 @@ def panda_task_detail(request, jeditaskid):
     jobs = jobs_data.get('jobs', []) if not jobs_data.get('error') else []
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
     completion_details = job_completion_details([job.get('pandaid') for job in jobs])
-    from ..models import EpicProdJob
+    from ..models import EpicProdJob, PandaTaskOperation
+    from ..panda.operations import operation_controls, serialize_operation
     epicprod_jobs = {
         row.pandaid: row
         for row in EpicProdJob.objects.filter(
@@ -1372,6 +1373,16 @@ def panda_task_detail(request, jeditaskid):
         )
         if value not in (None, '')
     ]
+    pending_operation = (PandaTaskOperation.objects
+                         .filter(
+                             jedi_task_id=int(jeditaskid),
+                             status__in=PandaTaskOperation.PENDING_STATUSES)
+                         .first())
+    task_operation_controls = operation_controls(
+        task,
+        authenticated=request.user.is_authenticated,
+        pending=pending_operation,
+    )
 
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
@@ -1383,6 +1394,10 @@ def panda_task_detail(request, jeditaskid):
         'job_count': len(jobs),
         'requested_resource_items': requested_resource_items,
         'task_record_items': task_record_items,
+        'task_operation_controls': task_operation_controls,
+        'pending_task_operation': (
+            serialize_operation(pending_operation)
+            if pending_operation else None),
     })
 
 

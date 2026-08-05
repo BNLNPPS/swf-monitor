@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 
 DEFAULT_PCLIENT_SETUP = os.path.expanduser("~/pclient/run/setup.sh")
@@ -27,6 +28,8 @@ def _run_inside_pclient(args):
         "jedi_task_id": args.jedi_task_id,
         "increase": args.increase,
         "new_parameters": args.new_parameters,
+        "verify_timeout": args.verify_timeout,
+        "poll_interval": args.poll_interval,
     }
     with tempfile.TemporaryDirectory(prefix="panda-task-operation.") as tmpdir:
         payload_path = os.path.join(tmpdir, "payload.json")
@@ -52,7 +55,7 @@ def _run_inside_pclient(args):
 
 
 def _inside_pclient(payload_path):
-    from pandaclient import panda_api
+    from pandaclient import Client, panda_api
 
     with open(payload_path) as f:
         payload = json.load(f)
@@ -66,17 +69,42 @@ def _inside_pclient(payload_path):
     elif operation == "retry_failures":
         new_parameters = payload.get("new_parameters") or None
         result = client.retry_task(jedi_task_id, new_parameters=new_parameters)
+    elif operation in ("pause", "resume"):
+        action = Client.pauseTask if operation == "pause" else Client.resumeTask
+        result = action(jedi_task_id, False)
     else:
         raise ValueError(f"unknown operation {operation!r}")
 
     ok, diagnostic = _panda_result_ok(result)
-    print(json.dumps({
+    output = {
         "operation": operation,
         "jedi_task_id": jedi_task_id,
         "ok": ok,
         "diagnostic": diagnostic,
         "result": result,
-    }, default=str))
+    }
+    if operation in ("pause", "resume"):
+        output["accepted"] = ok
+        output["verified"] = False
+        output["observed_status"] = ""
+        if ok:
+            deadline = time.monotonic() + float(payload.get("verify_timeout") or 90)
+            poll_interval = max(1.0, float(payload.get("poll_interval") or 5))
+            while True:
+                status_result = Client.getTaskStatus(jedi_task_id, False)
+                observed_status, status_diagnostic = _panda_task_status(status_result)
+                if observed_status:
+                    output["observed_status"] = observed_status
+                    if ((operation == "pause" and observed_status == "paused")
+                            or (operation == "resume" and observed_status != "paused")):
+                        output["verified"] = True
+                        break
+                else:
+                    output["status_diagnostic"] = status_diagnostic
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(poll_interval)
+    print(json.dumps(output, default=str))
     if not ok:
         _log(f"ERROR: PanDA returned failure for {operation} on {jedi_task_id}: {diagnostic}")
         return 1
@@ -107,15 +135,34 @@ def _panda_result_ok(result):
     return result is not None, str(result)
 
 
+def _panda_task_status(result):
+    """Interpret Client.getTaskStatus's (transport_status, status) result."""
+    if not isinstance(result, (list, tuple)) or not result:
+        return "", str(result)
+    if result[0] != 0:
+        return "", f"transport status {result[0]}"
+    if len(result) < 2 or result[1] is None:
+        return "", "task status unavailable"
+    status = str(result[1]).strip().lower()
+    if not status:
+        return "", "empty task status"
+    return status, ""
+
+
 def main():
     ap = argparse.ArgumentParser(description="Run an existing PanDA task operation.")
-    ap.add_argument("--operation", choices=["increase_attempts", "retry_failures"])
+    ap.add_argument(
+        "--operation",
+        choices=["increase_attempts", "retry_failures", "pause", "resume"],
+    )
     ap.add_argument("--jedi-task-id", type=int)
     ap.add_argument("--increase", type=int, default=1)
     ap.add_argument("--new-parameters", default="", help="JSON object for retry_task new_parameters")
     ap.add_argument("--auth-vo", default=DEFAULT_AUTH_VO)
     ap.add_argument("--pclient-setup", default=DEFAULT_PCLIENT_SETUP)
     ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--verify-timeout", type=int, default=90)
+    ap.add_argument("--poll-interval", type=float, default=5)
     ap.add_argument("--inside-pclient", action="store_true")
     ap.add_argument("--payload")
     args = ap.parse_args()

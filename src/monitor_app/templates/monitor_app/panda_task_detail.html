@@ -7,7 +7,26 @@
 <div class="container-fluid mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>PanDA Task {{ jeditaskid }}</h2>
-        <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
+        <div class="d-flex align-items-center gap-2">
+            <form id="panda-task-operation-form" class="d-flex align-items-center gap-2 mb-0">
+                {% csrf_token %}
+                <button type="button" id="panda-task-pause" class="btn btn-success btn-sm"
+                        data-operation="pause"
+                        title="{{ task_operation_controls.pause.reason }}"
+                        {% if not task_operation_controls.pause.enabled %}disabled aria-disabled="true"{% endif %}>Pause</button>
+                <button type="button" id="panda-task-resume" class="btn btn-success btn-sm"
+                        data-operation="resume"
+                        title="{{ task_operation_controls.resume.reason }}"
+                        {% if not task_operation_controls.resume.enabled %}disabled aria-disabled="true"{% endif %}>Resume</button>
+            </form>
+            <a href="{% url 'monitor_app:panda_tasks_list' %}" class="btn btn-outline-secondary btn-sm">Back to Tasks</a>
+        </div>
+    </div>
+
+    <div id="panda-task-operation-status" class="small mb-3{% if not pending_task_operation %} d-none{% endif %}" role="status">
+        {% if pending_task_operation %}
+        {{ pending_task_operation.operation|title }} requested; waiting for verified PanDA state…
+        {% endif %}
     </div>
 
     {% if error %}
@@ -285,4 +304,117 @@
 
     {% endif %}
 </div>
+
+{% if request.user.is_authenticated %}
+<script>
+(function () {
+    const form = document.getElementById('panda-task-operation-form');
+    const pauseButton = document.getElementById('panda-task-pause');
+    const resumeButton = document.getElementById('panda-task-resume');
+    const statusNode = document.getElementById('panda-task-operation-status');
+    const requestUrl = "{% url 'monitor_app:panda-task-operation-request' jeditaskid %}";
+    const operationBase = "{{ request.META.SCRIPT_NAME }}/api/panda/task-operations/";
+    const streamUrl = "{% url 'monitor_app:sse-message-stream' %}?msg_types=panda_task_operation_done";
+    const csrfToken = form.querySelector('[name=csrfmiddlewaretoken]').value;
+    let operationId = "{% if pending_task_operation %}{{ pending_task_operation.id }}{% endif %}";
+    let eventSource = null;
+    let pollTimer = null;
+    let stopTimer = null;
+
+    function showStatus(message, error) {
+        statusNode.textContent = message;
+        statusNode.classList.remove('d-none', 'text-danger', 'text-muted');
+        statusNode.classList.add(error ? 'text-danger' : 'text-muted');
+    }
+
+    function disableControls() {
+        pauseButton.disabled = true;
+        resumeButton.disabled = true;
+        pauseButton.setAttribute('aria-disabled', 'true');
+        resumeButton.setAttribute('aria-disabled', 'true');
+    }
+
+    function closeWatch() {
+        if (eventSource) eventSource.close();
+        eventSource = null;
+        if (pollTimer) window.clearInterval(pollTimer);
+        if (stopTimer) window.clearTimeout(stopTimer);
+        pollTimer = null;
+        stopTimer = null;
+    }
+
+    function complete(record) {
+        closeWatch();
+        const verified = record.status === 'verified';
+        const label = verified
+            ? `${record.operation === 'pause' ? 'Pause' : 'Resume'} verified by PanDA.`
+            : (record.diagnostic || `Operation ${record.status}.`);
+        showStatus(label, !verified);
+        window.setTimeout(function () { window.location.reload(); }, 700);
+    }
+
+    async function checkStatus() {
+        if (!operationId) return;
+        try {
+            const response = await fetch(`${operationBase}${operationId}/`, {
+                headers: {'Accept': 'application/json'},
+                credentials: 'same-origin',
+            });
+            if (!response.ok) return;
+            const record = await response.json();
+            if (!record.pending) complete(record);
+        } catch (_error) {
+            // SSE remains the primary completion path; the next bounded poll retries.
+        }
+    }
+
+    function watchOperation() {
+        closeWatch();
+        eventSource = new EventSource(streamUrl);
+        eventSource.addEventListener('panda_task_operation_done', function (event) {
+            const payload = JSON.parse(event.data);
+            if (String(payload.operation_id || '') !== String(operationId || '')) return;
+            checkStatus();
+        });
+        pollTimer = window.setInterval(checkStatus, 5000);
+        stopTimer = window.setTimeout(closeWatch, 180000);
+        checkStatus();
+    }
+
+    async function requestOperation(operation) {
+        disableControls();
+        showStatus(`${operation === 'pause' ? 'Pause' : 'Resume'} requested; waiting for verified PanDA state…`, false);
+        watchOperation();
+        try {
+            const response = await fetch(requestUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({operation: operation}),
+            });
+            const record = await response.json();
+            if (!response.ok) throw new Error(record.error || 'Operation could not be queued.');
+            operationId = record.id;
+            checkStatus();
+        } catch (error) {
+            closeWatch();
+            showStatus(error.message, true);
+            window.setTimeout(function () { window.location.reload(); }, 1200);
+        }
+    }
+
+    pauseButton.addEventListener('click', function () { requestOperation('pause'); });
+    resumeButton.addEventListener('click', function () { requestOperation('resume'); });
+    if (operationId) {
+        disableControls();
+        watchOperation();
+    }
+    window.addEventListener('beforeunload', closeWatch);
+}());
+</script>
+{% endif %}
 {% endblock %}

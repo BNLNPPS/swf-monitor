@@ -1,0 +1,183 @@
+"""Credential-free orchestration for durable PanDA pause/resume requests."""
+
+import json
+
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+
+from monitor_app.activemq_connection import ActiveMQConnectionManager
+from monitor_app.models import PandaTaskOperation
+
+from .queries import TERMINAL_TASK_STATUSES
+
+
+class PandaTaskOperationError(Exception):
+    def __init__(self, detail, status=400):
+        super().__init__(detail)
+        self.detail = detail
+        self.status = status
+
+
+def serialize_operation(operation):
+    return {
+        'id': str(operation.id),
+        'jedi_task_id': operation.jedi_task_id,
+        'task_name': operation.task_name,
+        'operation': operation.operation,
+        'source': operation.source,
+        'requested_by': operation.requested_by,
+        'status': operation.status,
+        'pending': operation.is_pending,
+        'diagnostic': operation.diagnostic,
+        'observed_status': operation.observed_status,
+        'evidence': operation.evidence,
+        'requested_at': operation.requested_at.isoformat(),
+        'started_at': (operation.started_at.isoformat()
+                       if operation.started_at else None),
+        'accepted_at': (operation.accepted_at.isoformat()
+                        if operation.accepted_at else None),
+        'completed_at': (operation.completed_at.isoformat()
+                         if operation.completed_at else None),
+        'updated_at': operation.updated_at.isoformat(),
+    }
+
+
+def operation_controls(task, *, authenticated, pending=None):
+    """Return enabled state and concise disabled reasons for both controls."""
+    status = str(task.get('status') or '').lower()
+    controls = {
+        'pause': {'enabled': False, 'reason': ''},
+        'resume': {'enabled': False, 'reason': ''},
+    }
+    if not authenticated:
+        controls['pause']['reason'] = 'Sign in to pause this task.'
+        controls['resume']['reason'] = 'Sign in to resume this task.'
+        return controls
+    if pending:
+        reason = f'{pending.operation.title()} is already in progress.'
+        controls['pause']['reason'] = reason
+        controls['resume']['reason'] = reason
+        return controls
+    if status == 'paused':
+        controls['pause']['reason'] = 'Task is already paused.'
+        controls['resume']['enabled'] = True
+        controls['resume']['reason'] = 'Resume this paused task.'
+        return controls
+    if status in TERMINAL_TASK_STATUSES:
+        reason = f'Task is terminal ({status}).'
+        controls['pause']['reason'] = reason
+        controls['resume']['reason'] = reason
+        return controls
+    controls['pause']['enabled'] = True
+    controls['pause']['reason'] = 'Pause this task.'
+    controls['resume']['reason'] = 'Task is not paused.'
+    return controls
+
+
+def queue_task_operation(*, task, operation, requested_by, source='manual',
+                         evidence=None):
+    """Persist and queue one pause/resume request for the prod-ops agent."""
+    if operation not in ('pause', 'resume'):
+        raise PandaTaskOperationError('operation must be pause or resume')
+    try:
+        jedi_task_id = int(task.get('jeditaskid'))
+    except (TypeError, ValueError):
+        raise PandaTaskOperationError('Task has no valid JEDI task ID.', 409)
+
+    pending = (PandaTaskOperation.objects
+               .filter(jedi_task_id=jedi_task_id,
+                       status__in=PandaTaskOperation.PENDING_STATUSES)
+               .first())
+    if pending:
+        if pending.operation == operation:
+            return pending, False
+        raise PandaTaskOperationError(
+            f'{pending.operation.title()} is already in progress for this task.',
+            409,
+        )
+
+    status = str(task.get('status') or '').lower()
+    if operation == 'pause':
+        if status == 'paused':
+            raise PandaTaskOperationError('Task is already paused.', 409)
+        if status in TERMINAL_TASK_STATUSES:
+            raise PandaTaskOperationError(
+                f'Task cannot be paused from terminal status {status}.', 409)
+    elif status != 'paused':
+        raise PandaTaskOperationError('Only a paused task can be resumed.', 409)
+
+    try:
+        with transaction.atomic():
+            record = PandaTaskOperation.objects.create(
+                jedi_task_id=jedi_task_id,
+                task_name=str(task.get('taskname') or ''),
+                operation=operation,
+                source=source,
+                requested_by=requested_by,
+                evidence=evidence or {'task_status': status},
+            )
+    except IntegrityError:
+        pending = (PandaTaskOperation.objects
+                   .filter(jedi_task_id=jedi_task_id,
+                           status__in=PandaTaskOperation.PENDING_STATUSES)
+                   .first())
+        if pending and pending.operation == operation:
+            return pending, False
+        raise PandaTaskOperationError(
+            'Another operation is already in progress for this task.', 409)
+
+    msg = {
+        'msg_type': 'panda_task_operation',
+        'namespace': 'prodops',
+        'operation_id': str(record.id),
+        'task_name': record.task_name or f'PanDA task {jedi_task_id}',
+        'jedi_task_id': jedi_task_id,
+        'operation': operation,
+        'source': source,
+        'created_by': requested_by,
+    }
+    try:
+        triggered = ActiveMQConnectionManager().send_message(
+            '/queue/epicprod.ops', json.dumps(msg))
+    except Exception as exc:
+        triggered = False
+        failure = str(exc)
+    else:
+        failure = 'ops-agent queue unreachable'
+    if not triggered:
+        record.status = 'failed'
+        record.diagnostic = f'Could not queue operation: {failure}'
+        record.completed_at = timezone.now()
+        record.save(update_fields=[
+            'status', 'diagnostic', 'completed_at', 'updated_at'])
+        raise PandaTaskOperationError(record.diagnostic, 503)
+    return record, True
+
+
+def update_task_operation(operation_id, *, status, diagnostic='',
+                          observed_status='', evidence=None):
+    """Commit an agent-reported lifecycle transition to the durable record."""
+    valid = {choice[0] for choice in PandaTaskOperation.STATUS_CHOICES}
+    if status not in valid or status == 'queued':
+        raise PandaTaskOperationError('Invalid operation status.')
+    try:
+        record = PandaTaskOperation.objects.get(pk=operation_id)
+    except PandaTaskOperation.DoesNotExist:
+        raise PandaTaskOperationError('Operation not found.', 404)
+
+    now = timezone.now()
+    record.status = status
+    record.diagnostic = str(diagnostic or '')[:4000]
+    record.observed_status = str(observed_status or '')[:50]
+    if evidence:
+        merged = dict(record.evidence or {})
+        merged.update(evidence)
+        record.evidence = merged
+    if status == 'running' and not record.started_at:
+        record.started_at = now
+    if status in ('accepted', 'verified', 'unverified') and not record.accepted_at:
+        record.accepted_at = now
+    if status in ('verified', 'failed', 'timeout', 'unverified'):
+        record.completed_at = now
+    record.save()
+    return record
