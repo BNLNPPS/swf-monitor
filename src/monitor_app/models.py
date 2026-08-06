@@ -455,12 +455,12 @@ class TFSlice(models.Model):
     Each TF slice is a small portion (~15 per STF sample) that can be
     processed independently by workers in ~30 seconds.
     """
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
+    fastmon_file = models.ForeignKey(FastMonFile, on_delete=models.CASCADE, related_name='tf_slices')
     slice_id = models.IntegerField()  # Serial number within STF sample (1-15)
     tf_first = models.IntegerField()  # First TF in the range
     tf_last = models.IntegerField()   # Last TF in the range
     tf_count = models.IntegerField()  # Number of TFs in the slice
-    tf_filename = models.CharField(max_length=255, db_index=True)
-    stf_filename = models.CharField(max_length=255, db_index=True)
     run_number = models.IntegerField(db_index=True)
     status = models.CharField(max_length=20, default='queued')
     retries = models.IntegerField(default=0)
@@ -477,13 +477,13 @@ class TFSlice(models.Model):
         db_table = 'swf_tf_slices'
         indexes = [
             models.Index(fields=['run_number', 'status']),
-            models.Index(fields=['stf_filename', 'status']),
+            models.Index(fields=['fastmon_file', 'status'], name='swf_tf_slic_fastmon_status_idx'),
             models.Index(fields=['status', 'created_at']),
         ]
-        unique_together = [['tf_filename', 'slice_id']]
+        unique_together = [['fastmon_file', 'slice_id']]
 
     def __str__(self):
-        return f"Slice {self.slice_id} of {self.tf_filename}"
+        return f"Slice {self.slice_id} of {self.fastmon_file.tf_filename}"
 
 
 class Worker(models.Model):
