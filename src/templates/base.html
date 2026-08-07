@@ -644,6 +644,7 @@ function applyNavMode(mode) {
     }
     function pollSystemStatus() {
         if (!statusUrl || !window.fetch) return;
+        if (document.hidden) return;
         fetch(statusUrl, {
             cache: 'no-store',
             credentials: 'same-origin',
@@ -668,6 +669,9 @@ function applyNavMode(mode) {
         dropdown.addEventListener('mouseenter', pollSystemStatus);
         dropdown.addEventListener('focusin', pollSystemStatus);
     }
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) pollSystemStatus();
+    });
     setInterval(refreshSystemNav, 10000);
     setInterval(pollSystemStatus, 60000);
 })();
