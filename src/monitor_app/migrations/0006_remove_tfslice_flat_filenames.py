@@ -4,7 +4,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('monitor_app', '0003_tfslice_fastmon_file'),
+        ('monitor_app', '0005_tfslice_fastmon_file'),
     ]
 
     operations = [

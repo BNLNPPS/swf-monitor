@@ -38,7 +38,7 @@ def restore_flat_filenames(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('monitor_app', '0002_cachedproduct'),
+        ('monitor_app', '0004_capcomnotice'),
     ]
 
     operations = [
