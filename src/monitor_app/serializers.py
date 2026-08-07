@@ -79,6 +79,11 @@ class LogSummarySerializer(serializers.Serializer):
 # Fast Processing models serializers
 
 class TFSliceSerializer(serializers.ModelSerializer):
+    fastmon_file = serializers.SlugRelatedField(
+        slug_field='tf_filename',
+        queryset=FastMonFile.objects.all(),
+    )
+
     class Meta:
         model = TFSlice
         fields = '__all__'

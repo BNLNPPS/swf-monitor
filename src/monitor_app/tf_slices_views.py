@@ -2,6 +2,7 @@
 TF Slices views for fast processing workflow monitoring.
 """
 
+from django.db.models import F
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.urls import reverse
@@ -71,10 +72,16 @@ def tf_slices_datatable_ajax(request):
                              default_order_direction='desc')
 
     # Build base queryset
-    queryset = TFSlice.objects.all()
+    queryset = TFSlice.objects.select_related('fastmon_file', 'fastmon_file__stf_file').annotate(
+        tf_filename=F('fastmon_file__tf_filename'),
+        stf_filename=F('fastmon_file__stf_file__stf_filename'),
+    )
 
     # Apply filters
     filter_mapping = {
+        'id': 'id',
+        'fastmon_file_id': 'fastmon_file_id',
+        'slice_id': 'slice_id',
         'tf_filename': 'tf_filename',
         'stf_filename': 'stf_filename',
         'status': 'status',

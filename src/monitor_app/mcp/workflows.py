@@ -543,6 +543,8 @@ async def swf_get_stf_file(file_id: str = None, stf_filename: str = None) -> dic
 
 @mcp.tool()
 async def swf_list_tf_slices(
+    id: int = None,
+    fastmon_file_id: str = None,
     run_number: int = None,
     stf_filename: str = None,
     tf_filename: str = None,
@@ -558,6 +560,8 @@ async def swf_list_tf_slices(
     process independently in ~30 seconds each.
 
     Args:
+        id: Filter to this TF slice's primary key
+        fastmon_file_id: Filter to slices belonging to this FastMonFile id
         run_number: Filter to slices from this run
         stf_filename: Filter to slices from this STF file
         tf_filename: Filter to slices from this TF sample
@@ -566,19 +570,23 @@ async def swf_list_tf_slices(
         start_time: Filter slices created >= this ISO datetime (default: last 24 hours)
         end_time: Filter slices created <= this ISO datetime
 
-    Returns list of slices with: slice_id, tf_filename, stf_filename, run_number,
-    tf_first, tf_last, tf_count, status, assigned_worker, created_at, completed_at
+    Returns list of slices with: id, fastmon_file_id, slice_id, tf_filename, stf_filename,
+    run_number, tf_first, tf_last, tf_count, status, assigned_worker, created_at, completed_at
     """
     @sync_to_async
     def fetch():
-        qs = TFSlice.objects.all().order_by('-created_at')
+        qs = TFSlice.objects.select_related('fastmon_file', 'fastmon_file__stf_file').order_by('-created_at')
 
+        if id:
+            qs = qs.filter(id=id)
+        if fastmon_file_id:
+            qs = qs.filter(fastmon_file_id=fastmon_file_id)
         if run_number:
             qs = qs.filter(run_number=run_number)
         if stf_filename:
-            qs = qs.filter(stf_filename=stf_filename)
+            qs = qs.filter(fastmon_file__stf_file__stf_filename=stf_filename)
         if tf_filename:
-            qs = qs.filter(tf_filename=tf_filename)
+            qs = qs.filter(fastmon_file__tf_filename=tf_filename)
         if status:
             qs = qs.filter(status__iexact=status)
         if assigned_worker:
@@ -604,9 +612,11 @@ async def swf_list_tf_slices(
         total_count = qs.count()
         items = [
             {
+                "id": s.id,
+                "fastmon_file_id": s.fastmon_file_id,
                 "slice_id": s.slice_id,
-                "tf_filename": s.tf_filename,
-                "stf_filename": s.stf_filename,
+                "tf_filename": s.fastmon_file.tf_filename,
+                "stf_filename": s.fastmon_file.stf_file.stf_filename,
                 "run_number": s.run_number,
                 "tf_first": s.tf_first,
                 "tf_last": s.tf_last,
@@ -645,11 +655,13 @@ async def swf_get_tf_slice(tf_filename: str, slice_id: int) -> dict:
     @sync_to_async
     def fetch():
         try:
-            s = TFSlice.objects.get(tf_filename=tf_filename, slice_id=slice_id)
+            s = TFSlice.objects.select_related('fastmon_file', 'fastmon_file__stf_file').get(
+                fastmon_file__tf_filename=tf_filename, slice_id=slice_id
+            )
             return {
                 "slice_id": s.slice_id,
-                "tf_filename": s.tf_filename,
-                "stf_filename": s.stf_filename,
+                "tf_filename": s.fastmon_file.tf_filename,
+                "stf_filename": s.fastmon_file.stf_file.stf_filename,
                 "run_number": s.run_number,
                 "tf_first": s.tf_first,
                 "tf_last": s.tf_last,
