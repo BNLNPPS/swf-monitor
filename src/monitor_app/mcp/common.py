@@ -3,7 +3,7 @@ Common utilities and tool discovery for MCP tools.
 """
 
 import logging
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -11,13 +11,22 @@ logger = logging.getLogger(__name__)
 
 
 def _parse_time(time_str):
-    """Parse ISO datetime string, return None if invalid."""
+    """Parse ISO datetime string, return None if invalid.
+
+    A naive value (no timezone offset) is interpreted as UTC — the
+    timezone every tool reports timestamps in. Left naive, Django
+    would read it in the project display timezone (ET), silently
+    shifting the caller's window by hours.
+    """
     if not time_str:
         return None
     try:
-        return parse_datetime(time_str)
+        parsed = parse_datetime(time_str)
     except (ValueError, TypeError):
         return None
+    if parsed is not None and timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, dt_timezone.utc)
+    return parsed
 
 
 def _default_start_time(hours=24):
@@ -288,7 +297,7 @@ def get_available_tools_list() -> list:
         },
         {
             "name": "panda_error_summary",
-            "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows most common errors with affected tasks, users, sites.",
+            "description": "Aggregate error summary across failed PanDA jobs, ranked by frequency. Shows task/site distributions and representative PandaIDs for evidence-based causal drill-down.",
             "parameters": ["days", "username", "site", "taskid", "error_source", "limit"],
         },
         {

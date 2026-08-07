@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Iterable, Optional
 
 from django.db import connections, transaction
 from django.utils import timezone
@@ -15,12 +15,16 @@ from snapper_ai.services import (
     register_component,
 )
 
-from .panda.constants import JOB_STATUS_CATEGORIES, PANDA_SCHEMA
+from .panda.constants import (
+    ERROR_COMPONENTS,
+    JOB_STATUS_CATEGORIES,
+    PANDA_SCHEMA,
+)
 from .panda.queries import get_activity
 
 
 PUBLISHER_IDENTITY = "swf-monitor:panda-activity"
-ASSESSMENT_POLICY_VERSION = "swf-panda-activity-24h-v2"
+ASSESSMENT_POLICY_VERSION = "swf-panda-activity-24h-v3"
 EVENT_RESOLVER = "swf-panda-activity-history"
 WINDOW_DAYS = 1
 WINDOW_HOURS = 24
@@ -38,6 +42,7 @@ TASK_TERMINAL_STATUSES = (
     "exhausted",
     "passed",
 )
+TERMINAL_JOB_STATUSES = ("finished", "failed", "cancelled", "closed")
 
 PANDA_REGISTRATION = {
     "title": "Curated epicprod PanDA activity",
@@ -72,6 +77,21 @@ PANDA_REGISTRATION = {
             "kind": "bounded_map",
             "max_items": MAX_STATUSES,
             "description": "Trailing 24-hour job counts by PanDA status.",
+        },
+        "jobs_cum": {
+            "path": "jobs.cum",
+            "type": "object",
+            "required": False,
+            "kind": "cumulative_counter_map",
+            "max_items": MAX_STATUSES,
+            "description": (
+                "Cumulative terminal job counts by status (finished, "
+                "failed, cancelled, closed), accumulated across "
+                "publications from the full recorded job history. "
+                "Monotonic; the absolute origin is arbitrary — "
+                "consumers difference two instants to count the "
+                "events between them."
+            ),
         },
         "in_flight_jobs_now": {
             "path": "jobs.in_flight_now.total",
@@ -132,8 +152,13 @@ PANDA_REGISTRATION = {
             "kind": "bounded_map",
             "max_items": MAX_SITES,
             "description": (
-                "Top PanDA target sites with trailing job outcomes and current "
-                "in-flight status counts and running jobs and cores."
+                "PanDA target sites with trailing job outcomes, current "
+                "in-flight status counts, running jobs and cores, and "
+                "cumulative terminal counters ('cum' by status; "
+                "'cum_failed_by_class' by error component). Every non-test "
+                "Canary queue is retained, including explicit zero state "
+                "when inactive; remaining slots contain the highest-ranked "
+                "activity-derived sites."
             ),
         },
         "tasks_total_24h": {
@@ -182,7 +207,8 @@ PANDA_REGISTRATION = {
             "max_items": MAX_SITES,
             "description": (
                 "Current nonterminal JEDI task counts by target site and "
-                "status."
+                "status. Every non-test Canary queue is retained with "
+                "explicit zero state when inactive."
             ),
         },
     },
@@ -261,6 +287,118 @@ def _in_flight_task_activity() -> list[dict]:
         ]
 
 
+def _canary_queue_names() -> set[str]:
+    """Non-test queues in Canary's catalog."""
+    from canary.store.models import Queue
+
+    return {
+        str(name)
+        for name in (
+            Queue.objects
+            .exclude(name__icontains="test")
+            .values_list("name", flat=True)
+        )
+    }
+
+
+def _terminal_outcome_rows(mark, until, sites=None):
+    """Terminal job transitions with end times in (mark, until] — or
+    the full recorded history when mark is None (the counter seed) —
+    per site, by status and, for failures, by error component class.
+    Rows are deduplicated across the active and archived tables."""
+    site_names = tuple(sorted({str(site) for site in sites or ()}))
+    if sites is not None and not site_names:
+        return []
+    class_case = " ".join(
+        f'WHEN "{c["code"]}" > 0 THEN \'{c["name"]}\''
+        for c in ERROR_COMPONENTS
+    )
+    err_fields = ", ".join(f'"{c["code"]}"' for c in ERROR_COMPONENTS)
+    placeholders = ", ".join(["%s"] * len(TERMINAL_JOB_STATUSES))
+    bounds = f'"endtime" <= %s AND "jobstatus" IN ({placeholders})'
+    params = [until, *TERMINAL_JOB_STATUSES]
+    if mark is not None:
+        bounds = f'"endtime" > %s AND {bounds}'
+        params = [mark, *params]
+    if sites is not None:
+        site_placeholders = ", ".join(["%s"] * len(site_names))
+        bounds = (
+            f"{bounds} AND COALESCE(\"computingsite\", 'unknown') "
+            f"IN ({site_placeholders})"
+        )
+        params.extend(site_names)
+    sql = f"""
+        SELECT COALESCE("computingsite", 'unknown'), "jobstatus",
+               CASE WHEN "jobstatus" = 'failed'
+                    THEN CASE {class_case} ELSE 'other' END
+                    ELSE '' END,
+               COUNT(*)
+        FROM (
+            SELECT "pandaid", "endtime", "jobstatus",
+                   "computingsite", {err_fields}
+            FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {bounds}
+            UNION
+            SELECT "pandaid", "endtime", "jobstatus",
+                   "computingsite", {err_fields}
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
+        ) completed
+        GROUP BY 1, 2, 3
+    """
+    with connections["panda"].cursor() as cursor:
+        cursor.execute(sql, params + params)
+        return cursor.fetchall()
+
+
+def _accumulate_outcomes(scope_cum, site_cums, rows):
+    """Add terminal-outcome rows into the counter maps in place."""
+    for site, status, fclass, count in rows:
+        count = int(count or 0)
+        if not count:
+            continue
+        if scope_cum is not None:
+            scope_cum[status] = int(scope_cum.get(status) or 0) + count
+        entry = site_cums.setdefault(
+            str(site or "unknown"), {"cum": {}, "classes": {}})
+        entry["cum"][status] = (
+            int(entry["cum"].get(status) or 0) + count)
+        if status == "failed" and fclass:
+            entry["classes"][fclass] = (
+                int(entry["classes"].get(fclass) or 0) + count)
+
+
+def _previous_counters():
+    """The counter maps and delta mark from the component's current
+    state. Counters and source time advance atomically in
+    publication, so counting end times in (source_as_of, now] never
+    double-counts across cycles. A current state without counters
+    yields mark None and the next publication seeds from the full
+    recorded job history; the absolute origin is arbitrary because
+    every consumer differences two instants."""
+    from snapper_ai.models import CurrentComponent
+
+    row = (CurrentComponent.objects
+           .filter(scope="epicprod", name="panda")
+           .values("data", "source_as_of").first())
+    if not row:
+        return {}, {}, None
+    jobs = (row["data"] or {}).get("jobs") or {}
+    scope_cum = {k: int(v or 0)
+                 for k, v in (jobs.get("cum") or {}).items()}
+    if not scope_cum:
+        return {}, {}, None
+    site_cums = {}
+    for site, block in (jobs.get("sites") or {}).items():
+        if block.get("cum") or block.get("cum_failed_by_class"):
+            site_cums[site] = {
+                "cum": {k: int(v or 0) for k, v
+                        in (block.get("cum") or {}).items()},
+                "classes": {k: int(v or 0) for k, v in
+                            (block.get("cum_failed_by_class")
+                             or {}).items()},
+            }
+    return scope_cum, site_cums, row["source_as_of"]
+
+
 def _count_map(values, label, maximum):
     result = {
         str(key or "unknown"): int(value or 0)
@@ -271,12 +409,35 @@ def _count_map(values, label, maximum):
     return result
 
 
+def _bounded_site_names(
+    names: Iterable[str],
+    required: Iterable[str],
+    ranking_key,
+) -> list[str]:
+    """Retain every required site, then fill remaining bounded slots."""
+    required = {str(name) for name in required}
+    if len(required) > MAX_SITES:
+        raise ValueError(
+            f"required Canary queues exceed {MAX_SITES} entries"
+        )
+    ranked = sorted({str(name) for name in names} | required, key=ranking_key)
+    selected = set(required)
+    for name in ranked:
+        if len(selected) >= MAX_SITES:
+            break
+        selected.add(name)
+    return [name for name in ranked if name in selected]
+
+
 def panda_projection(
     activity: Optional[dict] = None,
     in_flight_activity: Optional[list[dict]] = None,
     in_flight_task_activity: Optional[list[dict]] = None,
+    terminal_outcome_rows: Optional[list] = None,
+    catalog_sites: Optional[Iterable[str]] = None,
 ) -> tuple[dict, datetime]:
     """Build the bounded revision-driving PanDA activity projection."""
+    observed_at = timezone.now()
     activity = activity if activity is not None else get_activity(days=WINDOW_DAYS)
     if not isinstance(activity, dict) or activity.get("error"):
         raise ValueError(
@@ -295,6 +456,18 @@ def panda_projection(
         if in_flight_task_activity is not None
         else _in_flight_task_activity()
     )
+    catalog_site_names = {
+        str(name)
+        for name in (
+            catalog_sites
+            if catalog_sites is not None
+            else _canary_queue_names()
+        )
+    }
+    if len(catalog_site_names) > MAX_SITES:
+        raise ValueError(
+            f"required Canary queues exceed {MAX_SITES} entries"
+        )
 
     jobs_by_status = _count_map(
         jobs.get("by_status"), "job statuses", MAX_STATUSES
@@ -400,32 +573,58 @@ def panda_projection(
             f"in-flight task statuses exceed {MAX_STATUSES} entries"
         )
 
-    ranked_task_sites = sorted(
+    ranked_task_sites = _bounded_site_names(
         current_task_sites,
-        key=lambda name: (
+        catalog_site_names,
+        lambda name: (
             -int(current_task_sites[name]["in_flight_tasks"]),
             name,
-        ),
-    )[:MAX_SITES]
+        ) if name in current_task_sites else (0, name),
+    )
     task_sites = {
         name: {
             "in_flight_tasks_now": int(
-                current_task_sites[name]["in_flight_tasks"]
+                (current_task_sites.get(name) or {}).get(
+                    "in_flight_tasks"
+                ) or 0
             ),
-            "by_status_now": current_task_sites[name]["by_status"],
+            "by_status_now": (
+                (current_task_sites.get(name) or {}).get("by_status") or {}
+            ),
         }
         for name in ranked_task_sites
     }
 
-    site_names = set(recent_sites) | set(current_sites)
-    ranked_sites = sorted(
+    scope_cum, site_cums, mark = _previous_counters()
+    missing_catalog_counters = catalog_site_names - set(site_cums)
+    if mark is not None and missing_catalog_counters:
+        historical_rows = _terminal_outcome_rows(
+            None, mark, sites=missing_catalog_counters
+        )
+        _accumulate_outcomes(None, site_cums, historical_rows)
+    outcome_rows = (
+        terminal_outcome_rows
+        if terminal_outcome_rows is not None
+        else _terminal_outcome_rows(mark, observed_at)
+    )
+    _accumulate_outcomes(scope_cum, site_cums, outcome_rows)
+    for name in catalog_site_names:
+        counters = site_cums.setdefault(
+            name, {"cum": {}, "classes": {}}
+        )
+        for status in TERMINAL_JOB_STATUSES:
+            counters["cum"].setdefault(status, 0)
+
+    site_names = set(recent_sites) | set(current_sites) | catalog_site_names
+    ranked_sites = _bounded_site_names(
         site_names,
-        key=lambda name: (
+        catalog_site_names,
+        lambda name: (
             -int((current_sites.get(name) or {}).get("in_flight_jobs") or 0),
             -int((recent_sites.get(name) or {}).get("total") or 0),
             name,
         ),
-    )[:MAX_SITES]
+    )
     sites = {}
     for name in ranked_sites:
         recent = recent_sites.get(name) or {}
@@ -439,6 +638,12 @@ def panda_projection(
             "running_jobs_now": int(current.get("running_jobs") or 0),
             "running_cores_now": int(current.get("running_cores") or 0),
         }
+        counters = site_cums.get(name)
+        if counters:
+            if counters["cum"]:
+                sites[name]["cum"] = counters["cum"]
+            if counters["classes"]:
+                sites[name]["cum_failed_by_class"] = counters["classes"]
 
     in_flight_total = sum(in_flight_by_status.values())
     running_jobs = in_flight_by_status.get("running", 0)
@@ -451,6 +656,7 @@ def panda_projection(
         "window_hours": WINDOW_HOURS,
         "jobs": {
             "total_24h": int(jobs.get("total") or 0),
+            "cum": scope_cum,
             "by_status_24h": jobs_by_status,
             "in_flight_now": {
                 "total": in_flight_total,
@@ -473,7 +679,7 @@ def panda_projection(
             "sites": task_sites,
         },
     }
-    return projection, timezone.now()
+    return projection, observed_at
 
 
 def publish_panda_activity() -> PandaPublication:
@@ -496,7 +702,7 @@ def publish_panda_activity() -> PandaPublication:
                 name="panda",
                 publisher_identity=PUBLISHER_IDENTITY,
                 registration=PANDA_REGISTRATION,
-                component_schema_version=4,
+                component_schema_version=5,
             )
             update = publish_component(
                 scope="epicprod",
@@ -515,7 +721,7 @@ def publish_panda_activity() -> PandaPublication:
                 name="panda",
                 publisher_identity=PUBLISHER_IDENTITY,
                 registration=PANDA_REGISTRATION,
-                component_schema_version=4,
+                component_schema_version=5,
             )
     return PandaPublication(
         registration_update=registration_update,

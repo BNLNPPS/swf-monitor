@@ -5,7 +5,23 @@
 {% block content %}
 <div class="container-fluid mt-4">
     <h1 class="mb-4">ePIC Streaming WFMS Testbed</h1>
-    <p class="lead mb-5">Streaming workflow management system testbed for the ePIC experiment at the Electron Ion Collider</p>
+    <p class="lead mb-4">Streaming workflow management system testbed for the ePIC experiment at the Electron Ion Collider</p>
+
+    <!-- Snapper namespace activity lanes over the last 7 days -->
+    <div class="card mb-4">
+        <div class="card-header"><strong>Time history</strong>
+            {% if snapper_embed.report_query %}
+            <a class="ms-3" href="{% url 'snapper_ai:snapper_report' scope=snapper_embed.scope %}?{{ snapper_embed.report_query }}">Open in Snapper</a>
+            {% endif %}
+            {% if product_built_at_text %}
+            <span class="text-muted ms-3">Data as of <strong>{{ product_built_at_text }}</strong></span>
+            <a href="?refresh=1" class="btn btn-sm btn-secondary ms-2">Update</a>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+        </div>
+    </div>
 
     <h3 class="mb-3">Workflows</h3>
     <div class="row mb-4">

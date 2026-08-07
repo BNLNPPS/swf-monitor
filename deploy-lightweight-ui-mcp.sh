@@ -119,10 +119,13 @@ if [[ "$DRY_RUN" == true ]]; then
     RSYNC_ARGS+=(--dry-run --itemize-changes)
 fi
 
+# panda/ ships with the UI sync because its query layer serves the
+# monitor pages; the bot module stays out — a running bot only picks
+# up code at restart, which is full-deploy territory.
 MONITOR_EXCLUDES=(
     --exclude 'migrations/'
     --exclude 'management/'
-    --exclude 'panda/'
+    --exclude 'panda/bot.py'
     --exclude 'testbed_bot/'
     --exclude 'tests/'
 )

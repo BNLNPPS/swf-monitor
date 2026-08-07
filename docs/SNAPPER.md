@@ -131,8 +131,10 @@ component families before the independent capture scheduler observes them:
 
 The PanDA adapter publishes trailing 24-hour job and task counts, current counts
 for every in-flight job state and nonterminal task state, running cores, and
-bounded target-site and task-type maps. It excludes users and individual
-records. Selected
+bounded target-site and task-type maps. Both site maps retain every non-test
+queue in the Canary catalog, with explicit zero state when a catalog queue is
+inactive; remaining map slots contain the highest-ranked activity-derived
+sites. It excludes users and individual records. Selected
 `refresh-system-status.py --only` runs skip the PanDA query; full manual and
 periodic refreshes publish it. A publication error causes the refresh doer to
 fail visibly while preserving the last accepted component state.

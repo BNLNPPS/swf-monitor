@@ -16,6 +16,9 @@
         {% if item.assessment_kind %}
         <span class="badge bg-secondary">{{ item.assessment_kind }}</span>
         {% endif %}
+        {% if latest_weekly_url %}
+        <a href="{{ latest_weekly_url }}" class="ms-2">Latest weekly report</a>
+        {% endif %}
     </div>
 
     <div class="text-muted mb-3">
@@ -24,7 +27,7 @@
         &middot; {{ item.ai }}
         &middot; {{ item.username }}
         &middot; {{ item.created_display }}
-        &middot; Quality: {{ item.quality|default:"unreviewed" }}
+        {% if item.quality %}&middot; Quality: {{ item.quality }}{% endif %}
     </div>
 
     {% if item.comment %}

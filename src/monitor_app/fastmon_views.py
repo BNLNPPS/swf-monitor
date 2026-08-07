@@ -19,18 +19,9 @@ def fastmon_files_list(request):
     status_filter = request.GET.get('status')
     run_number = request.GET.get('run_number')
 
-    # Get filter options for dropdown links
-    # Get unique STF filenames that have TF files
-    stf_filenames = FastMonFile.objects.select_related('stf_file').values_list(
-        'stf_file__stf_filename', flat=True
-    ).distinct()
-
-    # Get run numbers from related STF files
-    run_numbers = FastMonFile.objects.select_related('stf_file__run').values_list(
-        'stf_file__run__run_number', flat=True
-    ).distinct()
-
-    # Get status choices from the model
+    # Status is the one humanly-choosable filter set; filename and run
+    # enumerations are not filters — deep-link parameters still apply
+    # and search covers targeted lookups.
     statuses = [choice[0] for choice in FastMonFile._meta.get_field('status').choices]
 
     # Column definitions for DataTables
@@ -48,8 +39,6 @@ def fastmon_files_list(request):
         'table_description': 'Track Time Frame (TF) files sampled from Super Time Frames for fast monitoring.',
         'ajax_url': reverse('monitor_app:fastmon_files_datatable_ajax'),
         'columns': columns,
-        'stf_filenames': sorted([s for s in stf_filenames if s]),
-        'run_numbers': sorted(run_numbers, reverse=True),
         'statuses': statuses,
         'selected_stf_filename': stf_filename,
         'selected_status': status_filter,
@@ -93,6 +82,9 @@ def fastmon_files_datatable_ajax(request):
     fastmon_files = dt.apply_pagination(queryset)
 
     # Format data for DataTables
+    from django.urls import reverse
+
+    from .cell_fmt import fill_cell, short_filename
     data = []
     for file in fastmon_files:
         # Use plain text status (consistent with STF files view)
@@ -102,17 +94,16 @@ def fastmon_files_datatable_ajax(request):
         file_size = f"{file.file_size_bytes:,}" if file.file_size_bytes else "N/A"
 
         # Make STF filename clickable to go to STF detail page
-        from django.urls import reverse
         stf_detail_url = reverse('monitor_app:stf_file_detail', args=[file.stf_file.file_id])
-        stf_link = f'<a href="{stf_detail_url}">{file.stf_file.stf_filename}</a>'
+        stf_link = (f'<a href="{stf_detail_url}">'
+                    f'{short_filename(file.stf_file.stf_filename)}</a>')
 
         # Make run number clickable to go to run detail page
         run_detail_url = reverse('monitor_app:run_detail', args=[file.stf_file.run.run_number])
         run_link = f'<a href="{run_detail_url}">{file.stf_file.run.run_number}</a>'
 
-        from .cell_fmt import fill_cell
         data.append([
-            file.tf_filename,
+            short_filename(file.tf_filename),
             stf_link,
             run_link,
             file_size,

@@ -115,6 +115,57 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
 
 ## REST API Endpoints
 
+### Capcom state
+- `GET /api/capcom/state/` - Display-ready SWF state for the tjai Capcom
+  page. `states` carries tile-exact entries shaped as tjai's
+  `capcom.set_state(source, value, color, url)` expects: `swf-system`
+  (the cached infrastructure/operations verdict, excluding user workload
+  state) and `swf-panda` (running jobs, running tasks, paused tasks, and
+  the success percentage over the trailing 12 hours). State values are
+  capped at 50 characters; paused-task identities remain in `detail`. `detail`
+  carries the numbers behind them. Open read, polled every few minutes;
+  externally reachable through the swf-remote proxy
+  (`/prod/api/capcom/state/`). Each section degrades independently,
+  contributing an UNAVAILABLE tile and `error_text` on failure.
+- `GET /api/capcom/user-state/?username=USERNAME` - Display-ready `swf-user`
+  tile combining that user's testbed activity/state and effective-user PanDA
+  activity over the trailing 24 hours. The endpoint contract is generic; the
+  Capcom collector supplies the configured username. Invalid or missing
+  usernames return HTTP 400.
+- `GET /api/capcom/notices/?since=ISO8601` - Buffered discrete SWF events
+  (campaign-delivery and task-operation notices) created strictly after
+  `since`; a naive timestamp is read as UTC, and the default window is the
+  trailing 24 hours. Rows return oldest-first so a consumer's next cursor is
+  the last row's `created_at`; `more` flags a page-capped response that
+  should be drained again immediately. Open read. Malformed `since` returns
+  HTTP 400. Rows past a 30-day retention window are pruned at ingest;
+  consumers keep their own history.
+- `POST /api/capcom/notices/ingest/` - Token-authenticated notice write from
+  the production operations agent: `{source, title, severity?, detail?,
+  url?, dedup_key?}`. No external feed system is contacted from SWF, and no
+  external feed credential is held in SWF; feed consumers drain the read
+  endpoint from their own side.
+
+### PanDA task operations
+
+- `POST /api/panda/tasks/{jeditaskid}/operations/` - Authenticated request for
+  `{"operation": "pause"}` or `{"operation": "resume"}`. Creates a durable
+  operation record and queues the credentialed work to prod-ops; HTTP 202 means
+  queued, not completed. This action is restricted to the internal monitor;
+  requests arriving through the swf-remote tunnel receive HTTP 403.
+- `POST /api/panda/task-operations/` - Authenticated internal-monitor bulk
+  pause/resume request with `{"operation": "pause|resume", "jedi_task_ids":
+  [...]}`. The endpoint re-reads current PanDA state and queues only `running`
+  tasks for pause or `paused` tasks for resume. Prod-ops sends the accepted
+  scalar PanDA commands one second apart and records each task's outcome.
+- `GET /api/panda/task-operations/{operation_id}/` - Authenticated durable
+  operation state for the task page's bounded SSE backstop. `verified` is the
+  only successful terminal state; `unverified` means PanDA accepted the request
+  but the expected task-state transition was not observed before the deadline.
+- `POST /api/panda/task-operations/{operation_id}/state/` - Token-authenticated
+  prod-ops lifecycle callback. This is an internal executor endpoint, not a
+  browser action.
+
 ### System Agents
 - `GET /api/systemagents/` - List all agents
 - `POST /api/systemagents/` - Create new agent

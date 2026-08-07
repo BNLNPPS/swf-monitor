@@ -121,13 +121,16 @@ def snapper_context(request, scope):
     State at the instant, changes in the window around it, and event
     references with their SWF resolver transports attached.
     """
+    import math
+
     try:
         window = float(request.GET.get('window') or 3600)
     except ValueError:
         return JsonResponse({'error': 'window must be a number of seconds'},
                             status=400)
-    if window <= 0:
-        return JsonResponse({'error': 'window must be positive'}, status=400)
+    if not math.isfinite(window) or window <= 0:
+        return JsonResponse({'error': 'window must be a positive finite '
+                                      'number of seconds'}, status=400)
     try:
         result = context_around(
             scope, _parse_time(request.GET.get('time'), 'time'), window)

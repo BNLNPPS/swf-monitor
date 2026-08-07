@@ -9,6 +9,7 @@ from rest_framework import viewsets, generics
 from rest_framework.decorators import action, api_view, authentication_classes, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from django.contrib.auth.decorators import login_required
@@ -217,6 +218,34 @@ def account_view(request):
     active_tab = request.GET.get('tab', 'workflows')
     if active_tab not in ('workflows', 'account'):
         active_tab = 'workflows'
+
+    snapper_embed = None
+    if active_tab == 'workflows':
+        try:
+            from datetime import timedelta
+
+            from snapper_ai.embed import embed_context
+
+            from .cached_product import get_product
+
+            def _build():
+                end = timezone.now()
+                ctx = embed_context('testbed', end - timedelta(days=7), end,
+                                    lanes=True)
+                if ctx.get('error'):
+                    raise RuntimeError(ctx['error'])
+                return ctx
+
+            product = get_product('snapper_embed:v1:testbed:lanes:7', _build,
+                                  ttl_seconds=300,
+                                  refresh=request.GET.get('refresh') == '1')
+            snapper_embed = product['value'] or {
+                'scope': 'testbed',
+                'error': 'state history is building — reload shortly.'}
+        except Exception as exc:
+            logger.error('snapper embed failed for account page: %s', exc)
+            snapper_embed = {'scope': 'testbed', 'error': str(exc)}
+
     return render(request, 'monitor_app/account.html', {
         'form': form,
         'user': request.user,
@@ -224,6 +253,7 @@ def account_view(request):
         'my_tasks': my_tasks,
         'my_tasks_error': my_tasks_error,
         'active_tab': active_tab,
+        'snapper_embed': snapper_embed,
     })
 
 
@@ -289,11 +319,22 @@ class AgentWorkflowStageViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 class WorkflowMessageViewSet(viewsets.ModelViewSet):
-    """API endpoint for Workflow Messages."""
+    """API endpoint for Workflow Messages.
+
+    ?execution_id= narrows to one workflow execution's messages in
+    sent order — the episode backfill's read path.
+    """
     queryset = WorkflowMessage.objects.all()
     serializer_class = WorkflowMessageSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        qs = WorkflowMessage.objects.all()
+        execution_id = self.request.query_params.get('execution_id')
+        if execution_id:
+            qs = qs.filter(execution_id=execution_id).order_by('sent_at')
+        return qs
 
 
 class AppLogViewSet(viewsets.ModelViewSet):
@@ -313,12 +354,56 @@ class RunViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 
+class _OptInLimitPagination(LimitOffsetPagination):
+    """Paginates only when ?limit= is present: a bare request keeps the
+    unenveloped list shape the deployed agents parse."""
+    default_limit = None
+
+
 class StfFileViewSet(viewsets.ModelViewSet):
-    """API endpoint for STF file tracking."""
+    """API endpoint for STF file tracking.
+
+    Filterable — agents must never need the whole table to find one
+    file: ?stf_filename= (exact), ?run_number=, ?status=,
+    ?workflow_id=. ?limit=/?offset= paginate on request.
+    """
     queryset = StfFile.objects.all()
     serializer_class = StfFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = _OptInLimitPagination
+
+    def get_queryset(self):
+        # Typed filter values must be validated here: a malformed value fed
+        # straight into .filter() raises django ValidationError, which DRF
+        # reports as a 500 — a client sending ?workflow_id=<execution id>
+        # took the endpoint down for every caller until restart.
+        from uuid import UUID
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        qs = super().get_queryset()
+        params = self.request.query_params
+        stf_filename = (params.get('stf_filename') or '').strip()
+        if stf_filename:
+            qs = qs.filter(stf_filename=stf_filename)
+        run_number = (params.get('run_number') or '').strip()
+        if run_number:
+            if not run_number.isdigit():
+                raise DRFValidationError(
+                    {'run_number': 'must be an integer run number'})
+            qs = qs.filter(run__run_number=run_number)
+        status_value = (params.get('status') or '').strip()
+        if status_value:
+            qs = qs.filter(status=status_value)
+        workflow_id = (params.get('workflow_id') or '').strip()
+        if workflow_id:
+            try:
+                UUID(workflow_id)
+            except ValueError:
+                raise DRFValidationError(
+                    {'workflow_id': 'must be a UUID; to select a '
+                     "workflow's files filter by run_number/status"})
+            qs = qs.filter(workflow_id=workflow_id)
+        return qs
 
 
 class SubscriberViewSet(viewsets.ModelViewSet):
@@ -331,11 +416,32 @@ class SubscriberViewSet(viewsets.ModelViewSet):
 
 
 class FastMonFileViewSet(viewsets.ModelViewSet):
-    """API endpoint for Fast Monitoring files."""
+    """API endpoint for Fast Monitoring files.
+
+    Filterable — the fastmon agent's by-filename lookup was previously
+    ignored server-side and answered with the full table: ?tf_filename=
+    (exact, unique-indexed), ?stf_filename= (exact, via the parent
+    STF), ?status=. ?limit=/?offset= paginate on request.
+    """
     queryset = FastMonFile.objects.all()
     serializer_class = FastMonFileSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = _OptInLimitPagination
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        params = self.request.query_params
+        tf_filename = (params.get('tf_filename') or '').strip()
+        if tf_filename:
+            qs = qs.filter(tf_filename=tf_filename)
+        stf_filename = (params.get('stf_filename') or '').strip()
+        if stf_filename:
+            qs = qs.filter(stf_file__stf_filename=stf_filename)
+        status_value = (params.get('status') or '').strip()
+        if status_value:
+            qs = qs.filter(status=status_value)
+        return qs
 
 
 class WorkflowDefinitionViewSet(viewsets.ModelViewSet):
@@ -373,7 +479,7 @@ class TFSliceViewSet(viewsets.ModelViewSet):
     serializer_class = TFSliceSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
-    filterset_fields = ['run_number', 'status', 'stf_filename', 'assigned_worker', 'tf_filename', 'slice_id']
+    filterset_fields = ['id', 'fastmon_file_id', 'run_number', 'status', 'fastmon_file__stf_file__stf_filename', 'assigned_worker', 'fastmon_file__tf_filename', 'slice_id']
 
 
 class WorkerViewSet(viewsets.ModelViewSet):
@@ -433,11 +539,17 @@ def log_summary(request):
     instance_name = request.GET.get('instance_name')
     levelname = request.GET.get('levelname')
 
-    # Get distinct app and instance names for filter links
-    app_names_qs = AppLog.objects.values_list('app_name', flat=True)
-    instance_names_qs = AppLog.objects.values_list('instance_name', flat=True)
-    app_names = sorted(set([name for name in app_names_qs if name]), key=lambda x: x.lower())
-    instance_names = sorted(set([name for name in instance_names_qs if name]), key=lambda x: x.lower())
+    # Distinct app and instance names for filter links — distinct at
+    # the database on the indexed columns; streaming every row into
+    # Python cost tens of seconds at millions of rows.
+    app_names_qs = (AppLog.objects.order_by()
+                    .values_list('app_name', flat=True).distinct())
+    instance_names_qs = (AppLog.objects.order_by()
+                         .values_list('instance_name', flat=True).distinct())
+    app_names = sorted((name for name in app_names_qs if name),
+                       key=lambda x: x.lower())
+    instance_names = sorted((name for name in instance_names_qs if name),
+                            key=lambda x: x.lower())
 
     # Extract agent types by stripping trailing -number (e.g., "workflow_runner-agent-wenauseic-25" -> "workflow_runner-agent-wenauseic")
     def extract_type(name):
@@ -471,7 +583,6 @@ def log_summary(request):
         'columns': columns,
         'app_names': app_names,
         'instance_types': instance_types,
-        'instance_names': instance_names,
         'selected_app': app_name,
         'selected_instance_type': instance_type,
         'selected_instance': instance_name,
@@ -1271,8 +1382,9 @@ def stf_files_list(request):
     status_filter = request.GET.get('status')
     machine_state = request.GET.get('machine_state')
     
-    # Get filter options for dropdown links
-    run_numbers = Run.objects.values_list('run_number', flat=True).distinct()
+    # Status and machine state are the humanly-choosable filter sets;
+    # run enumerations are not filters — deep-link parameters still
+    # apply and search covers targeted lookups.
     statuses = [choice[0] for choice in StfFile._meta.get_field('status').choices]
     machine_states = StfFile.objects.values_list('machine_state', flat=True).distinct()
     
@@ -1292,7 +1404,6 @@ def stf_files_list(request):
         'table_description': 'Track STF files by run, machine state, and processing status.',
         'ajax_url': reverse('monitor_app:stf_files_datatable_ajax'),
         'columns': columns,
-        'run_numbers': sorted(run_numbers, reverse=True),
         'statuses': statuses,
         'machine_states': sorted([s for s in machine_states if s]),
         'selected_run_number': run_number,
@@ -1358,9 +1469,9 @@ def stf_files_datatable_ajax(request):
         stf_file_detail_url = reverse('monitor_app:stf_file_detail', args=[file.file_id])
         view_link = f'<a href="{stf_file_detail_url}">View</a>'
 
-        from .cell_fmt import fill_cell
+        from .cell_fmt import fill_cell, short_filename
         data.append([
-            file.stf_filename, run_link, tf_files_link,
+            short_filename(file.stf_filename), run_link, tf_files_link,
             fill_cell(file.machine_state or '', file.machine_state),
             fill_cell(status_text, file.status), timestamp_str, view_link
         ])
@@ -1877,11 +1988,13 @@ def workflow_messages(request):
             {'title': 'workflow', 'orderable': True},
             {'title': 'is_successful', 'orderable': True},
         ],
+        # Selects hold only humanly-choosable sets. Hundreds of
+        # execution UUIDs or per-instance sender names are not filters
+        # — those arrive as deep-link parameters (still honored) or
+        # through search.
         'filter_fields': [
             {'name': 'namespace', 'label': 'namespace', 'type': 'select'},
-            {'name': 'execution_id', 'label': 'execution_id', 'type': 'select'},
             {'name': 'message_type', 'label': 'message_type', 'type': 'select'},
-            {'name': 'sender_agent', 'label': 'sender_agent', 'type': 'select'},
             {'name': 'workflow', 'label': 'workflow', 'type': 'select'},
             {'name': 'is_successful', 'label': 'is_successful', 'type': 'select'},
         ],
@@ -3278,9 +3391,11 @@ def prod_hub(request):
             'active_tab': 'ops',
             'dashboard': build_dashboard(prefs.get('panel_order')),
             'can_save_layout': bool(username),
+            'nav_mode': 'production',
         })
     context = pcs_hub_counts()
     context['active_tab'] = 'nav'
+    context['nav_mode'] = 'production'
     # The two corun counts are remote REST calls; served as a cached
     # product (docs/CACHED_PRODUCTS.md) so the Nav tab renders from the
     # store and stale rebuilds run behind the response.
@@ -3376,9 +3491,53 @@ def ai_content_list(request):
     filtered_items.sort(key=item_sort_key, reverse=True)
     paginator = Paginator(filtered_items, 100)
     page_obj = paginator.get_page(request.GET.get('page') or 1)
+    # Human detail URLs for scheduled campaign assessments (house URL
+    # form). Keyed off the registration series; a row that is not the
+    # newest registration of its (campaign, kind, date) slot — e.g. a
+    # salvage superseded by its rerun — keeps the UUID URL so it stays
+    # reachable.
+    from .models import AppLog
+    newest_in_slot = {}
+    for stamp, extra in (AppLog.objects.filter(
+            app_name='epicprod',
+            extra_data__action='assessment_register',
+            extra_data__outcome='ok',
+            extra_data__subject_type='campaign')
+            .order_by('-timestamp')
+            .values_list('timestamp', 'extra_data')[:1000]):
+        extra = extra or {}
+        kind = str(extra.get('assessment_kind') or '')
+        slot = (str(extra.get('subject_key') or ''),
+                'daily' if kind == 'nightly' else kind,
+                timezone.localtime(stamp).date().isoformat())
+        newest_in_slot.setdefault(
+            slot, str(extra.get('corun_page_group_id') or ''))
+
+    def _human_detail_url(item):
+        kind = str(item.get('assessment_kind') or '')
+        route_kind = 'daily' if kind == 'nightly' else kind
+        created = item.get('created_at')
+        if isinstance(created, str):
+            from django.utils.dateparse import parse_datetime
+            created = parse_datetime(created)
+        if (item.get('subject_type') != 'campaign'
+                or route_kind not in ('daily', 'weekly')
+                or created is None or not hasattr(created, 'date')):
+            return ''
+        try:
+            date = timezone.localtime(created).date().isoformat()
+        except ValueError:
+            date = created.date().isoformat()
+        subject = str(item.get('subject_key') or '')
+        if newest_in_slot.get((subject, route_kind, date)) != str(
+                item.get('corun_page_group_id') or ''):
+            return ''
+        return reverse('monitor_app:ai_content_by_name',
+                       args=[subject, route_kind, date])
+
     for item in page_obj.object_list:
         if item.get('storage') == 'corun':
-            item['detail_url'] = reverse(
+            item['detail_url'] = _human_detail_url(item) or reverse(
                 'monitor_app:ai_content_detail',
                 args=[item.get('corun_page_group_id')])
             item['body_url'] = reverse(
@@ -3502,10 +3661,56 @@ def ai_content_detail(request, page_group_id):
         return HttpResponse('AI assessment not found.', status=404)
     items[0]['assessment_html'] = render_assessment_markdown(
         items[0]['assessment'], omit_leading_title=items[0]['title'])
+    item = items[0]
+    latest_weekly_url = ''
+    if (item.get('subject_type') == 'campaign'
+            and item.get('assessment_kind') in ('daily', 'nightly')):
+        from pcs.views import assessment_register_rows, assessment_human_url
+        subject = item.get('subject_key') or ''
+        if assessment_register_rows(subject, ['weekly']).first():
+            latest_weekly_url = assessment_human_url(
+                subject, 'weekly', 'latest')
     return render(request, 'monitor_app/ai_content_detail.html', {
-        'item': items[0],
+        'item': item,
+        'latest_weekly_url': latest_weekly_url,
         'quality_choices': AI_CONTENT_QUALITY_VALUES,
     })
+
+
+def ai_content_by_name(request, campaign, kind, date):
+    """Human-addressed assessment page — campaign + kind + ET date (or
+    'latest') — resolved through the local registration series to the
+    stored report and rendered at this URL. The house URL form; the
+    UUID route serves stored links."""
+    from pcs.views import assessment_register_rows
+    if kind not in ('daily', 'weekly'):
+        return HttpResponse('Unknown assessment kind.', status=404)
+    kinds = ['daily', 'nightly'] if kind == 'daily' else [kind]
+    row = None
+    rows = assessment_register_rows(campaign, kinds)
+    if date == 'latest':
+        row = rows.first()
+    else:
+        date_rows = []
+        for cand in rows[:200]:
+            stamp = timezone.localtime(cand['timestamp']).date().isoformat()
+            if stamp == date:
+                date_rows.append(cand)
+            elif stamp < date:
+                break
+        # Family matching serves 'latest'; on an exact date prefer the
+        # row registered under exactly this campaign name (same-day
+        # per-edition reports pre-family).
+        row = next(
+            (r for r in date_rows
+             if str((r['extra_data'] or {}).get('subject_key') or '')
+             == campaign),
+            date_rows[0] if date_rows else None)
+    group_id = str(((row or {}).get('extra_data') or {})
+                   .get('corun_page_group_id') or '')
+    if not group_id:
+        return HttpResponse('No registered assessment matches.', status=404)
+    return ai_content_detail(request, group_id)
 
 
 def ai_content_body(request, page_group_id):
@@ -3599,5 +3804,39 @@ def ai_content_set_quality(request, content_id):
 
 
 def testbed_hub(request):
-    """ePIC Testbed home — workflow system overview."""
-    return render(request, 'monitor_app/testbed_hub.html')
+    """ePIC Testbed home — workflow system overview, topped by the
+    Snapper namespace-lanes plot as a cached product
+    (docs/CACHED_PRODUCTS.md)."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    from django.utils import timezone as dj_timezone
+
+    from snapper_ai.embed import embed_context
+    from .cached_product import get_product
+
+    def build():
+        now = dj_timezone.now()
+        ctx = embed_context('testbed', now - timedelta(days=7), now,
+                            lanes=True)
+        if ctx.get('error'):
+            raise RuntimeError(ctx['error'])
+        return ctx
+
+    context = {'nav_mode': 'testbed'}
+    try:
+        product = get_product(
+            'snapper_embed:v2:testbed:7', build, ttl_seconds=300,
+            refresh=request.GET.get('refresh') == '1')
+        context['snapper_embed'] = product['value'] or {
+            'scope': 'testbed',
+            'error': 'state history is building — reload shortly.'}
+        if product['built_at']:
+            context['product_built_at_text'] = (
+                product['built_at']
+                .astimezone(ZoneInfo(django_settings.TIME_ZONE))
+                .strftime('%Y-%m-%d %H:%M ET'))
+    except Exception as e:
+        logger.error('snapper embed failed for testbed hub: %s', e)
+        context['snapper_embed'] = {'scope': 'testbed', 'error': str(e)}
+    return render(request, 'monitor_app/testbed_hub.html', context)

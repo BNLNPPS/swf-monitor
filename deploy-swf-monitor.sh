@@ -60,21 +60,20 @@ case "$REF_TYPE" in
         ;;
 esac
 
-RELEASE_DIR="$DEPLOY_ROOT/releases/$DEPLOY_NAME"
+# Unique staging directory per deploy: the release 'current' serves is
+# never deleted or rebuilt in place. The whole build happens here while
+# the old release keeps serving; the current symlink flips to the fully
+# built release near the end. Cutover is atomic and rollback is
+# repointing current at the previous release.
+RELEASE_DIR="$DEPLOY_ROOT/releases/$DEPLOY_NAME-$(date +%Y%m%d-%H%M%S)"
 
-log "Starting deployment of $REF_TYPE '$REF_VALUE' to '$DEPLOY_NAME'"
+log "Starting deployment of $REF_TYPE '$REF_VALUE' to '$(basename "$RELEASE_DIR")'"
 
 # Verify the branch/tag exists before proceeding
 log "Verifying $REF_TYPE '$REF_VALUE' exists in repository..."
 if ! git ls-remote --exit-code --heads --tags "$REPO_URL" "$GIT_REF" >/dev/null 2>&1; then
     echo "ERROR: $REF_TYPE '$REF_VALUE' does not exist in repository $REPO_URL"
     exit 1
-fi
-
-# Create release directory
-if [ -d "$RELEASE_DIR" ]; then
-    log "Release directory exists, removing..."
-    rm -rf "$RELEASE_DIR"
 fi
 
 log "Creating release directory: $RELEASE_DIR"
@@ -234,7 +233,7 @@ python manage.py migrate --settings=swf_monitor_project.settings
 log "Setting ownership..."
 chown -R "$CURRENT_USER:eic" "$DEPLOY_ROOT"
 
-# Update current symlink
+# Atomic cutover: the fully built release takes over in one symlink flip
 log "Updating current symlink..."
 ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 
@@ -371,12 +370,12 @@ cd "$DEPLOY_ROOT/releases"
 ls -1t | tail -n +6 | xargs rm -rf 2>/dev/null || true
 
 log "Deployment completed successfully!"
-log "Active release: $DEPLOY_NAME"
+log "Active release: $(basename "$RELEASE_DIR")"
 log "Git commit: $(cd $RELEASE_DIR && git rev-parse --short HEAD)"
 
 # Show status
 log "Current deployment status:"
-echo "  Release: $DEPLOY_NAME"
+echo "  Release: $(basename "$RELEASE_DIR")"
 echo "  Path: $RELEASE_DIR"
 echo "  Current: $(readlink $DEPLOY_ROOT/current)"
 

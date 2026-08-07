@@ -41,7 +41,7 @@ _NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
 _PANDA_USER_EQUIVALENCES = {
     # Canonical monitor display name -> equivalent login/name variants.
-    'Torre Wenaus': ('wenaus',),
+    'Torre Wenaus': ('wenaus', 'wenauseic'),
 }
 _PANDA_USER_TO_CANONICAL = {
     name: canonical
@@ -950,14 +950,71 @@ def list_tasks(days=7, status=None, username=None, taskname=None,
     }
 
 
+def _error_distribution_views(site_task_counts):
+    """Normalize one error pattern's task/site correlations for MCP output."""
+    if isinstance(site_task_counts, str):
+        site_task_counts = json.loads(site_task_counts)
+    normalized = []
+    site_totals = {}
+    task_totals = {}
+    representative_pandaids = []
+    for item in site_task_counts or []:
+        distribution = dict(item)
+        distribution_count = int(distribution.get('count') or 0)
+        distribution['count'] = distribution_count
+        distribution_site = distribution.get('site') or ''
+        distribution_task = distribution.get('taskid')
+        site_totals[distribution_site] = (
+            site_totals.get(distribution_site, 0) + distribution_count)
+        task_totals[distribution_task] = (
+            task_totals.get(distribution_task, 0) + distribution_count)
+        representative = distribution.get('representative_pandaid')
+        if representative and representative not in representative_pandaids:
+            representative_pandaids.append(representative)
+        normalized.append(distribution)
+    site_counts = [
+        {'site': distribution_site, 'count': count}
+        for distribution_site, count in sorted(
+            site_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    task_counts = [
+        {'taskid': distribution_task, 'count': count}
+        for distribution_task, count in sorted(
+            task_totals.items(), key=lambda item: (-item[1], str(item[0])))
+    ]
+    return {
+        'site_counts': site_counts,
+        'task_counts': task_counts,
+        'site_task_counts': normalized,
+        'representative_pandaids': representative_pandaids,
+        'multi_site': len(site_counts) > 1,
+    }
+
+
 def error_summary(days=10, username=None, site=None, destinationse=None,
-                  taskid=None, error_source=None, limit=20):
+                  taskid=None, error_source=None, limit=20,
+                  ended_after=None, ended_before=None, status=None,
+                  classified=False):
     """Aggregate error summary across failed PanDA jobs, ranked by frequency."""
     # When scoped to a specific task, return all error patterns
     if taskid:
         limit = 10000
-    cutoff = timezone.now() - timedelta(days=days)
     conn = connections['panda']
+    if ended_after is not None and ended_before is not None:
+        time_filter = 'j."endtime" > %s AND j."endtime" <= %s'
+        time_params = [ended_after, ended_before]
+    else:
+        time_filter = 'j."modificationtime" >= %s'
+        time_params = [timezone.now() - timedelta(days=days)]
+    faulty_statuses = ('failed', 'cancelled', 'closed')
+    if status is not None and status not in faulty_statuses:
+        return {'error': f"status must be one of {faulty_statuses}"}
+    if status:
+        status_filter = 'j."jobstatus" = %s'
+        status_params = [status]
+    else:
+        status_filter = "j.\"jobstatus\" IN ('failed','cancelled','closed')"
+        status_params = []
 
     extra_params = []
     filters = ''
@@ -991,6 +1048,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         components_to_query = [c for c in ERROR_COMPONENTS if c['name'] == error_source]
         if not components_to_query:
             return {"error": f"Unknown error_source '{error_source}'. Valid: {[c['name'] for c in ERROR_COMPONENTS]}"}
+        if classified:
+            selected_index = next(
+                i for i, component in enumerate(ERROR_COMPONENTS)
+                if component['name'] == error_source)
+            for component in ERROR_COMPONENTS[:selected_index]:
+                filters += (
+                    f' AND COALESCE("{component["code"]}", 0) <= 0')
 
     # One window scan per jobs table: the seven error components unpivot
     # through a LATERAL VALUES row set instead of seven separate UNION
@@ -1019,6 +1083,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             SELECT e.error_source,
                    e.error_code,
                    e.error_diag,
+                   j."pandaid",
                    j."jeditaskid",
                    j."produsername",
                    j."computingsite",
@@ -1030,34 +1095,76 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             CROSS JOIN LATERAL (
                 VALUES {values_rows}
             ) AS e(error_source, error_code, error_diag)
-            WHERE j."modificationtime" >= %s
-              AND j."jobstatus" IN ('failed','cancelled','closed')
+            WHERE {time_filter}
+              AND {status_filter}
               AND e.error_code IS NOT NULL
               AND e.error_code != 0
               {filters}
         """)
-        all_params.extend(destse_params + [cutoff] + extra_params)
+        all_params.extend(destse_params + time_params + status_params
+                          + extra_params)
 
     union_sql = ' UNION ALL '.join(parts)
     sql = f"""
-        SELECT error_source, error_code,
-               LEFT(error_diag, 256) as error_diag,
-               COUNT(*) as count,
-               COUNT(DISTINCT jeditaskid) as task_count,
-               array_agg(DISTINCT produsername) as users,
-               array_agg(DISTINCT computingsite) as sites,
-               array_agg(DISTINCT destinationse) as destination_sites,
-               AVG(EXTRACT(EPOCH FROM (endtime - starttime)))
-                   FILTER (WHERE starttime IS NOT NULL
-                             AND endtime IS NOT NULL
-                             AND endtime >= starttime)
-                   as avg_seconds_to_error,
-               COUNT(*) FILTER (WHERE starttime IS NULL)
-                   as never_started_count
-        FROM ({union_sql}) errs
-        GROUP BY error_source, error_code, LEFT(error_diag, 256)
-        ORDER BY count DESC
-        LIMIT %s
+        WITH errs AS ({union_sql}),
+        pattern_totals AS (
+            SELECT error_source, error_code,
+                   COALESCE(LEFT(error_diag, 256), '') as error_diag,
+                   COUNT(*) as count,
+                   COUNT(DISTINCT jeditaskid) as task_count,
+                   array_agg(DISTINCT produsername) as users,
+                   array_agg(DISTINCT computingsite) as sites,
+                   array_agg(DISTINCT destinationse) as destination_sites,
+                   AVG(EXTRACT(EPOCH FROM (endtime - starttime)))
+                       FILTER (WHERE starttime IS NOT NULL
+                                 AND endtime IS NOT NULL
+                                 AND endtime >= starttime)
+                       as avg_seconds_to_error,
+                   COUNT(*) FILTER (WHERE starttime IS NULL)
+                       as never_started_count
+            FROM errs
+            GROUP BY error_source, error_code,
+                     COALESCE(LEFT(error_diag, 256), '')
+            ORDER BY count DESC
+            LIMIT %s
+        ),
+        site_task_distribution AS (
+            SELECT e.error_source, e.error_code,
+                   COALESCE(LEFT(e.error_diag, 256), '') as error_diag,
+                   e.computingsite, e.jeditaskid,
+                   COUNT(*) as count,
+                   MAX(e.pandaid) as representative_pandaid
+            FROM errs e
+            JOIN pattern_totals p
+              ON p.error_source = e.error_source
+             AND p.error_code = e.error_code
+             AND p.error_diag = COALESCE(LEFT(e.error_diag, 256), '')
+            GROUP BY e.error_source, e.error_code,
+                     COALESCE(LEFT(e.error_diag, 256), ''),
+                     e.computingsite, e.jeditaskid
+        )
+        SELECT p.error_source, p.error_code, p.error_diag,
+               p.count, p.task_count, p.users, p.sites,
+               p.destination_sites, p.avg_seconds_to_error,
+               p.never_started_count,
+               COALESCE((
+                   SELECT jsonb_agg(
+                       jsonb_build_object(
+                           'site', d.computingsite,
+                           'taskid', d.jeditaskid,
+                           'count', d.count,
+                           'representative_pandaid',
+                               d.representative_pandaid
+                       )
+                       ORDER BY d.count DESC, d.computingsite, d.jeditaskid
+                   )
+                   FROM site_task_distribution d
+                   WHERE d.error_source = p.error_source
+                     AND d.error_code = p.error_code
+                     AND d.error_diag = p.error_diag
+               ), '[]'::jsonb) as site_task_counts
+        FROM pattern_totals p
+        ORDER BY p.count DESC
     """
     all_params.append(limit)
 
@@ -1072,6 +1179,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
     errors = []
     total = 0
     for row in rows:
+        distribution_views = _error_distribution_views(row[10])
         entry = {
             'error_source': row[0],
             'error_code': row[1],
@@ -1088,7 +1196,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'avg_seconds_to_error': (round(float(row[8]), 1)
                                      if row[8] is not None else None),
             'never_started_count': row[9] or 0,
+            'attribution_guidance': (
+                'computingsite is the execution location, not causal '
+                'attribution; inspect a representative_pandaid with '
+                'panda_study_job before assigning cause.'
+            ),
         }
+        entry.update(distribution_views)
         total += row[3]
         errors.append(entry)
 
@@ -1390,6 +1504,111 @@ def get_queue(panda_queue):
     config['last_update'] = row[2].isoformat() if row[2] else None
 
     return {"queue": config}
+
+
+def job_outcomes(days=7, site=None, start_time=None, end_time=None):
+    """Completed-job outcomes over time for the jobs page's graphical
+    view: finished/failed/cancelled/closed counts per Eastern-time
+    bucket, each with its cumulative integral over the window. Bins
+    are hourly up to three days, daily beyond. Rows are deduplicated
+    across the active and archived tables by (pandaid, endtime,
+    status)."""
+    from zoneinfo import ZoneInfo
+
+    if start_time is not None or end_time is not None:
+        if (start_time is None or end_time is None
+                or start_time >= end_time):
+            return {'error': 'start_time and end_time must form a range'}
+        window_start = start_time
+        window_end = end_time
+        days = (window_end - window_start).total_seconds() / 86400
+    else:
+        try:
+            days = float(days)
+        except (TypeError, ValueError):
+            return {'error': 'days must be a number'}
+        window_end = timezone.now()
+        window_start = window_end - timedelta(days=days)
+    bucket = 'hour' if days <= 3 else 'day'
+
+    filters = ''
+    extra_params = []
+    if site:
+        clause, val = like_or_eq('computingsite', site)
+        filters += f' AND {clause}'
+        extra_params.append(val)
+    where = (
+        '"endtime" > %s AND "endtime" <= %s'
+        ' AND "jobstatus" IN'
+        " ('finished', 'failed', 'cancelled', 'closed')"
+        + filters)
+    params = [window_start, window_end] + extra_params
+    sql = f'''
+        SELECT date_trunc(%s, "endtime" AT TIME ZONE 'UTC'
+                              AT TIME ZONE 'America/New_York') AS bin,
+               "jobstatus", COUNT(*)
+        FROM (
+            SELECT "pandaid", "endtime", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {where}
+            UNION
+            SELECT "pandaid", "endtime", "jobstatus"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {where}
+        ) completed
+        GROUP BY 1, 2 ORDER BY 1
+    '''
+    conn = connections['panda']
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql, [bucket] + params + params)
+            rows = cursor.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('job_outcomes query failed: %s', e)
+        return {'error': str(e)}
+
+    # Every bin in the window renders — a quiet day is a zero, not a
+    # missing bar. Bin stamps are naive Eastern wall time, matching
+    # the SQL truncation.
+    et = ZoneInfo('America/New_York')
+    start_local = window_start.astimezone(et)
+    end_local = window_end.astimezone(et)
+    if bucket == 'day':
+        cursor_local = start_local.replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        step = timedelta(days=1)
+    else:
+        cursor_local = start_local.replace(
+            minute=0, second=0, microsecond=0)
+        step = timedelta(hours=1)
+    bins = []
+    while cursor_local <= end_local:
+        bins.append(cursor_local.replace(tzinfo=None))
+        cursor_local = cursor_local + step
+
+    counts = {}
+    for bin_time, status, count in rows:
+        counts.setdefault(status, {})[bin_time] = int(count)
+    series = []
+    for status in ('finished', 'failed', 'cancelled', 'closed'):
+        per_bin = counts.get(status)
+        if not per_bin:
+            continue
+        values = [per_bin.get(b, 0) for b in bins]
+        cumulative = []
+        total = 0
+        for value in values:
+            total += value
+            cumulative.append(total)
+        series.append({'status': status, 'values': values,
+                       'cumulative': cumulative, 'total': total})
+    return {
+        'bucket': bucket,
+        'bins': [b.isoformat() for b in bins],
+        'series': series,
+        'site': site or '',
+        'window': {'start': window_start.isoformat(),
+                   'end': window_end.isoformat(),
+                   'days': days, 'timezone': 'America/New_York'},
+    }
 
 
 def resource_usage(days=30, site=None, username=None, taskid=None,
@@ -1842,13 +2061,22 @@ TASK_SEARCH_FIELDS = ['jeditaskid', 'taskname', 'status', 'username',
                       'processingtype', 'workinggroup', 'transpath']
 
 
+def _job_window_filter(days, ended_after=None, ended_before=None):
+    """Exact completion interval when supplied; rolling activity otherwise."""
+    if ended_after is not None and ended_before is not None:
+        return (['"endtime" > %s', '"endtime" <= %s'],
+                [ended_after, ended_before])
+    cutoff = timezone.now() - timedelta(days=days)
+    return ['"modificationtime" >= %s'], [cutoff]
+
+
 def list_jobs_dt(days=7, status=None, username=None, site=None,
                  taskid=None, reqid=None,
-                 order_by='"pandaid" DESC', limit=100, offset=0, search=None):
+                 order_by='"pandaid" DESC', limit=100, offset=0, search=None,
+                 ended_after=None, ended_before=None):
     """List PanDA jobs for DataTables (returns rows, total, filtered counts)."""
-    cutoff = timezone.now() - timedelta(days=days)
-    where = ['"modificationtime" >= %s']
-    params = [cutoff]
+    where, params = _job_window_filter(
+        days, ended_after=ended_after, ended_before=ended_before)
 
     if status:
         where.append('"jobstatus" = %s')
@@ -1982,11 +2210,11 @@ def build_tasks_window(days=7, cap=5000):
 
 
 def job_filter_counts(days=7, status=None, username=None, site=None,
-                      taskid=None, reqid=None):
+                      taskid=None, reqid=None,
+                      ended_after=None, ended_before=None):
     """Get filter option counts for job list (status, user, site)."""
-    cutoff = timezone.now() - timedelta(days=days)
-    base_where = ['"modificationtime" >= %s']
-    base_params = [cutoff]
+    base_where, base_params = _job_window_filter(
+        days, ended_after=ended_after, ended_before=ended_before)
 
     if taskid:
         base_where.append('"jeditaskid" = %s')
@@ -2153,3 +2381,29 @@ def get_task(jeditaskid):
     task['taskparams'], task['job_parameters'] = _get_task_parameters(jeditaskid)
     task['task_record'] = _get_task_record(jeditaskid)
     return task
+
+
+def get_task_operation_targets(jedi_task_ids):
+    """Return current identity/status fields for a bounded task-id list."""
+    ids = [int(task_id) for task_id in jedi_task_ids]
+    if not ids:
+        return []
+    placeholders = ', '.join(['%s'] * len(ids))
+    sql = f"""
+        SELECT "jeditaskid", "taskname", "status"
+        FROM "{PANDA_SCHEMA}"."jedi_tasks"
+        WHERE "jeditaskid" IN ({placeholders})
+    """
+    connection = connections['panda']
+    with connection.cursor() as cursor:
+        cursor.execute(sql, ids)
+        rows = cursor.fetchall()
+    by_id = {
+        int(row[0]): {
+            'jeditaskid': int(row[0]),
+            'taskname': row[1] or '',
+            'status': row[2] or '',
+        }
+        for row in rows
+    }
+    return [by_id[task_id] for task_id in ids if task_id in by_id]

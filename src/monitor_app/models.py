@@ -455,12 +455,12 @@ class TFSlice(models.Model):
     Each TF slice is a small portion (~15 per STF sample) that can be
     processed independently by workers in ~30 seconds.
     """
+    id = models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')
+    fastmon_file = models.ForeignKey(FastMonFile, on_delete=models.CASCADE, related_name='tf_slices')
     slice_id = models.IntegerField()  # Serial number within STF sample (1-15)
     tf_first = models.IntegerField()  # First TF in the range
     tf_last = models.IntegerField()   # Last TF in the range
     tf_count = models.IntegerField()  # Number of TFs in the slice
-    tf_filename = models.CharField(max_length=255, db_index=True)
-    stf_filename = models.CharField(max_length=255, db_index=True)
     run_number = models.IntegerField(db_index=True)
     status = models.CharField(max_length=20, default='queued')
     retries = models.IntegerField(default=0)
@@ -477,13 +477,13 @@ class TFSlice(models.Model):
         db_table = 'swf_tf_slices'
         indexes = [
             models.Index(fields=['run_number', 'status']),
-            models.Index(fields=['stf_filename', 'status']),
+            models.Index(fields=['fastmon_file', 'status'], name='swf_tf_slic_fastmon_status_idx'),
             models.Index(fields=['status', 'created_at']),
         ]
-        unique_together = [['tf_filename', 'slice_id']]
+        unique_together = [['fastmon_file', 'slice_id']]
 
     def __str__(self):
-        return f"Slice {self.slice_id} of {self.tf_filename}"
+        return f"Slice {self.slice_id} of {self.fastmon_file.tf_filename}"
 
 
 class Worker(models.Model):
@@ -1134,6 +1134,88 @@ class DataProvenance(models.Model):
 
     def __str__(self):
         return f"DPID:{self.dpid} {self.tool_name}"
+
+
+class PandaTaskOperation(models.Model):
+    """Durable request and verified outcome for a PanDA task operation."""
+
+    OPERATION_CHOICES = [
+        ('pause', 'Pause'),
+        ('resume', 'Resume'),
+    ]
+    STATUS_CHOICES = [
+        ('queued', 'Queued'),
+        ('running', 'Running'),
+        ('accepted', 'Accepted by PanDA'),
+        ('verified', 'Verified'),
+        ('failed', 'Failed'),
+        ('timeout', 'Timed out'),
+        ('unverified', 'Accepted but unverified'),
+    ]
+    PENDING_STATUSES = ('queued', 'running', 'accepted')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    jedi_task_id = models.BigIntegerField(db_index=True)
+    task_name = models.CharField(max_length=500, blank=True, default='')
+    operation = models.CharField(max_length=20, choices=OPERATION_CHOICES)
+    source = models.CharField(max_length=40, default='manual')
+    requested_by = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='queued', db_index=True)
+    diagnostic = models.TextField(blank=True, default='')
+    observed_status = models.CharField(max_length=50, blank=True, default='')
+    evidence = models.JSONField(default=dict, blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_panda_task_operation'
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['jedi_task_id', 'requested_at'],
+                         name='swf_panda_t_jedi_ta_709a65_idx'),
+            models.Index(fields=['status', 'requested_at'],
+                         name='swf_panda_t_status_39c5b0_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['jedi_task_id'],
+                condition=models.Q(status__in=('queued', 'running', 'accepted')),
+                name='uniq_pending_panda_task_operation',
+            ),
+        ]
+
+    @property
+    def is_pending(self):
+        return self.status in self.PENDING_STATUSES
+
+    def __str__(self):
+        return f"{self.operation} PanDA task {self.jedi_task_id}: {self.status}"
+
+
+class CapcomNotice(models.Model):
+    """One discrete SWF event, buffered for feed consumers that poll
+    /api/capcom/notices/ from their own side. External feed systems hold
+    the poll credential story entirely on their side; no external
+    credential lives in SWF (viewdir/capcom.py module docstring)."""
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    source = models.CharField(max_length=100)
+    severity = models.CharField(max_length=20, default='info')
+    title = models.CharField(max_length=300)
+    detail = models.TextField(blank=True, default='')
+    url = models.CharField(max_length=500, blank=True, default='')
+    dedup_key = models.CharField(max_length=200, blank=True, default='')
+
+    class Meta:
+        db_table = 'swf_capcom_notice'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"[{self.source}] {self.title}"
 
 
 class CachedProduct(models.Model):

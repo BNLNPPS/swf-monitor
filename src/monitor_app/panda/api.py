@@ -1,9 +1,10 @@
 """
-PanDA REST API endpoints — thin JSON wrappers over monitor_app.panda.queries.
+PanDA REST API endpoints — JSON reads plus durable task-operation requests.
 
-Under /swf-monitor/api/panda/. Read-only. Intended for external consumers that
-need structured PanDA data without the MCP session/streaming protocol overhead
-(alarm engines, cron tools, dashboards).
+Under /swf-monitor/api/panda/. Reads are open; pause/resume requests and their
+durable status are authenticated. The web tier only records and queues these
+requests: the credentialed prod-ops agent invokes PanDA and records the verified
+outcome.
 
 Response shape matches the MCP tool responses for consistency: items / total_count
 / has_more / next_before_id / monitor_urls where applicable. Stability promise:
@@ -15,9 +16,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status as http_status
 
-from monitor_app.middleware import TunnelAuthentication
+from monitor_app.middleware import TunnelAuthentication, is_tunnel_request
 
-from . import queries
+from . import operations, queries
 
 
 _AUTH = [TunnelAuthentication, SessionAuthentication, TokenAuthentication]
@@ -117,6 +118,67 @@ def tasks_list(request):
 @api_view(['GET'])
 @authentication_classes(_AUTH)
 @permission_classes([AllowAny])
+def jobs_list(request):
+    """GET /api/panda/jobs/ — list PanDA jobs.
+
+    Query params:
+        days (int, default 7)   — modificationtime window
+        status (str)            — jobstatus filter
+        username (str, supports %)
+        site (str, supports %)  — computingsite
+        taskid (int)            — jeditaskid; scoping to a task returns
+                                  its complete job population by default
+        reqid (int)
+        limit (int)             — explicit values always honored
+        before_id (int)         — cursor
+
+    Returns:
+        { items, total_count, has_more, next_before_id, summary, filters }
+        Each job carries creation, start, and end times, site, and
+        output metadata — the per-worker record.
+    """
+    days, err = _int_param(request, 'days', default=7, min_value=1)
+    if err:
+        return err
+    taskid, err = _int_param(request, 'taskid')
+    if err:
+        return err
+    reqid, err = _int_param(request, 'reqid')
+    if err:
+        return err
+    limit, err = _int_param(request, 'limit', min_value=1)
+    if err:
+        return err
+    before_id, err = _int_param(request, 'before_id')
+    if err:
+        return err
+
+    result = queries.list_jobs(
+        days=days,
+        status=request.query_params.get('status'),
+        username=request.query_params.get('username'),
+        site=request.query_params.get('site'),
+        taskid=taskid,
+        reqid=reqid,
+        limit=limit,
+        before_id=before_id,
+    )
+    if 'error' in result:
+        return Response(result, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({
+        'items': result['jobs'],
+        'total_count': result['total_in_window'],
+        'has_more': result['pagination']['has_more'],
+        'next_before_id': result['pagination']['next_before_id'],
+        'summary': result['summary'],
+        'filters': result['filters'],
+    })
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([AllowAny])
 def task_detail(request, jeditaskid):
     """GET /api/panda/tasks/<jeditaskid>/ — one task with per-task job counts."""
     task = queries.get_task(jeditaskid)
@@ -125,6 +187,123 @@ def task_detail(request, jeditaskid):
             return Response(task, status=http_status.HTTP_404_NOT_FOUND)
         return Response(task, status=http_status.HTTP_500_INTERNAL_SERVER_ERROR)
     return Response(task)
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def task_operation_request(request, jeditaskid):
+    """Queue a durable manual pause/resume request for the prod-ops agent."""
+    if is_tunnel_request(request):
+        return Response(
+            {'error': 'Pause and resume are available on the internal monitor.'},
+            status=http_status.HTTP_403_FORBIDDEN,
+        )
+    task = queries.get_task(jeditaskid)
+    if 'error' in task:
+        response_status = (http_status.HTTP_404_NOT_FOUND
+                           if 'not found' in task['error']
+                           else http_status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(task, status=response_status)
+    try:
+        record, created = operations.queue_task_operation(
+            task=task,
+            operation=str(request.data.get('operation') or ''),
+            requested_by=getattr(request.user, 'username', '') or 'operator',
+        )
+    except operations.PandaTaskOperationError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    payload = operations.serialize_operation(record)
+    payload['created'] = created
+    return Response(
+        payload,
+        status=(http_status.HTTP_202_ACCEPTED
+                if created else http_status.HTTP_200_OK),
+    )
+
+
+@api_view(['POST'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def task_operations_request(request):
+    """Queue one internal bulk pause/resume request with per-task records."""
+    if is_tunnel_request(request):
+        return Response(
+            {'error': 'Bulk task actions are available on the internal monitor.'},
+            status=http_status.HTTP_403_FORBIDDEN,
+        )
+    raw_ids = request.data.get('jedi_task_ids')
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return Response({'error': 'jedi_task_ids must be a non-empty list.'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+    if len(raw_ids) > operations.MAX_BULK_TASKS:
+        return Response(
+            {'error': f'At most {operations.MAX_BULK_TASKS} tasks may be submitted at once.'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    try:
+        task_ids = list(dict.fromkeys(int(task_id) for task_id in raw_ids))
+    except (TypeError, ValueError):
+        return Response({'error': 'Every JEDI task ID must be an integer.'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+    try:
+        tasks = queries.get_task_operation_targets(task_ids)
+        result = operations.queue_task_operations(
+            tasks=tasks,
+            operation=str(request.data.get('operation') or ''),
+            requested_by=getattr(request.user, 'username', '') or 'operator',
+        )
+    except operations.PandaTaskOperationError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    found_ids = {task['jeditaskid'] for task in tasks}
+    for missing_id in (task_id for task_id in task_ids
+                       if task_id not in found_ids):
+        result['rejected'].append({
+            'jedi_task_id': missing_id,
+            'status': '',
+            'error': 'Task not found.',
+        })
+    if not result['records']:
+        result['error'] = 'None of the selected tasks is eligible for this action.'
+        return Response(result, status=http_status.HTTP_409_CONFLICT)
+    return Response(result, status=http_status.HTTP_202_ACCEPTED)
+
+
+@api_view(['GET'])
+@authentication_classes(_AUTH)
+@permission_classes([IsAuthenticated])
+def task_operation_detail(request, operation_id):
+    """Return the durable state used as the SSE reliability backstop."""
+    from monitor_app.models import PandaTaskOperation
+
+    try:
+        record = PandaTaskOperation.objects.get(pk=operation_id)
+    except PandaTaskOperation.DoesNotExist:
+        return Response({'error': 'Operation not found.'},
+                        status=http_status.HTTP_404_NOT_FOUND)
+    return Response(operations.serialize_operation(record))
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def task_operation_update(request, operation_id):
+    """Token-authenticated lifecycle callback from the prod-ops agent."""
+    evidence = request.data.get('evidence') or {}
+    if not isinstance(evidence, dict):
+        return Response({'error': 'evidence must be an object'},
+                        status=http_status.HTTP_400_BAD_REQUEST)
+    try:
+        record = operations.update_task_operation(
+            operation_id,
+            status=str(request.data.get('status') or ''),
+            diagnostic=request.data.get('diagnostic') or '',
+            observed_status=request.data.get('observed_status') or '',
+            evidence=evidence,
+        )
+    except operations.PandaTaskOperationError as exc:
+        return Response({'error': exc.detail}, status=exc.status)
+    return Response(operations.serialize_operation(record))
 
 
 @api_view(['GET'])

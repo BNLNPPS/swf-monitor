@@ -25,7 +25,7 @@ from ..panda import (
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, resource_usage,
+    list_queues, get_queue, resource_usage, job_outcomes,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
@@ -104,6 +104,7 @@ JOB_COLUMNS = [
     {'name': 'transformation', 'title': 'Transformation', 'orderable': True},
     {'name': 'creationtime', 'title': 'Created', 'orderable': True},
     {'name': 'endtime', 'title': 'Ended', 'orderable': True},
+    {'name': 'exec_time', 'title': 'Exec time', 'orderable': False},
     {'name': 'corecount', 'title': 'Cores', 'orderable': True},
 ]
 
@@ -113,10 +114,11 @@ JOB_FIELD_NAMES = [c['name'] for c in JOB_COLUMNS]
 JOB_ORDER_MAP = {
     0: '"pandaid"', 1: '"jeditaskid"', 2: '"produsername"',
     3: '"jobstatus"', 4: '"computingsite"', 5: '"transformation"',
-    6: '"creationtime"', 7: '"endtime"', 8: '"corecount"',
+    6: '"creationtime"', 7: '"endtime"', 9: '"corecount"',
 }
 
 TASK_COLUMNS = [
+    {'name': 'select', 'title': '', 'orderable': False},
     {'name': 'jeditaskid', 'title': 'Task ID', 'orderable': True},
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
@@ -245,6 +247,23 @@ def _fmt_dt(val):
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
+def _exec_duration(job):
+    """Return execution seconds for a terminal job from raw SQL timestamps."""
+    if job.get('jobstatus') not in {'finished', 'failed'}:
+        return None
+    start = job.get('starttime')
+    end = job.get('endtime')
+    try:
+        if isinstance(start, str):
+            start = datetime.fromisoformat(start)
+        if isinstance(end, str):
+            end = datetime.fromisoformat(end)
+        seconds = (end - start).total_seconds()
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
+
+
 _fill_cell = fill_cell  # backwards-compat alias within this module
 
 
@@ -272,6 +291,19 @@ def _get_days(request):
         return 7
 
 
+def _get_ended_window(request):
+    """Exact terminal-job interval carried by Snapper drill-down links."""
+    from django.utils.dateparse import parse_datetime
+
+    after = parse_datetime((request.GET.get('ended_after') or '').strip())
+    before = parse_datetime((request.GET.get('ended_before') or '').strip())
+    if (after is None or before is None
+            or after.tzinfo is None or before.tzinfo is None
+            or after >= before):
+        return None, None
+    return after, before
+
+
 def _days_context(days):
     """Build days selector context for templates."""
     return {
@@ -285,14 +317,96 @@ def _days_context(days):
 
 # ── Activity overview ────────────────────────────────────────────────────────
 
+def _activity_product(days, refresh):
+    """PanDA activity aggregates as a cached product
+    (docs/CACHED_PRODUCTS.md): served from the store, rebuilt behind.
+    A builder error raises so a transient failure is never cached."""
+    from ..cached_product import get_product
+
+    def build():
+        data = get_activity(days=days)
+        if 'error' in data:
+            raise RuntimeError(data['error'])
+        return data
+
+    return get_product(f'panda_activity:{days}', build,
+                       ttl_seconds=300, refresh=refresh)
+
+
+def _snapper_embed_product(days, refresh):
+    """Curves-only Snapper state-history plot over the page's window
+    (snapper_ai.embed), served as a cached product. Windows beyond the
+    embed's 30-day clamp share one key: their content is identical."""
+    from django.utils import timezone as dj_timezone
+
+    from snapper_ai.embed import MAX_EMBED_DAYS, embed_context
+    from ..cached_product import get_product
+
+    def build():
+        now = dj_timezone.now()
+        ctx = embed_context('epicprod', now - timedelta(days=days), now,
+                            families=('In-flight jobs', 'Tasks'))
+        if ctx.get('error'):
+            raise RuntimeError(ctx['error'])
+        return ctx
+
+    key_days = min(days, MAX_EMBED_DAYS + 1)
+    return get_product(f'snapper_embed:v3:epicprod:{key_days}', build,
+                       ttl_seconds=300, refresh=refresh)
+
+
 def panda_activity(request):
-    days = _get_days(request)
-    data = get_activity(days=days)
+    days = max(1, min(_get_days(request), 365))
+    if request.GET.get('chip') == '1':
+        # Read-only freshness status for the chip's bounded poll while
+        # "refreshing…" shows. Reads the store rows directly — never
+        # triggers a build.
+        from snapper_ai.embed import MAX_EMBED_DAYS
+
+        from ..models import CachedProduct
+        keys = [f'panda_activity:{days}',
+                f'snapper_embed:v3:epicprod:'
+                f'{min(days, MAX_EMBED_DAYS + 1)}']
+        rows = list(CachedProduct.objects.filter(key__in=keys))
+        built = [row.built_at for row in rows if row.built_at]
+        return JsonResponse({
+            'built_at': (min(built).isoformat()
+                         if len(built) == len(keys) else None),
+            'refreshing': any(row.building_since for row in rows),
+        })
+    refresh = request.GET.get('refresh') == '1'
+    built_ats = []
+    refreshing = False
+    try:
+        product = _activity_product(days, refresh)
+        data = product['value'] or {
+            'error': 'PanDA activity is building — reload shortly.'}
+        if product['built_at']:
+            built_ats.append(product['built_at'])
+        refreshing = refreshing or product['refreshing']
+    except Exception as e:
+        logger.error('panda activity build failed: %s', e)
+        data = {'error': str(e)}
     if 'error' in data:
-        ctx = {'error': data['error']}
-        ctx.update(_days_context(days))
-        return render(request, 'monitor_app/panda_activity.html', ctx)
+        data = {'error': data['error']}
     data.update(_days_context(days))
+    try:
+        embed_product = _snapper_embed_product(days, refresh)
+        data['snapper_embed'] = embed_product['value'] or {
+            'scope': 'epicprod',
+            'error': 'state history is building — reload shortly.'}
+        if embed_product['built_at']:
+            built_ats.append(embed_product['built_at'])
+        refreshing = refreshing or embed_product['refreshing']
+    except Exception as e:
+        logger.error('snapper embed failed for panda activity: %s', e)
+        data['snapper_embed'] = {'scope': 'epicprod', 'error': str(e)}
+    if built_ats:
+        data['product_built_at_text'] = (
+            min(built_ats).astimezone(ZoneInfo(settings.TIME_ZONE))
+            .strftime('%Y-%m-%d %H:%M ET'))
+        data['product_built_at_iso'] = min(built_ats).isoformat()
+        data['product_refreshing'] = refreshing
     return render(request, 'monitor_app/panda_activity.html', data)
 
 
@@ -315,24 +429,43 @@ def _compute_usage_dates(request):
 
 def _query_compute_usage(start_date, end_date, bucket, site=None,
                          series_rollup=False):
-    """Query plot-ready resource data for an inclusive Eastern date range."""
-    tz = ZoneInfo(settings.TIME_ZONE)
-    start_time = datetime.combine(start_date, time.min, tzinfo=tz)
-    end_time = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
-    usage = resource_usage(
-        start_time=start_time,
-        end_time=end_time,
-        bucket=bucket,
-        site=site,
-        series_rollup=series_rollup,
-    )
-    if usage.get('error'):
-        return None, usage['error']
-    usage['display_window'] = {
-        'start': start_date.isoformat(),
-        'end': end_date.isoformat(),
-        'timezone': settings.TIME_ZONE,
-    }
+    """Plot-ready resource data for an inclusive Eastern date range,
+    served as a cached product (docs/CACHED_PRODUCTS.md): the PanDA-DB
+    aggregation never builds in the request path once a key is
+    filled."""
+    from ..cached_product import get_product
+
+    def build():
+        tz = ZoneInfo(settings.TIME_ZONE)
+        start_time = datetime.combine(start_date, time.min, tzinfo=tz)
+        end_time = datetime.combine(
+            end_date + timedelta(days=1), time.min, tzinfo=tz)
+        usage = resource_usage(
+            start_time=start_time,
+            end_time=end_time,
+            bucket=bucket,
+            site=site,
+            series_rollup=series_rollup,
+        )
+        if usage.get('error'):
+            raise RuntimeError(usage['error'])
+        usage['display_window'] = {
+            'start': start_date.isoformat(),
+            'end': end_date.isoformat(),
+            'timezone': settings.TIME_ZONE,
+        }
+        return usage
+
+    key = (f'compute_usage:v1:{start_date}:{end_date}:{bucket}'
+           f":{site or ''}:{int(series_rollup)}")
+    try:
+        product = get_product(key, build, ttl_seconds=300)
+    except Exception as e:                                  # noqa: BLE001
+        logger.error('compute usage build failed: %s', e)
+        return None, str(e)
+    usage = product['value']
+    if not usage:
+        return None, 'compute usage is building — reload shortly'
     return usage, ''
 
 
@@ -409,15 +542,120 @@ def compute_usage_data(request):
 
 # ── Job list ─────────────────────────────────────────────────────────────────
 
+def _jobs_outcomes_product(days, site, refresh,
+                           ended_after=None, ended_before=None):
+    """Completed-job outcome series (finished/failed per bin with
+    cumulative integrals) for the jobs page's graphical view, served
+    as a cached product."""
+    from ..cached_product import get_product
+
+    def build():
+        outcomes = job_outcomes(
+            days=days, site=site or None,
+            start_time=ended_after, end_time=ended_before)
+        if outcomes.get('error'):
+            raise RuntimeError(outcomes['error'])
+        return outcomes
+
+    exact_key = (
+        f':{ended_after.isoformat()}:{ended_before.isoformat()}'
+        if ended_after is not None and ended_before is not None else '')
+    return get_product(
+        f"jobs_outcomes:v2:{days}:{site or ''}{exact_key}", build,
+        ttl_seconds=300, refresh=refresh)
+
+
+def _jobs_site_graphics_product(days, site, refresh,
+                                ended_after=None, ended_before=None):
+    """Placeable Snapper site history and outcomes pie for this page."""
+    from django.utils import timezone as dj_timezone
+
+    from snapper_ai.embed import embed_context
+    from ..cached_product import get_product
+    from ..snapper_providers import panda_site_outcomes_pie
+
+    def build():
+        end = ended_before or dj_timezone.now()
+        start = ended_after or (end - timedelta(days=days))
+        ctx = embed_context(
+            'epicprod', start, end,
+            families=(f'Site jobs {site}',))
+        if ctx.get('error'):
+            raise RuntimeError(ctx['error'])
+        # This embedded Site plot must open the same focused Site page,
+        # not the generic epicprod report.
+        ctx['report_focus_slug'] = 'site'
+        ctx['report_query'] = (
+            urlencode({'site': site}) + '&' + ctx['report_query'])
+        return {
+            'embed': ctx,
+            'outcomes_pie': panda_site_outcomes_pie(
+                site, start, end, size=270),
+        }
+
+    exact_key = (
+        f':{ended_after.isoformat()}:{ended_before.isoformat()}'
+        if ended_after is not None and ended_before is not None else '')
+    return get_product(
+        f'snapper_site_graphics:v4:epicprod:site:{site}:{days}{exact_key}',
+        build,
+        ttl_seconds=300, refresh=refresh)
+
+
 def panda_jobs_list(request):
     days = _get_days(request)
+    ended_after, ended_before = _get_ended_window(request)
     selected_site = request.GET.get('site', '')
-    description = f'Production jobs from the last {days} days.'
+    if ended_after is not None:
+        et = ZoneInfo(settings.TIME_ZONE)
+        ended_range_label = (
+            f"{ended_after.astimezone(et).strftime('%m-%d %H:%M')}"
+            f" – {ended_before.astimezone(et).strftime('%m-%d %H:%M')} ET")
+        description = f'Production jobs ending in {ended_range_label}.'
+        jobs_window_label = ended_range_label
+    else:
+        description = f'Production jobs from the last {days} days.'
+        jobs_window_label = f'last {days} day' + ('' if days == 1 else 's')
     if selected_site:
         site_url = reverse('monitor_app:epic_queue_detail', args=[selected_site])
         description += f'<br><a href="{site_url}">Site info for <strong>{selected_site}</strong></a>'
 
+    refresh = request.GET.get('refresh') == '1'
+    try:
+        outcomes_product = _jobs_outcomes_product(
+            days, selected_site, refresh,
+            ended_after=ended_after, ended_before=ended_before)
+        job_outcomes_data = outcomes_product['value'] or {
+            'error': 'Outcome history is building — reload shortly.'}
+        if outcomes_product['value'] and outcomes_product['built_at']:
+            job_outcomes_data = dict(job_outcomes_data)
+            job_outcomes_data['built_at_text'] = (
+                outcomes_product['built_at']
+                .astimezone(ZoneInfo(settings.TIME_ZONE))
+                .strftime('%H:%M ET'))
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('jobs outcomes build failed: %s', e)
+        job_outcomes_data = {'error': str(e)}
+    snapper_embed = None
+    job_outcomes_pie = None
+    if selected_site:
+        try:
+            graphics_product = _jobs_site_graphics_product(
+                days, selected_site, refresh,
+                ended_after=ended_after, ended_before=ended_before)
+            graphics = graphics_product['value'] or {}
+            snapper_embed = graphics.get('embed') or {
+                'scope': 'epicprod',
+                'error': 'state history is building — reload shortly.'}
+            job_outcomes_pie = graphics.get('outcomes_pie')
+        except Exception as e:                               # noqa: BLE001
+            logger.error('snapper site graphics failed for jobs list: %s', e)
+            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+
     context = {
+        'job_outcomes': job_outcomes_data,
+        'job_outcomes_pie': job_outcomes_pie,
+        'snapper_embed': snapper_embed,
         'table_title': 'PanDA Jobs',
         'table_description': description,
         'ajax_url': reverse('monitor_app:panda_jobs_datatable_ajax'),
@@ -434,6 +672,11 @@ def panda_jobs_list(request):
         'selected_username': request.GET.get('username', ''),
         'selected_site': request.GET.get('site', ''),
         'selected_taskid': request.GET.get('taskid', ''),
+        'ended_after': (ended_after.isoformat()
+                        if ended_after is not None else ''),
+        'ended_before': (ended_before.isoformat()
+                         if ended_before is not None else ''),
+        'jobs_window_label': jobs_window_label,
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_jobs_list.html', context)
@@ -443,6 +686,7 @@ def panda_jobs_datatable_ajax(request):
     dt = DataTablesProcessor(request, JOB_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
     days = _get_days(request)
+    ended_after, ended_before = _get_ended_window(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
@@ -458,15 +702,32 @@ def panda_jobs_datatable_ajax(request):
         taskid=taskid, reqid=reqid,
         order_by=order_by, limit=dt.length, offset=dt.start,
         search=dt.search_value or None,
+        ended_after=ended_after, ended_before=ended_before,
     )
 
+    window_params = {'days': days}
+    if ended_after is not None:
+        window_params.update({
+            'ended_after': ended_after.isoformat(),
+            'ended_before': ended_before.isoformat(),
+        })
     data = []
     for job in rows:
+        exec_duration = _exec_duration(job)
         job_url = reverse('monitor_app:panda_job_detail', args=[job['pandaid']])
         task_url = reverse('monitor_app:panda_task_detail', args=[job['jeditaskid']]) if job.get('jeditaskid') else None
-        jobs_by_user_url = _url_with_query('monitor_app:panda_jobs_list', days=days, username=job['produsername']) if job.get('produsername') else None
-        jobs_by_site_url = _url_with_query('monitor_app:panda_jobs_list', days=days, site=job['computingsite']) if job.get('computingsite') else None
-        jobs_by_status_url = _url_with_query('monitor_app:panda_jobs_list', days=days, status=job['jobstatus']) if job.get('jobstatus') else None
+        jobs_by_user_url = _url_with_query(
+            'monitor_app:panda_jobs_list',
+            **{**window_params, 'username': job['produsername']}
+        ) if job.get('produsername') else None
+        jobs_by_site_url = _url_with_query(
+            'monitor_app:panda_jobs_list',
+            **{**window_params, 'site': job['computingsite']}
+        ) if job.get('computingsite') else None
+        jobs_by_status_url = _url_with_query(
+            'monitor_app:panda_jobs_list',
+            **{**window_params, 'status': job['jobstatus']}
+        ) if job.get('jobstatus') else None
 
         data.append([
             f'<a href="{job_url}">{job["pandaid"]}</a>',
@@ -477,6 +738,7 @@ def panda_jobs_datatable_ajax(request):
             _linkify(job.get('transformation', '') or ''),
             _fmt_dt(job.get('creationtime')),
             _fmt_dt(job.get('endtime')),
+            _duration_text(exec_duration),
             str(job.get('corecount', '') or ''),
         ])
 
@@ -485,6 +747,7 @@ def panda_jobs_datatable_ajax(request):
 
 def panda_jobs_filter_counts(request):
     days = _get_days(request)
+    ended_after, ended_before = _get_ended_window(request)
     status = request.GET.get('status', '') or None
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
@@ -492,7 +755,9 @@ def panda_jobs_filter_counts(request):
     reqid = request.GET.get('reqid', '') or None
 
     counts = job_filter_counts(days=days, status=status, username=username,
-                               site=site, taskid=taskid, reqid=reqid)
+                               site=site, taskid=taskid, reqid=reqid,
+                               ended_after=ended_after,
+                               ended_before=ended_before)
     return JsonResponse({'filter_counts': counts})
 
 
@@ -500,6 +765,8 @@ def panda_jobs_filter_counts(request):
 
 def panda_tasks_list(request):
     days = _get_days(request)
+    from ..middleware import is_tunnel_request
+
     context = {
         'table_title': 'PanDA Tasks',
         'table_description': f'JEDI tasks from the last {days} days.',
@@ -516,13 +783,15 @@ def panda_tasks_list(request):
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_processingtype': request.GET.get('processingtype', ''),
+        'bulk_controls_operable': (
+            request.user.is_authenticated and not is_tunnel_request(request)),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_tasks_list.html', context)
 
 
-def _format_task_row(task, days):
-    """Render one task's 17 display cells, ordered as TASK_COLUMNS."""
+def _format_task_row(task, days, *, controls_operable):
+    """Render one task row, including its bulk-action selection contract."""
     task_url = reverse('monitor_app:panda_task_detail', args=[task['jeditaskid']])
     tasks_by_user_url = _url_with_query('monitor_app:panda_tasks_list', days=days, username=task['username']) if task.get('username') else None
     tasks_by_status_url = _url_with_query('monitor_app:panda_tasks_list', days=days, status=task['status']) if task.get('status') else None
@@ -555,8 +824,22 @@ def _format_task_row(task, days):
         if 'test' in processingtype.lower()
         else processingtype_html
     )
+    task_status = str(task.get('status') or '').lower()
+    pause_eligible = task_status == 'running'
+    resume_eligible = task_status == 'paused'
+    actionable = pause_eligible or resume_eligible
+    checkbox_disabled = not controls_operable or not actionable
+    checkbox = (
+        f'<input type="checkbox" class="panda-task-select" '
+        f'data-task-id="{int(task["jeditaskid"])}" '
+        f'data-pause-eligible="{1 if pause_eligible else 0}" '
+        f'data-resume-eligible="{1 if resume_eligible else 0}" '
+        f'aria-label="Select PanDA task {int(task["jeditaskid"])}"'
+        f'{" disabled" if checkbox_disabled else ""}>'
+    )
 
     return [
+        checkbox,
         f'<a href="{task_url}">{task["jeditaskid"]}</a>',
         f'<a href="{task_url}" title="{taskname_title}">{taskname_display}</a>',
         _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
@@ -578,16 +861,12 @@ def _format_task_row(task, days):
 
 
 def _build_tasks_window_product(days):
-    """Builder for the cached tasks-window product: rendered cells plus
-    the raw sort/filter record per task."""
+    """Builder for the cached tasks-window product: the raw task record
+    per row. Cells render at SERVE time in request context — a builder
+    can run in a background thread with no script prefix, and rendered
+    reverse() links stored from there are dead (CLAUDE.md)."""
     window = build_tasks_window(days=days, cap=TASKS_WINDOW_CAP)
-    raw_fields = set(TASK_FIELD_NAMES) | set(TASKS_WINDOW_SEARCH_FIELDS)
-    rows = []
-    for task in window['tasks']:
-        rows.append({
-            'cells': _format_task_row(task, days),
-            'raw': {f: task.get(f) for f in raw_fields},
-        })
+    rows = [{'raw': task} for task in window['tasks']]
     return {'rows': rows, 'count': window['count'],
             'truncated': window['truncated'], 'days': days}
 
@@ -602,13 +881,14 @@ def _window_sort_key(value):
 
 def panda_tasks_datatable_ajax(request):
     from ..cached_product import get_product
+    from ..middleware import is_tunnel_request
 
     dt = DataTablesProcessor(request, TASK_FIELD_NAMES,
                              default_order_column=0, default_order_direction='desc')
     days = _get_days(request)
 
     product = get_product(
-        f'panda_tasks_window:{days}',
+        f'panda_tasks_window:v2:{days}',
         lambda: _build_tasks_window_product(days),
         ttl_seconds=TASKS_WINDOW_TTL_SECONDS,
         refresh=request.GET.get('refresh') == '1',
@@ -655,7 +935,12 @@ def panda_tasks_datatable_ajax(request):
     else:
         page = rows[dt.start:] if dt.start else rows
 
-    data = [r['cells'] for r in page]
+    controls_operable = (
+        request.user.is_authenticated and not is_tunnel_request(request))
+    data = [
+        _format_task_row(r['raw'], days, controls_operable=controls_operable)
+        for r in page
+    ]
     return dt.create_response(data, total, filtered, extra=product_extra)
 
 
@@ -1077,7 +1362,9 @@ def panda_task_detail(request, jeditaskid):
     jobs = jobs_data.get('jobs', []) if not jobs_data.get('error') else []
     summary = jobs_data.get('summary', {}) if not jobs_data.get('error') else {}
     completion_details = job_completion_details([job.get('pandaid') for job in jobs])
-    from ..models import EpicProdJob
+    from ..models import EpicProdJob, PandaTaskOperation
+    from ..middleware import is_tunnel_request
+    from ..panda.operations import operation_controls, serialize_operation
     epicprod_jobs = {
         row.pandaid: row
         for row in EpicProdJob.objects.filter(
@@ -1112,6 +1399,17 @@ def panda_task_detail(request, jeditaskid):
         )
         if value not in (None, '')
     ]
+    pending_operation = (PandaTaskOperation.objects
+                         .filter(
+                             jedi_task_id=int(jeditaskid),
+                             status__in=PandaTaskOperation.PENDING_STATUSES)
+                         .first())
+    task_operation_controls = operation_controls(
+        task,
+        authenticated=request.user.is_authenticated,
+        internal_monitor=not is_tunnel_request(request),
+        pending=pending_operation,
+    )
 
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
@@ -1123,6 +1421,10 @@ def panda_task_detail(request, jeditaskid):
         'job_count': len(jobs),
         'requested_resource_items': requested_resource_items,
         'task_record_items': task_record_items,
+        'task_operation_controls': task_operation_controls,
+        'pending_task_operation': (
+            serialize_operation(pending_operation)
+            if pending_operation else None),
     })
 
 
@@ -1130,11 +1432,29 @@ def panda_task_detail(request, jeditaskid):
 
 def panda_errors_list(request):
     days = _get_days(request)
+    ended_after, ended_before = _get_ended_window(request)
+    if ended_after is not None:
+        et = ZoneInfo(settings.TIME_ZONE)
+        range_label = (
+            f"{ended_after.astimezone(et).strftime('%m-%d %H:%M')}"
+            f" – {ended_before.astimezone(et).strftime('%m-%d %H:%M')} ET")
+        description = f'Top error patterns across jobs ending in {range_label}.'
+    else:
+        description = (
+            f'Top error patterns across failed jobs in the last {days} days.')
     context = {
         'table_title': 'PanDA Error Summary',
-        'table_description': f'Top error patterns across failed jobs in the last {days} days.',
+        'table_description': description,
         'ajax_url': reverse('monitor_app:panda_errors_datatable_ajax'),
         'columns': ERROR_COLUMNS,
+        'selected_site': request.GET.get('site', ''),
+        'selected_error_source': request.GET.get('error_source', ''),
+        'selected_status': request.GET.get('status', ''),
+        'classified': request.GET.get('classified', ''),
+        'ended_after': (ended_after.isoformat()
+                        if ended_after is not None else ''),
+        'ended_before': (ended_before.isoformat()
+                         if ended_before is not None else ''),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_errors.html', context)
@@ -1146,18 +1466,26 @@ def panda_errors_datatable_ajax(request):
     dt = DataTablesProcessor(request, [c['name'] for c in ERROR_COLUMNS],
                              default_order_column=3, default_order_direction='desc')
     days = _get_days(request)
+    ended_after, ended_before = _get_ended_window(request)
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
     error_source = request.GET.get('error_source', '') or None
+    status = request.GET.get('status', '') or None
+    classified = request.GET.get('classified') == '1'
 
     # Served as a cached product: the error aggregation scans the window's
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
         f'panda_errors:v2:{days}:{username or ""}:{site or ""}'
-        f':{error_source or ""}',
+        f':{error_source or ""}:{status or ""}:{int(classified)}:'
+        f'{ended_after.isoformat() if ended_after else ""}:'
+        f'{ended_before.isoformat() if ended_before else ""}',
         lambda: error_summary(days=days, username=username, site=site,
-                              error_source=error_source, limit=200),
+                              error_source=error_source, limit=200,
+                              ended_after=ended_after,
+                              ended_before=ended_before, status=status,
+                              classified=classified),
         ttl_seconds=300,
         refresh=request.GET.get('refresh') == '1',
     )

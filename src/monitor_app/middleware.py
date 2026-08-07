@@ -18,6 +18,11 @@ def _is_localhost(request):
     return request.META.get('REMOTE_ADDR', '') in LOCALHOST_IPS
 
 
+def is_tunnel_request(request):
+    """True when the request arrived through the localhost SSH proxy hop."""
+    return _is_localhost(request)
+
+
 class TunnelAuthentication(BaseAuthentication):
     """DRF authentication backend for SSH tunnel (localhost) requests.
 
@@ -84,7 +89,7 @@ class TunnelAuthMiddleware:
 
 def tunnel_context(request):
     """Template context processor: sets is_tunnel for localhost requests."""
-    return {'is_tunnel': _is_localhost(request)}
+    return {'is_tunnel': is_tunnel_request(request)}
 
 
 class MCPAuthMiddleware:

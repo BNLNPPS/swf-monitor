@@ -11,11 +11,11 @@
 
     <div class="row">
         <div class="col-12">
-            <div class="alert alert-light">
-                <strong>About Persistent State:</strong> 
+            <p class="text-muted" style="max-width: 60em">
+                <strong>About Persistent State:</strong>
                 This data survives database resets and system restarts. The schema is stable - only the JSON content evolves.
                 New keys can be added without breaking existing functionality.
-            </div>
+            </p>
         </div>
     </div>
     
@@ -42,14 +42,14 @@
                                 <tbody>
                                     {% for key, value in state_data.items %}
                                     <tr>
-                                        <td><code>{{ key }}</code></td>
+                                        <td><strong>{{ key }}</strong></td>
                                         <td>
                                             {% if value == None %}
                                                 <span class="text-muted">null</span>
                                             {% elif value == True %}
-                                                <span class="text-success">true</span>
+                                                true
                                             {% elif value == False %}
-                                                <span class="text-danger">false</span>
+                                                false
                                             {% else %}
                                                 <strong>{{ value }}</strong>
                                             {% endif %}
@@ -74,12 +74,12 @@
                         <hr class="my-4">
                         
                         <h5 class="mb-3">JSON View</h5>
-                        <pre class="bg-light p-3 rounded"><code>{{ state_json }}</code></pre>
+                        <pre class="bg-light p-3 rounded" style="color: inherit;">{{ state_json }}</pre>
                     {% else %}
-                        <div class="alert alert-info">
+                        <p class="text-muted">
                             <strong>No persistent state data found.</strong><br>
                             State will be created when the system first runs.
-                        </div>
+                        </p>
                     {% endif %}
                 </div>
             </div>

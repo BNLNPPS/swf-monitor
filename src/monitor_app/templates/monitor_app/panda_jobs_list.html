@@ -16,6 +16,199 @@
     <a href="?days={{ days }}" style="margin-left:0.5em;color:#dc3545;">[clear]</a>
     {% endif %}
 </div>
+
+{% if snapper_embed %}
+<div class="mb-2">
+  <div class="d-flex align-items-baseline">
+    <h5 class="mb-1">State history · {{ selected_site }}</h5>
+    <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ selected_site|urlencode }}">Open in Snapper</a>
+  </div>
+  {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+</div>
+{% endif %}
+
+{% if job_outcomes %}
+<div class="mb-3">
+  <h5 class="mb-1">Completed jobs{% if selected_site %} · {{ selected_site }}{% endif %} · {{ jobs_window_label }}</h5>
+  {% if job_outcomes.error %}
+  <div class="text-muted mb-2">{{ job_outcomes.error }}</div>
+  {% else %}
+  <div class="row g-2 align-items-stretch">
+    <div class="{% if job_outcomes_pie.pie %}col-lg-8{% else %}col-12{% endif %}">
+      <div id="job-outcomes-plot" style="min-height:300px;"></div>
+    </div>
+    {% if job_outcomes_pie.pie %}
+    <div class="col-lg-4 d-flex justify-content-center">
+      {% include 'monitor_app/_snapper_site_outcomes_pie.html' with site_outcomes=job_outcomes_pie %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="text-muted small">
+    Bars are completions per {{ job_outcomes.bucket }} (Eastern time); lines are the cumulative integral over the window.
+    {% if job_outcomes.built_at_text %}Built {{ job_outcomes.built_at_text }} ·
+    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1">Update</a>{% endif %}
+  </div>
+  {{ job_outcomes|json_script:"job-outcomes-data" }}
+  <script>
+  (function () {
+    var dataEl = document.getElementById('job-outcomes-data');
+    var plotDiv = document.getElementById('job-outcomes-plot');
+    if (!dataEl || !plotDiv) return;
+    var data = JSON.parse(dataEl.textContent);
+    if (!data.series || !data.series.length) {
+      plotDiv.innerHTML = '<p class="text-muted">No completed jobs in this window.</p>';
+      return;
+    }
+    var BAR = {finished: '#62AC21', failed: '#FF8174',
+               cancelled: '#b0b0b0', closed: '#8a8a8a'};
+    var LINE = {finished: '#207f20', failed: '#b22222',
+                cancelled: '#777777', closed: '#555555'};
+    var binTimes = data.bins.map(function (value) {
+      return Date.parse(value);
+    });
+    var hoverFloater = document.createElement('div');
+    hoverFloater.style.cssText =
+        'position:fixed;z-index:1000;pointer-events:none;display:none;'
+        + 'font-size:14px;padding:.3rem .55rem;border-radius:4px;'
+        + 'box-shadow:0 1px 5px rgba(0,0,0,.45);white-space:nowrap;';
+    document.body.appendChild(hoverFloater);
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    function textOn(color) {
+      var match = /^#([0-9a-f]{6})$/i.exec(color || '');
+      if (!match) return '#fff';
+      var value = parseInt(match[1], 16);
+      var luma = 0.299 * (value >> 16 & 255)
+          + 0.587 * (value >> 8 & 255) + 0.114 * (value & 255);
+      return luma > 150 ? '#111' : '#fff';
+    }
+    function eventTime(event) {
+      var xa = plotDiv._fullLayout && plotDiv._fullLayout.xaxis;
+      if (!xa) return null;
+      var box = plotDiv.getBoundingClientRect();
+      var px = event.clientX - box.left - xa._offset;
+      if (px < 0 || px > xa._length) return null;
+      var left = Date.parse(xa.range[0]);
+      var right = Date.parse(xa.range[1]);
+      return left + (px / xa._length) * (right - left);
+    }
+    function nearestBin(time) {
+      var best = 0;
+      for (var i = 1; i < binTimes.length; i += 1) {
+        if (Math.abs(binTimes[i] - time)
+            < Math.abs(binTimes[best] - time)) best = i;
+      }
+      return best;
+    }
+    function plotHit(event, time) {
+      var layout = plotDiv._fullLayout;
+      if (!layout || !layout.yaxis || !layout.yaxis2) return null;
+      var box = plotDiv.getBoundingClientRect();
+      var index = nearestBin(time);
+      var best = null;
+      data.series.forEach(function (series) {
+        [
+          {label: series.status + ' / ' + data.bucket,
+           value: series.values[index], axis: layout.yaxis,
+           color: BAR[series.status] || '#999999'},
+          {label: series.status + ' cumulative',
+           value: series.cumulative[index], axis: layout.yaxis2,
+           color: LINE[series.status] || '#555555'},
+        ].forEach(function (candidate) {
+          var py = event.clientY - box.top - candidate.axis._offset;
+          if (py < 0 || py > candidate.axis._length) return;
+          var valuePy = candidate.axis._length
+              * (candidate.axis.range[1] - candidate.value)
+              / (candidate.axis.range[1] - candidate.axis.range[0]);
+          var distance = Math.abs(py - valuePy);
+          if (!best || distance < best.distance) {
+            best = {label: candidate.label, value: candidate.value,
+                    color: candidate.color, distance: distance,
+                    index: index};
+          }
+        });
+      });
+      return best;
+    }
+    function hideFloater() {
+      hoverFloater.style.display = 'none';
+    }
+    function showFloater(event, hit) {
+      var stamp = new Date(binTimes[hit.index]);
+      var pad = function (n) { return String(n).padStart(2, '0'); };
+      var dateText = stamp.getFullYear() + '-'
+          + pad(stamp.getMonth() + 1) + '-' + pad(stamp.getDate());
+      hoverFloater.style.background = hit.color;
+      hoverFloater.style.color = textOn(hit.color);
+      hoverFloater.innerHTML = '<b>' + escapeHtml(hit.label) + '</b>: '
+          + Number(hit.value).toLocaleString() + ' · ' + dateText;
+      hoverFloater.style.display = 'block';
+      var width = hoverFloater.offsetWidth;
+      hoverFloater.style.left = (
+          event.clientX + 16 + width > window.innerWidth
+              ? event.clientX - width - 12 : event.clientX + 16) + 'px';
+      hoverFloater.style.top = (event.clientY - 14) + 'px';
+    }
+    plotDiv.addEventListener('mousemove', function (event) {
+      if (event.buttons) { hideFloater(); return; }
+      var time = eventTime(event);
+      if (time === null) { hideFloater(); return; }
+      var hit = plotHit(event, time);
+      if (!hit) { hideFloater(); return; }
+      showFloater(event, hit);
+    });
+    plotDiv.addEventListener('mouseleave', hideFloater);
+
+    function render() {
+      var traces = [];
+      data.series.forEach(function (s) {
+        traces.push({type: 'bar', name: s.status + ' / ' + data.bucket,
+                     x: data.bins, y: s.values,
+                     marker: {color: BAR[s.status] || '#999999'},
+                     hoverinfo: 'skip'});
+      });
+      data.series.forEach(function (s) {
+        traces.push({type: 'scatter', mode: 'lines',
+                     name: s.status + ' cumulative (' + s.total + ')',
+                     x: data.bins, y: s.cumulative, yaxis: 'y2',
+                     line: {color: LINE[s.status] || '#555555', width: 2.5},
+                     hoverinfo: 'skip'});
+      });
+      Plotly.newPlot(plotDiv, traces, {
+        barmode: 'group',
+        hovermode: false,
+        margin: {l: 60, r: 65, t: 10, b: 45},
+        font: {size: 14},
+        height: 300,
+        legend: {orientation: 'h'},
+        yaxis: {title: {text: 'jobs / ' + data.bucket}, rangemode: 'tozero'},
+        yaxis2: {title: {text: 'cumulative'}, overlaying: 'y', side: 'right',
+                 rangemode: 'tozero', showgrid: false},
+      }, {responsive: true, displayModeBar: false});
+    }
+    if (window.Plotly) { render(); }
+    else {
+      var loader = document.querySelector('script[data-snapper-plotly]');
+      if (!loader) {
+        loader = document.createElement('script');
+        loader.src = 'https://cdn.plot.ly/plotly-2.35.2.min.js';
+        loader.setAttribute('data-snapper-plotly', '1');
+        document.head.appendChild(loader);
+      }
+      loader.addEventListener('load', render);
+      loader.addEventListener('error', function () {
+        plotDiv.innerHTML = '<p class="text-danger">The plot library failed to load.</p>';
+      });
+    }
+  })();
+  </script>
+  {% endif %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block initial_filters %}
@@ -24,7 +217,9 @@
     username: '{{ selected_username|default:"" }}',
     site: '{{ selected_site|default:"" }}',
     days: '{{ days }}',
-    taskid: '{{ selected_taskid|default:"" }}'
+    taskid: '{{ selected_taskid|default:"" }}',
+    ended_after: '{{ ended_after|escapejs }}',
+    ended_before: '{{ ended_before|escapejs }}'
 }
 {% endblock %}
 

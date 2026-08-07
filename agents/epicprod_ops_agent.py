@@ -41,7 +41,8 @@ Capabilities:
                        run (corun callback → validation, floor, registration;
                        swf-epicprod docs/EPICPROD_ASSESSMENTS_V1.md).
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
-                       increase allowed attempts or retry failed work.
+                       pause/resume, increase attempts, or retry failed work.
+  panda_task_operations — run one paced bulk pause/resume request.
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -82,6 +83,8 @@ OPS_QUEUE = os.environ.get("EPICPROD_OPS_QUEUE", "/queue/epicprod.ops")
 # REST log handler posts to).
 MONITOR_HTTP_URL = os.environ.get("SWF_MONITOR_HTTP_URL", "http://localhost:8002")
 ACTION_LOG_TIMEOUT = int(os.environ.get("EPICPROD_ACTION_LOG_TIMEOUT", "5"))
+MONITOR_API_TOKEN = (os.environ.get("SWFMON_TOKEN")
+                     or os.environ.get("SWF_MONITOR_TOKEN", ""))
 
 # Managed scratch/cache root (shared with the doer and the web view).
 SWF_TMP_DIR = os.environ.get("SWF_TMP_DIR", "/data/swf-tmp")
@@ -107,6 +110,7 @@ SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "subm
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
+PANDA_TASK_BULK_SEND_INTERVAL = 1.0
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
 # the per-task rematch — slow and network-bound, so generously bounded.
@@ -118,6 +122,20 @@ RUCIO_ARRIVALS_TIMEOUT = int(os.environ.get("EPICPROD_RUCIO_ARRIVALS_TIMEOUT", "
 # Past-campaign output ingest: pull the epic-prod clone + idempotent re-import.
 PAST_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "epic-prod-past-import.py"
 PAST_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_PAST_IMPORT_TIMEOUT", "600"))
+
+FILE_EVENTS_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "measure-file-events.py"
+FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600"))
+
+DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
+DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
+
+# Capcom events are buffered in the monitor's notice store; feed
+# consumers drain /api/capcom/notices/ from their own side. No external
+# feed credential lives in this system.
+CAPCOM_CAMPAIGN_URL = "https://epic-devcloud.org/prod/snapper/epicprod/campaign/"
+CAPCOM_LOGS_URL = "https://epic-devcloud.org/prod/logs/"
+CAPCOM_PANDA_TASK_URL = "https://epic-devcloud.org/prod/panda/tasks/{jedi_task_id}/"
+CAPCOM_PANDA_TASKS_URL = "https://epic-devcloud.org/prod/panda/tasks/"
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -183,7 +201,7 @@ class EpicProdOpsAgent(BaseAgent):
     """Production operations agent — dispatches ops messages to handlers."""
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
-                   "panda_task_operation",
+                   "panda_task_operation", "panda_task_operations",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "association_sweep", "catalog_sync", "questionnaire_import",
@@ -191,6 +209,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "sync_epicprod_inventory", "refresh_system_status",
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
+                   "file_events_measure", "delivery_daily_rebuild",
                    "assessment_completed",
                    "health_ping", "shutdown"}
 
@@ -507,7 +526,7 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m.get("operation")
         task_name = m.get("task_name")
         jedi_task_id = m.get("jedi_task_id")
-        if operation not in ("increase_attempts", "retry_failures"):
+        if operation not in ("increase_attempts", "retry_failures", "pause", "resume"):
             self.logger.error(f"PRODOPS panda_task_operation: bad operation {operation!r}")
             return
         if not task_name or not jedi_task_id:
@@ -537,6 +556,12 @@ class EpicProdOpsAgent(BaseAgent):
             f"PRODOPS panda_task_operation: {operation} task={task_name} "
             f"jediTaskID={jedi_task_id}")
         t0 = time.monotonic()
+        operation_id = str(m.get('operation_id') or '')
+        is_state_change = operation in ('pause', 'resume')
+        if is_state_change:
+            self._record_panda_operation_state(operation_id, 'running')
+            self._emit_panda_operation_notice(
+                m, 'requested', detail=f'Requested by {m.get("created_by") or "operator"}')
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
@@ -544,10 +569,16 @@ class EpicProdOpsAgent(BaseAgent):
             reason = f'operation timed out after {PANDA_TASK_OPERATION_TIMEOUT}s'
             self.logger.error(
                 f"PRODOPS panda_task_operation TIMEOUT: {operation} {jedi_task_id}")
+            if is_state_change:
+                self._record_panda_operation_state(
+                    operation_id, 'timeout', diagnostic=reason)
+                self._emit_panda_operation_notice(m, 'timeout', detail=reason)
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
-                'operation': operation, 'ok': False, 'error': reason})
+                'operation_id': operation_id,
+                'operation': operation, 'status': 'timeout',
+                'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='timeout',
                              reason=reason,
                              subject_type='panda_task', subject_key=jedi_task_id,
@@ -560,14 +591,60 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.info(f"  panda-task-operation: {line}")
         for line in (p.stderr or "").splitlines():
             self.logger.info(f"  panda-task-operation: {line}")
+        result = {}
+        if is_state_change:
+            try:
+                result = json.loads((p.stdout or '').strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError):
+                result = {}
         if p.returncode == 0:
             summary = (p.stdout or "").strip()
+            if is_state_change and not result.get('verified'):
+                reason = ('PanDA accepted the request but the task state was '
+                          'not verified before the deadline')
+                observed_status = str(result.get('observed_status') or '')
+                self.logger.warning(
+                    f"PRODOPS panda_task_operation UNVERIFIED: {operation} "
+                    f"{jedi_task_id} observed={observed_status or 'unknown'}")
+                self._record_panda_operation_state(
+                    operation_id, 'unverified', diagnostic=reason,
+                    observed_status=observed_status,
+                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                self._emit_panda_operation_notice(m, 'unverified', detail=reason)
+                self.send_message('/topic/epictopic', {
+                    'msg_type': 'panda_task_operation_done',
+                    'operation_id': operation_id,
+                    'task_name': task_name, 'jedi_task_id': jedi_task_id,
+                    'operation': operation, 'status': 'unverified',
+                    'observed_status': observed_status,
+                    'accepted': True, 'ok': False, 'error': reason})
+                self._log_action(
+                    'panda_task_operation', t0, outcome='unverified',
+                    reason=reason, subject_type='panda_task',
+                    subject_key=jedi_task_id,
+                    username=str(m.get('created_by') or ''),
+                    sublevel='high', live_default=True, level=logging.WARNING,
+                    operation=operation, task_name=task_name,
+                    observed_status=observed_status)
+                return
+            observed_status = str(result.get('observed_status') or '')
             self.logger.info(
                 f"PRODOPS panda_task_operation done: {operation} {jedi_task_id}")
+            if is_state_change:
+                self._record_panda_operation_state(
+                    operation_id, 'verified', observed_status=observed_status,
+                    diagnostic=str(result.get('diagnostic') or ''),
+                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                self._emit_panda_operation_notice(
+                    m, 'verified', detail=f'Observed PanDA state: {observed_status}')
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
+                'operation_id': operation_id,
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
-                'operation': operation, 'ok': True, 'summary': summary})
+                'operation': operation,
+                'status': 'verified' if is_state_change else 'done',
+                'observed_status': observed_status,
+                'ok': True, 'summary': summary})
             self._log_action('panda_task_operation', t0,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
@@ -578,16 +655,161 @@ class EpicProdOpsAgent(BaseAgent):
             self.logger.error(
                 f"PRODOPS panda_task_operation FAILED rc={p.returncode}: "
                 f"{operation} {jedi_task_id}")
+            if is_state_change:
+                self._record_panda_operation_state(
+                    operation_id, 'failed', diagnostic=reason,
+                    observed_status=str(result.get('observed_status') or ''),
+                    evidence={'panda_diagnostic': result.get('diagnostic', '')})
+                self._emit_panda_operation_notice(m, 'failed', detail=reason)
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
+                'operation_id': operation_id,
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
-                'operation': operation, 'ok': False, 'error': reason})
+                'operation': operation, 'status': 'failed',
+                'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='error',
                              reason=reason,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
                              operation=operation, task_name=task_name)
+
+    def _handle_panda_task_operations(self, m):
+        """Run one paced batch of scalar PanDA pause/resume commands."""
+        operation = m.get('operation')
+        items = m.get('items')
+        batch_id = str(m.get('batch_id') or '')
+        if operation not in ('pause', 'resume'):
+            self.logger.error(
+                f"PRODOPS panda_task_operations: bad operation {operation!r}")
+            return
+        if not batch_id or not isinstance(items, list) or not items:
+            self.logger.error(
+                "PRODOPS panda_task_operations: missing batch_id/items")
+            return
+        if any(not item.get('operation_id') or not item.get('jedi_task_id')
+               for item in items):
+            self.logger.error(
+                "PRODOPS panda_task_operations: invalid batch item")
+            return
+        self.run_in_background(
+            self._do_panda_task_operations, m,
+            dedup_key=f'panda-bulk:{batch_id}',
+            label=f'panda_task_operations {operation} {len(items)} tasks')
+
+    def _do_panda_task_operations(self, m):
+        operation = str(m['operation'])
+        items = list(m['items'])
+        batch_id = str(m['batch_id'])
+        username = str(m.get('created_by') or '')
+        paced_seconds = max(
+            0, int(PANDA_TASK_BULK_SEND_INTERVAL * (len(items) - 1) + 0.999))
+        doer_timeout = PANDA_TASK_OPERATION_TIMEOUT + paced_seconds
+        cmd = [
+            sys.executable, str(PANDA_TASK_OPERATION_SCRIPT),
+            '--batch',
+            '--operation', operation,
+            '--send-interval', str(PANDA_TASK_BULK_SEND_INTERVAL),
+            '--timeout', str(doer_timeout),
+        ]
+        for item in items:
+            self._record_panda_operation_state(item['operation_id'], 'running')
+        self._emit_panda_bulk_notice(m, 'requested')
+        self.logger.info(
+            f"PRODOPS panda_task_operations: {operation} batch={batch_id} "
+            f"tasks={len(items)} interval={PANDA_TASK_BULK_SEND_INTERVAL}s")
+        t0 = time.monotonic()
+        try:
+            process = subprocess.run(
+                cmd, input=json.dumps(items), capture_output=True, text=True,
+                timeout=doer_timeout + 30)
+        except subprocess.TimeoutExpired:
+            reason = f'bulk operation timed out after {doer_timeout}s'
+            for item in items:
+                self._settle_panda_bulk_item(
+                    m, item, 'timeout', diagnostic=reason)
+            self._emit_panda_bulk_notice(
+                m, 'completed', counts={'timeout': len(items)})
+            self._log_action(
+                'panda_task_operation', t0, outcome='timeout', reason=reason,
+                subject_type='panda_task_batch', subject_key=batch_id,
+                username=username, sublevel='high', live_default=True,
+                level=logging.ERROR, operation=operation, tasks=len(items))
+            return
+
+        for line in (process.stderr or '').splitlines():
+            self.logger.info(f'  panda-task-operations: {line}')
+        try:
+            output = json.loads((process.stdout or '').strip().splitlines()[-1])
+            result_rows = output.get('results') or []
+        except (AttributeError, IndexError, json.JSONDecodeError):
+            result_rows = []
+        by_operation_id = {
+            str(row.get('operation_id') or ''): row
+            for row in result_rows
+            if isinstance(row, dict)
+        }
+        counts = {'verified': 0, 'failed': 0, 'unverified': 0}
+        process_reason = self._derive_reason(process) if process.returncode else ''
+        for item in items:
+            result = by_operation_id.get(str(item['operation_id']))
+            if not result:
+                status = 'failed'
+                diagnostic = process_reason or 'No result returned for task.'
+            elif not result.get('accepted'):
+                status = 'failed'
+                diagnostic = str(result.get('diagnostic') or 'PanDA refused the request.')
+            elif result.get('verified'):
+                status = 'verified'
+                diagnostic = str(result.get('diagnostic') or '')
+            else:
+                status = 'unverified'
+                diagnostic = ('PanDA accepted the request but the task state '
+                              'was not verified before the deadline')
+            counts[status] = counts.get(status, 0) + 1
+            self._settle_panda_bulk_item(
+                m, item, status,
+                diagnostic=diagnostic,
+                observed_status=str((result or {}).get('observed_status') or ''),
+                evidence={
+                    'panda_diagnostic': str(
+                        (result or {}).get('diagnostic') or ''),
+                    'status_diagnostic': str(
+                        (result or {}).get('status_diagnostic') or ''),
+                },
+            )
+        self._emit_panda_bulk_notice(m, 'completed', counts=counts)
+        problems = counts.get('failed', 0) + counts.get('unverified', 0)
+        outcome = 'ok' if not problems else 'error'
+        self._log_action(
+            'panda_task_operation', t0, outcome=outcome,
+            reason=(f'{problems} task outcomes were not verified'
+                    if problems else ''),
+            subject_type='panda_task_batch', subject_key=batch_id,
+            username=username, sublevel='high', live_default=True,
+            level=logging.WARNING if problems else logging.INFO,
+            operation=operation, tasks=len(items), **counts)
+
+    def _settle_panda_bulk_item(self, message, item, status, *,
+                                diagnostic='', observed_status='',
+                                evidence=None):
+        operation_id = str(item['operation_id'])
+        self._record_panda_operation_state(
+            operation_id, status, diagnostic=diagnostic,
+            observed_status=observed_status, evidence=evidence or {})
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'panda_task_operation_done',
+            'batch_id': str(message.get('batch_id') or ''),
+            'operation_id': operation_id,
+            'task_name': str(item.get('task_name') or ''),
+            'jedi_task_id': str(item['jedi_task_id']),
+            'operation': str(message['operation']),
+            'status': status,
+            'observed_status': observed_status,
+            'accepted': status in ('verified', 'unverified'),
+            'ok': status == 'verified',
+            'error': diagnostic if status != 'verified' else '',
+        })
 
     def _handle_sync_epicprod_inventory(self, m):
         """Refresh one job/task inventory record on the worker pool."""
@@ -1036,6 +1258,8 @@ class EpicProdOpsAgent(BaseAgent):
             ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
+            ('file_events_measure', self._do_file_events_measure),
+            ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
         ]
         failed = []
         for name, step in steps:
@@ -1235,6 +1459,282 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              summary=((p.stdout or '').splitlines() or [''])[0])
+
+    def _handle_file_events_measure(self, m):
+        """Run the per-file event measurement off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_file_events_measure, m,
+            dedup_key="file_events_measure", label="file_events_measure")
+
+    def _do_file_events_measure(self, m):
+        """Measure events for newly delivered files (disk replicas only,
+        never tape): anchor each new byte-size class with one xrootd
+        read, fill members at the anchored rate; the daily delivery
+        record joins the store at build time."""
+        cmd = [sys.executable, str(FILE_EVENTS_SCRIPT)]
+        self.logger.info("PRODOPS file_events_measure: measuring new files")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=FILE_EVENTS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS file_events_measure TIMEOUT after {FILE_EVENTS_TIMEOUT}s")
+            self._log_action('file_events_measure', t0, outcome='timeout',
+                             reason=f'timed out after {FILE_EVENTS_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  measure-file-events: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  measure-file-events: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS file_events_measure FAILED rc={p.returncode}")
+            self._log_action('file_events_measure', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+        else:
+            self.logger.info("PRODOPS file_events_measure done")
+            self._log_action('file_events_measure', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=((p.stdout or '').splitlines() or [''])[-1])
+
+    def _handle_delivery_daily_rebuild(self, m):
+        """Run the daily delivery-record rebuild off the receiver thread —
+        normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_delivery_daily_rebuild, m,
+            dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
+
+    def _post_capcom_notice(self, payload):
+        """Buffer one discrete Capcom event in the monitor's notice store
+        (/api/capcom/notices/ingest/, ordinary monitor token); feed
+        consumers drain it from their own side. One attempt per event,
+        never resent; a failed post is logged loudly and the event is
+        dropped — record staleness has its own alarm."""
+        headers = {}
+        if MONITOR_API_TOKEN:
+            headers['Authorization'] = f'Token {MONITOR_API_TOKEN}'
+        try:
+            r = requests.post(
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/capcom/notices/ingest/",
+                json=payload, timeout=ACTION_LOG_TIMEOUT, headers=headers)
+            if r.status_code != 200:
+                self.logger.error(
+                    f"PRODOPS capcom notice: HTTP {r.status_code} "
+                    f"for {payload.get('dedup_key')}")
+            else:
+                self.logger.info(
+                    f"PRODOPS capcom notice stored: {payload.get('dedup_key')}")
+        except Exception as e:
+            self.logger.error(f"PRODOPS capcom notice: post failed: {e}")
+
+    def _record_panda_operation_state(self, operation_id, status, *,
+                                      diagnostic='', observed_status='',
+                                      evidence=None):
+        """Persist an agent lifecycle transition through the monitor API."""
+        if not operation_id:
+            return False
+        headers = {}
+        if MONITOR_API_TOKEN:
+            headers['Authorization'] = f'Token {MONITOR_API_TOKEN}'
+        try:
+            response = requests.post(
+                f"{MONITOR_HTTP_URL.rstrip('/')}/api/panda/task-operations/"
+                f"{operation_id}/state/",
+                json={
+                    'status': status,
+                    'diagnostic': diagnostic,
+                    'observed_status': observed_status,
+                    'evidence': evidence or {},
+                },
+                headers=headers,
+                timeout=ACTION_LOG_TIMEOUT,
+            )
+            response.raise_for_status()
+            return True
+        except Exception as exc:
+            self.logger.error(
+                f"PRODOPS panda operation state post failed "
+                f"({operation_id} {status}): {exc}")
+            return False
+
+    def _emit_panda_operation_notice(self, message, stage, *, detail=''):
+        """Publish one concise Capcom notice for a pause/resume transition."""
+        operation = str(message.get('operation') or '')
+        operation_id = str(message.get('operation_id') or '')
+        jedi_task_id = str(message.get('jedi_task_id') or '')
+        if operation not in ('pause', 'resume') or not operation_id:
+            return
+        if stage == 'requested':
+            title = f'PanDA {jedi_task_id}: {operation} requested'
+            severity = 'info'
+        elif stage == 'verified':
+            result = 'paused' if operation == 'pause' else 'resumed'
+            title = f'PanDA {jedi_task_id}: {result}'
+            severity = 'info'
+        elif stage == 'unverified':
+            title = f'PanDA {jedi_task_id}: {operation} not verified'
+            severity = 'warning'
+        elif stage == 'timeout':
+            title = f'PanDA {jedi_task_id}: {operation} timed out'
+            severity = 'warning'
+        else:
+            title = f'PanDA {jedi_task_id}: {operation} failed'
+            severity = 'warning'
+        self._post_capcom_notice({
+            'source': 'swf-panda-operations',
+            'severity': severity,
+            'title': title,
+            'detail': str(detail or '')[:500],
+            'url': CAPCOM_PANDA_TASK_URL.format(jedi_task_id=jedi_task_id),
+            'dedup_key': f'panda-task-operation:{operation_id}:{stage}',
+        })
+
+    def _emit_panda_bulk_notice(self, message, stage, *, counts=None):
+        """Publish one Capcom notice for the whole manual bulk request."""
+        operation = str(message.get('operation') or '')
+        batch_id = str(message.get('batch_id') or '')
+        items = message.get('items') or []
+        if operation not in ('pause', 'resume') or not batch_id or not items:
+            return
+        total = len(items)
+        counts = counts or {}
+        if stage == 'requested':
+            title = f'PanDA bulk {operation}: {total} requested'
+            detail = f'Requested by {message.get("created_by") or "operator"}.'
+            severity = 'info'
+        else:
+            verified = int(counts.get('verified') or 0)
+            failed = int(counts.get('failed') or 0)
+            unverified = int(counts.get('unverified') or 0)
+            timed_out = int(counts.get('timeout') or 0)
+            title = f'PanDA bulk {operation}: {verified}/{total} verified'
+            parts = [f'{verified} verified']
+            if failed:
+                parts.append(f'{failed} failed')
+            if unverified:
+                parts.append(f'{unverified} unverified')
+            if timed_out:
+                parts.append(f'{timed_out} timed out')
+            detail = ' · '.join(parts)
+            severity = ('info' if verified == total
+                        and not failed and not unverified and not timed_out
+                        else 'warning')
+        self._post_capcom_notice({
+            'source': 'swf-panda-operations',
+            'severity': severity,
+            'title': title,
+            'detail': detail,
+            'url': CAPCOM_PANDA_TASKS_URL,
+            'dedup_key': f'panda-task-bulk:{batch_id}:{stage}',
+        })
+
+    def _emit_delivery_notice(self, outcome, reason, summary):
+        """The campaign-delivery Capcom event: an info notice stating the
+        newest recorded day's arrivals, or a warning when the rebuild
+        failed."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        et_today = datetime.now(ZoneInfo("America/New_York")).date()
+        if outcome != "ok":
+            self._post_capcom_notice({
+                "source": "swf-campaign-delivery",
+                "severity": "warning",
+                "title": f"Campaign delivery nightly rebuild failed ({reason})",
+                "url": CAPCOM_LOGS_URL,
+                "dedup_key": f"delivery-daily-fail:{et_today.isoformat()}",
+            })
+            return
+        day = str((summary or {}).get("newest_day") or "")
+        if not day:
+            self.logger.error(
+                "PRODOPS capcom notice: no newest_day in rebuild summary; "
+                "notice dropped")
+            return
+        # The title states the newest recorded day's arrivals — the
+        # one-day (ET calendar day) counts, never cumulative totals.
+        # Files only: event coverage is incomplete, so event numbers
+        # stay off the notice until measurement is reliable.
+        parts = []
+        for name, block in sorted(
+                ((summary or {}).get("newest_arrivals") or {}).items()):
+            files = int((block or {}).get("files") or 0)
+            if not files:
+                continue
+            parts.append(f"{name} +{files:,} files")
+        day_label = datetime.fromisoformat(day).strftime("%b %-d")
+        title = (f"Campaign delivery {day_label}: "
+                 + (" · ".join(parts) if parts else "no new files"))
+        self._post_capcom_notice({
+            "source": "swf-campaign-delivery",
+            "severity": "info",
+            "title": title,
+            "url": CAPCOM_CAMPAIGN_URL,
+            "dedup_key": f"delivery-daily:{day}",
+        })
+
+    def _do_delivery_daily_rebuild(self, m):
+        """Rebuild the per-ET-day, per-PC registered-basis delivery
+        record from the JLab Rucio inventory — the record the Snapper
+        campaign view's curves draw from. Full idempotent reconstruction
+        through end of yesterday (CAMPAIGN_DELIVERY.md, Ongoing
+        production)."""
+        cmd = [sys.executable, str(DELIVERY_DAILY_SCRIPT),
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS delivery_daily_rebuild: reconstructing")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=DELIVERY_DAILY_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS delivery_daily_rebuild TIMEOUT after {DELIVERY_DAILY_TIMEOUT}s")
+            self._log_action('delivery_daily_rebuild', t0, outcome='timeout',
+                             reason=f'timed out after {DELIVERY_DAILY_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            self._emit_delivery_notice(
+                'timeout', f'timed out after {DELIVERY_DAILY_TIMEOUT}s', None)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  delivery-daily-rebuild: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  delivery-daily-rebuild: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(f"PRODOPS delivery_daily_rebuild FAILED rc={p.returncode}")
+            self._log_action('delivery_daily_rebuild', t0, outcome='error',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             level=logging.ERROR)
+            self._emit_delivery_notice('error', reason, None)
+        else:
+            self.logger.info("PRODOPS delivery_daily_rebuild done")
+            self._log_action('delivery_daily_rebuild', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=((p.stdout or '').splitlines() or [''])[-1])
+            summary = {}
+            for line in (p.stdout or "").splitlines():
+                if line.startswith('SUMMARY '):
+                    try:
+                        summary = json.loads(line[len('SUMMARY '):])
+                    except ValueError as e:
+                        self.logger.error(
+                            f"PRODOPS delivery_daily_rebuild: bad SUMMARY "
+                            f"line: {e}")
+            self._emit_delivery_notice('ok', '', summary)
 
     def _handle_epic_prod_past_import(self, m):
         """Run the past-campaign output ingest off the receiver thread —

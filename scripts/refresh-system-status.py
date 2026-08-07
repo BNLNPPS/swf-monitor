@@ -30,6 +30,10 @@ from monitor_app.snapper_workflow import (  # noqa: E402
     compact_workflow_publication_report,
     publish_workflow_activity,
 )
+from monitor_app.snapper_delivery import (  # noqa: E402
+    compact_delivery_publication_report,
+    publish_delivery,
+)
 
 
 def main(argv):
@@ -48,6 +52,8 @@ def main(argv):
         print(compact_panda_publication_report(panda_publication))
         workflow_publication = publish_workflow_activity()
         print(compact_workflow_publication_report(workflow_publication))
+        delivery_publication = publish_delivery()
+        print(compact_delivery_publication_report(delivery_publication))
     return 0
 
 
