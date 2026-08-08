@@ -1,7 +1,8 @@
 """Snapper episode REST adapters (snapper-ai docs/EPISODES.md).
 
-Thin transports over ``snapper_ai.episodes``. The write endpoints are
-token-authenticated — the episode builder agent posts open, append,
+Thin transports over ``snapper_ai.episodes``. The write endpoints
+accept token or session authentication and require an authorized
+builder identity — the episode builder agent posts open, append,
 and close with its builder identity. The read endpoints are read-open
 like the monitor's other read surfaces; errors are explicit JSON.
 """
