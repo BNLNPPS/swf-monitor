@@ -191,6 +191,8 @@ def _active_nav(request):
         'pcs_reco_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'r',
         'pcs_background_tags': namespace == 'pcs' and url_name in pcs_tag_names and tag_type == 'k',
         'pcs_datasets': namespace == 'pcs' and url_name in pcs_dataset_names,
+        'pcs_evgen_inputs': namespace == 'pcs' and url_name in (
+            'evgen_inputs', 'evgen_inputs_update'),
         'pcs_configs': namespace == 'pcs' and url_name in pcs_config_names,
         'pcs_tasks': namespace == 'pcs' and url_name in pcs_task_names,
         'campaigns': namespace == 'pcs' and url_name in pcs_catalog_names,
