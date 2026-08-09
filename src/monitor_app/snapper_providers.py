@@ -316,11 +316,12 @@ def _delivery_curve_values(state):
         for pc, leaf in (block.get('leaves') or {}).items():
             arrived_events = int(leaf.get('arrived_events') or 0)
             arrived_files = int(leaf.get('arrived_files') or 0)
-            if arrived_events:
-                values[f'dlvq_{tag}_{pc}'] = round(
-                    arrived_events / 1e6, 2)
-            if arrived_files:
-                values[f'dlvqf_{tag}_{pc}'] = arrived_files
+            # Zeros emit: a quiet day must stamp the quilt's time base,
+            # or the next arrival day's column widens back over the
+            # gap. The renderer stacks absent-at-stamp members as zero,
+            # so the stamps are what carry the day.
+            values[f'dlvq_{tag}_{pc}'] = round(arrived_events / 1e6, 2)
+            values[f'dlvqf_{tag}_{pc}'] = arrived_files
         for lens in DELIVERY_LENSES:
             seg = lens['seg']
             cum_e, cum_f = {}, {}
