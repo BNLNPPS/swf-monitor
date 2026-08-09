@@ -360,6 +360,9 @@ async def panda_resource_usage(
 
     Only counts finished jobs with actual runtime (starttime and endtime set).
     Jobs are attributed by endtime; queue/waiting time is excluded.
+    Every aggregate also carries failed_count — jobs ending 'failed' in the
+    window, counted by endtime. Failed jobs contribute nothing to job_count
+    or any core-hour metric.
 
     Args:
         days: Time window in days ending at end_time (default 30). Used when
@@ -373,7 +376,8 @@ async def panda_resource_usage(
         bucket: Optional time-series bin: 'day' or 'week'.
 
     Returns:
-        totals: {job_count, allocated_core_hours, used_core_hours, wall_hours}
+        totals: {job_count, allocated_core_hours, used_core_hours, wall_hours,
+                 failed_count}
         by_site: Breakdown by computing site, sorted by allocated_core_hours.
         by_user: Breakdown by job owner, sorted by allocated_core_hours.
         series: Site breakdown per day/week when bucket is supplied.
