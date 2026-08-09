@@ -351,6 +351,8 @@ COMMON QUERIES:
 - Core-hours this month? → panda_resource_usage(days=30)
 - Core-hours on Perlmutter? → panda_resource_usage(days=30, site='NERSC_Perlmutter%')
 - Find JLab science data for a campaign? → jlab_rucio_list_dids(scope='epic', name='*26.06.0*', type='DATASET')
+- How many files / how big are the datasets matching a pattern? → jlab_rucio_summarize_datasets(scope='epic', name='/EVGEN/*') — ONE call for counts, sizes, and totals; never loop get_did_metadata per dataset
+- Latest added or updated datasets? → jlab_rucio_summarize_datasets(scope='epic', name='/EVGEN/*', order='updated')
 - Inspect a JLab science dataset? → jlab_rucio_get_did_metadata(scope='epic', name='/RECO/...') then jlab_rucio_list_files(...)
 - Find BNL PanDA output or log datasets? → bnl_rucio_list_dids(scope='group.EIC', name='*26.06.0*', type='DATASET')
 - Diagnose BNL registration or replication? → bnl_rucio_get_did_metadata(...), bnl_rucio_list_rules(...), then bnl_rucio_get_rule_locks(...)
