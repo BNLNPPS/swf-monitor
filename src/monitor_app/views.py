@@ -1,4 +1,5 @@
 from collections import Counter
+from uuid import UUID
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
@@ -12,6 +13,7 @@ from rest_framework import status
 from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth import update_session_auth_hash
@@ -491,9 +493,7 @@ class TFSliceViewSet(viewsets.ModelViewSet):
     pagination_class = _OptInLimitPagination
 
     def get_queryset(self):
-        from uuid import UUID
-        from rest_framework.exceptions import ValidationError as DRFValidationError
-        qs = super().get_queryset()
+        qs = super().get_queryset().select_related('fastmon_file')
         params = self.request.query_params
 
         id_value = (params.get('id') or '').strip()
