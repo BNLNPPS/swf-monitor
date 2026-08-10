@@ -488,6 +488,7 @@ class TFSliceViewSet(viewsets.ModelViewSet):
     serializer_class = TFSliceSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
+    pagination_class = _OptInLimitPagination
 
     def get_queryset(self):
         from uuid import UUID
