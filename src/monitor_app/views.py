@@ -474,12 +474,70 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
 # Fast Processing API ViewSets
 
 class TFSliceViewSet(viewsets.ModelViewSet):
-    """API endpoint for TF Slices (fast processing workflow)."""
+    """API endpoint for TF Slices (fast processing workflow).
+
+    Filterable — integer/UUID values are validated before hitting the ORM
+    so a malformed value reports a 400 instead of crashing the endpoint:
+    ?id=, ?fastmon_file_id= (UUID), ?run_number=, ?slice_id= (integers),
+    ?status=, ?assigned_worker= (exact strings), ?tf_filename= /
+    ?stf_filename= (exact, cross the fastmon_file join; the dotted names
+    fastmon_file__tf_filename / fastmon_file__stf_file__stf_filename still
+    work too).
+    """
     queryset = TFSlice.objects.all()
     serializer_class = TFSliceSerializer
     authentication_classes = [SessionAuthentication, TokenAuthentication]
     permission_classes = [IsAuthenticatedOrReadOnly]
-    filterset_fields = ['id', 'fastmon_file_id', 'run_number', 'status', 'fastmon_file__stf_file__stf_filename', 'assigned_worker', 'fastmon_file__tf_filename', 'slice_id']
+
+    def get_queryset(self):
+        from uuid import UUID
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        qs = super().get_queryset()
+        params = self.request.query_params
+
+        id_value = (params.get('id') or '').strip()
+        if id_value:
+            if not id_value.isdigit():
+                raise DRFValidationError({'id': 'must be an integer'})
+            qs = qs.filter(id=id_value)
+
+        fastmon_file_id = (params.get('fastmon_file_id') or '').strip()
+        if fastmon_file_id:
+            try:
+                UUID(fastmon_file_id)
+            except ValueError:
+                raise DRFValidationError({'fastmon_file_id': 'must be a UUID'})
+            qs = qs.filter(fastmon_file_id=fastmon_file_id)
+
+        run_number = (params.get('run_number') or '').strip()
+        if run_number:
+            if not run_number.isdigit():
+                raise DRFValidationError({'run_number': 'must be an integer'})
+            qs = qs.filter(run_number=run_number)
+
+        slice_id = (params.get('slice_id') or '').strip()
+        if slice_id:
+            if not slice_id.isdigit():
+                raise DRFValidationError({'slice_id': 'must be an integer'})
+            qs = qs.filter(slice_id=slice_id)
+
+        status_value = (params.get('status') or '').strip()
+        if status_value:
+            qs = qs.filter(status=status_value)
+
+        assigned_worker = (params.get('assigned_worker') or '').strip()
+        if assigned_worker:
+            qs = qs.filter(assigned_worker=assigned_worker)
+
+        tf_filename = (params.get('tf_filename') or params.get('fastmon_file__tf_filename') or '').strip()
+        if tf_filename:
+            qs = qs.filter(fastmon_file__tf_filename=tf_filename)
+
+        stf_filename = (params.get('stf_filename') or params.get('fastmon_file__stf_file__stf_filename') or '').strip()
+        if stf_filename:
+            qs = qs.filter(fastmon_file__stf_file__stf_filename=stf_filename)
+
+        return qs
 
 
 class WorkerViewSet(viewsets.ModelViewSet):
