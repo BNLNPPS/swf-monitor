@@ -615,19 +615,51 @@ SELECT_TOOLS_TOOL = {
 # Number of tools to pre-load via semantic matching
 TOP_K_TOOLS = 8
 
+# Identifier-grammar boosts. A formal identifier in a question — a Rucio
+# DID, a PCS composed name, a task/job id, a queue name — is decisive
+# evidence for a tool family, and exactly the evidence cosine similarity
+# over prose descriptions dilutes. Each entry: (compiled pattern over the
+# message, predicate over (tool_name, server_name), score boost added to
+# the cosine score for matching tools).
+_ID_BOOSTS = [
+    # Science-data DID (epic scope) or a stage-rooted slash path → JLab Rucio.
+    (re.compile(r'\bepic\s*:\s*/|/(?:EVGEN|RECO|SIMU|FULL)/'),
+     lambda n, s: n.startswith('jlab_rucio_'), 0.25),
+    # group.EIC-scoped DID (PanDA outputs and logs) → BNL Rucio.
+    (re.compile(r'\bgroup\.EIC\s*:'),
+     lambda n, s: n.startswith('bnl_rucio_'), 0.25),
+    # PCS composed name → PCS and PanDA tools.
+    (re.compile(r'\bgroup\.EIC\.\S+'),
+     lambda n, s: n.startswith(('pcs_', 'panda_')), 0.20),
+    # Task or job id → PanDA tools.
+    (re.compile(r'\b(?:task|jeditaskid|job|pandaid)\s*#?\s*\d{4,}', re.I),
+     lambda n, s: n.startswith('panda_'), 0.20),
+    # PanDA queue-shaped name → queue and worker tools.
+    (re.compile(r'\b(?:BNL|JLAB|NERSC|OSG|E1)_[A-Za-z0-9_]+\b'),
+     lambda n, s: n in ('panda_get_queue', 'panda_list_queues',
+                        'panda_harvester_workers'), 0.20),
+    # ROOT file reference → file-analysis and transfer tools.
+    (re.compile(r'\S+\.root\b'),
+     lambda n, s: 'uproot' in n or 'uproot' in s or 'xrootd' in s, 0.20),
+]
+
 
 class ToolSelector:
-    """Selects relevant tools for a user message via semantic similarity.
+    """Selects relevant tools for a user message via semantic similarity
+    plus identifier-grammar boosts.
 
     At startup, embeds all tool descriptions into vectors. Tool names are
     prefixed with their MCP server name for embedding (e.g. "github:get_job_logs")
     so the model can distinguish tools from different domains. Returned names
-    are unprefixed (the actual tool name for dispatch).
+    are unprefixed (the actual tool name for dispatch). At selection time,
+    formal identifiers recognized in the message (_ID_BOOSTS) raise their
+    tool family's scores before ranking.
     """
 
     def __init__(self):
         self._model = SentenceTransformer('all-MiniLM-L6-v2')
         self._tool_names: list[str] = []
+        self._tool_servers: list[str] = []
         self._tool_embeddings: np.ndarray | None = None
 
     def build_index(self, tool_registry: dict[str, dict], server_map: dict[str, str]):
@@ -638,20 +670,41 @@ class ToolSelector:
             server_map: tool_name → server name (e.g. 'github', 'xrootd', 'swf-monitor')
         """
         self._tool_names = []
+        self._tool_servers = []
         texts = []
         for name, tool in tool_registry.items():
             self._tool_names.append(name)
             server = server_map.get(name, 'unknown')
+            self._tool_servers.append(server)
             texts.append(f"{server}:{name}: {tool['description']}")
         self._tool_embeddings = self._model.encode(texts, normalize_embeddings=True)
         logger.info(f"ToolSelector: indexed {len(self._tool_names)} tools")
 
     def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[tuple[str, float]]:
-        """Return top-K tool names with scores, ranked by relevance."""
+        """Return top-K tool names with scores, ranked by relevance.
+
+        Scores are cosine similarity plus any identifier-grammar boost;
+        a boosted tool's displayed score therefore exceeds its cosine
+        alone, which is the intended provenance signal in the
+        (tools suggested: ...) line.
+        """
         if self._tool_embeddings is None or len(self._tool_names) == 0:
             return []
         msg_embedding = self._model.encode(message, normalize_embeddings=True)
         scores = self._tool_embeddings @ msg_embedding
+        boosts = np.zeros(len(self._tool_names))
+        fired = []
+        for pattern, predicate, boost in _ID_BOOSTS:
+            if not pattern.search(message):
+                continue
+            fired.append(pattern.pattern)
+            for i, (name, server) in enumerate(
+                    zip(self._tool_names, self._tool_servers)):
+                if predicate(name, server):
+                    boosts[i] = max(boosts[i], boost)
+        if fired:
+            logger.info(f"ToolSelector: identifier boosts fired: {fired}")
+        scores = scores + boosts
         top_indices = np.argsort(scores)[-top_k:][::-1]
         return [(self._tool_names[i], float(scores[i])) for i in top_indices]
 
