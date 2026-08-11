@@ -301,6 +301,10 @@ SPECTACULAR_SETTINGS = {
     ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Relative server base so Swagger UI's try-it-out joins endpoint paths
+    # onto the application mount rather than the host root. The swf-remote
+    # proxy rewrites it to the /prod mount, so one setting serves both faces.
+    "SERVERS": [{"url": "/swf-monitor/"}],
     # Serve Swagger UI / Redoc assets from the sidecar package rather than
     # a public CDN, so the pages work without external asset loads.
     "SWAGGER_UI_DIST": "SIDECAR",
