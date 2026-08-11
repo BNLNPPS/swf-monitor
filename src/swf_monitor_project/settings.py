@@ -122,6 +122,7 @@ INSTALLED_APPS = [
     # Third-party apps
     "rest_framework",
     "drf_spectacular",
+    "drf_spectacular_sidecar",  # self-hosted Swagger UI / Redoc assets
     "rest_framework.authtoken",
     "django_filters",  # DRF filter backend for filterset_fields
     "django_seed",
@@ -290,11 +291,21 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "SWF Monitor API",
-    "DESCRIPTION": "API for the ePIC Streaming Workflow Testbed Monitor",
+    "TITLE": "ePIC SWF REST APIs",
+    "DESCRIPTION": (
+        "REST interfaces of the ePIC SWF platform: production (PCS, the "
+        "validation interface v1), PanDA views, and the testbed monitor. "
+        "Interface design documents live in the swf-epicprod and "
+        "swf-monitor repositories; this schema is the single source of "
+        "endpoint detail."
+    ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    # OTHER SETTINGS
+    # Serve Swagger UI / Redoc assets from the sidecar package rather than
+    # a public CDN, so the pages work without external asset loads.
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
 }
 
 # OAuth2 Provider settings for MCP authentication
