@@ -560,8 +560,6 @@ class EpicProdOpsAgent(BaseAgent):
         is_state_change = operation in ('pause', 'resume')
         if is_state_change:
             self._record_panda_operation_state(operation_id, 'running')
-            self._emit_panda_operation_notice(
-                m, 'requested', detail=f'Requested by {m.get("created_by") or "operator"}')
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
@@ -714,7 +712,6 @@ class EpicProdOpsAgent(BaseAgent):
         ]
         for item in items:
             self._record_panda_operation_state(item['operation_id'], 'running')
-        self._emit_panda_bulk_notice(m, 'requested')
         self.logger.info(
             f"PRODOPS panda_task_operations: {operation} batch={batch_id} "
             f"tasks={len(items)} interval={PANDA_TASK_BULK_SEND_INTERVAL}s")
@@ -1573,10 +1570,7 @@ class EpicProdOpsAgent(BaseAgent):
         jedi_task_id = str(message.get('jedi_task_id') or '')
         if operation not in ('pause', 'resume') or not operation_id:
             return
-        if stage == 'requested':
-            title = f'PanDA {jedi_task_id}: {operation} requested'
-            severity = 'info'
-        elif stage == 'verified':
+        if stage == 'verified':
             result = 'paused' if operation == 'pause' else 'resumed'
             title = f'PanDA {jedi_task_id}: {result}'
             severity = 'info'
@@ -1607,27 +1601,22 @@ class EpicProdOpsAgent(BaseAgent):
             return
         total = len(items)
         counts = counts or {}
-        if stage == 'requested':
-            title = f'PanDA bulk {operation}: {total} requested'
-            detail = f'Requested by {message.get("created_by") or "operator"}.'
-            severity = 'info'
-        else:
-            verified = int(counts.get('verified') or 0)
-            failed = int(counts.get('failed') or 0)
-            unverified = int(counts.get('unverified') or 0)
-            timed_out = int(counts.get('timeout') or 0)
-            title = f'PanDA bulk {operation}: {verified}/{total} verified'
-            parts = [f'{verified} verified']
-            if failed:
-                parts.append(f'{failed} failed')
-            if unverified:
-                parts.append(f'{unverified} unverified')
-            if timed_out:
-                parts.append(f'{timed_out} timed out')
-            detail = ' · '.join(parts)
-            severity = ('info' if verified == total
-                        and not failed and not unverified and not timed_out
-                        else 'warning')
+        verified = int(counts.get('verified') or 0)
+        failed = int(counts.get('failed') or 0)
+        unverified = int(counts.get('unverified') or 0)
+        timed_out = int(counts.get('timeout') or 0)
+        title = f'PanDA bulk {operation}: {verified}/{total} verified'
+        parts = [f'{verified} verified']
+        if failed:
+            parts.append(f'{failed} failed')
+        if unverified:
+            parts.append(f'{unverified} unverified')
+        if timed_out:
+            parts.append(f'{timed_out} timed out')
+        detail = ' · '.join(parts)
+        severity = ('info' if verified == total
+                    and not failed and not unverified and not timed_out
+                    else 'warning')
         self._post_capcom_notice({
             'source': 'swf-panda-operations',
             'severity': severity,
