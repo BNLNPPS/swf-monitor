@@ -85,8 +85,7 @@
   <line x1="625" y1="355" x2="680" y2="355" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
   <rect x="685" y="310" width="185" height="90" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" filter="url(#shadow)"/>
   <text x="777" y="338" text-anchor="middle" font-size="15" font-weight="bold" fill="#0d47a1">mattermost-live</text>
-  <text x="777" y="361" text-anchor="middle" font-size="14" fill="#333">push plugin,</text>
-  <text x="777" y="379" text-anchor="middle" font-size="14" fill="#333">at-most-once</text>
+  <text x="777" y="361" text-anchor="middle" font-size="14" fill="#333">push plugin</text>
 
   <line x1="870" y1="355" x2="925" y2="355" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
   <text x="897" y="343" text-anchor="middle" font-size="14" fill="#555">post</text>
