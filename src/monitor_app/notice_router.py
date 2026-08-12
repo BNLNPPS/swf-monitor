@@ -79,7 +79,7 @@ def _compose(row, extra):
     elif not url:
         url = f'{external_face_base_url()}/prod/logs/{row.id}/'
     return {
-        'source': 'swf-events',
+        'source': 'swf-notices',
         'severity': severity,
         'title': title[:300],
         'detail': detail[:2000],

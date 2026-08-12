@@ -497,6 +497,7 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
                 sublevel='low', live_default=False,
                 namespace=obj.namespace, status=obj.status,
                 notice=bool(params.get('notice')),
+                url=f'/workflow-executions/{obj.execution_id}/',
                 elapsed_s=elapsed)
 
 
