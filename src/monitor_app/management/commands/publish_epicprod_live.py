@@ -174,16 +174,21 @@ class Command(BaseCommand):
             notice = self._format_assessment(row, extra)
             if notice:
                 return notice
-        subject = str(extra.get('subject_key') or '')
-        if self.UUID_RE.search(subject):
-            subject = ''
+        subject_type = str(extra.get('subject_type') or '').replace('_', ' ')
+        subject_key = str(extra.get('subject_key') or '')
+        if self.UUID_RE.search(subject_key):
+            subject_key = ''
+        subject = f'{subject_type} {subject_key}'.strip()
         username = str(extra.get('username') or '')
         reason = str(extra.get('reason') or '')
         summary = str(extra.get('summary') or '')
         dur = extra.get('duration_ms')
         stamp = timezone.localtime(row.timestamp).strftime('%H:%M')
 
-        parts = [f"`{stamp}`", f"**{str(action).replace('_', ' ')}**"]
+        # The line's title is the most specific thing the event states
+        # it did: its operation when it carries one, else the action.
+        title = str(extra.get('operation') or action).replace('_', ' ')
+        parts = [f"`{stamp}`", f"**{title}**"]
         if subject:
             parts.append(subject)
         if username:

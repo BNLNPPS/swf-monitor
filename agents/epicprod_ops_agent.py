@@ -645,14 +645,19 @@ class EpicProdOpsAgent(BaseAgent):
                 'status': 'verified' if is_state_change else 'done',
                 'observed_status': observed_status,
                 'ok': True, 'summary': summary})
-            # State changes carry the human line the notice shows; the
-            # task page is the event's subject URL (notice routing).
+            # Every ok outcome carries the human line the feed and the
+            # notices show; the task page is the event's subject URL.
             ok_bits = {'url': f'/panda/tasks/{jedi_task_id}/'}
             if is_state_change:
                 verb = 'paused' if operation == 'pause' else 'resumed'
                 ok_bits['summary'] = (
                     f'{verb}; observed PanDA state: '
                     f'{observed_status or "unknown"}')
+            elif operation == 'retry_failures':
+                ok_bits['summary'] = 'PanDA accepted the failure retry'
+            elif operation == 'increase_attempts':
+                ok_bits['summary'] = (
+                    f'attempt limit raised by {m.get("increase") or 1}')
             self._log_action('panda_task_operation', t0,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
