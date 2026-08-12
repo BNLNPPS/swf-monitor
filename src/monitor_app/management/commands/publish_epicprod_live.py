@@ -20,6 +20,7 @@ Run: manage.py publish_epicprod_live   (systemd unit swf-epicprod-live)
 """
 import logging
 import os
+import re
 import time
 from datetime import timezone as dt_timezone
 
@@ -157,7 +158,15 @@ class Command(BaseCommand):
 
     # -- formatting ----------------------------------------------------------
 
+    UUID_RE = re.compile(
+        r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}',
+        re.IGNORECASE)
+
     def _format(self, row):
+        """One readable line per event: what happened, to what, by whom,
+        and the one explanation that matters. Machine tokens stay on the
+        record page — UUID subjects, the emitting component, and
+        sub-10-second timings carry nothing for a channel reader."""
         extra = row.extra_data if isinstance(row.extra_data, dict) else {}
         action = extra.get('action') or row.funcname or 'action'
         outcome = str(extra.get('outcome') or '')
@@ -165,27 +174,27 @@ class Command(BaseCommand):
             notice = self._format_assessment(row, extra)
             if notice:
                 return notice
-        subject = ':'.join(x for x in (extra.get('subject_type'),
-                                       extra.get('subject_key')) if x)
+        subject = str(extra.get('subject_key') or '')
+        if self.UUID_RE.search(subject):
+            subject = ''
         username = str(extra.get('username') or '')
         reason = str(extra.get('reason') or '')
+        summary = str(extra.get('summary') or '')
         dur = extra.get('duration_ms')
         stamp = timezone.localtime(row.timestamp).strftime('%H:%M')
 
-        parts = [f"`{stamp}`", f"**{action}**"]
+        parts = [f"`{stamp}`", f"**{str(action).replace('_', ' ')}**"]
         if subject:
             parts.append(subject)
-        parts.append(f"{row.instance_name}")
         if username:
             parts.append(f"by {username}")
         if outcome and outcome != 'ok':
             parts.append(f"⚠️ **{outcome.upper()}**")
-        if reason:
-            parts.append(reason)
-        summary = str(extra.get('summary') or '')
-        if summary:
-            parts.append(summary)
-        if isinstance(dur, (int, float)):
+        explanation = reason if (outcome and outcome != 'ok' and reason) \
+            else summary
+        if explanation:
+            parts.append(explanation)
+        if isinstance(dur, (int, float)) and dur >= 10000:
             parts.append(f"{dur / 1000:.1f} s")
         parts.append(f"[record]({_link_base()}/logs/{row.id}/)")
         return ' · '.join(parts)

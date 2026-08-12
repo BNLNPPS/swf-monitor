@@ -739,7 +739,7 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action(
                 'panda_task_operation', t0, outcome='timeout', reason=reason,
                 subject_type='panda_task_batch', subject_key=batch_id,
-                username=username, sublevel='high', live_default=True,
+                username=username, sublevel='high', live_default=False,
                 level=logging.ERROR, operation=operation, tasks=len(items),
                 summary=f'0/{len(items)} verified · {len(items)} timed out',
                 url='/panda/tasks/')
@@ -798,7 +798,7 @@ class EpicProdOpsAgent(BaseAgent):
             reason=(f'{problems} task outcomes were not verified'
                     if problems else ''),
             subject_type='panda_task_batch', subject_key=batch_id,
-            username=username, sublevel='high', live_default=True,
+            username=username, sublevel='high', live_default=False,
             level=logging.WARNING if problems else logging.INFO,
             operation=operation, tasks=len(items),
             summary=' · '.join(parts), url='/panda/tasks/', **counts)
