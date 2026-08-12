@@ -187,6 +187,7 @@
         font: {size: 14},
         height: 300,
         legend: {orientation: 'h'},
+        xaxis: {nticks: Math.min(data.bins.length + 1, 16)},
         yaxis: {title: {text: 'jobs / ' + data.bucket}, rangemode: 'tozero'},
         yaxis2: {title: {text: 'cumulative'}, overlaying: 'y', side: 'right',
                  rangemode: 'tozero', showgrid: false},
