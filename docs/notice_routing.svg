@@ -52,6 +52,7 @@
   <text x="482" y="432" font-size="14" fill="#555">read every pass</text>
 
   <!-- Registration (consumer side) -->
+  <line x1="1030" y1="435" x2="1030" y2="510" stroke="#5e35b1" stroke-width="2" stroke-dasharray="6 4"/>
   <line x1="1030" y1="510" x2="630" y2="510" stroke="#5e35b1" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowp)"/>
   <text x="830" y="488" text-anchor="middle" font-size="14" fill="#4527a0">each consumer registers and maintains</text>
   <text x="830" y="504" text-anchor="middle" font-size="14" fill="#4527a0">its own subscription over REST</text>
@@ -64,7 +65,7 @@
   <text x="777" y="274" text-anchor="middle" font-size="14" fill="#333">per subscriber</text>
 
   <line x1="870" y1="250" x2="925" y2="250" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="897" y="238" text-anchor="middle" font-size="13" fill="#555">pull</text>
+  <text x="897" y="238" text-anchor="middle" font-size="14" fill="#555">pull</text>
 
   <rect x="930" y="205" width="200" height="90" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
   <text x="1030" y="233" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">Personal feed</text>
@@ -79,7 +80,7 @@
   <text x="777" y="379" text-anchor="middle" font-size="14" fill="#333">at-most-once</text>
 
   <line x1="870" y1="355" x2="925" y2="355" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="897" y="343" text-anchor="middle" font-size="13" fill="#555">post</text>
+  <text x="897" y="343" text-anchor="middle" font-size="14" fill="#555">post</text>
 
   <rect x="930" y="310" width="200" height="90" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
   <text x="1030" y="338" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">#epicprod-live</text>

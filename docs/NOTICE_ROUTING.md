@@ -14,6 +14,8 @@ The design separates three concerns that today are partially fused:
 - **Subscriptions** — who wants what, registered by the consumer.
 - **Delivery** — how a matched event reaches each subscriber.
 
+[![Notice routing](notice_routing.svg)](notice_routing.svg)
+
 ## Events
 
 The action stream is the event source. The `action` identifier is the event
