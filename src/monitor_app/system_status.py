@@ -310,6 +310,40 @@ def _composed_name_integrity():
     return _status('composed-name-integrity', 'agents', status, summary, data)
 
 
+def _panda_retry_rules():
+    """PanDA job retry-module rules loaded on this instance — the
+    error-keyed tuning layer above per-job attempt retries. Rules are
+    instance data in the PanDA database; the epic set is loaded and
+    maintained by epicprod (swf-epicprod docs/PANDA_ANCILLARY_AUDIT.md).
+    A collector exception surfaces as a red collector-failed row via
+    refresh_system_status."""
+    from django.db import connections
+    cur = connections['panda'].cursor()
+    cur.execute(
+        "SELECT re.errorsource, re.errorcode, re.errordiag, re.parameters,"
+        "       ra.retry_action, re.active, ra.active"
+        " FROM retryerrors re JOIN retryactions ra"
+        "   ON re.retryaction = ra.retryaction_id"
+        " ORDER BY re.retryerror_id")
+    rules = [
+        {'source': row[0], 'code': row[1], 'diag': row[2] or '',
+         'parameters': row[3] or '', 'action': row[4],
+         'mode': 'enforcing' if (row[5] == 'Y' and row[6] == 'Y')
+                 else 'passive'}
+        for row in cur.fetchall()
+    ]
+    if not rules:
+        return _status(
+            'panda-retry-rules', 'services', 'ok',
+            'no retry-module rules loaded — every job failure consumes '
+            'its full attempt budget', {'rules': []})
+    enforcing = sum(1 for rule in rules if rule['mode'] == 'enforcing')
+    summary = (f'{len(rules)} rules loaded: {enforcing} enforcing, '
+               f'{len(rules) - enforcing} passive')
+    return _status('panda-retry-rules', 'services', 'ok', summary,
+                   {'rules': rules})
+
+
 def _snapper_scheduler(scope):
     """Assess one PostgreSQL-backed Snapper capture cursor."""
     from snapper_ai.models import CaptureCursor
@@ -580,6 +614,7 @@ COLLECTORS = {
     'swf-panda-bot': _panda_bot,
     'campaign-assessments': _campaign_assessments,
     'composed-name-integrity': _composed_name_integrity,
+    'panda-retry-rules': _panda_retry_rules,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
         'swf-monitor-mcp-asgi', 'swf-monitor-mcp-asgi', category='services'),
     'httpd': lambda: _systemctl_unit('httpd', 'httpd', category='services'),

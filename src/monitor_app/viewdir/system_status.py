@@ -24,11 +24,19 @@ def system_status_page(request):
         sysconfig_json = '{}'
     from ..system_status import RETRYABLE_CHECKS
 
+    groups = grouped_current_status()
+    panda_retry_rules = []
+    for group in groups:
+        for item in group.get('items', []):
+            if getattr(item, 'name', '') == 'panda-retry-rules':
+                panda_retry_rules = (item.data or {}).get('rules', [])
+
     return render(request, 'monitor_app/system_status.html', {
-        'groups': grouped_current_status(),
+        'groups': groups,
         'summary': status_summary(),
         'sysconfig_json': sysconfig_json,
         'retryable': RETRYABLE_CHECKS,
+        'panda_retry_rules': panda_retry_rules,
     })
 
 
