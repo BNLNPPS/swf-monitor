@@ -12,18 +12,27 @@ from monitor_app.models import PandaTaskOperation
 PAUSE_REJECTED_TASK_STATUSES = frozenset(
     ('finished', 'failed', 'done', 'aborted', 'broken', 'paused'))
 RESUMABLE_TASK_STATUSES = frozenset(('paused', 'throttled', 'staging'))
+# The PanDA command gate accepts plain retry from finished/failed/
+# exhausted only; an aborted task is retried via the reactivation path
+# (retry with new_parameters -> incexec), which the executor selects by
+# observed state. Verified live on task 38541, 2026-08-11.
 RETRYABLE_TASK_STATUSES = frozenset(
     ('finished', 'failed', 'exhausted', 'aborted'))
-KILLABLE_TASK_STATUSES = frozenset(
+# Stop-and-finish (the PanDA finish command): the task ends 'finished'
+# with completed output kept, and plain retry remains available. The
+# kill command is deliberately not offered — it strands the task in
+# 'aborted', which plain retry refuses (docs/PCS_COMPOSED_NAME_INTEGRITY
+# forensics, operator decision 2026-08-11).
+FINISHABLE_TASK_STATUSES = frozenset(
     ('running', 'paused', 'throttled', 'staging', 'exhausted',
      'ready', 'pending', 'scouting', 'assigning', 'defined', 'registered'))
 BULK_OPERATION_STATUSES = {
     'pause': frozenset(('running',)),
     'resume': frozenset(('paused',)),
     'retry_failures': RETRYABLE_TASK_STATUSES,
-    'kill': KILLABLE_TASK_STATUSES,
+    'finish': FINISHABLE_TASK_STATUSES,
 }
-OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'kill'))
+OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'finish'))
 MAX_BULK_TASKS = 5000
 
 
@@ -166,9 +175,9 @@ def _persist_task_operation(*, task, operation, requested_by, source,
             raise PandaTaskOperationError(
                 f'Task failures cannot be retried from status {task_status}.',
                 409)
-    elif task_status not in KILLABLE_TASK_STATUSES:
+    elif task_status not in FINISHABLE_TASK_STATUSES:
         raise PandaTaskOperationError(
-            f'Task cannot be killed from status {task_status}.', 409)
+            f'Task cannot be finished from status {task_status}.', 409)
 
     try:
         with transaction.atomic():

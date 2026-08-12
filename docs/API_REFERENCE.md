@@ -156,10 +156,17 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   requests arriving through the swf-remote tunnel receive HTTP 403.
 - `POST /api/panda/task-operations/` - Authenticated internal-monitor bulk
   task-operation request with `{"operation":
-  "pause|resume|retry_failures|kill", "jedi_task_ids": [...]}`. The endpoint
-  re-reads current PanDA state and queues only eligible tasks: `running` for
-  pause, `paused` for resume, terminal (`finished`/`failed`/`exhausted`/
-  `aborted`) for retry_failures, and active states for kill. Prod-ops sends
+  "pause|resume|retry_failures|finish", "jedi_task_ids": [...]}`. The
+  endpoint re-reads current PanDA state and queues only eligible tasks:
+  `running` for pause, `paused` for resume,
+  `finished`/`failed`/`exhausted`/`aborted` for retry_failures, and active
+  states for finish. Finish (the PanDA finish command) stops a task while
+  keeping completed output; the task ends `finished` and remains
+  retryable — the kill command is deliberately not offered, since it
+  strands tasks in `aborted`. An aborted task is retried through PanDA's
+  reactivation path (retry with new parameters, processed as incexec —
+  the plain retry command refuses aborted); the executor selects the path
+  by the task's observed state. Prod-ops sends
   the accepted scalar PanDA commands one second apart and records each task's
   verified outcome (retry verified when the task leaves its terminal state,
   kill when it reaches `aborting`/`aborted`).

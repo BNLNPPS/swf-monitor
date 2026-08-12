@@ -677,7 +677,7 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m.get('operation')
         items = m.get('items')
         batch_id = str(m.get('batch_id') or '')
-        if operation not in ('pause', 'resume', 'retry_failures', 'kill'):
+        if operation not in ('pause', 'resume', 'retry_failures', 'finish'):
             self.logger.error(
                 f"PRODOPS panda_task_operations: bad operation {operation!r}")
             return
@@ -1597,7 +1597,7 @@ class EpicProdOpsAgent(BaseAgent):
         operation = str(message.get('operation') or '')
         batch_id = str(message.get('batch_id') or '')
         items = message.get('items') or []
-        if (operation not in ('pause', 'resume', 'retry_failures', 'kill')
+        if (operation not in ('pause', 'resume', 'retry_failures', 'finish')
                 or not batch_id or not items):
             return
         operation = operation.replace('_', ' ')

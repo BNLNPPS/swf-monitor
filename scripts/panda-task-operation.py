@@ -20,8 +20,8 @@ DEFAULT_AUTH_VO = "EIC.production"
 # Single-op verbs whose PanDA acceptance is followed by task-state
 # verification. Single-op retry_failures keeps its fire-and-report
 # behavior for the compose page; batch retry_failures verifies.
-STATE_CHANGE_OPERATIONS = ("pause", "resume", "kill")
-BATCH_OPERATIONS = ("pause", "resume", "retry_failures", "kill")
+STATE_CHANGE_OPERATIONS = ("pause", "resume", "finish")
+BATCH_OPERATIONS = ("pause", "resume", "retry_failures", "finish")
 # A retried task has left these states once JEDI acts on the command.
 RETRY_TERMINAL_STATUSES = (
     "finished", "failed", "done", "exhausted", "aborted", "broken")
@@ -91,9 +91,14 @@ def _inside_pclient(payload_path):
         result = client.increase_attempt_nr(jedi_task_id, int(payload.get("increase") or 1))
     elif operation == "retry_failures":
         new_parameters = payload.get("new_parameters") or None
+        if new_parameters is None:
+            observed, _diag = _panda_task_status(
+                Client.getTaskStatus(jedi_task_id, False))
+            if observed == "aborted":
+                new_parameters = _reactivation_params(Client, jedi_task_id)
         result = client.retry_task(jedi_task_id, new_parameters=new_parameters)
-    elif operation == "kill":
-        result = Client.killTask(jedi_task_id, False)
+    elif operation == "finish":
+        result = Client.finishTask(jedi_task_id, False)
     elif operation in ("pause", "resume"):
         action = Client.pauseTask if operation == "pause" else Client.resumeTask
         result = action(jedi_task_id, False)
@@ -101,6 +106,8 @@ def _inside_pclient(payload_path):
         raise ValueError(f"unknown operation {operation!r}")
 
     ok, diagnostic = _panda_result_ok(result)
+    if operation == "retry_failures":
+        ok = _retry_accepted(ok, diagnostic)
     output = {
         "operation": operation,
         "jedi_task_id": jedi_task_id,
@@ -133,6 +140,41 @@ def _inside_pclient(payload_path):
         _log(f"ERROR: PanDA returned failure for {operation} on {jedi_task_id}: {diagnostic}")
         return 1
     return 0
+
+
+def _reactivation_params(Client, jedi_task_id):
+    """No-op parameter restatement that routes an aborted task through
+    PanDA's reactivation path (retry with new_parameters -> incexec, the
+    only retry the command gate accepts for aborted; verified live on
+    task 38541). Restates the stored taskPriority verbatim so nothing
+    about the task changes. Returns None when the stored parameters
+    cannot be read — the caller then sends a plain retry, whose refusal
+    diagnostic is recorded, rather than risking a priority change."""
+    try:
+        status, output = Client.getTaskParamsMap(jedi_task_id)
+    except Exception as exc:
+        _log(f"WARNING: getTaskParamsMap failed for {jedi_task_id}: {exc}")
+        return None
+    if status == 0 and isinstance(output, (list, tuple)) and len(output) > 1:
+        params = output[1]
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except ValueError:
+                params = None
+        if isinstance(params, dict) and params.get("taskPriority") is not None:
+            return {"taskPriority": params["taskPriority"]}
+    _log(f"WARNING: no stored taskPriority for {jedi_task_id}; "
+         "cannot build reactivation params")
+    return None
+
+
+def _retry_accepted(ok, diagnostic):
+    """Plain retry acceptance is return code 0; the reactivation path
+    answers return code 3 with an explicit acceptance message."""
+    if ok:
+        return True
+    return "reactivation accepted" in str(diagnostic or "")
 
 
 def _panda_result_ok(result):
@@ -178,8 +220,8 @@ def _task_state_verified(operation, observed_status):
         return observed_status == "paused"
     if operation == "resume":
         return observed_status not in ("paused", "throttled", "staging")
-    if operation == "kill":
-        return observed_status in ("aborting", "aborted")
+    if operation == "finish":
+        return observed_status in ("finishing", "passed", "finished", "done")
     if operation == "retry_failures":
         return observed_status not in RETRY_TERMINAL_STATUSES
     return False
@@ -191,17 +233,30 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
     actions = {
         "pause": Client.pauseTask,
         "resume": Client.resumeTask,
-        "retry_failures": Client.retryTask,
-        "kill": Client.killTask,
     }
-    action = actions[operation]
     results = []
     for index, item in enumerate(items):
         operation_id = str(item.get("operation_id") or "")
         jedi_task_id = int(item["jedi_task_id"])
         try:
-            panda_result = action(jedi_task_id, False)
+            if operation == "retry_failures":
+                # An aborted task takes the reactivation path (retry with
+                # new_parameters -> incexec); plain retry refuses aborted.
+                observed, _diag = _panda_task_status(
+                    Client.getTaskStatus(jedi_task_id, False))
+                if observed == "aborted":
+                    panda_result = Client.retryTask(
+                        jedi_task_id, False,
+                        newParams=_reactivation_params(Client, jedi_task_id))
+                else:
+                    panda_result = Client.retryTask(jedi_task_id, False)
+            elif operation == "finish":
+                panda_result = Client.finishTask(jedi_task_id, False)
+            else:
+                panda_result = actions[operation](jedi_task_id, False)
             accepted, diagnostic = _panda_result_ok(panda_result)
+            if operation == "retry_failures":
+                accepted = _retry_accepted(accepted, diagnostic)
         except Exception as exc:
             panda_result = None
             accepted = False
@@ -254,7 +309,7 @@ def main():
     ap.add_argument(
         "--operation",
         choices=["increase_attempts", "retry_failures", "pause", "resume",
-                 "kill"],
+                 "finish"],
     )
     ap.add_argument("--jedi-task-id", type=int)
     ap.add_argument("--increase", type=int, default=1)

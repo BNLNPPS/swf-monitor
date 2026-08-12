@@ -32,8 +32,8 @@
         <option value=""></option>
         <option value="pause">Pause</option>
         <option value="resume">Resume</option>
-        <option value="retry_failures">Retry failed jobs</option>
-        <option value="kill">Kill</option>
+        <option value="retry_failures">Restart and retry failures</option>
+        <option value="finish">Stop and finish task</option>
     </select>
     <button type="submit" id="panda-bulk-submit" class="btn btn-success btn-sm" disabled>Submit</button>
     <span id="panda-bulk-status" class="fw-semibold d-none" role="status"></span>
@@ -83,7 +83,7 @@ function taskCheckboxes() {
     return Array.from(document.querySelectorAll('.panda-task-select'));
 }
 
-const BULK_ACTIONS = ['pause', 'resume', 'retry_failures', 'kill'];
+const BULK_ACTIONS = ['pause', 'resume', 'retry_failures', 'finish'];
 
 function checkboxEligible(checkbox, action) {
     if (!action) return false;
@@ -211,8 +211,8 @@ bulkForm.addEventListener('submit', async function (event) {
     const operation = bulkAction.value;
     const taskIds = selectedTaskIds();
     if (!operation || !taskIds.length) return;
-    if (operation === 'kill'
-        && !window.confirm(`Kill ${taskIds.length} task${taskIds.length === 1 ? '' : 's'}? This cannot be undone.`)) {
+    if (operation === 'finish'
+        && !window.confirm(`Stop and finish ${taskIds.length} task${taskIds.length === 1 ? '' : 's'}? Running jobs stop; completed output is kept and the task can be retried later.`)) {
         return;
     }
     bulkBusy = true;
