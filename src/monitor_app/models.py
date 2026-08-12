@@ -619,9 +619,12 @@ class SysConfig(models.Model):
             return config[key]
         cls.update_config({key: default}, username='autoseed')
         from .epicprod_logging import log_epicprod_action
+        # Mechanical seeding, not an operator decision: recorded, never
+        # on the live feed (operator edits via update_config stay live).
         log_epicprod_action(
             'web', 'sysconfig_edit', username='autoseed',
-            sublevel='high', live_default=True,
+            sublevel='low', live_default=False,
+            summary=f'seeded {key} at its code default {default!r}',
             message=f'sysconfig_edit ok — autoseeded {key}={default!r} '
                     f'(first read of unset key)')
         return default

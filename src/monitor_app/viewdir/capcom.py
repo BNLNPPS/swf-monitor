@@ -550,5 +550,6 @@ class NoticeSubscriptionViewSet(viewsets.ModelViewSet):
             subject_type='notice_subscription',
             subject_key=f'{obj.subscriber}:{obj.event}',
             username=getattr(self.request.user, 'username', '') or '',
-            sublevel='normal', live_default=True,
+            sublevel='normal', live_default=False,
+            summary=f'{change}: {obj.subscriber} subscribes to {obj.event}',
             change=change, delivery=obj.delivery, enabled=obj.enabled)

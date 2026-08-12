@@ -245,7 +245,7 @@ ACTION_DEFAULTS = {
                        "notice stamp for notice routing.",
     },
     'notice_subscription_edit': {
-        'sublevel': 'normal', 'live': True,
+        'sublevel': 'normal', 'live': False,
         'description': "A notice-routing subscription was created, changed, "
                        "or removed through the subscriptions API.",
     },
