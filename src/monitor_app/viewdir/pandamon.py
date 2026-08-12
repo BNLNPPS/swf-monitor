@@ -680,6 +680,11 @@ def panda_jobs_list(request):
         'ended_before': (ended_before.isoformat()
                          if ended_before is not None else ''),
         'jobs_window_label': jobs_window_label,
+        # Nearest Snapper named window covering this page's day range,
+        # for the Snapper view link on the time-window line.
+        'snapper_window': ('24h' if days <= 1 else
+                           '48h' if days <= 2 else
+                           '7d' if days <= 7 else '30d'),
     }
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_jobs_list.html', context)
