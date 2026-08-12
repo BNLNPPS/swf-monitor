@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import hashlib
+import re
 from html import escape
 from datetime import date, datetime, time, timedelta
 from urllib.parse import quote, urlencode, urlparse
@@ -1405,6 +1406,30 @@ def panda_task_detail(request, jeditaskid):
         )
         if value not in (None, '')
     ]
+    # PanDA attributes every command to the DN of the issuing credential,
+    # so agent-executed operations read as the credential holder in
+    # errordialog. When the durable operation record identifies the real
+    # requester, render the system as the actor and the requester by name.
+    errordialog_display = str(task.get('errordialog') or '')
+    dialog_match = re.match(
+        r'^(pause|resume|retry|incexec|finish|kill)\s+by\s+', errordialog_display)
+    if dialog_match:
+        verb_operations = {
+            'pause': 'pause', 'resume': 'resume', 'finish': 'finish',
+            'kill': 'finish', 'retry': 'retry_failures',
+            'incexec': 'retry_failures',
+        }
+        attributed_op = (PandaTaskOperation.objects
+                         .filter(jedi_task_id=int(jeditaskid),
+                                 operation=verb_operations[dialog_match.group(1)])
+                         .exclude(status__in=('failed', 'timeout'))
+                         .order_by('-requested_at')
+                         .first())
+        if attributed_op and attributed_op.requested_by:
+            errordialog_display = (
+                f'{dialog_match.group(1)} by epicprod. '
+                f'Requested by {attributed_op.requested_by}')
+
     pending_operation = (PandaTaskOperation.objects
                          .filter(
                              jedi_task_id=int(jeditaskid),
@@ -1419,6 +1444,7 @@ def panda_task_detail(request, jeditaskid):
 
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
+        'errordialog_display': errordialog_display,
         'jeditaskid': jeditaskid,
         'pcs_task': pcs_task,
         'panda_tasks_metadata': (panda_tasks_row.metadata if panda_tasks_row else {}),
