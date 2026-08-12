@@ -28,21 +28,22 @@
   <text x="147" y="175" text-anchor="middle" font-size="14" fill="#333">e.g. workflow completion,</text>
   <text x="147" y="193" text-anchor="middle" font-size="14" fill="#333">task pause/restart</text>
 
-  <line x1="147" y1="205" x2="147" y2="226" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="147" y1="205" x2="147" y2="261" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="159" y="238" font-size="14" fill="#555">logging system</text>
 
   <!-- Action stream -->
-  <rect x="30" y="230" width="235" height="120" rx="10" fill="#fff3e0" stroke="#bf360c" stroke-width="2" filter="url(#shadow)"/>
-  <text x="147" y="260" text-anchor="middle" font-size="17" font-weight="bold" fill="#bf360c">The action stream</text>
-  <text x="147" y="286" text-anchor="middle" font-size="14" fill="#333">The running record of every</text>
-  <text x="147" y="304" text-anchor="middle" font-size="14" fill="#333">operation the system performs,</text>
-  <text x="147" y="322" text-anchor="middle" font-size="14" fill="#333">with structured attributes</text>
+  <rect x="30" y="265" width="235" height="120" rx="10" fill="#fff3e0" stroke="#bf360c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="147" y="295" text-anchor="middle" font-size="17" font-weight="bold" fill="#bf360c">The action stream</text>
+  <text x="147" y="321" text-anchor="middle" font-size="14" fill="#333">The running record of every</text>
+  <text x="147" y="339" text-anchor="middle" font-size="14" fill="#333">operation the system performs,</text>
+  <text x="147" y="357" text-anchor="middle" font-size="14" fill="#333">with structured attributes</text>
 
-  <line x1="265" y1="290" x2="310" y2="290" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="265" y1="325" x2="310" y2="325" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Router -->
   <rect x="315" y="185" width="310" height="210" rx="10" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" filter="url(#shadow)"/>
   <text x="470" y="213" text-anchor="middle" font-size="17" font-weight="bold" fill="#0d47a1">Notice router</text>
-  <text x="470" y="236" text-anchor="middle" font-size="14" fill="#333">One pass per cycle of the tailer service</text>
+  <text x="470" y="236" text-anchor="middle" font-size="14" fill="#333">Processes each new incident as it arrives</text>
 
   <rect x="330" y="250" width="280" height="60" rx="6" fill="#ffffff" stroke="#1565c0" stroke-width="1.5"/>
   <text x="470" y="273" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Match: incident name + filters</text>
@@ -57,7 +58,7 @@
   <text x="470" y="531" text-anchor="middle" font-size="14" fill="#333">incident &#183; filters &#183; delivery mode</text>
 
   <line x1="470" y1="455" x2="470" y2="400" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="482" y="432" font-size="14" fill="#555">read every pass</text>
+  <text x="482" y="432" font-size="14" fill="#555">re-read continuously</text>
 
   <!-- Registration (consumer side) -->
   <line x1="1030" y1="435" x2="1030" y2="510" stroke="#388e3c" stroke-width="2" stroke-dasharray="6 4"/>
