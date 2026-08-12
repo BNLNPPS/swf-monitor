@@ -96,3 +96,12 @@ becomes a plugin; its formatting is unchanged.
    the nightly heartbeat working end to end.
 2. Migration of the direct Capcom posters to subscriptions.
 3. The Mattermost publisher as a push plugin.
+
+## Status
+
+Step 1 is deployed (2026-08-11) and verified end to end: the router runs
+in the publisher cycle (`monitor_app/notice_router.py`), subscriptions
+serve at `/api/notices/subscriptions/`, and the first subscription —
+`capcom ← workflow_execution_completed`, filter `notice=true` — delivers
+the nightly testbed heartbeat from the stamped `testbed run --notice`
+cron run. Steps 2 and 3 are pending.
