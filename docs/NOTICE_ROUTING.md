@@ -14,7 +14,7 @@ The design separates three concerns that today are partially fused:
 - **Subscriptions** — who wants what, registered by the consumer.
 - **Delivery** — how a matched incident reaches each subscriber.
 
-[![Notice routing](notice_routing.svg)](notice_routing.svg)
+[![Notification system](notice_routing.svg)](https://raw.githubusercontent.com/BNLNPPS/swf-monitor/infra/baseline-v42/docs/notice_routing.svg)
 
 ## Incidents
 
