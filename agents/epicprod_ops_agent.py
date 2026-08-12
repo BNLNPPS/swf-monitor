@@ -115,7 +115,7 @@ PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
 
 SANDBOX_KEEPALIVE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-sandbox-keepalive.py"
-SANDBOX_KEEPALIVE_TIMEOUT = int(os.environ.get("EPICPROD_SANDBOX_KEEPALIVE_TIMEOUT", "300"))
+SANDBOX_KEEPALIVE_TIMEOUT = int(os.environ.get("EPICPROD_SANDBOX_KEEPALIVE_TIMEOUT", "600"))
 PANDA_TASK_BULK_SEND_INTERVAL = 1.0
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus

@@ -16,6 +16,13 @@ source server come from its stored parameters (``jedi_taskparams``). A
 tarball already purged is reported per task — that task is not natively
 retryable. Aborted and broken tasks are not kept alive.
 
+The same pass maintains log-dataset lifetimes: each candidate task's
+BNL Rucio datasets (located by ``task_id`` metadata) whose expiry falls
+inside the retention window are refreshed to the full window, so the
+logs of a task that is still active or recently final never expire on
+their original registration-time clock. Datasets carrying no expiry are
+left untouched.
+
 The prod-ops agent's doer for the nightly ``catalog_sync`` chain step;
 Django-bootstrap standalone script — also usable by hand. Auth is the
 production x509 proxy (``X509_USER_PROXY``) as TLS client certificate,
@@ -103,6 +110,62 @@ def _task_sandbox(jedi_task_id):
     return sorted(sources)[0], sorted(tarballs)[0]
 
 
+def _refresh_log_lifetimes(jedi_task_ids, final_days):
+    """Refresh the lifetime of candidate tasks' BNL Rucio datasets.
+
+    A dataset whose expiry falls inside the retention window gets a fresh
+    ``final_days`` lifetime; one with no expiry is left alone. Failures
+    are reported per dataset, never raised.
+    """
+    result = {"checked": 0, "refreshed": 0, "errors": []}
+    try:
+        from rucio.client import Client
+    except ImportError as e:
+        result["errors"].append(f"rucio client unavailable: {e}")
+        _log(f"WARNING: log-lifetime refresh skipped: {e}")
+        return result
+    rucio_url = os.environ.get("RUCIO_URL", "https://nprucio01.sdcc.bnl.gov:443")
+    scope = os.environ.get("RUCIO_SCOPE", "group.EIC")
+    try:
+        client = Client(
+            rucio_host=rucio_url, auth_host=rucio_url,
+            account=os.environ.get("RUCIO_ACCOUNT", "panda"),
+            auth_type="x509_proxy", creds={"client_proxy": X509_PROXY},
+            ca_cert=None, vo=os.environ.get("RUCIO_VO", "eic"))
+        client.whoami()
+    except Exception as e:
+        result["errors"].append(f"BNL Rucio auth failed: {e}")
+        _log(f"WARNING: log-lifetime refresh skipped: auth failed: {e}")
+        return result
+    import datetime as dt
+    horizon = dt.datetime.utcnow() + dt.timedelta(days=final_days)
+    for jedi_task_id in jedi_task_ids:
+        try:
+            names = list(client.list_dids(
+                scope=scope, filters={"task_id": int(jedi_task_id)},
+                did_type="dataset"))
+        except Exception as e:
+            result["errors"].append(f"task {jedi_task_id}: list_dids: {e}")
+            _log(f"WARNING: lifetime lookup failed for task {jedi_task_id}: {e}")
+            continue
+        for name in names:
+            try:
+                result["checked"] += 1
+                meta = client.get_metadata(scope=scope, name=name)
+                expired_at = meta.get("expired_at")
+                if expired_at is None or expired_at >= horizon:
+                    continue
+                client.set_metadata(scope=scope, name=name, key="lifetime",
+                                    value=final_days * 86400)
+                result["refreshed"] += 1
+                _log(f"refreshed lifetime for task {jedi_task_id} dataset "
+                     f"{scope}:{name} (was expiring {expired_at})")
+            except Exception as e:
+                result["errors"].append(f"{name}: {e}")
+                _log(f"WARNING: lifetime refresh failed for {scope}:{name}: {e}")
+    return result
+
+
 def _touch(source_url, tarball):
     """POST touch_cache_file; returns (status, message) where status is
     'touched', 'missing', or 'error'."""
@@ -177,6 +240,13 @@ def main():
             _log(f"ERROR: touch failed for {tarball} on {source_url}: "
                  f"{message}")
 
+    if args.dry_run:
+        lifetimes = {"checked": 0, "refreshed": 0, "errors": [],
+                     "skipped": "dry run"}
+    else:
+        lifetimes = _refresh_log_lifetimes(
+            [jedi_task_id for jedi_task_id, _ in tasks], final_days)
+
     summary = {
         "final_days": final_days,
         "candidates": len(tasks),
@@ -185,11 +255,12 @@ def main():
         "touched": len(touched),
         "missing": missing,
         "errors": errors,
+        "log_lifetimes": lifetimes,
         "dry_run": bool(args.dry_run),
-        "ok": not errors,
+        "ok": not errors and not lifetimes["errors"],
     }
     print(json.dumps(summary, default=str))
-    return 0 if not errors else 1
+    return 0 if summary["ok"] else 1
 
 
 if __name__ == "__main__":
