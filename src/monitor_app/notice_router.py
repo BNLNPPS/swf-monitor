@@ -30,21 +30,34 @@ def _init_high_water():
         logger.info("notice router: initialized high-water mark at %s", head)
 
 
-def _matches(sub, action, extra):
+def _matches(sub, row, action, extra, live_policy):
     """One subscription against one event: name (exact or trailing-*
     prefix), then equality over the structured fields. A list-valued
     filter means membership, so one subscription covers a value set
-    ({'operation': ['pause', 'resume']})."""
+    ({'operation': ['pause', 'resume']}). Two reserved keys reach beyond
+    the event's own attributes: ``app_name`` matches the record's logging
+    namespace, and ``live`` matches the event's effective live state —
+    the runtime live-policy override where one exists, else the record's
+    ``live_default`` — so a subscription can select the live stream as
+    data (NOTICE_ROUTING.md § Subscriptions)."""
     if sub.event.endswith('*'):
         if not action.startswith(sub.event[:-1]):
             return False
     elif action != sub.event:
         return False
     for key, want in (sub.filters or {}).items():
+        if key == 'app_name':
+            have = row.app_name
+        elif key == 'live':
+            override = live_policy.get(action)
+            have = bool(override if override is not None
+                        else extra.get('live_default'))
+        else:
+            have = extra.get(key)
         if isinstance(want, list):
-            if extra.get(key) not in want:
+            if have not in want:
                 return False
-        elif extra.get(key) != want:
+        elif have != want:
             return False
     return True
 
@@ -94,8 +107,10 @@ def route_new_events():
     cycle guard and are logged there — a failed pass retries from the
     same mark next cycle.
     """
+    from monitor_app.epicprod_logging import get_live_policy
     from monitor_app.models import (AppLog, CapcomNotice,
                                     NoticeSubscription, PersistentState)
+    from monitor_app.notice_plugins import PLUGINS
 
     _init_high_water()
     last_id = int(PersistentState.get_state().get(STATE_KEY) or 0)
@@ -105,26 +120,57 @@ def route_new_events():
                 .order_by('id')[:BATCH_MAX])
     if not rows:
         return 0
+    live_policy = get_live_policy()
     delivered = 0
+    active_plugins = []
+    failed_plugins = set()
     for row in rows:
         extra = row.extra_data if isinstance(row.extra_data, dict) else {}
         action = str(extra.get('action') or '')
         for sub in subs:
-            if not action or not _matches(sub, action, extra):
+            if not action or not _matches(sub, row, action, extra,
+                                          live_policy):
                 continue
-            if sub.delivery != 'buffer':
+            if sub.delivery == 'buffer':
+                content = _compose(row, extra)
+                _, created = CapcomNotice.objects.get_or_create(
+                    subscriber=sub.subscriber,
+                    dedup_key=f'event:{row.id}:{sub.subscriber}',
+                    defaults=content)
+                delivered += int(created)
+                continue
+            plugin = PLUGINS.get(sub.delivery)
+            if plugin is None:
                 logger.error(
                     "notice router: unknown delivery %r on subscription "
                     "%s ← %s; row %s not delivered",
                     sub.delivery, sub.subscriber, sub.event, row.id)
                 continue
-            content = _compose(row, extra)
-            CapcomNotice.objects.create(
-                subscriber=sub.subscriber,
-                dedup_key=f'event:{row.id}:{sub.subscriber}',
-                **content)
-            delivered += 1
+            # Push is at-most-once: a failure is logged and the pass
+            # continues, so a push outage never stalls buffered delivery.
+            # A plugin whose start_pass fails sits out the rest of the
+            # pass rather than re-failing on every matched row.
+            if sub.delivery in failed_plugins:
+                continue
+            try:
+                if plugin not in active_plugins:
+                    plugin.start_pass()
+                    active_plugins.append(plugin)
+                plugin.deliver(row, extra)
+                delivered += 1
+            except Exception:
+                if plugin not in active_plugins:
+                    failed_plugins.add(sub.delivery)
+                logger.exception(
+                    "notice router: push delivery %r failed for row %s "
+                    "(subscription %s ← %s)",
+                    sub.delivery, row.id, sub.subscriber, sub.event)
         PersistentState.update_state({STATE_KEY: int(row.id)})
+    for plugin in active_plugins:
+        try:
+            plugin.end_pass()
+        except Exception:
+            logger.exception("notice router: end_pass failed for a plugin")
     if delivered:
         logger.info("notice router: delivered %d notices (through row %s)",
                     delivered, rows[-1].id)

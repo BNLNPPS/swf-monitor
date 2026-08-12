@@ -35,7 +35,11 @@ A `NoticeSubscription` row: subscriber name, event name (exact or trailing
 wildcard), attribute filters (equality matches over the record's structured
 fields; a list-valued filter means membership, so one subscription covers a
 value set such as `{"operation": ["pause", "resume"]}`), delivery mode,
-enabled flag, creator. Token-authed CRUD at
+enabled flag, creator. Two reserved filter keys reach beyond the event's
+own attributes: `app_name` matches the record's logging namespace, and
+`live` matches the event's effective live state — the runtime live-policy
+override where one exists, else the record's `live_default` — so the live
+stream is selectable as a subscription. Token-authed CRUD at
 `/api/notices/subscriptions/`, so a third-party system registers and
 maintains its own subscriptions without swf code changes. Subscription
 changes are themselves logged actions.
@@ -50,9 +54,13 @@ Two modes, chosen per subscription:
   subscriber tag; the existing drain endpoint and retention behavior carry
   over), and preserves the external-consumer boundary: swf buffers locally
   and holds no credential into any external system.
-- **Push plugin** — the router hands the event to a named in-process plugin.
-  The `#epicprod-live` Mattermost publisher becomes the first plugin; each
-  plugin's settings live in SysConfig.
+- **Push plugin** — the router hands the event to a named in-process plugin:
+  the subscription's delivery value is the plugin name, resolved in the
+  registry in `monitor_app/notice_plugins.py`. Push delivery is
+  at-most-once — a delivery failure is logged and the pass continues, so a
+  push outage never stalls buffered-pull delivery; the event remains on the
+  log record page. The `#epicprod-live` Mattermost publisher is the first
+  plugin (`mattermost-live`); each plugin's settings live in SysConfig.
 
 Notice composition from the event is deterministic: title from the action
 and subject, detail from `narration`/`reason`/`summary` where present, URL
@@ -98,8 +106,13 @@ outcomes (salvage and quarantine, floor-verdict severity); and
 `delivery_daily_rebuild` (newest-day arrivals as `summary`, the campaign
 view as `url`). The `/api/capcom/notices/ingest/` endpoint remains for
 genuinely external posters. The Mattermost publisher's event selection
-(live + importance threshold) is re-expressed as a subscription when it
-becomes a plugin; its formatting is unchanged.
+(live + importance threshold) is the `epicprod-live` subscription — event
+`*`, filters `{"app_name": "epicprod", "live": true, "sublevel": ["high",
+"normal"]}`, delivery `mattermost-live`; its formatting is unchanged. The
+importance threshold is the subscription's `sublevel` list, edited over
+REST; the `epicprod_live_min_sublevel` SysConfig knob is retired. The
+channel name (`epicprod_live_channel`) and poll cadence
+(`epicprod_live_poll_seconds`) remain SysConfig knobs.
 
 ## Delivery sequence
 
@@ -118,4 +131,7 @@ serve at `/api/notices/subscriptions/`, and the first subscription —
 the nightly testbed heartbeat from the stamped `testbed run --notice`
 cron run. Step 2 (2026-08-12) migrated the direct Capcom posters to the
 four subscriptions listed under Migration and retired their posting code.
-Step 3 is pending.
+Step 3 (2026-08-12) moved the Mattermost publication into the
+`mattermost-live` push plugin, selected by the `epicprod-live`
+subscription; the `publish_epicprod_live` command is now only the tailer
+loop around the routing pass.
