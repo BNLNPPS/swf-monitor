@@ -43,6 +43,9 @@ Capabilities:
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        pause/resume, increase attempts, or retry failed work.
   panda_task_operations — run one paced bulk pause/resume request.
+  panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
+                       the PanDA server cache so the 7-day purge passes them
+                       by (nightly catalog_sync chain step).
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -110,6 +113,9 @@ SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "subm
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
+
+SANDBOX_KEEPALIVE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-sandbox-keepalive.py"
+SANDBOX_KEEPALIVE_TIMEOUT = int(os.environ.get("EPICPROD_SANDBOX_KEEPALIVE_TIMEOUT", "300"))
 PANDA_TASK_BULK_SEND_INTERVAL = 1.0
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
@@ -199,6 +205,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "panda_task_operation", "panda_task_operations",
+                   "panda_sandbox_keepalive",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "association_sweep", "catalog_sync", "questionnaire_import",
@@ -1252,6 +1259,7 @@ class EpicProdOpsAgent(BaseAgent):
         t0 = time.monotonic()
         steps = [
             ('credential_expiry_check', self._do_credential_expiry_check),
+            ('panda_sandbox_keepalive', self._do_panda_sandbox_keepalive),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -1282,6 +1290,73 @@ class EpicProdOpsAgent(BaseAgent):
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
             steps=len(steps), raised=failed)
+
+    def _handle_panda_sandbox_keepalive(self, m):
+        """Keep retryable tasks' sandbox tarballs alive in the PanDA server
+        cache; normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_panda_sandbox_keepalive, m,
+            dedup_key="panda_sandbox_keepalive",
+            label="panda_sandbox_keepalive")
+
+    def _do_panda_sandbox_keepalive(self, m):
+        """Touch the sandbox tarball of every task worth keeping retryable
+        (catalog_sync chain step): the server's 7-day cache purge is
+        modification-time based, and touch_cache_file resets the clock. A
+        tarball already purged marks its tasks as not natively retryable —
+        that is reported, not fatal."""
+        cmd = [sys.executable, str(SANDBOX_KEEPALIVE_SCRIPT)]
+        self.logger.info("PRODOPS panda_sandbox_keepalive: touching sandboxes")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SANDBOX_KEEPALIVE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS panda_sandbox_keepalive TIMEOUT after "
+                f"{SANDBOX_KEEPALIVE_TIMEOUT}s")
+            self._log_action('panda_sandbox_keepalive', t0, outcome='timeout',
+                             reason=f'timed out after {SANDBOX_KEEPALIVE_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  panda-sandbox-keepalive: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  panda-sandbox-keepalive: {line}")
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            pass
+        counts = {k: summary.get(k) for k in
+                  ('candidates', 'tarballs', 'touched')}
+        missing = summary.get('missing') or []
+        if p.returncode != 0:
+            self.logger.error(
+                f"PRODOPS panda_sandbox_keepalive FAILED rc={p.returncode}")
+            self._log_action('panda_sandbox_keepalive', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, **counts)
+        elif missing:
+            tasks = sorted({t for rec in missing for t in rec.get('tasks', [])})
+            reason = (f"sandbox already purged for task(s) {tasks} — "
+                      "not natively retryable")
+            self.logger.warning(f"PRODOPS panda_sandbox_keepalive: {reason}")
+            self._log_action('panda_sandbox_keepalive', t0, outcome='warning',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.WARNING,
+                             missing_tasks=tasks, **counts)
+        else:
+            self.logger.info("PRODOPS panda_sandbox_keepalive done")
+            self._log_action('panda_sandbox_keepalive', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False, **counts)
 
     def _do_credential_expiry_check(self, m):
         """Nightly credential-expiry check (catalog_sync chain step): runs
