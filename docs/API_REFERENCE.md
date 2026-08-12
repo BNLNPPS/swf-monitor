@@ -133,7 +133,8 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   Capcom collector supplies the configured username. Invalid or missing
   usernames return HTTP 400.
 - `GET /api/capcom/notices/?since=ISO8601` - Buffered discrete SWF events
-  (campaign-delivery, campaign-assessment, and task-operation notices)
+  (campaign-delivery, campaign-assessment, task-operation, and
+  catalog-integrity notices)
   created strictly after
   `since`; a naive timestamp is read as UTC, and the default window is the
   trailing 24 hours. Rows return oldest-first so a consumer's next cursor is
