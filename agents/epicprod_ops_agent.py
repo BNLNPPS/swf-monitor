@@ -1294,6 +1294,8 @@ class EpicProdOpsAgent(BaseAgent):
             username=created_by,
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
+            summary=(f'all {len(steps)} sync steps completed'
+                     if not failed else ''),
             steps=len(steps), raised=failed)
 
     def _handle_panda_sandbox_keepalive(self, m):
@@ -1497,7 +1499,9 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
             self._log_action('rucio_sweep', t0,
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True)
+                             sublevel='high', live_default=True,
+                             summary='produced-output Rucio snapshot '
+                                     'refreshed and rematched onto tasks')
 
     def _handle_rucio_arrivals_sweep(self, m):
         """Run the clockwork arrivals sweep off the receiver thread —
@@ -1794,7 +1798,9 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'evgen_rucio_ready', 'ok': True})
             self._log_action('evgen_sweep', t0,
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True)
+                             sublevel='high', live_default=True,
+                             summary='EVGEN input datasets re-resolved '
+                                     'from JLab Rucio')
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
