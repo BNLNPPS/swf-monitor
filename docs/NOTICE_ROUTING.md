@@ -1,45 +1,45 @@
 # Notice Routing
 
 Notice routing extends the action stream ([ACTION_STREAM.md](ACTION_STREAM.md))
-with subscriptions: named events matched to autonomously registered
+with subscriptions: named incidents matched to autonomously registered
 subscribers and delivered per subscriber. The emitting code declares only the
-event; it never names a recipient. Consumers — external systems like personal
+incident; it never names a recipient. Consumers — external systems like personal
 feed aggregators, and delivery plugins like the Mattermost publisher —
-register their own interest and receive matching events through their chosen
+register their own interest and receive matching incidents through their chosen
 delivery mode.
 
 The design separates three concerns that today are partially fused:
 
-- **Events** — what happened, recorded once, named.
+- **Incidents** — what happened, recorded once, named.
 - **Subscriptions** — who wants what, registered by the consumer.
-- **Delivery** — how a matched event reaches each subscriber.
+- **Delivery** — how a matched incident reaches each subscriber.
 
 [![Notice routing](notice_routing.svg)](notice_routing.svg)
 
-## Events
+## Incidents
 
-The action stream is the event source. The `action` identifier is the event
+The action stream is the incident source. The `action` identifier is the incident
 name; the record's structured fields (`subject_type`, `subject_key`,
 `outcome`, `namespace`, free keys) are its attributes. `ACTION_DEFAULTS` is
-the event-name catalog. Emission sites change nothing: recording an action is
-publishing an event.
+the incident-name catalog. Emission sites change nothing: recording an action is
+publishing an incident.
 
 Routing operates on the structured action space across logging namespaces
 (`app_name`), independent of the `sublevel` and `live` axes — those govern
 the built-in human channels (live page, `#epicprod-live`, digests), while
 subscriptions are the extension mechanism for systems. A subscription may
-filter on importance, but a low-importance mechanical event is fully
+filter on importance, but a low-importance mechanical incident is fully
 subscribable.
 
 ## Subscriptions
 
-A `NoticeSubscription` row: subscriber name, event name (exact or trailing
-wildcard), attribute filters (equality matches over the record's structured
+A `NoticeSubscription` row: subscriber name, incident name (exact or trailing
+wildcard; the API field is `event`), attribute filters (equality matches over the record's structured
 fields; a list-valued filter means membership, so one subscription covers a
 value set such as `{"operation": ["pause", "resume"]}`), delivery mode,
-enabled flag, creator. Two reserved filter keys reach beyond the event's
+enabled flag, creator. Two reserved filter keys reach beyond the incident's
 own attributes: `app_name` matches the record's logging namespace, and
-`live` matches the event's effective live state — the runtime live-policy
+`live` matches the incident's effective live state — the runtime live-policy
 override where one exists, else the record's `live_default` — so the live
 stream is selectable as a subscription. Token-authed CRUD at
 `/api/notices/subscriptions/`, so a third-party system registers and
@@ -56,18 +56,18 @@ Two modes, chosen per subscription:
   subscriber tag; the existing drain endpoint and retention behavior carry
   over), and preserves the external-consumer boundary: swf buffers locally
   and holds no credential into any external system.
-- **Push plugin** — the router hands the event to a named in-process plugin:
+- **Push plugin** — the router hands the incident to a named in-process plugin:
   the subscription's delivery value is the plugin name, resolved in the
   registry in `monitor_app/notice_plugins.py`. Push delivery is
   at-most-once — a delivery failure is logged and the pass continues, so a
-  push outage never stalls buffered-pull delivery; the event remains on the
+  push outage never stalls buffered-pull delivery; the incident remains on the
   log record page. The `#epicprod-live` Mattermost publisher is the first
   plugin (`mattermost-live`); each plugin's settings live in SysConfig.
 
-Notice composition from the event is deterministic: title from the action
+Notice composition from the incident is deterministic: title from the action
 and subject, detail from `narration`/`reason`/`summary` where present, URL
 to the log record, severity from the outcome, dedup key from the record id.
-Composition belongs to the router, not to emitters or subscribers. Events
+Composition belongs to the router, not to emitters or subscribers. Incidents
 may carry `severity` (how bad — e.g. an assessment verdict) and `url`
 (where to look — a subject page rather than the log record) as ordinary
 attributes; the router honors them and absolutizes a path-form `url` onto
@@ -79,17 +79,17 @@ and performs deliveries, with per-cycle caps and counted overflow, never
 silent drops. Emission stays pure and never blocks or fails on delivery
 problems.
 
-## Workflow completion events
+## Workflow completion incidents
 
 Workflow execution status changes arrive by plain REST update and record no
-action today. The execution update path gains a terminal-transition event:
+action today. The execution update path gains a terminal-transition incident:
 when status reaches `completed` or `failed`, it logs
 `workflow_execution_completed` (namespace, execution id, status, elapsed,
 and a `notice` attribute carried from the execution's parameters).
 `testbed run --notice` (equivalently a `testbed.toml` key) stamps the run.
 
 The first use is the nightly testbed heartbeat: the overnight cron run
-carries the stamp, and a subscription (subscriber `capcom`, event
+carries the stamp, and a subscription (subscriber `capcom`, incident
 `workflow_execution_completed`, filter `notice=true`) delivers exactly one
 notice per overnight run into the operator's feed — one notice for each
 day the testbed ran, with warning severity on failure.
@@ -97,18 +97,18 @@ day the testbed ran, with warning severity on failure.
 ## Migration
 
 The direct Capcom posters (ops-agent pause/resume terminal notices, the
-assessment and delivery-daily notices) emit matching stream events carrying
+assessment and delivery-daily notices) emit matching stream incidents carrying
 the needed fields; each is a subscription and its bespoke posting code is
 retired. The subscriptions replacing them: `panda_task_operation` with
 `operation` in pause/resume (single and bulk, terminal outcomes only —
-the events carry the human count line as `summary` and the task page as
+the incidents carry the human count line as `summary` and the task page as
 `url`); `assessment_register` filtered to the scheduled kinds (narration,
 verdict severity, report url); `assessment_enforce` filtered to error
 outcomes (salvage and quarantine, floor-verdict severity); and
 `delivery_daily_rebuild` (newest-day arrivals as `summary`, the campaign
 view as `url`). The `/api/capcom/notices/ingest/` endpoint remains for
-genuinely external posters. The Mattermost publisher's event selection
-(live + importance threshold) is the `epicprod-live` subscription — event
+genuinely external posters. The Mattermost publisher's incident selection
+(live + importance threshold) is the `epicprod-live` subscription — incident
 `*`, filters `{"app_name": "epicprod", "live": true, "sublevel": ["high",
 "normal"]}`, delivery `mattermost-live`; its formatting is unchanged. The
 importance threshold is the subscription's `sublevel` list, edited over
@@ -119,7 +119,7 @@ channel name (`epicprod_live_channel`) and poll cadence
 ## Delivery sequence
 
 1. The router service, the subscription model and REST, buffered-pull
-   delivery on the generalized store, and the workflow-completion event —
+   delivery on the generalized store, and the workflow-completion incident —
    the nightly heartbeat working end to end.
 2. Migration of the direct Capcom posters to subscriptions.
 3. The Mattermost publisher as a push plugin.
