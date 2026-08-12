@@ -11,10 +11,17 @@ finalization and the gen-VO JEDI plugins, unlike ATLAS's, never reopen them,
 so a post-final retry otherwise fails every log registration (DDM error 200,
 "is closed"). The reopen runs in this outer process under the invoking venv
 (rucio client + X509_USER_PROXY); its report is merged into the result JSON.
+
+Retry-class operations are refused when the task's sandbox tarball is no
+longer in the server cache (checked against the task's stored parameters and
+a HEAD of the cache URL): every generated job would fail its pre-process
+download, so the retry is reported refused with a resubmit recommendation
+instead of being sent. --force-retry bypasses the guard.
 """
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -146,6 +153,7 @@ def _run_inside_pclient(args):
         "poll_interval": args.poll_interval,
         "send_interval": args.send_interval,
         "items": args.items,
+        "force": bool(getattr(args, "force_retry", False)),
     }
     with tempfile.TemporaryDirectory(prefix="panda-task-operation.") as tmpdir:
         payload_path = os.path.join(tmpdir, "payload.json")
@@ -194,6 +202,19 @@ def _inside_pclient(payload_path):
         )
         print(json.dumps(output, default=str))
         return 0
+
+    if operation in RETRY_OPERATIONS and not payload.get("force"):
+        available, detail = _sandbox_available(Client, jedi_task_id)
+        if available is False:
+            _log(f"ERROR: refused {operation} on {jedi_task_id}: {detail}")
+            print(json.dumps({
+                "operation": operation, "jedi_task_id": jedi_task_id,
+                "ok": False, "refused": "sandbox_purged",
+                "diagnostic": detail, "result": None,
+            }, default=str))
+            return 1
+        if available is None:
+            _log(f"NOTE: sandbox check inconclusive for {jedi_task_id}: {detail}")
 
     if operation == "increase_attempts":
         result = client.increase_attempt_nr(jedi_task_id, int(payload.get("increase") or 1))
@@ -250,6 +271,66 @@ def _inside_pclient(payload_path):
     return 0
 
 
+_TARBALL_RE = re.compile(r"(?:jobO|sources)\.[0-9a-f-]+\.tar\.gz")
+_SOURCE_URL_RE = re.compile(r'"sourceURL":\s*"([^"]+)"')
+
+
+def _taskparams_payload(status, output):
+    """Normalize Client.getTaskParamsMap returns.
+
+    The client has answered both (0, params) with params the dict (or its
+    JSON string) directly, and (0, [code, params]). Returns the params dict
+    or JSON string, or None when unavailable.
+    """
+    if status != 0 or output is None:
+        return None
+    if isinstance(output, (list, tuple)):
+        if len(output) < 2 or output[1] is None:
+            return None
+        return output[1]
+    return output
+
+
+def _sandbox_available(Client, jedi_task_id):
+    """Whether the task's sandbox tarball still exists in the server cache.
+
+    Returns (available, detail): True/False when determined, None when it
+    cannot be determined (no sandbox reference in the stored parameters,
+    unreadable parameters, or an unreachable cache) — the caller proceeds
+    on None rather than blocking a possibly legitimate operation.
+    """
+    try:
+        status, output = Client.getTaskParamsMap(jedi_task_id)
+    except Exception as exc:
+        return None, f"taskparams unavailable: {exc}"
+    params = _taskparams_payload(status, output)
+    if params is None:
+        return None, "taskparams unavailable"
+    text = params if isinstance(params, str) else json.dumps(params)
+    tarballs = _TARBALL_RE.findall(text)
+    sources = _SOURCE_URL_RE.findall(text)
+    if not tarballs or not sources:
+        return None, "no sandbox reference in task parameters"
+    url = f"{sources[0]}/cache/{tarballs[0]}"
+    import ssl
+    import urllib.request
+    request = urllib.request.Request(url, method="HEAD")
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        with urllib.request.urlopen(request, timeout=15, context=context):
+            return True, tarballs[0]
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False, (f"sandbox tarball {tarballs[0]} is purged from "
+                           f"{sources[0]} — retry cannot succeed; "
+                           "resubmit the task instead")
+        return None, f"cache check inconclusive: HTTP {exc.code}"
+    except Exception as exc:
+        return None, f"cache check inconclusive: {exc}"
+
+
 def _reactivation_params(Client, jedi_task_id):
     """No-op parameter restatement that routes an aborted task through
     PanDA's reactivation path (retry with new_parameters -> incexec, the
@@ -263,15 +344,14 @@ def _reactivation_params(Client, jedi_task_id):
     except Exception as exc:
         _log(f"WARNING: getTaskParamsMap failed for {jedi_task_id}: {exc}")
         return None
-    if status == 0 and isinstance(output, (list, tuple)) and len(output) > 1:
-        params = output[1]
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except ValueError:
-                params = None
-        if isinstance(params, dict) and params.get("taskPriority") is not None:
-            return {"taskPriority": params["taskPriority"]}
+    params = _taskparams_payload(status, output)
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except ValueError:
+            params = None
+    if isinstance(params, dict) and params.get("taskPriority") is not None:
+        return {"taskPriority": params["taskPriority"]}
     _log(f"WARNING: no stored taskPriority for {jedi_task_id}; "
          "cannot build reactivation params")
     return None
@@ -346,6 +426,18 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
     for index, item in enumerate(items):
         operation_id = str(item.get("operation_id") or "")
         jedi_task_id = int(item["jedi_task_id"])
+        if operation == "retry_failures":
+            available, detail = _sandbox_available(Client, jedi_task_id)
+            if available is False:
+                _log(f"ERROR: refused retry_failures on {jedi_task_id}: {detail}")
+                results.append({
+                    "operation_id": operation_id,
+                    "jedi_task_id": jedi_task_id,
+                    "accepted": False, "verified": False,
+                    "observed_status": "", "refused": "sandbox_purged",
+                    "diagnostic": detail, "result": None,
+                })
+                continue
         try:
             if operation == "retry_failures":
                 # An aborted task takes the reactivation path (retry with
@@ -428,6 +520,8 @@ def main():
     ap.add_argument("--verify-timeout", type=int, default=90)
     ap.add_argument("--poll-interval", type=float, default=5)
     ap.add_argument("--send-interval", type=float, default=1)
+    ap.add_argument("--force-retry", action="store_true",
+                    help="bypass the purged-sandbox retry guard")
     ap.add_argument("--batch", action="store_true")
     ap.add_argument("--inside-pclient", action="store_true")
     ap.add_argument("--payload")
