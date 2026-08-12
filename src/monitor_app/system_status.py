@@ -300,6 +300,16 @@ def _campaign_assessments():
     return _status('campaign-assessments', 'agents', status, summary, data)
 
 
+def _composed_name_integrity():
+    """PCS composed-name uniqueness — the identity invariant restored by
+    the 2026-08-11 backfill, enforced by monitoring rather than a DB
+    constraint. Policy lives in pcs.integrity; a collector exception
+    surfaces as a red collector-failed row via refresh_system_status."""
+    from pcs.integrity import composed_name_integrity
+    status, summary, data = composed_name_integrity()
+    return _status('composed-name-integrity', 'agents', status, summary, data)
+
+
 def _snapper_scheduler(scope):
     """Assess one PostgreSQL-backed Snapper capture cursor."""
     from snapper_ai.models import CaptureCursor
@@ -569,6 +579,7 @@ COLLECTORS = {
     'stale-state': _stale_state,
     'swf-panda-bot': _panda_bot,
     'campaign-assessments': _campaign_assessments,
+    'composed-name-integrity': _composed_name_integrity,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
         'swf-monitor-mcp-asgi', 'swf-monitor-mcp-asgi', category='services'),
     'httpd': lambda: _systemctl_unit('httpd', 'httpd', category='services'),
