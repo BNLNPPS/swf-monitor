@@ -24,10 +24,12 @@ def system_status_page(request):
         sysconfig_json = '{}'
     from ..system_status import RETRYABLE_CHECKS
 
-    from ..system_status import panda_retry_rule_set
+    from ..system_status import panda_retry_action_set, panda_retry_rule_set
     panda_retry_rules_error = ''
+    panda_retry_actions = []
     try:
         panda_retry_rules = panda_retry_rule_set()
+        panda_retry_actions = panda_retry_action_set()
     except Exception as exc:
         logger.warning('panda retry rules read failed on system page: %s', exc)
         panda_retry_rules = None
@@ -39,6 +41,7 @@ def system_status_page(request):
         'sysconfig_json': sysconfig_json,
         'retryable': RETRYABLE_CHECKS,
         'panda_retry_rules': panda_retry_rules,
+        'panda_retry_actions': panda_retry_actions,
         'panda_retry_rules_error': panda_retry_rules_error,
     })
 

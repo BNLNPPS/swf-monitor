@@ -319,16 +319,33 @@ def panda_retry_rule_set():
     from django.db import connections
     cur = connections['panda'].cursor()
     cur.execute(
-        "SELECT re.errorsource, re.errorcode, re.errordiag, re.parameters,"
-        "       ra.retry_action, re.active, ra.active"
+        "SELECT re.retryerror_id, re.errorsource, re.errorcode,"
+        "       re.errordiag, re.parameters, ra.retry_action,"
+        "       re.active, ra.active"
         " FROM retryerrors re JOIN retryactions ra"
         "   ON re.retryaction = ra.retryaction_id"
         " ORDER BY re.retryerror_id")
     return [
-        {'source': row[0], 'code': row[1], 'diag': row[2] or '',
-         'parameters': row[3] or '', 'action': row[4],
-         'mode': 'enforcing' if (row[5] == 'Y' and row[6] == 'Y')
+        {'id': row[0], 'source': row[1], 'code': row[2],
+         'diag': row[3] or '', 'parameters': row[4] or '',
+         'action': row[5],
+         'mode': 'enforcing' if (row[6] == 'Y' and row[7] == 'Y')
                  else 'passive'}
+        for row in cur.fetchall()
+    ]
+
+
+def panda_retry_action_set():
+    """The registered retry actions (RETRYACTIONS) — the implementations
+    rules can invoke, with their own activation switch."""
+    from django.db import connections
+    cur = connections['panda'].cursor()
+    cur.execute(
+        "SELECT retryaction_id, retry_action, active, retry_description"
+        " FROM retryactions ORDER BY retryaction_id")
+    return [
+        {'id': row[0], 'action': row[1],
+         'active': row[2] == 'Y', 'description': row[3] or ''}
         for row in cur.fetchall()
     ]
 
