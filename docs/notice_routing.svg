@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 640" font-family="Arial, Helvetica, sans-serif" font-size="15">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+    <marker id="arrowp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5e35b1"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="1" dy="2" stdDeviation="1.5" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+
+  <rect width="1160" height="640" fill="#ffffff"/>
+
+  <text x="580" y="40" text-anchor="middle" font-size="22" font-weight="bold" fill="#333">Notice routing</text>
+  <text x="580" y="66" text-anchor="middle" font-size="15" fill="#555">Events matched to consumer-registered subscriptions and delivered per subscriber</text>
+
+  <!-- Boundary -->
+  <line x1="900" y1="130" x2="900" y2="595" stroke="#999" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="892" y="148" text-anchor="end" font-size="14" fill="#777">inside swf-monitor</text>
+  <text x="908" y="148" font-size="14" fill="#777">external</text>
+
+  <!-- Action stream -->
+  <rect x="30" y="230" width="235" height="120" rx="10" fill="#fff3e0" stroke="#bf360c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="147" y="260" text-anchor="middle" font-size="17" font-weight="bold" fill="#bf360c">The action stream</text>
+  <text x="147" y="286" text-anchor="middle" font-size="14" fill="#333">Every recorded action is</text>
+  <text x="147" y="304" text-anchor="middle" font-size="14" fill="#333">a named event with</text>
+  <text x="147" y="322" text-anchor="middle" font-size="14" fill="#333">structured attributes</text>
+
+  <line x1="265" y1="290" x2="310" y2="290" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Router -->
+  <rect x="315" y="185" width="310" height="210" rx="10" fill="#e3f2fd" stroke="#1565c0" stroke-width="2" filter="url(#shadow)"/>
+  <text x="470" y="213" text-anchor="middle" font-size="17" font-weight="bold" fill="#0d47a1">Notice router</text>
+  <text x="470" y="236" text-anchor="middle" font-size="14" fill="#333">One pass per cycle of the tailer service</text>
+
+  <rect x="330" y="250" width="280" height="60" rx="6" fill="#ffffff" stroke="#1565c0" stroke-width="1.5"/>
+  <text x="470" y="273" text-anchor="middle" font-size="14" font-weight="bold" fill="#333">Match: event name + filters</text>
+  <text x="470" y="293" text-anchor="middle" font-size="14" fill="#555">importance, namespace, live state</text>
+
+  <text x="470" y="337" text-anchor="middle" font-size="14" fill="#333">Composes title, detail, link, severity</text>
+  <text x="470" y="362" text-anchor="middle" font-size="14" fill="#333">High-water mark — no skips, no replays</text>
+
+  <!-- Subscriptions -->
+  <rect x="315" y="455" width="310" height="105" rx="10" fill="#ede7f6" stroke="#5e35b1" stroke-width="2" filter="url(#shadow)"/>
+  <text x="470" y="485" text-anchor="middle" font-size="17" font-weight="bold" fill="#4527a0">Subscriptions</text>
+  <text x="470" y="511" text-anchor="middle" font-size="14" fill="#333">Registered over REST by each consumer</text>
+  <text x="470" y="531" text-anchor="middle" font-size="14" fill="#333">event &#183; filters &#183; delivery mode</text>
+
+  <line x1="470" y1="455" x2="470" y2="400" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="482" y="432" font-size="14" fill="#555">read every pass</text>
+
+  <!-- Registration (consumer side) -->
+  <line x1="1030" y1="510" x2="630" y2="510" stroke="#5e35b1" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrowp)"/>
+  <text x="830" y="488" text-anchor="middle" font-size="14" fill="#4527a0">each consumer registers and maintains</text>
+  <text x="830" y="504" text-anchor="middle" font-size="14" fill="#4527a0">its own subscription over REST</text>
+
+  <!-- Buffered pull delivery -->
+  <line x1="625" y1="250" x2="680" y2="250" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="685" y="205" width="185" height="90" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="777" y="233" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">Notice buffer</text>
+  <text x="777" y="256" text-anchor="middle" font-size="14" fill="#333">one notice row</text>
+  <text x="777" y="274" text-anchor="middle" font-size="14" fill="#333">per subscriber</text>
+
+  <line x1="870" y1="250" x2="925" y2="250" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="897" y="238" text-anchor="middle" font-size="13" fill="#555">pull</text>
+
+  <rect x="930" y="205" width="200" height="90" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="1030" y="233" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">Personal feed</text>
+  <text x="1030" y="256" text-anchor="middle" font-size="14" fill="#333">drains its buffer over</text>
+  <text x="1030" y="274" text-anchor="middle" font-size="14" fill="#333">REST, from its own side</text>
+
+  <!-- Push plugin delivery -->
+  <line x1="625" y1="355" x2="680" y2="355" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="685" y="310" width="185" height="90" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="777" y="338" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">mattermost-live</text>
+  <text x="777" y="361" text-anchor="middle" font-size="14" fill="#333">push plugin,</text>
+  <text x="777" y="379" text-anchor="middle" font-size="14" fill="#333">at-most-once</text>
+
+  <line x1="870" y1="355" x2="925" y2="355" stroke="#444" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="897" y="343" text-anchor="middle" font-size="13" fill="#555">post</text>
+
+  <rect x="930" y="310" width="200" height="90" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" filter="url(#shadow)"/>
+  <text x="1030" y="338" text-anchor="middle" font-size="15" font-weight="bold" fill="#1b5e20">#epicprod-live</text>
+  <text x="1030" y="361" text-anchor="middle" font-size="14" fill="#333">Mattermost channel</text>
+
+  <text x="580" y="618" text-anchor="middle" font-size="15" fill="#555">The emitting code declares only the event; consumers register their own interest.</text>
+</svg>

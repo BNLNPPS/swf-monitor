@@ -112,32 +112,30 @@
             Job retry-module rules are instance data maintained by epicprod: they tune per-error retry
             behavior above the normal attempt machinery. A passive rule logs what it would do without acting.</p>
         {% if panda_retry_rules %}
-        <div class="system-status-table-wrap">
-            <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
-                <thead>
-                    <tr>
-                        <th>Error source</th>
-                        <th>Code</th>
-                        <th>Diagnostic match</th>
-                        <th>Action</th>
-                        <th>Parameters</th>
-                        <th>Mode</th>
-                    </tr>
-                </thead>
-                <tbody>
-                {% for rule in panda_retry_rules %}
-                    <tr>
-                        <td>{{ rule.source }}</td>
-                        <td>{{ rule.code }}</td>
-                        <td>{{ rule.diag }}</td>
-                        <td>{{ rule.action }}</td>
-                        <td>{{ rule.parameters|default:"–" }}</td>
-                        <td>{% if rule.mode == 'enforcing' %}<span class="badge text-bg-success">enforcing</span>{% else %}<span class="badge text-bg-secondary">passive</span>{% endif %}</td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
-        </div>
+        <table class="table table-striped table-bordered table-sm align-middle w-auto swf-sortable">
+            <thead>
+                <tr>
+                    <th>Error source</th>
+                    <th>Code</th>
+                    <th>Diagnostic match</th>
+                    <th>Action</th>
+                    <th>Parameters</th>
+                    <th>Mode</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for rule in panda_retry_rules %}
+                <tr>
+                    <td>{{ rule.source }}</td>
+                    <td>{{ rule.code }}</td>
+                    <td>{{ rule.diag }}</td>
+                    <td>{{ rule.action }}</td>
+                    <td>{{ rule.parameters|default:"–" }}</td>
+                    <td>{% if rule.mode == 'enforcing' %}<span class="badge text-bg-success">enforcing</span>{% else %}<span class="badge text-bg-secondary">passive</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
         {% elif panda_retry_rules_error %}
         <p class="text-muted small">The rule state could not be read from the PanDA database just now:
             {{ panda_retry_rules_error }}</p>
