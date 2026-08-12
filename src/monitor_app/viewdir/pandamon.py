@@ -19,6 +19,8 @@ from datetime import date, datetime, time, timedelta
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
+from ..panda.operations import BULK_OPERATION_STATUSES
+
 from ..utils import DataTablesProcessor
 from ..panda import (
     get_activity, study_job, list_jobs,
@@ -825,15 +827,19 @@ def _format_task_row(task, days, *, controls_operable):
         else processingtype_html
     )
     task_status = str(task.get('status') or '').lower()
-    pause_eligible = task_status == 'running'
-    resume_eligible = task_status == 'paused'
-    actionable = pause_eligible or resume_eligible
+    eligible = {
+        op: task_status in statuses
+        for op, statuses in BULK_OPERATION_STATUSES.items()
+    }
+    actionable = any(eligible.values())
     checkbox_disabled = not controls_operable or not actionable
+    eligible_attrs = ' '.join(
+        f'data-{op.replace("_", "-")}-eligible="{1 if ok else 0}"'
+        for op, ok in eligible.items())
     checkbox = (
         f'<input type="checkbox" class="panda-task-select" '
         f'data-task-id="{int(task["jeditaskid"])}" '
-        f'data-pause-eligible="{1 if pause_eligible else 0}" '
-        f'data-resume-eligible="{1 if resume_eligible else 0}" '
+        f'{eligible_attrs} '
         f'aria-label="Select PanDA task {int(task["jeditaskid"])}"'
         f'{" disabled" if checkbox_disabled else ""}>'
     )

@@ -17,6 +17,15 @@ import time
 DEFAULT_PCLIENT_SETUP = os.path.expanduser("~/pclient/run/setup.sh")
 DEFAULT_AUTH_VO = "EIC.production"
 
+# Single-op verbs whose PanDA acceptance is followed by task-state
+# verification. Single-op retry_failures keeps its fire-and-report
+# behavior for the compose page; batch retry_failures verifies.
+STATE_CHANGE_OPERATIONS = ("pause", "resume", "kill")
+BATCH_OPERATIONS = ("pause", "resume", "retry_failures", "kill")
+# A retried task has left these states once JEDI acts on the command.
+RETRY_TERMINAL_STATUSES = (
+    "finished", "failed", "done", "exhausted", "aborted", "broken")
+
 
 def _log(msg):
     print(msg, file=sys.stderr, flush=True)
@@ -83,6 +92,8 @@ def _inside_pclient(payload_path):
     elif operation == "retry_failures":
         new_parameters = payload.get("new_parameters") or None
         result = client.retry_task(jedi_task_id, new_parameters=new_parameters)
+    elif operation == "kill":
+        result = Client.killTask(jedi_task_id, False)
     elif operation in ("pause", "resume"):
         action = Client.pauseTask if operation == "pause" else Client.resumeTask
         result = action(jedi_task_id, False)
@@ -97,7 +108,7 @@ def _inside_pclient(payload_path):
         "diagnostic": diagnostic,
         "result": result,
     }
-    if operation in ("pause", "resume"):
+    if operation in STATE_CHANGE_OPERATIONS:
         output["accepted"] = ok
         output["verified"] = False
         output["observed_status"] = ""
@@ -167,13 +178,23 @@ def _task_state_verified(operation, observed_status):
         return observed_status == "paused"
     if operation == "resume":
         return observed_status not in ("paused", "throttled", "staging")
+    if operation == "kill":
+        return observed_status in ("aborting", "aborted")
+    if operation == "retry_failures":
+        return observed_status not in RETRY_TERMINAL_STATUSES
     return False
 
 
 def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
                                 poll_interval, send_interval):
     """Submit scalar commands with pacing, then verify on one shared clock."""
-    action = Client.pauseTask if operation == "pause" else Client.resumeTask
+    actions = {
+        "pause": Client.pauseTask,
+        "resume": Client.resumeTask,
+        "retry_failures": Client.retryTask,
+        "kill": Client.killTask,
+    }
+    action = actions[operation]
     results = []
     for index, item in enumerate(items):
         operation_id = str(item.get("operation_id") or "")
@@ -232,7 +253,8 @@ def main():
     ap = argparse.ArgumentParser(description="Run an existing PanDA task operation.")
     ap.add_argument(
         "--operation",
-        choices=["increase_attempts", "retry_failures", "pause", "resume"],
+        choices=["increase_attempts", "retry_failures", "pause", "resume",
+                 "kill"],
     )
     ap.add_argument("--jedi-task-id", type=int)
     ap.add_argument("--increase", type=int, default=1)
@@ -268,8 +290,9 @@ def main():
         if not isinstance(args.items, list) or not args.items:
             _log("ERROR: batch stdin must be a non-empty JSON list")
             return 2
-        if args.operation not in ("pause", "resume"):
-            _log("ERROR: batch mode supports pause or resume")
+        if args.operation not in BATCH_OPERATIONS:
+            _log("ERROR: batch mode supports "
+                 + ", ".join(BATCH_OPERATIONS))
             return 2
         args.jedi_task_id = int(args.items[0]["jedi_task_id"])
     if args.increase < 1:

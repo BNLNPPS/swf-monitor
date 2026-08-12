@@ -1142,6 +1142,8 @@ class PandaTaskOperation(models.Model):
     OPERATION_CHOICES = [
         ('pause', 'Pause'),
         ('resume', 'Resume'),
+        ('retry_failures', 'Retry failed jobs'),
+        ('kill', 'Kill'),
     ]
     STATUS_CHOICES = [
         ('queued', 'Queued'),
