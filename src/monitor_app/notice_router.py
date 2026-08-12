@@ -32,23 +32,32 @@ def _init_high_water():
 
 def _matches(sub, action, extra):
     """One subscription against one event: name (exact or trailing-*
-    prefix), then equality over the structured fields."""
+    prefix), then equality over the structured fields. A list-valued
+    filter means membership, so one subscription covers a value set
+    ({'operation': ['pause', 'resume']})."""
     if sub.event.endswith('*'):
         if not action.startswith(sub.event[:-1]):
             return False
     elif action != sub.event:
         return False
     for key, want in (sub.filters or {}).items():
-        if extra.get(key) != want:
+        if isinstance(want, list):
+            if extra.get(key) not in want:
+                return False
+        elif extra.get(key) != want:
             return False
     return True
+
+
+SEVERITIES = ('info', 'warning', 'alarm', 'error')
 
 
 def _compose(row, extra):
     """Deterministic notice content from the event (NOTICE_ROUTING.md §
     Delivery): title from the action and subject, detail from the
-    record's explanatory fields, URL to the log record, severity from
-    the outcome."""
+    record's explanatory fields, URL and severity from the event's own
+    ``url``/``severity`` attributes when it carries them, else the log
+    record link and outcome-derived severity."""
     from monitor_app.models import external_face_base_url
 
     action = str(extra.get('action') or row.funcname or 'event')
@@ -61,12 +70,20 @@ def _compose(row, extra):
                  or extra.get('summary') or '')
     if outcome and outcome != 'ok':
         detail = f'{outcome.upper()} — {detail}' if detail else outcome.upper()
+    severity = str(extra.get('severity') or '')
+    if severity not in SEVERITIES:
+        severity = 'info' if outcome in ('', 'ok') else 'warning'
+    url = str(extra.get('url') or '')
+    if url.startswith('/'):
+        url = f'{external_face_base_url()}/prod{url}'
+    elif not url:
+        url = f'{external_face_base_url()}/prod/logs/{row.id}/'
     return {
         'source': 'swf-events',
-        'severity': 'info' if outcome in ('', 'ok') else 'warning',
+        'severity': severity,
         'title': title[:300],
         'detail': detail[:2000],
-        'url': f'{external_face_base_url()}/prod/logs/{row.id}/',
+        'url': url[:500],
     }
 
 

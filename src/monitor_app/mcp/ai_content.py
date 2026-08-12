@@ -186,6 +186,11 @@ def _register_ai_assessment_sync(
                      if page_group_id else ''),
         assessment_kind=str(payload_data.get('assessment_kind') or ''),
         narration=str(payload_data.get('narration') or '')[:600],
+        # Notice-routing attributes (NOTICE_ROUTING.md): severity from
+        # the verdict, url to the report page.
+        severity={'attention': 'warning', 'alarm': 'alarm'}.get(
+            verdict, 'info'),
+        url=(f'/ai/assessments/{page_group_id}/' if page_group_id else ''),
         **({'verdict': verdict} if verdict else {}),
     )
     return {

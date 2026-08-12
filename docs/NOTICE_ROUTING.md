@@ -33,7 +33,9 @@ subscribable.
 
 A `NoticeSubscription` row: subscriber name, event name (exact or trailing
 wildcard), attribute filters (equality matches over the record's structured
-fields), delivery mode, enabled flag, creator. Token-authed CRUD at
+fields; a list-valued filter means membership, so one subscription covers a
+value set such as `{"operation": ["pause", "resume"]}`), delivery mode,
+enabled flag, creator. Token-authed CRUD at
 `/api/notices/subscriptions/`, so a third-party system registers and
 maintains its own subscriptions without swf code changes. Subscription
 changes are themselves logged actions.
@@ -52,11 +54,14 @@ Two modes, chosen per subscription:
   The `#epicprod-live` Mattermost publisher becomes the first plugin; each
   plugin's settings live in SysConfig.
 
-Notice composition from the event is deterministic: title from the action's
-catalog description and subject, detail from `reason`/`summary`/`narration`
-where present, URL to the log record, severity from the outcome, dedup key
-from the record id. Composition belongs to the router, not to emitters or
-subscribers.
+Notice composition from the event is deterministic: title from the action
+and subject, detail from `narration`/`reason`/`summary` where present, URL
+to the log record, severity from the outcome, dedup key from the record id.
+Composition belongs to the router, not to emitters or subscribers. Events
+may carry `severity` (how bad — e.g. an assessment verdict) and `url`
+(where to look — a subject page rather than the log record) as ordinary
+attributes; the router honors them and absolutizes a path-form `url` onto
+the external face.
 
 The router is a stream tailer — the proven publisher pattern: a single
 polling service that matches each new record against enabled subscriptions
@@ -82,9 +87,16 @@ day the testbed ran, with warning severity on failure.
 ## Migration
 
 The direct Capcom posters (ops-agent pause/resume terminal notices, the
-assessment and delivery-daily notices) already emit matching stream events
-carrying the needed fields; each becomes a subscription and its bespoke
-posting code retires. The `/api/capcom/notices/ingest/` endpoint remains for
+assessment and delivery-daily notices) emit matching stream events carrying
+the needed fields; each is a subscription and its bespoke posting code is
+retired. The subscriptions replacing them: `panda_task_operation` with
+`operation` in pause/resume (single and bulk, terminal outcomes only —
+the events carry the human count line as `summary` and the task page as
+`url`); `assessment_register` filtered to the scheduled kinds (narration,
+verdict severity, report url); `assessment_enforce` filtered to error
+outcomes (salvage and quarantine, floor-verdict severity); and
+`delivery_daily_rebuild` (newest-day arrivals as `summary`, the campaign
+view as `url`). The `/api/capcom/notices/ingest/` endpoint remains for
 genuinely external posters. The Mattermost publisher's event selection
 (live + importance threshold) is re-expressed as a subscription when it
 becomes a plugin; its formatting is unchanged.
@@ -104,4 +116,6 @@ in the publisher cycle (`monitor_app/notice_router.py`), subscriptions
 serve at `/api/notices/subscriptions/`, and the first subscription —
 `capcom ← workflow_execution_completed`, filter `notice=true` — delivers
 the nightly testbed heartbeat from the stamped `testbed run --notice`
-cron run. Steps 2 and 3 are pending.
+cron run. Step 2 (2026-08-12) migrated the direct Capcom posters to the
+four subscriptions listed under Migration and retired their posting code.
+Step 3 is pending.
