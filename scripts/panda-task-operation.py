@@ -4,6 +4,13 @@ Run one credentialed PanDA task operation for an existing JEDI task.
 
 The web tier only queues these requests. This doer sources the PanDA client
 environment, uses the cached production token, and calls the PanDA client API.
+
+Before any retry-class operation it reopens the task's closed BNL Rucio
+datasets (the PanDA-registered log datasets): PanDA closes them at task
+finalization and the gen-VO JEDI plugins, unlike ATLAS's, never reopen them,
+so a post-final retry otherwise fails every log registration (DDM error 200,
+"is closed"). The reopen runs in this outer process under the invoking venv
+(rucio client + X509_USER_PROXY); its report is merged into the result JSON.
 """
 import argparse
 import json
@@ -26,9 +33,107 @@ BATCH_OPERATIONS = ("pause", "resume", "retry_failures", "finish")
 RETRY_TERMINAL_STATUSES = (
     "finished", "failed", "done", "exhausted", "aborted", "broken")
 
+# Operations that make JEDI generate new jobs against the task's existing
+# datasets; these get the reopen-before-retry pass.
+RETRY_OPERATIONS = ("retry_failures", "increase_attempts")
+# BNL Rucio connection for the reopen pass, same env convention as
+# cache-payload-log.py; the agent's production.env provides the values.
+RUCIO_URL = os.environ.get("RUCIO_URL", "https://nprucio01.sdcc.bnl.gov:443")
+RUCIO_ACCOUNT = os.environ.get("RUCIO_ACCOUNT", "panda")
+RUCIO_VO = os.environ.get("RUCIO_VO", "eic")
+RUCIO_SCOPE = os.environ.get("RUCIO_SCOPE", "group.EIC")
+X509_PROXY = os.environ.get("X509_USER_PROXY", "/data/wenauseic/longproxy-for-rucio")
+# A reopened dataset gets a fresh lifetime so a retried task's logs do not
+# expire on the original registration-time clock (PanDA registers with 30d).
+REOPENED_LIFETIME_DAYS = 30
+
 
 def _log(msg):
     print(msg, file=sys.stderr, flush=True)
+
+
+def _reopen_task_datasets(jedi_task_ids):
+    """Reopen the closed BNL Rucio datasets of tasks about to be retried.
+
+    Datasets are found by their task_id metadata (exact, set by PanDA at
+    registration — never by name pattern, which collides across minQ2
+    siblings). Each closed dataset is reopened and given a fresh lifetime.
+    Failures are reported, never raised: the retry proceeds and the report
+    lands in the operation record for the operator to see.
+    """
+    report = {"tasks": {}, "reopened": 0, "ok": True}
+    try:
+        from rucio.client import Client
+    except ImportError as e:
+        report["ok"] = False
+        report["error"] = f"rucio client unavailable in {sys.executable}: {e}"
+        _log(f"WARNING: dataset reopen skipped: {report['error']}")
+        return report
+    try:
+        client = Client(
+            rucio_host=RUCIO_URL, auth_host=RUCIO_URL, account=RUCIO_ACCOUNT,
+            auth_type="x509_proxy", creds={"client_proxy": X509_PROXY},
+            ca_cert=None, vo=RUCIO_VO)
+        client.whoami()
+    except Exception as e:
+        report["ok"] = False
+        report["error"] = f"BNL Rucio auth failed: {e}"
+        _log(f"WARNING: dataset reopen skipped: {report['error']}")
+        return report
+    for jedi_task_id in jedi_task_ids:
+        entry = {"datasets": [], "reopened": [], "errors": []}
+        report["tasks"][str(jedi_task_id)] = entry
+        try:
+            names = list(client.list_dids(
+                scope=RUCIO_SCOPE, filters={"task_id": int(jedi_task_id)},
+                did_type="dataset"))
+        except Exception as e:
+            entry["errors"].append(f"list_dids failed: {e}")
+            report["ok"] = False
+            _log(f"WARNING: dataset lookup failed for task {jedi_task_id}: {e}")
+            continue
+        entry["datasets"] = names
+        for name in names:
+            try:
+                meta = client.get_metadata(scope=RUCIO_SCOPE, name=name)
+                if meta.get("is_open") is False:
+                    client.set_status(scope=RUCIO_SCOPE, name=name, open=True)
+                    client.set_metadata(
+                        scope=RUCIO_SCOPE, name=name, key="lifetime",
+                        value=REOPENED_LIFETIME_DAYS * 86400)
+                    entry["reopened"].append(name)
+                    report["reopened"] += 1
+                    _log(f"reopened closed dataset for task {jedi_task_id}: "
+                         f"{RUCIO_SCOPE}:{name}")
+            except Exception as e:
+                entry["errors"].append(f"{name}: {e}")
+                report["ok"] = False
+                _log(f"WARNING: reopen failed for {RUCIO_SCOPE}:{name}: {e}")
+    return report
+
+
+def _merge_reopen_report(stdout_text, report):
+    """Inject the reopen report into the doer's final JSON output line.
+
+    The inner pclient process prints one JSON line; the agent parses the
+    last stdout line. If the merge cannot parse that line, the original
+    stdout is returned untouched and the report goes to stderr instead —
+    the report is never silently dropped.
+    """
+    lines = stdout_text.splitlines()
+    for index in range(len(lines) - 1, -1, -1):
+        if not lines[index].strip():
+            continue
+        try:
+            payload = json.loads(lines[index])
+        except ValueError:
+            break
+        payload["dataset_reopen"] = report
+        lines[index] = json.dumps(payload, default=str)
+        return "\n".join(lines) + ("\n" if stdout_text.endswith("\n") else "")
+    _log(f"WARNING: could not merge dataset reopen report into result JSON; "
+         f"report: {json.dumps(report, default=str)}")
+    return stdout_text
 
 
 def _run_inside_pclient(args):
@@ -58,8 +163,11 @@ def _run_inside_pclient(args):
         except subprocess.TimeoutExpired:
             _log(f"ERROR: PanDA operation timed out after {args.timeout}s")
             return 4
-    if p.stdout:
-        print(p.stdout, end="")
+    stdout_text = p.stdout or ""
+    if getattr(args, "reopen_report", None) is not None and stdout_text:
+        stdout_text = _merge_reopen_report(stdout_text, args.reopen_report)
+    if stdout_text:
+        print(stdout_text, end="")
     if p.stderr:
         print(p.stderr, end="", file=sys.stderr)
     return p.returncode
@@ -365,6 +473,12 @@ def main():
         args.new_parameters = new_parameters
     else:
         args.new_parameters = None
+
+    args.reopen_report = None
+    if args.operation in RETRY_OPERATIONS:
+        ids = ([item.get("jedi_task_id") for item in args.items]
+               if args.items else [args.jedi_task_id])
+        args.reopen_report = _reopen_task_datasets([i for i in ids if i])
 
     return _run_inside_pclient(args)
 
