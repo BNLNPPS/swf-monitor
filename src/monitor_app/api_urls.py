@@ -15,7 +15,8 @@ from .sse_views import sse_message_stream, sse_status
 from .panda import api as panda_api
 from .panda.corun_callback import corun_callback
 from .viewdir.capcom import (capcom_notice_ingest, capcom_notices,
-                             capcom_state, capcom_user_state)
+                             capcom_state, capcom_user_state,
+                             NoticeSubscriptionViewSet)
 from .viewdir.snapper_api import (snapper_changes_between,
                                   snapper_component_history, snapper_context,
                                   snapper_latest, snapper_state_at,
@@ -42,6 +43,7 @@ router.register(r'tf-slices', TFSliceViewSet, basename='tfslice')
 router.register(r'workers', WorkerViewSet, basename='worker')
 router.register(r'run-states', RunStateViewSet, basename='runstate')
 router.register(r'system-state-events', SystemStateEventViewSet, basename='systemstateevent')
+router.register(r'notices/subscriptions', NoticeSubscriptionViewSet, basename='noticesubscription')
 
 urlpatterns = [
     path('logs/summary/', LogSummaryView.as_view(), name='log-summary'),

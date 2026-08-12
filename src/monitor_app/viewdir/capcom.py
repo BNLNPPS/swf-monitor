@@ -23,11 +23,17 @@ from urllib.parse import urlencode
 
 from django.http import JsonResponse
 from django.utils import timezone
-from rest_framework.authentication import TokenAuthentication
+from rest_framework import viewsets
+from rest_framework.authentication import (SessionAuthentication,
+                                           TokenAuthentication)
 from rest_framework.decorators import (api_view, authentication_classes,
                                        permission_classes)
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import (IsAuthenticated,
+                                        IsAuthenticatedOrReadOnly)
 from rest_framework.response import Response
+
+from ..models import NoticeSubscription
+from ..serializers import NoticeSubscriptionSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -388,6 +394,9 @@ def capcom_notices(request):
         since (ISO-8601 timestamp, optional) — return notices created
         strictly after this instant; a naive value is read as UTC.
         Default: the trailing 24 hours.
+        subscriber (optional) — the per-subscriber buffer to drain
+        (docs/NOTICE_ROUTING.md); default 'capcom', the original
+        single consumer.
 
     Rows come back oldest-first so the consumer's next cursor is the last
     row's created_at; 'more' is true when the page cap truncated the
@@ -408,7 +417,9 @@ def capcom_notices(request):
     else:
         since = now - timedelta(hours=24)
 
-    rows = list(CapcomNotice.objects.filter(created_at__gt=since)
+    subscriber = (request.GET.get('subscriber') or 'capcom').strip()[:100]
+    rows = list(CapcomNotice.objects.filter(created_at__gt=since,
+                                            subscriber=subscriber)
                 .order_by('created_at')[:NOTICE_PAGE_MAX + 1])
     more = len(rows) > NOTICE_PAGE_MAX
     rows = rows[:NOTICE_PAGE_MAX]
@@ -504,3 +515,40 @@ def capcom_user_state(request):
         'states': [entry],
         'detail': detail,
     })
+
+
+class NoticeSubscriptionViewSet(viewsets.ModelViewSet):
+    """Consumer-registered notice subscriptions (docs/NOTICE_ROUTING.md).
+
+    Read open; writes token-authenticated. A consumer registers and
+    maintains its own subscriptions without swf code changes; every
+    change is a logged action.
+    """
+    queryset = NoticeSubscription.objects.all()
+    serializer_class = NoticeSubscriptionSerializer
+    authentication_classes = [SessionAuthentication, TokenAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    filterset_fields = ['subscriber', 'event', 'enabled']
+
+    def perform_create(self, serializer):
+        obj = serializer.save(
+            created_by=getattr(self.request.user, 'username', '') or '')
+        self._log('created', obj)
+
+    def perform_update(self, serializer):
+        obj = serializer.save()
+        self._log('updated', obj)
+
+    def perform_destroy(self, instance):
+        self._log('removed', instance)
+        instance.delete()
+
+    def _log(self, change, obj):
+        from ..epicprod_logging import log_epicprod_action
+        log_epicprod_action(
+            'web', 'notice_subscription_edit',
+            subject_type='notice_subscription',
+            subject_key=f'{obj.subscriber}:{obj.event}',
+            username=getattr(self.request.user, 'username', '') or '',
+            sublevel='normal', live_default=True,
+            change=change, delivery=obj.delivery, enabled=obj.enabled)

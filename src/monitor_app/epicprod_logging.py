@@ -238,6 +238,17 @@ ACTION_DEFAULTS = {
         'description': "Operator change to an action's live-stream override "
                        "on the live-policy page.",
     },
+    'workflow_execution_completed': {
+        'sublevel': 'low', 'live': False,
+        'description': "A testbed workflow execution reached a terminal "
+                       "state (completed or failed); carries the run's "
+                       "notice stamp for notice routing.",
+    },
+    'notice_subscription_edit': {
+        'sublevel': 'normal', 'live': True,
+        'description': "A notice-routing subscription was created, changed, "
+                       "or removed through the subscriptions API.",
+    },
     'assessment_register': {
         'sublevel': 'normal', 'live': True,
         'description': "Register an AI assessment of a production object "

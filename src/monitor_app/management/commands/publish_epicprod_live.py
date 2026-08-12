@@ -79,6 +79,14 @@ class Command(BaseCommand):
                 poll = self._cycle()
             except Exception:
                 logger.exception("publish cycle failed; continuing")
+            try:
+                # Notice routing rides the same tailer process with its own
+                # high-water mark (monitor_app/notice_router.py); a routing
+                # failure never blocks publication.
+                from monitor_app.notice_router import route_new_events
+                route_new_events()
+            except Exception:
+                logger.exception("notice routing cycle failed; continuing")
             time.sleep(max(int(poll), 5))
 
     # -- one cycle -----------------------------------------------------------

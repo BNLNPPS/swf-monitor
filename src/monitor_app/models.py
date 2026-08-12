@@ -1202,9 +1202,15 @@ class CapcomNotice(models.Model):
     """One discrete SWF event, buffered for feed consumers that poll
     /api/capcom/notices/ from their own side. External feed systems hold
     the poll credential story entirely on their side; no external
-    credential lives in SWF (viewdir/capcom.py module docstring)."""
+    credential lives in SWF (viewdir/capcom.py module docstring).
+
+    The buffer is per-subscriber (docs/NOTICE_ROUTING.md): ``subscriber``
+    names the consumer the row is buffered for, defaulting to the
+    original single consumer."""
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    subscriber = models.CharField(max_length=100, default='capcom',
+                                  db_index=True)
     source = models.CharField(max_length=100)
     severity = models.CharField(max_length=20, default='info')
     title = models.CharField(max_length=300)
@@ -1218,6 +1224,41 @@ class CapcomNotice(models.Model):
 
     def __str__(self):
         return f"[{self.source}] {self.title}"
+
+
+class NoticeSubscription(models.Model):
+    """One consumer-registered subscription to named action-stream events
+    (docs/NOTICE_ROUTING.md). The emitting code never names recipients;
+    consumers register interest here through /api/notices/subscriptions/
+    and the router delivers matching events per ``delivery``: ``buffer``
+    writes a CapcomNotice row tagged with ``subscriber``; push plugins
+    are named delivery modes added as they come."""
+
+    subscriber = models.CharField(max_length=100, db_index=True)
+    event = models.CharField(
+        max_length=200,
+        help_text="Action-stream event name; a trailing * matches a prefix")
+    filters = models.JSONField(
+        default=dict, blank=True,
+        help_text="Equality matches over the event's structured fields")
+    delivery = models.CharField(max_length=50, default='buffer')
+    enabled = models.BooleanField(default=True)
+    created_by = models.CharField(max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_notice_subscription'
+        ordering = ['subscriber', 'event']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['subscriber', 'event'],
+                name='swf_notice_subscription_unique',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.subscriber} ← {self.event}"
 
 
 class CachedProduct(models.Model):
