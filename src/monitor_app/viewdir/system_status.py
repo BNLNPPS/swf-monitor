@@ -24,19 +24,22 @@ def system_status_page(request):
         sysconfig_json = '{}'
     from ..system_status import RETRYABLE_CHECKS
 
-    groups = grouped_current_status()
-    panda_retry_rules = []
-    for group in groups:
-        for item in group.get('items', []):
-            if getattr(item, 'name', '') == 'panda-retry-rules':
-                panda_retry_rules = (item.data or {}).get('rules', [])
+    from ..system_status import panda_retry_rule_set
+    panda_retry_rules_error = ''
+    try:
+        panda_retry_rules = panda_retry_rule_set()
+    except Exception as exc:
+        logger.warning('panda retry rules read failed on system page: %s', exc)
+        panda_retry_rules = None
+        panda_retry_rules_error = str(exc)
 
     return render(request, 'monitor_app/system_status.html', {
-        'groups': groups,
+        'groups': grouped_current_status(),
         'summary': status_summary(),
         'sysconfig_json': sysconfig_json,
         'retryable': RETRYABLE_CHECKS,
         'panda_retry_rules': panda_retry_rules,
+        'panda_retry_rules_error': panda_retry_rules_error,
     })
 
 

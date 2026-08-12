@@ -138,9 +138,12 @@
                 </tbody>
             </table>
         </div>
+        {% elif panda_retry_rules_error %}
+        <p class="text-muted small">The rule state could not be read from the PanDA database just now:
+            {{ panda_retry_rules_error }}</p>
         {% else %}
         <p class="text-muted small">No retry-module rules are loaded — every job failure consumes its
-            full attempt budget. The current rule state appears here after the next status refresh.</p>
+            full attempt budget.</p>
         {% endif %}
     </section>
 
