@@ -8,8 +8,7 @@
     <h1>ePIC Compute Queues</h1>
     <p class="text-muted mb-2">Live from PanDA schedconfig &mdash; {{ queues|length }} queues registered for VO <strong>eic</strong></p>
 
-    <div class="table-responsive">
-        <table class="table table-striped table-bordered table-sm align-middle mb-0">
+        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
             <thead>
                 <tr>
                     <th>Queue</th>
@@ -43,6 +42,5 @@
             {% endfor %}
             </tbody>
         </table>
-    </div>
 </div>
 {% endblock %}

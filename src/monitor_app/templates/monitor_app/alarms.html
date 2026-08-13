@@ -178,7 +178,7 @@
           </span>
         </div>
         {% if teams %}
-        <table class="table table-sm table-hover" style="max-width:1100px;">
+        <table class="table table-sm table-hover swf-sortable" style="max-width:1100px;">
             <thead>
                 <tr>
                     <th>Name</th>
@@ -225,7 +225,7 @@
         <span class="text-muted">hours ago</span>
         <button class="btn btn-primary btn-sm">Apply</button>
     </form>
-    <table class="table table-sm table-hover">
+    <table class="table table-sm table-hover swf-sortable">
         <thead>
             <tr>
                 <th>Alarm</th>
@@ -293,7 +293,7 @@
             {% if sec.active %}<span class="text-danger">{{ sec.active }}</span>{% else %}0{% endif %}
         </h4>
         {% if sec.active_rows %}
-        <table class="table table-sm table-hover">
+        <table class="table table-sm table-hover swf-sortable">
             <thead>
                 <tr>
                     <th>Description</th>
@@ -370,7 +370,7 @@
         — each run, with per-alarm breakdown
       </span>
     </div>
-    <table class="table table-sm">
+    <table class="table table-sm swf-sortable">
         <thead>
             <tr>
                 <th>Started</th>
