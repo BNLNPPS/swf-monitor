@@ -469,6 +469,8 @@ class EpicProdOpsAgent(BaseAgent):
             cmd += ["--panda-tasks-id", str(m["panda_tasks_id"])]
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
+        if m.get("residual"):       # residual .tryN over the undelivered remainder
+            cmd += ["--residual"]
         self.logger.info(f"PRODOPS submit_evgen_task: {task_name}")
         t0 = time.monotonic()
         try:
