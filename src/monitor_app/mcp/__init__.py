@@ -217,6 +217,7 @@ __all__ = [
     # PCS — datasets and tasks
     'pcs_dataset_list',
     'pcs_dataset_get',
+    'pcs_data_provenance',
     'pcs_dataset_intake',
     'pcs_prodtask_list',
     'pcs_prodtask_get',
