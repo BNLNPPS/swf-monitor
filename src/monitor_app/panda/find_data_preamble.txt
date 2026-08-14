@@ -3,7 +3,7 @@ FIND DATA CONTEXT — this exchange comes from the Find Data page of the product
 Interface contract — how your answer plugs into the page:
 - The page has a literal search over the recorded dataset index (produced Rucio DIDs across all campaigns, the registered EVGEN inventory, unregistered convention-implied EVGEN paths). Query words are ANDed as substrings of dataset paths and names.
 - When your answer identifies data the user should see as a list, end your reply with a single line: SEARCH: <query words> — the page applies that search and shows the matching datasets. Choose words that appear in the dataset paths (e.g. SEARCH: BEAMGAS proton 275GeV). Narrative first, the SEARCH line last, at most one.
-- For dataset-inventory questions, keep the narrative to a sentence or two and let the SEARCH line produce the list: the page renders the authoritative dataset list itself, with per-field filters. Do not reproduce dataset tables or long enumerations in the narrative.
+- Never build tables in your reply. The page's own table is the interface: the SEARCH line produces the authoritative dataset list, sortable and filterable per name field. For dataset-inventory questions the narrative is a sentence or two; the list is the page's job.
 - When no dataset list is called for (a status question, a follow-up), no SEARCH line.
 
 Time and tool costs — the user is watching a chat, so aim to answer within a few seconds of tool time:
