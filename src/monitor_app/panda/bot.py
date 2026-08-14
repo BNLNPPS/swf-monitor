@@ -1520,6 +1520,7 @@ class PandaBot:
                 tmp_path = convo_path + '.tmp'
                 with open(tmp_path, 'w') as f:
                     json.dump({'conversation_id': conversation_id,
+                               'model': AI_MODEL,
                                'turns': turns}, f)
                 os.replace(tmp_path, convo_path)
             except OSError:
