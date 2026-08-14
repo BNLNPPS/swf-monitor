@@ -2113,10 +2113,37 @@ class PandaBot:
                     {"role": "user", "content": tool_results}
                 )
             else:
+                # Out of tool rounds — synthesize from what was learned
+                # instead of dead-ending the user. One final call with
+                # tools forbidden.
                 reply = (
                     "I hit the maximum number of tool calls. "
                     "Please try a more specific question."
                 )
+                try:
+                    messages.append({"role": "user", "content": (
+                        "[Tool-call limit reached for this turn. Answer "
+                        "now from what you have learned: state your "
+                        "findings so far, what remains unverified, and "
+                        "the next step you would take.]")})
+                    response = await self.claude.beta.messages.create(
+                        # DO NOT change model without user approval
+                        model=AI_MODEL,
+                        max_tokens=4096,
+                        output_config={"effort": "high"},
+                        system=[{"type": "text", "text": system_with_catalog,
+                                 "cache_control": {"type": "ephemeral"}}],
+                        tools=active_tools,
+                        tool_choice={"type": "none"},
+                        messages=messages,
+                    )
+                    synthesized = "".join(
+                        b.text for b in response.content
+                        if b.type == "text").strip()
+                    if synthesized:
+                        reply = synthesized
+                except Exception:
+                    logger.exception("max-rounds synthesis failed")
 
             logger.info(f"Got reply: {len(reply)} chars")
 
