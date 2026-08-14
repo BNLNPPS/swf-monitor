@@ -1491,13 +1491,15 @@ class PandaBot:
                     f"{t['content']}" for t in turns) or None
                 tagged = f"[{username} via the Find Data page] {message_text}"
                 messages = await self._load_recent_dialog()
-                data_servers = ('jlab-rucio', 'bnl-rucio', 'xrootd', 'epicdoc')
+                # Full production toolset minus the clearly irrelevant
+                # servers — Brains keeps everything it knows about
+                # production, PanDA ops, and data.
+                off_topic = ('lxr', 'github', 'zenodo', 'corun')
                 reply, dpid_verified, tool_meta = await self._process_message(
                     messages, tagged, '', thread_context_text=thread_context,
                     system_suffix=_load_find_data_preamble(),
                     tool_allow=lambda name: (
-                        name.startswith('pcs_')
-                        or self._tool_server_map.get(name) in data_servers))
+                        self._tool_server_map.get(name) not in off_topic))
                 reply = self._clean_reply_boilerplate(reply)
                 reply, _ = self._extract_thread_reply_directive(reply)
                 if not dpid_verified and not reply.startswith("Sorry,"):
