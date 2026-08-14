@@ -1243,7 +1243,7 @@ class PandaBot:
         tools.append(SELECT_TOOLS_TOOL)
         return tools, scored
 
-    async def _load_recent_dialog(self):
+    async def _load_recent_dialog(self, turns=MEMORY_TURNS):
         """Load recent dialog from the database — all users, all contexts."""
         mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         messages = []
@@ -1251,7 +1251,7 @@ class PandaBot:
             await mcp.initialize()
             result = await mcp.call_tool('swf_get_ai_memory', {
                 'username': MEMORY_USERNAME,
-                'turns': MEMORY_TURNS,
+                'turns': turns,
             })
             content = result.get('content', [])
             text = ''
@@ -1387,6 +1387,30 @@ class PandaBot:
     # topic. No Mattermost involvement.
 
     BRAINS_QUEUE = '/queue/dispatcher.brains'
+
+    # Fixed tool set for web (Find Data) turns — stable across turns so
+    # the tools+system prompt prefix caches. select_tools keeps the rest
+    # of the catalog reachable on demand.
+    BRAINS_TOOL_NAMES = (
+        'pcs_data_provenance', 'pcs_dataset_list', 'pcs_dataset_get',
+        'pcs_prodtask_list', 'pcs_search_tags', 'epicprod_campaign_status',
+        'jlab_rucio_list_dids', 'jlab_rucio_summarize_datasets',
+        'jlab_rucio_get_did_metadata', 'jlab_rucio_list_files',
+        'epic_doc_search',
+    )
+    MEMORY_TURNS_WEB = 10
+
+    def _brains_fixed_tools(self):
+        """The web turns' stable tool set, sorted for byte-stable order."""
+        tools = [self._tool_registry[n] for n in sorted(self.BRAINS_TOOL_NAMES)
+                 if n in self._tool_registry]
+        missing = [n for n in self.BRAINS_TOOL_NAMES
+                   if n not in self._tool_registry]
+        if missing:
+            logger.warning("Brains fixed tools missing from registry: %s",
+                           missing)
+        tools.append(SELECT_TOOLS_TOOL)
+        return tools
 
     @staticmethod
     def _brains_dir():
@@ -1544,16 +1568,18 @@ class PandaBot:
                              if page_state else '')
                 tagged = (f"[{username} via the Find Data page]{state_tag} "
                           f"{message_text}")
-                messages = await self._load_recent_dialog()
-                # Full production toolset minus the clearly irrelevant
-                # servers — Brains keeps everything it knows about
-                # production, PanDA ops, and data.
+                messages = await self._load_recent_dialog(
+                    turns=self.MEMORY_TURNS_WEB)
+                # Catalog: full production toolset minus the clearly
+                # irrelevant servers. Active tools: the fixed stable set,
+                # so the tools+system prefix caches across turns.
                 off_topic = ('lxr', 'github', 'zenodo', 'corun')
                 reply, dpid_verified, tool_meta = await self._process_message(
                     messages, tagged, '', thread_context_text=thread_context,
                     system_suffix=_load_find_data_preamble(),
                     tool_allow=lambda name: (
-                        self._tool_server_map.get(name) not in off_topic))
+                        self._tool_server_map.get(name) not in off_topic),
+                    fixed_tools=self._brains_fixed_tools())
                 reply = self._clean_reply_boilerplate(reply)
                 reply, _ = self._extract_thread_reply_directive(reply)
                 if not dpid_verified and not reply.startswith("Sorry,"):
@@ -1888,7 +1914,8 @@ class PandaBot:
 
     async def _process_message(self, messages, message_text, root_id,
                                context_channel=None, thread_context_text=None,
-                               system_suffix='', tool_allow=None):
+                               system_suffix='', tool_allow=None,
+                               fixed_tools=None):
         """Run the Claude conversation loop for one user message.
 
         Returns (reply_text, dpid_verified).  dpid_verified is True only when
@@ -1947,16 +1974,26 @@ class PandaBot:
 
             # Select tools relevant to this message + thread history.
             # tool_allow (web turns) narrows both the selection and the
-            # catalog to a scoped tool view.
-            active_tools, scored = self._select_tools_for_message(message_text, thread_context)
-            if tool_allow:
-                active_tools = [t for t in active_tools if tool_allow(t['name'])]
-                scored = [(n, s) for n, s in scored if tool_allow(n)]
+            # catalog to a scoped tool view. fixed_tools bypasses the
+            # per-message semantic selection with a stable, sorted set —
+            # a byte-stable tools array is what lets the prompt prefix
+            # cache across turns (tools render first in the prefix).
+            if fixed_tools is not None:
+                active_tools = fixed_tools
+                scored = []
+                logger.info(f"Fixed tool set: {len(active_tools)} tools")
+            else:
+                active_tools, scored = self._select_tools_for_message(message_text, thread_context)
+                if tool_allow:
+                    active_tools = [t for t in active_tools if tool_allow(t['name'])]
+                    scored = [(n, s) for n, s in scored if tool_allow(n)]
+                logger.info(
+                    "Selected %d tools: %s", len(active_tools),
+                    [f"{name}:{score:.2f}" for name, score in scored])
             active_tool_names = {t['name'] for t in active_tools}
             suggested_names = [
                 f"{name}:{score:.2f}" for name, score in scored
             ]
-            logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
             system = self._build_system_prompt()
             tool_catalog = self._build_tool_catalog(allow=tool_allow)
@@ -1970,8 +2007,14 @@ class PandaBot:
                     model=AI_MODEL,
                     max_tokens=4096,
                     output_config={"effort": "high"},
-                    cache_control={"type": "ephemeral"},
-                    system=system_with_catalog,
+                    # Breakpoint on the system block caches tools+system
+                    # together (prefix order: tools, system, messages).
+                    # The old top-level cache_control marked the LAST
+                    # cacheable block — end of the mutating messages —
+                    # so the prefix never matched and every turn paid a
+                    # full cache write with zero reads.
+                    system=[{"type": "text", "text": system_with_catalog,
+                             "cache_control": {"type": "ephemeral"}}],
                     tools=active_tools,
                     messages=messages,
                     betas=["context-management-2025-06-27"],
