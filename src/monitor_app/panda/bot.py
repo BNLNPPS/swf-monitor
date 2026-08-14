@@ -1428,7 +1428,9 @@ class PandaBot:
                                      payload)
                         return
                     asyncio.run_coroutine_threadsafe(
-                        bot.respond_web(conversation_id, username, message),
+                        bot.respond_web(
+                            conversation_id, username, message,
+                            page_state=str(payload.get('page_state') or '')),
                         bot._loop)
                 elif msg_type == 'brains_event':
                     # Record-only append (a search the user applied) — part
@@ -1524,19 +1526,24 @@ class PandaBot:
         return (f"{'Brains' if role == 'assistant' else 'User'}: "
                 f"{turn['content']}")
 
-    async def respond_web(self, conversation_id, username, message_text):
+    async def respond_web(self, conversation_id, username, message_text,
+                          page_state=''):
         """One turn of a Find Data Brains dialog.
 
         The conversation's own turns — chat and applied searches — are
-        the thread context; the exchange is recorded to the unified
-        memory like a Mattermost turn."""
+        the thread context, and page_state grounds the turn in what the
+        page's list currently shows; the exchange is recorded to the
+        unified memory like a Mattermost turn."""
         convo_path = self._brains_convo_path(conversation_id)
         async with self._respond_lock:
             try:
                 turns = self._brains_load_turns(convo_path)
                 thread_context = "\n".join(
                     self._brains_context_line(t) for t in turns) or None
-                tagged = f"[{username} via the Find Data page] {message_text}"
+                state_tag = (f" [The page's list now shows {page_state}]"
+                             if page_state else '')
+                tagged = (f"[{username} via the Find Data page]{state_tag} "
+                          f"{message_text}")
                 messages = await self._load_recent_dialog()
                 # Full production toolset minus the clearly irrelevant
                 # servers — Brains keeps everything it knows about
