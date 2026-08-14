@@ -47,7 +47,7 @@ MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
 BOT_ASSESSMENT_USERNAME = 'bot'
-AI_MODEL = "claude-sonnet-5"
+from .constants import AI_MODEL
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
