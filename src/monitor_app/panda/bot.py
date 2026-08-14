@@ -1582,9 +1582,9 @@ class PandaBot:
                     fixed_tools=self._brains_fixed_tools())
                 reply = self._clean_reply_boilerplate(reply)
                 reply, _ = self._extract_thread_reply_directive(reply)
-                if not dpid_verified and not reply.startswith("Sorry,"):
-                    reply += "\n\n" + (NO_CITE_WARN if tool_meta['used']
-                                       else NO_QUERY_WARN)
+                # No DPID-citation footers on web turns — the citation
+                # convention is Mattermost machinery, and the warning
+                # reads as an ominous caveat on the Find Data page.
                 await self._record_exchange(
                     tagged, reply, post_id=conversation_id,
                     root_id=conversation_id, session_id='find-data')
