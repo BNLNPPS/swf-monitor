@@ -26,6 +26,18 @@ DISpatcher (`monitor_app/panda/bot.py`) is an MCP **client**. It answers product
 - `/panda` slash commands for direct queries without LLM involvement (status, errors, jobs/tasks by filter, site detail)
 - Server-side matplotlib plots rendered in Mattermost
 
+**Brains web inlet:** the Find Data page's Brains dialog
+(`/pcs/find/`, swf-epicprod) runs on this same engine. The bot holds a
+second stomp connection subscribed to `/queue/dispatcher.brains`; each
+`brains_query` message (`conversation_id`, `username`, `message`) runs
+one engine turn with the conversation's recorded turns as thread
+context, appends the exchange to
+`SWF_TMP_DIR/brains/<conversation_id>.json` (bot writes, web reads),
+records it to the unified memory with session `find-data`, and
+publishes a `brains_answer` event to `/topic/epictopic` for the SSE
+relay. Web turns share the response lock with Mattermost responses.
+Architecture context: swf-epicprod `docs/EPICPROD_LLM_OPERATIONS.md`.
+
 **Running:** `manage.py panda_bot`
 
 **Environment variables:**

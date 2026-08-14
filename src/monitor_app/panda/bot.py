@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -1249,7 +1250,8 @@ class PandaBot:
             await mcp.close()
         return messages
 
-    async def _record_exchange(self, question, answer, post_id='', root_id=''):
+    async def _record_exchange(self, question, answer, post_id='', root_id='',
+                               session_id='mattermost'):
         """Record a Q&A exchange to the unified memory."""
         mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
@@ -1257,7 +1259,7 @@ class PandaBot:
             for role, content in [('user', question), ('assistant', answer)]:
                 await mcp.call_tool('swf_record_ai_memory', {
                     'username': MEMORY_USERNAME,
-                    'session_id': 'mattermost',
+                    'session_id': session_id,
                     'role': role,
                     'content': content,
                     'namespace': post_id,
@@ -1351,7 +1353,163 @@ class PandaBot:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self._setup_mcp())
         self._load_active_threads()
+        self._loop = loop
+        self._start_brains_listener()
         self.driver.init_websocket(self._handle_event)
+
+    # ------------------------------------------------------------------
+    # Brains web inlet — the Find Data page's dialog runs on this same
+    # engine. The web tier drops a brains_query on the bus; the answer
+    # is written to a conversation file under SWF_TMP_DIR (bot writes,
+    # web reads) and announced with a brains_answer event on the relay
+    # topic. No Mattermost involvement.
+
+    BRAINS_QUEUE = '/queue/dispatcher.brains'
+
+    @staticmethod
+    def _brains_dir():
+        from django.conf import settings as dj_settings
+        path = os.path.join(
+            getattr(dj_settings, 'SWF_TMP_DIR', '/data/swf-tmp'), 'brains')
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _start_brains_listener(self):
+        """Subscribe to the brains queue on its own stomp connection.
+
+        Runs alongside the Mattermost WebSocket; each message schedules a
+        respond_web turn on the bot's event loop. Reconnects on broker
+        disconnect."""
+        try:
+            import stomp
+        except ImportError:
+            logger.error("stomp.py unavailable — Brains web inlet disabled")
+            return
+        from django.conf import settings as dj_settings
+
+        bot = self
+
+        class _BrainsListener(stomp.ConnectionListener):
+            def on_message(self, frame):
+                try:
+                    payload = json.loads(frame.body)
+                except (TypeError, ValueError) as e:
+                    logger.error("brains_query unparseable: %s", e)
+                    return
+                if payload.get('msg_type') != 'brains_query':
+                    return
+                conversation_id = str(payload.get('conversation_id') or '')
+                message = str(payload.get('message') or '').strip()
+                username = str(payload.get('username') or 'web user')
+                if not conversation_id or not message:
+                    logger.error("brains_query missing fields: %r", payload)
+                    return
+                asyncio.run_coroutine_threadsafe(
+                    bot.respond_web(conversation_id, username, message),
+                    bot._loop)
+
+            def on_disconnected(self):
+                logger.warning("Brains queue connection lost; reconnecting")
+                try:
+                    bot._brains_connect()
+                except Exception:
+                    logger.exception("Brains queue reconnect failed")
+
+        self._brains_listener = _BrainsListener()
+
+        def _connect():
+            host = getattr(dj_settings, 'ACTIVEMQ_HOST', 'localhost')
+            port = getattr(dj_settings, 'ACTIVEMQ_PORT', 61612)
+            conn = stomp.Connection(
+                host_and_ports=[(host, port)], vhost=host,
+                try_loopback_connect=False, heartbeats=(5000, 10000))
+            if getattr(dj_settings, 'ACTIVEMQ_USE_SSL', False):
+                ca = getattr(dj_settings, 'ACTIVEMQ_SSL_CA_CERTS', '')
+                if ca:
+                    conn.transport.set_ssl(
+                        for_hosts=[(host, port)], ca_certs=ca,
+                        ssl_version=ssl.PROTOCOL_TLS_CLIENT)
+            conn.set_listener('brains', self._brains_listener)
+            conn.connect(
+                getattr(dj_settings, 'ACTIVEMQ_USER', 'admin'),
+                getattr(dj_settings, 'ACTIVEMQ_PASSWORD', 'admin'),
+                wait=True, version='1.1',
+                headers={'client-id': 'dispatcher-brains'})
+            conn.subscribe(destination=self.BRAINS_QUEUE, id=1, ack='auto')
+            self._brains_conn = conn
+            logger.info("Brains web inlet listening on %s", self.BRAINS_QUEUE)
+
+        self._brains_connect = _connect
+        try:
+            _connect()
+        except Exception:
+            logger.exception(
+                "Brains queue subscribe failed — web inlet disabled")
+
+    async def respond_web(self, conversation_id, username, message_text):
+        """One turn of a Find Data Brains dialog.
+
+        The conversation's own turns are the thread context; the exchange
+        is recorded to the unified memory like a Mattermost turn."""
+        convo_path = os.path.join(self._brains_dir(),
+                                  f'{conversation_id}.json')
+        async with self._respond_lock:
+            try:
+                turns = []
+                try:
+                    with open(convo_path) as f:
+                        turns = json.load(f).get('turns', [])
+                except FileNotFoundError:
+                    pass
+                except (OSError, ValueError) as e:
+                    logger.error("brains conversation unreadable (%s): %s",
+                                 convo_path, e)
+                thread_context = "\n".join(
+                    f"{'Brains' if t['role'] == 'assistant' else 'User'}: "
+                    f"{t['content']}" for t in turns) or None
+                tagged = f"[{username} via the Find Data page] {message_text}"
+                messages = await self._load_recent_dialog()
+                reply, dpid_verified, tool_meta = await self._process_message(
+                    messages, tagged, '', thread_context_text=thread_context)
+                reply = self._clean_reply_boilerplate(reply)
+                reply, _ = self._extract_thread_reply_directive(reply)
+                if not dpid_verified and not reply.startswith("Sorry,"):
+                    reply += "\n\n" + (NO_CITE_WARN if tool_meta['used']
+                                       else NO_QUERY_WARN)
+                await self._record_exchange(
+                    tagged, reply, post_id=conversation_id,
+                    root_id=conversation_id, session_id='find-data')
+            except Exception:
+                logger.exception("Brains web turn failed")
+                reply = ("Sorry, I hit an internal error while working on "
+                         "this. The exception was logged.")
+            now = datetime.now(timezone.utc).isoformat()
+            turns.append({'role': 'user', 'content': message_text,
+                          'username': username, 'at': now})
+            turns.append({'role': 'assistant', 'content': reply, 'at': now})
+            try:
+                tmp_path = convo_path + '.tmp'
+                with open(tmp_path, 'w') as f:
+                    json.dump({'conversation_id': conversation_id,
+                               'turns': turns}, f)
+                os.replace(tmp_path, convo_path)
+            except OSError:
+                logger.exception("brains conversation write failed (%s)",
+                                 convo_path)
+        try:
+            from monitor_app.activemq_connection import ActiveMQConnectionManager
+            sent = ActiveMQConnectionManager().send_message(
+                '/topic/epictopic', json.dumps({
+                    'msg_type': 'brains_answer',
+                    'conversation_id': conversation_id,
+                    'processed_by': 'dispatcher',
+                    'sent_at': datetime.now(timezone.utc).isoformat(),
+                }))
+            if not sent:
+                logger.error("brains_answer publish failed for %s",
+                             conversation_id)
+        except Exception:
+            logger.exception("brains_answer publish failed")
 
     THREADS_STATE_KEY = 'pandabot_active_threads'
 
@@ -1654,16 +1812,24 @@ class PandaBot:
             logger.exception("Failed to post reply")
 
     async def _process_message(self, messages, message_text, root_id,
-                               context_channel=None):
+                               context_channel=None, thread_context_text=None):
         """Run the Claude conversation loop for one user message.
 
         Returns (reply_text, dpid_verified).  dpid_verified is True only when
         a tool was called AND the LLM cited a matching DPID in its final reply.
         """
-        # Build user message with full thread context if it's a reply
+        # Build user message with full thread context if it's a reply.
+        # thread_context_text carries a caller-supplied dialog (the web
+        # Brains inlet), used in place of a Mattermost thread fetch.
         user_content = message_text
         thread_context = None
-        if root_id:
+        if thread_context_text:
+            thread_context = thread_context_text
+            user_content = (
+                f"[Dialog so far:\n{thread_context}\n]\n"
+                f"New message: {message_text}"
+            )
+        elif root_id:
             thread_context = await self._build_thread_context(root_id)
             if thread_context:
                 user_content = (
