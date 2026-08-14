@@ -298,12 +298,6 @@
                     </div>
                     <div class="workflow-link-desc">AI-proposed actions pending review, and the decision history</div>
                 </div>
-                <div class="workflow-link-row" title="The registered epic:/EVGEN inventory: file counts, sizes, last update, and PCS resolution">
-                    <div class="workflow-link-line">
-                        <strong><a href="{% url 'pcs:evgen_inputs' %}" class="text-decoration-none">EVGEN Inputs</a></strong>
-                    </div>
-                    <div class="workflow-link-desc">The registered epic:/EVGEN inventory and its PCS resolution</div>
-                </div>
             </div>
         </section>
 
@@ -365,9 +359,28 @@
 
         <section class="workflow-stage">
             <div class="workflow-stage-header">
-                <div class="workflow-stage-title">Validation</div>
+                <div class="workflow-stage-title">Data &amp; Validation</div>
             </div>
-            <div class="workflow-stage-body"></div>
+            <div class="workflow-stage-body">
+                <div class="workflow-link-row" title="Single search field over produced datasets and EVGEN inputs across all campaigns; a single match goes straight to its dataset page">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:find_data' %}" class="text-decoration-none">Find Data</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Search everything recorded, with a per-field breakdown of the matches</div>
+                </div>
+                <div class="workflow-link-row" title="The registered epic:/EVGEN inventory: file counts, sizes, last update, PCS resolution, and registration coverage">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:evgen_inputs' %}" class="text-decoration-none">EVGEN Inputs</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">The registered epic:/EVGEN inventory and registration coverage</div>
+                </div>
+                <div class="workflow-link-row" title="Sample and campaign completion served to the validation team (v1)">
+                    <div class="workflow-link-line">
+                        <strong><a href="{% url 'pcs:validation_v1_index' %}" class="text-decoration-none">Validation API</a></strong>
+                    </div>
+                    <div class="workflow-link-desc">Sample and campaign completion for validation</div>
+                </div>
+            </div>
         </section>
     </div>
     {% endif %}

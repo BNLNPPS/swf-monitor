@@ -553,7 +553,14 @@
                 <a href="{% url 'pcs:pcs_campaign_plan' %}">Campaign Plan</a>
                 <a href="{% url 'ai:ai_narratives' %}">Campaign Narratives</a>
                 <a href="{% url 'monitor_app:ai_content_list' %}?subject_type=campaign_task,campaign">Campaign Assessments</a>
+            </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.data %} nav-active{% endif %}">Data</button>
+            <div class="dropdown-content">
+                <a href="{% url 'pcs:find_data' %}" class="{% if active_nav.find_data %}nav-active{% endif %}">Find data</a>
                 <a href="{% url 'pcs:evgen_inputs' %}" class="{% if active_nav.pcs_evgen_inputs %}nav-active{% endif %}">EVGEN Inputs</a>
+                <a href="{% url 'pcs:validation_v1_index' %}">Validation API</a>
             </div>
         </div>
         <div class="dropdown">
@@ -564,12 +571,22 @@
             </div>
         </div>
         <strong class="nav-label nav-panda-label">PanDA</strong>
-        <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity</a>
-        <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
-        <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
-        <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
-        <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
-        <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.panda_activity or active_nav.panda_tasks or active_nav.panda_jobs %} nav-active{% endif %}">Activity</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_activity' %}" class="{% if active_nav.panda_activity %}nav-active{% endif %}">Activity summary</a>
+                <a href="{% url 'monitor_app:panda_tasks_list' %}" class="{% if active_nav.panda_tasks %}nav-active{% endif %}">Tasks</a>
+                <a href="{% url 'monitor_app:panda_jobs_list' %}" class="{% if active_nav.panda_jobs %}nav-active{% endif %}">Jobs</a>
+            </div>
+        </div>
+        <div class="dropdown">
+            <button class="dropbtn{% if active_nav.panda_errors or active_nav.alarms or active_nav.panda_diagnostics %} nav-active{% endif %}">Diagnostics</button>
+            <div class="dropdown-content">
+                <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
+                <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
+                <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
+            </div>
+        </div>
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.sites %} nav-active{% endif %}">Sites</button>
             <div class="dropdown-content">
