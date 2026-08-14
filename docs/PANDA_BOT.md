@@ -35,7 +35,14 @@ context, appends the exchange to
 `SWF_TMP_DIR/brains/<conversation_id>.json` (bot writes, web reads),
 records it to the unified memory with session `find-data`, and
 publishes a `brains_answer` event to `/topic/epictopic` for the SSE
-relay. Web turns share the response lock with Mattermost responses.
+relay. A `brains_event` message on the same queue appends an applied
+search to the conversation file with no engine run, keeping the
+dialog's chat-and-search narrative durable in one record; search
+entries enter later turns' thread context as "Search applied" lines.
+An engine reply may end with a `SEARCH: <words>` line — the page's
+interface contract, defined in the Find Data preamble — which the page
+applies to its own dataset index. Web turns share the response lock
+with Mattermost responses.
 Web turns run in Find Data mode: `find_data_preamble.txt` (re-read per
 message, like the system prompt) is appended to the system prompt, and
 the tool view drops the servers irrelevant to the page (lxr, github,

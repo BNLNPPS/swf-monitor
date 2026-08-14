@@ -1416,19 +1416,31 @@ class PandaBot:
                 try:
                     payload = json.loads(frame.body)
                 except (TypeError, ValueError) as e:
-                    logger.error("brains_query unparseable: %s", e)
+                    logger.error("brains message unparseable: %s", e)
                     return
-                if payload.get('msg_type') != 'brains_query':
-                    return
+                msg_type = payload.get('msg_type')
                 conversation_id = str(payload.get('conversation_id') or '')
                 message = str(payload.get('message') or '').strip()
                 username = str(payload.get('username') or 'web user')
-                if not conversation_id or not message:
-                    logger.error("brains_query missing fields: %r", payload)
-                    return
-                asyncio.run_coroutine_threadsafe(
-                    bot.respond_web(conversation_id, username, message),
-                    bot._loop)
+                if msg_type == 'brains_query':
+                    if not conversation_id or not message:
+                        logger.error("brains_query missing fields: %r",
+                                     payload)
+                        return
+                    asyncio.run_coroutine_threadsafe(
+                        bot.respond_web(conversation_id, username, message),
+                        bot._loop)
+                elif msg_type == 'brains_event':
+                    # Record-only append (a search the user applied) — part
+                    # of the durable dialog narrative, no LLM run.
+                    if not conversation_id or not message:
+                        logger.error("brains_event missing fields: %r",
+                                     payload)
+                        return
+                    asyncio.run_coroutine_threadsafe(
+                        bot.record_web_event(conversation_id, username,
+                                             message),
+                        bot._loop)
 
             def on_disconnected(self):
                 logger.warning("Brains queue connection lost; reconnecting")
@@ -1468,27 +1480,62 @@ class PandaBot:
             logger.exception(
                 "Brains queue subscribe failed — web inlet disabled")
 
+    def _brains_convo_path(self, conversation_id):
+        return os.path.join(self._brains_dir(), f'{conversation_id}.json')
+
+    def _brains_load_turns(self, convo_path):
+        try:
+            with open(convo_path) as f:
+                return json.load(f).get('turns', [])
+        except FileNotFoundError:
+            return []
+        except (OSError, ValueError) as e:
+            logger.error("brains conversation unreadable (%s): %s",
+                         convo_path, e)
+            return []
+
+    def _brains_write(self, convo_path, conversation_id, turns):
+        try:
+            tmp_path = convo_path + '.tmp'
+            with open(tmp_path, 'w') as f:
+                json.dump({'conversation_id': conversation_id,
+                           'model': AI_MODEL,
+                           'turns': turns}, f)
+            os.replace(tmp_path, convo_path)
+        except OSError:
+            logger.exception("brains conversation write failed (%s)",
+                             convo_path)
+
+    async def record_web_event(self, conversation_id, username, query):
+        """Append an applied search to the dialog narrative — record only."""
+        convo_path = self._brains_convo_path(conversation_id)
+        async with self._respond_lock:
+            turns = self._brains_load_turns(convo_path)
+            turns.append({'role': 'search', 'content': query,
+                          'username': username,
+                          'at': datetime.now(timezone.utc).isoformat()})
+            self._brains_write(convo_path, conversation_id, turns)
+
+    @staticmethod
+    def _brains_context_line(turn):
+        role = turn.get('role')
+        if role == 'search':
+            return f"Search applied: {turn['content']}"
+        return (f"{'Brains' if role == 'assistant' else 'User'}: "
+                f"{turn['content']}")
+
     async def respond_web(self, conversation_id, username, message_text):
         """One turn of a Find Data Brains dialog.
 
-        The conversation's own turns are the thread context; the exchange
-        is recorded to the unified memory like a Mattermost turn."""
-        convo_path = os.path.join(self._brains_dir(),
-                                  f'{conversation_id}.json')
+        The conversation's own turns — chat and applied searches — are
+        the thread context; the exchange is recorded to the unified
+        memory like a Mattermost turn."""
+        convo_path = self._brains_convo_path(conversation_id)
         async with self._respond_lock:
             try:
-                turns = []
-                try:
-                    with open(convo_path) as f:
-                        turns = json.load(f).get('turns', [])
-                except FileNotFoundError:
-                    pass
-                except (OSError, ValueError) as e:
-                    logger.error("brains conversation unreadable (%s): %s",
-                                 convo_path, e)
+                turns = self._brains_load_turns(convo_path)
                 thread_context = "\n".join(
-                    f"{'Brains' if t['role'] == 'assistant' else 'User'}: "
-                    f"{t['content']}" for t in turns) or None
+                    self._brains_context_line(t) for t in turns) or None
                 tagged = f"[{username} via the Find Data page] {message_text}"
                 messages = await self._load_recent_dialog()
                 # Full production toolset minus the clearly irrelevant
@@ -1516,16 +1563,7 @@ class PandaBot:
             turns.append({'role': 'user', 'content': message_text,
                           'username': username, 'at': now})
             turns.append({'role': 'assistant', 'content': reply, 'at': now})
-            try:
-                tmp_path = convo_path + '.tmp'
-                with open(tmp_path, 'w') as f:
-                    json.dump({'conversation_id': conversation_id,
-                               'model': AI_MODEL,
-                               'turns': turns}, f)
-                os.replace(tmp_path, convo_path)
-            except OSError:
-                logger.exception("brains conversation write failed (%s)",
-                                 convo_path)
+            self._brains_write(convo_path, conversation_id, turns)
         try:
             from monitor_app.activemq_connection import ActiveMQConnectionManager
             sent = ActiveMQConnectionManager().send_message(
