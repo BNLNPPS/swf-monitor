@@ -439,6 +439,25 @@ SYSTEM_PROMPT_FILE = os.getenv(
     os.path.join(os.path.dirname(__file__), 'system_prompt.txt'),
 )
 
+# Appended to the system prompt for Find Data (Brains) web turns only —
+# same re-read-per-message convention as the system prompt, so prompt
+# iteration needs no bot restart.
+FIND_DATA_PREAMBLE_FILE = os.getenv(
+    'BRAINS_FIND_PREAMBLE',
+    os.path.join(os.path.dirname(__file__), 'find_data_preamble.txt'),
+)
+
+
+def _load_find_data_preamble():
+    """Read the Find Data prompt addition, fresh on every call."""
+    try:
+        with open(FIND_DATA_PREAMBLE_FILE) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        logging.getLogger('panda_bot').warning(
+            "Find Data preamble missing: %s", FIND_DATA_PREAMBLE_FILE)
+        return ''
+
 
 def _load_system_preamble():
     """Read system prompt from file, fresh on every call."""
@@ -1093,8 +1112,9 @@ class PandaBot:
         except Exception:
             logger.exception("Failed to ensure corun notification subscription")
 
-    def _build_tool_catalog(self):
-        """One-liner catalog of all tools for the system prompt."""
+    def _build_tool_catalog(self, allow=None):
+        """One-liner catalog of tools for the system prompt; allow narrows
+        it to a scoped view (the Find Data web turns)."""
         lines = [
             "TOOL AWARENESS — three tiers:",
             "1. CATALOG: All tools are in your system prompt as one-liners — full awareness at minimal token cost.",
@@ -1104,6 +1124,8 @@ class PandaBot:
             "Full tool catalog:",
         ]
         for name, tool in sorted(self._tool_registry.items()):
+            if allow and not allow(name):
+                continue
             desc = tool["description"].split('\n')[0][:120]
             lines.append(f"- {name}: {desc}")
         return "\n".join(lines)
@@ -1469,8 +1491,13 @@ class PandaBot:
                     f"{t['content']}" for t in turns) or None
                 tagged = f"[{username} via the Find Data page] {message_text}"
                 messages = await self._load_recent_dialog()
+                data_servers = ('jlab-rucio', 'bnl-rucio', 'xrootd', 'epicdoc')
                 reply, dpid_verified, tool_meta = await self._process_message(
-                    messages, tagged, '', thread_context_text=thread_context)
+                    messages, tagged, '', thread_context_text=thread_context,
+                    system_suffix=_load_find_data_preamble(),
+                    tool_allow=lambda name: (
+                        name.startswith('pcs_')
+                        or self._tool_server_map.get(name) in data_servers))
                 reply = self._clean_reply_boilerplate(reply)
                 reply, _ = self._extract_thread_reply_directive(reply)
                 if not dpid_verified and not reply.startswith("Sorry,"):
@@ -1812,7 +1839,8 @@ class PandaBot:
             logger.exception("Failed to post reply")
 
     async def _process_message(self, messages, message_text, root_id,
-                               context_channel=None, thread_context_text=None):
+                               context_channel=None, thread_context_text=None,
+                               system_suffix='', tool_allow=None):
         """Run the Claude conversation loop for one user message.
 
         Returns (reply_text, dpid_verified).  dpid_verified is True only when
@@ -1869,8 +1897,13 @@ class PandaBot:
                         at = mcp_tool_to_anthropic(t)
                         self._tool_registry[at["name"]] = at
 
-            # Select tools relevant to this message + thread history
+            # Select tools relevant to this message + thread history.
+            # tool_allow (web turns) narrows both the selection and the
+            # catalog to a scoped tool view.
             active_tools, scored = self._select_tools_for_message(message_text, thread_context)
+            if tool_allow:
+                active_tools = [t for t in active_tools if tool_allow(t['name'])]
+                scored = [(n, s) for n, s in scored if tool_allow(n)]
             active_tool_names = {t['name'] for t in active_tools}
             suggested_names = [
                 f"{name}:{score:.2f}" for name, score in scored
@@ -1878,7 +1911,9 @@ class PandaBot:
             logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
             system = self._build_system_prompt()
-            tool_catalog = self._build_tool_catalog()
+            tool_catalog = self._build_tool_catalog(allow=tool_allow)
+            if system_suffix:
+                system = f"{system}\n\n{system_suffix}"
             system_with_catalog = f"{system}\n\n{tool_catalog}"
 
             for _round in range(MAX_TOOL_ROUNDS):

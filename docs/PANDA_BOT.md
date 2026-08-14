@@ -36,7 +36,11 @@ context, appends the exchange to
 records it to the unified memory with session `find-data`, and
 publishes a `brains_answer` event to `/topic/epictopic` for the SSE
 relay. Web turns share the response lock with Mattermost responses.
-Architecture context: swf-epicprod `docs/EPICPROD_LLM_OPERATIONS.md`.
+Web turns run in Find Data mode: `find_data_preamble.txt` (re-read per
+message, like the system prompt) is appended to the system prompt, and
+the tool view is scoped to the data tools — `pcs_*` plus the
+jlab-rucio, bnl-rucio, xrootd, and epicdoc servers. Architecture
+context: swf-epicprod `docs/EPICPROD_LLM_OPERATIONS.md`.
 
 **Running:** `manage.py panda_bot`
 
