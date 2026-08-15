@@ -22,10 +22,15 @@
             {% endfor %}
         </div>
         {% endfor %}
-        {% if any_filter %}
-        <div><a href="{% url 'monitor_app:epic_queues_list' %}" class="btn btn-secondary btn-sm">Clear filters</a></div>
-        {% endif %}
     </div>
+
+    {% if any_filter %}
+    <div id="active-filters" class="mt-2 mb-2">
+        <strong>Active filters:</strong>
+        <span id="filter-badges">{% for f in filters %}{% if f.selected %}<span class="badge bg-info me-1">{{ f.key }}: {{ f.selected }}</span>{% endif %}{% endfor %}</span>
+        <a href="{% url 'monitor_app:epic_queues_list' %}" class="btn btn-link btn-sm p-0 ms-2">clear all</a>
+    </div>
+    {% endif %}
 
         <p class="text-muted mb-1">Opp = opportunistic &middot; Unified = production and analysis &middot; hpc_special = DOE HPC</p>
 
