@@ -216,6 +216,10 @@ def main():
                     help="panda-client environment setup to source")
     ap.add_argument("--timeout", type=int, default=300,
                     help="seconds before the submission run is abandoned")
+    ap.add_argument("--residual", action="store_true",
+                    help="residual .tryN: the spec covers only manifest rows "
+                         "with no registered RECO output "
+                         "(JEDI_INTEGRATION.md § Residual rerun)")
     args = ap.parse_args()
 
     if not args.swf_monitor_url:
@@ -232,6 +236,8 @@ def main():
     spec_query = {"name": args.task_name, "fmt": "evgen"}
     if args.panda_tasks_id:
         spec_query["panda_tasks_id"] = args.panda_tasks_id
+    if args.residual:
+        spec_query["residual"] = "1"
     try:
         raw = _api_get(args.swf_monitor_url, "/pcs/api/prod-tasks/command/",
                        spec_query, args.token)
@@ -303,6 +309,8 @@ def main():
                 body["panda_tasks_id"] = args.panda_tasks_id
             if spec.get("outDS"):
                 body["panda_task_name"] = spec["outDS"]
+            if spec.get("residual"):
+                body["residual"] = spec["residual"]
             _api_post_json(args.swf_monitor_url, "/pcs/api/prod-tasks/record-submission/",
                            {"name": args.task_name}, body,
                            args.token, owner=args.owner)

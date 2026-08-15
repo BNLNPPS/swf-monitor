@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -46,7 +47,7 @@ MM_POST_LIMIT = 16383
 MEMORY_TURNS = 30
 MEMORY_USERNAME = 'pandabot'
 BOT_ASSESSMENT_USERNAME = 'bot'
-AI_MODEL = "claude-sonnet-5"
+from .constants import AI_MODEL
 MCP_URL = os.environ.get(
     'MCP_URL', 'http://127.0.0.1:8001/swf-monitor/mcp/'
 )
@@ -438,6 +439,25 @@ SYSTEM_PROMPT_FILE = os.getenv(
     os.path.join(os.path.dirname(__file__), 'system_prompt.txt'),
 )
 
+# Appended to the system prompt for Find Data (Brains) web turns only —
+# same re-read-per-message convention as the system prompt, so prompt
+# iteration needs no bot restart.
+FIND_DATA_PREAMBLE_FILE = os.getenv(
+    'BRAINS_FIND_PREAMBLE',
+    os.path.join(os.path.dirname(__file__), 'find_data_preamble.txt'),
+)
+
+
+def _load_find_data_preamble():
+    """Read the Find Data prompt addition, fresh on every call."""
+    try:
+        with open(FIND_DATA_PREAMBLE_FILE) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        logging.getLogger('panda_bot').warning(
+            "Find Data preamble missing: %s", FIND_DATA_PREAMBLE_FILE)
+        return ''
+
 
 def _load_system_preamble():
     """Read system prompt from file, fresh on every call."""
@@ -615,19 +635,51 @@ SELECT_TOOLS_TOOL = {
 # Number of tools to pre-load via semantic matching
 TOP_K_TOOLS = 8
 
+# Identifier-grammar boosts. A formal identifier in a question — a Rucio
+# DID, a PCS composed name, a task/job id, a queue name — is decisive
+# evidence for a tool family, and exactly the evidence cosine similarity
+# over prose descriptions dilutes. Each entry: (compiled pattern over the
+# message, predicate over (tool_name, server_name), score boost added to
+# the cosine score for matching tools).
+_ID_BOOSTS = [
+    # Science-data DID (epic scope) or a stage-rooted slash path → JLab Rucio.
+    (re.compile(r'\bepic\s*:\s*/|/(?:EVGEN|RECO|SIMU|FULL)/'),
+     lambda n, s: n.startswith('jlab_rucio_'), 0.25),
+    # group.EIC-scoped DID (PanDA outputs and logs) → BNL Rucio.
+    (re.compile(r'\bgroup\.EIC\s*:'),
+     lambda n, s: n.startswith('bnl_rucio_'), 0.25),
+    # PCS composed name → PCS and PanDA tools.
+    (re.compile(r'\bgroup\.EIC\.\S+'),
+     lambda n, s: n.startswith(('pcs_', 'panda_')), 0.20),
+    # Task or job id → PanDA tools.
+    (re.compile(r'\b(?:task|jeditaskid|job|pandaid)\s*#?\s*\d{4,}', re.I),
+     lambda n, s: n.startswith('panda_'), 0.20),
+    # PanDA queue-shaped name → queue and worker tools.
+    (re.compile(r'\b(?:BNL|JLAB|NERSC|OSG|E1)_[A-Za-z0-9_]+\b'),
+     lambda n, s: n in ('panda_get_queue', 'panda_list_queues',
+                        'panda_harvester_workers'), 0.20),
+    # ROOT file reference → file-analysis and transfer tools.
+    (re.compile(r'\S+\.root\b'),
+     lambda n, s: 'uproot' in n or 'uproot' in s or 'xrootd' in s, 0.20),
+]
+
 
 class ToolSelector:
-    """Selects relevant tools for a user message via semantic similarity.
+    """Selects relevant tools for a user message via semantic similarity
+    plus identifier-grammar boosts.
 
     At startup, embeds all tool descriptions into vectors. Tool names are
     prefixed with their MCP server name for embedding (e.g. "github:get_job_logs")
     so the model can distinguish tools from different domains. Returned names
-    are unprefixed (the actual tool name for dispatch).
+    are unprefixed (the actual tool name for dispatch). At selection time,
+    formal identifiers recognized in the message (_ID_BOOSTS) raise their
+    tool family's scores before ranking.
     """
 
     def __init__(self):
         self._model = SentenceTransformer('all-MiniLM-L6-v2')
         self._tool_names: list[str] = []
+        self._tool_servers: list[str] = []
         self._tool_embeddings: np.ndarray | None = None
 
     def build_index(self, tool_registry: dict[str, dict], server_map: dict[str, str]):
@@ -638,20 +690,41 @@ class ToolSelector:
             server_map: tool_name → server name (e.g. 'github', 'xrootd', 'swf-monitor')
         """
         self._tool_names = []
+        self._tool_servers = []
         texts = []
         for name, tool in tool_registry.items():
             self._tool_names.append(name)
             server = server_map.get(name, 'unknown')
+            self._tool_servers.append(server)
             texts.append(f"{server}:{name}: {tool['description']}")
         self._tool_embeddings = self._model.encode(texts, normalize_embeddings=True)
         logger.info(f"ToolSelector: indexed {len(self._tool_names)} tools")
 
     def select(self, message: str, top_k: int = TOP_K_TOOLS) -> list[tuple[str, float]]:
-        """Return top-K tool names with scores, ranked by relevance."""
+        """Return top-K tool names with scores, ranked by relevance.
+
+        Scores are cosine similarity plus any identifier-grammar boost;
+        a boosted tool's displayed score therefore exceeds its cosine
+        alone, which is the intended provenance signal in the
+        (tools suggested: ...) line.
+        """
         if self._tool_embeddings is None or len(self._tool_names) == 0:
             return []
         msg_embedding = self._model.encode(message, normalize_embeddings=True)
         scores = self._tool_embeddings @ msg_embedding
+        boosts = np.zeros(len(self._tool_names))
+        fired = []
+        for pattern, predicate, boost in _ID_BOOSTS:
+            if not pattern.search(message):
+                continue
+            fired.append(pattern.pattern)
+            for i, (name, server) in enumerate(
+                    zip(self._tool_names, self._tool_servers)):
+                if predicate(name, server):
+                    boosts[i] = max(boosts[i], boost)
+        if fired:
+            logger.info(f"ToolSelector: identifier boosts fired: {fired}")
+        scores = scores + boosts
         top_indices = np.argsort(scores)[-top_k:][::-1]
         return [(self._tool_names[i], float(scores[i])) for i in top_indices]
 
@@ -1039,8 +1112,9 @@ class PandaBot:
         except Exception:
             logger.exception("Failed to ensure corun notification subscription")
 
-    def _build_tool_catalog(self):
-        """One-liner catalog of all tools for the system prompt."""
+    def _build_tool_catalog(self, allow=None):
+        """One-liner catalog of tools for the system prompt; allow narrows
+        it to a scoped view (the Find Data web turns)."""
         lines = [
             "TOOL AWARENESS — three tiers:",
             "1. CATALOG: All tools are in your system prompt as one-liners — full awareness at minimal token cost.",
@@ -1050,6 +1124,8 @@ class PandaBot:
             "Full tool catalog:",
         ]
         for name, tool in sorted(self._tool_registry.items()):
+            if allow and not allow(name):
+                continue
             desc = tool["description"].split('\n')[0][:120]
             lines.append(f"- {name}: {desc}")
         return "\n".join(lines)
@@ -1167,7 +1243,7 @@ class PandaBot:
         tools.append(SELECT_TOOLS_TOOL)
         return tools, scored
 
-    async def _load_recent_dialog(self):
+    async def _load_recent_dialog(self, turns=MEMORY_TURNS):
         """Load recent dialog from the database — all users, all contexts."""
         mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         messages = []
@@ -1175,7 +1251,7 @@ class PandaBot:
             await mcp.initialize()
             result = await mcp.call_tool('swf_get_ai_memory', {
                 'username': MEMORY_USERNAME,
-                'turns': MEMORY_TURNS,
+                'turns': turns,
             })
             content = result.get('content', [])
             text = ''
@@ -1196,7 +1272,8 @@ class PandaBot:
             await mcp.close()
         return messages
 
-    async def _record_exchange(self, question, answer, post_id='', root_id=''):
+    async def _record_exchange(self, question, answer, post_id='', root_id='',
+                               session_id='mattermost'):
         """Record a Q&A exchange to the unified memory."""
         mcp = MCPClient(self.mcp_url, self.mcp_bearer_token)
         try:
@@ -1204,7 +1281,7 @@ class PandaBot:
             for role, content in [('user', question), ('assistant', answer)]:
                 await mcp.call_tool('swf_record_ai_memory', {
                     'username': MEMORY_USERNAME,
-                    'session_id': 'mattermost',
+                    'session_id': session_id,
                     'role': role,
                     'content': content,
                     'namespace': post_id,
@@ -1298,7 +1375,242 @@ class PandaBot:
         loop = asyncio.get_event_loop()
         loop.run_until_complete(self._setup_mcp())
         self._load_active_threads()
+        self._loop = loop
+        self._start_brains_listener()
         self.driver.init_websocket(self._handle_event)
+
+    # ------------------------------------------------------------------
+    # Brains web inlet — the Find Data page's dialog runs on this same
+    # engine. The web tier drops a brains_query on the bus; the answer
+    # is written to a conversation file under SWF_TMP_DIR (bot writes,
+    # web reads) and announced with a brains_answer event on the relay
+    # topic. No Mattermost involvement.
+
+    BRAINS_QUEUE = '/queue/dispatcher.brains'
+
+    # Fixed tool set for web (Find Data) turns — stable across turns so
+    # the tools+system prompt prefix caches. select_tools keeps the rest
+    # of the catalog reachable on demand.
+    BRAINS_TOOL_NAMES = (
+        'pcs_data_provenance', 'pcs_dataset_list', 'pcs_dataset_get',
+        'pcs_prodtask_list', 'pcs_search_tags', 'epicprod_campaign_status',
+        'jlab_rucio_list_dids', 'jlab_rucio_summarize_datasets',
+        'jlab_rucio_get_did_metadata', 'jlab_rucio_list_files',
+        'epic_doc_search',
+    )
+    MEMORY_TURNS_WEB = 10
+
+    def _brains_fixed_tools(self):
+        """The web turns' stable tool set, sorted for byte-stable order."""
+        tools = [self._tool_registry[n] for n in sorted(self.BRAINS_TOOL_NAMES)
+                 if n in self._tool_registry]
+        missing = [n for n in self.BRAINS_TOOL_NAMES
+                   if n not in self._tool_registry]
+        if missing:
+            logger.warning("Brains fixed tools missing from registry: %s",
+                           missing)
+        tools.append(SELECT_TOOLS_TOOL)
+        return tools
+
+    @staticmethod
+    def _brains_dir():
+        from django.conf import settings as dj_settings
+        path = os.path.join(
+            getattr(dj_settings, 'SWF_TMP_DIR', '/data/swf-tmp'), 'brains')
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _start_brains_listener(self):
+        """Subscribe to the brains queue on its own stomp connection.
+
+        Runs alongside the Mattermost WebSocket; each message schedules a
+        respond_web turn on the bot's event loop. Reconnects on broker
+        disconnect."""
+        try:
+            import stomp
+        except ImportError:
+            logger.error("stomp.py unavailable — Brains web inlet disabled")
+            return
+        from django.conf import settings as dj_settings
+
+        bot = self
+
+        class _BrainsListener(stomp.ConnectionListener):
+            def on_message(self, frame):
+                try:
+                    payload = json.loads(frame.body)
+                except (TypeError, ValueError) as e:
+                    logger.error("brains message unparseable: %s", e)
+                    return
+                msg_type = payload.get('msg_type')
+                conversation_id = str(payload.get('conversation_id') or '')
+                message = str(payload.get('message') or '').strip()
+                username = str(payload.get('username') or 'web user')
+                if msg_type == 'brains_query':
+                    if not conversation_id or not message:
+                        logger.error("brains_query missing fields: %r",
+                                     payload)
+                        return
+                    asyncio.run_coroutine_threadsafe(
+                        bot.respond_web(
+                            conversation_id, username, message,
+                            page_state=str(payload.get('page_state') or '')),
+                        bot._loop)
+                elif msg_type == 'brains_event':
+                    # Record-only append (a search the user applied) — part
+                    # of the durable dialog narrative, no LLM run.
+                    if not conversation_id or not message:
+                        logger.error("brains_event missing fields: %r",
+                                     payload)
+                        return
+                    asyncio.run_coroutine_threadsafe(
+                        bot.record_web_event(conversation_id, username,
+                                             message),
+                        bot._loop)
+
+            def on_disconnected(self):
+                logger.warning("Brains queue connection lost; reconnecting")
+                try:
+                    bot._brains_connect()
+                except Exception:
+                    logger.exception("Brains queue reconnect failed")
+
+        self._brains_listener = _BrainsListener()
+
+        def _connect():
+            host = getattr(dj_settings, 'ACTIVEMQ_HOST', 'localhost')
+            port = getattr(dj_settings, 'ACTIVEMQ_PORT', 61612)
+            conn = stomp.Connection(
+                host_and_ports=[(host, port)], vhost=host,
+                try_loopback_connect=False, heartbeats=(5000, 10000))
+            if getattr(dj_settings, 'ACTIVEMQ_USE_SSL', False):
+                ca = getattr(dj_settings, 'ACTIVEMQ_SSL_CA_CERTS', '')
+                if ca:
+                    conn.transport.set_ssl(
+                        for_hosts=[(host, port)], ca_certs=ca,
+                        ssl_version=ssl.PROTOCOL_TLS_CLIENT)
+            conn.set_listener('brains', self._brains_listener)
+            conn.connect(
+                getattr(dj_settings, 'ACTIVEMQ_USER', 'admin'),
+                getattr(dj_settings, 'ACTIVEMQ_PASSWORD', 'admin'),
+                wait=True, version='1.1',
+                headers={'client-id': 'dispatcher-brains'})
+            conn.subscribe(destination=self.BRAINS_QUEUE, id=1, ack='auto')
+            self._brains_conn = conn
+            logger.info("Brains web inlet listening on %s", self.BRAINS_QUEUE)
+
+        self._brains_connect = _connect
+        try:
+            _connect()
+        except Exception:
+            logger.exception(
+                "Brains queue subscribe failed — web inlet disabled")
+
+    def _brains_convo_path(self, conversation_id):
+        return os.path.join(self._brains_dir(), f'{conversation_id}.json')
+
+    def _brains_load_turns(self, convo_path):
+        try:
+            with open(convo_path) as f:
+                return json.load(f).get('turns', [])
+        except FileNotFoundError:
+            return []
+        except (OSError, ValueError) as e:
+            logger.error("brains conversation unreadable (%s): %s",
+                         convo_path, e)
+            return []
+
+    def _brains_write(self, convo_path, conversation_id, turns):
+        try:
+            tmp_path = convo_path + '.tmp'
+            with open(tmp_path, 'w') as f:
+                json.dump({'conversation_id': conversation_id,
+                           'model': AI_MODEL,
+                           'turns': turns}, f)
+            os.replace(tmp_path, convo_path)
+        except OSError:
+            logger.exception("brains conversation write failed (%s)",
+                             convo_path)
+
+    async def record_web_event(self, conversation_id, username, query):
+        """Append an applied search to the dialog narrative — record only."""
+        convo_path = self._brains_convo_path(conversation_id)
+        async with self._respond_lock:
+            turns = self._brains_load_turns(convo_path)
+            turns.append({'role': 'search', 'content': query,
+                          'username': username,
+                          'at': datetime.now(timezone.utc).isoformat()})
+            self._brains_write(convo_path, conversation_id, turns)
+
+    @staticmethod
+    def _brains_context_line(turn):
+        role = turn.get('role')
+        if role == 'search':
+            return f"Search applied: {turn['content']}"
+        return (f"{'Brains' if role == 'assistant' else 'User'}: "
+                f"{turn['content']}")
+
+    async def respond_web(self, conversation_id, username, message_text,
+                          page_state=''):
+        """One turn of a Find Data Brains dialog.
+
+        The conversation's own turns — chat and applied searches — are
+        the thread context, and page_state grounds the turn in what the
+        page's list currently shows; the exchange is recorded to the
+        unified memory like a Mattermost turn."""
+        convo_path = self._brains_convo_path(conversation_id)
+        async with self._respond_lock:
+            try:
+                turns = self._brains_load_turns(convo_path)
+                thread_context = "\n".join(
+                    self._brains_context_line(t) for t in turns) or None
+                state_tag = (f" [The page's list now shows {page_state}]"
+                             if page_state else '')
+                tagged = (f"[{username} via the Find Data page]{state_tag} "
+                          f"{message_text}")
+                messages = await self._load_recent_dialog(
+                    turns=self.MEMORY_TURNS_WEB)
+                # Catalog: full production toolset minus the clearly
+                # irrelevant servers. Active tools: the fixed stable set,
+                # so the tools+system prefix caches across turns.
+                off_topic = ('lxr', 'github', 'zenodo', 'corun')
+                reply, dpid_verified, tool_meta = await self._process_message(
+                    messages, tagged, '', thread_context_text=thread_context,
+                    system_suffix=_load_find_data_preamble(),
+                    tool_allow=lambda name: (
+                        self._tool_server_map.get(name) not in off_topic),
+                    fixed_tools=self._brains_fixed_tools())
+                reply = self._clean_reply_boilerplate(reply)
+                reply, _ = self._extract_thread_reply_directive(reply)
+                # No DPID-citation footers on web turns — the citation
+                # convention is Mattermost machinery, and the warning
+                # reads as an ominous caveat on the Find Data page.
+                await self._record_exchange(
+                    tagged, reply, post_id=conversation_id,
+                    root_id=conversation_id, session_id='find-data')
+            except Exception:
+                logger.exception("Brains web turn failed")
+                reply = ("Sorry, I hit an internal error while working on "
+                         "this. The exception was logged.")
+            now = datetime.now(timezone.utc).isoformat()
+            turns.append({'role': 'user', 'content': message_text,
+                          'username': username, 'at': now})
+            turns.append({'role': 'assistant', 'content': reply, 'at': now})
+            self._brains_write(convo_path, conversation_id, turns)
+        try:
+            from monitor_app.activemq_connection import ActiveMQConnectionManager
+            sent = ActiveMQConnectionManager().send_message(
+                '/topic/epictopic', json.dumps({
+                    'msg_type': 'brains_answer',
+                    'conversation_id': conversation_id,
+                    'processed_by': 'dispatcher',
+                    'sent_at': datetime.now(timezone.utc).isoformat(),
+                }))
+            if not sent:
+                logger.error("brains_answer publish failed for %s",
+                             conversation_id)
+        except Exception:
+            logger.exception("brains_answer publish failed")
 
     THREADS_STATE_KEY = 'pandabot_active_threads'
 
@@ -1601,16 +1913,26 @@ class PandaBot:
             logger.exception("Failed to post reply")
 
     async def _process_message(self, messages, message_text, root_id,
-                               context_channel=None):
+                               context_channel=None, thread_context_text=None,
+                               system_suffix='', tool_allow=None,
+                               fixed_tools=None):
         """Run the Claude conversation loop for one user message.
 
         Returns (reply_text, dpid_verified).  dpid_verified is True only when
         a tool was called AND the LLM cited a matching DPID in its final reply.
         """
-        # Build user message with full thread context if it's a reply
+        # Build user message with full thread context if it's a reply.
+        # thread_context_text carries a caller-supplied dialog (the web
+        # Brains inlet), used in place of a Mattermost thread fetch.
         user_content = message_text
         thread_context = None
-        if root_id:
+        if thread_context_text:
+            thread_context = thread_context_text
+            user_content = (
+                f"[Dialog so far:\n{thread_context}\n]\n"
+                f"New message: {message_text}"
+            )
+        elif root_id:
             thread_context = await self._build_thread_context(root_id)
             if thread_context:
                 user_content = (
@@ -1650,16 +1972,33 @@ class PandaBot:
                         at = mcp_tool_to_anthropic(t)
                         self._tool_registry[at["name"]] = at
 
-            # Select tools relevant to this message + thread history
-            active_tools, scored = self._select_tools_for_message(message_text, thread_context)
+            # Select tools relevant to this message + thread history.
+            # tool_allow (web turns) narrows both the selection and the
+            # catalog to a scoped tool view. fixed_tools bypasses the
+            # per-message semantic selection with a stable, sorted set —
+            # a byte-stable tools array is what lets the prompt prefix
+            # cache across turns (tools render first in the prefix).
+            if fixed_tools is not None:
+                active_tools = fixed_tools
+                scored = []
+                logger.info(f"Fixed tool set: {len(active_tools)} tools")
+            else:
+                active_tools, scored = self._select_tools_for_message(message_text, thread_context)
+                if tool_allow:
+                    active_tools = [t for t in active_tools if tool_allow(t['name'])]
+                    scored = [(n, s) for n, s in scored if tool_allow(n)]
+                logger.info(
+                    "Selected %d tools: %s", len(active_tools),
+                    [f"{name}:{score:.2f}" for name, score in scored])
             active_tool_names = {t['name'] for t in active_tools}
             suggested_names = [
                 f"{name}:{score:.2f}" for name, score in scored
             ]
-            logger.info(f"Selected {len(active_tools)} tools: {suggested_names}")
 
             system = self._build_system_prompt()
-            tool_catalog = self._build_tool_catalog()
+            tool_catalog = self._build_tool_catalog(allow=tool_allow)
+            if system_suffix:
+                system = f"{system}\n\n{system_suffix}"
             system_with_catalog = f"{system}\n\n{tool_catalog}"
 
             for _round in range(MAX_TOOL_ROUNDS):
@@ -1668,8 +2007,14 @@ class PandaBot:
                     model=AI_MODEL,
                     max_tokens=4096,
                     output_config={"effort": "high"},
-                    cache_control={"type": "ephemeral"},
-                    system=system_with_catalog,
+                    # Breakpoint on the system block caches tools+system
+                    # together (prefix order: tools, system, messages).
+                    # The old top-level cache_control marked the LAST
+                    # cacheable block — end of the mutating messages —
+                    # so the prefix never matched and every turn paid a
+                    # full cache write with zero reads.
+                    system=[{"type": "text", "text": system_with_catalog,
+                             "cache_control": {"type": "ephemeral"}}],
                     tools=active_tools,
                     messages=messages,
                     betas=["context-management-2025-06-27"],
@@ -1768,10 +2113,37 @@ class PandaBot:
                     {"role": "user", "content": tool_results}
                 )
             else:
+                # Out of tool rounds — synthesize from what was learned
+                # instead of dead-ending the user. One final call with
+                # tools forbidden.
                 reply = (
                     "I hit the maximum number of tool calls. "
                     "Please try a more specific question."
                 )
+                try:
+                    messages.append({"role": "user", "content": (
+                        "[Tool-call limit reached for this turn. Answer "
+                        "now from what you have learned: state your "
+                        "findings so far, what remains unverified, and "
+                        "the next step you would take.]")})
+                    response = await self.claude.beta.messages.create(
+                        # DO NOT change model without user approval
+                        model=AI_MODEL,
+                        max_tokens=4096,
+                        output_config={"effort": "high"},
+                        system=[{"type": "text", "text": system_with_catalog,
+                                 "cache_control": {"type": "ephemeral"}}],
+                        tools=active_tools,
+                        tool_choice={"type": "none"},
+                        messages=messages,
+                    )
+                    synthesized = "".join(
+                        b.text for b in response.content
+                        if b.type == "text").strip()
+                    if synthesized:
+                        reply = synthesized
+                except Exception:
+                    logger.exception("max-rounds synthesis failed")
 
             logger.info(f"Got reply: {len(reply)} chars")
 

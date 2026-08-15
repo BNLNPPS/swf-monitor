@@ -1622,6 +1622,11 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
 
     Only counts jobs that actually ran: jobstatus='finished' with both
     starttime and endtime set. Pre-running queue time is excluded.
+
+    Every aggregate additionally carries failed_count: jobs ending
+    'failed' in the window, counted by end time as the jobs page counts
+    them (no starttime requirement). Failed jobs contribute nothing to
+    job_count or any core-hour metric.
     """
     def _time(value, label):
         if value in (None, ''):
@@ -1669,29 +1674,32 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     base_where = (
         '"endtime" >= %s'
         ' AND "endtime" < %s'
-        ' AND "jobstatus" = \'finished\''
-        ' AND "starttime" IS NOT NULL'
-        ' AND "endtime" IS NOT NULL'
+        ' AND (("jobstatus" = \'finished\''
+        '       AND "starttime" IS NOT NULL'
+        '       AND "endtime" IS NOT NULL)'
+        '      OR "jobstatus" = \'failed\')'
         + filters
     )
     base_params = [window_start, window_end] + extra_params
 
     inner_fields = (
-        '"computingsite", "produsername", '
+        '"computingsite", "produsername", "jobstatus", '
         '"cpuconsumptiontime", "actualcorecount", "corecount", '
         '"starttime", "endtime"'
     )
 
     agg_cols = """
-        COUNT(*) as job_count,
+        COUNT(*) FILTER (WHERE "jobstatus" = 'finished') as job_count,
         COALESCE(SUM(
             EXTRACT(EPOCH FROM ("endtime" - "starttime"))
             * COALESCE("actualcorecount", "corecount", 1)
-        ), 0) / 3600.0 as allocated_core_hours,
-        COALESCE(SUM("cpuconsumptiontime"), 0) / 3600.0 as used_core_hours,
+        ) FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as allocated_core_hours,
+        COALESCE(SUM("cpuconsumptiontime")
+                 FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as used_core_hours,
         COALESCE(SUM(
             EXTRACT(EPOCH FROM ("endtime" - "starttime"))
-        ), 0) / 3600.0 as wall_hours
+        ) FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as wall_hours,
+        COUNT(*) FILTER (WHERE "jobstatus" = 'failed') as failed_count
     """
 
     def _run(group_col=None):
@@ -1717,6 +1725,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             'allocated_core_hours': float(row[offset + 1]),
             'used_core_hours': float(row[offset + 2]),
             'wall_hours': float(row[offset + 3]),
+            'failed_count': int(row[offset + 4] or 0),
         }
 
     def _rounded_metrics(values, precision=1):
@@ -1725,6 +1734,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             'allocated_core_hours': round(values['allocated_core_hours'], precision),
             'used_core_hours': round(values['used_core_hours'], precision),
             'wall_hours': round(values['wall_hours'], precision),
+            'failed_count': values['failed_count'],
         }
 
     try:
@@ -1762,7 +1772,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
         if series_rollup:
             metric_names = (
                 'job_count', 'allocated_core_hours',
-                'used_core_hours', 'wall_hours',
+                'used_core_hours', 'wall_hours', 'failed_count',
             )
             totals_raw = {name: 0 for name in metric_names}
             sites_raw = {}
@@ -1785,7 +1795,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             rows = _run()
             totals = _rounded_metrics(_raw_metrics(rows[0])) if rows else {
                 'job_count': 0, 'allocated_core_hours': 0,
-                'used_core_hours': 0, 'wall_hours': 0,
+                'used_core_hours': 0, 'wall_hours': 0, 'failed_count': 0,
             }
 
             by_site = []

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Compute Usage - epicprod{% endblock %}
+{% block title %}Site compute usage - epicprod{% endblock %}
 
 {% block content %}
 <style>
@@ -72,8 +72,8 @@
 <div class="container-fluid mt-3">
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
     <div>
-      <h1 class="h3 mb-1">Compute Usage</h1>
-      <div class="text-muted">Finished PanDA jobs, grouped by computing site and completion time.</div>
+      <h1 class="h3 mb-1">Site compute usage</h1>
+      <div class="text-muted">Finished PanDA jobs, grouped by computing site and completion time, with failed job counts alongside.</div>
     </div>
   </div>
 
@@ -114,22 +114,24 @@
   <div class="alert alert-danger">{{ error }}</div>
   {% else %}
   <div class="row g-2 mb-3">
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">—</strong></div></div>
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
-    <div class="col-sm-6 col-xl-3"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Failed jobs</div><strong id="usage-failed">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
   </div>
 
   <div class="usage-layout">
     <div class="usage-history">
       <div class="border rounded p-2">
-        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
           <strong>Core-hours over time</strong>
-          <div>
-            <label class="me-1" for="usage-metric">Metric</label>
+          <div style="margin-left:1cm">
+            <label class="me-1 fw-bold" for="usage-metric">Metric</label>
             <select class="form-select form-select-sm d-inline-block w-auto" id="usage-metric">
               <option value="allocated_core_hours">Allocated core-hours</option>
               <option value="used_core_hours">Used core-hours</option>
+              <option value="failed_count">Failed jobs</option>
             </select>
           </div>
         </div>
@@ -162,11 +164,12 @@
       </div>
     </div>
 
-  <div class="usage-table table-responsive">
-    <table class="table table-sm table-striped align-middle w-auto" id="usage-site-table">
+  <div class="usage-table">
+    <table class="table table-sm table-striped align-middle w-auto swf-latch-head" id="usage-site-table">
       <thead><tr>
         <th aria-sort="none"><button type="button" class="usage-sort" data-sort="site">Computing site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
@@ -178,6 +181,7 @@
           <td><span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
                     style="width:.75rem;height:.75rem" aria-hidden="true"></span>{{ site.site }}</td>
           <td class="text-end usage-site-jobs">—</td>
+          <td class="text-end usage-site-failed">—</td>
           <td class="text-end usage-site-allocated">—</td>
           <td class="text-end usage-site-used">—</td>
           <td class="text-end usage-site-efficiency">—</td>
@@ -192,7 +196,9 @@
   <p class="small text-muted">
     Period boundaries are Eastern time. Jobs are attributed by end time.
     Allocated core-hours are allocated cores multiplied by wall time; used
-    core-hours are recorded CPU consumption time.
+    core-hours are recorded CPU consumption time. Failed jobs are counted
+    by end time and contribute nothing to the core-hour and efficiency
+    metrics.
   </p>
 
   {{ usage|json_script:"compute-usage-data" }}
@@ -232,12 +238,17 @@
 
     const loadedStart = usage.window.start_time.slice(0, 10);
     const loadedEndExclusive = usage.window.end_time.slice(0, 10);
+    const requestedMetric = new URLSearchParams(window.location.search).get('metric');
+    if (requestedMetric
+        && [...metric.options].some(option => option.value === requestedMetric)) {
+      metric.value = requestedMetric;
+    }
     document.querySelectorAll('.usage-site-swatch').forEach(swatch => {
       swatch.style.backgroundColor = siteColors.get(swatch.dataset.site);
     });
 
     function emptyUsage() {
-      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0};
+      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0, failed_count: 0};
     }
 
     function addUsage(target, source) {
@@ -245,6 +256,7 @@
       target.allocated_core_hours += Number(source.allocated_core_hours || 0);
       target.used_core_hours += Number(source.used_core_hours || 0);
       target.wall_hours += Number(source.wall_hours || 0);
+      target.failed_count += Number(source.failed_count || 0);
     }
 
     function weekStart(dateText) {
@@ -314,6 +326,8 @@
       const sites = selected();
       const key = metric.value;
       const label = metric.options[metric.selectedIndex].text;
+      const countMetric = key === 'failed_count';
+      const hoverValue = countMetric ? '%{y:,.0f} jobs' : '%{y:,.1f} core-hours';
       const data = selectedData();
       const traces = [...sites].map(site => {
         const points = data.plotRows.filter(point => point.site === site);
@@ -326,7 +340,7 @@
             bgcolor: siteColors.get(site),
             font: {color: contrastTextColor(siteColors.get(site))},
           },
-          hovertemplate: '%{x}<br>' + site + '<br>%{y:,.1f} core-hours<extra></extra>',
+          hovertemplate: '%{x}<br>' + site + '<br>' + hoverValue + '<extra></extra>',
         };
       });
       Plotly.react('compute-usage-plot', traces, {
@@ -358,7 +372,9 @@
           bordercolor: pieRows.map(row => contrastTextColor(siteColors.get(row.site))),
           font: {color: pieRows.map(row => contrastTextColor(siteColors.get(row.site)))},
         },
-        hovertemplate: '%{label}<br>%{value:,.1f} core-hours<br>%{percent}<extra></extra>',
+        hovertemplate: '%{label}<br>'
+          + (countMetric ? '%{value:,.0f} jobs' : '%{value:,.1f} core-hours')
+          + '<br>%{percent}<extra></extra>',
       }] : [], {
         margin: {l: 10, r: 10, t: 10, b: 30},
         showlegend: true,
@@ -370,10 +386,12 @@
       const totals = siteTotals
         .reduce((sum, row) => ({
           jobs: sum.jobs + Number(row.job_count || 0),
+          failed: sum.failed + Number(row.failed_count || 0),
           allocated: sum.allocated + Number(row.allocated_core_hours || 0),
           used: sum.used + Number(row.used_core_hours || 0),
-        }), {jobs: 0, allocated: 0, used: 0});
+        }), {jobs: 0, failed: 0, allocated: 0, used: 0});
       document.getElementById('usage-jobs').textContent = totals.jobs.toLocaleString();
+      document.getElementById('usage-failed').textContent = totals.failed.toLocaleString();
       document.getElementById('usage-allocated').textContent = fmt(totals.allocated);
       document.getElementById('usage-used').textContent = fmt(totals.used);
       document.getElementById('usage-efficiency').textContent = totals.allocated
@@ -385,6 +403,7 @@
         row.hidden = !sites.has(row.dataset.site) || !values;
         if (!values) return;
         row.querySelector('.usage-site-jobs').textContent = values.job_count.toLocaleString();
+        row.querySelector('.usage-site-failed').textContent = values.failed_count.toLocaleString();
         row.querySelector('.usage-site-allocated').textContent = fmt(values.allocated_core_hours);
         row.querySelector('.usage-site-used').textContent = fmt(values.used_core_hours);
         const efficiency = values.allocated_core_hours
@@ -395,6 +414,7 @@
         row.querySelector('.usage-site-share').textContent = usageTotal
           ? share.toFixed(1) + '%' : '—';
         row.dataset.jobs = values.job_count;
+        row.dataset.failed = values.failed_count;
         row.dataset.allocated = values.allocated_core_hours;
         row.dataset.used = values.used_core_hours;
         row.dataset.efficiency = efficiency;
@@ -417,6 +437,7 @@
       params.set('start', startInput.value);
       params.set('end', endInput.value);
       params.set('bucket', bucketInput.value);
+      params.set('metric', metric.value);
       window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
       const dataUrl = new URL(jsonLink.href, window.location.href);
       dataUrl.search = params.toString();
@@ -430,7 +451,7 @@
     }
 
     boxes.forEach(box => box.addEventListener('change', render));
-    metric.addEventListener('change', render);
+    metric.addEventListener('change', () => { updateLocation(); render(); });
     sortButtons.forEach(button => button.addEventListener('click', () => {
       const nextKey = button.dataset.sort;
       if (nextKey === sortKey) {
@@ -451,7 +472,16 @@
       if (startInput.value >= loadedStart && endInput.value < loadedEndExclusive) {
         event.preventDefault();
         applyLoadedRange();
+        return;
       }
+      let metricField = periodForm.querySelector('input[name="metric"]');
+      if (!metricField) {
+        metricField = document.createElement('input');
+        metricField.type = 'hidden';
+        metricField.name = 'metric';
+        periodForm.appendChild(metricField);
+      }
+      metricField.value = metric.value;
     });
     document.getElementById('usage-sites-all').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = true; }); render();

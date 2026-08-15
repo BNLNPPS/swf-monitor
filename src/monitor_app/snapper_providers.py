@@ -316,11 +316,12 @@ def _delivery_curve_values(state):
         for pc, leaf in (block.get('leaves') or {}).items():
             arrived_events = int(leaf.get('arrived_events') or 0)
             arrived_files = int(leaf.get('arrived_files') or 0)
-            if arrived_events:
-                values[f'dlvq_{tag}_{pc}'] = round(
-                    arrived_events / 1e6, 2)
-            if arrived_files:
-                values[f'dlvqf_{tag}_{pc}'] = arrived_files
+            # Zeros emit: a quiet day must stamp the quilt's time base,
+            # or the next arrival day's column widens back over the
+            # gap. The renderer stacks absent-at-stamp members as zero,
+            # so the stamps are what carry the day.
+            values[f'dlvq_{tag}_{pc}'] = round(arrived_events / 1e6, 2)
+            values[f'dlvqf_{tag}_{pc}'] = arrived_files
         for lens in DELIVERY_LENSES:
             seg = lens['seg']
             cum_e, cum_f = {}, {}
@@ -639,8 +640,11 @@ def _delivery_focus_view():
         'label': 'Campaign',
         # The natural campaign span carries thousands of unrelated
         # scope snaps and curves. Persist the selected campaign
-        # families as their own small product for immediate display.
+        # families as their own small product for immediate display,
+        # built from the delivery component's snaps alone — the scope's
+        # frequent panda/health snaps carry nothing for this record.
         'cache_series': True,
+        'components': ('delivery',),
         'default': campaigns[0],
         # Two selector axes: the plotted quantity (files is the
         # default while the measured event rates are under review;
@@ -1696,14 +1700,22 @@ def _scheduler_status(scope):
         name=f'snapper-{scope}-scheduler').first()
 
 
-def _series_cache(key, builder):
+def _series_cache(key, builder, refresh=False):
     """Snapper series as a cached product (docs/CACHED_PRODUCTS.md):
     served stored, rebuilt behind responses on staleness. Refresh state
     is returned with the value so the page can fetch the newly built
-    product promptly; a concurrent first fill never duplicates work."""
+    product promptly; a concurrent first fill never duplicates work.
+
+    Focus products (day-granular records such as the campaign quilt,
+    rebuilt by the nightly prewarm when their record changes) carry an
+    hours-scale TTL as a backstop; the scope report's live curves keep
+    the short one. ``refresh=True`` is the prewarm path: rebuild
+    synchronously."""
     from .cached_product import get_product
 
-    product = get_product(key, builder, ttl_seconds=90)
+    ttl_seconds = 6 * 3600 if ':focus:' in key else 90
+    product = get_product(key, builder, ttl_seconds=ttl_seconds,
+                          refresh=refresh)
     return {
         'value': product['value'],
         'refreshing': product['refreshing'],

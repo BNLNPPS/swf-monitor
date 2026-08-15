@@ -43,6 +43,9 @@ Capabilities:
   panda_task_operation — run a PanDA-native operation on an existing JEDI task:
                        pause/resume, increase attempts, or retry failed work.
   panda_task_operations — run one paced bulk pause/resume request.
+  panda_sandbox_keepalive — touch the sandbox tarballs of retryable tasks in
+                       the PanDA server cache so the 7-day purge passes them
+                       by (nightly catalog_sync chain step).
   sync_epicprod_inventory — refresh the monitor's ePIC production job/file
                        inventory and parsed failure diagnosis for a PanDA job.
   refresh_system_status — refresh cached System status rows for services,
@@ -110,6 +113,9 @@ SUBMIT_EVGEN_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "subm
 SUBMIT_EVGEN_TIMEOUT = int(os.environ.get("EPICPROD_SUBMIT_EVGEN_TIMEOUT", "300"))
 PANDA_TASK_OPERATION_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-task-operation.py"
 PANDA_TASK_OPERATION_TIMEOUT = int(os.environ.get("EPICPROD_PANDA_TASK_OPERATION_TIMEOUT", "120"))
+
+SANDBOX_KEEPALIVE_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "panda-sandbox-keepalive.py"
+SANDBOX_KEEPALIVE_TIMEOUT = int(os.environ.get("EPICPROD_SANDBOX_KEEPALIVE_TIMEOUT", "600"))
 PANDA_TASK_BULK_SEND_INTERVAL = 1.0
 
 # Update-from-Rucio doer: a live JLab Rucio fetch (current + last campaign) plus
@@ -129,13 +135,10 @@ FILE_EVENTS_TIMEOUT = int(os.environ.get("EPICPROD_FILE_EVENTS_TIMEOUT", "3600")
 DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "delivery-daily-rebuild.py"
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
 
-# Capcom events are buffered in the monitor's notice store; feed
-# consumers drain /api/capcom/notices/ from their own side. No external
-# feed credential lives in this system.
-CAPCOM_CAMPAIGN_URL = "https://epic-devcloud.org/prod/snapper/epicprod/campaign/"
-CAPCOM_LOGS_URL = "https://epic-devcloud.org/prod/logs/"
-CAPCOM_PANDA_TASK_URL = "https://epic-devcloud.org/prod/panda/tasks/{jedi_task_id}/"
-CAPCOM_PANDA_TASKS_URL = "https://epic-devcloud.org/prod/panda/tasks/"
+# Discrete events reach feed consumers through notice routing
+# (swf-monitor docs/NOTICE_ROUTING.md): this agent only logs actions,
+# carrying summary/severity/url attributes where a notice needs them;
+# the router matches subscriptions and buffers per-subscriber notices.
 CATALOG_IMPORT_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "pcs-catalog-import.py"
 CATALOG_IMPORT_TIMEOUT = int(os.environ.get("EPICPROD_CATALOG_IMPORT_TIMEOUT", "1800"))
 QUESTIONNAIRE_MATCH_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "update-questionnaire-matches.py"
@@ -202,6 +205,7 @@ class EpicProdOpsAgent(BaseAgent):
 
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "panda_task_operation", "panda_task_operations",
+                   "panda_sandbox_keepalive",
                    "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "association_sweep", "catalog_sync", "questionnaire_import",
@@ -465,6 +469,8 @@ class EpicProdOpsAgent(BaseAgent):
             cmd += ["--panda-tasks-id", str(m["panda_tasks_id"])]
         if m.get("owner"):          # X-Remote-User for the owner-gated record write
             cmd += ["--owner", str(m["owner"])]
+        if m.get("residual"):       # residual .tryN over the undelivered remainder
+            cmd += ["--residual"]
         self.logger.info(f"PRODOPS submit_evgen_task: {task_name}")
         t0 = time.monotonic()
         try:
@@ -560,8 +566,6 @@ class EpicProdOpsAgent(BaseAgent):
         is_state_change = operation in ('pause', 'resume')
         if is_state_change:
             self._record_panda_operation_state(operation_id, 'running')
-            self._emit_panda_operation_notice(
-                m, 'requested', detail=f'Requested by {m.get("created_by") or "operator"}')
         try:
             p = subprocess.run(cmd, capture_output=True, text=True,
                                timeout=PANDA_TASK_OPERATION_TIMEOUT + 30)
@@ -572,7 +576,6 @@ class EpicProdOpsAgent(BaseAgent):
             if is_state_change:
                 self._record_panda_operation_state(
                     operation_id, 'timeout', diagnostic=reason)
-                self._emit_panda_operation_notice(m, 'timeout', detail=reason)
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
                 'task_name': task_name, 'jedi_task_id': jedi_task_id,
@@ -584,7 +587,8 @@ class EpicProdOpsAgent(BaseAgent):
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
-                             operation=operation, task_name=task_name)
+                             operation=operation, task_name=task_name,
+                             url=f'/panda/tasks/{jedi_task_id}/')
             return
 
         for line in (p.stdout or "").splitlines():
@@ -610,7 +614,6 @@ class EpicProdOpsAgent(BaseAgent):
                     operation_id, 'unverified', diagnostic=reason,
                     observed_status=observed_status,
                     evidence={'panda_diagnostic': result.get('diagnostic', '')})
-                self._emit_panda_operation_notice(m, 'unverified', detail=reason)
                 self.send_message('/topic/epictopic', {
                     'msg_type': 'panda_task_operation_done',
                     'operation_id': operation_id,
@@ -625,7 +628,8 @@ class EpicProdOpsAgent(BaseAgent):
                     username=str(m.get('created_by') or ''),
                     sublevel='high', live_default=True, level=logging.WARNING,
                     operation=operation, task_name=task_name,
-                    observed_status=observed_status)
+                    observed_status=observed_status,
+                    url=f'/panda/tasks/{jedi_task_id}/')
                 return
             observed_status = str(result.get('observed_status') or '')
             self.logger.info(
@@ -635,8 +639,6 @@ class EpicProdOpsAgent(BaseAgent):
                     operation_id, 'verified', observed_status=observed_status,
                     diagnostic=str(result.get('diagnostic') or ''),
                     evidence={'panda_diagnostic': result.get('diagnostic', '')})
-                self._emit_panda_operation_notice(
-                    m, 'verified', detail=f'Observed PanDA state: {observed_status}')
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
                 'operation_id': operation_id,
@@ -645,11 +647,25 @@ class EpicProdOpsAgent(BaseAgent):
                 'status': 'verified' if is_state_change else 'done',
                 'observed_status': observed_status,
                 'ok': True, 'summary': summary})
+            # Every ok outcome carries the human line the feed and the
+            # notices show; the task page is the event's subject URL.
+            ok_bits = {'url': f'/panda/tasks/{jedi_task_id}/'}
+            if is_state_change:
+                verb = 'paused' if operation == 'pause' else 'resumed'
+                ok_bits['summary'] = (
+                    f'{verb}; observed PanDA state: '
+                    f'{observed_status or "unknown"}')
+            elif operation == 'retry_failures':
+                ok_bits['summary'] = 'PanDA accepted the failure retry'
+            elif operation == 'increase_attempts':
+                ok_bits['summary'] = (
+                    f'attempt limit raised by {m.get("increase") or 1}')
             self._log_action('panda_task_operation', t0,
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True,
-                             operation=operation, task_name=task_name)
+                             operation=operation, task_name=task_name,
+                             **ok_bits)
         else:
             reason = self._derive_reason(p)
             self.logger.error(
@@ -660,7 +676,6 @@ class EpicProdOpsAgent(BaseAgent):
                     operation_id, 'failed', diagnostic=reason,
                     observed_status=str(result.get('observed_status') or ''),
                     evidence={'panda_diagnostic': result.get('diagnostic', '')})
-                self._emit_panda_operation_notice(m, 'failed', detail=reason)
             self.send_message('/topic/epictopic', {
                 'msg_type': 'panda_task_operation_done',
                 'operation_id': operation_id,
@@ -669,6 +684,7 @@ class EpicProdOpsAgent(BaseAgent):
                 'ok': False, 'error': reason})
             self._log_action('panda_task_operation', t0, outcome='error',
                              reason=reason,
+                             url=f'/panda/tasks/{jedi_task_id}/',
                              subject_type='panda_task', subject_key=jedi_task_id,
                              username=str(m.get('created_by') or ''),
                              sublevel='high', live_default=True, level=logging.ERROR,
@@ -679,7 +695,7 @@ class EpicProdOpsAgent(BaseAgent):
         operation = m.get('operation')
         items = m.get('items')
         batch_id = str(m.get('batch_id') or '')
-        if operation not in ('pause', 'resume'):
+        if operation not in ('pause', 'resume', 'retry_failures', 'finish'):
             self.logger.error(
                 f"PRODOPS panda_task_operations: bad operation {operation!r}")
             return
@@ -714,7 +730,6 @@ class EpicProdOpsAgent(BaseAgent):
         ]
         for item in items:
             self._record_panda_operation_state(item['operation_id'], 'running')
-        self._emit_panda_bulk_notice(m, 'requested')
         self.logger.info(
             f"PRODOPS panda_task_operations: {operation} batch={batch_id} "
             f"tasks={len(items)} interval={PANDA_TASK_BULK_SEND_INTERVAL}s")
@@ -728,13 +743,13 @@ class EpicProdOpsAgent(BaseAgent):
             for item in items:
                 self._settle_panda_bulk_item(
                     m, item, 'timeout', diagnostic=reason)
-            self._emit_panda_bulk_notice(
-                m, 'completed', counts={'timeout': len(items)})
             self._log_action(
                 'panda_task_operation', t0, outcome='timeout', reason=reason,
                 subject_type='panda_task_batch', subject_key=batch_id,
-                username=username, sublevel='high', live_default=True,
-                level=logging.ERROR, operation=operation, tasks=len(items))
+                username=username, sublevel='high', live_default=False,
+                level=logging.ERROR, operation=operation, tasks=len(items),
+                summary=f'0/{len(items)} verified · {len(items)} timed out',
+                url='/panda/tasks/')
             return
 
         for line in (process.stderr or '').splitlines():
@@ -778,17 +793,22 @@ class EpicProdOpsAgent(BaseAgent):
                         (result or {}).get('status_diagnostic') or ''),
                 },
             )
-        self._emit_panda_bulk_notice(m, 'completed', counts=counts)
         problems = counts.get('failed', 0) + counts.get('unverified', 0)
         outcome = 'ok' if not problems else 'error'
+        # The human count line the batch notice shows (notice routing).
+        parts = [f"{counts.get('verified', 0)}/{len(items)} verified"]
+        for label in ('failed', 'unverified'):
+            if counts.get(label):
+                parts.append(f"{counts[label]} {label}")
         self._log_action(
             'panda_task_operation', t0, outcome=outcome,
             reason=(f'{problems} task outcomes were not verified'
                     if problems else ''),
             subject_type='panda_task_batch', subject_key=batch_id,
-            username=username, sublevel='high', live_default=True,
+            username=username, sublevel='high', live_default=False,
             level=logging.WARNING if problems else logging.INFO,
-            operation=operation, tasks=len(items), **counts)
+            operation=operation, tasks=len(items),
+            summary=' · '.join(parts), url='/panda/tasks/', **counts)
 
     def _settle_panda_bulk_item(self, message, item, status, *,
                                 diagnostic='', observed_status='',
@@ -1246,6 +1266,7 @@ class EpicProdOpsAgent(BaseAgent):
         t0 = time.monotonic()
         steps = [
             ('credential_expiry_check', self._do_credential_expiry_check),
+            ('panda_sandbox_keepalive', self._do_panda_sandbox_keepalive),
             ('catalog_import_csv',
              lambda msg: self._do_catalog_import(dict(msg, source='csv'))),
             ('epic_prod_past_import', self._do_epic_prod_past_import),
@@ -1275,7 +1296,76 @@ class EpicProdOpsAgent(BaseAgent):
             username=created_by,
             sublevel='high', live_default=True,
             level=logging.INFO if not failed else logging.ERROR,
+            summary=(f'all {len(steps)} sync steps completed'
+                     if not failed else ''),
             steps=len(steps), raised=failed)
+
+    def _handle_panda_sandbox_keepalive(self, m):
+        """Keep retryable tasks' sandbox tarballs alive in the PanDA server
+        cache; normally a catalog_sync chain step, also directly invokable."""
+        self.run_in_background(
+            self._do_panda_sandbox_keepalive, m,
+            dedup_key="panda_sandbox_keepalive",
+            label="panda_sandbox_keepalive")
+
+    def _do_panda_sandbox_keepalive(self, m):
+        """Touch the sandbox tarball of every task worth keeping retryable
+        (catalog_sync chain step): the server's 7-day cache purge is
+        modification-time based, and touch_cache_file resets the clock. A
+        tarball already purged marks its tasks as not natively retryable —
+        that is reported, not fatal."""
+        cmd = [sys.executable, str(SANDBOX_KEEPALIVE_SCRIPT)]
+        self.logger.info("PRODOPS panda_sandbox_keepalive: touching sandboxes")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=SANDBOX_KEEPALIVE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS panda_sandbox_keepalive TIMEOUT after "
+                f"{SANDBOX_KEEPALIVE_TIMEOUT}s")
+            self._log_action('panda_sandbox_keepalive', t0, outcome='timeout',
+                             reason=f'timed out after {SANDBOX_KEEPALIVE_TIMEOUT}s',
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  panda-sandbox-keepalive: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  panda-sandbox-keepalive: {line}")
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or '').strip().splitlines()[-1])
+        except Exception:
+            pass
+        counts = {k: summary.get(k) for k in
+                  ('candidates', 'tarballs', 'touched')}
+        missing = summary.get('missing') or []
+        if p.returncode != 0:
+            self.logger.error(
+                f"PRODOPS panda_sandbox_keepalive FAILED rc={p.returncode}")
+            self._log_action('panda_sandbox_keepalive', t0, outcome='error',
+                             reason=self._derive_reason(p),
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.ERROR, **counts)
+        elif missing:
+            tasks = sorted({t for rec in missing for t in rec.get('tasks', [])})
+            reason = (f"sandbox already purged for task(s) {tasks} — "
+                      "not natively retryable")
+            self.logger.warning(f"PRODOPS panda_sandbox_keepalive: {reason}")
+            self._log_action('panda_sandbox_keepalive', t0, outcome='warning',
+                             reason=reason,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='high', live_default=True,
+                             level=logging.WARNING,
+                             missing_tasks=tasks, **counts)
+        else:
+            self.logger.info("PRODOPS panda_sandbox_keepalive done")
+            self._log_action('panda_sandbox_keepalive', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False, **counts)
 
     def _do_credential_expiry_check(self, m):
         """Nightly credential-expiry check (catalog_sync chain step): runs
@@ -1411,7 +1501,9 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'rucio_snapshot_ready', 'ok': True})
             self._log_action('rucio_sweep', t0,
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True)
+                             sublevel='high', live_default=True,
+                             summary='produced-output Rucio snapshot '
+                                     'refreshed and rematched onto tasks')
 
     def _handle_rucio_arrivals_sweep(self, m):
         """Run the clockwork arrivals sweep off the receiver thread —
@@ -1513,29 +1605,6 @@ class EpicProdOpsAgent(BaseAgent):
             self._do_delivery_daily_rebuild, m,
             dedup_key="delivery_daily_rebuild", label="delivery_daily_rebuild")
 
-    def _post_capcom_notice(self, payload):
-        """Buffer one discrete Capcom event in the monitor's notice store
-        (/api/capcom/notices/ingest/, ordinary monitor token); feed
-        consumers drain it from their own side. One attempt per event,
-        never resent; a failed post is logged loudly and the event is
-        dropped — record staleness has its own alarm."""
-        headers = {}
-        if MONITOR_API_TOKEN:
-            headers['Authorization'] = f'Token {MONITOR_API_TOKEN}'
-        try:
-            r = requests.post(
-                f"{MONITOR_HTTP_URL.rstrip('/')}/api/capcom/notices/ingest/",
-                json=payload, timeout=ACTION_LOG_TIMEOUT, headers=headers)
-            if r.status_code != 200:
-                self.logger.error(
-                    f"PRODOPS capcom notice: HTTP {r.status_code} "
-                    f"for {payload.get('dedup_key')}")
-            else:
-                self.logger.info(
-                    f"PRODOPS capcom notice stored: {payload.get('dedup_key')}")
-        except Exception as e:
-            self.logger.error(f"PRODOPS capcom notice: post failed: {e}")
-
     def _record_panda_operation_state(self, operation_id, status, *,
                                       diagnostic='', observed_status='',
                                       evidence=None):
@@ -1566,122 +1635,6 @@ class EpicProdOpsAgent(BaseAgent):
                 f"({operation_id} {status}): {exc}")
             return False
 
-    def _emit_panda_operation_notice(self, message, stage, *, detail=''):
-        """Publish one concise Capcom notice for a pause/resume transition."""
-        operation = str(message.get('operation') or '')
-        operation_id = str(message.get('operation_id') or '')
-        jedi_task_id = str(message.get('jedi_task_id') or '')
-        if operation not in ('pause', 'resume') or not operation_id:
-            return
-        if stage == 'requested':
-            title = f'PanDA {jedi_task_id}: {operation} requested'
-            severity = 'info'
-        elif stage == 'verified':
-            result = 'paused' if operation == 'pause' else 'resumed'
-            title = f'PanDA {jedi_task_id}: {result}'
-            severity = 'info'
-        elif stage == 'unverified':
-            title = f'PanDA {jedi_task_id}: {operation} not verified'
-            severity = 'warning'
-        elif stage == 'timeout':
-            title = f'PanDA {jedi_task_id}: {operation} timed out'
-            severity = 'warning'
-        else:
-            title = f'PanDA {jedi_task_id}: {operation} failed'
-            severity = 'warning'
-        self._post_capcom_notice({
-            'source': 'swf-panda-operations',
-            'severity': severity,
-            'title': title,
-            'detail': str(detail or '')[:500],
-            'url': CAPCOM_PANDA_TASK_URL.format(jedi_task_id=jedi_task_id),
-            'dedup_key': f'panda-task-operation:{operation_id}:{stage}',
-        })
-
-    def _emit_panda_bulk_notice(self, message, stage, *, counts=None):
-        """Publish one Capcom notice for the whole manual bulk request."""
-        operation = str(message.get('operation') or '')
-        batch_id = str(message.get('batch_id') or '')
-        items = message.get('items') or []
-        if operation not in ('pause', 'resume') or not batch_id or not items:
-            return
-        total = len(items)
-        counts = counts or {}
-        if stage == 'requested':
-            title = f'PanDA bulk {operation}: {total} requested'
-            detail = f'Requested by {message.get("created_by") or "operator"}.'
-            severity = 'info'
-        else:
-            verified = int(counts.get('verified') or 0)
-            failed = int(counts.get('failed') or 0)
-            unverified = int(counts.get('unverified') or 0)
-            timed_out = int(counts.get('timeout') or 0)
-            title = f'PanDA bulk {operation}: {verified}/{total} verified'
-            parts = [f'{verified} verified']
-            if failed:
-                parts.append(f'{failed} failed')
-            if unverified:
-                parts.append(f'{unverified} unverified')
-            if timed_out:
-                parts.append(f'{timed_out} timed out')
-            detail = ' · '.join(parts)
-            severity = ('info' if verified == total
-                        and not failed and not unverified and not timed_out
-                        else 'warning')
-        self._post_capcom_notice({
-            'source': 'swf-panda-operations',
-            'severity': severity,
-            'title': title,
-            'detail': detail,
-            'url': CAPCOM_PANDA_TASKS_URL,
-            'dedup_key': f'panda-task-bulk:{batch_id}:{stage}',
-        })
-
-    def _emit_delivery_notice(self, outcome, reason, summary):
-        """The campaign-delivery Capcom event: an info notice stating the
-        newest recorded day's arrivals, or a warning when the rebuild
-        failed."""
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-
-        et_today = datetime.now(ZoneInfo("America/New_York")).date()
-        if outcome != "ok":
-            self._post_capcom_notice({
-                "source": "swf-campaign-delivery",
-                "severity": "warning",
-                "title": f"Campaign delivery nightly rebuild failed ({reason})",
-                "url": CAPCOM_LOGS_URL,
-                "dedup_key": f"delivery-daily-fail:{et_today.isoformat()}",
-            })
-            return
-        day = str((summary or {}).get("newest_day") or "")
-        if not day:
-            self.logger.error(
-                "PRODOPS capcom notice: no newest_day in rebuild summary; "
-                "notice dropped")
-            return
-        # The title states the newest recorded day's arrivals — the
-        # one-day (ET calendar day) counts, never cumulative totals.
-        # Files only: event coverage is incomplete, so event numbers
-        # stay off the notice until measurement is reliable.
-        parts = []
-        for name, block in sorted(
-                ((summary or {}).get("newest_arrivals") or {}).items()):
-            files = int((block or {}).get("files") or 0)
-            if not files:
-                continue
-            parts.append(f"{name} +{files:,} files")
-        day_label = datetime.fromisoformat(day).strftime("%b %-d")
-        title = (f"Campaign delivery {day_label}: "
-                 + (" · ".join(parts) if parts else "no new files"))
-        self._post_capcom_notice({
-            "source": "swf-campaign-delivery",
-            "severity": "info",
-            "title": title,
-            "url": CAPCOM_CAMPAIGN_URL,
-            "dedup_key": f"delivery-daily:{day}",
-        })
-
     def _do_delivery_daily_rebuild(self, m):
         """Rebuild the per-ET-day, per-PC registered-basis delivery
         record from the JLab Rucio inventory — the record the Snapper
@@ -1703,8 +1656,6 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              level=logging.ERROR)
-            self._emit_delivery_notice(
-                'timeout', f'timed out after {DELIVERY_DAILY_TIMEOUT}s', None)
             return
         for line in (p.stdout or "").splitlines():
             self.logger.info(f"  delivery-daily-rebuild: {line}")
@@ -1718,13 +1669,8 @@ class EpicProdOpsAgent(BaseAgent):
                              username=str(m.get('created_by') or ''),
                              sublevel='low', live_default=False,
                              level=logging.ERROR)
-            self._emit_delivery_notice('error', reason, None)
         else:
             self.logger.info("PRODOPS delivery_daily_rebuild done")
-            self._log_action('delivery_daily_rebuild', t0,
-                             username=str(m.get('created_by') or ''),
-                             sublevel='low', live_default=False,
-                             summary=((p.stdout or '').splitlines() or [''])[-1])
             summary = {}
             for line in (p.stdout or "").splitlines():
                 if line.startswith('SUMMARY '):
@@ -1734,7 +1680,32 @@ class EpicProdOpsAgent(BaseAgent):
                         self.logger.error(
                             f"PRODOPS delivery_daily_rebuild: bad SUMMARY "
                             f"line: {e}")
-            self._emit_delivery_notice('ok', '', summary)
+            # The event's summary states the newest recorded day's
+            # arrivals — one-day counts, files only (event coverage is
+            # incomplete until measurement is reliable); the notice
+            # router delivers it verbatim (NOTICE_ROUTING.md).
+            from datetime import datetime as _dt
+            day = str((summary or {}).get("newest_day") or "")
+            if day:
+                parts = []
+                for name, block in sorted(
+                        ((summary or {}).get("newest_arrivals") or {}).items()):
+                    files = int((block or {}).get("files") or 0)
+                    if files:
+                        parts.append(f"{name} +{files:,} files")
+                day_label = _dt.fromisoformat(day).strftime("%b %-d")
+                day_line = (f"newest day {day_label}: "
+                            + (" · ".join(parts) if parts else "no new files"))
+            else:
+                day_line = 'no newest_day in rebuild summary'
+                self.logger.error(
+                    "PRODOPS delivery_daily_rebuild: no newest_day in "
+                    "rebuild summary")
+            self._log_action('delivery_daily_rebuild', t0,
+                             username=str(m.get('created_by') or ''),
+                             sublevel='low', live_default=False,
+                             summary=day_line,
+                             url='/snapper/epicprod/campaign/')
 
     def _handle_epic_prod_past_import(self, m):
         """Run the past-campaign output ingest off the receiver thread —
@@ -1829,7 +1800,9 @@ class EpicProdOpsAgent(BaseAgent):
                 'msg_type': 'evgen_rucio_ready', 'ok': True})
             self._log_action('evgen_sweep', t0,
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True)
+                             sublevel='high', live_default=True,
+                             summary='EVGEN input datasets re-resolved '
+                                     'from JLab Rucio')
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —

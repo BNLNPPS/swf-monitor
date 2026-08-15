@@ -12,10 +12,27 @@ from monitor_app.models import PandaTaskOperation
 PAUSE_REJECTED_TASK_STATUSES = frozenset(
     ('finished', 'failed', 'done', 'aborted', 'broken', 'paused'))
 RESUMABLE_TASK_STATUSES = frozenset(('paused', 'throttled', 'staging'))
+# The PanDA command gate accepts plain retry from finished/failed/
+# exhausted only; an aborted task is retried via the reactivation path
+# (retry with new_parameters -> incexec), which the executor selects by
+# observed state. Verified live on task 38541, 2026-08-11.
+RETRYABLE_TASK_STATUSES = frozenset(
+    ('finished', 'failed', 'exhausted', 'aborted'))
+# Stop-and-finish (the PanDA finish command): the task ends 'finished'
+# with completed output kept, and plain retry remains available. The
+# kill command is deliberately not offered — it strands the task in
+# 'aborted', which plain retry refuses (docs/PCS_COMPOSED_NAME_INTEGRITY
+# forensics, operator decision 2026-08-11).
+FINISHABLE_TASK_STATUSES = frozenset(
+    ('running', 'paused', 'throttled', 'staging', 'exhausted',
+     'ready', 'pending', 'scouting', 'assigning', 'defined', 'registered'))
 BULK_OPERATION_STATUSES = {
     'pause': frozenset(('running',)),
     'resume': frozenset(('paused',)),
+    'retry_failures': RETRYABLE_TASK_STATUSES,
+    'finish': FINISHABLE_TASK_STATUSES,
 }
+OPERATION_VERBS = frozenset(('pause', 'resume', 'retry_failures', 'finish'))
 MAX_BULK_TASKS = 5000
 
 
@@ -120,8 +137,9 @@ def queue_task_operation(*, task, operation, requested_by, source='manual',
 def _persist_task_operation(*, task, operation, requested_by, source,
                             evidence=None, allowed_statuses=None):
     """Validate and create one record without sending an ActiveMQ message."""
-    if operation not in ('pause', 'resume'):
-        raise PandaTaskOperationError('operation must be pause or resume')
+    if operation not in OPERATION_VERBS:
+        raise PandaTaskOperationError(
+            'operation must be one of: ' + ', '.join(sorted(OPERATION_VERBS)))
     try:
         jedi_task_id = int(task.get('jeditaskid'))
     except (TypeError, ValueError):
@@ -142,14 +160,24 @@ def _persist_task_operation(*, task, operation, requested_by, source,
     task_status = str(task.get('status') or '').lower()
     if allowed_statuses is not None and task_status not in allowed_statuses:
         raise PandaTaskOperationError(
-            f'Task cannot be bulk {operation}d from status {task_status}.', 409)
+            f'Task is not eligible for bulk {operation} '
+            f'from status {task_status}.', 409)
     if operation == 'pause':
         if task_status in PAUSE_REJECTED_TASK_STATUSES:
             raise PandaTaskOperationError(
                 f'Task cannot be paused from status {task_status}.', 409)
-    elif task_status not in RESUMABLE_TASK_STATUSES:
+    elif operation == 'resume':
+        if task_status not in RESUMABLE_TASK_STATUSES:
+            raise PandaTaskOperationError(
+                f'Task cannot be resumed from status {task_status}.', 409)
+    elif operation == 'retry_failures':
+        if task_status not in RETRYABLE_TASK_STATUSES:
+            raise PandaTaskOperationError(
+                f'Task failures cannot be retried from status {task_status}.',
+                409)
+    elif task_status not in FINISHABLE_TASK_STATUSES:
         raise PandaTaskOperationError(
-            f'Task cannot be resumed from status {task_status}.', 409)
+            f'Task cannot be finished from status {task_status}.', 409)
 
     try:
         with transaction.atomic():
@@ -196,7 +224,9 @@ def _send_operation_message(message, records):
 def queue_task_operations(*, tasks, operation, requested_by):
     """Persist eligible task records and queue one paced prod-ops batch."""
     if operation not in BULK_OPERATION_STATUSES:
-        raise PandaTaskOperationError('operation must be pause or resume')
+        raise PandaTaskOperationError(
+            'operation must be one of: '
+            + ', '.join(sorted(BULK_OPERATION_STATUSES)))
     if not tasks:
         raise PandaTaskOperationError('Select at least one task.')
     if len(tasks) > MAX_BULK_TASKS:

@@ -98,7 +98,7 @@
     <div class="card mb-3">
         <div class="card-header" style="background:#f8d7da;"><strong>Logged status</strong></div>
         <div class="card-body">
-            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{{ task.errordialog }}</div>
+            <div style="white-space:pre-wrap;overflow-wrap:anywhere;">{{ errordialog_display }}</div>
         </div>
     </div>
     {% endif %}
@@ -135,8 +135,7 @@
     <div class="card mb-3">
         <div class="card-header"><strong>Dataset processing information</strong></div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-sm table-bordered table-striped mb-0">
+                <table class="table table-sm table-bordered table-striped mb-0 swf-sortable">
                     <thead>
                         <tr>
                             <th>Dataset / container</th>
@@ -168,7 +167,6 @@
                     {% endfor %}
                     </tbody>
                 </table>
-            </div>
         </div>
     </div>
     {% endif %}
@@ -214,8 +212,7 @@
         </div>
         <div class="card-body">
             {% if jobs %}
-            <div class="table-responsive">
-                <table class="table table-sm table-bordered table-striped mb-0">
+                <table class="table table-sm table-bordered table-striped mb-0 swf-sortable">
                     <thead>
                         <tr>
                             <th>PanDA ID</th>
@@ -259,7 +256,6 @@
                     {% endfor %}
                     </tbody>
                 </table>
-            </div>
             {% if job_count >= 200 %}
             <p class="mt-2 text-muted">Showing first 200 jobs. <a href="{% url 'monitor_app:panda_jobs_list' %}?taskid={{ jeditaskid }}&days=90">View all in job list</a></p>
             {% endif %}

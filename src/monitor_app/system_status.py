@@ -300,6 +300,72 @@ def _campaign_assessments():
     return _status('campaign-assessments', 'agents', status, summary, data)
 
 
+def _composed_name_integrity():
+    """PCS composed-name uniqueness — the identity invariant restored by
+    the 2026-08-11 backfill, enforced by monitoring rather than a DB
+    constraint. Policy lives in pcs.integrity; a collector exception
+    surfaces as a red collector-failed row via refresh_system_status."""
+    from pcs.integrity import composed_name_integrity
+    status, summary, data = composed_name_integrity()
+    return _status('composed-name-integrity', 'agents', status, summary, data)
+
+
+def panda_retry_rule_set():
+    """The PanDA job retry-module rules live from the PanDA database —
+    the error-keyed tuning layer above per-job attempt retries. Rules
+    are instance data; the epic set is loaded and maintained by epicprod
+    (swf-epicprod docs/PANDA_ANCILLARY_AUDIT.md). Read by the System
+    page directly and by the panda-retry-rules collector."""
+    from django.db import connections
+    cur = connections['panda'].cursor()
+    cur.execute(
+        "SELECT re.retryerror_id, re.errorsource, re.errorcode,"
+        "       re.errordiag, re.parameters, ra.retry_action,"
+        "       re.active, ra.active"
+        " FROM retryerrors re JOIN retryactions ra"
+        "   ON re.retryaction = ra.retryaction_id"
+        " ORDER BY re.retryerror_id")
+    return [
+        {'id': row[0], 'source': row[1], 'code': row[2],
+         'diag': row[3] or '', 'parameters': row[4] or '',
+         'action': row[5],
+         'mode': 'enforcing' if (row[6] == 'Y' and row[7] == 'Y')
+                 else 'passive'}
+        for row in cur.fetchall()
+    ]
+
+
+def panda_retry_action_set():
+    """The registered retry actions (RETRYACTIONS) — the implementations
+    rules can invoke, with their own activation switch."""
+    from django.db import connections
+    cur = connections['panda'].cursor()
+    cur.execute(
+        "SELECT retryaction_id, retry_action, active, retry_description"
+        " FROM retryactions ORDER BY retryaction_id")
+    return [
+        {'id': row[0], 'action': row[1],
+         'active': row[2] == 'Y', 'description': row[3] or ''}
+        for row in cur.fetchall()
+    ]
+
+
+def _panda_retry_rules():
+    """Collector row over panda_retry_rule_set(); a collector exception
+    surfaces as a red collector-failed row via refresh_system_status."""
+    rules = panda_retry_rule_set()
+    if not rules:
+        return _status(
+            'panda-retry-rules', 'services', 'ok',
+            'no retry-module rules loaded — every job failure consumes '
+            'its full attempt budget', {'rules': []})
+    enforcing = sum(1 for rule in rules if rule['mode'] == 'enforcing')
+    summary = (f'{len(rules)} rules loaded: {enforcing} enforcing, '
+               f'{len(rules) - enforcing} passive')
+    return _status('panda-retry-rules', 'services', 'ok', summary,
+                   {'rules': rules})
+
+
 def _snapper_scheduler(scope):
     """Assess one PostgreSQL-backed Snapper capture cursor."""
     from snapper_ai.models import CaptureCursor
@@ -569,6 +635,8 @@ COLLECTORS = {
     'stale-state': _stale_state,
     'swf-panda-bot': _panda_bot,
     'campaign-assessments': _campaign_assessments,
+    'composed-name-integrity': _composed_name_integrity,
+    'panda-retry-rules': _panda_retry_rules,
     'swf-monitor-mcp-asgi': lambda: _systemctl_unit(
         'swf-monitor-mcp-asgi', 'swf-monitor-mcp-asgi', category='services'),
     'httpd': lambda: _systemctl_unit('httpd', 'httpd', category='services'),

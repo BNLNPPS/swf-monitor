@@ -171,6 +171,18 @@ def _register_ai_assessment_sync(
     # assessment calling for attention reaches operators without any
     # additional machinery (EPICPROD_ASSESSMENTS.md § Architecture).
     verdict = str(payload_data.get('verdict') or '').strip().lower()
+    # Report links are for people: slotted assessments get the slot-form
+    # path (campaign/kind/date); the page-group UUID form is the fallback
+    # for unslotted content only.
+    slot_parts = [p for p in str(payload_data.get('slot') or '').split('/') if p]
+    if len(slot_parts) == 3:
+        kind_part = 'daily' if slot_parts[1] == 'nightly' else slot_parts[1]
+        report_path = (f'/ai/assessments/{slot_parts[0]}/'
+                       f'{kind_part}/{slot_parts[2]}/')
+    elif page_group_id:
+        report_path = f'/ai/assessments/{page_group_id}/'
+    else:
+        report_path = ''
     log_epicprod_action(
         'mcp', 'assessment_register',
         subject_type=canonical_type,
@@ -182,10 +194,14 @@ def _register_ai_assessment_sync(
         linked=linked,
         corun_page_group_id=page_group_id,
         report_title=report_title,
-        report_path=(f'/ai/assessments/{page_group_id}/'
-                     if page_group_id else ''),
+        report_path=report_path,
         assessment_kind=str(payload_data.get('assessment_kind') or ''),
         narration=str(payload_data.get('narration') or '')[:600],
+        # Notice-routing attributes (NOTICE_ROUTING.md): severity from
+        # the verdict, url to the report page.
+        severity={'attention': 'warning', 'alarm': 'alarm'}.get(
+            verdict, 'info'),
+        url=report_path,
         **({'verdict': verdict} if verdict else {}),
     )
     return {

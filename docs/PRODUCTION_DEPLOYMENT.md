@@ -598,7 +598,7 @@ pg_restore -h <DB_HOST> -U <DB_USER> -d swfdb --clean --if-exists \
 The dumps share the `/data` volume with PGDATA (`/data/pgsql`), so they
 protect against logical loss — a bad migration, table deletion,
 corruption — not against loss of the volume itself. Host-level and
-off-host protection is SDCC's layer.
+off-host protection is SCDF's layer.
 
 ### Regular Maintenance
 

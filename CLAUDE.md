@@ -118,6 +118,13 @@ page template:
   `data-relative-time="<ISO timestamp>"` and its text renders and ticks
   every second as `just now` / `Ns ago` / `Nm ago` / `Nh ago` / `Nd ago`
   (`window.swfFormatElapsed` is the formatter).
+- **Poll gate**: `window.swfPollGate.attended()` reports whether the page
+  is attended — visible, and either its window holds focus or it was
+  interacted with within five minutes — and
+  `swfPollGate.onReturn(fn)` registers a catch-up callback for when
+  attention returns. Gate every recurring client-side fetch on it;
+  `document.hidden` alone is not sufficient, because the frontmost tab
+  of an unfocused window reports itself visible and polls forever.
 - **Editor fit**: `swfFitEditor(el)` (or class `swf-fit-editor` on the
   textarea) grows an in-page document editor to the visible window.
 - **AI attribution**: `.ai-attr` / `.ai-attr-text` (purple-on-lavender

@@ -584,12 +584,13 @@ catalogs. Credentials and the BNL X509 proxy remain on swf-testbed.
   `group.EIC`; use it for output and log registration, rules, locks, replicas,
   and RSE diagnostics.
 
-Each prefix exposes the complete 13-tool surface below:
+Each prefix exposes the complete 14-tool surface below:
 
 | Suffix | Parameters | Purpose |
 |---|---|---|
 | `list_scopes` | - | Discover scopes available in that catalog. |
 | `list_dids` | `scope`, `name`, `type`, `filters`, `long`, `page`, `limit` | Search datasets, containers, or files by wildcard name and metadata. |
+| `summarize_datasets` | `scope`, `name`, `filters`, `order`, `page`, `limit` | Per-dataset file counts, sizes, and created/updated times plus totals for every dataset matching a pattern, in one call; `order='updated'` puts the latest first. |
 | `list_files` | `scope`, `name`, `page`, `limit` | Recursively list files in a dataset or container. |
 | `list_content` | `scope`, `name`, `page`, `limit` | List immediate child DIDs. |
 | `get_did_metadata` | `scope`, `name`, `plugin` | Retrieve system and custom physics metadata. |
@@ -640,11 +641,11 @@ not an immediate conclusion that data is absent.
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
-| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 9 |
+| PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 10 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
-| JLab Rucio | `jlab_rucio_*` | 13 |
-| BNL Rucio | `bnl_rucio_*` | 13 |
-| **Total** | | **86** |
+| JLab Rucio | `jlab_rucio_*` | 14 |
+| BNL Rucio | `bnl_rucio_*` | 14 |
+| **Total** | | **88** |
 
 ---
 

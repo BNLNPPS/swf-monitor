@@ -158,3 +158,9 @@ JOB_STATUS_CATEGORIES = {
     'finished': ('finished',),
     'failed': ('failed',),
 }
+
+
+# Runtime LLM for DISpatcher and the Brains web dialog. Lives here (an
+# import-light module) so the web tier can name the model without
+# importing the bot. DO NOT change the model without user approval.
+AI_MODEL = "claude-sonnet-5"

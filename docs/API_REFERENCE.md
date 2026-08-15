@@ -133,7 +133,9 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   Capcom collector supplies the configured username. Invalid or missing
   usernames return HTTP 400.
 - `GET /api/capcom/notices/?since=ISO8601` - Buffered discrete SWF events
-  (campaign-delivery and task-operation notices) created strictly after
+  (campaign-delivery, campaign-assessment, task-operation, and
+  catalog-integrity notices)
+  created strictly after
   `since`; a naive timestamp is read as UTC, and the default window is the
   trailing 24 hours. Rows return oldest-first so a consumer's next cursor is
   the last row's `created_at`; `more` flags a page-capped response that
@@ -154,10 +156,21 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   queued, not completed. This action is restricted to the internal monitor;
   requests arriving through the swf-remote tunnel receive HTTP 403.
 - `POST /api/panda/task-operations/` - Authenticated internal-monitor bulk
-  pause/resume request with `{"operation": "pause|resume", "jedi_task_ids":
-  [...]}`. The endpoint re-reads current PanDA state and queues only `running`
-  tasks for pause or `paused` tasks for resume. Prod-ops sends the accepted
-  scalar PanDA commands one second apart and records each task's outcome.
+  task-operation request with `{"operation":
+  "pause|resume|retry_failures|finish", "jedi_task_ids": [...]}`. The
+  endpoint re-reads current PanDA state and queues only eligible tasks:
+  `running` for pause, `paused` for resume,
+  `finished`/`failed`/`exhausted`/`aborted` for retry_failures, and active
+  states for finish. Finish (the PanDA finish command) stops a task while
+  keeping completed output; the task ends `finished` and remains
+  retryable — the kill command is deliberately not offered, since it
+  strands tasks in `aborted`. An aborted task is retried through PanDA's
+  reactivation path (retry with new parameters, processed as incexec —
+  the plain retry command refuses aborted); the executor selects the path
+  by the task's observed state. Prod-ops sends
+  the accepted scalar PanDA commands one second apart and records each task's
+  verified outcome (retry verified when the task leaves its terminal state,
+  kill when it reaches `aborting`/`aborted`).
 - `GET /api/panda/task-operations/{operation_id}/` - Authenticated durable
   operation state for the task page's bounded SSE backstop. `verified` is the
   only successful terminal state; `unverified` means PanDA accepted the request

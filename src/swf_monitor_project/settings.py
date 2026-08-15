@@ -122,6 +122,7 @@ INSTALLED_APPS = [
     # Third-party apps
     "rest_framework",
     "drf_spectacular",
+    "drf_spectacular_sidecar",  # self-hosted Swagger UI / Redoc assets
     "rest_framework.authtoken",
     "django_filters",  # DRF filter backend for filterset_fields
     "django_seed",
@@ -290,11 +291,25 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "SWF Monitor API",
-    "DESCRIPTION": "API for the ePIC Streaming Workflow Testbed Monitor",
+    "TITLE": "ePIC SWF REST APIs",
+    "DESCRIPTION": (
+        "REST interfaces of the ePIC SWF platform: production (PCS, the "
+        "validation interface v1), PanDA views, and the testbed monitor. "
+        "Interface design documents live in the swf-epicprod and "
+        "swf-monitor repositories; this schema is the single source of "
+        "endpoint detail."
+    ),
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    # OTHER SETTINGS
+    # Relative server base so Swagger UI's try-it-out joins endpoint paths
+    # onto the application mount rather than the host root. The swf-remote
+    # proxy rewrites it to the /prod mount, so one setting serves both faces.
+    "SERVERS": [{"url": "/swf-monitor/"}],
+    # Serve Swagger UI / Redoc assets from the sidecar package rather than
+    # a public CDN, so the pages work without external asset loads.
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
 }
 
 # OAuth2 Provider settings for MCP authentication
@@ -351,6 +366,8 @@ COMMON QUERIES:
 - Core-hours this month? → panda_resource_usage(days=30)
 - Core-hours on Perlmutter? → panda_resource_usage(days=30, site='NERSC_Perlmutter%')
 - Find JLab science data for a campaign? → jlab_rucio_list_dids(scope='epic', name='*26.06.0*', type='DATASET')
+- How many files / how big are the datasets matching a pattern? → jlab_rucio_summarize_datasets(scope='epic', name='/EVGEN/*') — ONE call for counts, sizes, and totals; never loop get_did_metadata per dataset
+- Latest added or updated datasets? → jlab_rucio_summarize_datasets(scope='epic', name='/EVGEN/*', order='updated')
 - Inspect a JLab science dataset? → jlab_rucio_get_did_metadata(scope='epic', name='/RECO/...') then jlab_rucio_list_files(...)
 - Find BNL PanDA output or log datasets? → bnl_rucio_list_dids(scope='group.EIC', name='*26.06.0*', type='DATASET')
 - Diagnose BNL registration or replication? → bnl_rucio_get_did_metadata(...), bnl_rucio_list_rules(...), then bnl_rucio_get_rule_locks(...)

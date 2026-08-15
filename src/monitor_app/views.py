@@ -470,6 +470,36 @@ class WorkflowExecutionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
     filterset_fields = ['status', 'namespace', 'executed_by']
 
+    TERMINAL_STATUSES = ('completed', 'failed')
+
+    def perform_update(self, serializer):
+        prev_status = serializer.instance.status
+        obj = serializer.save()
+        # Terminal transition = a named stream event for notice routing
+        # (docs/NOTICE_ROUTING.md); the run's notice stamp travels in
+        # parameter_values.
+        if (obj.status in self.TERMINAL_STATUSES
+                and prev_status not in self.TERMINAL_STATUSES):
+            from monitor_app.epicprod_logging import log_epicprod_action
+            params = obj.parameter_values or {}
+            elapsed = None
+            if obj.start_time and obj.end_time:
+                elapsed = round(
+                    (obj.end_time - obj.start_time).total_seconds(), 1)
+            log_epicprod_action(
+                'web', 'workflow_execution_completed',
+                subject_type='workflow_execution',
+                subject_key=obj.execution_id,
+                username=str(obj.executed_by or ''),
+                outcome='ok' if obj.status == 'completed' else 'error',
+                reason=('' if obj.status == 'completed'
+                        else 'workflow execution failed'),
+                sublevel='low', live_default=False,
+                namespace=obj.namespace, status=obj.status,
+                notice=bool(params.get('notice')),
+                url=f'/workflow-executions/{obj.execution_id}/',
+                elapsed_s=elapsed)
+
 
 # Fast Processing API ViewSets
 
