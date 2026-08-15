@@ -117,8 +117,38 @@ DESCRIPTIONS = {
 }
 
 
+# Tier as the facility providing the cycles, which is what a reader wants and
+# what schedconfig does not give: its value follows the parent site, so nearly
+# every ePIC queue reports T1 whatever the hardware behind it. BNL and JLab are
+# the Tier-1 facilities, Manitoba GREX is Tier-2, and everything else is
+# opportunistic capacity ("Opp"): NERSC allocations and commercial cloud.
+TIERS = {
+    'BNL_EPIC_PROD_1': 'T1',
+    'BNL_NPPS_GPU': 'T1',
+    'BNL_OSG_EPIC_PROD_1': 'T1',
+    'BNL_OSG_PanDA_1': 'T1',
+    'BNL_OSG_PanDA_CI': 'T1',
+    'BNL_OSG_PanDA_pilotest': 'T1',
+    'BNL_PanDA_1': 'T1',
+    'BNL_PanDA_test': 'T1',
+    'E1_BNL': 'T1',
+    'E1_JLAB': 'T1',
+    'UM_GREX_PanDA_1': 'T2',
+    'BNL_ePIC_GOOGLE': 'Opp',
+    'BNL_ePIC_GOOGLE_test': 'Opp',
+    'NERSC_Perlmutter_epic': 'Opp',
+    'NERSC_Perlmutter_epic_dev': 'Opp',
+    'NERSC_Perlmutter_epic_gpu_mps': 'Opp',
+    'NERSC_Perlmutter_epic_gpu_test': 'Opp',
+    'NERSC_Perlmutter_epic_mcore': 'Opp',
+    'NERSC_Perlmutter_epic_test': 'Opp',
+    'NERSC_Perlmutter_epic_test_mcore': 'Opp',
+    'NERSC_Perlmutter_iri': 'Opp',
+}
+
+
 class Command(BaseCommand):
-    help = 'Seed queue descriptions into PandaQueue.metadata'
+    help = 'Seed queue descriptions and facility tiers into PandaQueue.metadata'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -149,10 +179,13 @@ class Command(BaseCommand):
 
             metadata = dict(queue.metadata or {})
             existing = (metadata.get('description') or '').strip()
-            if existing and not force:
+            tier = TIERS.get(queue_name)
+            tier_current = (metadata.get('tier') or '').strip()
+            tier_stale = bool(tier) and tier_current != tier
+            if existing and not force and not tier_stale:
                 skipped += 1
                 continue
-            if existing == text:
+            if existing == text and not tier_stale:
                 skipped += 1
                 continue
 
@@ -161,6 +194,8 @@ class Command(BaseCommand):
                 written += 1
                 continue
 
+            if tier:
+                metadata['tier'] = tier
             metadata['description'] = text
             metadata['description_updated_by'] = 'set_queue_descriptions'
             metadata['description_updated_at'] = timezone.now().isoformat()

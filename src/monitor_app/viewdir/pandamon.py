@@ -1648,17 +1648,48 @@ def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
     queues = result.get('queues', [])
-    # Operator-written descriptions live in the local model's metadata, which
-    # the CRIC sync never touches. One query, attached by name.
+    # Operator-written description and tier live in the local model's
+    # metadata, which the CRIC sync never touches. One query, attached by
+    # name. The tier held there overrides schedconfig, whose value reflects
+    # the parent site rather than the facility actually providing the cycles.
     from monitor_app.models import PandaQueue
-    descriptions = {
-        row.queue_name: (row.metadata or {}).get('description', '')
+    local = {
+        row.queue_name: (row.metadata or {})
         for row in PandaQueue.objects.only('queue_name', 'metadata')
     }
     for queue in queues:
-        queue['description'] = descriptions.get(queue.get('panda_queue'), '')
+        meta = local.get(queue.get('panda_queue'), {})
+        queue['description'] = meta.get('description', '')
+        queue['tier'] = meta.get('tier') or queue.get('tier') or ''
+
+    filter_fields = [
+        ('status', 'Status'),
+        ('state', 'State'),
+        ('resource_type', 'Resource Type'),
+        ('type', 'Queue Type'),
+        ('country', 'Region'),
+        ('tier', 'Tier'),
+    ]
+    # Options come from the full set, so a chosen filter does not empty the
+    # other filter bars.
+    filters = []
+    selected = {}
+    for key, label in filter_fields:
+        value = (request.GET.get(key) or '').strip()
+        selected[key] = value
+        options = sorted({(q.get(key) or '') for q in queues if q.get(key)})
+        filters.append({
+            'key': key, 'label': label, 'options': options, 'selected': value,
+        })
+    for key, value in selected.items():
+        if value:
+            queues = [q for q in queues if (q.get(key) or '') == value]
+
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
+        'filters': filters,
+        'any_filter': any(selected.values()),
+        'total_count': result.get('count', 0),
     })
 
 
