@@ -98,6 +98,7 @@ from .viewdir.pandamon import (
     panda_payload_log,
     epic_queues_list,
     epic_queue_detail,
+    epic_queue_description_update,
 )
 
 from .viewdir.system_status import (
@@ -282,6 +283,8 @@ urlpatterns = [
     path('panda/diagnostics/datatable/', panda_diagnostics_datatable_ajax, name='panda_diagnostics_datatable_ajax'),
     path('panda/epic-queues/', epic_queues_list, name='epic_queues_list'),
     path('panda/epic-queues/<str:queue_name>/', epic_queue_detail, name='epic_queue_detail'),
+    path('panda/epic-queues/<str:queue_name>/description/', epic_queue_description_update,
+         name='epic_queue_description_update'),
 
     # Alarms
     path('alarms/', alarm_views.alarms_dashboard, name='alarms_dashboard'),

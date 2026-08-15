@@ -15,6 +15,42 @@
 
     <h1>{{ queue_name }}</h1>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>Description</strong>
+            {% if user.is_authenticated %}
+            <button type="button" class="btn btn-dark-green btn-sm"
+                    onclick="document.getElementById('queue-desc-view').classList.toggle('d-none');
+                             document.getElementById('queue-desc-edit').classList.toggle('d-none');">
+                Edit
+            </button>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <div id="queue-desc-view">
+                {% if description %}<p class="mb-0">{{ description }}</p>
+                {% else %}<p class="mb-0 text-muted">No description yet.</p>{% endif %}
+            </div>
+            {% if user.is_authenticated %}
+            <form id="queue-desc-edit" class="d-none" method="post"
+                  action="{% url 'monitor_app:epic_queue_description_update' queue_name %}">
+                {% csrf_token %}
+                <textarea name="description" class="form-control mb-2" rows="3"
+                          placeholder="What this queue is for, and how it differs from its siblings.">{{ description }}</textarea>
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm"
+                        onclick="document.getElementById('queue-desc-view').classList.toggle('d-none');
+                                 document.getElementById('queue-desc-edit').classList.toggle('d-none');">
+                    Cancel
+                </button>
+                {% if panda_queue_metadata.description_updated_by %}
+                <span class="text-muted ms-2">last edited by {{ panda_queue_metadata.description_updated_by }}</span>
+                {% endif %}
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
     {% ai_assessment_panel panda_queue_metadata %}
 
     {% if error %}

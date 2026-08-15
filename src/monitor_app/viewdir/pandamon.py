@@ -5,6 +5,7 @@ Web views for ePIC PanDA production monitoring — jobs, tasks, errors,
 activity overview, and detail pages with rich cross-linking.
 """
 
+from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
@@ -1647,6 +1648,15 @@ def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
     queues = result.get('queues', [])
+    # Operator-written descriptions live in the local model's metadata, which
+    # the CRIC sync never touches. One query, attached by name.
+    from monitor_app.models import PandaQueue
+    descriptions = {
+        row.queue_name: (row.metadata or {}).get('description', '')
+        for row in PandaQueue.objects.only('queue_name', 'metadata')
+    }
+    for queue in queues:
+        queue['description'] = descriptions.get(queue.get('panda_queue'), '')
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
     })
@@ -1667,6 +1677,7 @@ def epic_queue_detail(request, queue_name):
             'error': result['error'],
             'queue_name': queue_name,
             'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
+            'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
         })
     config = result['queue']
 
@@ -1716,7 +1727,36 @@ def epic_queue_detail(request, queue_name):
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
         'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
+        'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
     })
+
+
+@login_required
+def epic_queue_description_update(request, queue_name):
+    """Save the operator-written description for a queue.
+
+    The description is held in the local model's ``metadata`` JSON rather than
+    in the mirrored schedconfig: the sync writers replace ``config_data`` and
+    leave ``metadata`` alone, so the text survives every refresh. The local
+    row is created on demand, since most queues are only known from
+    schedconfig until somebody annotates them.
+    """
+    from monitor_app.models import PandaQueue
+
+    if request.method != 'POST':
+        return redirect('monitor_app:epic_queue_detail', queue_name=queue_name)
+
+    queue, _created = PandaQueue.objects.get_or_create(
+        queue_name=queue_name,
+        defaults={'config_data': {}, 'metadata': {}},
+    )
+    metadata = dict(queue.metadata or {})
+    metadata['description'] = (request.POST.get('description') or '').strip()
+    metadata['description_updated_by'] = request.user.get_username()
+    metadata['description_updated_at'] = timezone.now().isoformat()
+    queue.metadata = metadata
+    queue.save(update_fields=['metadata', 'updated_at'])
+    return redirect('monitor_app:epic_queue_detail', queue_name=queue_name)
