@@ -1691,6 +1691,11 @@ def epic_queues_list(request):
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
         'filters': filters,
+        'active_filters': [
+            {'label': f['label'], 'value': f['selected']}
+            for f in filters if f['selected']
+        ],
+        'clear_all_url': reverse('monitor_app:epic_queues_list'),
         'any_filter': any(selected.values()),
         'total_count': result.get('count', 0),
     })
