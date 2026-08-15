@@ -22,6 +22,19 @@
     </div>
     {% endfor %}
 
+    {% if any_filter %}
+    <div class="small mb-2">
+        <strong>Active filters:</strong>
+        {% for f in filters %}
+        {% if f.selected %}
+        <span class="badge bg-info me-1">{{ f.label }}: {{ f.selected }}</span>
+        <a href="?{% for o in filters %}{% if o.key != f.key and o.selected %}{{ o.key }}={{ o.selected|urlencode }}&amp;{% endif %}{% endfor %}"
+           class="btn btn-link btn-sm p-0 me-2">clear {{ f.label|lower }}</a>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
         <p class="text-muted mb-1">Opp = opportunistic &middot; Unified = production and analysis &middot; hpc_special = DOE HPC</p>
 
         <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
