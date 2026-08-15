@@ -5,21 +5,13 @@
 
 {% block content %}
 <div class="container-fluid">
-    <nav aria-label="breadcrumb">
-        <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_hub' %}">Home</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'monitor_app:epic_queues_list' %}">ePIC Queues</a></li>
-            <li class="breadcrumb-item active">{{ queue_name }}</li>
-        </ol>
-    </nav>
-
     <h1>{{ queue_name }}</h1>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
     <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="card-header d-flex align-items-center">
             <strong>Description</strong>
             {% if user.is_authenticated %}
-            <button type="button" class="btn btn-dark-green btn-sm"
+            <button type="button" class="btn btn-dark-green btn-sm" style="margin-left:1cm;"
                     onclick="document.getElementById('queue-desc-view').classList.toggle('d-none');
                              document.getElementById('queue-desc-edit').classList.toggle('d-none');">
                 Edit
