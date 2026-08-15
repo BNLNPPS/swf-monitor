@@ -15,6 +15,15 @@ h1 {
 .filter-bar a:hover {
     text-decoration: underline;
 }
+/* Bootstrap's bg-info is a pale cyan; its default white badge text is
+   unreadable on it. Repaint the badge to the house link blue, and stop
+   shrinking it to 0.75em. Utilities carry !important, so this must too. */
+.badge.bg-info {
+    background-color: #0b5394 !important;
+    color: #fff !important;
+    font-size: 0.85em;
+}
+
 .filter-bar a.filter-active {
     font-weight: bold;
     text-decoration: underline;
