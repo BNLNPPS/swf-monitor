@@ -1353,6 +1353,8 @@ def _delivery_card(data, previous_data, ctx):
                 if not arrived:
                     continue
                 delivering += 1
+                cum_events = int(leaf.get('events') or 0)
+                expected = leaf.get('expected')
                 row = {
                     'label': pc,
                     # The quilt curve this row is a patch of, in
@@ -1365,11 +1367,13 @@ def _delivery_card(data, previous_data, ctx):
                                         or ['Unassigned']),
                     'arrived_events': int(
                         leaf.get('arrived_events') or 0),
-                    'cum_events': int(leaf.get('events') or 0),
+                    'cum_events': cum_events,
                     'arrived': arrived,
                     'cum': int(leaf.get('cum_files') or 0),
-                    'expected': leaf.get('expected'),
+                    'expected': expected,
                     'tier': leaf.get('tier') or '',
+                    'completion': (round(100 * cum_events / expected, 1)
+                                   if expected else None),
                 }
                 for group in _lens_groups(pc, seg, cache):
                     slot = by_group.setdefault(group, {

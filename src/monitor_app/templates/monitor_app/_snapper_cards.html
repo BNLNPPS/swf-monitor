@@ -128,7 +128,7 @@
         <div class="mb-1"><strong>{{ grp.name }}</strong>
           · {{ grp.arrived_events }} events, {{ grp.arrived_files }} files this day</div>
         <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th></tr></thead>
+          <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th><th>% complete</th></tr></thead>
           <tbody>
           {% for pc in grp.rows %}
           <tr>
@@ -139,6 +139,7 @@
             <td class="text-end">{{ pc.cum_events }}</td>
             <td class="text-end">{{ pc.arrived }}</td>
             <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+            <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
           </tr>
           {% endfor %}
           </tbody>
