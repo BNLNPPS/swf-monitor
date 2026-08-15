@@ -59,9 +59,10 @@ DESCRIPTIONS = {
         'from the gpu_test queue and now the busier of the two GPU queues.'
     ),
     'NERSC_Perlmutter_epic_gpu_test': (
-        'First Perlmutter GPU queue, without MPS sharing. Identical in PanDA '
-        'configuration to the MPS queue; the difference is in the NERSC-side '
-        'batch submission. Largely superseded by the MPS queue.'
+        'Identical to NERSC_Perlmutter_epic_gpu_mps in schedconfig: every '
+        'field matches, and the MPS queue was cloned from this one. Any '
+        'difference between them is in the NERSC-side batch submission, not '
+        'in PanDA. The earlier of the two GPU queues and now the quieter.'
     ),
 
     # NERSC Perlmutter CPU
