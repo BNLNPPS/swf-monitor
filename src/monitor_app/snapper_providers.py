@@ -638,7 +638,8 @@ def _delivery_focus_view():
     return {
         'param': 'campaign',
         'label': 'Campaign',
-        'note': ("Daily bins are constructed overnight based on the "
+        'note': ("Click on a bin to see a breakdown of data arrivals "
+                 "below. Daily bins are constructed overnight based on the "
                  "day's arrivals, hence no today bin."),
         # The natural campaign span carries thousands of unrelated
         # scope snaps and curves. Persist the selected campaign
