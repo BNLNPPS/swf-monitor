@@ -10,27 +10,17 @@
         {% if any_filter %}{{ queues|length }} of {{ total_count }}{% else %}{{ queues|length }}{% endif %}
         queues registered for VO <strong>eic</strong></p>
 
+    {% for f in filters %}
     <div class="filter-bar mb-2">
-        {% for f in filters %}
-        <div style="margin-bottom: 0.35em;">
-            <span style="font-weight: 600;">{{ f.label }}:</span>
-            <a href="?{% for o in filters %}{% if o.key != f.key and o.selected %}{{ o.key }}={{ o.selected|urlencode }}&amp;{% endif %}{% endfor %}"
-               class="{% if not f.selected %}filter-active{% endif %}">All</a>
-            {% for opt in f.options %}
-            <a href="?{{ f.key }}={{ opt|urlencode }}{% for o in filters %}{% if o.key != f.key and o.selected %}&amp;{{ o.key }}={{ o.selected|urlencode }}{% endif %}{% endfor %}"
-               class="{% if f.selected == opt %}filter-active{% endif %}">{{ opt }}</a>
-            {% endfor %}
-        </div>
+        <strong>{{ f.label }}:</strong>
+        <a href="?{% for o in filters %}{% if o.key != f.key and o.selected %}{{ o.key }}={{ o.selected|urlencode }}&amp;{% endif %}{% endfor %}"
+           class="filter-link {% if not f.selected %}filter-active{% endif %}">All ({{ total_count }})</a>
+        {% for opt in f.options %}
+        <a href="?{{ f.key }}={{ opt.value|urlencode }}{% for o in filters %}{% if o.key != f.key and o.selected %}&amp;{{ o.key }}={{ o.selected|urlencode }}{% endif %}{% endfor %}"
+           class="filter-link {% if f.selected == opt.value %}filter-active{% endif %}">{{ opt.value }} ({{ opt.count }})</a>
         {% endfor %}
     </div>
-
-    {% if any_filter %}
-    <div id="active-filters" class="mt-2 mb-2">
-        <strong>Active filters:</strong>
-        <span id="filter-badges">{% for f in filters %}{% if f.selected %}<span class="badge bg-info me-1">{{ f.key }}: {{ f.selected }}</span>{% endif %}{% endfor %}</span>
-        <a href="{% url 'monitor_app:epic_queues_list' %}" class="btn btn-link btn-sm p-0 ms-2">clear all</a>
-    </div>
-    {% endif %}
+    {% endfor %}
 
         <p class="text-muted mb-1">Opp = opportunistic &middot; Unified = production and analysis &middot; hpc_special = DOE HPC</p>
 

@@ -9,7 +9,7 @@ h1 {
 
 .filter-bar a {
     margin-right: 0.5em;
-    color: #007bff;
+    color: #0b5394;
     text-decoration: none;
 }
 .filter-bar a:hover {
@@ -18,7 +18,7 @@ h1 {
 .filter-bar a.filter-active {
     font-weight: bold;
     text-decoration: underline;
-    color: #0056b3;
+    color: #073763;
 }
 
 .ai-assessment-entry {

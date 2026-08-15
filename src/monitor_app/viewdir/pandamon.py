@@ -6,6 +6,8 @@ activity overview, and detail pages with rich cross-linking.
 """
 
 from django.contrib.auth.decorators import login_required
+from collections import Counter
+
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
@@ -1677,9 +1679,10 @@ def epic_queues_list(request):
     for key, label in filter_fields:
         value = (request.GET.get(key) or '').strip()
         selected[key] = value
-        options = sorted({(q.get(key) or '') for q in queues if q.get(key)})
+        counts = Counter((q.get(key) or '') for q in queues if q.get(key))
         filters.append({
-            'key': key, 'label': label, 'options': options, 'selected': value,
+            'key': key, 'label': label, 'selected': value,
+            'options': [{'value': v, 'count': counts[v]} for v in sorted(counts)],
         })
     for key, value in selected.items():
         if value:
