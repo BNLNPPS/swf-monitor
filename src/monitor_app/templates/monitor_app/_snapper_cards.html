@@ -261,7 +261,7 @@
         <tr>
           <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
           <td>{{ pc.identity }}</td>
-          <td class="text-nowrap">{% if pc.process %}<div>process={{ pc.process }}</div>{% endif %}{% if pc.species %}<div>species={{ pc.species }}</div>{% endif %}{% if pc.beam_energy %}<div>beam={{ pc.beam_energy }}</div>{% endif %}{% if pc.q2_range %}<div>Q²={{ pc.q2_range }}</div>{% endif %}{% if pc.sample %}<div>sample={{ pc.sample }}</div>{% endif %}</td>
+          <td class="text-nowrap">{% if pc.process %}<div>process={{ pc.process }}</div>{% endif %}{% if pc.species and pc.species != 'Unspecified' %}<div>species={{ pc.species }}</div>{% endif %}{% if pc.beam_energy %}<div>beam={{ pc.beam_energy }}</div>{% endif %}{% if pc.q2_range %}<div>Q²={{ pc.q2_range }}</div>{% endif %}{% if pc.sample %}<div>sample={{ pc.sample }}</div>{% endif %}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
           <td class="text-end">{% if pc.today_events %}{{ pc.today_events }}{% endif %}</td>
@@ -277,7 +277,7 @@
         <tr>
           <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
           <td>{{ pc.identity }}</td>
-          <td class="text-nowrap">{% if pc.process %}<div>process={{ pc.process }}</div>{% endif %}{% if pc.species %}<div>species={{ pc.species }}</div>{% endif %}{% if pc.beam_energy %}<div>beam={{ pc.beam_energy }}</div>{% endif %}{% if pc.q2_range %}<div>Q²={{ pc.q2_range }}</div>{% endif %}{% if pc.sample %}<div>sample={{ pc.sample }}</div>{% endif %}</td>
+          <td class="text-nowrap">{% if pc.process %}<div>process={{ pc.process }}</div>{% endif %}{% if pc.species and pc.species != 'Unspecified' %}<div>species={{ pc.species }}</div>{% endif %}{% if pc.beam_energy %}<div>beam={{ pc.beam_energy }}</div>{% endif %}{% if pc.q2_range %}<div>Q²={{ pc.q2_range }}</div>{% endif %}{% if pc.sample %}<div>sample={{ pc.sample }}</div>{% endif %}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
           <td class="text-end">{% if pc.today_events %}{{ pc.today_events }}{% endif %}</td>
