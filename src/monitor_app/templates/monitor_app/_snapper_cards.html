@@ -256,6 +256,8 @@
           <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
+        {% empty %}
+        <tr><td colspan="9" class="text-muted">No PC state recorded for this category at this cut.</td></tr>
         {% endfor %}
         </tbody>
       </table>

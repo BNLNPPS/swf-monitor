@@ -1811,8 +1811,11 @@ def _delivery_card(data, previous_data, ctx):
             category_pc_groups = [
                 {'name': category,
                  'detail_key': _delivery_pc_detail_key(name, category),
-                 'rows': category_pc_rows[category]}
-                for category in sorted(category_pc_rows)
+                 'rows': category_pc_rows.get(category, [])}
+                # A plotted category always owns a detail panel. At a cut
+                # before that category's first recorded PC, the panel is an
+                # explicit empty table rather than silently disappearing.
+                for category in _delivery_categories()
             ]
             requested_at = (ctx or {}).get('requested_at')
             unmeasured = int(totals.get('unmeasured_files') or 0)
