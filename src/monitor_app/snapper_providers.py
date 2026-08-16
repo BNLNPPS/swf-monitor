@@ -784,6 +784,11 @@ def _delivery_detail_key(kind, campaign):
     return f'delivery-{kind}-{_group_slug(campaign)}'
 
 
+def _delivery_pc_detail_key(campaign, category):
+    return (f'delivery-pcs-{_group_slug(campaign)}-'
+            f'{_group_slug(category)}')
+
+
 def _delivery_focus_view():
     """The Campaign focus tab: the report narrowed to one campaign's
     delivery — its family only, the delivery card in the cut, the
@@ -948,6 +953,7 @@ def _delivery_groups():
                 'ids': [f'dlvpcf_{tag}_{pc}' for pc in pcs],
                 'order': [f'dlvpcf_{tag}_{pc}' for pc in pcs],
                 'stacked': True, 'compact': True,
+                'detail_key': _delivery_pc_detail_key(name, category),
                 'panel_px': 300, 'units': 'files'})
             groups.append({
                 'name': _delivery_pc_family_name(name, 'events', category),
@@ -956,6 +962,7 @@ def _delivery_groups():
                 'ids': [f'dlvpc_{tag}_{pc}' for pc in pcs],
                 'order': [f'dlvpc_{tag}_{pc}' for pc in pcs],
                 'stacked': True, 'compact': True,
+                'detail_key': _delivery_pc_detail_key(name, category),
                 'panel_px': 300, 'units': 'events (M)'})
     return tuple(groups)
 
@@ -1695,7 +1702,8 @@ def _delivery_card(data, previous_data, ctx):
             # category stack.  Its cut table uses the same category
             # partition and the same cumulative values as the curves.
             category_totals = {}
-            for pc, leaf in leaves.items():
+            category_pc_rows = {}
+            for pc, leaf in sorted(leaves.items()):
                 category = cache['categories'].get(pc) or 'Uncategorized'
                 slot = category_totals.setdefault(category, {
                     'name': category, 'configurations': 0,
@@ -1703,6 +1711,24 @@ def _delivery_card(data, previous_data, ctx):
                 slot['configurations'] += 1
                 slot['events'] += int(leaf.get('events') or 0)
                 slot['files'] += int(leaf.get('cum_files') or 0)
+                cumulative_events = int(leaf.get('events') or 0)
+                expected = leaf.get('expected')
+                category_pc_rows.setdefault(category, []).append({
+                    'label': pc,
+                    'identity': keys.get(pc, ''),
+                    'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                    'groups': ', '.join(requestors.get(pc)
+                                        or ['Unassigned']),
+                    'events': cumulative_events,
+                    'files': int(leaf.get('cum_files') or 0),
+                    'expected': expected,
+                    'tier': leaf.get('tier') or '',
+                    'completion': (
+                        round(100 * cumulative_events / expected, 1)
+                        if expected else None),
+                    'curve': (f'dlvpc_{tag}_{pc} '
+                              f'dlvpcf_{tag}_{pc}'),
+                })
             category_rows = []
             for category in sorted(category_totals):
                 row = category_totals[category]
@@ -1710,6 +1736,12 @@ def _delivery_card(data, previous_data, ctx):
                 row['curve'] = (f'dlvc_cat_{tag}_{slug} '
                                 f'dlvcf_cat_{tag}_{slug}')
                 category_rows.append(row)
+            category_pc_groups = [
+                {'name': category,
+                 'detail_key': _delivery_pc_detail_key(name, category),
+                 'rows': category_pc_rows[category]}
+                for category in sorted(category_pc_rows)
+            ]
             requested_at = (ctx or {}).get('requested_at')
             unmeasured = int(totals.get('unmeasured_files') or 0)
             campaigns.append({
@@ -1743,6 +1775,7 @@ def _delivery_card(data, previous_data, ctx):
                      'value': delivering, 'delta': None},
                 ],
                 'category_rows': category_rows,
+                'category_pc_groups': category_pc_groups,
                 'unmeasured_files': unmeasured,
                 'plan_url': (reverse('pcs:pcs_campaign_plan')
                              + f'?campaign={name}'),
