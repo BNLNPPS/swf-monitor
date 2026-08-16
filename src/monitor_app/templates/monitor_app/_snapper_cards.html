@@ -203,7 +203,7 @@
             <td class="text-end">{{ pc.arrived_events }}</td>
             <td class="text-end">{{ pc.cum_events }}</td>
             <td class="text-end">{{ pc.arrived }}</td>
-            <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+            <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
             <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
           </tr>
           {% endfor %}
@@ -268,7 +268,7 @@
           <td class="text-end">{{ pc.today_events }}</td>
           <td class="text-end">{{ pc.files }}</td>
           <td class="text-end">{{ pc.today_files }}</td>
-          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
         {% endfor %}
@@ -285,7 +285,7 @@
           <td class="text-end">{{ pc.today_events }}</td>
           <td class="text-end">{{ pc.files }}</td>
           <td class="text-end">{{ pc.today_files }}</td>
-          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
         {% empty %}
@@ -324,7 +324,7 @@
         <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
         <td>{{ pc.groups }}</td>
         <td class="text-end">{{ pc.files }}</td>
-        <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+        <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
       </tr>
       {% endfor %}
       </tbody>
