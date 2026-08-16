@@ -191,12 +191,14 @@
         <div class="mb-1"><strong>{{ grp.name }}</strong>
           · {{ grp.arrived_events }} events, {{ grp.arrived_files }} files this day</div>
         <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th><th>% complete</th></tr></thead>
+          <thead><tr><th>PC</th><th>Configuration</th><th>Process</th><th>Species</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th><th>% complete</th></tr></thead>
           <tbody>
           {% for pc in grp.rows %}
           <tr>
             <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
             <td>{{ pc.identity }}</td>
+            <td>{{ pc.process }}</td>
+            <td>{{ pc.species }}</td>
             <td>{{ pc.groups }}</td>
             <td class="text-end">{{ pc.arrived_events }}</td>
             <td class="text-end">{{ pc.cum_events }}</td>
@@ -240,12 +242,14 @@
              class="snapper-cut-card mb-2">
       <div class="mb-1"><strong>Cumulative {{ category.name }} by PC · {{ c.name }}</strong></div>
       <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
-        <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th class="text-end">Cumulative events</th><th class="text-end">Cumulative files</th><th class="text-end">Target events</th><th class="text-end">% complete</th></tr></thead>
+        <thead><tr><th>PC</th><th>Configuration</th><th>Process</th><th>Species</th><th>Requestor</th><th class="text-end">Cumulative events</th><th class="text-end">Cumulative files</th><th class="text-end">Target events</th><th class="text-end">% complete</th></tr></thead>
         <tbody>
         {% for pc in category.rows %}
         <tr>
           <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
           <td>{{ pc.identity }}</td>
+          <td>{{ pc.process }}</td>
+          <td>{{ pc.species }}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
           <td class="text-end">{{ pc.files }}</td>

@@ -241,7 +241,8 @@ DELIVERY_LENSES = (
 )
 
 _PC_CACHE = {'at': None, 'requestors': {}, 'keys': {},
-             'categories': {}, 'group_names': {}}
+             'categories': {}, 'processes': {}, 'species': {},
+             'group_names': {}}
 
 
 def _group_slug(name):
@@ -263,13 +264,22 @@ def _pc_cache():
     if (_PC_CACHE['at'] is None
             or (now - _PC_CACHE['at']).total_seconds() > 60):
         requestors, keys, categories = {}, {}, {}
-        for label, groups, key, category in (
+        processes, species = {}, {}
+        for label, groups, key, category, parameters in (
                 PhysicsConfig.objects.values_list(
                     'label', 'requestors', 'config_key',
-                    'physics_tag__category__name')):
+                    'physics_tag__category__name',
+                    'physics_tag__parameters')):
             requestors[label] = list(groups or [])
             keys[label] = key
             categories[label] = category or 'Uncategorized'
+            parameters = parameters or {}
+            processes[label] = str(parameters.get('process') or '')
+            # Collision species for ordinary samples; generated particle
+            # species for particle-gun samples, whose beam species is
+            # intentionally empty.
+            species[label] = str(parameters.get('beam_species')
+                                 or parameters.get('particle') or '')
         group_names = {}
         for name in set(categories.values()):
             group_names[_group_slug(name)] = name
@@ -280,6 +290,7 @@ def _pc_cache():
             group_names[_group_slug(name)] = name
         _PC_CACHE.update({'requestors': requestors, 'keys': keys,
                           'categories': categories,
+                          'processes': processes, 'species': species,
                           'group_names': group_names, 'at': now})
     return _PC_CACHE
 
@@ -1635,6 +1646,8 @@ def _delivery_card(data, previous_data, ctx):
     cache = _pc_cache()
     requestors = cache['requestors']
     keys = cache['keys']
+    processes = cache.get('processes') or {}
+    species = cache.get('species') or {}
     campaigns = []
     for name, block in sorted((data.get('campaigns') or {}).items()):
         if selected and name not in selected:
@@ -1670,6 +1683,8 @@ def _delivery_card(data, previous_data, ctx):
                     # takes the first candidate the plot carries.
                     'curve': (f'dlvq_{tag}_{pc} dlvqf_{tag}_{pc}'),
                     'identity': keys.get(pc, ''),
+                    'process': processes.get(pc, ''),
+                    'species': species.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
@@ -1716,6 +1731,8 @@ def _delivery_card(data, previous_data, ctx):
                 category_pc_rows.setdefault(category, []).append({
                     'label': pc,
                     'identity': keys.get(pc, ''),
+                    'process': processes.get(pc, ''),
+                    'species': species.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
