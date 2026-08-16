@@ -16,6 +16,7 @@ class EpicprodCurveValuesTests(SimpleTestCase):
 
         self.assertTrue(focus['cache_series'])
         self.assertEqual(focus['components'], ('panda',))
+        self.assertFalse(focus['prewarm_series'])
 
     def test_sent_jobs_stay_in_state_but_not_plot_curves(self):
         state = {

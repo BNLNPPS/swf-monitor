@@ -994,6 +994,9 @@ def _site_focus_view():
         # campaign and every queue before discarding nearly all of it.
         'cache_series': True,
         'components': ('panda',),
+        # The delivery rebuild prewarms campaign products. It must not turn
+        # that one job into a 30-day build for every PanDA queue.
+        'prewarm_series': False,
         'note': ('In-flight counts are the recorded queue state through '
                  'time; finished and failed accumulate from the left '
                  'edge of the shown window — the window is the '
