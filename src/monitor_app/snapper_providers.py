@@ -1933,7 +1933,8 @@ def _series_cache(key, builder, refresh=False):
 
     ttl_seconds = 6 * 3600 if ':focus:' in key else 90
     product = get_product(key, builder, ttl_seconds=ttl_seconds,
-                          refresh=refresh)
+                          refresh=refresh,
+                          async_first_fill=':focus:site:' in key)
     value = product.get('value')
     if isinstance(value, dict) and value.get('queue_members'):
         _QUEUE_STACK_CACHE['members'] = tuple(value['queue_members'])

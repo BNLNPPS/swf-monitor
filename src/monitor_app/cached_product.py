@@ -88,7 +88,8 @@ def _background_build(key, builder):
     thread.start()
 
 
-def get_product(key, builder, ttl_seconds, refresh=False):
+def get_product(key, builder, ttl_seconds, refresh=False,
+                async_first_fill=False):
     """Serve a cached product; rebuild by the contract above.
 
     Returns ``{'value', 'built_at', 'age_seconds', 'refreshing',
@@ -101,6 +102,15 @@ def get_product(key, builder, ttl_seconds, refresh=False):
 
     row = CachedProduct.objects.filter(key=key).first()
     have_product = row is not None and row.built_at is not None
+
+    # A large focus product must not hold the page request open on its first
+    # build. The report already understands a truthful empty/refreshing shell
+    # and follows it up after three seconds; build behind that response.
+    if async_first_fill and not refresh and not have_product:
+        if _claim(key):
+            _background_build(key, builder)
+        return {'value': None, 'built_at': None, 'age_seconds': None,
+                'refreshing': True, 'built_now': False}
 
     if (refresh or not have_product) and _claim(key):
         _build_and_store(key, builder)
