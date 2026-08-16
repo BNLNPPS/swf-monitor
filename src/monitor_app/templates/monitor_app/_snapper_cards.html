@@ -230,9 +230,9 @@
           <td><span data-curve="{{ row.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ row.name }}</td>
           <td class="text-end">{{ row.configurations }}</td>
           <td class="text-end">{{ row.events }}</td>
-          <td class="text-end">{{ row.today_events }}</td>
+          <td class="text-end">{% if row.today_events %}{{ row.today_events }}{% endif %}</td>
           <td class="text-end">{{ row.files }}</td>
-          <td class="text-end">{{ row.today_files }}</td>
+          <td class="text-end">{% if row.today_files %}{{ row.today_files }}{% endif %}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -251,9 +251,9 @@
         <tr class="table-secondary fw-bold">
           <td colspan="5"><span data-curve="{{ species.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ species.name }} · {{ species.configurations }} PCs</td>
           <td class="text-end">{{ species.events }}</td>
-          <td class="text-end">{{ species.today_events }}</td>
+          <td class="text-end">{% if species.today_events %}{{ species.today_events }}{% endif %}</td>
           <td class="text-end">{{ species.files }}</td>
-          <td class="text-end">{{ species.today_files }}</td>
+          <td class="text-end">{% if species.today_files %}{{ species.today_files }}{% endif %}</td>
           <td class="text-end">{% if species.target is not None %}{{ species.target }}{% if species.target_partial %} <span class="text-muted">· known targets</span>{% endif %}{% else %}<span class="text-muted">no targets</span>{% endif %}</td>
           <td class="text-end">{% if species.completion is not None %}{{ species.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
@@ -265,9 +265,9 @@
           <td>{{ pc.species }}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
-          <td class="text-end">{{ pc.today_events }}</td>
+          <td class="text-end">{% if pc.today_events %}{{ pc.today_events }}{% endif %}</td>
           <td class="text-end">{{ pc.files }}</td>
-          <td class="text-end">{{ pc.today_files }}</td>
+          <td class="text-end">{% if pc.today_files %}{{ pc.today_files }}{% endif %}</td>
           <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
@@ -282,9 +282,9 @@
           <td>{{ pc.species }}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
-          <td class="text-end">{{ pc.today_events }}</td>
+          <td class="text-end">{% if pc.today_events %}{{ pc.today_events }}{% endif %}</td>
           <td class="text-end">{{ pc.files }}</td>
-          <td class="text-end">{{ pc.today_files }}</td>
+          <td class="text-end">{% if pc.today_files %}{{ pc.today_files }}{% endif %}</td>
           <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
