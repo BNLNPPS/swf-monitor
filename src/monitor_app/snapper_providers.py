@@ -967,6 +967,7 @@ def _delivery_groups():
                 'ids': category_file_ids,
                 'order': category_file_ids,
                 'stacked': category_stack,
+                'cumulative_stack': category_stack,
                 'panel_px': 300 if category_stack else 0,
                 'detail_key': (_delivery_detail_key('categories', name)
                                if category_stack else ''),
@@ -980,6 +981,7 @@ def _delivery_groups():
                 'ids': category_event_ids,
                 'order': category_event_ids,
                 'stacked': category_stack,
+                'cumulative_stack': category_stack,
                 'panel_px': 300 if category_stack else 0,
                 'detail_key': (_delivery_detail_key('categories', name)
                                if category_stack else ''),
@@ -1009,7 +1011,8 @@ def _delivery_groups():
                 'title': title,
                 'prefixes': [],
                 'ids': file_ids, 'order': file_ids,
-                'stacked': True, 'compact': not by_species,
+                'stacked': True, 'cumulative_stack': True,
+                'compact': not by_species,
                 'detail_key': _delivery_pc_detail_key(name, category),
                 'panel_px': 300, 'units': 'files'})
             groups.append({
@@ -1017,7 +1020,8 @@ def _delivery_groups():
                 'title': title,
                 'prefixes': [],
                 'ids': event_ids, 'order': event_ids,
-                'stacked': True, 'compact': not by_species,
+                'stacked': True, 'cumulative_stack': True,
+                'compact': not by_species,
                 'detail_key': _delivery_pc_detail_key(name, category),
                 'panel_px': 300, 'units': 'events (M)'})
     return tuple(groups)
