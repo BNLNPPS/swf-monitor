@@ -242,6 +242,7 @@ DELIVERY_LENSES = (
 
 _PC_CACHE = {'at': None, 'requestors': {}, 'keys': {},
              'categories': {}, 'processes': {}, 'species': {},
+             'beam_energies': {}, 'q2_ranges': {}, 'samples': {},
              'group_names': {}}
 
 
@@ -272,11 +273,12 @@ def _pc_cache():
             or (now - _PC_CACHE['at']).total_seconds() > 60):
         requestors, keys, categories = {}, {}, {}
         processes, species = {}, {}
-        for label, groups, key, category, parameters in (
+        beam_energies, q2_ranges, samples = {}, {}, {}
+        for label, groups, key, category, parameters, sample in (
                 PhysicsConfig.objects.values_list(
                     'label', 'requestors', 'config_key',
                     'physics_tag__category__name',
-                    'physics_tag__parameters')):
+                    'physics_tag__parameters', 'sample_name')):
             requestors[label] = list(groups or [])
             keys[label] = key
             categories[label] = category or 'Uncategorized'
@@ -287,6 +289,17 @@ def _pc_cache():
             # intentionally empty.
             species[label] = str(parameters.get('beam_species')
                                  or parameters.get('particle') or '')
+            electron = parameters.get('beam_energy_electron')
+            hadron = parameters.get('beam_energy_hadron')
+            energies = [str(value) for value in (electron, hadron)
+                        if value not in (None, '')]
+            beam_energies[label] = (
+                f"{' × '.join(energies)} GeV" if energies else '')
+            q2_range = str(parameters.get('q2_range') or '')
+            if q2_range.startswith('q2_'):
+                q2_range = q2_range[3:]
+            q2_ranges[label] = q2_range.replace('to', '–')
+            samples[label] = str(sample or '')
         group_names = {}
         for name in set(categories.values()):
             group_names[_group_slug(name)] = name
@@ -302,6 +315,8 @@ def _pc_cache():
         _PC_CACHE.update({'requestors': requestors, 'keys': keys,
                           'categories': categories,
                           'processes': processes, 'species': species,
+                          'beam_energies': beam_energies,
+                          'q2_ranges': q2_ranges, 'samples': samples,
                           'species_names': species_names,
                           'group_names': group_names, 'at': now})
     return _PC_CACHE
@@ -1697,6 +1712,9 @@ def _delivery_card(data, previous_data, ctx):
     keys = cache['keys']
     processes = cache.get('processes') or {}
     species = cache.get('species') or {}
+    beam_energies = cache.get('beam_energies') or {}
+    q2_ranges = cache.get('q2_ranges') or {}
+    samples = cache.get('samples') or {}
     campaigns = []
     for name, block in sorted((data.get('campaigns') or {}).items()):
         if selected and name not in selected:
@@ -1795,6 +1813,9 @@ def _delivery_card(data, previous_data, ctx):
                     'identity': keys.get(pc, ''),
                     'process': processes.get(pc, ''),
                     'species': row_species,
+                    'beam_energy': beam_energies.get(pc, ''),
+                    'q2_range': q2_ranges.get(pc, ''),
+                    'sample': samples.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
