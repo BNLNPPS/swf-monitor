@@ -369,6 +369,8 @@ _QUEUE_BAND_COLORS = (
 # short dispatch transition; sampling it at five-minute cadence creates tall,
 # one-snap needles without useful operational structure.
 _EPICPROD_DISABLED_PLOT_JOB_STATES = frozenset(('sent',))
+_EPICPROD_TYPE_EXCLUDED_JOB_STATES = frozenset(
+    ('activated', 'starting')) | _EPICPROD_DISABLED_PLOT_JOB_STATES
 
 
 def _queue_stack_members():
@@ -492,9 +494,8 @@ def _epicprod_curve_values(state):
         for ptype, count in (jobs_now.get('by_type') or {}).items():
             states = type_states.get(ptype) or {}
             waiting = sum(int(states.get(status) or 0)
-                          for status in (
-                              'activated', 'starting',
-                              *_EPICPROD_DISABLED_PLOT_JOB_STATES))
+                          for status in
+                          _EPICPROD_TYPE_EXCLUDED_JOB_STATES)
             values[f'type_{ptype}'] = max(0, int(count or 0) - waiting)
         for ptype, states in type_states.items():
             for status, count in (states or {}).items():
@@ -1208,48 +1209,77 @@ def panda_site_outcomes_pie(site, since, until, size=270):
 
 
 def _panda_card(data, previous_data, ctx):
+    jobs = data.get('jobs') or {}
+    prev_job_data = previous_data.get('jobs') or {}
     jobs_now = (data.get('jobs') or {}).get('in_flight_now') or {}
     prev_jobs = ((previous_data.get('jobs') or {})
                  .get('in_flight_now') or {})
     tasks_now = (data.get('tasks') or {}).get('in_flight_now') or {}
     prev_tasks = ((previous_data.get('tasks') or {})
                   .get('in_flight_now') or {})
+    params = (ctx or {}).get('params') or {}
 
-    def stat(label, value, previous):
-        return {'label': label,
-                'value': value if value is not None else '—',
-                'delta': cut_delta(value, previous)}
+    def plotted_type_counts(block):
+        by_type_status = block.get('by_type_status') or {}
+        if not by_type_status:
+            return {str(name): int(count or 0)
+                    for name, count in (block.get('by_type') or {}).items()}
+        return {
+            str(ptype): sum(
+                int(count or 0) for status, count in (states or {}).items()
+                if status not in _EPICPROD_TYPE_EXCLUDED_JOB_STATES)
+            for ptype, states in by_type_status.items()
+        }
 
-    headline = [
-        stat('running jobs', jobs_now.get('running_jobs'),
-             prev_jobs.get('running_jobs')),
-        stat('running cores', jobs_now.get('running_cores'),
-             prev_jobs.get('running_cores')),
-        stat('in-flight jobs', jobs_now.get('total'),
-             prev_jobs.get('total')),
-        stat('queued (activated)',
-             (jobs_now.get('by_status') or {}).get('activated'),
-             (prev_jobs.get('by_status') or {}).get('activated')),
-        stat('in-flight tasks', tasks_now.get('total'),
-             prev_tasks.get('total')),
+    type_counts = plotted_type_counts(jobs_now)
+    prev_type_counts = plotted_type_counts(prev_jobs)
+    types = [
+        {'label': ptype, 'curve': f'type_{ptype}', 'value': value,
+         'delta': cut_delta(value, prev_type_counts.get(ptype))}
+        for ptype, value in sorted(
+            type_counts.items(), key=lambda item: (-item[1], item[0]))
+        if value or prev_type_counts.get(ptype)
     ]
-    types = sorted((jobs_now.get('by_type') or {}).items(),
-                   key=lambda item: -item[1])
-    type_states = []
-    for ptype, states in sorted(
-            (jobs_now.get('by_type_status') or {}).items()):
-        for status, count in sorted((states or {}).items()):
-            previous = ((prev_jobs.get('by_type_status') or {})
-                        .get(ptype) or {}).get(status)
-            type_states.append({
-                'label': f'{ptype} · {status}', 'value': count,
-                'delta': cut_delta(count, previous)})
+
+    job_statuses = jobs_now.get('by_status') or {}
+    prev_job_statuses = prev_jobs.get('by_status') or {}
+    states = [
+        {'label': status, 'curve': f'job_{status}',
+         'value': int(count or 0),
+         'delta': cut_delta(count, prev_job_statuses.get(status))}
+        for status, count in sorted(job_statuses.items())
+        if status not in _EPICPROD_TYPE_EXCLUDED_JOB_STATES
+    ]
+
+    task_statuses = tasks_now.get('by_status') or {}
+    prev_task_statuses = prev_tasks.get('by_status') or {}
+    tasks = [
+        {'label': status, 'curve': f'task_{status}',
+         'value': int(count or 0),
+         'delta': cut_delta(count, prev_task_statuses.get(status))}
+        for status, count in sorted(task_statuses.items())
+        if status not in ('defined', 'ready')
+    ]
+
+    cut_cum = jobs.get('cum') or {}
+    prev_cum = prev_job_data.get('cum') or {}
+    since_jobs = (((ctx or {}).get('since_data') or {}).get('jobs') or {})
+    basis_cum = since_jobs.get('cum') or {}
+    have_basis = (ctx or {}).get('since') is not None
+    outcomes = []
+    for status in ('finished', 'failed'):
+        current = int(cut_cum.get(status) or 0)
+        basis = int(basis_cum.get(status) or 0)
+        outcomes.append({
+            'label': status, 'curve': f'outcome_{status}',
+            'value': max(0, current - basis) if have_basis else current,
+            'delta': cut_delta(current, prev_cum.get(status)),
+        })
     # The Site focus narrows the card to the selected sites' detail:
     # the germane facts of the slice, color-coded as in the plot —
     # window outcomes first (differenced against the ?since= basis,
     # the view's left edge), then the in-flight standing in lifecycle
     # order, then tasks. One swatch per fact, no repetition.
-    params = (ctx or {}).get('params') or {}
     selected = [value for value in
                 (params.get('site') or '').split(',') if value]
     compact = str(params.get('compact') or '') == '1'
@@ -1475,10 +1505,13 @@ def _panda_card(data, previous_data, ctx):
                         'value': other_now,
                         'delta': cut_delta(other_now, other_prev)})
 
-    return {'kind': 'panda', 'headline': headline, 'types': types,
-            'type_states': type_states, 'sites': sites,
-            'queue_cores': queue_cores,
-            'site_only': bool(sites) and compact}
+    site_only = bool(sites) and compact
+    return {'kind': 'panda', 'types': types, 'states': states,
+            'tasks': tasks, 'outcomes': outcomes,
+            'outcomes_basis': ('Since window start'
+                               if have_basis else 'Cumulative'),
+            'sites': sites, 'queue_cores': queue_cores,
+            'site_only': site_only, 'split_panels': not site_only}
 
 
 def _delivery_card(data, previous_data, ctx):

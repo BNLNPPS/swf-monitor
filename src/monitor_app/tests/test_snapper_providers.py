@@ -1,6 +1,10 @@
-from django.test import SimpleTestCase
+from datetime import datetime, timezone
 
-from monitor_app.snapper_providers import _epicprod_curve_values
+from django.test import SimpleTestCase
+from django.template.loader import render_to_string
+
+from monitor_app.snapper_providers import (_epicprod_curve_values,
+                                           _panda_card)
 
 
 class EpicprodCurveValuesTests(SimpleTestCase):
@@ -50,3 +54,79 @@ class EpicprodCurveValuesTests(SimpleTestCase):
         self.assertEqual(values['job_running'], 10)
         self.assertEqual(values['ts_epicproduction_running'], 10)
         self.assertEqual(values['job_activated'], 100)
+
+    def test_scope_cut_is_six_vertical_plot_aligned_tables(self):
+        data = {
+            'jobs': {
+                'cum': {'finished': 120, 'failed': 8},
+                'in_flight_now': {
+                    'by_status': {
+                        'activated': 100, 'sent': 40, 'starting': 20,
+                        'holding': 2, 'running': 10,
+                    },
+                    'by_type': {'epicproduction': 172},
+                    'by_type_status': {
+                        'epicproduction': {
+                            'activated': 100, 'sent': 40, 'starting': 20,
+                            'holding': 2, 'running': 10,
+                        },
+                    },
+                },
+                'sites': {},
+            },
+            'tasks': {
+                'in_flight_now': {
+                    'by_status': {'ready': 7, 'running': 3},
+                },
+                'sites': {},
+            },
+        }
+        previous = {
+            'jobs': {
+                'cum': {'finished': 115, 'failed': 7},
+                'in_flight_now': {
+                    'by_status': {'holding': 1, 'running': 9},
+                    'by_type_status': {
+                        'epicproduction': {'holding': 1, 'running': 9},
+                    },
+                },
+            },
+            'tasks': {'in_flight_now': {'by_status': {'running': 2}}},
+        }
+        card = _panda_card(data, previous, {
+            'params': {},
+            'since': datetime(2026, 8, 1, tzinfo=timezone.utc),
+            'since_data': {'jobs': {'cum': {'finished': 100, 'failed': 5}}},
+        })
+        card.update({
+            'name': 'panda',
+            'template': 'monitor_app/_snapper_cards.html',
+            'payload_json': '{}',
+        })
+
+        self.assertTrue(card['split_panels'])
+        self.assertEqual(card['types'][0]['value'], 12)
+        self.assertEqual([row['label'] for row in card['states']],
+                         ['holding', 'running'])
+        self.assertEqual([row['label'] for row in card['tasks']],
+                         ['running'])
+        self.assertEqual([row['value'] for row in card['outcomes']], [20, 3])
+
+        html = render_to_string(
+            'snapper_ai/_snapper_cut.html',
+            {
+                'requested_at': None,
+                'cards': [{
+                    'name': 'health', 'kind': 'health',
+                    'chip': {'color': '#2e7d32', 'value': 'ok'},
+                    'counts': {'ok': 5}, 'non_ok_checks': [],
+                    'payload_json': '{}',
+                }, card],
+            },
+        )
+        positions = [html.index(f'<strong>{title}</strong>') for title in (
+            'Health', 'Queues', 'Outcomes', 'Types', 'States', 'Tasks')]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('d-flex flex-column gap-3 align-items-stretch', html)
+        self.assertNotIn('Type × state', html)
+        self.assertNotIn('job_sent', html)
