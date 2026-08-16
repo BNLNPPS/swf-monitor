@@ -1,13 +1,22 @@
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 from django.template.loader import render_to_string
 
 from monitor_app.snapper_providers import (_epicprod_curve_values,
-                                           _panda_card)
+                                           _panda_card, _site_focus_view)
 
 
 class EpicprodCurveValuesTests(SimpleTestCase):
+    @patch('monitor_app.snapper_providers._panda_sites',
+           return_value=('SITE_A',))
+    def test_site_focus_uses_a_panda_only_focus_series_product(self, _sites):
+        focus = _site_focus_view()
+
+        self.assertTrue(focus['cache_series'])
+        self.assertEqual(focus['components'], ('panda',))
+
     def test_sent_jobs_stay_in_state_but_not_plot_curves(self):
         state = {
             'components': {

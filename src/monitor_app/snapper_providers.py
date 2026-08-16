@@ -989,6 +989,11 @@ def _site_focus_view():
         'param': 'site',
         'label': 'Site',
         'selector_label': 'Queue',
+        # A Site view needs only the selected queue's PanDA curves. Sharing
+        # the all-scope product makes a cold 30-day request assemble every
+        # campaign and every queue before discarding nearly all of it.
+        'cache_series': True,
+        'components': ('panda',),
         'note': ('In-flight counts are the recorded queue state through '
                  'time; finished and failed accumulate from the left '
                  'edge of the shown window — the window is the '
