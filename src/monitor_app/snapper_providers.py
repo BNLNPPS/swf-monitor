@@ -1841,6 +1841,9 @@ def _delivery_card(data, previous_data, ctx):
                 slug = _group_slug(category)
                 row['curve'] = (f'dlvc_cat_{tag}_{slug} '
                                 f'dlvcf_cat_{tag}_{slug}')
+                row['plot_anchor'] = (
+                    'snapper-plot-'
+                    + _delivery_pc_detail_key(name, category))
                 category_rows.append(row)
             category_pc_groups = []
             for category in _delivery_categories():
