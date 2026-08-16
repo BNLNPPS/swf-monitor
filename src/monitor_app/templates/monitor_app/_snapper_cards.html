@@ -250,7 +250,7 @@
         <tbody>
         {% if category.species_groups %}
         {% for species in category.species_groups %}
-        <tr class="table-secondary fw-bold">
+        <tr class="table-secondary fw-bold swf-latch-section-row">
           <td colspan="4"><span data-curve="{{ species.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ species.name }} · {{ species.configurations }} PCs</td>
           <td class="text-end">{{ species.events }}</td>
           <td class="text-end">{% if species.today_events %}{{ species.today_events }}{% endif %}</td>

@@ -217,6 +217,7 @@
          script-time measurement or jump. */
       table.swf-latch-titled-head {
         --swf-latch-title-height: 2rem;
+        --swf-latch-column-height: 2rem;
       }
       table.swf-latch-titled-head thead tr.swf-latch-title-row > th {
         top: var(--swf-nav-height, 0px);
@@ -228,7 +229,21 @@
       table.swf-latch-titled-head thead tr.swf-latch-title-row + tr > th {
         top: calc(var(--swf-nav-height, 0px)
                   + var(--swf-latch-title-height));
+        height: var(--swf-latch-column-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
         z-index: 101;
+      }
+      table.swf-latch-titled-head tbody tr.swf-latch-section-row > * {
+        position: sticky;
+        top: calc(var(--swf-nav-height, 0px)
+                  + var(--swf-latch-title-height)
+                  + var(--swf-latch-column-height));
+        z-index: 100;
+        background-color: var(--bs-table-bg,
+                              var(--bs-secondary-bg, #e2e3e5));
+        box-shadow: inset 1px 0 0 #dee2e6,
+                    inset 0 -1px 0 #dee2e6;
       }
       .swf-wide-table-scroll > table.swf-latch-titled-head
           thead tr.swf-latch-title-row > th {
@@ -237,6 +252,11 @@
       .swf-wide-table-scroll > table.swf-latch-titled-head
           thead tr.swf-latch-title-row + tr > th {
         top: var(--swf-latch-title-height);
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          tbody tr.swf-latch-section-row > * {
+        top: calc(var(--swf-latch-title-height)
+                  + var(--swf-latch-column-height));
       }
       /* Wide tables pin two leading columns by default so a compact ID can
          retain the useful name beside it. data-swf-pin-columns can lower
