@@ -685,8 +685,9 @@ EPICPROD_GROUPS = (
      'prefixes': ['type_'], 'ids': [], 'stacked': True, 'panel_px': 150,
      'units': 'jobs'},
     {'name': 'In-flight jobs', 'title': 'Job states', 'prefixes': ['job_'],
-     'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
-    {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
+     'ids': [], 'stacked': True, 'panel_px': 150, 'units': 'jobs'},
+    {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': [],
+     'stacked': True, 'panel_px': 150, 'units': 'jobs'},
     {'name': 'Tasks', 'prefixes': ['task_'], 'ids': [],
      'stacked': True, 'panel_px': 150, 'units': 'tasks'},
 )
