@@ -1812,15 +1812,43 @@ def _delivery_card(data, previous_data, ctx):
                 row['curve'] = (f'dlvc_cat_{tag}_{slug} '
                                 f'dlvcf_cat_{tag}_{slug}')
                 category_rows.append(row)
-            category_pc_groups = [
-                {'name': category,
-                 'detail_key': _delivery_pc_detail_key(name, category),
-                 'rows': category_pc_rows.get(category, [])}
-                # A plotted category always owns a detail panel. At a cut
-                # before that category's first recorded PC, the panel is an
-                # explicit empty table rather than silently disappearing.
-                for category in _delivery_categories()
-            ]
+            category_pc_groups = []
+            for category in _delivery_categories():
+                rows = category_pc_rows.get(category, [])
+                species_groups = []
+                if category == 'Single Particle':
+                    by_species = {}
+                    for row in rows:
+                        by_species.setdefault(row['species'], []).append(row)
+                    for species_name in sorted(by_species):
+                        species_rows = by_species[species_name]
+                        targets = [row['expected'] for row in species_rows
+                                   if row['expected'] is not None]
+                        target = sum(targets) if targets else None
+                        events = sum(row['events'] for row in species_rows)
+                        species_groups.append({
+                            'name': species_name,
+                            'curve': species_rows[0]['curve'],
+                            'rows': species_rows,
+                            'configurations': len(species_rows),
+                            'events': events,
+                            'files': sum(row['files']
+                                         for row in species_rows),
+                            'target': target,
+                            'target_partial': (
+                                bool(targets)
+                                and len(targets) != len(species_rows)),
+                            'completion': (
+                                round(100 * events / target, 1)
+                                if target and len(targets) == len(species_rows)
+                                else None),
+                        })
+                category_pc_groups.append({
+                    'name': category,
+                    'detail_key': _delivery_pc_detail_key(name, category),
+                    'rows': rows,
+                    'species_groups': species_groups,
+                })
             requested_at = (ctx or {}).get('requested_at')
             unmeasured = int(totals.get('unmeasured_files') or 0)
             campaigns.append({
