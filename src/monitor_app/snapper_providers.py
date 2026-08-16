@@ -250,6 +250,13 @@ def _group_slug(name):
     return re.sub(r'[^a-z0-9]+', '_', str(name).lower()).strip('_')
 
 
+def _species_slug(name):
+    # Preserve charge in curve identities: e+ and e- must not both
+    # collapse to the same generic ``e`` slug.
+    charged = str(name).replace('+', '_plus').replace('-', '_minus')
+    return _group_slug(charged) or 'unspecified'
+
+
 def _pc_cache():
     """pc label -> requestor labels, physics category, and identity
     key, cached briefly: series assembly calls curve extraction once
@@ -288,9 +295,14 @@ def _pc_cache():
                 group_names[_group_slug(name)] = name
         for name in ('Unassigned', 'Uncategorized'):
             group_names[_group_slug(name)] = name
+        species_names = {
+            _species_slug(name or 'Unspecified'): name or 'Unspecified'
+            for name in species.values()
+        }
         _PC_CACHE.update({'requestors': requestors, 'keys': keys,
                           'categories': categories,
                           'processes': processes, 'species': species,
+                          'species_names': species_names,
                           'group_names': group_names, 'at': now})
     return _PC_CACHE
 
@@ -324,6 +336,7 @@ def _delivery_curve_values(state):
         # production bursts attributed — the lens only clusters the
         # tick boxes and the cut card. Cumulative draws at lens-group
         # level: a handful of lines, plus the total.
+        species_cum_e, species_cum_f = {}, {}
         for pc, leaf in (block.get('leaves') or {}).items():
             arrived_events = int(leaf.get('arrived_events') or 0)
             arrived_files = int(leaf.get('arrived_files') or 0)
@@ -344,6 +357,20 @@ def _delivery_curve_values(state):
                     cumulative_events / 1e6, 2)
             if cumulative_files:
                 values[f'dlvpcf_{tag}_{pc}'] = cumulative_files
+            if cache['categories'].get(pc) == 'Single Particle':
+                species = (cache.get('species') or {}).get(pc) \
+                    or 'Unspecified'
+                slug = _species_slug(species)
+                species_cum_e[slug] = (species_cum_e.get(slug, 0)
+                                       + cumulative_events)
+                species_cum_f[slug] = (species_cum_f.get(slug, 0)
+                                       + cumulative_files)
+        for slug, value in species_cum_e.items():
+            if value:
+                values[f'dlvsp_{tag}_{slug}'] = round(value / 1e6, 2)
+        for slug, value in species_cum_f.items():
+            if value:
+                values[f'dlvspf_{tag}_{slug}'] = value
         for lens in DELIVERY_LENSES:
             seg = lens['seg']
             cum_e, cum_f = {}, {}
@@ -670,6 +697,9 @@ def _epicprod_curve_label(curve_id):
         _campaign, pc = _delivery_curve_parts(curve_id)
         key = _pc_cache()['keys'].get(pc, '')
         return f'{pc} {key}' if key else pc
+    if curve_id.startswith(('dlvsp_', 'dlvspf_')):
+        _campaign, slug = _delivery_curve_parts(curve_id)
+        return (_pc_cache().get('species_names') or {}).get(slug, slug)
     if curve_id.startswith(('dlvc_', 'dlvcf_')):
         # The line states the group; the family header states
         # campaign, kind, and unit.
@@ -788,6 +818,8 @@ def _delivery_categories():
 
 
 def _delivery_pc_family_name(campaign, quantity, category):
+    if category == 'Single Particle':
+        return f'Cumulative {campaign} {quantity} species {category}'
     return f'Cumulative {campaign} {quantity} PCs {category}'
 
 
@@ -957,22 +989,35 @@ def _delivery_groups():
             pcs = sorted(pc for pc, pc_category
                          in cache['categories'].items()
                          if pc_category == category)
+            by_species = category == 'Single Particle'
+            species_names = sorted({
+                (cache.get('species') or {}).get(pc) or 'Unspecified'
+                for pc in pcs
+            }) if by_species else []
+            file_ids = ([f'dlvspf_{tag}_{_species_slug(species)}'
+                         for species in species_names]
+                        if by_species
+                        else [f'dlvpcf_{tag}_{pc}' for pc in pcs])
+            event_ids = ([f'dlvsp_{tag}_{_species_slug(species)}'
+                          for species in species_names]
+                         if by_species
+                         else [f'dlvpc_{tag}_{pc}' for pc in pcs])
+            title = (f'Cumulative {name} · {category} by species'
+                     if by_species else f'Cumulative {name} · {category}')
             groups.append({
                 'name': _delivery_pc_family_name(name, 'files', category),
-                'title': f'Cumulative {name} · {category}',
+                'title': title,
                 'prefixes': [],
-                'ids': [f'dlvpcf_{tag}_{pc}' for pc in pcs],
-                'order': [f'dlvpcf_{tag}_{pc}' for pc in pcs],
-                'stacked': True, 'compact': True,
+                'ids': file_ids, 'order': file_ids,
+                'stacked': True, 'compact': not by_species,
                 'detail_key': _delivery_pc_detail_key(name, category),
                 'panel_px': 300, 'units': 'files'})
             groups.append({
                 'name': _delivery_pc_family_name(name, 'events', category),
-                'title': f'Cumulative {name} · {category}',
+                'title': title,
                 'prefixes': [],
-                'ids': [f'dlvpc_{tag}_{pc}' for pc in pcs],
-                'order': [f'dlvpc_{tag}_{pc}' for pc in pcs],
-                'stacked': True, 'compact': True,
+                'ids': event_ids, 'order': event_ids,
+                'stacked': True, 'compact': not by_species,
                 'detail_key': _delivery_pc_detail_key(name, category),
                 'panel_px': 300, 'units': 'events (M)'})
     return tuple(groups)
@@ -1728,11 +1773,19 @@ def _delivery_card(data, previous_data, ctx):
                 slot['files'] += int(leaf.get('cum_files') or 0)
                 cumulative_events = int(leaf.get('events') or 0)
                 expected = leaf.get('expected')
+                row_species = species.get(pc, '') or 'Unspecified'
+                if category == 'Single Particle':
+                    species_slug = _species_slug(row_species)
+                    row_curve = (f'dlvsp_{tag}_{species_slug} '
+                                 f'dlvspf_{tag}_{species_slug}')
+                else:
+                    row_curve = (f'dlvpc_{tag}_{pc} '
+                                 f'dlvpcf_{tag}_{pc}')
                 category_pc_rows.setdefault(category, []).append({
                     'label': pc,
                     'identity': keys.get(pc, ''),
                     'process': processes.get(pc, ''),
-                    'species': species.get(pc, ''),
+                    'species': row_species,
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
@@ -1743,9 +1796,11 @@ def _delivery_card(data, previous_data, ctx):
                     'completion': (
                         round(100 * cumulative_events / expected, 1)
                         if expected else None),
-                    'curve': (f'dlvpc_{tag}_{pc} '
-                              f'dlvpcf_{tag}_{pc}'),
+                    'curve': row_curve,
                 })
+            for rows in category_pc_rows.values():
+                rows.sort(key=lambda row: (
+                    row['species'], row['process'], row['label']))
             category_rows = []
             for category in sorted(category_totals):
                 row = category_totals[category]
