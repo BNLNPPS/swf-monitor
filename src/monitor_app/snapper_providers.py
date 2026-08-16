@@ -364,6 +364,12 @@ _QUEUE_BAND_COLORS = (
     '#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3',
     '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195')
 
+# Keep these states in the captured PanDA record and detail tables, but do not
+# turn them into plot curves.  In particular, ``sent`` is normally a very
+# short dispatch transition; sampling it at five-minute cadence creates tall,
+# one-snap needles without useful operational structure.
+_EPICPROD_DISABLED_PLOT_JOB_STATES = frozenset(('sent',))
+
 
 def _queue_stack_members():
     """Members derived from the report series already in hand."""
@@ -384,7 +390,8 @@ def _site_curve_values(panda):
     # queue, so the stack always sums to the whole running-core count.
     for site, block in job_sites.items():
         for status, count in (block.get('by_status_now') or {}).items():
-            if status == 'starting':
+            if (status == 'starting'
+                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
                 continue
             values[f'sj_{site}_{status}'] = int(count or 0)
         if block.get('running_cores_now') is not None:
@@ -477,18 +484,22 @@ def _epicprod_curve_values(state):
     if jobs_now:
         values['running_cores'] = int(jobs_now.get('running_cores') or 0)
         for status, count in (jobs_now.get('by_status') or {}).items():
-            if status == 'starting':
+            if (status == 'starting'
+                    or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
                 continue
             values[f'job_{status}'] = int(count or 0)
         type_states = jobs_now.get('by_type_status') or {}
         for ptype, count in (jobs_now.get('by_type') or {}).items():
             states = type_states.get(ptype) or {}
             waiting = sum(int(states.get(status) or 0)
-                          for status in ('activated', 'starting'))
+                          for status in (
+                              'activated', 'starting',
+                              *_EPICPROD_DISABLED_PLOT_JOB_STATES))
             values[f'type_{ptype}'] = max(0, int(count or 0) - waiting)
         for ptype, states in type_states.items():
             for status, count in (states or {}).items():
-                if status in ('activated', 'starting'):
+                if (status in ('activated', 'starting')
+                        or status in _EPICPROD_DISABLED_PLOT_JOB_STATES):
                     continue
                 values[f'ts_{ptype}_{status}'] = int(count or 0)
     for status in ('finished', 'failed'):
