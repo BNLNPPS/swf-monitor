@@ -62,9 +62,19 @@
   </div>
   {% endif %}
   {% if card.queue_cores %}
-  <div class="mb-1"><strong>Running cores by queue:</strong>
-    {% for entry in card.queue_cores %}<span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.25em; vertical-align:-0.08em;"></span>{% if entry.site == 'other' %}other{% else %}<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ entry.site|urlencode }}&status=running">{{ entry.site }}</a>{% endif %} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
-  </div>
+  <div class="mb-1"><strong>Running cores by queue</strong></div>
+  <table class="table table-striped table-bordered table-sm align-middle w-auto mb-1">
+    <thead><tr><th>Queue</th><th class="text-end">Running cores</th><th class="text-end">Δ prev snap</th></tr></thead>
+    <tbody>
+    {% for entry in card.queue_cores %}
+    <tr>
+      <td><span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{% if entry.site == 'other' %}other{% else %}<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ entry.site|urlencode }}&status=running">{{ entry.site }}</a>{% endif %}</td>
+      <td class="text-end">{{ entry.value }}</td>
+      <td class="text-end">{% if entry.delta %}{{ entry.delta }}{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
   {% endif %}
   {% endif %}
   {# Queue slice: one table row per curve, in panel order, the swatch #}
