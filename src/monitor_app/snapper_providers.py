@@ -1771,10 +1771,15 @@ def _delivery_card(data, previous_data, ctx):
                 category = cache['categories'].get(pc) or 'Uncategorized'
                 slot = category_totals.setdefault(category, {
                     'name': category, 'configurations': 0,
-                    'events': 0, 'files': 0})
+                    'events': 0, 'today_events': 0,
+                    'files': 0, 'today_files': 0})
                 slot['configurations'] += 1
                 slot['events'] += int(leaf.get('events') or 0)
+                slot['today_events'] += int(
+                    leaf.get('arrived_events') or 0)
                 slot['files'] += int(leaf.get('cum_files') or 0)
+                slot['today_files'] += int(
+                    leaf.get('arrived_files') or 0)
                 cumulative_events = int(leaf.get('events') or 0)
                 expected = leaf.get('expected')
                 row_species = species.get(pc, '') or 'Unspecified'
@@ -1794,7 +1799,11 @@ def _delivery_card(data, previous_data, ctx):
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
                     'events': cumulative_events,
+                    'today_events': int(
+                        leaf.get('arrived_events') or 0),
                     'files': int(leaf.get('cum_files') or 0),
+                    'today_files': int(
+                        leaf.get('arrived_files') or 0),
                     'expected': expected,
                     'tier': leaf.get('tier') or '',
                     'completion': (
@@ -1832,8 +1841,14 @@ def _delivery_card(data, previous_data, ctx):
                             'rows': species_rows,
                             'configurations': len(species_rows),
                             'events': events,
+                            'today_events': sum(
+                                row['today_events']
+                                for row in species_rows),
                             'files': sum(row['files']
                                          for row in species_rows),
+                            'today_files': sum(
+                                row['today_files']
+                                for row in species_rows),
                             'target': target,
                             'target_partial': (
                                 bool(targets)

@@ -223,14 +223,16 @@
              class="snapper-cut-card mb-2">
       <div class="mb-1"><strong>Cumulative by category · {{ c.name }}{% if c.day %} · through {{ c.day }}{% endif %}</strong></div>
       <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
-        <thead><tr><th>Category</th><th class="text-end">Configurations</th><th class="text-end">Cumulative events</th><th class="text-end">Cumulative files</th></tr></thead>
+        <thead><tr><th>Category</th><th class="text-end">Configurations</th><th class="text-end">Tot events</th><th class="text-end">Today</th><th class="text-end">Tot files</th><th class="text-end">Today</th></tr></thead>
         <tbody>
         {% for row in c.category_rows %}
         <tr>
           <td><span data-curve="{{ row.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ row.name }}</td>
           <td class="text-end">{{ row.configurations }}</td>
           <td class="text-end">{{ row.events }}</td>
+          <td class="text-end">{{ row.today_events }}</td>
           <td class="text-end">{{ row.files }}</td>
+          <td class="text-end">{{ row.today_files }}</td>
         </tr>
         {% endfor %}
         </tbody>
@@ -242,14 +244,16 @@
              class="snapper-cut-card mb-2">
       <div class="mb-1"><strong>Cumulative {{ category.name }} by PC · {{ c.name }}{% if c.day %} · through {{ c.day }}{% endif %}</strong></div>
       <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
-        <thead><tr><th>PC</th><th>Configuration</th><th>Process</th><th>Species</th><th>Requestor</th><th class="text-end">Cumulative events</th><th class="text-end">Cumulative files</th><th class="text-end">Target events</th><th class="text-end">% complete</th></tr></thead>
+        <thead><tr><th>PC</th><th>Configuration</th><th>Process</th><th>Species</th><th>Requestor</th><th class="text-end">Tot events</th><th class="text-end">Today</th><th class="text-end">Tot files</th><th class="text-end">Today</th><th class="text-end">Target events</th><th class="text-end">% complete</th></tr></thead>
         <tbody>
         {% if category.species_groups %}
         {% for species in category.species_groups %}
         <tr class="table-secondary fw-bold">
           <td colspan="5"><span data-curve="{{ species.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ species.name }} · {{ species.configurations }} PCs</td>
           <td class="text-end">{{ species.events }}</td>
+          <td class="text-end">{{ species.today_events }}</td>
           <td class="text-end">{{ species.files }}</td>
+          <td class="text-end">{{ species.today_files }}</td>
           <td class="text-end">{% if species.target is not None %}{{ species.target }}{% if species.target_partial %} <span class="text-muted">· known targets</span>{% endif %}{% else %}<span class="text-muted">no targets</span>{% endif %}</td>
           <td class="text-end">{% if species.completion is not None %}{{ species.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
@@ -261,7 +265,9 @@
           <td>{{ pc.species }}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
+          <td class="text-end">{{ pc.today_events }}</td>
           <td class="text-end">{{ pc.files }}</td>
+          <td class="text-end">{{ pc.today_files }}</td>
           <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
@@ -276,12 +282,14 @@
           <td>{{ pc.species }}</td>
           <td>{{ pc.groups }}</td>
           <td class="text-end">{{ pc.events }}</td>
+          <td class="text-end">{{ pc.today_events }}</td>
           <td class="text-end">{{ pc.files }}</td>
+          <td class="text-end">{{ pc.today_files }}</td>
           <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
           <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
         </tr>
         {% empty %}
-        <tr><td colspan="9" class="text-muted">No PC state recorded for this category at this cut.</td></tr>
+        <tr><td colspan="11" class="text-muted">No PC state recorded for this category at this cut.</td></tr>
         {% endfor %}
         {% endif %}
         </tbody>
