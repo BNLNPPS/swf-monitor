@@ -351,11 +351,11 @@ _QUEUE_STACK_CACHE = {'at': None, 'members': ()}
 # into 'other'.
 QUEUE_STACK_MAX = 6
 
-# Band colors in stack order: orange, bright blue, green, purple, teal,
-# pink — adjacent bands never share a hue neighborhood, and none of them
-# is a dark tone that the grey tail band could be mistaken for.
-_QUEUE_BAND_COLORS = ('#ef6c00', '#1e88e5', '#2e7d32', '#6a1b9a',
-                      '#00838f', '#c2185b')
+# The categorical palette used by the Site compute usage plots. Queue
+# colors are assigned by current stack rank; 'other' takes the next color.
+_QUEUE_BAND_COLORS = (
+    '#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3',
+    '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195')
 
 
 def _queue_stack_members():
@@ -408,15 +408,12 @@ def _site_curve_values(panda):
         if block.get('running_cores_now') is not None:
             cores = int(block.get('running_cores_now') or 0)
             values[f'sjc_{site}'] = cores
-            # Only a queue actually holding cores carries a point: the
-            # stack zero-fills a member's missing stamps, so an idle
-            # queue costs nothing and one idle all window never joins
-            # the family at all.
-            if cores:
-                if site in named:
-                    values[f'qc_{site}'] = cores
-                else:
-                    other_cores += cores
+            if site in named:
+                # Current-state bands carry the same sample points as
+                # the ordinary curves, including explicit zeroes.
+                values[f'qc_{site}'] = cores
+            else:
+                other_cores += cores
         # Cumulative terminal counters (raw absolute values; the
         # window-relative families rebase them at render).
         cum = block.get('cum') or {}
@@ -531,18 +528,15 @@ def _epicprod_curve_color(curve_id):
         return _FAILURE_CLASS_COLORS.get(
             curve_id.rsplit('_', 1)[1], '#424242')
     if curve_id.startswith('qc_'):
-        # Bands sit against each other, so the queues take widely
-        # separated hues by their rank in the stack rather than the
-        # palette's neighboring assignments. The tail band is grey:
-        # it is context, and red belongs to failure.
         queue = curve_id[3:]
-        if queue == 'other':
-            return '#bdbdbd'
         members = _queue_stack_members()
+        if queue == 'other':
+            return _QUEUE_BAND_COLORS[
+                len(members) % len(_QUEUE_BAND_COLORS)]
         if queue in members:
             return _QUEUE_BAND_COLORS[
                 members.index(queue) % len(_QUEUE_BAND_COLORS)]
-        return '#bdbdbd'
+        return _QUEUE_BAND_COLORS[-1]
     if curve_id.startswith('sjc_'):
         return '#1565c0'
     if curve_id.startswith('sj_'):
@@ -657,6 +651,18 @@ EPICPROD_GROUPS = (
      'prefixes': ['type_'], 'ids': []},
     {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
 )
+
+
+def _epicprod_scope_groups():
+    """The compact scope families with the queue stack in rank order."""
+    groups = [dict(group) for group in EPICPROD_GROUPS]
+    queue_order = [f'qc_{site}' for site in _queue_stack_members()]
+    queue_order.append('qc_other')
+    for group in groups:
+        if group['name'] == 'Running cores by queue':
+            group['order'] = queue_order
+            break
+    return tuple(groups)
 
 
 _CAMPAIGN_START_CACHE = {'at': None, 'starts': {}}
@@ -794,13 +800,15 @@ def _delivery_groups():
             'name': f'Arrivals {name} files',
             'title': f'Arrivals {name}',
             'prefixes': [f'dlvqf_{tag}_'], 'ids': [],
-            'stacked': True, 'pc_groups': pc_groups,
+            'stacked': True, 'end_stamped': True,
+            'pc_groups': pc_groups,
             'units': 'files'})
         groups.append({
             'name': f'Arrivals {name} events',
             'title': f'Arrivals {name}',
             'prefixes': [f'dlvq_{tag}_'], 'ids': [],
-            'stacked': True, 'pc_groups': pc_groups,
+            'stacked': True, 'end_stamped': True,
+            'pc_groups': pc_groups,
             'default_off': True, 'units': 'events (M)'})
         for lens in DELIVERY_LENSES:
             seg, lens_value = lens['seg'], lens['value']
@@ -1386,26 +1394,31 @@ def _panda_card(data, previous_data, ctx):
         })
     # Cores by queue: the scope view's stacked panel read as numbers,
     # folding the tail into 'other' exactly as the curves do.
-    tracked = set(_queue_stack_members())
+    tracked_order = _queue_stack_members()
+    tracked = set(tracked_order)
     site_blocks = (data.get('jobs') or {}).get('sites') or {}
     prev_blocks = (previous_data.get('jobs') or {}).get('sites') or {}
     queue_cores = []
-    other_now = other_prev = 0
-    for site, block in site_blocks.items():
-        cores = int((block or {}).get('running_cores_now') or 0)
+    for site in tracked_order:
+        cores = int((site_blocks.get(site) or {})
+                    .get('running_cores_now') or 0)
         was = int((prev_blocks.get(site) or {})
                   .get('running_cores_now') or 0)
-        if site in tracked:
-            if cores or was:
-                queue_cores.append({'site': site, 'value': cores,
-                                    'delta': cut_delta(cores, was)})
-        else:
+        queue_cores.append({'site': site, 'curve': f'qc_{site}',
+                            'value': cores,
+                            'delta': cut_delta(cores, was)})
+    other_now = other_prev = 0
+    for site in set(site_blocks) | set(prev_blocks):
+        cores = int((site_blocks.get(site) or {})
+                    .get('running_cores_now') or 0)
+        was = int((prev_blocks.get(site) or {})
+                  .get('running_cores_now') or 0)
+        if site not in tracked:
             other_now += cores
             other_prev += was
-    queue_cores.sort(key=lambda row: -row['value'])
-    if other_now or other_prev:
-        queue_cores.append({'site': 'other', 'value': other_now,
-                            'delta': cut_delta(other_now, other_prev)})
+    queue_cores.append({'site': 'other', 'curve': 'qc_other',
+                        'value': other_now,
+                        'delta': cut_delta(other_now, other_prev)})
 
     return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states, 'sites': sites,
@@ -1419,17 +1432,19 @@ def _delivery_card(data, previous_data, ctx):
     cumulative standing. On a live placed-basis snap, the placement
     totals with deltas and the top configurations. Full lists live on
     the campaign plan page."""
+    # Delivery detail belongs to the Campaign focus, whose selected PCs
+    # and daily bins provide its visual context. The scope report has no
+    # campaign or PC family and therefore carries no delivery card.
+    params = (ctx or {}).get('params') or {}
+    selected = {value for value in
+                (params.get('campaign') or '').split(',') if value}
+    if not selected:
+        return None
     from django.urls import reverse
 
     cache = _pc_cache()
     requestors = cache['requestors']
     keys = cache['keys']
-    # The campaign view's selection narrows the card: only the ticked
-    # campaigns' sections render. Without the parameter (a scope-view
-    # cut) every campaign in the snap renders.
-    params = (ctx or {}).get('params') or {}
-    selected = {value for value in
-                (params.get('campaign') or '').split(',') if value}
     campaigns = []
     for name, block in sorted((data.get('campaigns') or {}).items()):
         if selected and name not in selected:
@@ -1852,7 +1867,7 @@ def register_snapper_providers():
         curve_label=_epicprod_curve_label,
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
-        scope_curve_groups=EPICPROD_GROUPS,
+        scope_curve_groups=_epicprod_scope_groups,
         focus_view=(_delivery_focus_view, _site_focus_view),
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card},

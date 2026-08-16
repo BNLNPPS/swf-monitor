@@ -63,7 +63,7 @@
   {% endif %}
   {% if card.queue_cores %}
   <div class="mb-1"><strong>Running cores by queue:</strong>
-    {% for entry in card.queue_cores %}{% if entry.site == 'other' %}other{% else %}<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ entry.site|urlencode }}&status=running">{{ entry.site }}</a>{% endif %} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+    {% for entry in card.queue_cores %}<span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.25em; vertical-align:-0.08em;"></span>{% if entry.site == 'other' %}other{% else %}<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ entry.site|urlencode }}&status=running">{{ entry.site }}</a>{% endif %} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
   </div>
   {% endif %}
   {% endif %}

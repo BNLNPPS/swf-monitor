@@ -9,6 +9,12 @@ from monitor_app.snapper_providers import _delivery_card
 
 class DeliveryCardTests(SimpleTestCase):
     @patch('monitor_app.snapper_providers._pc_cache')
+    def test_scope_cut_omits_campaign_detail(self, pc_cache):
+        self.assertIsNone(_delivery_card(
+            {'campaigns': {'26.08': {}}}, {}, {'params': {}}))
+        pc_cache.assert_not_called()
+
+    @patch('monitor_app.snapper_providers._pc_cache')
     def test_day_table_shows_event_completion_as_rightmost_column(
             self, pc_cache):
         pc_cache.return_value = {
