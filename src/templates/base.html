@@ -218,6 +218,7 @@
       table.swf-latch-titled-head {
         --swf-latch-title-height: 2rem;
         --swf-latch-column-height: 2rem;
+        --swf-latch-section-height: 2rem;
       }
       table.swf-latch-titled-head thead tr.swf-latch-title-row > th {
         top: var(--swf-nav-height, 0px);
@@ -240,10 +241,25 @@
                   + var(--swf-latch-title-height)
                   + var(--swf-latch-column-height));
         z-index: 100;
+        height: var(--swf-latch-section-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
         background-color: var(--bs-table-bg,
                               var(--bs-secondary-bg, #e2e3e5));
         box-shadow: inset 1px 0 0 #dee2e6,
                     inset 0 -1px 0 #dee2e6;
+      }
+      table.swf-latch-titled-head tbody tr.swf-pc-anchor {
+        scroll-margin-top: calc(var(--swf-nav-height, 0px)
+                                + var(--swf-latch-title-height)
+                                + var(--swf-latch-column-height) + .5rem);
+      }
+      table.swf-latch-titled-head.swf-latch-section-heads
+          tbody tr.swf-pc-anchor {
+        scroll-margin-top: calc(var(--swf-nav-height, 0px)
+                                + var(--swf-latch-title-height)
+                                + var(--swf-latch-column-height)
+                                + var(--swf-latch-section-height) + .5rem);
       }
       .swf-wide-table-scroll > table.swf-latch-titled-head
           thead tr.swf-latch-title-row > th {

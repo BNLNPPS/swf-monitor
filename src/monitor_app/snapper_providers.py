@@ -1753,6 +1753,7 @@ def _delivery_card(data, previous_data, ctx):
                     'process': processes.get(pc, ''),
                     'species': species.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                    'cumulative_anchor': f'delivery-pc-{tag}-{pc}',
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
                     'arrived_events': int(
@@ -1817,6 +1818,7 @@ def _delivery_card(data, previous_data, ctx):
                     'q2_range': q2_ranges.get(pc, ''),
                     'sample': samples.get(pc, ''),
                     'url': reverse('pcs:pcs_config_detail', args=[pc]),
+                    'cumulative_anchor': f'delivery-pc-{tag}-{pc}',
                     'groups': ', '.join(requestors.get(pc)
                                         or ['Unassigned']),
                     'events': cumulative_events,
