@@ -345,7 +345,14 @@ def _delivery_curve_values(state):
     return values
 
 
-_QUEUE_STACK_CACHE = {'at': None, 'members': ()}
+_QUEUE_STACK_CACHE = {'members': (
+    'NERSC_Perlmutter_epic',
+    'BNL_OSG_EPIC_PROD_1',
+    'UM_GREX_PanDA_1',
+    'BNL_ePIC_GOOGLE',
+    'BNL_NPPS_GPU',
+    'BNL_PanDA_1',
+)}
 
 # Named bands in the seven-day cores-by-queue stack; every other queue
 # collapses into 'other'.
@@ -359,54 +366,8 @@ _QUEUE_BAND_COLORS = (
 
 
 def _queue_stack_members():
-    """The named members of the cores-by-queue stack: the queues
-    contributing the most core-time over the report's seven-day window,
-    largest first and capped at QUEUE_STACK_MAX. Cached for five minutes
-    because the series walk calls this once per snap."""
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    from snapper_ai.models import SystemSnap
-
-    now = timezone.now()
-    if (_QUEUE_STACK_CACHE['at'] is not None
-            and (now - _QUEUE_STACK_CACHE['at']).total_seconds() < 300):
-        return _QUEUE_STACK_CACHE['members']
-    start = now - timedelta(days=7)
-    boundary = (SystemSnap.objects.filter(
-        scope='epicprod', snap_time__lt=start)
-        .order_by('-snap_time').values_list('snap_time', 'state').first())
-    rows = (SystemSnap.objects.filter(
-        scope='epicprod', snap_time__gte=start, snap_time__lte=now)
-        .order_by('snap_time').values_list('snap_time', 'state'))
-    weighted = {}
-
-    def add_interval(sample, until):
-        if sample is None:
-            return
-        stamp, state = sample
-        seconds = (until - max(stamp, start)).total_seconds()
-        if seconds <= 0:
-            return
-        sites = (((((state or {}).get('components') or {})
-                   .get('panda') or {}).get('data') or {})
-                 .get('jobs') or {}).get('sites') or {}
-        for site, block in sites.items():
-            cores = int((block or {}).get('running_cores_now') or 0)
-            if cores:
-                weighted[site] = weighted.get(site, 0) + cores * seconds
-
-    previous = boundary
-    for row in rows.iterator(chunk_size=500):
-        add_interval(previous, row[0])
-        previous = row
-    add_interval(previous, now)
-    ranked = sorted(weighted.items(), key=lambda item: (-item[1], item[0]))
-    members = tuple(site for site, core_seconds
-                    in ranked[:QUEUE_STACK_MAX] if core_seconds > 0)
-    _QUEUE_STACK_CACHE.update({'members': members, 'at': now})
-    return members
+    """Members derived from the report series already in hand."""
+    return _QUEUE_STACK_CACHE['members']
 
 
 def _site_curve_values(panda):
@@ -421,8 +382,6 @@ def _site_curve_values(panda):
     # The scope view's cores-by-queue stack shares this walk: a handful
     # of named queues and one 'other' band carrying every remaining
     # queue, so the stack always sums to the whole running-core count.
-    named = set(_queue_stack_members())
-    other_cores = 0
     for site, block in job_sites.items():
         for status, count in (block.get('by_status_now') or {}).items():
             if status == 'starting':
@@ -431,12 +390,7 @@ def _site_curve_values(panda):
         if block.get('running_cores_now') is not None:
             cores = int(block.get('running_cores_now') or 0)
             values[f'sjc_{site}'] = cores
-            if site in named:
-                # Current-state bands carry the same sample points as
-                # the ordinary curves, including explicit zeroes.
-                values[f'qc_{site}'] = cores
-            else:
-                other_cores += cores
+            values[f'qc_{site}'] = cores
         # Cumulative terminal counters (raw absolute values; the
         # window-relative families rebase them at render).
         cum = block.get('cum') or {}
@@ -447,15 +401,71 @@ def _site_curve_values(panda):
         for cls, count in (block.get('cum_failed_by_class')
                            or {}).items():
             values[f'sjxc_{site}_{cls}'] = int(count or 0)
-    if (jobs.get('in_flight_now') or {}).get('running_cores') is not None:
-        for site in named:
-            values.setdefault(f'qc_{site}', 0)
-        values['qc_other'] = other_cores
     for site, block in ((panda.get('tasks') or {}).get('sites')
                         or {}).items():
         for status, count in (block.get('by_status_now') or {}).items():
             values[f'stt_{site}_{status}'] = int(count or 0)
     return values
+
+
+def _epicprod_series_transform(series):
+    """Rank and fold queue curves using the series already assembled."""
+    from datetime import datetime
+
+    curves = series.get('curves') or {}
+    queue_curves = {
+        curve_id: curve for curve_id, curve in curves.items()
+        if curve_id.startswith('qc_') and curve_id != 'qc_other'
+    }
+    running_points = (curves.get('running_cores') or {}).get('points') or []
+    if not queue_curves or not running_points:
+        return series
+
+    stamps = [point[0] for point in running_points]
+    running = {point[0]: int(point[1] or 0) for point in running_points}
+    values = {
+        curve_id: {point[0]: int(point[1] or 0)
+                   for point in curve.get('points') or []}
+        for curve_id, curve in queue_curves.items()
+    }
+    end = datetime.fromisoformat(series['end'])
+    durations = {}
+    for index, stamp in enumerate(stamps):
+        until = (datetime.fromisoformat(stamps[index + 1])
+                 if index + 1 < len(stamps) else end)
+        durations[stamp] = max(
+            0, (until - datetime.fromisoformat(stamp)).total_seconds())
+    ranked = sorted(
+        queue_curves,
+        key=lambda curve_id: (
+            -sum(values[curve_id].get(stamp, 0) * durations[stamp]
+                 for stamp in stamps),
+            curve_id))
+    selected = [curve_id for curve_id in ranked[:QUEUE_STACK_MAX]
+                if any(values[curve_id].values())]
+    members = tuple(curve_id[3:] for curve_id in selected)
+    _QUEUE_STACK_CACHE['members'] = members
+
+    folded = {curve_id: curve for curve_id, curve in curves.items()
+              if not curve_id.startswith('qc_')}
+    for curve_id in selected:
+        folded[curve_id] = {
+            'label': curve_id[3:],
+            'points': [[stamp, values[curve_id].get(stamp, 0)]
+                       for stamp in stamps],
+        }
+    folded['qc_other'] = {
+        'label': 'other',
+        'points': [
+            [stamp, max(0, running[stamp] - sum(
+                values[curve_id].get(stamp, 0)
+                for curve_id in selected))]
+            for stamp in stamps
+        ],
+    }
+    series['curves'] = folded
+    series['queue_members'] = list(members)
+    return series
 
 
 def _epicprod_curve_values(state):
@@ -1420,7 +1430,10 @@ def _panda_card(data, previous_data, ctx):
         })
     # Cores by queue: the scope view's stacked panel read as numbers,
     # folding the tail into 'other' exactly as the curves do.
-    tracked_order = _queue_stack_members()
+    requested_queues = ((ctx.get('params') or {}).get('queues') or '')
+    tracked_order = tuple(
+        site for site in requested_queues.split(',') if site
+    )[:QUEUE_STACK_MAX] or _queue_stack_members()
     tracked = set(tracked_order)
     site_blocks = (data.get('jobs') or {}).get('sites') or {}
     prev_blocks = (previous_data.get('jobs') or {}).get('sites') or {}
@@ -1864,8 +1877,11 @@ def _series_cache(key, builder, refresh=False):
     ttl_seconds = 6 * 3600 if ':focus:' in key else 90
     product = get_product(key, builder, ttl_seconds=ttl_seconds,
                           refresh=refresh)
+    value = product.get('value')
+    if isinstance(value, dict) and value.get('queue_members'):
+        _QUEUE_STACK_CACHE['members'] = tuple(value['queue_members'])
     return {
-        'value': product['value'],
+        'value': value,
         'refreshing': product['refreshing'],
         'built_at': product['built_at'],
         'age_seconds': product['age_seconds'],
@@ -1890,6 +1906,7 @@ def register_snapper_providers():
         scope='epicprod',
         label='epicprod',
         curve_values=_epicprod_curve_values,
+        series_transform=_epicprod_series_transform,
         curve_label=_epicprod_curve_label,
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
