@@ -902,12 +902,22 @@ def _delivery_groups():
             seg, lens_value = lens['seg'], lens['value']
             category_stack = lens_value == 'category'
             category_names = categories if category_stack else ()
+            category_file_ids = [
+                f'dlvcf_{seg}_{tag}_{_group_slug(category)}'
+                for category in category_names]
+            category_event_ids = [
+                f'dlvc_{seg}_{tag}_{_group_slug(category)}'
+                for category in category_names]
             groups.append({
                 'name': f'Cumulative {name} files {lens_value}',
                 'title': f'Cumulative {name}',
-                'prefixes': [f'dlvcf_{seg}_{tag}_'], 'ids': [],
-                'order': [f'dlvcf_{seg}_{tag}_{_group_slug(category)}'
-                          for category in category_names],
+                # The former wireframe carried an explicit total line.
+                # A stack is the total of its category bands; including
+                # that old line as another band would double the height.
+                'prefixes': ([] if category_stack
+                             else [f'dlvcf_{seg}_{tag}_']),
+                'ids': category_file_ids,
+                'order': category_file_ids,
                 'stacked': category_stack,
                 'panel_px': 300 if category_stack else 0,
                 'detail_key': (_delivery_detail_key('categories', name)
@@ -917,9 +927,10 @@ def _delivery_groups():
             groups.append({
                 'name': f'Cumulative {name} events {lens_value}',
                 'title': f'Cumulative {name}',
-                'prefixes': [f'dlvc_{seg}_{tag}_'], 'ids': [],
-                'order': [f'dlvc_{seg}_{tag}_{_group_slug(category)}'
-                          for category in category_names],
+                'prefixes': ([] if category_stack
+                             else [f'dlvc_{seg}_{tag}_']),
+                'ids': category_event_ids,
+                'order': category_event_ids,
                 'stacked': category_stack,
                 'panel_px': 300 if category_stack else 0,
                 'detail_key': (_delivery_detail_key('categories', name)
