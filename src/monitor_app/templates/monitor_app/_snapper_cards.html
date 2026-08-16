@@ -61,6 +61,11 @@
     {% for entry in card.type_states %}{{ entry.label }} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
   </div>
   {% endif %}
+  {% if card.queue_cores %}
+  <div class="mb-1"><strong>Running cores by queue:</strong>
+    {% for entry in card.queue_cores %}{% if entry.site == 'other' %}other{% else %}<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ entry.site|urlencode }}&status=running">{{ entry.site }}</a>{% endif %} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
   {% endif %}
   {# Queue slice: one table row per curve, in panel order, the swatch #}
   {# correlating each row to its curve — at-cut standing, change     #}

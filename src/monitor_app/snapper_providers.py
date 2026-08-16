@@ -345,6 +345,48 @@ def _delivery_curve_values(state):
     return values
 
 
+_QUEUE_STACK_CACHE = {'at': None, 'members': ()}
+
+# Named bands in the cores-by-queue stack; every other queue collapses
+# into 'other'.
+QUEUE_STACK_MAX = 6
+
+# Band colors in stack order: orange, bright blue, green, purple, teal,
+# pink — adjacent bands never share a hue neighborhood, and none of them
+# is a dark tone that the grey tail band could be mistaken for.
+_QUEUE_BAND_COLORS = ('#ef6c00', '#1e88e5', '#2e7d32', '#6a1b9a',
+                      '#00838f', '#c2185b')
+
+
+def _queue_stack_members():
+    """The named members of the cores-by-queue stack: the queues
+    holding the most running cores in the latest snap, largest first,
+    capped at QUEUE_STACK_MAX. Cached for five minutes — the walk calls
+    this once per snap."""
+    from django.utils import timezone
+
+    from snapper_ai.models import SystemSnap
+
+    now = timezone.now()
+    if (_QUEUE_STACK_CACHE['at'] is not None
+            and (now - _QUEUE_STACK_CACHE['at']).total_seconds() < 300):
+        return _QUEUE_STACK_CACHE['members']
+    state = (SystemSnap.objects.filter(scope='epicprod')
+             .order_by('-snap_time').values_list('state', flat=True)
+             .first())
+    sites = (((((state or {}).get('components') or {})
+               .get('panda') or {}).get('data') or {})
+             .get('jobs') or {}).get('sites') or {}
+    ranked = sorted(
+        ((int((block or {}).get('running_cores_now') or 0), site)
+         for site, block in sites.items()),
+        reverse=True)
+    members = tuple(site for cores, site in ranked[:QUEUE_STACK_MAX]
+                    if cores)
+    _QUEUE_STACK_CACHE.update({'members': members, 'at': now})
+    return members
+
+
 def _site_curve_values(panda):
     """Per-site job lifecycle curves from the sites maps recorded in
     every snap: the in-flight population by status (submission through
@@ -352,6 +394,11 @@ def _site_curve_values(panda):
     finished/failed outcomes. Site names carry underscores, so the
     status is always the id's last segment."""
     values = {}
+    # The scope view's cores-by-queue stack shares this walk: a handful
+    # of named queues and one 'other' band carrying every remaining
+    # queue, so the stack always sums to the whole running-core count.
+    named = set(_queue_stack_members())
+    other_cores = 0
     for site, block in ((panda.get('jobs') or {}).get('sites')
                         or {}).items():
         for status, count in (block.get('by_status_now') or {}).items():
@@ -359,8 +406,17 @@ def _site_curve_values(panda):
                 continue
             values[f'sj_{site}_{status}'] = int(count or 0)
         if block.get('running_cores_now') is not None:
-            values[f'sjc_{site}'] = int(
-                block.get('running_cores_now') or 0)
+            cores = int(block.get('running_cores_now') or 0)
+            values[f'sjc_{site}'] = cores
+            # Only a queue actually holding cores carries a point: the
+            # stack zero-fills a member's missing stamps, so an idle
+            # queue costs nothing and one idle all window never joins
+            # the family at all.
+            if cores:
+                if site in named:
+                    values[f'qc_{site}'] = cores
+                else:
+                    other_cores += cores
         # Cumulative terminal counters (raw absolute values; the
         # window-relative families rebase them at render).
         cum = block.get('cum') or {}
@@ -371,6 +427,7 @@ def _site_curve_values(panda):
         for cls, count in (block.get('cum_failed_by_class')
                            or {}).items():
             values[f'sjxc_{site}_{cls}'] = int(count or 0)
+    values['qc_other'] = other_cores
     for site, block in ((panda.get('tasks') or {}).get('sites')
                         or {}).items():
         for status, count in (block.get('by_status_now') or {}).items():
@@ -473,6 +530,19 @@ def _epicprod_curve_color(curve_id):
     if curve_id.startswith('sjxc_'):
         return _FAILURE_CLASS_COLORS.get(
             curve_id.rsplit('_', 1)[1], '#424242')
+    if curve_id.startswith('qc_'):
+        # Bands sit against each other, so the queues take widely
+        # separated hues by their rank in the stack rather than the
+        # palette's neighboring assignments. The tail band is grey:
+        # it is context, and red belongs to failure.
+        queue = curve_id[3:]
+        if queue == 'other':
+            return '#bdbdbd'
+        members = _queue_stack_members()
+        if queue in members:
+            return _QUEUE_BAND_COLORS[
+                members.index(queue) % len(_QUEUE_BAND_COLORS)]
+        return '#bdbdbd'
     if curve_id.startswith('sjc_'):
         return '#1565c0'
     if curve_id.startswith('sj_'):
@@ -514,6 +584,9 @@ def _epicprod_curve_label(curve_id):
     # label is the lifecycle stage alone. 'running' says 'running
     # jobs' — 'running cores' sits beside it and the bare word is
     # ambiguous.
+    if curve_id.startswith('qc_'):
+        # The cores-by-queue stack: the member is the queue itself.
+        return curve_id[3:]
     if curve_id.startswith('sjc_'):
         return 'running cores'
     if curve_id.startswith('sjfw_'):
@@ -573,6 +646,9 @@ def _testbed_curve_label(curve_id):
 EPICPROD_GROUPS = (
     {'name': 'In-flight jobs', 'title': 'Jobs', 'prefixes': ['job_'],
      'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
+    {'name': 'Running cores by queue', 'title': 'Running cores · by queue',
+     'prefixes': ['qc_'], 'ids': [], 'stacked': True, 'panel_px': 150,
+     'units': 'cores'},
     {'name': 'Job outcomes', 'prefixes': ['outcome_'], 'ids': [],
      'order': ['outcome_finished', 'outcome_failed'],
      'window_relative': True},
@@ -1308,8 +1384,32 @@ def _panda_card(data, previous_data, ctx):
             # The pie fills the table's height: sized to the row count.
             'pie_size': min(400, max(220, 34 * (len(rows) + 1))),
         })
+    # Cores by queue: the scope view's stacked panel read as numbers,
+    # folding the tail into 'other' exactly as the curves do.
+    tracked = set(_queue_stack_members())
+    site_blocks = (data.get('jobs') or {}).get('sites') or {}
+    prev_blocks = (previous_data.get('jobs') or {}).get('sites') or {}
+    queue_cores = []
+    other_now = other_prev = 0
+    for site, block in site_blocks.items():
+        cores = int((block or {}).get('running_cores_now') or 0)
+        was = int((prev_blocks.get(site) or {})
+                  .get('running_cores_now') or 0)
+        if site in tracked:
+            if cores or was:
+                queue_cores.append({'site': site, 'value': cores,
+                                    'delta': cut_delta(cores, was)})
+        else:
+            other_now += cores
+            other_prev += was
+    queue_cores.sort(key=lambda row: -row['value'])
+    if other_now or other_prev:
+        queue_cores.append({'site': 'other', 'value': other_now,
+                            'delta': cut_delta(other_now, other_prev)})
+
     return {'kind': 'panda', 'headline': headline, 'types': types,
             'type_states': type_states, 'sites': sites,
+            'queue_cores': queue_cores,
             'site_only': bool(sites) and compact}
 
 
