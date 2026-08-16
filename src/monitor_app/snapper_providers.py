@@ -322,6 +322,17 @@ def _delivery_curve_values(state):
             # so the stamps are what carry the day.
             values[f'dlvq_{tag}_{pc}'] = round(arrived_events / 1e6, 2)
             values[f'dlvqf_{tag}_{pc}'] = arrived_files
+            # The same daily record carries each configuration's
+            # cumulative standing.  Keep these as separate curves from
+            # the daily-arrival quilt: the campaign view reuses them in
+            # one stacked panel per top-level physics category.
+            cumulative_events = int(leaf.get('events') or 0)
+            cumulative_files = int(leaf.get('cum_files') or 0)
+            if cumulative_events:
+                values[f'dlvpc_{tag}_{pc}'] = round(
+                    cumulative_events / 1e6, 2)
+            if cumulative_files:
+                values[f'dlvpcf_{tag}_{pc}'] = cumulative_files
         for lens in DELIVERY_LENSES:
             seg = lens['seg']
             cum_e, cum_f = {}, {}
@@ -533,8 +544,9 @@ def _testbed_curve_values(state):
 
 
 def _delivery_curve_parts(curve_id):
-    """(campaign, remainder) from a per-PC arrivals curve id
-    (dlvq_26_07_pc12); campaign tags serialize dots as underscores."""
+    """(campaign, remainder) from a per-PC delivery curve id
+    (dlvq_26_07_pc12 or dlvpc_26_07_pc12); campaign tags serialize
+    dots as underscores."""
     remainder = curve_id.split('_', 1)[1]
     tag, _, rest = remainder.partition('_')
     while rest and rest[0].isdigit():
@@ -643,7 +655,7 @@ def _epicprod_curve_label(curve_id):
         return 'running jobs' if status == 'running' else status
     if curve_id.startswith('stt_'):
         return curve_id.rsplit('_', 1)[1]
-    if curve_id.startswith(('dlvq_', 'dlvqf_')):
+    if curve_id.startswith(('dlvq_', 'dlvqf_', 'dlvpc_', 'dlvpcf_')):
         _campaign, pc = _delivery_curve_parts(curve_id)
         key = _pc_cache()['keys'].get(pc, '')
         return f'{pc} {key}' if key else pc
@@ -708,7 +720,8 @@ EPICPROD_GROUPS = (
 
 def _epicprod_scope_groups():
     """The compact scope families with the queue stack in rank order."""
-    groups = [dict(group) for group in EPICPROD_GROUPS]
+    groups = [dict(group) for group in EPICPROD_GROUPS
+              if group['name'] not in ('In-flight jobs', 'Type × state')]
     queue_order = [f'qc_{site}' for site in _queue_stack_members()]
     queue_order.append('qc_other')
     for group in groups:
@@ -754,6 +767,21 @@ def _campaign_delivery_starts():
     _CAMPAIGN_START_CACHE['starts'] = starts
     _CAMPAIGN_START_CACHE['at'] = now
     return starts
+
+
+def _delivery_categories():
+    """The stable top-level physics-category vocabulary used to split
+    the campaign cumulative PC plots."""
+    return tuple(sorted(set(_pc_cache()['categories'].values())
+                        or {'Uncategorized'}))
+
+
+def _delivery_pc_family_name(campaign, quantity, category):
+    return f'Cumulative {campaign} {quantity} PCs {category}'
+
+
+def _delivery_detail_key(kind, campaign):
+    return f'delivery-{kind}-{_group_slug(campaign)}'
 
 
 def _delivery_focus_view():
@@ -808,6 +836,9 @@ def _delivery_focus_view():
                  f'{quantity}|{lens["value"]}': [
                      f'Arrivals {name} {quantity}',
                      f'Cumulative {name} {quantity} {lens["value"]}',
+                 ] + [
+                     _delivery_pc_family_name(name, quantity, category)
+                     for category in _delivery_categories()
                  ]
                  for quantity in ('files', 'events')
                  for lens in DELIVERY_LENSES},
@@ -845,7 +876,9 @@ def _delivery_groups():
         campaigns = resolve_target_campaigns()
     except Exception:                                       # noqa: BLE001
         return ()
+    cache = _pc_cache()
     pc_groups = _pc_tick_groupings()
+    categories = _delivery_categories()
     groups = []
     for name in campaigns:
         tag = name.replace('.', '_')
@@ -854,6 +887,7 @@ def _delivery_groups():
             'title': f'Arrivals {name}',
             'prefixes': [f'dlvqf_{tag}_'], 'ids': [],
             'stacked': True, 'end_stamped': True,
+            'detail_key': _delivery_detail_key('arrivals', name),
             'pc_groups': pc_groups,
             'units': 'files'})
         groups.append({
@@ -861,20 +895,57 @@ def _delivery_groups():
             'title': f'Arrivals {name}',
             'prefixes': [f'dlvq_{tag}_'], 'ids': [],
             'stacked': True, 'end_stamped': True,
+            'detail_key': _delivery_detail_key('arrivals', name),
             'pc_groups': pc_groups,
             'default_off': True, 'units': 'events (M)'})
         for lens in DELIVERY_LENSES:
             seg, lens_value = lens['seg'], lens['value']
+            category_stack = lens_value == 'category'
+            category_names = categories if category_stack else ()
             groups.append({
                 'name': f'Cumulative {name} files {lens_value}',
                 'title': f'Cumulative {name}',
                 'prefixes': [f'dlvcf_{seg}_{tag}_'], 'ids': [],
+                'order': [f'dlvcf_{seg}_{tag}_{_group_slug(category)}'
+                          for category in category_names],
+                'stacked': category_stack,
+                'panel_px': 300 if category_stack else 0,
+                'detail_key': (_delivery_detail_key('categories', name)
+                               if category_stack else ''),
+                'focus_closed': category_stack,
                 'default_off': True, 'units': 'files'})
             groups.append({
                 'name': f'Cumulative {name} events {lens_value}',
                 'title': f'Cumulative {name}',
                 'prefixes': [f'dlvc_{seg}_{tag}_'], 'ids': [],
+                'order': [f'dlvc_{seg}_{tag}_{_group_slug(category)}'
+                          for category in category_names],
+                'stacked': category_stack,
+                'panel_px': 300 if category_stack else 0,
+                'detail_key': (_delivery_detail_key('categories', name)
+                               if category_stack else ''),
+                'focus_closed': category_stack,
                 'default_off': True, 'units': 'events (M)'})
+        for category in categories:
+            pcs = sorted(pc for pc, pc_category
+                         in cache['categories'].items()
+                         if pc_category == category)
+            groups.append({
+                'name': _delivery_pc_family_name(name, 'files', category),
+                'title': f'Cumulative {name} · {category}',
+                'prefixes': [],
+                'ids': [f'dlvpcf_{tag}_{pc}' for pc in pcs],
+                'order': [f'dlvpcf_{tag}_{pc}' for pc in pcs],
+                'stacked': True, 'compact': True,
+                'panel_px': 300, 'units': 'files'})
+            groups.append({
+                'name': _delivery_pc_family_name(name, 'events', category),
+                'title': f'Cumulative {name} · {category}',
+                'prefixes': [],
+                'ids': [f'dlvpc_{tag}_{pc}' for pc in pcs],
+                'order': [f'dlvpc_{tag}_{pc}' for pc in pcs],
+                'stacked': True, 'compact': True,
+                'panel_px': 300, 'units': 'events (M)'})
     return tuple(groups)
 
 _SITE_CACHE = {'at': None, 'sites': ()}
@@ -1609,10 +1680,34 @@ def _delivery_card(data, previous_data, ctx):
             for group in day_groups:
                 group['rows'].sort(
                     key=lambda r: (-r['arrived_events'], -r['arrived']))
+            # The second campaign panel is the additive cumulative
+            # category stack.  Its cut table uses the same category
+            # partition and the same cumulative values as the curves.
+            category_totals = {}
+            for pc, leaf in leaves.items():
+                category = cache['categories'].get(pc) or 'Uncategorized'
+                slot = category_totals.setdefault(category, {
+                    'name': category, 'configurations': 0,
+                    'events': 0, 'files': 0})
+                slot['configurations'] += 1
+                slot['events'] += int(leaf.get('events') or 0)
+                slot['files'] += int(leaf.get('cum_files') or 0)
+            category_rows = []
+            for category in sorted(category_totals):
+                row = category_totals[category]
+                slug = _group_slug(category)
+                row['curve'] = (f'dlvc_cat_{tag}_{slug} '
+                                f'dlvcf_cat_{tag}_{slug}')
+                category_rows.append(row)
             requested_at = (ctx or {}).get('requested_at')
             unmeasured = int(totals.get('unmeasured_files') or 0)
             campaigns.append({
                 'name': name,
+                'daily': True,
+                'arrivals_detail_key': _delivery_detail_key(
+                    'arrivals', name),
+                'categories_detail_key': _delivery_detail_key(
+                    'categories', name),
                 # The compact card names its own day — no surrounding
                 # chrome does it anymore.
                 'day': (requested_at.astimezone(ET_ZONE)
@@ -1636,6 +1731,7 @@ def _delivery_card(data, previous_data, ctx):
                     {'label': 'configurations delivering',
                      'value': delivering, 'delta': None},
                 ],
+                'category_rows': category_rows,
                 'unmeasured_files': unmeasured,
                 'plan_url': (reverse('pcs:pcs_campaign_plan')
                              + f'?campaign={name}'),

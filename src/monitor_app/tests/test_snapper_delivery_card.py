@@ -55,9 +55,27 @@ class DeliveryCardTests(SimpleTestCase):
 
         row = card['campaigns'][0]['day_groups'][0]['rows'][0]
         self.assertEqual(row['completion'], 25.0)
+        campaign = card['campaigns'][0]
+        self.assertTrue(campaign['daily'])
+        self.assertEqual(campaign['arrivals_detail_key'],
+                         'delivery-arrivals-26_08')
+        self.assertEqual(campaign['categories_detail_key'],
+                         'delivery-categories-26_08')
+        self.assertEqual(campaign['category_rows'], [{
+            'name': 'DIS',
+            'configurations': 1,
+            'events': 25,
+            'files': 2,
+            'curve': 'dlvc_cat_26_08_dis dlvcf_cat_26_08_dis',
+        }])
         html = render_to_string(
             'monitor_app/_snapper_cards.html', {'card': card})
         self.assertIn('25.0%', html)
+        self.assertIn(
+            'data-snapper-detail-key="delivery-arrivals-26_08"', html)
+        self.assertIn(
+            'data-snapper-detail-key="delivery-categories-26_08"', html)
+        self.assertIn('Cumulative by category · 26.08', html)
         self.assertLess(
             html.index('<th>Target events</th>'),
             html.index('<th>% complete</th>'),

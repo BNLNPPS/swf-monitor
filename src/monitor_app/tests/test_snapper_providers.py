@@ -4,12 +4,97 @@ from unittest.mock import patch
 from django.test import SimpleTestCase
 from django.template.loader import render_to_string
 
-from monitor_app.snapper_providers import (_epicprod_curve_values,
+from monitor_app.snapper_providers import (_delivery_curve_values,
+                                           _delivery_focus_view,
+                                           _delivery_groups,
+                                           _epicprod_curve_values,
+                                           _epicprod_scope_groups,
                                            _panda_card, _site_focus_view,
                                            _site_groups)
 
 
 class EpicprodCurveValuesTests(SimpleTestCase):
+    @patch('monitor_app.snapper_providers._queue_stack_members',
+           return_value=('QUEUE_A',))
+    def test_ops_scope_omits_state_and_type_by_state_plots(self, _queues):
+        names = [group['name'] for group in _epicprod_scope_groups()]
+
+        self.assertNotIn('In-flight jobs', names)
+        self.assertNotIn('Type × state', names)
+        self.assertEqual(names, [
+            'Running cores by queue', 'Job outcomes',
+            'In-flight job types', 'Tasks',
+        ])
+
+    @patch('monitor_app.snapper_providers._pc_cache')
+    def test_delivery_emits_per_pc_cumulative_curves(self, pc_cache):
+        pc_cache.return_value = {
+            'requestors': {'pc1': ['PWG']},
+            'keys': {'pc1': 'configuration'},
+            'categories': {'pc1': 'DIS'},
+            'group_names': {'dis': 'DIS'},
+        }
+        state = {'components': {'delivery': {'data': {'campaigns': {
+            '26.08': {
+                'totals': {'arrived_files': 3},
+                'leaves': {'pc1': {
+                    'arrived_events': 12_000_000,
+                    'arrived_files': 3,
+                    'events': 80_000_000,
+                    'cum_files': 20,
+                }},
+            },
+        }}}}}
+
+        values = _delivery_curve_values(state)
+
+        self.assertEqual(values['dlvpc_26_08_pc1'], 80.0)
+        self.assertEqual(values['dlvpcf_26_08_pc1'], 20)
+
+    @patch('swf_epicprod.analytics.rollup.resolve_target_campaigns',
+           return_value=['26.08'])
+    @patch('monitor_app.snapper_providers._pc_tick_groupings',
+           return_value={})
+    @patch('monitor_app.snapper_providers._pc_cache')
+    def test_campaign_cumulative_categories_and_pcs_are_stacked(
+            self, pc_cache, _pc_groups, _campaigns):
+        pc_cache.return_value = {
+            'categories': {'pc1': 'DIS', 'pc2': 'DIS', 'pc3': 'SIDIS'},
+        }
+
+        groups = {group['name']: group for group in _delivery_groups()}
+
+        category = groups['Cumulative 26.08 files category']
+        self.assertTrue(category['stacked'])
+        self.assertTrue(category['default_off'])
+        self.assertEqual(category['detail_key'],
+                         'delivery-categories-26_08')
+        self.assertFalse(
+            groups['Cumulative 26.08 files requestor']['stacked'])
+        dis = groups['Cumulative 26.08 files PCs DIS']
+        self.assertTrue(dis['stacked'])
+        self.assertTrue(dis['compact'])
+        self.assertEqual(dis['ids'],
+                         ['dlvpcf_26_08_pc1', 'dlvpcf_26_08_pc2'])
+
+    @patch('swf_epicprod.analytics.rollup.resolve_target_campaigns',
+           return_value=['26.08'])
+    @patch('monitor_app.snapper_providers._campaign_delivery_starts',
+           return_value={})
+    @patch('monitor_app.snapper_providers._delivery_categories',
+           return_value=('DIS', 'SIDIS'))
+    def test_campaign_focus_orders_pc_panels_after_category_cumulative(
+            self, _categories, _starts, _campaigns):
+        focus = _delivery_focus_view()
+        families = focus['options'][0]['families_by']['files|category']
+
+        self.assertEqual(families, [
+            'Arrivals 26.08 files',
+            'Cumulative 26.08 files category',
+            'Cumulative 26.08 files PCs DIS',
+            'Cumulative 26.08 files PCs SIDIS',
+        ])
+
     @patch('monitor_app.snapper_providers._panda_sites',
            return_value=('SITE_A',))
     def test_site_panels_are_stacked_with_cores_on_top(self, _sites):
