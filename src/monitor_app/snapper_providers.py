@@ -674,18 +674,19 @@ def _testbed_curve_label(curve_id):
 
 
 EPICPROD_GROUPS = (
-    {'name': 'In-flight jobs', 'title': 'Jobs', 'prefixes': ['job_'],
-     'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
     {'name': 'Running cores by queue', 'title': 'Running cores · by queue',
      'prefixes': ['qc_'], 'ids': [], 'stacked': True, 'panel_px': 150,
      'units': 'cores'},
     {'name': 'Job outcomes', 'prefixes': ['outcome_'], 'ids': [],
+     'stacked': True,
      'order': ['outcome_finished', 'outcome_failed'],
      'window_relative': True},
-    {'name': 'Tasks', 'prefixes': ['task_'], 'ids': []},
+    {'name': 'In-flight jobs', 'title': 'Job states', 'prefixes': ['job_'],
+     'ids': ['running_cores'], 'default_off_ids': ['job_activated']},
     {'name': 'In-flight job types', 'title': 'Job types',
      'prefixes': ['type_'], 'ids': []},
     {'name': 'Type × state', 'prefixes': ['ts_'], 'ids': []},
+    {'name': 'Tasks', 'prefixes': ['task_'], 'ids': []},
 )
 
 
