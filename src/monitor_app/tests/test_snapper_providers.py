@@ -5,10 +5,26 @@ from django.test import SimpleTestCase
 from django.template.loader import render_to_string
 
 from monitor_app.snapper_providers import (_epicprod_curve_values,
-                                           _panda_card, _site_focus_view)
+                                           _panda_card, _site_focus_view,
+                                           _site_groups)
 
 
 class EpicprodCurveValuesTests(SimpleTestCase):
+    @patch('monitor_app.snapper_providers._panda_sites',
+           return_value=('SITE_A',))
+    def test_site_panels_are_stacked_with_cores_on_top(self, _sites):
+        groups = {group['name']: group for group in _site_groups()}
+
+        jobs = groups['Site jobs SITE_A']
+        self.assertTrue(jobs['stacked'])
+        self.assertEqual(jobs['order'][-2:],
+                         ['sj_SITE_A_running', 'sjc_SITE_A'])
+        self.assertEqual(jobs['default_off_ids'],
+                         ['sj_SITE_A_activated'])
+        for name in ('Site outcomes SITE_A', 'Site failures SITE_A',
+                     'Site tasks SITE_A'):
+            self.assertTrue(groups[name]['stacked'])
+
     @patch('monitor_app.snapper_providers._panda_sites',
            return_value=('SITE_A',))
     def test_site_focus_uses_a_panda_only_focus_series_product(self, _sites):

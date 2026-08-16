@@ -916,8 +916,10 @@ def _panda_sites():
     return sites
 
 
-# Display order of the site jobs family: submission through queueing
-# to execution (cores beside running jobs) to the trailing outcomes.
+# Display order of the site jobs stack, bottom to top. Running cores is
+# deliberately last: it is complementary capacity information in different
+# units, so its band may move the outer boundary but never re-seat or distort
+# any of the job-state boundaries below it.
 _JOB_LIFECYCLE_EARLY = ('defined', 'waiting', 'assigned', 'activated',
                         'sent')
 _JOB_LIFECYCLE_LATE = ('holding', 'transferring', 'merging')
@@ -934,8 +936,8 @@ def _site_groups():
         # window's left edge; the displayed window is their integration
         # range.
         order = ([f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_EARLY]
-                 + [f'sj_{site}_running', f'sjc_{site}']
-                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE])
+                 + [f'sj_{site}_{s}' for s in _JOB_LIFECYCLE_LATE]
+                 + [f'sj_{site}_running', f'sjc_{site}'])
         groups.append({
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
@@ -943,7 +945,7 @@ def _site_groups():
             'ids': [f'sjc_{site}'],
             'order': order,
             'default_off_ids': [f'sj_{site}_activated'],
-            'tall': True,
+            'stacked': True, 'panel_px': 300,
             'default_off': True})
         groups.append({
             'name': f'Site outcomes {site}',
@@ -952,19 +954,22 @@ def _site_groups():
             'prefixes': [],
             'ids': [f'sjfw_{site}', f'sjxw_{site}'],
             'order': [f'sjfw_{site}', f'sjxw_{site}'],
-            'window_relative': True,
+            'window_relative': True, 'stacked': True,
+            'panel_px': 150, 'units': 'jobs',
             'default_off': True})
         groups.append({
             'name': f'Site failures {site}',
             'title': f'Failures by class · {site}',
             'prefixes': [f'sjxc_{site}_'], 'ids': [],
-            'window_relative': True,
+            'window_relative': True, 'stacked': True,
+            'panel_px': 150, 'units': 'jobs',
             'focus_closed': True,
             'default_off': True})
         groups.append({
             'name': f'Site tasks {site}',
             'title': f'Tasks · {site}',
             'prefixes': [f'stt_{site}_'], 'ids': [],
+            'stacked': True, 'panel_px': 150, 'units': 'tasks',
             'focus_closed': True,
             'default_off': True})
     return tuple(groups)
