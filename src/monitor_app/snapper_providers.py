@@ -347,12 +347,12 @@ def _delivery_curve_values(state):
 
 _QUEUE_STACK_CACHE = {'at': None, 'members': ()}
 
-# Named bands in the cores-by-queue stack; every other queue collapses
-# into 'other'.
+# Named bands in the seven-day cores-by-queue stack; every other queue
+# collapses into 'other'.
 QUEUE_STACK_MAX = 6
 
 # The categorical palette used by the Site compute usage plots. Queue
-# colors are assigned by current stack rank; 'other' takes the next color.
+# colors are assigned by time-weighted stack rank; 'other' takes the next color.
 _QUEUE_BAND_COLORS = (
     '#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3',
     '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195')
@@ -360,9 +360,11 @@ _QUEUE_BAND_COLORS = (
 
 def _queue_stack_members():
     """The named members of the cores-by-queue stack: the queues
-    holding the most running cores in the latest snap, largest first,
-    capped at QUEUE_STACK_MAX. Cached for five minutes — the walk calls
-    this once per snap."""
+    contributing the most core-time over the report's seven-day window,
+    largest first and capped at QUEUE_STACK_MAX. Cached for five minutes
+    because the series walk calls this once per snap."""
+    from datetime import timedelta
+
     from django.utils import timezone
 
     from snapper_ai.models import SystemSnap
@@ -371,18 +373,38 @@ def _queue_stack_members():
     if (_QUEUE_STACK_CACHE['at'] is not None
             and (now - _QUEUE_STACK_CACHE['at']).total_seconds() < 300):
         return _QUEUE_STACK_CACHE['members']
-    state = (SystemSnap.objects.filter(scope='epicprod')
-             .order_by('-snap_time').values_list('state', flat=True)
-             .first())
-    sites = (((((state or {}).get('components') or {})
-               .get('panda') or {}).get('data') or {})
-             .get('jobs') or {}).get('sites') or {}
-    ranked = sorted(
-        ((int((block or {}).get('running_cores_now') or 0), site)
-         for site, block in sites.items()),
-        reverse=True)
-    members = tuple(site for cores, site in ranked[:QUEUE_STACK_MAX]
-                    if cores)
+    start = now - timedelta(days=7)
+    boundary = (SystemSnap.objects.filter(
+        scope='epicprod', snap_time__lt=start)
+        .order_by('-snap_time').values_list('snap_time', 'state').first())
+    rows = (SystemSnap.objects.filter(
+        scope='epicprod', snap_time__gte=start, snap_time__lte=now)
+        .order_by('snap_time').values_list('snap_time', 'state'))
+    weighted = {}
+
+    def add_interval(sample, until):
+        if sample is None:
+            return
+        stamp, state = sample
+        seconds = (until - max(stamp, start)).total_seconds()
+        if seconds <= 0:
+            return
+        sites = (((((state or {}).get('components') or {})
+                   .get('panda') or {}).get('data') or {})
+                 .get('jobs') or {}).get('sites') or {}
+        for site, block in sites.items():
+            cores = int((block or {}).get('running_cores_now') or 0)
+            if cores:
+                weighted[site] = weighted.get(site, 0) + cores * seconds
+
+    previous = boundary
+    for row in rows.iterator(chunk_size=500):
+        add_interval(previous, row[0])
+        previous = row
+    add_interval(previous, now)
+    ranked = sorted(weighted.items(), key=lambda item: (-item[1], item[0]))
+    members = tuple(site for site, core_seconds
+                    in ranked[:QUEUE_STACK_MAX] if core_seconds > 0)
     _QUEUE_STACK_CACHE.update({'members': members, 'at': now})
     return members
 
@@ -394,13 +416,14 @@ def _site_curve_values(panda):
     finished/failed outcomes. Site names carry underscores, so the
     status is always the id's last segment."""
     values = {}
+    jobs = panda.get('jobs') or {}
+    job_sites = jobs.get('sites') or {}
     # The scope view's cores-by-queue stack shares this walk: a handful
     # of named queues and one 'other' band carrying every remaining
     # queue, so the stack always sums to the whole running-core count.
     named = set(_queue_stack_members())
     other_cores = 0
-    for site, block in ((panda.get('jobs') or {}).get('sites')
-                        or {}).items():
+    for site, block in job_sites.items():
         for status, count in (block.get('by_status_now') or {}).items():
             if status == 'starting':
                 continue
@@ -424,7 +447,10 @@ def _site_curve_values(panda):
         for cls, count in (block.get('cum_failed_by_class')
                            or {}).items():
             values[f'sjxc_{site}_{cls}'] = int(count or 0)
-    values['qc_other'] = other_cores
+    if (jobs.get('in_flight_now') or {}).get('running_cores') is not None:
+        for site in named:
+            values.setdefault(f'qc_{site}', 0)
+        values['qc_other'] = other_cores
     for site, block in ((panda.get('tasks') or {}).get('sites')
                         or {}).items():
         for status, count in (block.get('by_status_now') or {}).items():
