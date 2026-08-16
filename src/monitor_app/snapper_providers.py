@@ -678,7 +678,7 @@ EPICPROD_GROUPS = (
      'prefixes': ['qc_'], 'ids': [], 'stacked': True, 'panel_px': 150,
      'units': 'cores'},
     {'name': 'Job outcomes', 'prefixes': ['outcome_'], 'ids': [],
-     'stacked': True,
+     'stacked': True, 'panel_px': 150,
      'order': ['outcome_finished', 'outcome_failed'],
      'window_relative': True},
     {'name': 'In-flight jobs', 'title': 'Job states', 'prefixes': ['job_'],
