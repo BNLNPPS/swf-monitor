@@ -467,10 +467,16 @@ def _site_curve_values(panda):
         # Cumulative terminal counters (raw absolute values; the
         # window-relative families rebase them at render).
         cum = block.get('cum') or {}
+        # The same counters twice under distinct ids: one curve id
+        # carries one render projection, and these counters feed two —
+        # the integrated outcomes (window-relative) and the completions
+        # flow (counter_flow per-interval deltas).
         if 'finished' in cum:
             values[f'sjfw_{site}'] = int(cum.get('finished') or 0)
+            values[f'sjfin_{site}'] = int(cum.get('finished') or 0)
         if 'failed' in cum:
             values[f'sjxw_{site}'] = int(cum.get('failed') or 0)
+            values[f'sjfail_{site}'] = int(cum.get('failed') or 0)
         for cls, count in (block.get('cum_failed_by_class')
                            or {}).items():
             values[f'sjxc_{site}_{cls}'] = int(count or 0)
@@ -637,6 +643,10 @@ def _epicprod_curve_color(curve_id):
         return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
         return JOB_STATE_COLORS.get('failed')
+    if curve_id.startswith('sjfin_'):
+        return JOB_STATE_COLORS.get('finished')
+    if curve_id.startswith('sjfail_'):
+        return JOB_STATE_COLORS.get('failed')
     if curve_id.startswith('sjxc_'):
         return _FAILURE_CLASS_COLORS.get(
             curve_id.rsplit('_', 1)[1], '#424242')
@@ -696,9 +706,9 @@ def _epicprod_curve_label(curve_id):
         return curve_id[3:]
     if curve_id.startswith('sjc_'):
         return 'running cores'
-    if curve_id.startswith('sjfw_'):
+    if curve_id.startswith(('sjfw_', 'sjfin_')):
         return 'finished'
-    if curve_id.startswith('sjxw_'):
+    if curve_id.startswith(('sjxw_', 'sjfail_')):
         return 'failed'
     if curve_id.startswith('sjxc_'):
         # Failure-class curves: the class is the last id segment.
@@ -1133,6 +1143,16 @@ def _site_groups():
             'stacked': True, 'panel_px': 300,
             'default_off': True})
         groups.append({
+            'name': f'Site completions {site}',
+            'title': f'Completions · {site}',
+            'prefixes': [],
+            'ids': [f'sjfin_{site}', f'sjfail_{site}'],
+            'order': [f'sjfin_{site}', f'sjfail_{site}'],
+            'counter_flow': True, 'end_stamped': True,
+            'stacked': True,
+            'panel_px': 150, 'units': 'jobs',
+            'default_off': True})
+        groups.append({
             'name': f'Site outcomes {site}',
             'title': f'Job outcomes · {site}',
             'detail_key': site,
@@ -1198,6 +1218,7 @@ def _site_focus_view():
         'options': [
             {'value': site, 'label': site,
              'families': [f'Site jobs {site}',
+                          f'Site completions {site}',
                           f'Site outcomes {site}',
                           f'Site failures {site}',
                           f'Site tasks {site}'],
