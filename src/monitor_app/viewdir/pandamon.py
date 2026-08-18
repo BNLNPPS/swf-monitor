@@ -1691,13 +1691,17 @@ def epic_queues_list(request):
     canary_health = {q.name: q.status for q in canary_queues}
     canary_names = {q.id: q.name for q in canary_queues}
     canary_pct = {}
+    canary_njobs = {}
     seen_samples = set()
     for sample in PassiveSample.objects.order_by('queue_id', '-window_end'):
         if sample.queue_id in seen_samples:
             continue
         seen_samples.add(sample.queue_id)
         name = canary_names.get(sample.queue_id)
-        if name and sample.failure_rate is not None:
+        if not name:
+            continue
+        canary_njobs[name] = sample.njobs
+        if sample.failure_rate is not None:
             canary_pct[name] = f'{sample.failure_rate * 100:.0f}%'
     last_use = queue_last_use()
     for queue in queues:
@@ -1707,6 +1711,7 @@ def epic_queues_list(request):
         queue['tier'] = meta.get('tier') or queue.get('tier') or ''
         queue['canary'] = canary_health.get(name, 'unknown')
         queue['canary_pct'] = canary_pct.get(name, '')
+        queue['canary_njobs'] = canary_njobs.get(name)
         queue['last_use'] = last_use.get(name)
         # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
         # display lowercase throughout.
