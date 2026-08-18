@@ -1094,7 +1094,13 @@ def _site_groups():
     window-relative terminal outcomes, and tasks. Off by default on the
     scope view — the Site focus page is their home."""
     groups = []
-    for site in _panda_sites():
+    sites = list(_panda_sites())
+    for site in sites:
+        # A queue name extending another (SITE vs SITE_test) collides
+        # under prefix matching: the longer sibling's curves are
+        # excluded from the shorter name's families.
+        longer = [s for s in sites
+                  if s != site and s.startswith(site + '_')]
         # Keep instantaneous job populations and terminal flow on
         # separate scales. Outcome staircases rise from zero at the
         # window's left edge; the displayed window is their integration
@@ -1106,6 +1112,7 @@ def _site_groups():
             'name': f'Site jobs {site}',
             'title': f'Jobs · {site}',
             'prefixes': [f'sj_{site}_'],
+            'exclude_prefixes': [f'sj_{s}_' for s in longer],
             'ids': [f'sjc_{site}'],
             'order': order,
             'default_off_ids': [f'sj_{site}_activated'],
@@ -1128,6 +1135,7 @@ def _site_groups():
             'name': f'Site failures {site}',
             'title': f'Failures by class · {site}',
             'prefixes': [f'sjxc_{site}_'], 'ids': [],
+            'exclude_prefixes': [f'sjxc_{s}_' for s in longer],
             'window_relative': True, 'stacked': True,
             'panel_px': 150, 'units': 'jobs',
             'focus_closed': True,
@@ -1136,6 +1144,7 @@ def _site_groups():
             'name': f'Site tasks {site}',
             'title': f'Tasks · {site}',
             'prefixes': [f'stt_{site}_'], 'ids': [],
+            'exclude_prefixes': [f'stt_{s}_' for s in longer],
             'stacked': True, 'panel_px': 150, 'units': 'tasks',
             'focus_closed': True,
             'default_off': True})
