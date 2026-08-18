@@ -1674,20 +1674,22 @@ SPARK_SPAN_DAYS = 14
 SPARK_BIN_HOURS = 4
 
 
-def _queue_running_sparklines():
-    """Per-queue running-job series for the 2-week thumbnail sparklines.
+def _queue_completion_sparklines():
+    """Per-queue finished/failed completion flows for the 2-week
+    thumbnail sparklines: per-4-hour-bin deltas of the per-site
+    cumulative finished and failed counters in epicprod panda snaps,
+    extracted server-side (jsonb path, no full-state parsing).
 
-    Pulls running_jobs_now per site out of the snap JSON in the database
-    (server-side path extraction, no full-state parsing), binned to
-    4-hour means over the trailing 2 weeks, oldest first. A site absent
-    from a snap's site block had zero running jobs at that sample; a bin
-    with no snaps at all is a coverage gap and stays None.
+    A bin with no snaps is a coverage gap (None); the next sampled bin
+    carries the delta accumulated across the gap. A counter reset
+    (negative delta) renders as a gap, never as a negative flow.
     """
     from django.db import connection
     from django.utils import timezone as dj_timezone
     now = dj_timezone.now()
-    start = now - timedelta(days=SPARK_SPAN_DAYS)
     nbins = SPARK_SPAN_DAYS * 24 // SPARK_BIN_HOURS
+    # One extra lead-in bin supplies the baseline for the first delta.
+    start = now - timedelta(days=SPARK_SPAN_DAYS, hours=SPARK_BIN_HOURS)
     sql = """
         SELECT snap_time, state#>'{components,panda,data,jobs,sites}'
         FROM snapper_system_snap
@@ -1702,8 +1704,7 @@ def _queue_running_sparklines():
         rows = cursor.fetchall()
     if not rows:
         return {}
-    bin_samples = [0] * nbins
-    site_sums = {}             # site -> per-bin running sums
+    counters = {}              # site -> {slot: (cum finished, cum failed)}
     for snap_time, sites in rows:
         if isinstance(sites, str):
             try:
@@ -1713,62 +1714,81 @@ def _queue_running_sparklines():
                 continue
         age_h = (now - snap_time).total_seconds() / 3600.0
         slot = nbins - 1 - int(age_h // SPARK_BIN_HOURS)
-        if slot < 0 or slot >= nbins:
+        if slot < -1:
             continue
-        bin_samples[slot] += 1
         for site, block in (sites or {}).items():
-            running = (block or {}).get('running_jobs_now') or 0
-            site_sums.setdefault(site, [0] * nbins)[slot] += running
-    sites_out = {
-        site: [
-            (sums[i] / bin_samples[i]) if bin_samples[i] else None
-            for i in range(nbins)
-        ]
-        for site, sums in site_sums.items()
-    }
+            cum = (block or {}).get('cum') or {}
+            counters.setdefault(site, {})[slot] = (
+                cum.get('finished') or 0, cum.get('failed') or 0)
+    sites_out = {}
+    for site, per_slot in counters.items():
+        flows = []
+        prev = per_slot.get(-1)
+        for i in range(nbins):
+            cur = per_slot.get(i)
+            if cur is None or prev is None:
+                flows.append(None)
+            else:
+                dfin, dfail = cur[0] - prev[0], cur[1] - prev[1]
+                flows.append([dfin, dfail]
+                             if dfin >= 0 and dfail >= 0 else None)
+            if cur is not None:
+                prev = cur
+        sites_out[site] = flows
     return {'nbins': nbins, 'sites': sites_out}
 
 
 def _spark_svg(series, width=120, height=20):
-    """Area-sparkline geometry for one queue's series: stroke and fill
-    path strings scaled to the queue's own peak; None values are
-    coverage gaps and break the path."""
+    """Stacked-area sparkline geometry for one queue's completion flows:
+    green fill = finished, red band above it = failed, scaled to the
+    queue's own peak total. None bins are coverage gaps and break the
+    paths."""
     if not series:
         return None
-    peak = max((v for v in series if v is not None), default=None)
+    totals = [(v[0] + v[1]) if v is not None else None for v in series]
+    peak = max((t for t in totals if t is not None), default=None)
     if peak is None:
         return None
+    scale = peak if peak > 0 else 1
     n = len(series)
     step = width / max(n - 1, 1)
     top, base = 2.0, float(height)
     span = base - top
-    line, fill = [], []
-    segment = []
+    green, red = [], []
+    seg = []                   # (x, y at finished, y at finished+failed)
 
     def close_segment():
-        if not segment:
+        if not seg:
             return
-        pts = ' L '.join(f'{x:.1f},{y:.1f}' for x, y in segment)
-        line.append(f'M {pts}')
-        fill.append(
-            f'M {segment[0][0]:.1f},{base:.1f} L {pts} '
-            f'L {segment[-1][0]:.1f},{base:.1f} Z')
+        fin_fwd = ' L '.join(f'{x:.1f},{yf:.1f}' for x, yf, yt in seg)
+        green.append(
+            f'M {seg[0][0]:.1f},{base:.1f} L {fin_fwd} '
+            f'L {seg[-1][0]:.1f},{base:.1f} Z')
+        if any(yt < yf for x, yf, yt in seg):
+            tot_fwd = ' L '.join(f'{x:.1f},{yt:.1f}' for x, yf, yt in seg)
+            fin_back = ' L '.join(
+                f'{x:.1f},{yf:.1f}' for x, yf, yt in reversed(seg))
+            red.append(f'M {tot_fwd} L {fin_back} Z')
 
     for i, v in enumerate(series):
         if v is None:
             close_segment()
-            segment = []
+            seg = []
             continue
-        y = base - (span * v / peak if peak else 0)
-        segment.append((i * step, y))
+        dfin, dfail = v
+        y_fin = base - span * dfin / scale
+        y_tot = base - span * (dfin + dfail) / scale
+        seg.append((i * step, y_fin, y_tot))
     close_segment()
-    if not line:
+    if not green:
         return None
-    latest = next((v for v in reversed(series) if v is not None), 0)
+    fin_total = sum(v[0] for v in series if v is not None)
+    fail_total = sum(v[1] for v in series if v is not None)
     return {
         'w': width, 'h': height,
-        'line': ' '.join(line), 'fill': ' '.join(fill),
-        'peak': int(round(peak)), 'latest': int(round(latest)),
+        'green': ' '.join(green), 'red': ' '.join(red),
+        'fin_total': fin_total, 'fail_total': fail_total,
+        'total': fin_total + fail_total,
     }
 
 
@@ -1808,7 +1828,7 @@ def epic_queues_list(request):
     last_use = queue_last_use()
     from ..cached_product import get_product
     spark_product = get_product(
-        'epic_queues_sparklines:v1', _queue_running_sparklines,
+        'epic_queues_sparklines:v2', _queue_completion_sparklines,
         ttl_seconds=6 * 3600, async_first_fill=True)
     spark_data = (spark_product or {}).get('value') or {}
     spark_sites = spark_data.get('sites') or {}

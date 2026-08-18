@@ -34,7 +34,7 @@
                     <th>Status</th>
                     <th>Canary</th>
                     <th title="Job count in the canary 14-day assessment window">Jobs 2 weeks</th>
-                    <th title="Running jobs over the last 2 weeks, 4-hour bins">Running 2 weeks</th>
+                    <th title="Finished (green) and failed (red) jobs per 4-hour bin over the last 2 weeks">Completions 2 weeks</th>
                     <th>Last use</th>
                     <th>Resource Type</th>
                     <th>Type</th>
@@ -55,12 +55,12 @@
                     <td class="{{ q.canary|state_class }}">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</td>
                     {% endif %}
                     <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
-                    <td data-order="{% if q.spark %}{{ q.spark.latest }}{% else %}0{% endif %}">
+                    <td data-order="{% if q.spark %}{{ q.spark.total }}{% else %}0{% endif %}">
                         {% if q.spark %}
                         <svg width="{{ q.spark.w }}" height="{{ q.spark.h }}" viewBox="0 0 {{ q.spark.w }} {{ q.spark.h }}" role="img" style="display:block">
-                            <title>Running jobs, last 2 weeks (4-hour bins) — peak {{ q.spark.peak }}</title>
-                            <path d="{{ q.spark.fill }}" fill="#47D147" fill-opacity="0.35" stroke="none"/>
-                            <path d="{{ q.spark.line }}" fill="none" stroke="#47D147" stroke-width="1.5"/>
+                            <title>Last 2 weeks (4-hour bins): {{ q.spark.fin_total }} finished, {{ q.spark.fail_total }} failed</title>
+                            <path d="{{ q.spark.green }}" fill="#207f20" stroke="none"/>
+                            {% if q.spark.red %}<path d="{{ q.spark.red }}" fill="#ff0000" stroke="none"/>{% endif %}
                         </svg>
                         {% endif %}
                     </td>
