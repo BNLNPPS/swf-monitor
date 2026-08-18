@@ -45,6 +45,25 @@
 
     {% ai_assessment_panel panda_queue_metadata %}
 
+    {% if snapper_embed %}
+    <div class="mb-3">
+        <div class="d-flex align-items-baseline">
+            <h5 class="mb-1">State history · {{ queue_name }} · last 2 weeks</h5>
+            <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ queue_name|urlencode }}">Open in Snapper</a>
+        </div>
+        <div class="row g-2 align-items-stretch">
+            <div class="{% if site_outcomes_pie.pie %}col-lg-8{% else %}col-12{% endif %}">
+                {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+            </div>
+            {% if site_outcomes_pie.pie %}
+            <div class="col-lg-4 d-flex justify-content-center">
+                {% include 'monitor_app/_snapper_site_outcomes_pie.html' with site_outcomes=site_outcomes_pie %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% if error %}
     <div class="alert alert-danger">{{ error }}</div>
     {% else %}

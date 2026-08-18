@@ -1955,6 +1955,22 @@ def epic_queue_detail(request, queue_name):
         shown.update(s.keys())
     other = {k: v for k, v in config.items() if k not in shown}
 
+    # Same snapper site history + outcomes pie the jobs page shows when
+    # filtered to this queue, over the standing 2-week window.
+    snapper_embed = None
+    site_outcomes_pie = None
+    try:
+        graphics_product = _jobs_site_graphics_product(
+            14, queue_name, request.GET.get('refresh') == '1')
+        graphics = graphics_product['value'] or {}
+        snapper_embed = graphics.get('embed') or {
+            'scope': 'epicprod',
+            'error': 'state history is building — reload shortly.'}
+        site_outcomes_pie = graphics.get('outcomes_pie')
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('snapper site graphics failed for queue detail: %s', e)
+        snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
         'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
@@ -1962,6 +1978,8 @@ def epic_queue_detail(request, queue_name):
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
+        'snapper_embed': snapper_embed,
+        'site_outcomes_pie': site_outcomes_pie,
     })
 
 
