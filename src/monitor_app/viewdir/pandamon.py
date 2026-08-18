@@ -1670,6 +1670,108 @@ def panda_diagnostics_datatable_ajax(request):
 
 # ── ePIC Queue views ────────────────────────────────────────────────────────
 
+SPARK_SPAN_DAYS = 14
+SPARK_BIN_HOURS = 4
+
+
+def _queue_running_sparklines():
+    """Per-queue running-job series for the 2-week thumbnail sparklines.
+
+    Pulls running_jobs_now per site out of the snap JSON in the database
+    (server-side path extraction, no full-state parsing), binned to
+    4-hour means over the trailing 2 weeks, oldest first. A site absent
+    from a snap's site block had zero running jobs at that sample; a bin
+    with no snaps at all is a coverage gap and stays None.
+    """
+    from django.db import connection
+    from django.utils import timezone as dj_timezone
+    now = dj_timezone.now()
+    start = now - timedelta(days=SPARK_SPAN_DAYS)
+    nbins = SPARK_SPAN_DAYS * 24 // SPARK_BIN_HOURS
+    sql = """
+        SELECT snap_time, state#>'{components,panda,data,jobs,sites}'
+        FROM snapper_system_snap
+        WHERE scope = 'epicprod'
+          AND snap_time >= %s
+          AND changed_components @> %s::jsonb
+          AND state#>'{components,panda,data,jobs,sites}' IS NOT NULL
+        ORDER BY snap_time
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [start, '["panda"]'])
+        rows = cursor.fetchall()
+    if not rows:
+        return {}
+    bin_samples = [0] * nbins
+    site_sums = {}             # site -> per-bin running sums
+    for snap_time, sites in rows:
+        if isinstance(sites, str):
+            try:
+                sites = json.loads(sites)
+            except ValueError as e:
+                logger.error("sparkline snap JSON parse failed: %s", e)
+                continue
+        age_h = (now - snap_time).total_seconds() / 3600.0
+        slot = nbins - 1 - int(age_h // SPARK_BIN_HOURS)
+        if slot < 0 or slot >= nbins:
+            continue
+        bin_samples[slot] += 1
+        for site, block in (sites or {}).items():
+            running = (block or {}).get('running_jobs_now') or 0
+            site_sums.setdefault(site, [0] * nbins)[slot] += running
+    sites_out = {
+        site: [
+            (sums[i] / bin_samples[i]) if bin_samples[i] else None
+            for i in range(nbins)
+        ]
+        for site, sums in site_sums.items()
+    }
+    return {'nbins': nbins, 'sites': sites_out}
+
+
+def _spark_svg(series, width=120, height=20):
+    """Area-sparkline geometry for one queue's series: stroke and fill
+    path strings scaled to the queue's own peak; None values are
+    coverage gaps and break the path."""
+    if not series:
+        return None
+    peak = max((v for v in series if v is not None), default=None)
+    if peak is None:
+        return None
+    n = len(series)
+    step = width / max(n - 1, 1)
+    top, base = 2.0, float(height)
+    span = base - top
+    line, fill = [], []
+    segment = []
+
+    def close_segment():
+        if not segment:
+            return
+        pts = ' L '.join(f'{x:.1f},{y:.1f}' for x, y in segment)
+        line.append(f'M {pts}')
+        fill.append(
+            f'M {segment[0][0]:.1f},{base:.1f} L {pts} '
+            f'L {segment[-1][0]:.1f},{base:.1f} Z')
+
+    for i, v in enumerate(series):
+        if v is None:
+            close_segment()
+            segment = []
+            continue
+        y = base - (span * v / peak if peak else 0)
+        segment.append((i * step, y))
+    close_segment()
+    if not line:
+        return None
+    latest = next((v for v in reversed(series) if v is not None), 0)
+    return {
+        'w': width, 'h': height,
+        'line': ' '.join(line), 'fill': ' '.join(fill),
+        'peak': int(round(peak)), 'latest': int(round(latest)),
+    }
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
@@ -1704,6 +1806,12 @@ def epic_queues_list(request):
         if sample.failure_rate is not None:
             canary_pct[name] = f'{sample.failure_rate * 100:.0f}%'
     last_use = queue_last_use()
+    from ..cached_product import get_product
+    spark_product = get_product(
+        'epic_queues_sparklines:v1', _queue_running_sparklines,
+        ttl_seconds=6 * 3600, async_first_fill=True)
+    spark_data = (spark_product or {}).get('value') or {}
+    spark_sites = spark_data.get('sites') or {}
     for queue in queues:
         name = queue.get('panda_queue')
         meta = local.get(name, {})
@@ -1713,6 +1821,7 @@ def epic_queues_list(request):
         queue['canary_pct'] = canary_pct.get(name, '')
         queue['canary_njobs'] = canary_njobs.get(name)
         queue['last_use'] = last_use.get(name)
+        queue['spark'] = _spark_svg(spark_sites.get(name))
         # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
         # display lowercase throughout.
         if queue.get('resource_type'):
