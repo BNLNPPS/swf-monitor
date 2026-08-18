@@ -325,6 +325,12 @@ ACTION_DEFAULTS = {
         'sublevel': 'high', 'live': True,
         'description': "Operator designation of the current campaign.",
     },
+    'evgen_mark_obsolete': {
+        'sublevel': 'high', 'live': True,
+        'description': "PWG triage mark on EVGEN entries: set or clear the "
+                       "obsolete flag on the ticked paths, with the setter, "
+                       "time, and reason recorded.",
+    },
     'campaign_set_last': {
         'sublevel': 'high', 'live': True,
         'description': "Operator designation of the last (previous) campaign.",
