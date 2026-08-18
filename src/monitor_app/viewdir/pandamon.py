@@ -624,7 +624,7 @@ def _jobs_site_graphics_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f'snapper_site_graphics:v4:epicprod:site:{site}:{days}{exact_key}',
+        f'snapper_site_graphics:v5:epicprod:site:{site}:{days}{exact_key}',
         build,
         ttl_seconds=300, refresh=refresh)
 

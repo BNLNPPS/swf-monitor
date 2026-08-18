@@ -1109,6 +1109,10 @@ def _site_groups():
             'ids': [f'sjc_{site}'],
             'order': order,
             'default_off_ids': [f'sj_{site}_activated'],
+            # Cores are a distinct quantity, not a job population: they
+            # ride the jobs stack as a foreground line, never summed in.
+            'overlay_ids': [f'sjc_{site}'],
+            'overlay_colors': {f'sjc_{site}': '#00008B'},
             'stacked': True, 'panel_px': 300,
             'default_off': True})
         groups.append({
