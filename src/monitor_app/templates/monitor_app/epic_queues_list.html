@@ -27,15 +27,15 @@
     <p class="text-muted mb-1">Opp = opportunistic &middot; Unified = production and analysis &middot; hpc_special = DOE HPC</p>
     <p class="text-muted mb-1">See <a href="{% url 'canary:canary_page' %}">Canary</a> for full assessment info</p>
 
-        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable" data-swf-order="5,desc">
+        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable" data-swf-order="3,desc">
             <thead>
                 <tr>
                     <th>Queue</th>
                     <th>Status</th>
                     <th>Canary</th>
+                    <th>Last use</th>
                     <th title="Job count in the canary 14-day assessment window">Jobs 2 weeks</th>
                     <th title="Finished (green) and failed (red) jobs per 8-hour bin over the last 2 weeks">Completions 2 weeks</th>
-                    <th>Last use</th>
                     <th>Resource Type</th>
                     <th>Type</th>
                     <th>Region</th>
@@ -54,6 +54,7 @@
                     {% else %}
                     <td class="{{ q.canary|state_class }}">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</td>
                     {% endif %}
+                    <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
                     <td data-order="{% if q.spark %}{{ q.spark.total }}{% else %}0{% endif %}">
                         {% if q.spark %}
@@ -65,7 +66,6 @@
                         </svg>
                         {% endif %}
                     </td>
-                    <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td>{{ q.resource_type|default:"—" }}</td>
                     <td>{{ q.type|default:"—" }}</td>
                     <td>{{ q.country|default:"—" }}</td>
