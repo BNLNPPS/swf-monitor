@@ -1,10 +1,12 @@
 {# House active-filters line; matches monitor_app/_datatable_dynamic_base.html. #}
 {# Include with active_filters (list of label/value) and clear_all_url. #}
-{# Renders nothing when nothing is selected. #}
-{% if active_filters %}
-<div id="active-filters" class="mt-2">
+{# Standing UI: always renders, reading 'None' when nothing is selected. #}
+<div id="active-filters" class="mt-2 mb-3">
     <strong>Active filters:</strong>
+    {% if active_filters %}
     <span id="filter-badges">{% for f in active_filters %}<span class="badge bg-info me-1">{{ f.label }}: {{ f.value }}</span>{% endfor %}</span>
     <a href="{{ clear_all_url }}" class="btn btn-link btn-sm p-0 ms-2">clear all</a>
+    {% else %}
+    <span id="filter-badges" class="text-muted">None</span>
+    {% endif %}
 </div>
-{% endif %}

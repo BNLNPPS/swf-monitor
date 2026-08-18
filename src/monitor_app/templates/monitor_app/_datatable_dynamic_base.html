@@ -47,11 +47,12 @@ Filter field configuration format:
                 {% endfor %}
             </div>
 
-            <!-- Active filters display -->
-            <div id="active-filters" class="mt-2" style="display: none;">
+            <!-- Active filters display: standing UI, always visible;
+                 'None' when nothing is selected. -->
+            <div id="active-filters" class="mt-2">
                 <strong>Active filters:</strong>
-                <span id="filter-badges"></span>
-                <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2">clear all</button>
+                <span id="filter-badges"><span class="text-muted">None</span></span>
+                <button type="button" id="clear-all-filters" class="btn btn-link btn-sm p-0 ms-2" style="display: none;">clear all</button>
             </div>
         </div>
     </div>
@@ -400,6 +401,23 @@ $(document).ready(function() {
         {% endfor %}
         {% endblock %}
     }
+
+    // The active-filters line is standing UI: always visible, reading
+    // 'None' when nothing is selected — a line that only appears once
+    // a filter is chosen reads as a missing feature. Wrapping here
+    // covers every page override of the block above.
+    const _updateActiveFiltersInner = updateActiveFiltersDisplay;
+    updateActiveFiltersDisplay = function () {
+        _updateActiveFiltersInner();
+        const line = $('#active-filters');
+        if (line.is(':hidden')) {
+            $('#filter-badges').html('<span class="text-muted">None</span>');
+            $('#clear-all-filters').hide();
+        } else {
+            $('#clear-all-filters').show();
+        }
+        line.show();
+    };
 
     // Function to load dynamic filter options with counts
     function loadDynamicFilters() {
