@@ -1144,7 +1144,7 @@ def _site_groups():
             'default_off': True})
         groups.append({
             'name': f'Site completions {site}',
-            'title': f'Completions · {site}',
+            'title': f'Job completions · {site}',
             'prefixes': [],
             'ids': [f'sjfin_{site}', f'sjfail_{site}'],
             'order': [f'sjfin_{site}', f'sjfail_{site}'],
