@@ -1671,7 +1671,7 @@ def panda_diagnostics_datatable_ajax(request):
 # ── ePIC Queue views ────────────────────────────────────────────────────────
 
 SPARK_SPAN_DAYS = 14
-SPARK_BIN_HOURS = 4
+SPARK_BIN_HOURS = 8
 
 
 def _queue_completion_sparklines():
@@ -1738,7 +1738,7 @@ def _queue_completion_sparklines():
     return {'nbins': nbins, 'sites': sites_out}
 
 
-def _spark_svg(series, width=120, height=20):
+def _spark_svg(series, width=120, height=40):
     """Stacked-area sparkline geometry for one queue's completion flows:
     green fill = finished, red band above it = failed, scaled to the
     queue's own peak total. None bins are coverage gaps and break the
@@ -1828,7 +1828,7 @@ def epic_queues_list(request):
     last_use = queue_last_use()
     from ..cached_product import get_product
     spark_product = get_product(
-        'epic_queues_sparklines:v2', _queue_completion_sparklines,
+        'epic_queues_sparklines:v3', _queue_completion_sparklines,
         ttl_seconds=6 * 3600, async_first_fill=True)
     spark_data = (spark_product or {}).get('value') or {}
     spark_sites = spark_data.get('sites') or {}
