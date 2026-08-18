@@ -50,7 +50,7 @@
                     {% if q.canary == 'unknown' or q.canary == 'insufficient' %}
                     <td></td>
                     {% else %}
-                    <td class="{{ q.canary|state_class }}"><a href="{% url 'canary:canary_page' %}" style="font-weight:normal">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</a></td>
+                    <td class="{{ q.canary|state_class }}">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</td>
                     {% endif %}
                     <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td>{{ q.resource_type|default:"—" }}</td>
