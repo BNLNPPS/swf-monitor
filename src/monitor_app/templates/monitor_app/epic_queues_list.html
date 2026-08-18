@@ -53,7 +53,7 @@
                     {% else %}
                     <td class="{{ q.canary|state_class }}">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</td>
                     {% endif %}
-                    <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% else %}—{% endif %}</td>
+                    <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
                     <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td>{{ q.resource_type|default:"—" }}</td>
                     <td>{{ q.type|default:"—" }}</td>
