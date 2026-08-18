@@ -19,7 +19,7 @@ import os
 import hashlib
 import re
 from html import escape
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
@@ -241,8 +241,27 @@ def _linkify(text):
     return text
 
 
+_NAIVE_ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$')
+
+
+def _tag_panda_utc(obj):
+    """PanDA DB timestamps are naive UTC. Stamp the offset onto naive ISO
+    strings, in place, so downstream formatters render true Eastern."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, str):
+                if _NAIVE_ISO_RE.match(value):
+                    obj[key] = value + '+00:00'
+            elif isinstance(value, (dict, list)):
+                _tag_panda_utc(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _tag_panda_utc(item)
+
+
 def _fmt_dt(val):
-    """Format an ISO datetime string or datetime object for display."""
+    """Format an ISO datetime string or datetime object for display.
+    Naive values are PanDA DB timestamps, which are UTC."""
     if not val:
         return ''
     if isinstance(val, str):
@@ -250,6 +269,8 @@ def _fmt_dt(val):
             val = datetime.fromisoformat(val)
         except (ValueError, TypeError):
             return val
+    if val.tzinfo is None:
+        val = val.replace(tzinfo=dt_timezone.utc)
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
@@ -980,6 +1001,7 @@ def panda_job_detail(request, pandaid):
     if 'error' in data:
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
+    _tag_panda_utc(data)
     data['pandaid'] = pandaid
     job = data.get('job') or {}
     job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
@@ -1351,6 +1373,7 @@ def panda_task_detail(request, jeditaskid):
     if isinstance(task, dict) and 'error' in task:
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
+    _tag_panda_utc(task)
     pcs_task = _pcs_task_for_panda_task(task)
     panda_tasks_row = _panda_tasks_row_for_jeditaskid(jeditaskid)
 
@@ -1392,6 +1415,7 @@ def panda_task_detail(request, jeditaskid):
         if epicprod_job and epicprod_job.failure_summary:
             job['epicprod_phase'] = epicprod_job.phase
             job['epicprod_failure_summary'] = epicprod_job.failure_summary
+    _tag_panda_utc(jobs)
     task_record = task.get('task_record') or {}
     task_record_items = [
         {
