@@ -56,7 +56,7 @@
                     <td>{{ q.type|default:"—" }}</td>
                     <td>{{ q.country|default:"—" }}</td>
                     <td{% if q.tier == "Opp" %} title="Opportunistic"{% endif %}>{{ q.tier|default:"—" }}</td>
-                    <td>{{ q.last_use|fmt_dt|default:"—" }}</td>
+                    <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td>{{ q.description|default:"—" }}</td>
                     <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                 </tr>
