@@ -62,6 +62,8 @@
             {% endif %}
         </div>
     </div>
+    {% elif site_no_activity %}
+    <p class="text-muted">No recorded job activity for this queue.</p>
     {% endif %}
 
     {% if error %}

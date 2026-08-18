@@ -1959,6 +1959,7 @@ def epic_queue_detail(request, queue_name):
     # filtered to this queue, over the standing 2-week window.
     snapper_embed = None
     site_outcomes_pie = None
+    site_no_activity = False
     try:
         graphics_product = _jobs_site_graphics_product(
             14, queue_name, request.GET.get('refresh') == '1')
@@ -1968,8 +1969,14 @@ def epic_queue_detail(request, queue_name):
             'error': 'state history is building — reload shortly.'}
         site_outcomes_pie = graphics.get('outcomes_pie')
     except Exception as e:                                   # noqa: BLE001
-        logger.error('snapper site graphics failed for queue detail: %s', e)
-        snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+        if 'has no curve family' in str(e):
+            # No job history in the snapper record for this queue: an
+            # expected absence, not a failure.
+            site_no_activity = True
+        else:
+            logger.error(
+                'snapper site graphics failed for queue detail: %s', e)
+            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
 
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
@@ -1980,6 +1987,7 @@ def epic_queue_detail(request, queue_name):
         'config_json': json_mod.dumps(config, indent=2, default=str),
         'snapper_embed': snapper_embed,
         'site_outcomes_pie': site_outcomes_pie,
+        'site_no_activity': site_no_activity,
     })
 
 
