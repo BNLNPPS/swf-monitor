@@ -1699,15 +1699,24 @@ def epic_queues_list(request):
     ]
     # Options come from the full set, so a chosen filter does not empty the
     # other filter bars.
+    # Tier options rank T1, T2, ... then Opp, not alphabetically.
+    def _tier_rank(v):
+        if v.startswith('T') and v[1:].isdigit():
+            return (0, int(v[1:]), v)
+        if v == 'Opp':
+            return (1, 0, v)
+        return (2, 0, v)
+
     filters = []
     selected = {}
     for key, label in filter_fields:
         value = (request.GET.get(key) or '').strip()
         selected[key] = value
         counts = Counter((q.get(key) or '') for q in queues if q.get(key))
+        ordered = sorted(counts, key=_tier_rank) if key == 'tier' else sorted(counts)
         filters.append({
             'key': key, 'label': label, 'selected': value,
-            'options': [{'value': v, 'count': counts[v]} for v in sorted(counts)],
+            'options': [{'value': v, 'count': counts[v]} for v in ordered],
         })
     for key, value in selected.items():
         if value:
