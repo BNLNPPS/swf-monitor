@@ -1659,10 +1659,22 @@ def epic_queues_list(request):
         row.queue_name: (row.metadata or {})
         for row in PandaQueue.objects.only('queue_name', 'metadata')
     }
-    # Canary's curated per-queue health and the last job activity from the
-    # PanDA jobs tables, both joined by queue name.
-    from canary.store.models import Queue as CanaryQueue
-    canary_health = dict(CanaryQueue.objects.values_list('name', 'status'))
+    # Canary's curated per-queue health, the failure percentage its policy
+    # judges, and the last job activity from the PanDA jobs tables, all
+    # joined by queue name.
+    from canary.store.models import PassiveSample, Queue as CanaryQueue
+    canary_queues = list(CanaryQueue.objects.all())
+    canary_health = {q.name: q.status for q in canary_queues}
+    canary_names = {q.id: q.name for q in canary_queues}
+    canary_pct = {}
+    seen_samples = set()
+    for sample in PassiveSample.objects.order_by('queue_id', '-window_end'):
+        if sample.queue_id in seen_samples:
+            continue
+        seen_samples.add(sample.queue_id)
+        name = canary_names.get(sample.queue_id)
+        if name and sample.failure_rate is not None:
+            canary_pct[name] = f'{sample.failure_rate * 100:.0f}%'
     last_use = queue_last_use()
     for queue in queues:
         name = queue.get('panda_queue')
@@ -1670,6 +1682,7 @@ def epic_queues_list(request):
         queue['description'] = meta.get('description', '')
         queue['tier'] = meta.get('tier') or queue.get('tier') or ''
         queue['canary'] = canary_health.get(name, 'unknown')
+        queue['canary_pct'] = canary_pct.get(name, '')
         queue['last_use'] = last_use.get(name)
         # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
         # display lowercase throughout.

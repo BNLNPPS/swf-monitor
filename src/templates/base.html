@@ -949,8 +949,18 @@ function applyNavMode(mode) {
         $(function () {
           // House sortable tables get chrome-free DataTables sorting before
           // the adaptive frame measures their rendered column widths.
-          $('table.swf-sortable').DataTable({
-            paging: false, searching: false, info: false, order: []
+          // data-swf-order="N,desc" opts a table into a default sort.
+          $('table.swf-sortable').each(function () {
+            const spec = this.getAttribute('data-swf-order');
+            let order = [];
+            if (spec) {
+              const parts = spec.split(',');
+              order = [[parseInt(parts[0], 10) || 0,
+                        parts[1] === 'desc' ? 'desc' : 'asc']];
+            }
+            $(this).DataTable({
+              paging: false, searching: false, info: false, order: order
+            });
           });
           scheduleTableFrameUpdate();
         });

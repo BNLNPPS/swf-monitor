@@ -27,17 +27,17 @@
     <p class="text-muted mb-1">Opp = opportunistic &middot; Unified = production and analysis &middot; hpc_special = DOE HPC</p>
     <p class="text-muted mb-1">See <a href="{% url 'canary:canary_page' %}">Canary</a> for full assessment info</p>
 
-        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
+        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable" data-swf-order="3,desc">
             <thead>
                 <tr>
                     <th>Queue</th>
                     <th>Status</th>
                     <th>Canary</th>
+                    <th>Last use</th>
                     <th>Resource Type</th>
                     <th>Type</th>
                     <th>Region</th>
                     <th>Tier</th>
-                    <th>Last use</th>
                     <th>Description</th>
                     <th>Jobs</th>
                 </tr>
@@ -50,13 +50,13 @@
                     {% if q.canary == 'unknown' or q.canary == 'insufficient' %}
                     <td></td>
                     {% else %}
-                    <td class="{{ q.canary|state_class }}"><a href="{% url 'canary:canary_page' %}" style="font-weight:normal">{{ q.canary }}</a></td>
+                    <td class="{{ q.canary|state_class }}"><a href="{% url 'canary:canary_page' %}" style="font-weight:normal">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</a></td>
                     {% endif %}
+                    <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td>{{ q.resource_type|default:"—" }}</td>
                     <td>{{ q.type|default:"—" }}</td>
                     <td>{{ q.country|default:"—" }}</td>
                     <td{% if q.tier == "Opp" %} title="Opportunistic"{% endif %}>{{ q.tier|default:"—" }}</td>
-                    <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td>{{ q.description|default:"—" }}</td>
                     <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                 </tr>
