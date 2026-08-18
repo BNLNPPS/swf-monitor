@@ -1095,11 +1095,22 @@ def _site_groups():
     scope view — the Site focus page is their home."""
     groups = []
     sites = list(_panda_sites())
+    # A queue name extending another (SITE vs SITE_test) collides under
+    # prefix matching: the longer sibling's curves are excluded from the
+    # shorter name's families. Siblings are scanned over the full known
+    # queue inventory, not the displayed site list — test-named queues
+    # are excluded from display yet their curves exist in snap history.
+    known = set(sites)
+    try:
+        from .models import PandaQueue
+        known.update(
+            PandaQueue.objects.values_list('queue_name', flat=True))
+        from canary.store.models import Queue as CanaryQueue
+        known.update(CanaryQueue.objects.values_list('name', flat=True))
+    except Exception as e:                                   # noqa: BLE001
+        logger.error('site sibling inventory failed: %s', e)
     for site in sites:
-        # A queue name extending another (SITE vs SITE_test) collides
-        # under prefix matching: the longer sibling's curves are
-        # excluded from the shorter name's families.
-        longer = [s for s in sites
+        longer = [s for s in known
                   if s != site and s.startswith(site + '_')]
         # Keep instantaneous job populations and terminal flow on
         # separate scales. Outcome staircases rise from zero at the
