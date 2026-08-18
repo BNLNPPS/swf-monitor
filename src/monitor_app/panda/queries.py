@@ -8,7 +8,7 @@ directly. Callers in async contexts should wrap with sync_to_async.
 import logging
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from urllib.parse import unquote
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -1474,6 +1474,33 @@ def list_queues(vo=None, status=None, state=None, search=None):
         "count": len(queues),
         "filters": {"vo": vo, "status": status, "state": state, "search": search},
     }
+
+
+def queue_last_use():
+    """Most recent job activity per queue: max modificationtime across
+    active and archived jobs. PanDA DB timestamps are naive UTC; returned
+    values are UTC-aware datetimes keyed by queue name."""
+    conn = connections['panda']
+    sql = f"""
+        SELECT "computingsite", MAX("modificationtime")
+        FROM (
+            SELECT "computingsite", "modificationtime"
+            FROM "{PANDA_SCHEMA}"."jobsactive4"
+            UNION ALL
+            SELECT "computingsite", "modificationtime"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+        ) jobs
+        GROUP BY "computingsite"
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"queue_last_use failed: {e}")
+        return {}
+    return {row[0]: row[1].replace(tzinfo=dt_timezone.utc)
+            for row in rows if row[1] is not None}
 
 
 def get_queue(panda_queue):

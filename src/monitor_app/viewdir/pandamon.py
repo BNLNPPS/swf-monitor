@@ -31,7 +31,7 @@ from ..panda import (
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, resource_usage, job_outcomes,
+    list_queues, get_queue, queue_last_use, resource_usage, job_outcomes,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
@@ -1659,14 +1659,26 @@ def epic_queues_list(request):
         row.queue_name: (row.metadata or {})
         for row in PandaQueue.objects.only('queue_name', 'metadata')
     }
+    # Canary's curated per-queue health and the last job activity from the
+    # PanDA jobs tables, both joined by queue name.
+    from canary.store.models import Queue as CanaryQueue
+    canary_health = dict(CanaryQueue.objects.values_list('name', 'status'))
+    last_use = queue_last_use()
     for queue in queues:
-        meta = local.get(queue.get('panda_queue'), {})
+        name = queue.get('panda_queue')
+        meta = local.get(name, {})
         queue['description'] = meta.get('description', '')
         queue['tier'] = meta.get('tier') or queue.get('tier') or ''
+        queue['canary'] = canary_health.get(name, 'unknown')
+        queue['last_use'] = last_use.get(name)
+        # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
+        # display lowercase throughout.
+        if queue.get('resource_type'):
+            queue['resource_type'] = queue['resource_type'].lower()
 
     filter_fields = [
         ('status', 'Status'),
-        ('state', 'State'),
+        ('canary', 'Canary'),
         ('resource_type', 'Resource Type'),
         ('type', 'Queue Type'),
         ('country', 'Region'),
