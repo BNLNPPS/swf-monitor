@@ -629,10 +629,10 @@ def _epicprod_curve_color(curve_id):
     from .panda.constants import JOB_STATE_COLORS, TASK_STATE_COLORS
 
     # Operator-set colors on every jobs panel: the running pair reads
-    # as blues — cores strong, running jobs lighter — and activated is
+    # as blues — cores dark, running jobs lighter — and activated is
     # grey context rather than health/completion green.
     if curve_id == 'running_cores':
-        return '#1565c0'
+        return '#0d47a1'
     if curve_id.startswith('sjfw_'):
         return JOB_STATE_COLORS.get('activated')
     if curve_id.startswith('sjxw_'):
@@ -651,7 +651,7 @@ def _epicprod_curve_color(curve_id):
                 members.index(queue) % len(_QUEUE_BAND_COLORS)]
         return _QUEUE_BAND_COLORS[-1]
     if curve_id.startswith('sjc_'):
-        return '#1565c0'
+        return '#0d47a1'
     if curve_id.startswith('sj_'):
         status = curve_id.rsplit('_', 1)[1]
         if status == 'running':
@@ -1112,7 +1112,6 @@ def _site_groups():
             # Cores are a distinct quantity, not a job population: they
             # ride the jobs stack as a foreground line, never summed in.
             'overlay_ids': [f'sjc_{site}'],
-            'overlay_colors': {f'sjc_{site}': '#00008B'},
             'stacked': True, 'panel_px': 300,
             'default_off': True})
         groups.append({
