@@ -1287,7 +1287,11 @@ class EpicProdOpsAgent(BaseAgent):
             ('rucio_arrivals_sweep', self._do_rucio_arrivals_sweep),
             ('evgen_rucio_update', self._do_evgen_rucio_update),
             ('dataset_definitions_sweep', self._do_dataset_definitions_sweep),
-            ('questionnaire_automatch', self._do_questionnaire_automatch),
+            # Retired from the nightly 2026-08-19: request ingest moves to
+            # the internal request form, so the LLM automatch of legacy
+            # Google-form questionnaires no longer earns a nightly sweep.
+            # The handler remains directly invokable.
+            # ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
             ('file_events_measure', self._do_file_events_measure),
