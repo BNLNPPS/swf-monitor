@@ -1352,14 +1352,17 @@ class EpicProdOpsAgent(BaseAgent):
                              level=logging.ERROR, **counts)
         elif missing:
             tasks = sorted({t for rec in missing for t in rec.get('tasks', [])})
-            reason = (f"sandbox already purged for task(s) {tasks} — "
-                      "not natively retryable")
-            self.logger.warning(f"PRODOPS panda_sandbox_keepalive: {reason}")
-            self._log_action('panda_sandbox_keepalive', t0, outcome='warning',
-                             reason=reason,
+            summary = (f"{counts.get('touched') or 0} tarball(s) touched; "
+                       f"{len(missing)} already absent for {len(tasks)} "
+                       "task(s)")
+            self.logger.info(
+                f"PRODOPS panda_sandbox_keepalive done: {summary}")
+            self._log_action('panda_sandbox_keepalive', t0,
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True,
-                             level=logging.WARNING,
+                             sublevel='low', live_default=False,
+                             summary=summary,
+                             missing_task_count=len(tasks),
+                             missing_tarballs=len(missing),
                              missing_tasks=tasks, **counts)
         else:
             self.logger.info("PRODOPS panda_sandbox_keepalive done")

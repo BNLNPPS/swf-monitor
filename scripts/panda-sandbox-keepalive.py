@@ -13,8 +13,10 @@ retryable: epic-VO tasks in a non-final state, plus tasks finished, failed,
 or exhausted within the retention window (SysConfig
 ``panda_sandbox_keepalive_final_days``). Each task's tarball name and
 source server come from its stored parameters (``jedi_taskparams``). A
-tarball already purged is reported per task — that task is not natively
-retryable. Aborted and broken tasks are not kept alive.
+tarball already purged is retained in the run inventory per task — that
+task is not natively retryable. Aborted and broken tasks are not kept
+alive. Missing tarballs are established state, not a failure of the
+current keepalive pass; API and authentication failures remain errors.
 
 The same pass maintains log-dataset lifetimes: each candidate task's
 BNL Rucio datasets (located by ``task_id`` metadata) whose expiry falls
@@ -232,8 +234,8 @@ def main():
             touched.append(record)
         elif status == "missing":
             missing.append(record)
-            _log(f"WARNING: sandbox already purged for tasks "
-                 f"{entry['tasks']} ({tarball}) — not natively retryable")
+            _log(f"sandbox already absent for tasks {entry['tasks']} "
+                 f"({tarball}) — not natively retryable")
         else:
             record["error"] = message
             errors.append(record)
