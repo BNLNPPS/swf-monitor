@@ -718,6 +718,18 @@ class EpicProdOpsAgent(BaseAgent):
         items = list(m['items'])
         batch_id = str(m['batch_id'])
         username = str(m.get('created_by') or '')
+        task_ids = [str(item['jedi_task_id']) for item in items]
+        if len(task_ids) <= 8:
+            subject_label = f"PanDA tasks {', '.join(task_ids)}"
+        else:
+            subject_label = f"{len(task_ids)} PanDA tasks"
+        notice_subject = {
+            'subject_type': 'panda_task_batch',
+            'subject_key': batch_id,
+            'subject_label': subject_label,
+            'batch_id': batch_id,
+            'jedi_task_ids': task_ids,
+        }
         paced_seconds = max(
             0, int(PANDA_TASK_BULK_SEND_INTERVAL * (len(items) - 1) + 0.999))
         doer_timeout = PANDA_TASK_OPERATION_TIMEOUT + paced_seconds
@@ -745,11 +757,10 @@ class EpicProdOpsAgent(BaseAgent):
                     m, item, 'timeout', diagnostic=reason)
             self._log_action(
                 'panda_task_operation', t0, outcome='timeout', reason=reason,
-                subject_type='panda_task_batch', subject_key=batch_id,
                 username=username, sublevel='high', live_default=False,
                 level=logging.ERROR, operation=operation, tasks=len(items),
                 summary=f'0/{len(items)} verified · {len(items)} timed out',
-                url='/panda/tasks/')
+                url='/panda/tasks/', **notice_subject)
             return
 
         for line in (process.stderr or '').splitlines():
@@ -804,11 +815,11 @@ class EpicProdOpsAgent(BaseAgent):
             'panda_task_operation', t0, outcome=outcome,
             reason=(f'{problems} task outcomes were not verified'
                     if problems else ''),
-            subject_type='panda_task_batch', subject_key=batch_id,
             username=username, sublevel='high', live_default=False,
             level=logging.WARNING if problems else logging.INFO,
             operation=operation, tasks=len(items),
-            summary=' · '.join(parts), url='/panda/tasks/', **counts)
+            summary=' · '.join(parts), url='/panda/tasks/',
+            **notice_subject, **counts)
 
     def _settle_panda_bulk_item(self, message, item, status, *,
                                 diagnostic='', observed_status='',

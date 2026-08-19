@@ -74,8 +74,9 @@ def _compose(row, extra):
     from monitor_app.models import external_face_base_url
 
     action = str(extra.get('action') or row.funcname or 'event')
-    subject = str(extra.get('subject_key') or '')
-    title = action.replace('_', ' ')
+    title_action = str(extra.get('operation') or action)
+    subject = str(extra.get('subject_label') or extra.get('subject_key') or '')
+    title = title_action.replace('_', ' ')
     if subject:
         title = f'{title}: {subject}'
     outcome = str(extra.get('outcome') or '')

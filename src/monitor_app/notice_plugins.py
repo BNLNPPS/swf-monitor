@@ -130,9 +130,13 @@ class MattermostLivePlugin:
                 return notice
         subject_type = str(extra.get('subject_type') or '').replace('_', ' ')
         subject_key = str(extra.get('subject_key') or '')
-        if self.UUID_RE.search(subject_key):
-            subject_key = ''
-        subject = f'{subject_type} {subject_key}'.strip()
+        subject_label = str(extra.get('subject_label') or '')
+        if subject_label:
+            subject = subject_label
+        else:
+            if self.UUID_RE.search(subject_key):
+                subject_key = ''
+            subject = f'{subject_type} {subject_key}'.strip()
         username = str(extra.get('username') or '')
         reason = str(extra.get('reason') or '')
         summary = str(extra.get('summary') or '')

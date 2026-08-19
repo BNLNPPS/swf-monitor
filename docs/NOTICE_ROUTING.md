@@ -20,9 +20,11 @@ The design separates three concerns that today are partially fused:
 
 The action stream is the incident source. The `action` identifier is the incident
 name; the record's structured fields (`subject_type`, `subject_key`,
-`outcome`, `namespace`, free keys) are its attributes. `ACTION_DEFAULTS` is
-the incident-name catalog. Emission sites change nothing: recording an action is
-publishing an incident.
+`subject_label`, `outcome`, `namespace`, free keys) are its attributes.
+`subject_key` remains the canonical machine identity; `subject_label` may
+provide its human-readable presentation. `ACTION_DEFAULTS` is the incident-name
+catalog. Emission sites change nothing: recording an action is publishing an
+incident.
 
 Routing operates on the structured action space across logging namespaces
 (`app_name`), independent of the `sublevel` and `live` axes — those govern
@@ -64,9 +66,10 @@ Two modes, chosen per subscription:
   log record page. The `#epicprod-live` Mattermost publisher is the first
   plugin (`mattermost-live`); each plugin's settings live in SysConfig.
 
-Notice composition from the incident is deterministic: title from the action
-and subject, detail from `narration`/`reason`/`summary` where present, URL
-to the log record, severity from the outcome, dedup key from the record id.
+Notice composition from the incident is deterministic: title from the operation
+when present, otherwise the action, plus `subject_label` when present, otherwise
+`subject_key`; detail from `narration`/`reason`/`summary` where present, URL to
+the log record, severity from the outcome, dedup key from the record id.
 Composition belongs to the router, not to emitters or subscribers. Incidents
 may carry `severity` (how bad — e.g. an assessment verdict) and `url`
 (where to look — a subject page rather than the log record) as ordinary

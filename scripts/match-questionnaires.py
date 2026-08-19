@@ -57,8 +57,11 @@ MATCHED_BY = 'automatch'
 CHUNK = 25
 CLAUDE_BIN = os.environ.get('EPICPROD_MATCHER_CLAUDE') or (
     shutil.which('claude') or os.path.expanduser('~/.local/bin/claude'))
-# Per delegate call; 4 chunk calls must fit the agent handler's 1800s budget.
-CALL_TIMEOUT = 420
+# Per delegate call; two worst-case calls fit the agent handler's 1800 s
+# budget. Observed calls run 450-700 s and grow with the task catalog,
+# which rides inline in every prompt — the durable fix is a candidate
+# prefilter that shrinks the catalog per call, not a longer timeout.
+CALL_TIMEOUT = int(os.environ.get('EPICPROD_MATCHER_TIMEOUT', '800'))
 # Bump with ANY change to SYSTEM_PROMPT or the request/catalog presentation:
 # a changed matcher is a changed question, and every questionnaire earns one
 # deliberate re-pass against it.
