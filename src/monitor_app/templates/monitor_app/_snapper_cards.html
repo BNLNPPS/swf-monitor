@@ -177,20 +177,19 @@
   {# the error summary, the failed-jobs list, or a representative job. #}
   <section class="snapper-cut-card">
     <div class="mb-1"><strong>Errors{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
-      {% if card.basis %} <span class="text-muted small">accrued since {{ card.basis }}</span>{% endif %}
+      {% if card.basis %} <span class="text-muted small">interval from {{ card.basis }}</span>{% endif %}
       · <a href="{{ card.errors_url }}">error summary</a>
       · <a href="{{ card.jobs_url }}">failed jobs</a></div>
     {% if card.rows %}
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       <div>
         <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>Category</th><th class="text-end">Since {% if card.basis %}{{ card.basis }}{% else %}window start{% endif %}</th><th class="text-end">Δ prev snap</th></tr></thead>
+          <thead><tr><th>Category</th><th class="text-end">Errors</th></tr></thead>
           <tbody>
           {% for r in card.rows %}
           <tr>
             <td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.label }}</a></td>
             <td class="text-end">{{ r.window }}</td>
-            <td class="text-end">{% if r.delta %}{{ r.delta }}{% else %}—{% endif %}</td>
           </tr>
           {% endfor %}
           </tbody>
