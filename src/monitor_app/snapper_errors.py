@@ -40,6 +40,9 @@ SCOPE = "epicprod"
 
 ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime"]
 MAX_ENTRIES = 2000
+MAX_PATTERNS = 20
+MAX_PATTERN_TASKS = 8
+PATTERN_DIAG_CHARS = 160
 # A fresh component (or one whose record was reset) starts its first
 # interval this far back rather than swallowing all recorded history
 # into one interval; earlier history is the backfill's to write.
@@ -144,11 +147,15 @@ def _classify_sql():
     return comp_case, code_case, diag_case
 
 
-def _faulty_union(mark, until):
+def _faulty_union(mark, until, diags=False):
     """Bounds SQL and parameters for the deduplicated union of faulty
     jobs ending in (mark, until] across the active and archived
-    tables."""
+    tables. diags=True adds the diagnostic text columns for pattern
+    aggregation."""
     err_fields = ", ".join(f'"{c["code"]}"' for c in ERROR_COMPONENTS)
+    if diags:
+        err_fields += ", " + ", ".join(
+            f'"{c["diag"]}"' for c in ERROR_COMPONENTS)
     status_placeholders = ", ".join(["%s"] * len(FAULTY_STATUSES))
     any_nonzero = " OR ".join(
         f'"{c["code"]}" > 0' for c in ERROR_COMPONENTS
@@ -167,6 +174,43 @@ def _faulty_union(mark, until):
         FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
     """
     return union, params + params
+
+
+def error_patterns(mark, until, taskid=None):
+    """Top diagnostic patterns among faulty jobs ending in
+    (mark, until], optionally restricted to one task: category,
+    sample diagnostic, count, representative PanDA job id, and
+    affected task ids, most frequent first. Digit runs collapse in
+    the pattern grouping so job-specific paths, ids, and line numbers
+    merge into one pattern; the sample shown is one member's raw
+    text. Aggregated live from the job records — the errors view's
+    breakdown calls this at cut time (docs/SNAPPER_ERRORS.md)."""
+    comp_case, code_case, diag_case = _classify_sql()
+    union, params = _faulty_union(mark, until, diags=True)
+    task_where = ""
+    if taskid is not None:
+        task_where = 'WHERE "jeditaskid" = %s'
+        params = params + [int(taskid)]
+    sql = f"""
+        SELECT CASE {comp_case} ELSE 'other' END AS comp,
+               CASE {code_case} ELSE 0 END AS code,
+               COALESCE(LEFT(regexp_replace(
+                   CASE {diag_case} ELSE '' END,
+                   '[0-9]+', '#', 'g'), {PATTERN_DIAG_CHARS}), '')
+                   AS diag_pattern,
+               MIN(COALESCE(LEFT(CASE {diag_case} ELSE '' END,
+                                 {PATTERN_DIAG_CHARS}), '')) AS diag,
+               COUNT(*) AS count,
+               MAX("pandaid") AS representative_pandaid,
+               array_agg(DISTINCT "jeditaskid") AS taskids
+        FROM ({union}) faulty
+        {task_where}
+        GROUP BY 1, 2, 3
+        ORDER BY 5 DESC, 1, 2
+    """
+    with connections["panda"].cursor() as cursor:
+        cursor.execute(sql, params)
+        return cursor.fetchall()
 
 
 def _entry_rows(mark, until):

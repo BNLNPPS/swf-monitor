@@ -177,7 +177,7 @@
   {# the error summary, the failed-jobs list, or a representative job. #}
   <section class="snapper-cut-card">
     <div class="mb-1"><strong>Errors{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
-      {% if card.basis %} <span class="text-muted small">interval from {{ card.basis }}</span>{% endif %}
+      {% if card.basis %} <span class="text-muted small">window {{ card.basis }} · {{ card.window_errors }} errors</span>{% endif %}
       · <a href="{{ card.errors_url }}">error summary</a>
       · <a href="{{ card.jobs_url }}">failed jobs</a></div>
     {% if card.rows %}
@@ -200,7 +200,7 @@
       </div>
       {% if card.pie %}
       <div>
-        <div class="mb-1 text-center"><strong>Component shares</strong></div>
+        <div class="mb-1 text-center"><strong>{{ card.pie_label|default:"Shares" }}</strong></div>
         <svg width="{{ card.pie_size }}" height="{{ card.pie_size }}"
              viewBox="0 0 120 120"
              style="display:block; max-width:100%; height:auto;"
@@ -219,7 +219,7 @@
     <div class="text-muted mb-1">No errors accrued in this window{% if card.task_selection %} for this task{% endif %}.</div>
     {% endif %}
     {% if card.patterns %}
-    <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">trailing {{ card.detail_window_minutes }} min before this snap · {{ card.window_errors }} errors</span></div>
+    <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">{{ card.window_patterns }} pattern{{ card.window_patterns|pluralize }} in the window, from live job records</span></div>
     <table class="table table-sm table-bordered w-100 mb-1">
       <thead><tr><th>Category</th><th>Diagnostic</th><th class="text-end">Count</th><th>Example job</th><th>Tasks</th></tr></thead>
       <tbody>

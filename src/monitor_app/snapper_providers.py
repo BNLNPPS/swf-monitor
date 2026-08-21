@@ -1899,68 +1899,119 @@ def _panda_card(data, previous_data, ctx):
 
 
 def _errors_card(data, previous_data, ctx):
-    """The error-state cut card, interval form: the cut snap's own
-    recorded interval — error counts per category with catalog labels
-    and the component-share donut, read from the interval entries. A
-    task selection (?task=) narrows to that task's events. The wider
-    integration window around the cut (the detail phase in
-    docs/SNAPPER_ERRORS.md) supersedes this interval-only reading."""
+    """The error-state cut card: the breakdown over the detail window
+    around the cut — the clicked display bin when it is an hour or
+    wider, else the hour around the cut (docs/SNAPPER_ERRORS.md).
+    Category counts and the component-share donut aggregate the
+    recorded interval entries over the window; the diagnostic
+    patterns aggregate live from the job records over the same
+    bounds. A task selection (?task=) narrows everything to that
+    task's events."""
     import math
-    from datetime import datetime
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
     from urllib.parse import quote
 
     from django.urls import reverse
     from zoneinfo import ZoneInfo
 
-    from .panda.error_labels import category_label
+    from snapper_ai.models import SystemSnap
 
-    entries = data.get('entries')
-    if entries is None:
+    from .panda.error_labels import category_label
+    from .snapper_errors import (
+        MAX_PATTERN_TASKS,
+        MAX_PATTERNS,
+        error_patterns,
+    )
+
+    if data.get('entries') is None:
         # A counter-era snap holds no interval record to read.
         return None
     params = ctx.get('params') or {}
     selected = [v for v in (params.get('task') or '').split(',')
                 if v and v != 'overall']
-    interval = data.get('interval') or {}
+    single_task = selected[0] if len(selected) == 1 else None
 
-    cat_counts = {}
-    total = 0
-    for row in entries:
-        try:
-            taskid = str(int(row[1] or 0))
-            category = str(row[2])
-        except (IndexError, TypeError, ValueError):
-            continue
-        if selected and taskid not in selected:
-            continue
-        cat_counts[category] = (cat_counts.get(category) or 0) + 1
-        total += 1
-    if not selected:
-        overflow = data.get('overflow') or {}
-        for category, count in (overflow.get('by_category') or {}).items():
-            cat_counts[str(category)] = (
-                cat_counts.get(str(category)) or 0) + int(count or 0)
-            total += int(count or 0)
-
-    def _stamp_text(iso):
+    def _parse(iso):
         try:
             parsed = datetime.fromisoformat(
                 str(iso or '').replace('Z', '+00:00'))
         except ValueError:
-            return ''
-        return (parsed.astimezone(ZoneInfo('America/New_York'))
-                .strftime('%m-%d %H:%M ET'))
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt_timezone.utc)
+        return parsed
 
-    basis_text = _stamp_text(interval.get('start'))
+    window_from = _parse(params.get('from'))
+    window_to = _parse(params.get('to'))
+    if (window_from is None or window_to is None
+            or not window_from < window_to):
+        # No client bounds: the hour ending at the cut snap's interval.
+        window_to = _parse((data.get('interval') or {}).get('end'))
+        if window_to is None:
+            return None
+        window_from = window_to - timedelta(hours=1)
+
+    # Entries over the window from the recorded snaps. Snap intervals
+    # tile, so snaps stamped in (from, to + one capture interval]
+    # cover every event in bounds; an unchanged component can repeat
+    # across snaps, so intervals dedup by their end.
+    states = (SystemSnap.objects
+              .filter(scope='epicprod',
+                      snap_time__gt=window_from,
+                      snap_time__lte=window_to + timedelta(minutes=10),
+                      state__components__errors__data__has_key='entries')
+              .order_by('snap_time')
+              .values_list('state', flat=True))
+    cat_counts = {}
+    total = 0
+    seen_intervals = set()
+    for state in states.iterator():
+        errors = (((state.get('components') or {}).get('errors')
+                   or {}).get('data')) or {}
+        interval = errors.get('interval') or {}
+        interval_key = str(interval.get('end') or '')
+        if not interval_key or interval_key in seen_intervals:
+            continue
+        seen_intervals.add(interval_key)
+        for row in errors.get('entries') or []:
+            try:
+                taskid = str(int(row[1] or 0))
+                category = str(row[2])
+                when = _parse(row[3])
+            except (IndexError, TypeError, ValueError):
+                continue
+            if when is None or when <= window_from or when > window_to:
+                continue
+            if selected and taskid not in selected:
+                continue
+            cat_counts[category] = (cat_counts.get(category) or 0) + 1
+            total += 1
+        if not selected:
+            interval_end = _parse(interval.get('end'))
+            if (interval_end is not None
+                    and window_from < interval_end <= window_to):
+                for category, count in ((errors.get('overflow') or {})
+                                        .get('by_category') or {}).items():
+                    cat_counts[str(category)] = (
+                        cat_counts.get(str(category)) or 0) + int(count or 0)
+                    total += int(count or 0)
+
+    eastern = ZoneInfo('America/New_York')
+    from_et = window_from.astimezone(eastern)
+    to_et = window_to.astimezone(eastern)
+    basis_text = (from_et.strftime('%m-%d %H:%M') + ' – '
+                  + to_et.strftime(
+                      '%H:%M ET' if to_et.date() == from_et.date()
+                      else '%m-%d %H:%M ET'))
 
     errors_base = reverse('monitor_app:panda_errors_list')
     jobs_base = reverse('monitor_app:panda_jobs_list')
-    window_q = ''
-    if interval.get('start') and interval.get('end'):
-        window_q = ('&days=1&ended_after=' + quote(str(interval['start']))
-                    + '&ended_before=' + quote(str(interval['end'])))
-
-    single_task = selected[0] if len(selected) == 1 else None
+    window_days = max(1, math.ceil(
+        (window_to - window_from).total_seconds() / 86400))
+    window_q = (f'&days={window_days}&ended_after='
+                + quote(window_from.isoformat())
+                + '&ended_before=' + quote(window_to.isoformat()))
 
     def _errors_url(comp):
         url = f'{errors_base}?status=failed'
@@ -1987,22 +2038,91 @@ def _errors_card(data, previous_data, ctx):
         })
     rows = rows[:24]
 
+    # The donut follows the active lens and wears the plot's own
+    # colors — the same data-curve painting as the table swatches, so
+    # plot, rows, and donut tell one color story. Small shares fold
+    # into a grey remainder slice.
+    lens = str(params.get('lens') or 'category')
+    if lens == 'component':
+        shares = comp_counts
+
+        def _slice_curve(key):
+            return (f'terrc_{single_task}_{key}' if single_task
+                    else f'perrc_{key}')
+
+        def _slice_label(key):
+            return key
+
+        def _slice_url(key):
+            return _errors_url(key)
+    else:
+        shares = cat_counts
+
+        def _slice_curve(key):
+            comp, _, code = key.partition(':')
+            return (f'terr_{single_task}_{comp}_{code}' if single_task
+                    else f'perr_{comp}_{code}')
+
+        def _slice_label(key):
+            comp, _, code = key.partition(':')
+            return category_label(comp, code)
+
+        def _slice_url(key):
+            return _errors_url(key.partition(':')[0])
+
     pie = []
     if total:
+        max_slices = 12
+        ranked = sorted(shares.items(), key=lambda kv: (-kv[1], kv[0]))
+        slices = [
+            {'count': count, 'curve': _slice_curve(key),
+             'color': None, 'url': _slice_url(key),
+             'label': _slice_label(key)}
+            for key, count in ranked[:max_slices]]
+        folded = sum(count for _, count in ranked[max_slices:])
+        if folded:
+            slices.append({
+                'count': folded, 'curve': '', 'color': '#9e9e9e',
+                'url': _errors_url(''),
+                'label': f'{len(ranked) - max_slices} more'})
         tau = 2 * math.pi
         angle = 0.0
-        for comp in sorted(comp_counts, key=lambda c: -comp_counts[c]):
-            span = tau * comp_counts[comp] / total
-            curve = (f'terrc_{single_task}_{comp}' if single_task
-                     else f'perrc_{comp}')
+        for entry in slices:
+            span = tau * entry['count'] / total
             pie.append({
                 'path': _pie_segment(60, 60, 26, 58, angle, angle + span),
-                'curve': curve,
-                'color': _FAILURE_CLASS_COLORS.get(comp, '#424242'),
-                'url': _errors_url(comp),
-                'title': (f'{comp} · {comp_counts[comp]:,} '
-                          f'({comp_counts[comp] / total:.0%})')})
+                'curve': entry['curve'],
+                'color': entry['color'],
+                'url': entry['url'],
+                'title': (f"{entry['label']} · {entry['count']:,} "
+                          f"({entry['count'] / total:.0%})")})
             angle += span
+
+    # Diagnostic patterns aggregate live from the job records over the
+    # same bounds; a single-task filter restricts the query itself,
+    # a multi-task selection filters the aggregated rows.
+    patterns = []
+    window_patterns = 0
+    for comp, code, _pattern, diag, count, rep, taskids in error_patterns(
+            window_from, window_to,
+            taskid=int(single_task) if single_task else None):
+        task_list = sorted({int(t) for t in (taskids or []) if t})
+        if (selected and not single_task
+                and not any(str(t) in selected for t in task_list)):
+            continue
+        window_patterns += 1
+        if len(patterns) < MAX_PATTERNS:
+            rep = int(rep or 0)
+            patterns.append({
+                'category': category_label(comp, code),
+                'curve': f'perr_{comp}_{code}',
+                'diag': str(diag or ''),
+                'count': int(count or 0),
+                'rep_pandaid': rep,
+                'rep_url': (reverse('monitor_app:panda_job_detail',
+                                    args=[rep]) if rep else ''),
+                'tasks': task_list[:MAX_PATTERN_TASKS],
+            })
 
     return {
         'kind': 'errors',
@@ -2012,11 +2132,15 @@ def _errors_card(data, previous_data, ctx):
         'row_overflow': max(0, len(cat_counts) - len(rows)),
         'row_overflow_note': 'more categories',
         'pie': pie,
+        'pie_label': ('Component shares' if lens == 'component'
+                      else 'Category shares'),
         'pie_size': min(360, max(200, 30 * (len(rows) + 1))),
         'window_total': total,
-        'detail_window_minutes': 0,
+        'detail_window_minutes': int(
+            (window_to - window_from).total_seconds() // 60),
         'window_errors': total,
-        'patterns': [],
+        'window_patterns': window_patterns,
+        'patterns': patterns,
         'errors_url': _errors_url(''),
         'jobs_url': (f'{jobs_base}?status=failed'
                      + (f'&taskid={quote(single_task)}'
