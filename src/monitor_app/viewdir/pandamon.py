@@ -1515,11 +1515,15 @@ def panda_errors_list(request):
         'selected_error_source': request.GET.get('error_source', ''),
         'selected_status': request.GET.get('status', ''),
         'classified': request.GET.get('classified', ''),
+        'selected_taskid': request.GET.get('taskid', ''),
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
         'ended_before': (ended_before.isoformat()
                          if ended_before is not None else ''),
     }
+    without_taskid = request.GET.copy()
+    without_taskid.pop('taskid', None)
+    context['clear_task_query'] = without_taskid.urlencode()
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_errors.html', context)
 
@@ -1536,17 +1540,20 @@ def panda_errors_datatable_ajax(request):
     error_source = request.GET.get('error_source', '') or None
     status = request.GET.get('status', '') or None
     classified = request.GET.get('classified') == '1'
+    taskid = request.GET.get('taskid', '') or None
 
     # Served as a cached product: the error aggregation scans the window's
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v2:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v3:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
+        f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
         f'{ended_before.isoformat() if ended_before else ""}',
         lambda: error_summary(days=days, username=username, site=site,
                               error_source=error_source, limit=200,
+                              taskid=taskid,
                               ended_after=ended_after,
                               ended_before=ended_before, status=status,
                               classified=classified),

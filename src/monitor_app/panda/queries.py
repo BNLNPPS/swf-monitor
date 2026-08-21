@@ -1040,8 +1040,18 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             destse_filter = ' AND f."destinationse" = %s'
         destse_params.append(destinationse)
     if taskid:
-        filters += ' AND "jeditaskid" = %s'
-        extra_params.append(taskid)
+        # One id or a CSV list: the errors view's task filter and the
+        # task-page links both land here.
+        try:
+            taskids = [int(t) for t in str(taskid).split(',')
+                       if str(t).strip()]
+        except (TypeError, ValueError):
+            return {'error': f"taskid must be an id or CSV of ids, "
+                             f"got {taskid!r}"}
+        if taskids:
+            placeholders = ', '.join(['%s'] * len(taskids))
+            filters += f' AND "jeditaskid" IN ({placeholders})'
+            extra_params.extend(taskids)
 
     components_to_query = ERROR_COMPONENTS
     if error_source:
