@@ -2014,12 +2014,18 @@ def _errors_card(data, previous_data, ctx):
                 + '&ended_before=' + quote(window_to.isoformat()))
 
     def _errors_url(comp):
-        url = f'{errors_base}?status=failed'
+        # No status pin: the record counts every faulty status
+        # (failed, cancelled, closed), and the pattern page without a
+        # status aggregates the same set — a kill storm is closed
+        # jobs, and a status=failed link lands on an empty page.
+        query = []
         if comp and comp != 'other':
-            url += f'&classified=1&error_source={quote(comp)}'
+            query.append(f'classified=1&error_source={quote(comp)}')
         if single_task:
-            url += f'&taskid={quote(single_task)}'
-        return url + window_q
+            query.append(f'taskid={quote(single_task)}')
+        joined = '&'.join(query)
+        return (errors_base + '?'
+                + (joined + window_q if joined else window_q.lstrip('&')))
 
     rows = []
     comp_counts = {}
