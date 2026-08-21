@@ -95,7 +95,7 @@ ERRORS_REGISTRATION = {
             "required": False,
             "kind": "fold_remainder",
             "description": (
-                "Null normally. In an interval exceeding the entry "
+                "Absent normally. In an interval exceeding the entry "
                 "bound: 'total' and per-category 'by_category' counts "
                 "of the rows not listed in entries, so aggregate "
                 "counts never lose a job."
@@ -246,11 +246,10 @@ def errors_projection(now=None, mark=None):
     projection = {
         "interval": {"start": _iso_utc(mark), "end": _iso_utc(observed_at)},
         "entries": entries,
-        "overflow": (
-            {"total": overflow_total, "by_category": overflow_categories}
-            if overflow_total else None
-        ),
     }
+    if overflow_total:
+        projection["overflow"] = {
+            "total": overflow_total, "by_category": overflow_categories}
     serialized = len(json.dumps(projection, separators=(",", ":")))
     if serialized > MAX_SERIALIZED_BYTES:
         raise ValueError(
@@ -281,7 +280,7 @@ def publish_errors_state() -> ErrorsPublication:
     errorful interval still starts where the record left off.
     """
     projection, observed_at = errors_projection()
-    quiet = (not projection["entries"] and not projection["overflow"]
+    quiet = (not projection["entries"] and not projection.get("overflow")
              and _previous_data_is_v2())
     with transaction.atomic():
         # Registration first: reconciliation is idempotent, and the
@@ -324,7 +323,7 @@ def publish_errors_state() -> ErrorsPublication:
 
 def compact_errors_publication_report(publication: ErrorsPublication) -> str:
     projection = publication.projection
-    overflow = projection["overflow"] or {}
+    overflow = projection.get("overflow") or {}
     return json.dumps(
         {
             "scope": SCOPE,

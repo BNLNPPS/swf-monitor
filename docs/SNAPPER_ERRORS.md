@@ -89,7 +89,7 @@ Each publication records the error events of one interval:
   PanDA job id, JEDI task id, category, and end time, as arrays in a
   declared column order. A job reports errors once, upon completion,
   so each failed job appears in exactly one interval.
-- **Overflow** — normally null. An interval exceeding the entry bound
+- **Overflow** — absent normally. An interval exceeding the entry bound
   (2,000 rows) keeps the earliest rows and folds the exact remainder
   into per-category counts, so aggregate counts never lose a job
   while the per-job listing stays bounded in storm floods.

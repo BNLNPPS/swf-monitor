@@ -209,12 +209,11 @@ def main():
             state_hash='',
             state={'components': {COMPONENT: {
                 'v': 2,
-                'data': {
-                    'interval': {'start': _iso_utc(lead),
-                                 'end': _iso_utc(end_stamp)},
-                    'entries': entries,
-                    'overflow': overflow,
-                },
+                'data': dict(
+                    {'interval': {'start': _iso_utc(lead),
+                                  'end': _iso_utc(end_stamp)},
+                     'entries': entries},
+                    **({'overflow': overflow} if overflow else {})),
                 'registration': ERRORS_REGISTRATION,
                 'revision': 0,
                 'registration_version': 2,
