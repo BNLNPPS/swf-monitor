@@ -2558,7 +2558,13 @@ def _series_cache(key, builder, refresh=False):
     synchronously."""
     from .cached_product import get_product
 
-    ttl_seconds = 6 * 3600 if ':focus:' in key else 90
+    # The Errors focus (param 'task') plots a component that advances
+    # every refresh cycle; its products take the live TTL, not the
+    # day-granular focus backstop.
+    if ':focus:task:' in key:
+        ttl_seconds = 90
+    else:
+        ttl_seconds = 6 * 3600 if ':focus:' in key else 90
     product = get_product(key, builder, ttl_seconds=ttl_seconds,
                           refresh=refresh,
                           async_first_fill=':focus:site:' in key)
