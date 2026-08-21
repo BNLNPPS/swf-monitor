@@ -73,46 +73,49 @@ the recorded history's structure:
 
 ## The error-state component
 
-A new component, internal name `errors`, in the epicprod scope,
-published by a maintainer module beside the existing PanDA activity
-maintainer (`monitor_app/snapper_panda.py`) on the same 5-minute
-System-status refresh. Five minutes is the floor; the cadence is
-governed by the existing SysConfig capture policy and is raised, not
-lowered, if the component proves heavy.
+A component, internal name `errors`, in the epicprod scope, published
+by a maintainer module beside the existing PanDA activity maintainer
+(`monitor_app/snapper_panda.py`) on the same 5-minute System-status
+refresh. Five minutes is the floor; the cadence is governed by the
+existing SysConfig capture policy and is raised, not lowered, if the
+component proves heavy.
 
-Component content per publication:
+Each publication records the error events of one interval:
 
-- **Scope counters** — running failed-job counts per category.
-- **Task counters** — running counts per task × category, for tasks
-  in flight plus tasks final within a trailing retention window. A
-  task leaving the retention window leaves the component; its
-  recorded history remains in the snaps.
-- **Moment detail** — for each currently active category: the top
-  diagnostic patterns (component, code, diagnostic snippet,
-  representative PanDA job id, affected task ids), folded to a
-  bounded top-N with an explicit remainder entry.
+- **Interval** — the half-open interval (start, end] the publication
+  covers, running from the previous publication's source time to this
+  one's.
+- **Entries** — one row per job that ended faulty in the interval:
+  PanDA job id, JEDI task id, category, and end time, as arrays in a
+  declared column order. A job reports errors once, upon completion,
+  so each failed job appears in exactly one interval.
+- **Overflow** — normally null. An interval exceeding the entry bound
+  (2,000 rows) keeps the earliest rows and folds the exact remainder
+  into per-category counts, so aggregate counts never lose a job
+  while the per-job listing stays bounded in storm floods.
 
-The publisher is stateless: each pass recounts from the PanDA job
-records. The published values are running counters; the recorded
-quantity of interest is the **accrual within each snap interval**, read
-as the difference between consecutive snaps. This is the established
-counter-flow form (`counter_flow` families, `snapper_ai/series.py`,
-used by the site-completions curves):
+The publisher is stateless: each pass reads the interval's faulty jobs
+from the PanDA job records. Counts over any period are sums of entry
+counts over the intervals it spans, and per-task readings filter the
+same entries by task id — no counters are stored. An interval with no
+errors is affirmed unchanged, advancing the source time with no new
+snap, so quiet periods cost nothing while the interval chain stays
+gapless. A missed or delayed publication loses nothing: the following
+interval covers the gap.
 
-- Accruals are additive: any display bound — an hour, a day, the
-  page's date range, a render bin — is a sum of snap-interval
-  contributions, computed as a subtraction of counter values.
-- A missed or delayed publication loses nothing; the gap's accrual
-  lands in the following interval.
-- A quiet interval leaves the component unchanged, so no snap is
-  written; quiet periods cost nothing.
-- No displayed quantity is a running total: every number, curve, and
-  share shown is the accrual within declared bounds of interest.
+### Backfill
 
-Because the publisher recounts from job records, the component's first
-publication is correct immediately; history before the component
-existed remains recoverable from the job records themselves, which
-carry end times and error fields for every failed job.
+The recorded job history carries end times and error fields for every
+failed job, so the interval record is reconstructible for any past
+period. The backfill script (`scripts/backfill-errors-entries.py`)
+writes synthetic errors snaps on the 5-minute grid over the trailing
+30 days: one snap per non-empty interval, with capture policy
+`backfill-errors-v1` marking reconstructed evidence as distinct from
+observed snaps. The backfilled record tiles exactly against the start
+of the first live interval, so each failed job lands in exactly one
+interval across the seam. The script is idempotent — a re-run
+replaces prior backfill — and dry-run by default. The deployment
+order is maintainer first, backfill after the first live publication.
 
 ## The errors view
 
@@ -123,11 +126,16 @@ The error families are not added to the epicprod Time history report
 page, which carries its own distinct information; dashboard
 compositions may combine elements of both.
 
-**Plot.** The category flood quilt: per-interval accruals by category,
-stacked, binned at render by the counter-flow projection. A grouping
-selector switches between the seven-component grouping and the full
-component × code categories; low-share categories fold into a labeled
-remainder band per the established quilt laws.
+**Plot.** The category flood quilt: recorded error events by
+category, stacked. The server bins events once, by each job's end
+time, into sparse bins at the native 5-minute cadence; the page bins
+those into the display rung — the smallest of 5, 10, 15, 20, 30, and
+60 minutes keeping the plotted extent at or under 720 columns — and
+re-bins in place as the view zooms, down to the native bins, with no
+further server work. Every rung is an exact sum of native bins. A
+grouping selector switches between the seven-component grouping and
+the full component × code categories. Member tick boxes are omitted:
+identification lives in hover and the breakdown below.
 
 **Share donut.** Category shares of the accruals within the display
 bounds, rendered with the annular SVG donut the site view's detail
@@ -137,26 +145,30 @@ the tables. The donut follows the display bounds and the active
 filters.
 
 **Detail below the plot: the error breakdown.** A click on the plot is
-a time cut. The detail section renders the error breakdown at that
-moment, organized by category:
+a time cut. The detail section renders the error breakdown around
+that moment, integrated over a window at least an hour wide — a
+single 5-minute interval is too sparse to read — organized by
+category:
 
-- interval accrual and share per category;
-- the stored top diagnostic patterns with snippets;
+- error counts and shares per category within the window;
+- the window's top diagnostic patterns, aggregated live from the job
+  records;
 - representative job links — the job page, payload log, and job study;
 - the affected tasks, as detail within each category's section;
-- a link to the `/panda/errors/` pattern table windowed to the
-  interval, for the full aggregation over live job records.
+- a link to the `/panda/errors/` pattern table windowed to the same
+  bounds, for the full aggregation over live job records.
 
 The breakdown is organized by error, not by task; the task reading
 comes from the filter.
 
 **Task filter.** A task selection (URL parameter, so the view is
 bookmarkable and linkable) narrows the plot, donut, and breakdown to
-that task's counters — the per-task error history is the overall view
-filtered, not a separate surface. The PanDA task page
-(`panda/tasks/<jeditaskid>/`) links to its filtered errors view.
-Refinements specific to the per-task reading come later; the filter is
-the mechanism from the start.
+that task's events — the per-task error history is the overall view
+filtered, not a separate surface. The parameter is open: any task id
+reached by link is valid, and no task list is offered on the view
+itself. The PanDA task page (`panda/tasks/<jeditaskid>/`) links to
+its filtered errors view. Refinements specific to the per-task
+reading come later; the filter is the mechanism from the start.
 
 ## Retrieval
 
@@ -172,15 +184,19 @@ the same history the view renders.
 - Maintainer module `monitor_app/snapper_errors.py`, invoked from the
   System-status refresh beside `publish_panda_activity`; publication
   errors fail visibly per the existing maintainer convention.
-- Provider additions in `monitor_app/snapper_providers.py`: the error
-  curve families (counter-flow, folding), the focus-view declaration
-  with its grouping and task selectors, the breakdown card sections,
-  and the donut context.
+- Provider additions in `monitor_app/snapper_providers.py`: event
+  extraction from the interval entries into category, component, and
+  per-task curves; the errors focus view with its grouping selector
+  and open task parameter; the breakdown card; the donut context.
+- Generic mechanisms in the snapper-ai package: the event_values
+  provider hook and event-flow rendering (`snapper_ai/series.py` and
+  the observatory template), and the open_option focus hook
+  (`snapper_ai/views.py`).
 - Curve identifiers carry the category vocabulary; any vocabulary
   change bumps the series cache version per the standing rule.
-- Component bounds: counters keyed by active tasks (typically tens)
-  and categories; moment detail folded to top-N. The component stays
-  curated, bounded JSON per the Snapper design contract.
+- Component bounds: entries capped per interval with exact overflow
+  folding. The component stays curated, bounded JSON per the Snapper
+  design contract.
 
 ## Related
 
