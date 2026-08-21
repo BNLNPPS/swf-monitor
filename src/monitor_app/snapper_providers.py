@@ -1268,6 +1268,15 @@ def _errors_groups():
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
          'panel_px': 300, 'units': 'errors', 'default_off': True},
+        # Umbrella over every per-task error curve: the series build
+        # resolves event_flow membership from registered families, and
+        # per-task families are synthesized per request. Panels never
+        # name this family — the synthesized per-task groups do that.
+        {'name': 'Task errors', 'title': 'Task errors',
+         'prefixes': ['terr_', 'terrc_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 300, 'units': 'errors', 'default_off': True},
     )
 
 
