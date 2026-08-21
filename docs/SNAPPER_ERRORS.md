@@ -187,6 +187,15 @@ of an absolute floor and a multiple of the trailing median; it ends
 after a run of quiet intervals. Detection is stateful and emits on
 transitions — storm start, escalation, storm end — never per
 interval. Thresholds are SysConfig keys, present at their defaults.
+The detector makes the maintainer a canary in place: it already
+reads every interval of the production error stream, so no separate
+sentinel is needed.
+
+Silence is itself a signal. An infrastructure incident can stall the
+maintainer's own pass, and the canary then reports nothing precisely
+when it matters most. A freshness watch on the errors publication
+emits through the same router when the component goes quiet beyond a
+few cycles, at a severity distinct from a storm.
 
 ### Notice and alarm
 
@@ -212,9 +221,13 @@ per transition.
 An AI pass over the mined material — summarizing, hypothesizing,
 drafting the evaluation brief — is the tier where analysis beyond
 deterministic tooling can add value, applied only where the
-deterministic tiers stop. Its model, spend, and gating are explicit
-operator decisions, taken separately; the tiers above it stand on
-their own.
+deterministic tiers stop. The apparatus exists: a threshold-gated,
+case-specific action launches a corun-ai evaluation of the storm
+dossier — the attribution reading, the diagnostic patterns, and the
+drilldown results — and the returned evaluation document links from
+the notice for human review. Spend and gating remain explicit
+operator configuration; the tiers above stand on their own without
+it.
 
 ## Retrieval
 
