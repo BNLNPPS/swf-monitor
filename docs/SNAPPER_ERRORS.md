@@ -170,6 +170,52 @@ itself. The PanDA task page (`panda/tasks/<jeditaskid>/`) links to
 its filtered errors view. Refinements specific to the per-task
 reading come later; the filter is the mechanism from the start.
 
+## Proactive storm response
+
+Planned, the next stage of this design: the recorded error stream is
+the trigger surface for automatic storm response — detection,
+notification, and bounded automatic investigation that prepares
+information for human evaluation. Investigation latency is accepted
+by design; the alternative cost is operator time.
+
+### Storm detection
+
+A detector rides the component publisher: every publication counts
+one interval, and the detector evaluates it against the trailing
+baseline. A storm starts when an interval's errors exceed the larger
+of an absolute floor and a multiple of the trailing median; it ends
+after a run of quiet intervals. Detection is stateful and emits on
+transitions — storm start, escalation, storm end — never per
+interval. Thresholds are SysConfig keys, present at their defaults.
+
+### Notice and alarm
+
+Storm start emits a Capcom notice through the notice router carrying
+the attribution reading — the category, task, and site concentration
+verdicts the breakdown card computes — and a link to the errors view
+windowed to the storm. Storm end reports totals. An alarm fires only
+above a second, higher threshold, itself a configuration value.
+
+### Bounded drilldown
+
+Storm start also triggers the deterministic investigation tier
+through the production-operations agent: Bamboo log classification
+(the classify_failure analysis of the refinement tiers above) on one
+representative job per top diagnostic pattern, with results entering
+the action stream and enriching the notice. Directed canary probes
+join this tier when canary jobs exist (site-canary). The work is
+bounded per storm: a fixed number of representative jobs, one pass
+per transition.
+
+### AI analysis tier
+
+An AI pass over the mined material — summarizing, hypothesizing,
+drafting the evaluation brief — is the tier where analysis beyond
+deterministic tooling can add value, applied only where the
+deterministic tiers stop. Its model, spend, and gating are explicit
+operator decisions, taken separately; the tiers above it stand on
+their own.
+
 ## Retrieval
 
 The component rides the existing Snapper retrieval surface unchanged:
