@@ -152,3 +152,6 @@ messages themselves: the ActiveMQ processor applies each stamped transition
 lanes track the E0-E1 state machine in real time. The
 `repair_stuck_run_states` management command (dry-run default) terminalizes
 rows from before this write side existed.
+
+The error-state component and the dedicated errors view are designed in
+[SNAPPER_ERRORS.md](SNAPPER_ERRORS.md).
