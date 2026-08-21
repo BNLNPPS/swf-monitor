@@ -190,12 +190,14 @@ def main():
         scope=SCOPE, capture_policy=CAPTURE_POLICY).delete()
     written = 0
     for lead, end_stamp, entries, overflow in snaps:
-        # One second past the grid instant: live captures land on
-        # aligned 30-second boundaries, so the stamp never collides
-        # with a real snap under the (scope, snap_time) uniqueness.
+        # Two seconds past the grid instant: live captures land on
+        # aligned 30-second boundaries and the hourly counter backfill
+        # (backfill-panda-counters.py) owns the one-second offset, so
+        # this stamp never collides under the (scope, snap_time)
+        # uniqueness.
         SystemSnap.objects.create(
             scope=SCOPE,
-            snap_time=end_stamp + dt.timedelta(seconds=1),
+            snap_time=end_stamp + dt.timedelta(seconds=2),
             observed_at=now,
             completed_at=now,
             snap_schema_version=1,
