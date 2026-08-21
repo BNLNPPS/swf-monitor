@@ -1109,7 +1109,10 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         WITH errs AS ({union_sql}),
         pattern_totals AS (
             SELECT error_source, error_code,
-                   COALESCE(LEFT(error_diag, 256), '') as error_diag,
+                   COALESCE(LEFT(regexp_replace(
+                       error_diag, '[0-9]+', '#', 'g'), 256), '')
+                       as diag_pattern,
+                   MIN(COALESCE(LEFT(error_diag, 256), '')) as error_diag,
                    COUNT(*) as count,
                    COUNT(DISTINCT jeditaskid) as task_count,
                    array_agg(DISTINCT produsername) as users,
@@ -1123,14 +1126,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    COUNT(*) FILTER (WHERE starttime IS NULL)
                        as never_started_count
             FROM errs
-            GROUP BY error_source, error_code,
-                     COALESCE(LEFT(error_diag, 256), '')
+            GROUP BY error_source, error_code, 3
             ORDER BY count DESC
             LIMIT %s
         ),
         site_task_distribution AS (
-            SELECT e.error_source, e.error_code,
-                   COALESCE(LEFT(e.error_diag, 256), '') as error_diag,
+            SELECT p.diag_pattern,
+                   e.error_source, e.error_code,
                    e.computingsite, e.jeditaskid,
                    COUNT(*) as count,
                    MAX(e.pandaid) as representative_pandaid
@@ -1138,9 +1140,9 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             JOIN pattern_totals p
               ON p.error_source = e.error_source
              AND p.error_code = e.error_code
-             AND p.error_diag = COALESCE(LEFT(e.error_diag, 256), '')
-            GROUP BY e.error_source, e.error_code,
-                     COALESCE(LEFT(e.error_diag, 256), ''),
+             AND p.diag_pattern = COALESCE(LEFT(regexp_replace(
+                     e.error_diag, '[0-9]+', '#', 'g'), 256), '')
+            GROUP BY p.diag_pattern, e.error_source, e.error_code,
                      e.computingsite, e.jeditaskid
         )
         SELECT p.error_source, p.error_code, p.error_diag,
@@ -1161,7 +1163,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    FROM site_task_distribution d
                    WHERE d.error_source = p.error_source
                      AND d.error_code = p.error_code
-                     AND d.error_diag = p.error_diag
+                     AND d.diag_pattern = p.diag_pattern
                ), '[]'::jsonb) as site_task_counts
         FROM pattern_totals p
         ORDER BY p.count DESC
