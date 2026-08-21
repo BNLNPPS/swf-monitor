@@ -147,15 +147,17 @@ def _classify_sql():
     return comp_case, code_case, diag_case
 
 
-def _faulty_union(mark, until, diags=False):
+def _faulty_union(mark, until, diags=False, sites=False):
     """Bounds SQL and parameters for the deduplicated union of faulty
     jobs ending in (mark, until] across the active and archived
     tables. diags=True adds the diagnostic text columns for pattern
-    aggregation."""
+    aggregation; sites=True adds the computing site."""
     err_fields = ", ".join(f'"{c["code"]}"' for c in ERROR_COMPONENTS)
     if diags:
         err_fields += ", " + ", ".join(
             f'"{c["diag"]}"' for c in ERROR_COMPONENTS)
+    if sites:
+        err_fields += ', "computingsite"'
     status_placeholders = ", ".join(["%s"] * len(FAULTY_STATUSES))
     any_nonzero = " OR ".join(
         f'"{c["code"]}" > 0' for c in ERROR_COMPONENTS
@@ -174,6 +176,46 @@ def _faulty_union(mark, until, diags=False):
         FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
     """
     return union, params + params
+
+
+def error_axes(mark, until, taskids=None):
+    """Totals per category, per task, and per site for the faulty
+    jobs ending in (mark, until], from one scan (GROUPING SETS) —
+    the concentration facts behind the breakdown's attribution
+    reading: whether the errors concentrate in one condition, one
+    task, or one site, or spread. taskids optionally restricts to a
+    task list."""
+    comp_case, code_case, _ = _classify_sql()
+    union, params = _faulty_union(mark, until, sites=True)
+    task_where = ""
+    if taskids:
+        placeholders = ", ".join(["%s"] * len(taskids))
+        task_where = f'WHERE "jeditaskid" IN ({placeholders})'
+        params = params + [int(t) for t in taskids]
+    sql = f"""
+        SELECT CASE {comp_case} ELSE 'other' END AS comp,
+               CASE {code_case} ELSE 0 END AS code,
+               "jeditaskid",
+               COALESCE("computingsite", 'unknown') AS site,
+               COUNT(*)
+        FROM ({union}) faulty
+        {task_where}
+        GROUP BY GROUPING SETS ((1, 2), (3), (4))
+    """
+    categories = {}
+    tasks = {}
+    sites = {}
+    with connections["panda"].cursor() as cursor:
+        cursor.execute(sql, params)
+        for comp, code, taskid, site, count in cursor.fetchall():
+            count = int(count or 0)
+            if comp is not None:
+                categories[_category_key(comp, code)] = count
+            elif taskid is not None:
+                tasks[int(taskid)] = count
+            elif site is not None:
+                sites[str(site)] = count
+    return {"categories": categories, "tasks": tasks, "sites": sites}
 
 
 def error_patterns(mark, until, taskid=None):

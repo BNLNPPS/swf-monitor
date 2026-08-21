@@ -180,6 +180,11 @@
       {% if card.basis %} <span class="text-muted small">window {{ card.basis }} · {{ card.window_errors }} errors</span>{% endif %}
       · <a href="{{ card.errors_url }}">error summary</a>
       · <a href="{{ card.jobs_url }}">failed jobs</a></div>
+    {% if card.reading %}
+    <div class="mb-2"><strong>Reading:</strong>
+      {% for r in card.reading %}{% if not forloop.first %} · {% endif %}{{ r.pre }}{% if r.url %}<a href="{{ r.url }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{{ r.post }}{% endfor %}
+    </div>
+    {% endif %}
     {% if card.rows %}
     <div class="d-flex flex-wrap column-gap-4 align-items-start">
       <div>

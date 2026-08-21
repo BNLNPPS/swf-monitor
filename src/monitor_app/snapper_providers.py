@@ -1921,6 +1921,7 @@ def _errors_card(data, previous_data, ctx):
     from .snapper_errors import (
         MAX_PATTERN_TASKS,
         MAX_PATTERNS,
+        error_axes,
         error_patterns,
     )
 
@@ -2130,10 +2131,65 @@ def _errors_card(data, previous_data, ctx):
                 'tasks': task_list[:MAX_PATTERN_TASKS],
             })
 
+    # The attribution reading: where the window's errors concentrate,
+    # axis by axis — category, task, site — with spread itself a
+    # conclusion. Deterministic shares from one live scan
+    # (error_axes); the task axis is omitted when the view is already
+    # filtered to tasks.
+    axes = error_axes(window_from, window_to, taskids=selected or None)
+
+    def _axis_item(values, singular, plural, label_of, url_of):
+        axis_total = sum(values.values())
+        if not axis_total:
+            return None
+        ranked = sorted(values.items(),
+                        key=lambda kv: (-kv[1], str(kv[0])))
+        top_key, top_count = ranked[0]
+        share = top_count / axis_total
+        n = len(ranked)
+        if n == 1:
+            pre, post = f'single {singular}: ', ' (100%)'
+        elif share >= 0.9:
+            pre, post = (f'essentially one {singular}: ',
+                         f' ({share:.0%} of {n})')
+        elif share >= 0.55:
+            pre, post = (f'{singular}-dominated: ',
+                         f' ({share:.0%} of {n})')
+        elif share >= 0.3:
+            pre, post = ('led by ', f' ({share:.0%} of {n} {plural})')
+        else:
+            pre, post = (f'spread over {n} {plural} — largest ',
+                         f' ({share:.0%})')
+        return {'pre': pre, 'label': label_of(top_key),
+                'post': post, 'url': url_of(top_key)}
+
+    reading = []
+    item = _axis_item(
+        axes['categories'], 'category', 'categories',
+        lambda key: category_label(*str(key).partition(':')[::2]),
+        lambda key: _errors_url(str(key).partition(':')[0]))
+    if item:
+        reading.append(item)
+    if not selected:
+        item = _axis_item(
+            axes['tasks'], 'task', 'tasks',
+            lambda t: f'task {t}',
+            lambda t: reverse('monitor_app:panda_task_detail',
+                              kwargs={'jeditaskid': t}))
+        if item:
+            reading.append(item)
+    item = _axis_item(
+        axes['sites'], 'site', 'sites',
+        lambda s: str(s),
+        lambda s: f'{jobs_base}?site={quote(str(s))}' + window_q)
+    if item:
+        reading.append(item)
+
     return {
         'kind': 'errors',
         'task_selection': ', '.join(selected),
         'basis': basis_text,
+        'reading': reading,
         'rows': rows,
         'row_overflow': max(0, len(cat_counts) - len(rows)),
         'row_overflow_note': 'more categories',

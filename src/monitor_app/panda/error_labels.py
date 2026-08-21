@@ -2,8 +2,44 @@
 
 PILOT_LABELS is generated from the pilot error catalog by
 scripts/gen-pilot-error-labels.py; edit that generator, not this table.
+TASKBUFFER_LABELS transcribes the PanDA server's own definitions
+(pandaserver/taskbuffer/ErrorCode.py) — the component names the
+recording server module, not a cause: taskbuffer 102 means the server
+expired the job, most often one that waited past its limit without
+being dispatched.
 category_label() is the shared renderer for component:code categories.
 """
+
+TASKBUFFER_LABELS = {
+    100: "Killed",
+    101: "Transfer timeout",
+    102: "Expired by the server (waited past its limit)",
+    103: "Aborted",
+    105: "Reassigned by re-brokerage",
+    106: "Reassigned by server-side retry",
+    107: "Retried by pilot",
+    111: "Retried for event service",
+    112: "Event service merge",
+    113: "Merge job failed",
+    114: "Event service max attempts reached",
+    115: "Waiting on other event consumers",
+    116: "Killed as unused event consumer",
+    117: "No events processed on worker",
+    118: "No events processed, last consumer",
+    119: "All event ranges failed",
+    120: "Consumer generated event-service merge",
+    121: "Associated event consumer failed",
+    122: "Killed for preemption",
+    123: "Retried without processing events",
+    124: "Input files inconsistent with JEDI",
+    125: "No event service queues available",
+    126: "Closed in bad job status",
+    130: "Fast re-brokerage when overloaded",
+    200: "Job cloning semaphore lock failed",
+    300: "Worker finished before the job",
+    403: "Forbidden request",
+    404: "File not found",
+}
 
 PILOT_LABELS = {
     1008: "General pilot error, consult batch log",
@@ -139,5 +175,7 @@ def category_label(component, code):
     message = None
     if component == "pilot":
         message = PILOT_LABELS.get(code)
+    elif component == "taskbuffer":
+        message = TASKBUFFER_LABELS.get(code)
     base = f"{component} {code}"
     return f"{base} - {message}" if message else base
