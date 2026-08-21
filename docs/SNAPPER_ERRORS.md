@@ -229,6 +229,21 @@ the notice for human review. Spend and gating remain explicit
 operator configuration; the tiers above stand on their own without
 it.
 
+### Bounded action
+
+The escalation path beyond evaluation: the storm AI first notifies,
+then proposes, then — within explicit bounds — acts. The proposal
+stage uses the established AI-proposals pattern (AI_PROPOSALS.md):
+the evaluation concludes with a concrete deterministic action, such
+as pausing the dominant task, that a human approves in one step.
+Bounded autonomous action comes later and stays within a curated
+vocabulary of reversible operations — task pause is the model case,
+and the task-operation set already excludes irreversible actions —
+gated by its own thresholds and an explicit allowlist. The goal
+condition: within minutes of a major failure, the flow of jobs into
+a failing configuration is stopped, and the human reviews an action
+that one step undoes.
+
 ## Retrieval
 
 The component rides the existing Snapper retrieval surface unchanged:
