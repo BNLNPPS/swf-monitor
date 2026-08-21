@@ -584,6 +584,32 @@ def _epicprod_curve_values(state):
             values[f'task_{status}'] = int(count or 0)
     values.update(_site_curve_values(panda))
     values.update(_delivery_curve_values(state))
+    values.update(_errors_curve_values(state))
+    return values
+
+
+def _errors_curve_values(state):
+    """Curves from the error-state component: running counters per
+    category (perr_), per component (perrc_), and per tracked task at
+    both granularities (terr_, terrc_). Counter-flow families project
+    consecutive-snap differences at render (docs/SNAPPER_ERRORS.md)."""
+    values = {}
+    errors = component_data(state, 'errors')
+    comp_totals = {}
+    for key, count in (errors.get('categories') or {}).items():
+        comp, _, code = str(key).partition(':')
+        values[f'perr_{comp}_{code}'] = int(count or 0)
+        comp_totals[comp] = comp_totals.get(comp, 0) + int(count or 0)
+    for comp, total in comp_totals.items():
+        values[f'perrc_{comp}'] = total
+    for taskid, entry in (errors.get('tasks') or {}).items():
+        task_totals = {}
+        for key, count in ((entry or {}).get('cum') or {}).items():
+            comp, _, code = str(key).partition(':')
+            values[f'terr_{taskid}_{comp}_{code}'] = int(count or 0)
+            task_totals[comp] = task_totals.get(comp, 0) + int(count or 0)
+        for comp, total in task_totals.items():
+            values[f'terrc_{taskid}_{comp}'] = total
     return values
 
 
@@ -650,6 +676,11 @@ def _epicprod_curve_color(curve_id):
     if curve_id.startswith('sjxc_'):
         return _FAILURE_CLASS_COLORS.get(
             curve_id.rsplit('_', 1)[1], '#424242')
+    if curve_id.startswith('perrc_'):
+        return _FAILURE_CLASS_COLORS.get(curve_id[6:], '#424242')
+    if curve_id.startswith('terrc_'):
+        return _FAILURE_CLASS_COLORS.get(
+            curve_id[6:].partition('_')[2], '#424242')
     if curve_id.startswith('qc_'):
         queue = curve_id[3:]
         members = _queue_stack_members()
@@ -701,6 +732,17 @@ def _epicprod_curve_label(curve_id):
     # label is the lifecycle stage alone. 'running' says 'running
     # jobs' — 'running cores' sits beside it and the bare word is
     # ambiguous.
+    if curve_id.startswith('perrc_'):
+        return curve_id[6:]
+    if curve_id.startswith('perr_'):
+        comp, _, code = curve_id[5:].rpartition('_')
+        return f'{comp} {code}'
+    if curve_id.startswith('terrc_'):
+        return curve_id[6:].partition('_')[2]
+    if curve_id.startswith('terr_'):
+        rest = curve_id[5:].partition('_')[2]
+        comp, _, code = rest.rpartition('_')
+        return f'{comp} {code}'
     if curve_id.startswith('qc_'):
         # The cores-by-queue stack: the member is the queue itself.
         return curve_id[3:]
@@ -1186,7 +1228,105 @@ def _epicprod_groups():
     """The epicprod curve families, resolved per render (the seam's
     callable form) so new campaigns and sites appear without an app
     restart."""
-    return EPICPROD_GROUPS + _delivery_groups() + _site_groups()
+    return (EPICPROD_GROUPS + _delivery_groups() + _site_groups()
+            + _errors_groups())
+
+
+def _errors_component_tasks():
+    """Tracked task ids and statuses from the error-state component's
+    current value, newest first — the option list of the Errors focus
+    view. Empty when the component has not yet published."""
+    try:
+        from snapper_ai.models import CurrentComponent
+
+        row = (CurrentComponent.objects
+               .filter(scope='epicprod', name='errors')
+               .values_list('data', flat=True).first())
+    except Exception:                                       # noqa: BLE001
+        return []
+    tasks = (row or {}).get('tasks') or {}
+    entries = []
+    for taskid, entry in tasks.items():
+        try:
+            entries.append((int(taskid),
+                            str((entry or {}).get('status') or 'unknown')))
+        except (TypeError, ValueError):
+            continue
+    return sorted(entries, reverse=True)
+
+
+def _errors_groups():
+    """Error-flood families (docs/SNAPPER_ERRORS.md): per-interval
+    accruals by category or component for the scope and per tracked
+    task. Counter-flow projection; absent from the compact scope
+    families, so they render only on the Errors focus page and in
+    embeds that name them."""
+    groups = [
+        {'name': 'Errors by category', 'title': 'Errors by category',
+         'prefixes': ['perr_'], 'ids': [],
+         'counter_flow': True, 'end_stamped': True, 'stacked': True,
+         'panel_px': 300, 'units': 'errors', 'default_off': True},
+        {'name': 'Errors by component', 'title': 'Errors by component',
+         'prefixes': ['perrc_'], 'ids': [],
+         'counter_flow': True, 'end_stamped': True, 'stacked': True,
+         'panel_px': 300, 'units': 'errors', 'default_off': True},
+    ]
+    for taskid, _status in _errors_component_tasks():
+        groups.append({
+            'name': f'Task errors {taskid} category',
+            'title': f'Errors · task {taskid}',
+            'prefixes': [f'terr_{taskid}_'], 'ids': [],
+            'counter_flow': True, 'end_stamped': True, 'stacked': True,
+            'panel_px': 300, 'units': 'errors', 'default_off': True})
+        groups.append({
+            'name': f'Task errors {taskid} component',
+            'title': f'Errors · task {taskid}',
+            'prefixes': [f'terrc_{taskid}_'], 'ids': [],
+            'counter_flow': True, 'end_stamped': True, 'stacked': True,
+            'panel_px': 300, 'units': 'errors', 'default_off': True})
+    return tuple(groups)
+
+
+def _errors_focus_view():
+    """The Errors focus tab: error accruals by category or component,
+    overall or narrowed to one tracked task — the per-task reading is
+    the overall view filtered (?task=), and the PanDA task page links
+    here."""
+    lens_families = {
+        'overall': {'category': ['Errors by category'],
+                    'component': ['Errors by component']},
+    }
+    options = [{'value': 'overall', 'label': 'Overall',
+                'families_by': lens_families['overall'],
+                'component': 'errors'}]
+    for taskid, status in _errors_component_tasks():
+        options.append({
+            'value': str(taskid),
+            'label': f'{taskid} · {status}',
+            'families_by': {
+                'category': [f'Task errors {taskid} category'],
+                'component': [f'Task errors {taskid} component']},
+            'component': 'errors'})
+    return {
+        'param': 'task',
+        'label': 'Errors',
+        'selector_label': 'Task',
+        'cache_series': True,
+        'components': ('errors',),
+        'prewarm_series': False,
+        'note': ('Each bin is the errors accrued in that interval; '
+                 'the breakdown below the plot reads at the clicked '
+                 'moment, differenced from the window start. Tasks '
+                 'listed are those in flight or recently final.'),
+        'default': 'overall',
+        'selectors': [
+            {'param': 'lens', 'label': 'Grouping',
+             'default': 'category',
+             'choices': [{'value': 'category', 'label': 'error category'},
+                         {'value': 'component', 'label': 'error component'}]},
+        ],
+        'options': options,
+    }
 
 
 def _site_focus_view():
@@ -1733,6 +1873,156 @@ def _panda_card(data, previous_data, ctx):
                                if have_basis else 'Cumulative'),
             'sites': sites, 'queue_cores': queue_cores,
             'site_only': site_only, 'split_panels': not site_only}
+
+
+def _errors_card(data, previous_data, ctx):
+    """The error-state cut card: the error breakdown at the cut —
+    window accruals per category with catalog labels, the
+    component-share donut, and the trailing window's top diagnostic
+    patterns with representative jobs. A task selection (?task=)
+    narrows the counters and patterns to that task."""
+    import math
+    from urllib.parse import quote
+
+    from django.urls import reverse
+    from zoneinfo import ZoneInfo
+
+    from .panda.error_labels import category_label
+
+    params = ctx.get('params') or {}
+    selected = [v for v in (params.get('task') or '').split(',')
+                if v and v != 'overall']
+    since_data = (ctx or {}).get('since_data') or {}
+    since_stamp = (ctx or {}).get('since')
+    requested_at = (ctx or {}).get('requested_at')
+    have_basis = since_stamp is not None
+    basis_text = ''
+    if have_basis:
+        basis_text = (since_stamp.astimezone(ZoneInfo('America/New_York'))
+                      .strftime('%m-%d %H:%M ET'))
+
+    def _task_cum(block, taskids):
+        merged = {}
+        tasks = block.get('tasks') or {}
+        for taskid in taskids:
+            for key, count in ((tasks.get(taskid) or {})
+                               .get('cum') or {}).items():
+                merged[key] = merged.get(key, 0) + int(count or 0)
+        return merged
+
+    if selected:
+        cum = _task_cum(data, selected)
+        base = _task_cum(since_data, selected)
+        prev = _task_cum(previous_data, selected)
+    else:
+        cum = {k: int(v or 0)
+               for k, v in (data.get('categories') or {}).items()}
+        base = {k: int(v or 0)
+                for k, v in (since_data.get('categories') or {}).items()}
+        prev = {k: int(v or 0)
+                for k, v in (previous_data.get('categories') or {}).items()}
+
+    errors_base = reverse('monitor_app:panda_errors_list')
+    jobs_base = reverse('monitor_app:panda_jobs_list')
+    window_q = ''
+    if have_basis and requested_at is not None:
+        window_days = max(1, math.ceil(
+            (requested_at - since_stamp).total_seconds() / 86400))
+        window_q = (f'&days={window_days}&ended_after='
+                    + quote(since_stamp.isoformat())
+                    + '&ended_before=' + quote(requested_at.isoformat()))
+
+    single_task = selected[0] if len(selected) == 1 else None
+
+    def _errors_url(comp):
+        url = f'{errors_base}?status=failed'
+        if comp and comp != 'other':
+            url += f'&classified=1&error_source={quote(comp)}'
+        if single_task:
+            url += f'&taskid={quote(single_task)}'
+        return url + window_q
+
+    rows = []
+    comp_windows = {}
+    window_total = 0
+    for key in sorted(cum, key=lambda k: -(cum[k] - int(base.get(k) or 0))):
+        comp, _, code = str(key).partition(':')
+        window = max(0, cum[key] - int(base.get(key) or 0))
+        if have_basis and not window:
+            continue
+        # Shares are accruals within the declared bounds; without a
+        # basis there is no bounded accrual and no share to draw.
+        if have_basis:
+            comp_windows[comp] = comp_windows.get(comp, 0) + window
+            window_total += window
+        curve = (f'terr_{single_task}_{comp}_{code}' if single_task
+                 else f'perr_{comp}_{code}')
+        rows.append({
+            'label': category_label(comp, code),
+            'curve': curve,
+            'url': _errors_url(comp),
+            'window': str(window) if have_basis else '—',
+            'cum': str(cum[key]),
+            'delta': cut_delta(cum.get(key), prev.get(key)) or '',
+        })
+    rows = rows[:24]
+
+    pie = []
+    if window_total:
+        tau = 2 * math.pi
+        angle = 0.0
+        for comp in sorted(comp_windows, key=lambda c: -comp_windows[c]):
+            span = tau * comp_windows[comp] / window_total
+            curve = (f'terrc_{single_task}_{comp}' if single_task
+                     else f'perrc_{comp}')
+            pie.append({
+                'path': _pie_segment(60, 60, 26, 58, angle, angle + span),
+                'curve': curve,
+                'color': _FAILURE_CLASS_COLORS.get(comp, '#424242'),
+                'url': _errors_url(comp),
+                'title': (f'{comp} · {comp_windows[comp]:,} '
+                          f'({comp_windows[comp] / window_total:.0%})')})
+            angle += span
+
+    detail = data.get('detail') or {}
+    patterns = []
+    for pattern in detail.get('patterns') or ():
+        taskids = [int(t) for t in pattern.get('tasks') or ()]
+        if selected and not any(str(t) in selected for t in taskids):
+            continue
+        comp, _, code = str(pattern.get('category') or '').partition(':')
+        rep = int(pattern.get('representative_pandaid') or 0)
+        patterns.append({
+            'category': category_label(comp, code),
+            'curve': f'perr_{comp}_{code}',
+            'diag': str(pattern.get('diag') or ''),
+            'count': int(pattern.get('count') or 0),
+            'rep_pandaid': rep,
+            'rep_url': (reverse('monitor_app:panda_job_detail',
+                                args=[rep]) if rep else ''),
+            'tasks': taskids,
+        })
+
+    return {
+        'kind': 'errors',
+        'task_selection': ', '.join(selected),
+        'basis': basis_text,
+        'rows': rows,
+        'row_overflow': max(0, len(cum) - len(rows)),
+        'row_overflow_note': (
+            'more categories with nothing accrued in this window'
+            if have_basis else 'more categories'),
+        'pie': pie,
+        'pie_size': min(360, max(200, 30 * (len(rows) + 1))),
+        'window_total': window_total,
+        'detail_window_minutes': int(detail.get('window_minutes') or 0),
+        'window_errors': int(detail.get('window_errors') or 0),
+        'patterns': patterns,
+        'errors_url': _errors_url(''),
+        'jobs_url': (f'{jobs_base}?status=failed'
+                     + (f'&taskid={quote(single_task)}'
+                        if single_task else '') + window_q),
+    }
 
 
 def _delivery_card(data, previous_data, ctx):
@@ -2306,9 +2596,11 @@ def register_snapper_providers():
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
         scope_curve_groups=_epicprod_scope_groups,
-        focus_view=(_delivery_focus_view, _site_focus_view),
+        focus_view=(_delivery_focus_view, _site_focus_view,
+                    _errors_focus_view),
         component_cards={'panda': _panda_card,
-                         'delivery': _delivery_card},
+                         'delivery': _delivery_card,
+                         'errors': _errors_card},
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))
