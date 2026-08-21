@@ -21,7 +21,6 @@ from django.db import connections, transaction
 from django.utils import timezone
 
 from snapper_ai.services import (
-    ComponentNotFound,
     ComponentUpdate,
     publish_component,
     register_component,
@@ -285,34 +284,27 @@ def publish_errors_state() -> ErrorsPublication:
     quiet = (not projection["entries"] and not projection["overflow"]
              and _previous_data_is_v2())
     with transaction.atomic():
-        try:
-            if quiet:
-                update = report_component_unchanged(
-                    scope=SCOPE,
-                    name=COMPONENT_NAME,
-                    publisher_identity=PUBLISHER_IDENTITY,
-                    assessed_at=observed_at,
-                    source_as_of=observed_at,
-                    assessment_policy_version=ASSESSMENT_POLICY_VERSION,
-                )
-            else:
-                update = publish_component(
-                    scope=SCOPE,
-                    name=COMPONENT_NAME,
-                    publisher_identity=PUBLISHER_IDENTITY,
-                    data=projection,
-                    assessed_at=observed_at,
-                    source_as_of=observed_at,
-                    assessment_policy_version=ASSESSMENT_POLICY_VERSION,
-                )
-        except ComponentNotFound:
-            registration_update = register_component(
+        # Registration first: reconciliation is idempotent, and the
+        # publication validates against the registration on record —
+        # publishing first would validate new-shape data against a
+        # superseded definition and fail.
+        registration_update = register_component(
+            scope=SCOPE,
+            name=COMPONENT_NAME,
+            publisher_identity=PUBLISHER_IDENTITY,
+            registration=ERRORS_REGISTRATION,
+            component_schema_version=2,
+        )
+        if quiet:
+            update = report_component_unchanged(
                 scope=SCOPE,
                 name=COMPONENT_NAME,
                 publisher_identity=PUBLISHER_IDENTITY,
-                registration=ERRORS_REGISTRATION,
-                component_schema_version=2,
+                assessed_at=observed_at,
+                source_as_of=observed_at,
+                assessment_policy_version=ASSESSMENT_POLICY_VERSION,
             )
+        else:
             update = publish_component(
                 scope=SCOPE,
                 name=COMPONENT_NAME,
@@ -321,14 +313,6 @@ def publish_errors_state() -> ErrorsPublication:
                 assessed_at=observed_at,
                 source_as_of=observed_at,
                 assessment_policy_version=ASSESSMENT_POLICY_VERSION,
-            )
-        else:
-            registration_update = register_component(
-                scope=SCOPE,
-                name=COMPONENT_NAME,
-                publisher_identity=PUBLISHER_IDENTITY,
-                registration=ERRORS_REGISTRATION,
-                component_schema_version=2,
             )
     return ErrorsPublication(
         registration_update=registration_update,
