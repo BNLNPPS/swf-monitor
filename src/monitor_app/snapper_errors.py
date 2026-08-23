@@ -3,13 +3,17 @@
 Design: docs/SNAPPER_ERRORS.md. Each publication records the error
 events of one interval: every job that ended faulty within
 (previous publication, now], as bounded entry rows of
-(pandaid, jeditaskid, category, endtime). A job reports errors once,
-upon completion, so each failed job appears in exactly one interval.
-Counts over any period are sums of entry counts over the intervals it
-spans; per-task readings filter the same entries by task id. An
-interval whose entry count exceeds the bound keeps a representative
-subset and folds the exact remainder into per-category overflow
-counts, so aggregate counts never lose a job.
+(pandaid, jeditaskid, category, endtime, status). The status is the
+job's terminal state (failed, cancelled, closed) — the system's own
+disposition semantics: closed marks jobs the server disposed of for
+workflow reasons, by design not actual errors. A job reports errors
+once, upon completion, so each failed job appears in exactly one
+interval. Counts over any period are sums of entry counts over the
+intervals it spans; per-task readings filter the same entries by task
+id. An interval whose entry count exceeds the bound keeps a
+representative subset and folds the exact remainder into
+per-category-and-status overflow counts, so aggregate counts never
+lose a job.
 """
 
 import json
@@ -34,11 +38,11 @@ from .panda.constants import (
 )
 
 PUBLISHER_IDENTITY = "swf-monitor:panda-errors"
-ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v2"
+ASSESSMENT_POLICY_VERSION = "swf-panda-errors-v3"
 COMPONENT_NAME = "errors"
 SCOPE = "epicprod"
 
-ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime"]
+ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime", "status"]
 MAX_ENTRIES = 2000
 MAX_PATTERNS = 20
 MAX_PATTERN_TASKS = 8
@@ -55,11 +59,14 @@ ERRORS_REGISTRATION = {
     "description": (
         "Per-interval PanDA job error events: each publication covers "
         "one interval and records every job that ended faulty within "
-        "it, as entry rows of (pandaid, jeditaskid, category, endtime). "
-        "The category is 'component:code', classified by the first "
-        "nonzero error component in the standard order, so one job "
-        "lands in one category. Counts over any period are sums of "
-        "entry counts over the intervals it spans."
+        "it, as entry rows of (pandaid, jeditaskid, category, "
+        "endtime, status). The category is 'component:code', "
+        "classified by the first nonzero error component in the "
+        "standard order, so one job lands in one category. The status "
+        "is the job's terminal state (failed, cancelled, closed); "
+        "closed marks jobs the server disposed of for workflow "
+        "reasons, by design not actual errors. Counts over any period "
+        "are sums of entry counts over the intervals it spans."
     ),
     "visibility": "public",
     "owning_subsystem": "SWF PanDA production monitor",
@@ -87,10 +94,11 @@ ERRORS_REGISTRATION = {
             "description": (
                 "One row per job that ended faulty in the interval, as "
                 "arrays in ENTRY_FIELDS order: pandaid, jeditaskid, "
-                "category 'component:code', and endtime. Each failed "
-                "job appears in exactly one interval. When the interval "
-                "exceeds the entry bound, entries keep the earliest "
-                "rows and 'overflow' carries the exact remainder."
+                "category 'component:code', endtime, and terminal "
+                "status. Each failed job appears in exactly one "
+                "interval. When the interval exceeds the entry bound, "
+                "entries keep the earliest rows and 'overflow' carries "
+                "the exact remainder."
             ),
         },
         "overflow": {
@@ -100,9 +108,9 @@ ERRORS_REGISTRATION = {
             "kind": "fold_remainder",
             "description": (
                 "Absent normally. In an interval exceeding the entry "
-                "bound: 'total' and per-category 'by_category' counts "
-                "of the rows not listed in entries, so aggregate "
-                "counts never lose a job."
+                "bound: 'total' and 'by_category' counts of the rows "
+                "not listed in entries, keyed 'component:code@status' "
+                "so status-resolved aggregate counts never lose a job."
             ),
         },
     },
@@ -170,29 +178,35 @@ def _faulty_union(mark, until, diags=False, sites=False):
     )
     params = [mark, until, *FAULTY_STATUSES]
     union = f"""
-        SELECT "pandaid", "jeditaskid", "endtime", {err_fields}
+        SELECT "pandaid", "jeditaskid", "endtime", "jobstatus", {err_fields}
         FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {bounds}
         UNION
-        SELECT "pandaid", "jeditaskid", "endtime", {err_fields}
+        SELECT "pandaid", "jeditaskid", "endtime", "jobstatus", {err_fields}
         FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
     """
     return union, params + params
 
 
-def error_axes(mark, until, taskids=None):
+def error_axes(mark, until, taskids=None, statuses=None):
     """Totals per category, per task, and per site for the faulty
     jobs ending in (mark, until], from one scan (GROUPING SETS) —
     the concentration facts behind the breakdown's attribution
     reading: whether the errors concentrate in one condition, one
     task, or one site, or spread. taskids optionally restricts to a
-    task list."""
+    task list; statuses to a terminal-state list."""
     comp_case, code_case, _ = _classify_sql()
     union, params = _faulty_union(mark, until, sites=True)
-    task_where = ""
+    conditions = []
     if taskids:
         placeholders = ", ".join(["%s"] * len(taskids))
-        task_where = f'WHERE "jeditaskid" IN ({placeholders})'
+        conditions.append(f'"jeditaskid" IN ({placeholders})')
         params = params + [int(t) for t in taskids]
+    status_list = _known_statuses(statuses)
+    if status_list:
+        placeholders = ", ".join(["%s"] * len(status_list))
+        conditions.append(f'"jobstatus" IN ({placeholders})')
+        params = params + status_list
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
         SELECT CASE {comp_case} ELSE 'other' END AS comp,
                CASE {code_case} ELSE 0 END AS code,
@@ -200,7 +214,7 @@ def error_axes(mark, until, taskids=None):
                COALESCE("computingsite", 'unknown') AS site,
                COUNT(*)
         FROM ({union}) faulty
-        {task_where}
+        {where}
         GROUP BY GROUPING SETS ((1, 2), (3), (4))
     """
     categories = {}
@@ -219,21 +233,42 @@ def error_axes(mark, until, taskids=None):
     return {"categories": categories, "tasks": tasks, "sites": sites}
 
 
-def error_patterns(mark, until, taskid=None):
+def _known_statuses(statuses):
+    """The restriction list for a terminal-state selection: the given
+    statuses that live job-record queries can express. Synthetic
+    presentation states (e.g. 'unrecorded' for pre-status entry rows)
+    have no job-record equivalent and drop out; an empty or full
+    selection means no restriction."""
+    if not statuses:
+        return []
+    known = [s for s in statuses if s in FAULTY_STATUSES]
+    if len(known) == len(FAULTY_STATUSES):
+        return []
+    return known
+
+
+def error_patterns(mark, until, taskid=None, statuses=None):
     """Top diagnostic patterns among faulty jobs ending in
-    (mark, until], optionally restricted to one task: category,
-    sample diagnostic, count, representative PanDA job id, and
-    affected task ids, most frequent first. Digit runs collapse in
-    the pattern grouping so job-specific paths, ids, and line numbers
-    merge into one pattern; the sample shown is one member's raw
-    text. Aggregated live from the job records — the errors view's
-    breakdown calls this at cut time (docs/SNAPPER_ERRORS.md)."""
+    (mark, until], optionally restricted to one task and/or a
+    terminal-state list: category, sample diagnostic, count,
+    representative PanDA job id, and affected task ids, most frequent
+    first. Digit runs collapse in the pattern grouping so job-specific
+    paths, ids, and line numbers merge into one pattern; the sample
+    shown is one member's raw text. Aggregated live from the job
+    records — the errors view's breakdown calls this at cut time
+    (docs/SNAPPER_ERRORS.md)."""
     comp_case, code_case, diag_case = _classify_sql()
     union, params = _faulty_union(mark, until, diags=True, sites=True)
-    task_where = ""
+    conditions = []
     if taskid is not None:
-        task_where = 'WHERE "jeditaskid" = %s'
+        conditions.append('"jeditaskid" = %s')
         params = params + [int(taskid)]
+    status_list = _known_statuses(statuses)
+    if status_list:
+        placeholders = ", ".join(["%s"] * len(status_list))
+        conditions.append(f'"jobstatus" IN ({placeholders})')
+        params = params + status_list
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
         SELECT CASE {comp_case} ELSE 'other' END AS comp,
                CASE {code_case} ELSE 0 END AS code,
@@ -249,7 +284,7 @@ def error_patterns(mark, until, taskid=None):
                array_agg(DISTINCT COALESCE("computingsite", 'unknown'))
                    AS sites
         FROM ({union}) faulty
-        {task_where}
+        {where}
         GROUP BY 1, 2, 3
         ORDER BY 5 DESC, 1, 2
     """
@@ -259,15 +294,15 @@ def error_patterns(mark, until, taskid=None):
 
 
 def _entry_rows(mark, until):
-    """(pandaid, jeditaskid, category, endtime) for faulty jobs ending
-    in (mark, until], in endtime order."""
+    """(pandaid, jeditaskid, category, endtime, status) for faulty
+    jobs ending in (mark, until], in endtime order."""
     comp_case, code_case, _ = _classify_sql()
     union, params = _faulty_union(mark, until)
     sql = f"""
         SELECT "pandaid", "jeditaskid",
                CASE {comp_case} ELSE 'other' END,
                CASE {code_case} ELSE 0 END,
-               "endtime"
+               "endtime", "jobstatus"
         FROM ({union}) faulty
         ORDER BY "endtime", "pandaid"
     """
@@ -317,7 +352,7 @@ def errors_projection(now=None, mark=None):
     entries = []
     overflow_total = 0
     overflow_categories = {}
-    for pandaid, taskid, comp, code, endtime in _entry_rows(
+    for pandaid, taskid, comp, code, endtime, status in _entry_rows(
             mark, observed_at):
         category = _category_key(comp, code)
         if len(entries) < MAX_ENTRIES:
@@ -326,11 +361,13 @@ def errors_projection(now=None, mark=None):
                 int(taskid or 0),
                 category,
                 _iso_utc(endtime),
+                str(status or ''),
             ])
         else:
             overflow_total += 1
-            overflow_categories[category] = (
-                overflow_categories.get(category) or 0) + 1
+            fold_key = f"{category}@{status or ''}"
+            overflow_categories[fold_key] = (
+                overflow_categories.get(fold_key) or 0) + 1
 
     projection = {
         "interval": {"start": _iso_utc(mark), "end": _iso_utc(observed_at)},
@@ -348,17 +385,21 @@ def errors_projection(now=None, mark=None):
     return projection, observed_at
 
 
-def _previous_data_is_v2():
+def _previous_data_is_v3():
     """Whether the component's current content already has the
-    interval-entries shape. Until it does, a quiet interval still
-    publishes, so the shape transition lands as real content."""
+    status-bearing interval-entries shape. Until it does, a quiet
+    interval still publishes, so the shape transition lands as real
+    content."""
     from snapper_ai.models import CurrentComponent
 
     row = (CurrentComponent.objects
            .filter(scope=SCOPE, name=COMPONENT_NAME)
            .values("data").first())
-    return bool(row and isinstance(row["data"], dict)
-                and "entries" in row["data"])
+    if not (row and isinstance(row["data"], dict)
+            and "entries" in row["data"]):
+        return False
+    rows = row["data"]["entries"]
+    return not rows or len(rows[0]) >= len(ENTRY_FIELDS)
 
 
 def publish_errors_state() -> ErrorsPublication:
@@ -370,7 +411,7 @@ def publish_errors_state() -> ErrorsPublication:
     """
     projection, observed_at = errors_projection()
     quiet = (not projection["entries"] and not projection.get("overflow")
-             and _previous_data_is_v2())
+             and _previous_data_is_v3())
     with transaction.atomic():
         # Registration first: reconciliation is idempotent, and the
         # publication validates against the registration on record —
@@ -381,7 +422,7 @@ def publish_errors_state() -> ErrorsPublication:
             name=COMPONENT_NAME,
             publisher_identity=PUBLISHER_IDENTITY,
             registration=ERRORS_REGISTRATION,
-            component_schema_version=2,
+            component_schema_version=3,
         )
         if quiet:
             update = report_component_unchanged(

@@ -1,10 +1,10 @@
 """Backfill per-interval error-event snaps into snap history.
 
-Reconstructs the errors component's version-2 interval entries — every
+Reconstructs the errors component's version-3 interval entries — every
 job that ended faulty within each grid interval, as rows of
-(pandaid, jeditaskid, category, endtime) — from the recorded job
-history in the PanDA database, on a regular grid at the live capture
-cadence. One synthetic snap per non-empty interval is written with
+(pandaid, jeditaskid, category, endtime, status) — from the recorded
+job history in the PanDA database, on a regular grid at the live
+capture cadence. One synthetic snap per non-empty interval is written with
 capture policy ``backfill-errors-v1`` — reconstructed evidence,
 explicitly distinguishable from observed snaps — carrying only the
 errors component in the live publisher's envelope shape. A job reports
@@ -82,7 +82,7 @@ def _interval_snaps(day_start, day_end, step):
         overflow_total = 0
         overflow_categories = {}
 
-    for pandaid, taskid, comp, code, endtime in rows:
+    for pandaid, taskid, comp, code, endtime, status in rows:
         stamp = endtime if endtime.tzinfo else endtime.replace(
             tzinfo=dt.timezone.utc)
         while stamp > edge:
@@ -96,11 +96,13 @@ def _interval_snaps(day_start, day_end, step):
                 int(taskid or 0),
                 category,
                 _iso_utc(endtime),
+                str(status or ''),
             ])
         else:
             overflow_total += 1
-            overflow_categories[category] = (
-                overflow_categories.get(category) or 0) + 1
+            fold_key = f'{category}@{status or ""}'
+            overflow_categories[fold_key] = (
+                overflow_categories.get(fold_key) or 0) + 1
     close()
     return intervals
 
@@ -177,7 +179,7 @@ def main():
               + (f' + {overflow["total"]} overflow' if overflow else ''))
     for _, end_stamp, entries, overflow in snaps[-3:]:
         categories = {}
-        for _, _, category, _ in entries:
+        for _, _, category, _, _ in entries:
             categories[category] = (categories.get(category) or 0) + 1
         top = sorted(categories.items(), key=lambda kv: -kv[1])[:3]
         print(f'  {end_stamp.isoformat()}: {len(entries)} entries, top {top}')
@@ -206,11 +208,11 @@ def main():
             reasons=['backfill'],
             changed_components=[COMPONENT],
             component_revisions={COMPONENT: 0},
-            registration_versions={COMPONENT: 2},
+            registration_versions={COMPONENT: 3},
             component_hashes={},
             state_hash='',
             state={'components': {COMPONENT: {
-                'v': 2,
+                'v': 3,
                 'data': dict(
                     {'interval': {'start': _iso_utc(lead),
                                   'end': _iso_utc(end_stamp)},
@@ -218,7 +220,7 @@ def main():
                     **({'overflow': overflow} if overflow else {})),
                 'registration': ERRORS_REGISTRATION,
                 'revision': 0,
-                'registration_version': 2,
+                'registration_version': 3,
                 'assessed_at': end_stamp.isoformat(),
                 'source_as_of': end_stamp.isoformat(),
                 'accepted_at': now.isoformat(),

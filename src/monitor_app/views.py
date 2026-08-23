@@ -2744,9 +2744,16 @@ def panda_slash_command(request):
 
         if subcmd == 'errors':
             days = int(arg) if arg.isdigit() else 7
-            data = queries.error_summary(days=days, limit=10)
+            # Closed jobs are workflow disposals, not actual errors —
+            # excluded from the digest, named when present.
+            data = queries.error_summary(days=days, limit=10,
+                                         status='failed,cancelled')
             lines = [f"#### Top Errors (last {days} days)"]
             lines.append(f"Total error occurrences: {data.get('total_errors', 0)}")
+            closed = (data.get('status_counts') or {}).get('closed')
+            if closed:
+                lines.append(f"(+ {closed} closed — server workflow "
+                             f"disposals, excluded here)")
             for e in data.get('errors', []):
                 diag = (e.get('error_diag') or '')[:80]
                 lines.append(

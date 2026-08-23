@@ -51,6 +51,28 @@ Every failed job row carries `jeditaskid` alongside the error fields,
 so the same categorization aggregates per task, per site, or per any
 other job attribute without additional classification work.
 
+### Terminal states
+
+The job's terminal status is a second classification axis, recorded
+per entry. PanDA's own kill path assigns it with distinct semantics
+(`job_complex_module.py`, panda-server):
+
+- **failed** — the job ran and ended in error: an actual error.
+- **cancelled** — a person or controlling system deliberately killed
+  the job.
+- **closed** — the server disposed of the job for its own workflow
+  reasons: pending expiry, reassignment, rebrokerage, task-done
+  kills. By design not an actual error; a flood of closures signals
+  an infrastructure condition (a stalled daemon, generation
+  outrunning dispatch), not a payload problem.
+
+Error presentations therefore exclude closed jobs by default and
+offer the terminal states as a filter, discovered from the recorded
+data with per-state counts always visible — a closure storm announces
+itself in its count without displacing the actual errors. The
+recorded history and the retrieval surface carry every state; the
+default applies to presentation only.
+
 ### Progressive refinement
 
 Two refinement tiers improve the vocabulary over time without changing
@@ -86,13 +108,15 @@ Each publication records the error events of one interval:
   covers, running from the previous publication's source time to this
   one's.
 - **Entries** — one row per job that ended faulty in the interval:
-  PanDA job id, JEDI task id, category, and end time, as arrays in a
-  declared column order. A job reports errors once, upon completion,
-  so each failed job appears in exactly one interval.
+  PanDA job id, JEDI task id, category, end time, and terminal
+  status, as arrays in a declared column order. A job reports errors
+  once, upon completion, so each failed job appears in exactly one
+  interval.
 - **Overflow** — absent normally. An interval exceeding the entry bound
   (2,000 rows) keeps the earliest rows and folds the exact remainder
-  into per-category counts, so aggregate counts never lose a job
-  while the per-job listing stays bounded in storm floods.
+  into counts keyed `category@status`, so status-resolved aggregate
+  counts never lose a job while the per-job listing stays bounded in
+  storm floods.
 
 The publisher is stateless: each pass reads the interval's faulty jobs
 from the PanDA job records. Counts over any period are sums of entry
@@ -105,9 +129,9 @@ interval covers the gap.
 
 ### Backfill
 
-The recorded job history carries end times and error fields for every
-failed job, so the interval record is reconstructible for any past
-period. The backfill script (`scripts/backfill-errors-entries.py`)
+The recorded job history carries end times, terminal statuses, and
+error fields for every failed job, so the interval record is
+reconstructible for any past period. The backfill script (`scripts/backfill-errors-entries.py`)
 writes synthetic errors snaps on the 5-minute grid over the trailing
 30 days: one snap per non-empty interval, with capture policy
 `backfill-errors-v1` marking reconstructed evidence as distinct from
@@ -161,6 +185,18 @@ category:
 The breakdown is organized by error, not by task; the task reading
 comes from the filter.
 
+**Terminal-state filter.** A chip row beside the grouping selector
+filters the view by terminal state. The chips are discovered from the
+loaded data — a state appears exactly when the record holds it — and
+each carries its count over the visible range in parentheses, so an
+excluded closure storm remains visible in its chip while the plot
+shows the actual errors. Closed is off by default (see Terminal
+states above); rows recorded before the status column report as
+`unrecorded` and age out of the window. The selection lives in the
+URL, filters client-side from the per-state breakdowns the bins
+carry (no refetch), and the breakdown, donut, and diagnostic
+patterns follow it.
+
 **Task filter.** A task selection (URL parameter, so the view is
 bookmarkable and linkable) narrows the plot, donut, and breakdown to
 that task's events — the per-task error history is the overall view
@@ -182,7 +218,10 @@ by design; the alternative cost is operator time.
 
 A detector rides the component publisher: every publication counts
 one interval, and the detector evaluates it against the trailing
-baseline. A storm starts when an interval's errors exceed the larger
+baseline. Detection covers every terminal state, closed included —
+the presentation default that filters closures out of the errors
+view never applies here, because a closure flood is itself an
+infrastructure signal. A storm starts when an interval's errors exceed the larger
 of an absolute floor and a multiple of the trailing median; it ends
 after a run of quiet intervals. Detection is stateful and emits on
 transitions — storm start, escalation, storm end — never per

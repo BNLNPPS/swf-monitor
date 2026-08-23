@@ -1007,11 +1007,19 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         time_filter = 'j."modificationtime" >= %s'
         time_params = [timezone.now() - timedelta(days=days)]
     faulty_statuses = ('failed', 'cancelled', 'closed')
-    if status is not None and status not in faulty_statuses:
-        return {'error': f"status must be one of {faulty_statuses}"}
-    if status:
-        status_filter = 'j."jobstatus" = %s'
-        status_params = [status]
+    # status accepts one terminal state or a CSV selection. The
+    # summary always reports the per-status totals of the unrestricted
+    # population alongside (status_counts), so an excluded flood —
+    # e.g. a closed-job kill storm — stays visible in its count.
+    status_list = [s for s in str(status or '').split(',') if s]
+    unknown = [s for s in status_list if s not in faulty_statuses]
+    if unknown:
+        return {'error': f"status must be among {faulty_statuses}, "
+                         f"got {unknown}"}
+    if status_list:
+        placeholders = ', '.join(['%s'] * len(status_list))
+        status_filter = f'j."jobstatus" IN ({placeholders})'
+        status_params = list(status_list)
     else:
         status_filter = "j.\"jobstatus\" IN ('failed','cancelled','closed')"
         status_params = []
@@ -1188,6 +1196,37 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         logger.error(f"error_summary query failed: {e}")
         return {"error": str(e)}
 
+    # Terminal-state totals of the same population WITHOUT the status
+    # restriction: the filter chips self-discover from these — a
+    # status appears exactly when the window holds it, with its count.
+    any_nonzero = ' OR '.join(
+        f'COALESCE(j."{c["code"]}", 0) != 0' for c in components_to_query)
+    count_parts = []
+    count_params = []
+    for table in ['jobsactive4', 'jobsarchived4']:
+        count_parts.append(f"""
+            SELECT j."jobstatus", COUNT(*)
+            FROM "{PANDA_SCHEMA}"."{table}" j
+            {dest_join}
+            WHERE {time_filter}
+              AND j."jobstatus" IN ('failed','cancelled','closed')
+              AND ({any_nonzero})
+              {filters}
+            GROUP BY 1
+        """)
+        count_params.extend(destse_params + time_params + extra_params)
+    status_counts = {}
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(' UNION ALL '.join(count_parts), count_params)
+            for job_status, job_count in cursor.fetchall():
+                status_counts[str(job_status)] = (
+                    status_counts.get(str(job_status)) or 0
+                ) + int(job_count or 0)
+    except Exception as e:
+        logger.error(f"error_summary status counts failed: {e}")
+        return {"error": str(e)}
+
     errors = []
     total = 0
     for row in rows:
@@ -1222,12 +1261,17 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         "total_errors": total,
         "errors": errors,
         "count": len(errors),
+        # Per terminal state, the window's totals with no status
+        # restriction applied — the basis of the status filter chips,
+        # and the visibility of whatever the filter excludes.
+        "status_counts": status_counts,
         "filters": {
             "days": days,
             "username": username,
             "site": site,
             "taskid": taskid,
             "error_source": error_source,
+            "status": ','.join(status_list) if status_list else None,
         },
     }
 

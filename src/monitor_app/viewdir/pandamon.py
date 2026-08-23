@@ -1513,7 +1513,9 @@ def panda_errors_list(request):
         'columns': ERROR_COLUMNS,
         'selected_site': request.GET.get('site', ''),
         'selected_error_source': request.GET.get('error_source', ''),
-        'selected_status': request.GET.get('status', ''),
+        # Default excludes closed (workflow disposals, not actual
+        # errors); the chips show every state present with its count.
+        'selected_status': request.GET.get('status', '') or 'failed,cancelled',
         'classified': request.GET.get('classified', ''),
         'selected_taskid': request.GET.get('taskid', ''),
         'ended_after': (ended_after.isoformat()
@@ -1538,7 +1540,11 @@ def panda_errors_datatable_ajax(request):
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
     error_source = request.GET.get('error_source', '') or None
-    status = request.GET.get('status', '') or None
+    # Terminal-state filter, one status or CSV. The default excludes
+    # closed: the server disposed of those jobs for workflow reasons,
+    # by design not actual errors — the closed population stays
+    # visible in the status chips' counts and is one click away.
+    status = request.GET.get('status', '') or 'failed,cancelled'
     classified = request.GET.get('classified') == '1'
     taskid = request.GET.get('taskid', '') or None
 
@@ -1546,7 +1552,7 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v3:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v4:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
         f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
@@ -1566,6 +1572,10 @@ def panda_errors_datatable_ajax(request):
                              if product['built_at'] else None),
         'product_age_seconds': product['age_seconds'],
         'product_refreshing': product['refreshing'],
+        # Chip basis: per-status totals of the unrestricted window
+        # population, and the selection this response was built under.
+        'status_counts': result.get('status_counts') or {},
+        'status_selected': status,
     }
 
     if 'error' in result:

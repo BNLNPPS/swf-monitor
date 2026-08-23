@@ -597,9 +597,13 @@ def _errors_event_values(state):
     """Error events from the error-state component's interval record
     (docs/SNAPPER_ERRORS.md): one stamp per failed job at its end
     time, keyed into the category (perr_), component (perrc_), and
-    per-task (terr_, terrc_) curves. Overflow rows — storm intervals
-    beyond the entry bound — carry no individual stamps; their exact
-    counts land at the interval end, scope curves only."""
+    per-task (terr_, terrc_) curves. Each stamp carries the job's
+    terminal state as its event qualifier (series bins per-qualifier
+    breakdowns for the view's terminal-state filter); rows recorded
+    before the status column report 'unrecorded'. Overflow rows —
+    storm intervals beyond the entry bound — carry no individual
+    stamps; their exact counts land at the interval end, scope curves
+    only, keyed 'category@status' since v3."""
     events = {}
     errors = component_data(state, 'errors')
     entries = errors.get('entries')
@@ -612,18 +616,23 @@ def _errors_event_values(state):
             stamp = str(row[3])
         except (IndexError, TypeError, ValueError):
             continue
-        events.setdefault(f'perr_{comp}_{code}', []).append(stamp)
-        events.setdefault(f'perrc_{comp}', []).append(stamp)
+        status = (str(row[4]) if len(row) > 4 and row[4]
+                  else 'unrecorded')
+        event = [stamp, status]
+        events.setdefault(f'perr_{comp}_{code}', []).append(event)
+        events.setdefault(f'perrc_{comp}', []).append(event)
         if taskid:
             events.setdefault(
-                f'terr_{taskid}_{comp}_{code}', []).append(stamp)
-            events.setdefault(f'terrc_{taskid}_{comp}', []).append(stamp)
+                f'terr_{taskid}_{comp}_{code}', []).append(event)
+            events.setdefault(f'terrc_{taskid}_{comp}', []).append(event)
     overflow = errors.get('overflow') or {}
     interval_end = str((errors.get('interval') or {}).get('end') or '')
     if interval_end:
-        for category, count in (overflow.get('by_category') or {}).items():
+        for fold_key, count in (overflow.get('by_category') or {}).items():
+            category, at, status = str(fold_key).partition('@')
             comp, _, code = str(category).partition(':')
-            stamps = [interval_end] * int(count or 0)
+            event = [interval_end, status if at and status else 'unrecorded']
+            stamps = [event] * int(count or 0)
             events.setdefault(f'perr_{comp}_{code}', []).extend(stamps)
             events.setdefault(f'perrc_{comp}', []).extend(stamps)
     return events
@@ -1257,17 +1266,27 @@ def _errors_groups():
     render only on the Errors focus page and in embeds that name
     them. Member ticks stay off: identification lives in hover and
     the breakdown below."""
+    # The terminal-state chip declarations feed the observatory's
+    # event-qualifier filter: chips self-discover from the recorded
+    # statuses with counts over the visible range; closed is off by
+    # default — the server disposed of those jobs for workflow
+    # reasons, by design not actual errors (docs/SNAPPER_ERRORS.md).
+    qualifier = {'qualifier_label': 'Terminal state',
+                 'qualifier_param': 'states',
+                 'qualifiers_off': ['closed']}
     return (
         {'name': 'Errors by category', 'title': 'Errors by category',
          'prefixes': ['perr_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
-         'panel_px': 300, 'units': 'errors', 'default_off': True},
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
         {'name': 'Errors by component', 'title': 'Errors by component',
          'prefixes': ['perrc_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
-         'panel_px': 300, 'units': 'errors', 'default_off': True},
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
         # Umbrella over every per-task error curve: the series build
         # resolves event_flow membership from registered families, and
         # per-task families are synthesized per request. Panels never
@@ -1276,25 +1295,31 @@ def _errors_groups():
          'prefixes': ['terr_', 'terrc_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
-         'panel_px': 300, 'units': 'errors', 'default_off': True},
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
     )
 
 
 def _errors_task_groups(taskid):
     """The synthesized per-task error families for one requested task."""
+    qualifier = {'qualifier_label': 'Terminal state',
+                 'qualifier_param': 'states',
+                 'qualifiers_off': ['closed']}
     return (
         {'name': f'Task errors {taskid} category',
          'title': f'Errors · task {taskid}',
          'prefixes': [f'terr_{taskid}_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
-         'panel_px': 300, 'units': 'errors', 'default_off': True},
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
         {'name': f'Task errors {taskid} component',
          'title': f'Errors · task {taskid}',
          'prefixes': [f'terrc_{taskid}_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
          'member_ticks': False,
-         'panel_px': 300, 'units': 'errors', 'default_off': True},
+         'panel_px': 300, 'units': 'errors', 'default_off': True,
+         **qualifier},
     )
 
 
@@ -1933,6 +1958,11 @@ def _errors_card(data, previous_data, ctx):
     selected = [v for v in (params.get('task') or '').split(',')
                 if v and v != 'overall']
     single_task = selected[0] if len(selected) == 1 else None
+    # The terminal-state chip selection (?states=): entries filter on
+    # the recorded status, live job-record queries restrict to the
+    # real statuses among it. Absent means unrestricted.
+    state_filter = [v for v in (params.get('states') or '').split(',')
+                    if v]
 
     def _parse(iso):
         try:
@@ -1987,16 +2017,27 @@ def _errors_card(data, previous_data, ctx):
                 continue
             if selected and taskid not in selected:
                 continue
+            status = (str(row[4]) if len(row) > 4 and row[4]
+                      else 'unrecorded')
+            if state_filter and status not in state_filter:
+                continue
             cat_counts[category] = (cat_counts.get(category) or 0) + 1
             total += 1
         if not selected:
             interval_end = _parse(interval.get('end'))
             if (interval_end is not None
                     and window_from < interval_end <= window_to):
-                for category, count in ((errors.get('overflow') or {})
+                # Overflow folds key 'component:code@status' since v3;
+                # earlier keys carry no status and read 'unrecorded'.
+                for fold_key, count in ((errors.get('overflow') or {})
                                         .get('by_category') or {}).items():
-                    cat_counts[str(category)] = (
-                        cat_counts.get(str(category)) or 0) + int(count or 0)
+                    category, at, status = str(fold_key).partition('@')
+                    if not (at and status):
+                        status = 'unrecorded'
+                    if state_filter and status not in state_filter:
+                        continue
+                    cat_counts[category] = (
+                        cat_counts.get(category) or 0) + int(count or 0)
                     total += int(count or 0)
 
     eastern = ZoneInfo('America/New_York')
@@ -2016,15 +2057,19 @@ def _errors_card(data, previous_data, ctx):
                 + '&ended_before=' + quote(window_to.isoformat()))
 
     def _errors_url(comp):
-        # No status pin: the record counts every faulty status
-        # (failed, cancelled, closed), and the pattern page without a
-        # status aggregates the same set — a kill storm is closed
-        # jobs, and a status=failed link lands on an empty page.
+        # No single-status pin: the record counts every faulty status
+        # (failed, cancelled, closed), and a status=failed link on a
+        # kill storm — closed jobs — lands on an empty page. The
+        # active terminal-state selection carries over instead, so
+        # the pattern page shows the same population as the card.
         query = []
         if comp and comp != 'other':
             query.append(f'classified=1&error_source={quote(comp)}')
         if single_task:
             query.append(f'taskid={quote(single_task)}')
+        real_states = [s for s in state_filter if s != 'unrecorded']
+        if real_states:
+            query.append('status=' + quote(','.join(real_states)))
         joined = '&'.join(query)
         return (errors_base + '?'
                 + (joined + window_q if joined else window_q.lstrip('&')))
@@ -2114,7 +2159,8 @@ def _errors_card(data, previous_data, ctx):
     for (comp, code, _pattern, diag, count, rep, taskids,
          pattern_sites) in error_patterns(
             window_from, window_to,
-            taskid=int(single_task) if single_task else None):
+            taskid=int(single_task) if single_task else None,
+            statuses=state_filter or None):
         task_list = sorted({int(t) for t in (taskids or []) if t})
         if (selected and not single_task
                 and not any(str(t) in selected for t in task_list)):
@@ -2141,7 +2187,8 @@ def _errors_card(data, previous_data, ctx):
     # conclusion. Deterministic shares from one live scan
     # (error_axes); the task axis is omitted when the view is already
     # filtered to tasks.
-    axes = error_axes(window_from, window_to, taskids=selected or None)
+    axes = error_axes(window_from, window_to, taskids=selected or None,
+                      statuses=state_filter or None)
 
     def _axis_item(values, singular, plural, label_of, url_of):
         axis_total = sum(values.values())

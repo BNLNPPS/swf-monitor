@@ -18,6 +18,51 @@
     <a href="?{{ clear_task_query }}" class="btn btn-sm btn-secondary ms-2">Clear task filter</a>
 </div>
 {% endif %}
+<!-- Terminal-state filter: chips self-discover from the window's
+     per-status totals (filled from the table response); closed is
+     excluded by default — workflow disposals, not actual errors —
+     but its count keeps a storm visible at a glance. -->
+<div style="margin-bottom:1em;" id="panda-errors-status-chips">
+    <strong>Terminal state:</strong>
+    <span class="text-muted">loading…</span>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+$('#main-table').on('xhr.dt', function (e, settings, json) {
+    if (!json || !json.status_counts) { return; }
+    const box = document.getElementById('panda-errors-status-chips');
+    if (!box) { return; }
+    const selected = String(json.status_selected || '')
+        .split(',').filter(Boolean);
+    const order = ['failed', 'cancelled', 'closed'];
+    const names = Object.keys(json.status_counts).sort(function (a, b) {
+        const ai = order.indexOf(a), bi = order.indexOf(b);
+        return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi)
+            || a.localeCompare(b);
+    });
+    box.innerHTML = '<strong>Terminal state:</strong> ';
+    names.forEach(function (name) {
+        const active = selected.indexOf(name) >= 0;
+        const next = active
+            ? selected.filter(function (s) { return s !== name; })
+            : selected.concat([name]);
+        const url = new URL(window.location);
+        if (next.length) { url.searchParams.set('status', next.join(',')); }
+        else { url.searchParams.delete('status'); }
+        const a = document.createElement('a');
+        a.href = url.toString();
+        a.className = 'btn btn-sm me-1 '
+            + (active ? 'btn-primary' : 'btn-secondary');
+        a.textContent = name + ' ('
+            + (json.status_counts[name] || 0).toLocaleString() + ')';
+        a.title = active ? 'Click to hide ' + name + ' jobs'
+                         : 'Click to include ' + name + ' jobs';
+        box.appendChild(a);
+    });
+});
+</script>
 {% endblock %}
 
 {% block initial_filters %}{ days: '{{ days }}'{% if selected_site %}, site: '{{ selected_site|escapejs }}'{% endif %}{% if selected_error_source %}, error_source: '{{ selected_error_source|escapejs }}'{% endif %}{% if selected_status %}, status: '{{ selected_status|escapejs }}'{% endif %}{% if classified %}, classified: '{{ classified|escapejs }}'{% endif %}{% if selected_taskid %}, taskid: '{{ selected_taskid|escapejs }}'{% endif %}{% if ended_after %}, ended_after: '{{ ended_after|escapejs }}', ended_before: '{{ ended_before|escapejs }}'{% endif %} }{% endblock %}
