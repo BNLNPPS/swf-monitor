@@ -29,7 +29,9 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script>
+// Terminal-state chips: filled from the table response's status
+// counts. This block renders inside the base template's script
+// element — raw statements only, no script tags.
 $('#main-table').on('xhr.dt', function (e, settings, json) {
     if (!json || !json.status_counts) { return; }
     const box = document.getElementById('panda-errors-status-chips');
@@ -62,7 +64,6 @@ $('#main-table').on('xhr.dt', function (e, settings, json) {
         box.appendChild(a);
     });
 });
-</script>
 {% endblock %}
 
 {% block initial_filters %}{ days: '{{ days }}'{% if selected_site %}, site: '{{ selected_site|escapejs }}'{% endif %}{% if selected_error_source %}, error_source: '{{ selected_error_source|escapejs }}'{% endif %}{% if selected_status %}, status: '{{ selected_status|escapejs }}'{% endif %}{% if classified %}, classified: '{{ classified|escapejs }}'{% endif %}{% if selected_taskid %}, taskid: '{{ selected_taskid|escapejs }}'{% endif %}{% if ended_after %}, ended_after: '{{ ended_after|escapejs }}', ended_before: '{{ ended_before|escapejs }}'{% endif %} }{% endblock %}
