@@ -646,7 +646,8 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.panda_errors or active_nav.alarms or active_nav.panda_diagnostics %} nav-active{% endif %}">Diagnostics</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}">Snapper error view</a>
+                <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Error summary</a>
                 <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
                 <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
             </div>
