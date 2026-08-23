@@ -42,6 +42,7 @@ ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime"]
 MAX_ENTRIES = 2000
 MAX_PATTERNS = 20
 MAX_PATTERN_TASKS = 8
+MAX_PATTERN_SITES = 6
 PATTERN_DIAG_CHARS = 160
 # A fresh component (or one whose record was reset) starts its first
 # interval this far back rather than swallowing all recorded history
@@ -228,7 +229,7 @@ def error_patterns(mark, until, taskid=None):
     text. Aggregated live from the job records — the errors view's
     breakdown calls this at cut time (docs/SNAPPER_ERRORS.md)."""
     comp_case, code_case, diag_case = _classify_sql()
-    union, params = _faulty_union(mark, until, diags=True)
+    union, params = _faulty_union(mark, until, diags=True, sites=True)
     task_where = ""
     if taskid is not None:
         task_where = 'WHERE "jeditaskid" = %s'
@@ -244,7 +245,9 @@ def error_patterns(mark, until, taskid=None):
                                  {PATTERN_DIAG_CHARS}), '')) AS diag,
                COUNT(*) AS count,
                MAX("pandaid") AS representative_pandaid,
-               array_agg(DISTINCT "jeditaskid") AS taskids
+               array_agg(DISTINCT "jeditaskid") AS taskids,
+               array_agg(DISTINCT COALESCE("computingsite", 'unknown'))
+                   AS sites
         FROM ({union}) faulty
         {task_where}
         GROUP BY 1, 2, 3

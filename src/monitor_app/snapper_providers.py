@@ -1919,6 +1919,7 @@ def _errors_card(data, previous_data, ctx):
 
     from .panda.error_labels import category_label
     from .snapper_errors import (
+        MAX_PATTERN_SITES,
         MAX_PATTERN_TASKS,
         MAX_PATTERNS,
         error_axes,
@@ -2110,7 +2111,8 @@ def _errors_card(data, previous_data, ctx):
     # a multi-task selection filters the aggregated rows.
     patterns = []
     window_patterns = 0
-    for comp, code, _pattern, diag, count, rep, taskids in error_patterns(
+    for (comp, code, _pattern, diag, count, rep, taskids,
+         pattern_sites) in error_patterns(
             window_from, window_to,
             taskid=int(single_task) if single_task else None):
         task_list = sorted({int(t) for t in (taskids or []) if t})
@@ -2120,6 +2122,7 @@ def _errors_card(data, previous_data, ctx):
         window_patterns += 1
         if len(patterns) < MAX_PATTERNS:
             rep = int(rep or 0)
+            site_list = sorted({str(s) for s in (pattern_sites or []) if s})
             patterns.append({
                 'category': category_label(comp, code),
                 'curve': f'perr_{comp}_{code}',
@@ -2129,6 +2132,8 @@ def _errors_card(data, previous_data, ctx):
                 'rep_url': (reverse('monitor_app:panda_job_detail',
                                     args=[rep]) if rep else ''),
                 'tasks': task_list[:MAX_PATTERN_TASKS],
+                'sites': site_list[:MAX_PATTERN_SITES],
+                'site_overflow': max(0, len(site_list) - MAX_PATTERN_SITES),
             })
 
     # The attribution reading: where the window's errors concentrate,
