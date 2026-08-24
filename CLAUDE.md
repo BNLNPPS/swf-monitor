@@ -65,6 +65,7 @@ the old paths here. This repo's docs cover the platform services:
 - `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
 - `SYSTEM_STATUS.md` — cached system status record and page.
 - `SNAPPER.md`, `SNAPPER_ERRORS.md` — Snapper operations in SWF; the error-state component and errors view design.
+- `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
 - `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `API_REFERENCE.md` — REST API surface.
