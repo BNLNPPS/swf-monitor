@@ -226,11 +226,24 @@ relationships.
 ## Detection and notice
 
 The maintainer evaluates each publication against the thresholds and
-emits on transitions only — degradation start, escalation, end —
-through the notice router as the error storm detector is planned to; a
-freshness watch on the platform component itself, and the
-reporter-status transition, report silence through the same path. A
-`panda-platform` System Status collector reads the latest published
+records the verdicts in the component's `assessment`. Notice is the
+alarm engine's job ([alarms.md](alarms.md)): the
+`panda_platform_health` alarm reads the latest published component on
+each engine tick and raises one detection per metric in warning —
+heartbeat yield, heartbeat staleness, database connections, server
+latency, monitor volumes, monitor services — plus one when the
+component itself is absent, unreadable, or silent beyond
+`stale_after_minutes`. Heartbeat verdicts are suppressed below
+`min_running` running jobs, where the rates are noise. The thresholds
+stay with the record (the `platform_*` SysConfig keys); the alarm
+carries only its own two parameters. The engine's state-based dedup
+gives the transition behaviour — an event opens when a metric enters
+warning and clears when it leaves — and the per-alarm email gate,
+recipients, and renotification window are edited on the alarms
+dashboard. Capcom carries nothing from this path: the alarm is the
+notice.
+
+A `panda-platform` System Status collector reads the latest published
 component so the platform state enters the System page and the health
 lane without a second source.
 
@@ -253,8 +266,10 @@ envelopes, and `changes_between` locates the transitions.
   `lane_entries`); the card kind in `_snapper_cards.html`; a
   `panda-platform` collector in `system_status.py`; the reporter script
   `scripts/panda-server-reporter.py` (standard library only) and its
-  unit file under `tools/`; this document and the SNAPPER.md maintainer
-  list.
+  unit file under `tools/`; the alarm module
+  `alarms/swf_alarms/alarms/panda_platform_health.py` with its
+  `alarm_panda_platform_health` config row; this document and the
+  SNAPPER.md maintainer list.
 - snapper-ai: a focus-view declaration for a page-bottom summary
   section fed by the cut (the cut request already carries the view's
   left edge and the detail window; the summary needs the visible
