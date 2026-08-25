@@ -75,7 +75,7 @@ Every corrected reading carries the grade of its evidence, best first:
    plugin lifts its exitCode/exitMsg into the stored
    `exeErrorCode`/`exeErrorDiag` job fields
    ([pilot3 PR #212](https://github.com/PanDAWMS/pilot3/pull/212),
-   merged to `next`).
+   merged and deployed on the ePIC pilot 2026-08-25).
 4. **Pilot mechanical fields** — `transexitcode`, `pilottiming`,
    `cpuconsumptiontime`: measurements, population-wide, SQL-joinable,
    and self-cross-checking (a "launch" label on a job whose own timing
@@ -145,5 +145,5 @@ with job count.
   exit-code registry; the `run.sh` insert for direct submissions.
 - **Upstream, parallel and non-blocking**:
   [pilot3 PR #212](https://github.com/PanDAWMS/pilot3/pull/212)
-  (merged); optionally a server-side lift of the failed-job metadata
-  discard.
+  (merged and deployed on the ePIC pilot 2026-08-25); optionally a
+  server-side lift of the failed-job metadata discard.
