@@ -9,9 +9,13 @@ resolution, and the host service hooks (preferences, configuration,
 scheduler status, health page). Registered from MonitorAppConfig.ready().
 """
 
+import logging
+
 from snapper_ai.presentation import (ET_ZONE, component_data, cut_chip,
                                      cut_delta, et_naive, span_text)
 from snapper_ai.registry import ScopeProvider, register, register_hooks
+
+logger = logging.getLogger(__name__)
 
 # The host template rendering the provider card kinds below.
 CARD_TEMPLATE = 'monitor_app/_snapper_cards.html'
@@ -584,6 +588,68 @@ def _epicprod_curve_values(state):
             values[f'task_{status}'] = int(count or 0)
     values.update(_site_curve_values(panda))
     values.update(_delivery_curve_values(state))
+    values.update(_platform_curve_values(state))
+    return values
+
+
+# Monitor-host volume paths as curve-id segments.
+_PLATFORM_VOLUME_SLUGS = {'/': 'root'}
+
+
+def _platform_volume_slug(path):
+    return _PLATFORM_VOLUME_SLUGS.get(path) or _group_slug(path) or 'root'
+
+
+def _platform_curve_values(state):
+    """Curves from the platform-health component (docs/SNAPPER_PLATFORM.md).
+    Heartbeat-age tiers are recorded nested (older than 30, 60, 120
+    minutes) and plotted as exclusive bands so the stack sums to the
+    jobs older than 30 minutes; the per-site curves carry the oldest
+    tier. A group that recorded a read failure emits no curves — the
+    failure is stated on the card, never drawn as zero."""
+    values = {}
+    plat = component_data(state, 'platform')
+    if not plat:
+        return values
+    hb = plat.get('heartbeats') or {}
+    if hb and 'error' not in hb:
+        values['plhb_received'] = int(hb.get('received') or 0)
+        values['plhb_started'] = int(hb.get('started') or 0)
+        if hb.get('yield') is not None:
+            values['plhy_yield'] = float(hb['yield'])
+        s30 = int(hb.get('stale_30') or 0)
+        s60 = int(hb.get('stale_60') or 0)
+        s120 = int(hb.get('stale_120') or 0)
+        values['plst_30'] = max(0, s30 - s60)
+        values['plst_60'] = max(0, s60 - s120)
+        values['plst_120'] = s120
+        for site, entry in (hb.get('sites') or {}).items():
+            values[f'plss_{site}'] = int((entry or {}).get('stale_120') or 0)
+    db = plat.get('database') or {}
+    if db and 'error' not in db:
+        for key in ('active', 'idle', 'waiting'):
+            values[f'pldb_{key}'] = int(db.get(key) or 0)
+        if db.get('max_connections'):
+            values['pldb_max'] = int(db['max_connections'])
+    server = plat.get('server') or {}
+    if server.get('latency_ms') is not None:
+        values['plsv_latency'] = float(server['latency_ms'])
+    host = plat.get('monitor_host') or {}
+    load = host.get('load') or {}
+    for key in ('1m', '5m', '15m'):
+        if load.get(key) is not None:
+            values[f'plml_{key}'] = float(load[key])
+    memory = host.get('memory') or {}
+    if memory.get('used_percent') is not None:
+        values['plmm_used_pct'] = float(memory['used_percent'])
+    for path, entry in (host.get('volumes') or {}).items():
+        used = (entry or {}).get('used_percent')
+        if used is not None:
+            values[f'plmv_{_platform_volume_slug(path)}'] = float(used)
+    for key in ('httpd', 'wsgi', 'asgi', 'ops_agent'):
+        rss = (host.get(key) or {}).get('rss_mb')
+        if rss is not None:
+            values[f'plmp_{key}'] = float(rss)
     return values
 
 
@@ -706,6 +772,23 @@ def _epicprod_curve_color(curve_id):
     if curve_id.startswith('terrc_'):
         return _FAILURE_CLASS_COLORS.get(
             curve_id[6:].partition('_')[2], '#424242')
+    # Platform view: heartbeat-age bands climb warning → failure; the
+    # connection limit and the yield line wear the operator dark blue;
+    # waiting connections are the warning color.
+    if curve_id == 'plst_30':
+        return '#f9a825'
+    if curve_id == 'plst_60':
+        return '#ef6c00'
+    if curve_id == 'plst_120':
+        return '#c62828'
+    if curve_id in ('pldb_max', 'plhy_yield'):
+        return '#0d47a1'
+    if curve_id == 'pldb_waiting':
+        return '#ef6c00'
+    if curve_id == 'pldb_active':
+        return '#64b5f6'
+    if curve_id == 'pldb_idle':
+        return '#8a8a8a'
     if curve_id.startswith('qc_'):
         queue = curve_id[3:]
         members = _queue_stack_members()
@@ -752,11 +835,41 @@ def _epicprod_curve_color(curve_id):
     return None
 
 
+_PLATFORM_LABELS = {
+    'plhb_received': 'heartbeats received',
+    'plhb_started': 'jobs started',
+    'plhy_yield': 'yield',
+    'pldb_active': 'active',
+    'pldb_idle': 'idle',
+    'pldb_waiting': 'waiting',
+    'pldb_max': 'connection limit',
+    'plsv_latency': 'is_alive latency',
+    'plst_30': '30–60 min silent',
+    'plst_60': '60–120 min silent',
+    'plst_120': 'over 120 min silent',
+    'plml_1m': '1 min',
+    'plml_5m': '5 min',
+    'plml_15m': '15 min',
+    'plmm_used_pct': 'memory used',
+    'plmv_root': '/',
+    'plmp_httpd': 'httpd (all)',
+    'plmp_wsgi': 'WSGI daemon',
+    'plmp_asgi': 'ASGI (MCP)',
+    'plmp_ops_agent': 'prod-ops agent',
+}
+
+
 def _epicprod_curve_label(curve_id):
     # Per-site curves: the family title names the site; the curve
     # label is the lifecycle stage alone. 'running' says 'running
     # jobs' — 'running cores' sits beside it and the bare word is
     # ambiguous.
+    if curve_id in _PLATFORM_LABELS:
+        return _PLATFORM_LABELS[curve_id]
+    if curve_id.startswith('plss_'):
+        return curve_id[5:]
+    if curve_id.startswith('plmv_'):
+        return '/' + curve_id[5:]
     if curve_id.startswith('perrc_'):
         return curve_id[6:]
     if curve_id.startswith('perr_'):
@@ -1254,7 +1367,131 @@ def _epicprod_groups():
     callable form) so new campaigns and sites appear without an app
     restart."""
     return (EPICPROD_GROUPS + _delivery_groups() + _site_groups()
-            + _errors_groups())
+            + _errors_groups() + _platform_groups())
+
+
+# The Platform view's families in panel order — load, platform,
+# consequences (docs/SNAPPER_PLATFORM.md). The load and consequence
+# families re-project curves the scope families already carry (in-flight
+# jobs, outcomes, error events) under platform-view names so the page
+# orders its panels itself; nothing is recorded twice.
+_PLATFORM_FAMILIES_COMMON_HEAD = (
+    'Platform jobs', 'Platform heartbeats', 'Platform heartbeat yield',
+    'Platform DB connections', 'Platform server latency')
+_PLATFORM_FAMILIES_COMMON_TAIL = (
+    'Platform monitor load', 'Platform monitor memory',
+    'Platform monitor storage', 'Platform monitor processes',
+    'Platform kills', 'Platform outcomes')
+PLATFORM_FAMILIES_BY_LENS = {
+    'tiers': (_PLATFORM_FAMILIES_COMMON_HEAD
+              + ('Platform staleness',) + _PLATFORM_FAMILIES_COMMON_TAIL),
+    'sites': (_PLATFORM_FAMILIES_COMMON_HEAD
+              + ('Platform stale by site',) + _PLATFORM_FAMILIES_COMMON_TAIL),
+}
+
+
+def _platform_groups():
+    qualifier = {'qualifier_label': 'Terminal state',
+                 'qualifier_param': 'states',
+                 'qualifiers_off': ['closed']}
+    lifecycle = ([f'job_{s}' for s in _JOB_LIFECYCLE_EARLY]
+                 + [f'job_{s}' for s in _JOB_LIFECYCLE_LATE]
+                 + ['job_running', 'running_cores'])
+    return (
+        {'name': 'Platform jobs', 'title': 'Jobs in flight',
+         'prefixes': ['job_'], 'ids': ['running_cores'],
+         'order': lifecycle, 'default_off_ids': ['job_activated'],
+         'overlay_ids': ['running_cores'],
+         'stacked': True, 'panel_px': 220, 'units': 'jobs',
+         'default_off': True},
+        {'name': 'Platform heartbeats', 'title': 'Heartbeats',
+         'prefixes': [], 'ids': ['plhb_received', 'plhb_started'],
+         'order': ['plhb_received', 'plhb_started'],
+         'panel_px': 150, 'units': 'per interval', 'default_off': True},
+        {'name': 'Platform heartbeat yield', 'title': 'Heartbeat yield',
+         'prefixes': [], 'ids': ['plhy_yield'],
+         'panel_px': 110, 'units': 'received / expected',
+         'default_off': True},
+        {'name': 'Platform DB connections', 'title': 'DB connections',
+         'prefixes': [], 'ids': ['pldb_idle', 'pldb_active',
+                                 'pldb_waiting', 'pldb_max'],
+         'order': ['pldb_idle', 'pldb_active', 'pldb_waiting', 'pldb_max'],
+         'overlay_ids': ['pldb_max'],
+         'stacked': True, 'panel_px': 150, 'units': 'connections',
+         'default_off': True},
+        {'name': 'Platform server latency', 'title': 'Server latency',
+         'prefixes': [], 'ids': ['plsv_latency'],
+         'panel_px': 110, 'units': 'ms', 'default_off': True},
+        {'name': 'Platform staleness', 'title': 'Heartbeat staleness',
+         'prefixes': [], 'ids': ['plst_30', 'plst_60', 'plst_120'],
+         'order': ['plst_30', 'plst_60', 'plst_120'],
+         'stacked': True, 'panel_px': 150, 'units': 'running jobs',
+         'default_off': True},
+        {'name': 'Platform stale by site', 'title': 'Silent over 120 min · by site',
+         'prefixes': ['plss_'], 'ids': [],
+         'stacked': True, 'panel_px': 150, 'units': 'running jobs',
+         'default_off': True},
+        {'name': 'Platform monitor load', 'title': 'Monitor host load',
+         'prefixes': ['plml_'], 'ids': [],
+         'order': ['plml_1m', 'plml_5m', 'plml_15m'],
+         'panel_px': 110, 'units': 'load average', 'default_off': True},
+        {'name': 'Platform monitor memory', 'title': 'Monitor host memory',
+         'prefixes': [], 'ids': ['plmm_used_pct'],
+         'panel_px': 110, 'units': '% used', 'default_off': True},
+        {'name': 'Platform monitor storage', 'title': 'Monitor host storage',
+         'prefixes': ['plmv_'], 'ids': [],
+         'panel_px': 110, 'units': '% used', 'default_off': True},
+        {'name': 'Platform monitor processes', 'title': 'Monitor host processes',
+         'prefixes': ['plmp_'], 'ids': [],
+         'order': ['plmp_httpd', 'plmp_wsgi', 'plmp_asgi', 'plmp_ops_agent'],
+         'panel_px': 110, 'units': 'MB resident', 'default_off': True},
+        {'name': 'Platform kills', 'title': 'Faulty job events by component',
+         'prefixes': ['perrc_'], 'ids': [],
+         'event_flow': True, 'end_stamped': True, 'stacked': True,
+         'member_ticks': False,
+         'panel_px': 200, 'units': 'errors', 'default_off': True,
+         **qualifier},
+        {'name': 'Platform outcomes', 'title': 'Job outcomes',
+         'prefixes': ['outcome_'], 'ids': [],
+         'order': ['outcome_finished', 'outcome_failed'],
+         'window_relative': True, 'stacked': True,
+         'panel_px': 150, 'units': 'jobs', 'default_off': True},
+    )
+
+
+def _platform_focus_view():
+    """The Platform focus tab (docs/SNAPPER_PLATFORM.md): load,
+    platform state, and consequences on one axis, the cut narrowed to
+    the platform component's card with the summary across every
+    metric. One option — the whole platform — with a staleness lens
+    switching the heartbeat-age panel between age tiers and sites."""
+    return {
+        'param': 'platform',
+        'label': 'Platform',
+        'selector_label': 'Platform',
+        'cache_series': True,
+        'components': ('platform', 'panda', 'errors'),
+        'prewarm_series': False,
+        'note': ('Load above, platform state in the middle, consequences '
+                 'below, on one time axis. Heartbeats and starts count '
+                 'the 5-minute publication interval ending at each stamp; '
+                 'yield is heartbeats received over the count expected '
+                 'from the running population. Click the plot for the '
+                 'platform state at that instant and the summary across '
+                 'every metric.'),
+        'default': 'overall',
+        'selectors': [
+            {'param': 'lens', 'label': 'Staleness',
+             'default': 'tiers',
+             'choices': [{'value': 'tiers', 'label': 'by age'},
+                         {'value': 'sites', 'label': 'by site'}]},
+        ],
+        'options': [{'value': 'overall', 'label': 'Overall',
+                     'families_by': {
+                         lens: list(families)
+                         for lens, families in PLATFORM_FAMILIES_BY_LENS.items()},
+                     'component': 'platform'}],
+    }
 
 
 def _errors_groups():
@@ -2262,6 +2499,415 @@ def _errors_card(data, previous_data, ctx):
     }
 
 
+# Summary rows of the Platform view's cut: label, curve id for the
+# swatch ('' when the row is a total no single curve draws), unit, and
+# the extractor over (platform data, panda data). Order = panel order.
+_PLATFORM_SUMMARY_SPECS = (
+    ('jobs in flight', '', 'jobs',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('total')),
+    ('running jobs', 'job_running', 'jobs',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_jobs')),
+    ('running cores', 'running_cores', 'cores',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_cores')),
+    ('heartbeats received', 'plhb_received', 'per interval',
+     lambda p, j: (p.get('heartbeats') or {}).get('received')),
+    ('jobs started', 'plhb_started', 'per interval',
+     lambda p, j: (p.get('heartbeats') or {}).get('started')),
+    ('heartbeat yield', 'plhy_yield', '',
+     lambda p, j: (p.get('heartbeats') or {}).get('yield')),
+    ('silent 30–60 min', 'plst_30', 'jobs',
+     lambda p, j: _platform_band(p, 30, 60)),
+    ('silent 60–120 min', 'plst_60', 'jobs',
+     lambda p, j: _platform_band(p, 60, 120)),
+    ('silent over 120 min', 'plst_120', 'jobs',
+     lambda p, j: (p.get('heartbeats') or {}).get('stale_120')),
+    ('DB connections', '', 'of limit',
+     lambda p, j: (p.get('database') or {}).get('connections')),
+    ('DB active', 'pldb_active', 'connections',
+     lambda p, j: (p.get('database') or {}).get('active')),
+    ('DB waiting', 'pldb_waiting', 'connections',
+     lambda p, j: (p.get('database') or {}).get('waiting')),
+    ('longest transaction', '', 's',
+     lambda p, j: (p.get('database') or {}).get('longest_transaction_s')),
+    ('server latency', 'plsv_latency', 'ms',
+     lambda p, j: (p.get('server') or {}).get('latency_ms')),
+    ('monitor load (1 min)', 'plml_1m', '',
+     lambda p, j: ((p.get('monitor_host') or {}).get('load') or {}).get('1m')),
+    ('monitor memory used', 'plmm_used_pct', '%',
+     lambda p, j: ((p.get('monitor_host') or {}).get('memory') or {}).get('used_percent')),
+    ('monitor WSGI resident', 'plmp_wsgi', 'MB',
+     lambda p, j: ((p.get('monitor_host') or {}).get('wsgi') or {}).get('rss_mb')),
+)
+
+
+def _platform_band(plat, lower, upper):
+    hb = plat.get('heartbeats') or {}
+    if 'error' in hb or f'stale_{lower}' not in hb:
+        return None
+    return max(0, int(hb.get(f'stale_{lower}') or 0)
+               - int(hb.get(f'stale_{upper}') or 0))
+
+
+def _platform_summary_walk(scope, since, until, limit=3000):
+    """(snap_time, platform data, panda data) rows over (since, until],
+    newest first, from the snaps carrying the platform component —
+    only the two components' payloads leave the database."""
+    from django.db.models.fields.json import KeyTransform
+
+    from snapper_ai.models import SystemSnap
+
+    query = (SystemSnap.objects
+             .filter(scope=scope, snap_time__lte=until,
+                     state__components__has_key='platform'))
+    if since is not None:
+        query = query.filter(snap_time__gt=since)
+    rows = (query.order_by('-snap_time')
+            .annotate(plat=KeyTransform('platform',
+                                        KeyTransform('components', 'state')),
+                      pand=KeyTransform('panda',
+                                        KeyTransform('components', 'state')))
+            .values_list('snap_time', 'plat', 'pand')[:limit + 1])
+    out = []
+    for snap_time, plat, pand in rows:
+        out.append((snap_time,
+                    (plat or {}).get('data') or {},
+                    (pand or {}).get('data') or {}))
+    return out
+
+
+def _faulty_events_in_window(scope, window_from, window_to):
+    """Total faulty job events and per-component counts over the
+    window, from the error-state component's interval entries (the
+    same aggregation the errors card performs)."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+
+    from snapper_ai.models import SystemSnap
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+    states = (SystemSnap.objects
+              .filter(scope=scope, snap_time__gt=window_from,
+                      snap_time__lte=window_to + timedelta(minutes=10),
+                      state__components__errors__data__has_key='entries')
+              .order_by('snap_time')
+              .values_list('state', flat=True))
+    total = 0
+    by_component = {}
+    seen = set()
+    for state in states.iterator():
+        errors = (((state.get('components') or {}).get('errors')
+                   or {}).get('data')) or {}
+        interval = errors.get('interval') or {}
+        key = str(interval.get('end') or '')
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        for row in errors.get('entries') or []:
+            try:
+                comp = str(row[2]).partition(':')[0]
+                when = _parse(row[3])
+            except (IndexError, TypeError):
+                continue
+            if when is None or when <= window_from or when > window_to:
+                continue
+            total += 1
+            by_component[comp] = by_component.get(comp, 0) + 1
+        interval_end = _parse(interval.get('end'))
+        if interval_end is not None and window_from < interval_end <= window_to:
+            for fold_key, count in ((errors.get('overflow') or {})
+                                    .get('by_category') or {}).items():
+                comp = str(fold_key).partition(':')[0]
+                total += int(count or 0)
+                by_component[comp] = by_component.get(comp, 0) + int(count or 0)
+    return total, by_component
+
+
+def _scope_cum_at(scope, instant):
+    """The panda component's scope-level cumulative outcome counters at
+    the nearest counter-bearing snap at or before the instant."""
+    from snapper_ai.models import SystemSnap
+
+    if instant is None:
+        return {}
+    row = (SystemSnap.objects
+           .filter(scope=scope, snap_time__lte=instant,
+                   state__components__panda__data__jobs__has_key='cum')
+           .order_by('-snap_time')
+           .values('state').first())
+    if not row:
+        return {}
+    jobs = (((((row['state'] or {}).get('components') or {})
+              .get('panda') or {}).get('data') or {}).get('jobs') or {})
+    return jobs.get('cum') or {}
+
+
+def _platform_card(data, previous_data, ctx):
+    """The platform cut card (docs/SNAPPER_PLATFORM.md): the assessment
+    against thresholds, the database, heartbeat, server, and
+    monitor-host detail at the instant, and — last — the summary
+    across every metric the view plots: value at the cut, change
+    against the previous snap, and min/mean/max over the shown range,
+    read from the coherent snaps carrying the platform component."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+    from urllib.parse import quote
+
+    from django.urls import reverse
+
+    if not data or 'heartbeats' not in data:
+        return None
+    params = (ctx or {}).get('params') or {}
+    scope = (ctx or {}).get('scope') or 'epicprod'
+    requested_at = (ctx or {}).get('requested_at')
+    since = (ctx or {}).get('since')
+    hb = data.get('heartbeats') or {}
+    db = data.get('database') or {}
+    server = data.get('server') or {}
+    host = data.get('monitor_host') or {}
+    assessment = data.get('assessment') or {}
+    thresholds = assessment.get('thresholds') or {}
+
+    threshold_text = {
+        'heartbeat_yield': f"warn below {thresholds.get('platform_yield_warn_below')}",
+        'heartbeat_staleness': (
+            f"warn when over {thresholds.get('platform_stale_warn_fraction')} "
+            f"of running jobs are silent {thresholds.get('platform_stale_warn_tier_minutes')}+ min"),
+        'db_connections': (
+            f"warn above {thresholds.get('platform_connections_warn_fraction')} of the limit"),
+        'server_latency': f"warn above {thresholds.get('platform_latency_warn_ms')} ms or not ok",
+        'monitor_volumes': f"warn above {thresholds.get('platform_volume_warn_percent')}% used",
+        'monitor_services': 'warn when the ASGI or prod-ops service is not active',
+        'reporter': f"stale after {thresholds.get('platform_reporter_stale_seconds')} s",
+    }
+    verdicts = [
+        {'name': name.replace('_', ' '), 'chip': cut_chip(
+            'ok' if verdict == 'ok' else 'warning' if verdict == 'warning'
+            else 'unknown'),
+         'threshold': threshold_text.get(name, '')}
+        for name, verdict in (assessment.get('verdicts') or {}).items()]
+
+    # Detail tables.
+    running = int(hb.get('running') or 0)
+    site_rows = []
+    site_url = reverse('snapper_ai:snapper_focus',
+                       kwargs={'scope': scope, 'focus_slug': 'site'})
+    cut_q = (f'&cut={quote(requested_at.isoformat())}'
+             if requested_at is not None else '')
+    for site, entry in sorted((hb.get('sites') or {}).items(),
+                              key=lambda kv: -int((kv[1] or {}).get('running') or 0)):
+        entry = entry or {}
+        if not int(entry.get('running') or 0):
+            continue
+        site_rows.append({
+            'site': site,
+            'url': f'{site_url}?site={quote(site)}{cut_q}',
+            'running': int(entry.get('running') or 0),
+            'received': int(entry.get('received') or 0),
+            'stale_30': int(entry.get('stale_30') or 0),
+            'stale_60': int(entry.get('stale_60') or 0),
+            'stale_120': int(entry.get('stale_120') or 0),
+        })
+    by_app = sorted((db.get('by_app') or {}).items(), key=lambda kv: -kv[1])
+    j4 = db.get('jobsactive4') or {}
+    volumes = [{'path': path, **(entry or {})}
+               for path, entry in sorted((host.get('volumes') or {}).items())]
+    processes = [
+        {'label': label, **(host.get(key) or {})}
+        for key, label in (('httpd', 'httpd (all processes)'),
+                           ('wsgi', 'WSGI daemon'),
+                           ('asgi', 'ASGI service (MCP)'),
+                           ('ops_agent', 'prod-ops agent'))]
+
+    # Faulty events over the detail window (the errors card's window
+    # convention: the client's from/to, else the hour ending at the
+    # cut interval).
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+    window_from = _parse(params.get('from'))
+    window_to = _parse(params.get('to'))
+    if window_from is None or window_to is None or not window_from < window_to:
+        window_to = _parse((data.get('interval') or {}).get('end')) or requested_at
+        window_from = (window_to - timedelta(hours=1)) if window_to else None
+    kills_total, kills_by_comp = (0, {})
+    kills_error = ''
+    if window_from and window_to:
+        try:
+            kills_total, kills_by_comp = _faulty_events_in_window(
+                scope, window_from, window_to)
+        except Exception as e:                               # noqa: BLE001
+            logger.error('platform card: faulty-event window failed: %s', e)
+            kills_error = f'faulty-event count failed: {e}'
+
+    # The summary walk over the shown range.
+    walk = []
+    walk_error = ''
+    if requested_at is not None:
+        try:
+            walk = _platform_summary_walk(scope, since, requested_at)
+        except Exception as e:                               # noqa: BLE001
+            logger.error('platform card: summary walk failed: %s', e)
+            walk_error = f'range statistics failed: {e}'
+    capped = len(walk) > 3000
+    walk = walk[:3000]
+    at = walk[0] if walk else (requested_at, data, {})
+    prev = walk[1] if len(walk) > 1 else None
+    warn_rows = set()
+    verdict_map = assessment.get('verdicts') or {}
+    if verdict_map.get('heartbeat_yield') == 'warning':
+        warn_rows.add('heartbeat yield')
+    if verdict_map.get('heartbeat_staleness') == 'warning':
+        warn_rows.update({'silent 60–120 min', 'silent over 120 min'})
+    if verdict_map.get('db_connections') == 'warning':
+        warn_rows.add('DB connections')
+    if verdict_map.get('server_latency') == 'warning':
+        warn_rows.add('server latency')
+    if verdict_map.get('monitor_volumes') == 'warning':
+        warn_rows.add('monitor storage')
+    summary = []
+    for label, curve, unit, extract in _PLATFORM_SUMMARY_SPECS:
+        value = extract(at[1], at[2])
+        previous = extract(prev[1], prev[2]) if prev else None
+        samples = [v for v in (extract(p, j) for _, p, j in walk)
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        stats = None
+        if samples:
+            lo, hi = min(samples), max(samples)
+            mean = sum(samples) / len(samples)
+            position = (None if hi == lo or not isinstance(value, (int, float))
+                        else round(100 * (value - lo) / (hi - lo)))
+            stats = {'min': _fmt_num(lo), 'mean': _fmt_num(mean),
+                     'max': _fmt_num(hi), 'position': position}
+        summary.append({
+            'label': label, 'curve': curve, 'unit': unit,
+            'value': _fmt_num(value), 'delta': cut_delta(
+                round(value) if isinstance(value, float) else value,
+                round(previous) if isinstance(previous, float) else previous)
+            if isinstance(value, (int, float)) and isinstance(previous, (int, float))
+            and label != 'heartbeat yield' else (
+                _fmt_signed(value - previous)
+                if label == 'heartbeat yield'
+                and isinstance(value, (int, float))
+                and isinstance(previous, (int, float)) else None),
+            'stats': stats, 'warn': label in warn_rows,
+        })
+    if db.get('max_connections'):
+        for row in summary:
+            if row['label'] == 'DB connections':
+                row['unit'] = f"of {db['max_connections']}"
+    # Consequence rows: faulty events over the detail window, outcomes
+    # since the shown range's start (the counters' window basis).
+    summary.append({
+        'label': 'faulty job events', 'curve': '',
+        'unit': 'in the detail window', 'value': _fmt_num(kills_total),
+        'delta': None, 'stats': None, 'warn': False,
+        'detail': ', '.join(f'{c} {n}' for c, n in sorted(
+            kills_by_comp.items(), key=lambda kv: -kv[1])[:6]),
+    })
+    cum_at = _scope_cum_at(scope, requested_at)
+    cum_since = _scope_cum_at(scope, since) if since is not None else {}
+    for status in ('finished', 'failed'):
+        current = int(cum_at.get(status) or 0)
+        basis = int(cum_since.get(status) or 0)
+        summary.append({
+            'label': f'{status} since range start', 'curve': f'outcome_{status}',
+            'unit': 'jobs', 'value': _fmt_num(max(0, current - basis))
+            if cum_at else '—', 'delta': None, 'stats': None, 'warn': False,
+        })
+
+    range_text = ''
+    if walk:
+        first, last = walk[-1][0], walk[0][0]
+        range_text = (f"{first.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
+                      f"{last.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')}, "
+                      f"{len(walk)} snaps"
+                      + (' (the newest 3000)' if capped else ''))
+    window_text = ''
+    if window_from and window_to:
+        window_text = (f"{window_from.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
+                       f"{window_to.astimezone(ET_ZONE).strftime('%H:%M ET')}")
+    errors_url = (reverse('snapper_ai:snapper_focus',
+                          kwargs={'scope': scope, 'focus_slug': 'errors'})
+                  + (f'?cut={quote(requested_at.isoformat())}'
+                     if requested_at is not None else ''))
+    return {
+        'kind': 'platform',
+        'overall': assessment.get('overall') or 'unknown',
+        'overall_chip': cut_chip(
+            'ok' if assessment.get('overall') == 'ok'
+            else 'warning' if assessment.get('overall') == 'warning'
+            else 'unknown'),
+        'verdicts': verdicts,
+        'interval': data.get('interval') or {},
+        'reporter_status': data.get('reporter_status') or 'absent',
+        'heartbeats': {
+            'running': running,
+            'received': int(hb.get('received') or 0),
+            'expected': int(hb.get('expected') or 0),
+            'yield': hb.get('yield'),
+            'started': int(hb.get('started') or 0),
+            'period_minutes': round(int(hb.get('period_seconds') or 1800) / 60),
+            'stale_30': int(hb.get('stale_30') or 0),
+            'stale_60': int(hb.get('stale_60') or 0),
+            'stale_120': int(hb.get('stale_120') or 0),
+            'error': hb.get('error') or '',
+        },
+        'site_rows': site_rows,
+        'database': {
+            'connections': db.get('connections'),
+            'max_connections': db.get('max_connections'),
+            'active': db.get('active'), 'idle': db.get('idle'),
+            'waiting': db.get('waiting'),
+            'longest_transaction_s': db.get('longest_transaction_s'),
+            'live_tuples': j4.get('live_tuples'),
+            'dead_tuples': j4.get('dead_tuples'),
+            'minutes_since_autovacuum': j4.get('minutes_since_autovacuum'),
+            'by_app': by_app, 'error': db.get('error') or '',
+        },
+        'server': server,
+        'host': {
+            'load': host.get('load') or {}, 'cpus': host.get('cpus'),
+            'memory': host.get('memory') or {},
+            'volumes': volumes, 'processes': processes,
+            'db_connections': host.get('db_connections'),
+            'errors': [v for k, v in host.items() if k.endswith('_error')],
+        },
+        'summary': summary,
+        'summary_range': range_text,
+        'summary_window': window_text,
+        'summary_errors': [e for e in (walk_error, kills_error) if e],
+        'errors_url': errors_url,
+    }
+
+
+def _fmt_num(value):
+    if value is None:
+        return '—'
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        if abs(value) < 10:
+            return f'{value:.3g}'
+        return f'{value:,.0f}' if abs(value) >= 1000 else f'{value:.1f}'
+    return f'{value:,}'
+
+
+def _fmt_signed(value):
+    if value == 0:
+        return None
+    return f'{value:+.3f}'
+
+
 def _delivery_card(data, previous_data, ctx):
     """The delivery cut card. On a daily-record snap (the quilt), the
     breakdown of that day: what arrived, per configuration, with
@@ -2798,7 +3444,9 @@ def _series_cache(key, builder, refresh=False):
     # The Errors focus (param 'task') plots a component that advances
     # every refresh cycle; its products take the live TTL, not the
     # day-granular focus backstop.
-    if ':focus:task:' in key:
+    # The Platform focus (param 'platform') likewise plots components
+    # that advance every refresh cycle.
+    if ':focus:task:' in key or ':focus:platform:' in key:
         ttl_seconds = 90
     else:
         ttl_seconds = 6 * 3600 if ':focus:' in key else 90
@@ -2841,10 +3489,11 @@ def register_snapper_providers():
         curve_groups=_epicprod_groups,
         scope_curve_groups=_epicprod_scope_groups,
         focus_view=(_delivery_focus_view, _site_focus_view,
-                    _errors_focus_view),
+                    _errors_focus_view, _platform_focus_view),
         component_cards={'panda': _panda_card,
                          'delivery': _delivery_card,
-                         'errors': _errors_card},
+                         'errors': _errors_card,
+                         'platform': _platform_card},
         card_template=CARD_TEMPLATE,
         annotate_references=annotate_references,
     ))

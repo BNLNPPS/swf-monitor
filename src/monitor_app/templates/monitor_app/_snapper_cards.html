@@ -249,6 +249,105 @@
     {% endif %}
   </section>
 
+{% elif card.kind == 'platform' %}
+  {# The platform cut: assessment, then the detail tables, and last the #}
+  {# summary across every plotted metric with its range statistics.  #}
+  <section class="snapper-cut-card">
+    <div class="mb-2"><strong>Platform</strong>
+      <span class="snapper-chip" style="background:{{ card.overall_chip.color }}">{{ card.overall }}</span>
+      {% if card.interval.end %}<span class="text-muted small">interval ending {{ card.interval.end }}</span>{% endif %}
+      · <span class="text-muted small">server-host report: {{ card.reporter_status }}</span>
+      · <a href="{{ card.errors_url }}">error breakdown at this cut</a></div>
+    <div class="d-flex flex-wrap column-gap-3 row-gap-1 mb-2">
+      {% for v in card.verdicts %}
+      <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>
+      {% endfor %}
+    </div>
+    <div class="d-flex flex-wrap column-gap-4 row-gap-2 align-items-start">
+      <div>
+        <div class="mb-1"><strong>Heartbeats</strong> <span class="text-muted small">{{ card.heartbeats.period_minutes }}-min pilot period</span></div>
+        {% if card.heartbeats.error %}<div class="text-danger mb-1">{{ card.heartbeats.error }}</div>{% endif %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <thead><tr><th>Queue</th><th class="text-end">Running</th><th class="text-end">Heartbeats</th><th class="text-end">Silent 30+</th><th class="text-end">60+</th><th class="text-end">120+ min</th></tr></thead>
+          <tbody>
+          <tr class="fw-bold"><td>all queues</td><td class="text-end">{{ card.heartbeats.running }}</td><td class="text-end">{{ card.heartbeats.received }} / {{ card.heartbeats.expected }}{% if card.heartbeats.yield is not None %} · yield {{ card.heartbeats.yield }}{% endif %}</td><td class="text-end">{{ card.heartbeats.stale_30 }}</td><td class="text-end">{{ card.heartbeats.stale_60 }}</td><td class="text-end">{{ card.heartbeats.stale_120 }}</td></tr>
+          {% for s in card.site_rows %}
+          <tr><td><a href="{{ s.url }}">{{ s.site }}</a></td><td class="text-end">{{ s.running }}</td><td class="text-end">{{ s.received }}</td><td class="text-end">{{ s.stale_30 }}</td><td class="text-end">{{ s.stale_60 }}</td><td class="text-end">{{ s.stale_120 }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <div class="text-muted small mb-2">{{ card.heartbeats.started }} jobs started in the interval.</div>
+      </div>
+      <div>
+        <div class="mb-1"><strong>PanDA database</strong></div>
+        {% if card.database.error %}<div class="text-danger mb-1">{{ card.database.error }}</div>{% endif %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <tbody>
+          <tr><td>connections</td><td class="text-end">{{ card.database.connections|default:"—" }} of {{ card.database.max_connections|default:"—" }}</td></tr>
+          <tr><td>active · idle · waiting</td><td class="text-end">{{ card.database.active|default:"0" }} · {{ card.database.idle|default:"0" }} · {{ card.database.waiting|default:"0" }}</td></tr>
+          <tr><td>longest transaction</td><td class="text-end">{{ card.database.longest_transaction_s|default:"—" }} s</td></tr>
+          <tr><td>jobsactive4 live · dead tuples</td><td class="text-end">{{ card.database.live_tuples|default:"—" }} · {{ card.database.dead_tuples|default:"—" }}</td></tr>
+          <tr><td>minutes since autovacuum</td><td class="text-end">{{ card.database.minutes_since_autovacuum|default:"—" }}</td></tr>
+          {% for app, n in card.database.by_app %}
+          <tr><td class="text-muted">{{ app }}</td><td class="text-end">{{ n }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <div class="mb-1"><strong>PanDA server</strong></div>
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <tbody>
+          <tr><td>is_alive</td><td class="text-end">{% if card.server.ok %}ok{% else %}<span class="text-danger">{% if card.server.timeout %}timeout{% else %}not ok{% endif %}</span>{% endif %} · {{ card.server.latency_ms|default:"—" }} ms{% if card.server.status %} · HTTP {{ card.server.status }}{% endif %}</td></tr>
+          {% if card.server.error %}<tr><td colspan="2" class="text-danger">{{ card.server.error }}</td></tr>{% endif %}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="mb-1"><strong>Monitor host</strong></div>
+        {% for e in card.host.errors %}<div class="text-danger mb-1">{{ e }}</div>{% endfor %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <tbody>
+          <tr><td>load 1 · 5 · 15 min</td><td class="text-end">{{ card.host.load.1m|default:"—" }} · {{ card.host.load.5m|default:"—" }} · {{ card.host.load.15m|default:"—" }}{% if card.host.cpus %} on {{ card.host.cpus }} CPUs{% endif %}</td></tr>
+          <tr><td>memory used</td><td class="text-end">{{ card.host.memory.used_mb|default:"—" }} of {{ card.host.memory.total_mb|default:"—" }} MB ({{ card.host.memory.used_percent|default:"—" }}%) · swap {{ card.host.memory.swap_used_mb|default:"0" }} MB</td></tr>
+          {% for v in card.host.volumes %}
+          <tr><td>{{ v.path }}</td><td class="text-end">{% if v.error %}<span class="text-danger">{{ v.error }}</span>{% else %}{{ v.used_percent }}% used · {{ v.free_gb }} GB free{% endif %}</td></tr>
+          {% endfor %}
+          {% for p in card.host.processes %}
+          <tr><td>{{ p.label }}</td><td class="text-end">{% if p.error %}<span class="text-danger">{{ p.error }}</span>{% else %}{% if p.count is not None %}{{ p.count }} proc · {% endif %}{% if p.state %}<span class="{{ p.state|state_class }} px-1">{{ p.state }}</span> · {% endif %}{{ p.rss_mb|default:"—" }} MB{% if p.restarts %} · {{ p.restarts }} restarts{% endif %}{% endif %}</td></tr>
+          {% endfor %}
+          <tr><td>monitor DB connections</td><td class="text-end">{{ card.host.db_connections|default:"—" }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mt-2 mb-1"><strong>Summary at the cut</strong>
+      <span class="text-muted small">range statistics over {{ card.summary_range|default:"the shown range" }}{% if card.summary_window %} · faulty events over {{ card.summary_window }}{% endif %}</span></div>
+    {% for e in card.summary_errors %}<div class="text-danger mb-1">{{ e }}</div>{% endfor %}
+    <table class="table table-sm table-bordered w-auto mb-1">
+      <thead><tr><th>Metric</th><th class="text-end">At cut</th><th class="text-end">Δ prev snap</th><th class="text-end">Min</th><th class="text-end">Mean</th><th class="text-end">Max</th><th class="text-end">Position</th><th>Unit</th></tr></thead>
+      <tbody>
+      {% for r in card.summary %}
+      <tr{% if r.warn %} class="warning_fill"{% endif %}>
+        <td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;{% if not r.curve %} visibility:hidden;{% endif %}"></span>{{ r.label }}{% if r.detail %} <span class="text-muted small">({{ r.detail }})</span>{% endif %}</td>
+        <td class="text-end">{{ r.value }}</td>
+        <td class="text-end">{{ r.delta|default:"" }}</td>
+        <td class="text-end">{% if r.stats %}{{ r.stats.min }}{% endif %}</td>
+        <td class="text-end">{% if r.stats %}{{ r.stats.mean }}{% endif %}</td>
+        <td class="text-end">{% if r.stats %}{{ r.stats.max }}{% endif %}</td>
+        <td class="text-end">{% if r.stats and r.stats.position is not None %}{{ r.stats.position }}%{% endif %}</td>
+        <td class="text-muted small">{{ r.unit }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="text-muted small mb-1">Position: where the cut value sits between the range's minimum (0%) and maximum (100%). Highlighted rows crossed a threshold.</div>
+    {% if card.payload_json %}
+    <details class="mt-1">
+      <summary class="text-muted small">component document (audit)</summary>
+      <pre class="p-2 border rounded snapper-scrollpane" style="max-height:22em; overflow:auto; font-size:.9em;">{{ card.payload_json }}</pre>
+    </details>
+    {% endif %}
+  </section>
+
 {% elif card.kind == 'delivery' %}
   {% for c in card.campaigns %}
     {% if c.daily %}
