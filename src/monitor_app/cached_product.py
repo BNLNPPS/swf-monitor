@@ -33,6 +33,21 @@ BUILD_LOCK_TIMEOUT_SECONDS = 600
 REFRESH_WAIT_SECONDS = 15
 
 
+def _lock_live(row):
+    """True while the row's build slot is held by a live build.
+
+    A slot older than ``BUILD_LOCK_TIMEOUT_SECONDS`` belongs to a worker
+    that died mid-build (a process recycle kills the background thread
+    before its ``finally`` clears the slot). Every reader of
+    ``building_since`` goes through this rule, so an abandoned slot never
+    presents as an in-flight rebuild and never blocks the next one.
+    """
+    if row is None or row.building_since is None:
+        return False
+    age = (timezone.now() - row.building_since).total_seconds()
+    return age < BUILD_LOCK_TIMEOUT_SECONDS
+
+
 def _claim(key):
     """Atomically claim the build slot for a key. True when claimed."""
     from django.db.models import Q
@@ -142,7 +157,7 @@ def get_product(key, builder, ttl_seconds, refresh=False,
                     'refreshing': False,
                     'built_now': False,
                 }
-            if (row is None or row.building_since is None) and _claim(key):
+            if not _lock_live(row) and _claim(key):
                 # The other build ended without landing a newer product
                 # (failure or lock expiry). The caller asked for a
                 # synchronous update, so build it here after all.
@@ -164,7 +179,7 @@ def get_product(key, builder, ttl_seconds, refresh=False,
                 'refreshing': True, 'built_now': False}
 
     age = (timezone.now() - row.built_at).total_seconds()
-    refreshing = row.building_since is not None
+    refreshing = _lock_live(row)
     if age > ttl_seconds and not refreshing and _claim(key):
         _background_build(key, builder)
         refreshing = True

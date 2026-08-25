@@ -14,7 +14,12 @@ variant.
 - **Staleness rebuilds behind the response.** A request that finds the
   product older than its TTL returns it anyway and triggers one
   background rebuild; `building_since` on the store row is the
-  cross-worker lock, so concurrent requests never stampede.
+  cross-worker lock, so concurrent requests never stampede. A lock
+  older than `BUILD_LOCK_TIMEOUT_SECONDS` (600 s) is abandoned — its
+  worker died mid-build, as a process recycle at deploy does to a
+  background thread — and every reader treats it as absent: the next
+  request reclaims it and rebuilds. No product stays stale behind a
+  dead lock.
 - **Explicit update rebuilds synchronously.** The uniform Update button
   passes `refresh=1`; the user chose to wait, and gets fresh data back.
 - **The first-ever fill builds synchronously** — there is nothing to

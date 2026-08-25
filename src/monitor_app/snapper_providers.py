@@ -632,6 +632,9 @@ def _platform_curve_values(state):
     server = plat.get('server') or {}
     if server.get('latency_ms') is not None:
         values['plsv_latency'] = float(server['latency_ms'])
+    for probe, entry in (plat.get('pandamon') or {}).items():
+        if (entry or {}).get('latency_ms') is not None:
+            values[f'plpm_{probe}'] = float(entry['latency_ms'])
     host = plat.get('monitor_host') or {}
     load = host.get('load') or {}
     for key in ('1m', '5m', '15m'):
@@ -841,6 +844,8 @@ _PLATFORM_LABELS = {
     'pldb_idle': 'idle',
     'pldb_waiting': 'waiting',
     'plsv_latency': 'is_alive latency',
+    'plpm_front': 'front page',
+    'plpm_workers': 'worker-stats query',
     'plst_30': '30–60 min silent',
     'plst_60': '60–120 min silent',
     'plst_120': 'over 120 min silent',
@@ -1376,6 +1381,7 @@ _PLATFORM_FAMILIES_COMMON_HEAD = (
     'Platform heartbeats', 'Platform heartbeat yield')
 _PLATFORM_FAMILIES_COMMON_TAIL = (
     'Platform DB connections', 'Platform server latency',
+    'Platform PanDA monitor latency',
     'Platform monitor load', 'Platform monitor memory',
     'Platform monitor storage', 'Platform monitor processes',
     'Platform jobs', 'Platform kills', 'Platform outcomes')
@@ -1419,6 +1425,11 @@ def _platform_groups():
          'stacked': True, 'panel_px': 150, 'units': 'connections'},
         {'name': 'Platform server latency', 'title': 'Server latency',
          'prefixes': [], 'ids': ['plsv_latency'],
+         'panel_px': 110, 'units': 'ms'},
+        {'name': 'Platform PanDA monitor latency',
+         'title': 'PanDA monitor latency',
+         'prefixes': ['plpm_'], 'ids': [],
+         'order': ['plpm_front', 'plpm_workers'],
          'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform monitor load', 'title': 'Monitor host load',
          'prefixes': ['plml_'], 'ids': [],
@@ -2518,6 +2529,10 @@ _PLATFORM_SUMMARY_SPECS = (
      lambda p, j: (p.get('database') or {}).get('longest_transaction_s')),
     ('server latency', 'plsv_latency', 'ms',
      lambda p, j: (p.get('server') or {}).get('latency_ms')),
+    ('PanDA monitor front page', 'plpm_front', 'ms',
+     lambda p, j: ((p.get('pandamon') or {}).get('front') or {}).get('latency_ms')),
+    ('PanDA monitor worker query', 'plpm_workers', 'ms',
+     lambda p, j: ((p.get('pandamon') or {}).get('workers') or {}).get('latency_ms')),
     ('monitor load (1 min)', 'plml_1m', '',
      lambda p, j: ((p.get('monitor_host') or {}).get('load') or {}).get('1m')),
     ('monitor memory used', 'plmm_used_pct', '%',
@@ -2662,6 +2677,7 @@ def _platform_card(data, previous_data, ctx):
     hb = data.get('heartbeats') or {}
     db = data.get('database') or {}
     server = data.get('server') or {}
+    pandamon = data.get('pandamon') or {}
     host = data.get('monitor_host') or {}
     assessment = data.get('assessment') or {}
     thresholds = assessment.get('thresholds') or {}
@@ -2765,6 +2781,9 @@ def _platform_card(data, previous_data, ctx):
         warn_rows.add('DB connections')
     if verdict_map.get('server_latency') == 'warning':
         warn_rows.add('server latency')
+    if verdict_map.get('pandamon_latency') == 'warning':
+        warn_rows.update({'PanDA monitor front page',
+                          'PanDA monitor worker query'})
     if verdict_map.get('monitor_volumes') == 'warning':
         warn_rows.add('monitor storage')
     summary = []
@@ -2868,6 +2887,10 @@ def _platform_card(data, previous_data, ctx):
             'by_app': by_app, 'error': db.get('error') or '',
         },
         'server': server,
+        'pandamon': [
+            ('front page', pandamon.get('front') or {}),
+            ('worker-stats query', pandamon.get('workers') or {}),
+        ] if pandamon else [],
         'host': {
             'load': host.get('load') or {}, 'cpus': host.get('cpus'),
             'memory': host.get('memory') or {},

@@ -67,6 +67,8 @@ MONITOR_UNITS = {
 CONFIG_DEFAULTS = {
     "platform_panda_server_url": "https://pandaserver01.sdcc.bnl.gov:25443",
     "platform_server_timeout_seconds": 10,
+    "platform_pandamon_url": "https://pandamon01.sdcc.bnl.gov",
+    "platform_pandamon_timeout_seconds": 30,
     "platform_heartbeat_period_seconds": 1800,
     "platform_monitor_volumes": ["/", "/var", "/data"],
     "platform_reporter_stale_seconds": 900,
@@ -74,6 +76,7 @@ CONFIG_DEFAULTS = {
     "platform_yield_warn_below": 0.5,
     "platform_connections_warn_fraction": 0.8,
     "platform_latency_warn_ms": 2000,
+    "platform_pandamon_warn_ms": 20000,
     "platform_stale_warn_fraction": 0.25,
     "platform_stale_warn_tier_minutes": 60,
     "platform_volume_warn_percent": 90,
@@ -162,6 +165,19 @@ PLATFORM_REGISTRATION = {
                 "One timed liveness request to the PanDA server: "
                 "latency in milliseconds, HTTP status, and ok; a timeout "
                 "or failure is recorded with its reason."
+            ),
+        },
+        "pandamon": {
+            "path": "pandamon",
+            "type": "object",
+            "required": False,
+            "kind": "gauge",
+            "description": (
+                "Two timed requests to the PanDA monitor (BigPanDA) web "
+                "face: its front page and the harvester worker-stats "
+                "query the monitor's tools use; latency in milliseconds, "
+                "HTTP status, and ok; a timeout or failure is recorded "
+                "with its reason."
             ),
         },
         "server_host": {
@@ -395,14 +411,15 @@ def heartbeat_reading(mark, until, period_seconds):
 
 # ── Server ──────────────────────────────────────────────────────────────
 
-def server_reading(base_url, timeout_seconds):
-    """One timed request to the PanDA server's liveness endpoint."""
+def timed_get(url, timeout_seconds, params=None):
+    """One timed GET: latency in milliseconds, HTTP status, ok; a
+    timeout records at the timeout value with its reason, never omitted."""
     import requests
 
-    url = f"{base_url.rstrip('/')}/api/v1/system/is_alive"
     started = time.monotonic()
     try:
-        response = requests.get(url, timeout=float(timeout_seconds))
+        response = requests.get(url, params=params,
+                                timeout=float(timeout_seconds))
         ms = round((time.monotonic() - started) * 1000, 1)
         return {"url": url, "latency_ms": ms,
                 "status": int(response.status_code),
@@ -417,6 +434,28 @@ def server_reading(base_url, timeout_seconds):
                 "latency_ms": round((time.monotonic() - started) * 1000, 1),
                 "status": None, "ok": False, "timeout": False,
                 "error": f"{type(e).__name__}: {e}"[:300]}
+
+
+def server_reading(base_url, timeout_seconds):
+    """One timed request to the PanDA server's liveness endpoint."""
+    return timed_get(f"{base_url.rstrip('/')}/api/v1/system/is_alive",
+                     timeout_seconds)
+
+
+def pandamon_reading(base_url, timeout_seconds, now):
+    """Two timed requests to the PanDA monitor (BigPanDA) web face: the
+    front page, and the harvester worker-stats query over the last hour
+    — the request the monitor's own tools make, so the record shows the
+    face as its consumers meet it."""
+    root = base_url.rstrip("/")
+    since = now - timedelta(hours=1)
+    return {
+        "front": timed_get(f"{root}/", timeout_seconds),
+        "workers": timed_get(
+            f"{root}/harvester/getworkerstats/", timeout_seconds,
+            params={"lastupdate_from": since.strftime("%Y-%m-%d %H:%M:%S"),
+                    "lastupdate_to": now.strftime("%Y-%m-%d %H:%M:%S")}),
+    }
 
 
 # ── Server host (reporter) ──────────────────────────────────────────────
@@ -549,7 +588,7 @@ def monitor_host_reading(volumes):
 # ── Assessment ──────────────────────────────────────────────────────────
 
 def assess(database, heartbeats, server, reporter_status, monitor_host,
-           thresholds):
+           thresholds, pandamon=None):
     """Per-metric verdicts against the configured thresholds."""
     verdicts = {}
 
@@ -578,6 +617,12 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
             (not server.get("ok"))
             or server.get("latency_ms", 0) > thresholds["platform_latency_warn_ms"],
             known=True)
+    probes = list((pandamon or {}).values())
+    verdict("pandamon_latency",
+            any((not p.get("ok"))
+                or p.get("latency_ms", 0) > thresholds["platform_pandamon_warn_ms"]
+                for p in probes),
+            known=bool(probes))
     vols = (monitor_host.get("volumes") or {})
     percents = [v.get("used_percent") for v in vols.values()
                 if isinstance(v, dict) and v.get("used_percent") is not None]
@@ -629,6 +674,9 @@ def platform_projection(now=None, mark=None):
         mark, observed_at, int(_config("platform_heartbeat_period_seconds")))
     server = server_reading(str(_config("platform_panda_server_url")),
                             _config("platform_server_timeout_seconds"))
+    pandamon = pandamon_reading(str(_config("platform_pandamon_url")),
+                                _config("platform_pandamon_timeout_seconds"),
+                                observed_at)
     server_host, reporter_status = server_host_reading(
         observed_at, int(_config("platform_reporter_stale_seconds")))
     monitor_host = monitor_host_reading(
@@ -638,10 +686,11 @@ def platform_projection(now=None, mark=None):
         "database": database,
         "heartbeats": heartbeats,
         "server": server,
+        "pandamon": pandamon,
         "reporter_status": reporter_status,
         "monitor_host": monitor_host,
         "assessment": assess(database, heartbeats, server, reporter_status,
-                             monitor_host, thresholds),
+                             monitor_host, thresholds, pandamon),
     }
     if server_host is not None:
         projection["server_host"] = server_host
@@ -699,6 +748,8 @@ def compact_platform_publication_report(publication: PlatformPublication) -> str
             "heartbeat_yield": heartbeats.get("yield"),
             "server_latency_ms": projection["server"].get("latency_ms"),
             "server_ok": projection["server"].get("ok"),
+            "pandamon_front_ms": projection["pandamon"]["front"].get("latency_ms"),
+            "pandamon_workers_ms": projection["pandamon"]["workers"].get("latency_ms"),
             "reporter_status": projection["reporter_status"],
             "assessment": projection["assessment"]["overall"],
             "observed_at": publication.observed_at.isoformat(),

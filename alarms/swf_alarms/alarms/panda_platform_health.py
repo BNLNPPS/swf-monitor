@@ -31,6 +31,9 @@ _METRIC_TEXT = {
         "configured tier — the Watcher will fail them at two hours"),
     "db_connections": "PanDA database connections near the configured limit",
     "server_latency": "PanDA server liveness request slow or failing",
+    "pandamon_latency": (
+        "PanDA monitor (BigPanDA) web face slow or failing — its "
+        "queries are also load on the PanDA database"),
     "monitor_volumes": "a monitor-host volume is above the configured use",
     "monitor_services": "the monitor's ASGI or prod-ops service is not active",
 }
@@ -103,6 +106,7 @@ def detect(client, params):
     running = int(heartbeats.get("running") or 0)
     database = data.get("database") or {}
     server = data.get("server") or {}
+    pandamon = data.get("pandamon") or {}
     host = data.get("monitor_host") or {}
     for metric, verdict in verdicts.items():
         if verdict != "warning" or metric not in _METRIC_TEXT:
@@ -142,6 +146,16 @@ def detect(client, params):
             detail = (f"is_alive {'ok' if server.get('ok') else 'NOT ok'}, "
                       f"{server.get('latency_ms')} ms"
                       + (f" — {server.get('error')}" if server.get("error") else ""))
+        elif metric == "pandamon_latency":
+            facts = {probe: {"latency_ms": (p or {}).get("latency_ms"),
+                             "ok": (p or {}).get("ok"),
+                             "error": (p or {}).get("error")}
+                     for probe, p in pandamon.items()}
+            detail = ", ".join(
+                f"{probe} {'ok' if (p or {}).get('ok') else 'NOT ok'} "
+                f"{(p or {}).get('latency_ms')} ms"
+                + (f" ({p.get('error')})" if (p or {}).get("error") else "")
+                for probe, p in pandamon.items())
         elif metric == "monitor_volumes":
             vols = {p: (v or {}).get("used_percent")
                     for p, v in (host.get("volumes") or {}).items()}

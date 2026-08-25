@@ -300,6 +300,17 @@
           {% if card.server.error %}<tr><td colspan="2" class="text-danger">{{ card.server.error }}</td></tr>{% endif %}
           </tbody>
         </table>
+        {% if card.pandamon %}
+        <div class="mb-1"><strong>PanDA monitor</strong></div>
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <tbody>
+          {% for label, probe in card.pandamon %}
+          <tr><td>{{ label }}</td><td class="text-end">{% if probe.ok %}ok{% else %}<span class="text-danger">{% if probe.timeout %}timeout{% else %}not ok{% endif %}</span>{% endif %} · {{ probe.latency_ms|default_if_none:"—" }} ms{% if probe.status %} · HTTP {{ probe.status }}{% endif %}</td></tr>
+          {% if probe.error %}<tr><td colspan="2" class="text-danger">{{ probe.error }}</td></tr>{% endif %}
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
       </div>
       <div>
         <div class="mb-1"><strong>Monitor host</strong></div>

@@ -72,6 +72,15 @@ the PanDA server's status endpoint from the monitor host, recorded as
 milliseconds, with a timeout recorded as a timeout, never omitted.
 Question: was the server answering.
 
+**PanDA monitor (gauge, measured by the maintainer).** Two timed
+requests to the PanDA monitor (BigPanDA) web face on pandamon01: its
+front page, and the harvester worker-stats query over the last hour —
+the request the monitor's own tools make. Recorded as the server
+measurement is, with its own timeout. The monitor face is a distinct
+tier from the server: its queries are read load on the same database,
+so its latency is both a symptom and a cause. Question: was the
+monitor face answering, at the cost its consumers pay.
+
 **Server host (delivered by the reporter).** Web-tier request counts
 per endpoint class and status class for the interval (updateJob,
 getJob, harvester, other; 2xx, 4xx, 5xx), error-log marker counts,
@@ -156,7 +165,8 @@ each family's control row docked above its panel:**
    the card and in the summary, not drawn: on the plot it dwarfs the
    stack into a sliver.
 4. *Server latency* — milliseconds; a timeout records at the timeout
-   value.
+   value. *PanDA monitor latency* follows on its own panel: the front
+   page and the worker-stats query, same treatment.
 5. *Web tier* — request rates by endpoint class and the 5xx count,
    present when the reporter reports; daemon liveness renders as lanes
    above the panels (per-daemon continuous lanes on the health-lane
@@ -231,7 +241,8 @@ alarm engine's job ([alarms.md](alarms.md)): the
 `panda_platform_health` alarm reads the latest published component on
 each engine tick and raises one detection per metric in warning —
 heartbeat yield, heartbeat staleness, database connections, server
-latency, monitor volumes, monitor services — plus one when the
+latency, PanDA monitor latency, monitor volumes, monitor services —
+plus one when the
 component itself is absent, unreadable, or silent beyond
 `stale_after_minutes`. Heartbeat verdicts are suppressed below
 `min_running` running jobs, where the rates are noise. The thresholds
