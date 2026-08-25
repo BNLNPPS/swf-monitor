@@ -1961,6 +1961,35 @@ def study_job(pandaid):
     job = dict(full_job)
     job['errors'] = extract_errors(job)
 
+    # A lost-heartbeat failure records the LAST HEARTBEAT as the end
+    # time (the Watcher's convention) and the failure instant only as
+    # the modification time; stated together, with the silence between,
+    # so the record reads as what happened rather than as a job that
+    # died seconds after it started.
+    if int(job.get('jobdispatchererrorcode') or 0) == 100:
+        from datetime import datetime as _dt
+
+        def _when(value):
+            if isinstance(value, str):
+                try:
+                    return _dt.fromisoformat(value)
+                except ValueError:
+                    return None
+            return value if isinstance(value, _dt) else None
+
+        last = _when(job.get('endtime'))
+        failed = _when(job.get('modificationtime'))
+        started = _when(job.get('starttime'))
+        timeline = {'last_heartbeat': job.get('endtime'),
+                    'failed_at': job.get('modificationtime')}
+        if last and failed and failed > last:
+            timeline['silent_minutes'] = round(
+                (failed - last).total_seconds() / 60)
+        if started and last:
+            timeline['heard_for_minutes'] = round(
+                (last - started).total_seconds() / 60)
+        job['heartbeat_timeline'] = timeline
+
     # Strip null fields for readability
     job = {k: v for k, v in job.items() if v is not None}
 

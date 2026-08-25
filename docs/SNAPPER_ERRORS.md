@@ -108,9 +108,14 @@ Each publication records the error events of one interval:
   covers, running from the previous publication's source time to this
   one's.
 - **Entries** — one row per job that ended faulty in the interval:
-  PanDA job id, JEDI task id, category, end time, and terminal
-  status, as arrays in a declared column order. A job reports errors
-  once, upon completion, so each failed job appears in exactly one
+  PanDA job id, JEDI task id, category, event time, and terminal
+  status, as arrays in a declared column order. The event time is the
+  job's end time, with one exception: a lost-heartbeat failure
+  (dispatcher code 100) records the last heartbeat as its end time
+  and the failure instant only as its modification time, so the
+  failure instant is its event time — otherwise a kill storm appears
+  on the plots hours before it happened. A job reports errors once,
+  upon completion, so each failed job appears in exactly one
   interval.
 - **Overflow** — absent normally. An interval exceeding the entry bound
   (2,000 rows) keeps the earliest rows and folds the exact remainder

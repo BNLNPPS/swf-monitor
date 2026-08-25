@@ -43,6 +43,14 @@ COMPONENT_NAME = "errors"
 SCOPE = "epicprod"
 
 ENTRY_FIELDS = ["pandaid", "jeditaskid", "category", "endtime", "status"]
+# The event time of a faulty job: its end time, except that a
+# lost-heartbeat failure (dispatcher code 100) records the last
+# heartbeat as the end time and the failure instant as the modification
+# time — the failure instant is the event.
+EVENT_TIME_SQL = (
+    'CASE WHEN "jobdispatchererrorcode" = 100 '
+    'THEN "modificationtime" ELSE "endtime" END'
+)
 MAX_ENTRIES = 2000
 MAX_PATTERNS = 20
 MAX_PATTERN_TASKS = 8
@@ -94,8 +102,12 @@ ERRORS_REGISTRATION = {
             "description": (
                 "One row per job that ended faulty in the interval, as "
                 "arrays in ENTRY_FIELDS order: pandaid, jeditaskid, "
-                "category 'component:code', endtime, and terminal "
-                "status. Each failed job appears in exactly one "
+                "category 'component:code', event time, and terminal "
+                "status. The event time is the job's end time, except "
+                "for lost-heartbeat failures (dispatcher 100), whose "
+                "recorded end time is the last heartbeat: their event "
+                "time is the failure instant (the modification time). "
+                "Each failed job appears in exactly one "
                 "interval. When the interval exceeds the entry bound, "
                 "entries keep the earliest rows and 'overflow' carries "
                 "the exact remainder."
@@ -171,17 +183,24 @@ def _faulty_union(mark, until, diags=False, sites=False):
     any_nonzero = " OR ".join(
         f'"{c["code"]}" > 0' for c in ERROR_COMPONENTS
     )
+    # The event time is when the job ended faulty. For a lost-heartbeat
+    # failure the record's end time is the LAST HEARTBEAT (the Watcher's
+    # convention); the failure instant is the modification time, so
+    # that is the event time for those jobs — otherwise a kill storm
+    # lands on the plots hours before it happened.
     bounds = (
-        f'"endtime" > %s AND "endtime" <= %s '
+        f"{EVENT_TIME_SQL} > %s AND {EVENT_TIME_SQL} <= %s "
         f'AND "jobstatus" IN ({status_placeholders}) '
         f"AND ({any_nonzero})"
     )
     params = [mark, until, *FAULTY_STATUSES]
     union = f"""
-        SELECT "pandaid", "jeditaskid", "endtime", "jobstatus", {err_fields}
+        SELECT "pandaid", "jeditaskid", {EVENT_TIME_SQL} AS "endtime",
+               "jobstatus", {err_fields}
         FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {bounds}
         UNION
-        SELECT "pandaid", "jeditaskid", "endtime", "jobstatus", {err_fields}
+        SELECT "pandaid", "jeditaskid", {EVENT_TIME_SQL} AS "endtime",
+               "jobstatus", {err_fields}
         FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {bounds}
     """
     return union, params + params
