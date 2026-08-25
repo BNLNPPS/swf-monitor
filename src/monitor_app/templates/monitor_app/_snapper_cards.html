@@ -283,11 +283,11 @@
         {% if card.database.error %}<div class="text-danger mb-1">{{ card.database.error }}</div>{% endif %}
         <table class="table table-sm table-bordered w-auto mb-1">
           <tbody>
-          <tr><td>connections</td><td class="text-end">{{ card.database.connections|default:"—" }} of {{ card.database.max_connections|default:"—" }}</td></tr>
-          <tr><td>active · idle · waiting</td><td class="text-end">{{ card.database.active|default:"0" }} · {{ card.database.idle|default:"0" }} · {{ card.database.waiting|default:"0" }}</td></tr>
-          <tr><td>longest transaction</td><td class="text-end">{{ card.database.longest_transaction_s|default:"—" }} s</td></tr>
-          <tr><td>jobsactive4 live · dead tuples</td><td class="text-end">{{ card.database.live_tuples|default:"—" }} · {{ card.database.dead_tuples|default:"—" }}</td></tr>
-          <tr><td>minutes since autovacuum</td><td class="text-end">{{ card.database.minutes_since_autovacuum|default:"—" }}</td></tr>
+          <tr><td>connections</td><td class="text-end">{{ card.database.connections|default_if_none:"—" }} of {{ card.database.max_connections|default_if_none:"—" }}</td></tr>
+          <tr><td>active · idle · waiting</td><td class="text-end">{{ card.database.active|default_if_none:"—" }} · {{ card.database.idle|default_if_none:"—" }} · {{ card.database.waiting|default_if_none:"—" }}</td></tr>
+          <tr><td>longest transaction</td><td class="text-end">{{ card.database.longest_transaction_s|default_if_none:"—" }} s</td></tr>
+          <tr><td>jobsactive4 live · dead tuples</td><td class="text-end">{{ card.database.live_tuples|default_if_none:"—" }} · {{ card.database.dead_tuples|default_if_none:"—" }}</td></tr>
+          <tr><td>minutes since autovacuum</td><td class="text-end">{{ card.database.minutes_since_autovacuum|default_if_none:"—" }}</td></tr>
           {% for app, n in card.database.by_app %}
           <tr><td class="text-muted">{{ app }}</td><td class="text-end">{{ n }}</td></tr>
           {% endfor %}
