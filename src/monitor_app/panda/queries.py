@@ -37,7 +37,6 @@ PSEUDO_TASK_DATASETS = {'seq_number', 'pseudo_dataset'}
 # NERSC Perlmutter jobs publish their per-job pilot & slurm logs here.
 # Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
 _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
-_NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
 _PANDA_USER_EQUIVALENCES = {
     # Canonical monitor display name -> equivalent login/name variants.
@@ -355,13 +354,26 @@ def _nersc_portal_log_urls(computingsite, pandaid):
     except Exception as e:
         logger.warning("NERSC portal dir fetch failed for %s: %s", pandaid, e)
         return None
-    result = {
-        'nersc_log_dir': log_dir,
-        'pilot_stdout': log_dir + 'pilotlog.txt',
-    }
-    m = _NERSC_SLURM_RE.search(resp.text)
-    if m:
-        result['slurm_task_stdout'] = log_dir + m.group(1)
+    # The published names vary by layout generation: the pilot log is
+    # 'pilotlog.txt' or 'pilotlog-task<N>.txt'; the per-task Slurm files
+    # 'slurm-<id>-task<N>-panda<id>.out' or 'slurm<id>-task<N>.out' with
+    # an '.err' twin; the worker's own Slurm output 'slurm-<id>.out';
+    # and the payload's stdout/stderr under 'PanDA_Pilot-<pandaid>/'.
+    # Every name comes from the listing itself, never assumed.
+    names = re.findall(r'href="([^"/]+/?)"', resp.text)
+    result = {'nersc_log_dir': log_dir}
+    for name in names:
+        if re.fullmatch(r'pilotlog(-task\d+)?\.txt', name):
+            result['pilot_log'] = log_dir + name
+        elif re.fullmatch(r'slurm-?\d+-task\d+(-panda\d+)?\.out', name):
+            result['slurm_task_stdout'] = log_dir + name
+        elif re.fullmatch(r'slurm-?\d+-task\d+(-panda\d+)?\.err', name):
+            result['slurm_task_stderr'] = log_dir + name
+        elif re.fullmatch(r'slurm-?\d+\.out', name):
+            result['slurm_worker_stdout'] = log_dir + name
+        elif name == f'PanDA_Pilot-{pandaid}/':
+            result['payload_stdout'] = log_dir + name + 'payload.stdout'
+            result['payload_stderr'] = log_dir + name + 'payload.stderr'
     return result
 
 
@@ -1971,8 +1983,9 @@ def study_job(pandaid):
     if site.startswith('NERSC_Perlmutter'):
         portal_urls = _nersc_portal_log_urls(site, pandaid)
         if portal_urls:
-            # Drop the broken stderr/batch entries; Perlmutter has a single
-            # combined pilot log.
+            # The synthesized pilotid-derived entries 404 on Perlmutter;
+            # the portal listing supplies the real files.
+            log_urls.pop('pilot_stdout', None)
             log_urls.pop('pilot_stderr', None)
             log_urls.pop('batch_log', None)
             log_urls.update(portal_urls)
