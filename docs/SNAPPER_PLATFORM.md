@@ -141,36 +141,36 @@ over the `platform`, `panda`, and `errors` components' snaps, and its
 own detail rendering. Its families are absent from the compact scope
 report; the scope's front door does not grow.
 
-**Panels, in order — load, platform, consequences — each family's
-control row docked above its panel:**
+**Panels, in order — the platform's own quantities first, then the
+load and consequence panels beneath them for correlation by eye —
+each family's control row docked above its panel:**
 
-1. *Jobs in flight* — the scope's in-flight jobs family (by state,
-   stacked) with running cores as the overlay line, as the Site view
-   draws them.
-2. *Heartbeats* — received per interval and starts per interval,
-   end-stamped; *Heartbeat yield* as its own small panel on a 0–1
-   scale with a reference line at 1.
-3. *DB connections* — active, idle, waiting stacked, with
-   `max_connections` as the overlay line so proximity to the limit is
-   visible without a second axis.
-4. *Server latency* — milliseconds, timeouts drawn as markers at the
-   panel top in the failure color.
-5. *Heartbeat staleness* — the >30, >60, >120 minute counts stacked;
-   a per-site grouping selector switches the stack to sites (the >120
-   tier by site).
-6. *Web tier* — request rates by endpoint class and the 5xx count,
+1. *Heartbeats* — received per interval and starts per interval;
+   *Heartbeat yield* as its own small panel on a 0–1 scale.
+2. *Heartbeat staleness* — the 30–60, 60–120, and over-120-minute
+   bands stacked (the recorded nested tiers plotted as exclusive
+   bands); a staleness selector switches the panel to the over-120
+   count by site.
+3. *DB connections* — idle, active, waiting stacked in blues with
+   waiting in the warning color. The connection limit is stated on
+   the card and in the summary, not drawn: on the plot it dwarfs the
+   stack into a sliver.
+4. *Server latency* — milliseconds; a timeout records at the timeout
+   value.
+5. *Web tier* — request rates by endpoint class and the 5xx count,
    present when the reporter reports; daemon liveness renders as lanes
    above the panels (per-daemon continuous lanes on the health-lane
    mechanism: green alive, failure color silent), so a stalled
    copyArchive is a red band, not a number.
-7. *Hosts* — one panel per host, server and monitor: load average with
-   memory used as the overlay line; *Storage* — volume use per host as
-   percent, one line per volume; *Processes* — WSGI and ASGI resident
-   memory and process counts per host, with service liveness as lanes
-   beside the daemon lanes.
-8. *Kills* — the error-state component's events by component
-   (dispatcher, taskbuffer, ddm, pilot, …), event-flow binned; the
-   terminal-state chips apply as on the Errors view.
+6. *Hosts* — per host, server and monitor: load average; memory used;
+   volume use as percent, one line per volume; WSGI, ASGI, and agent
+   resident memory; service liveness as lanes beside the daemon lanes.
+7. *Jobs in flight* — the scope's in-flight jobs family (by state,
+   stacked) with running cores as the overlay line, as the Site view
+   draws them.
+8. *Faulty job events* — the error-state component's events by
+   component (dispatcher, taskbuffer, ddm, pilot, …), event-flow
+   binned; the terminal-state chips apply as on the Errors view.
 9. *Job outcomes* — finished and failed, window-relative.
 
 Units on every panel title; house state colors where a state is drawn;

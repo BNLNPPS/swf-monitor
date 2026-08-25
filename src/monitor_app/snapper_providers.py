@@ -629,8 +629,6 @@ def _platform_curve_values(state):
     if db and 'error' not in db:
         for key in ('active', 'idle', 'waiting'):
             values[f'pldb_{key}'] = int(db.get(key) or 0)
-        if db.get('max_connections'):
-            values['pldb_max'] = int(db['max_connections'])
     server = plat.get('server') or {}
     if server.get('latency_ms') is not None:
         values['plsv_latency'] = float(server['latency_ms'])
@@ -781,14 +779,14 @@ def _epicprod_curve_color(curve_id):
         return '#ef6c00'
     if curve_id == 'plst_120':
         return '#c62828'
-    if curve_id in ('pldb_max', 'plhy_yield'):
+    if curve_id == 'plhy_yield':
         return '#0d47a1'
     if curve_id == 'pldb_waiting':
         return '#ef6c00'
     if curve_id == 'pldb_active':
-        return '#64b5f6'
+        return '#1565c0'
     if curve_id == 'pldb_idle':
-        return '#8a8a8a'
+        return '#90caf9'
     if curve_id.startswith('qc_'):
         queue = curve_id[3:]
         members = _queue_stack_members()
@@ -842,7 +840,6 @@ _PLATFORM_LABELS = {
     'pldb_active': 'active',
     'pldb_idle': 'idle',
     'pldb_waiting': 'waiting',
-    'pldb_max': 'connection limit',
     'plsv_latency': 'is_alive latency',
     'plst_30': '30–60 min silent',
     'plst_60': '60–120 min silent',
@@ -1376,12 +1373,12 @@ def _epicprod_groups():
 # jobs, outcomes, error events) under platform-view names so the page
 # orders its panels itself; nothing is recorded twice.
 _PLATFORM_FAMILIES_COMMON_HEAD = (
-    'Platform jobs', 'Platform heartbeats', 'Platform heartbeat yield',
-    'Platform DB connections', 'Platform server latency')
+    'Platform heartbeats', 'Platform heartbeat yield')
 _PLATFORM_FAMILIES_COMMON_TAIL = (
+    'Platform DB connections', 'Platform server latency',
     'Platform monitor load', 'Platform monitor memory',
     'Platform monitor storage', 'Platform monitor processes',
-    'Platform kills', 'Platform outcomes')
+    'Platform jobs', 'Platform kills', 'Platform outcomes')
 PLATFORM_FAMILIES_BY_LENS = {
     'tiers': (_PLATFORM_FAMILIES_COMMON_HEAD
               + ('Platform staleness',) + _PLATFORM_FAMILIES_COMMON_TAIL),
@@ -1397,12 +1394,9 @@ def _platform_groups():
     lifecycle = ([f'job_{s}' for s in _JOB_LIFECYCLE_EARLY]
                  + [f'job_{s}' for s in _JOB_LIFECYCLE_LATE]
                  + ['job_running', 'running_cores'])
+    # Panel order: the platform's own quantities first, then the load
+    # and consequence panels beneath them for correlation by eye.
     return (
-        {'name': 'Platform jobs', 'title': 'Jobs in flight',
-         'prefixes': ['job_'], 'ids': ['running_cores'],
-         'order': lifecycle, 'default_off_ids': ['job_activated'],
-         'overlay_ids': ['running_cores'],
-         'stacked': True, 'panel_px': 220, 'units': 'jobs'},
         {'name': 'Platform heartbeats', 'title': 'Heartbeats',
          'prefixes': [], 'ids': ['plhb_received', 'plhb_started'],
          'order': ['plhb_received', 'plhb_started'],
@@ -1410,15 +1404,6 @@ def _platform_groups():
         {'name': 'Platform heartbeat yield', 'title': 'Heartbeat yield',
          'prefixes': [], 'ids': ['plhy_yield'],
          'panel_px': 110, 'units': 'received / expected'},
-        {'name': 'Platform DB connections', 'title': 'DB connections',
-         'prefixes': [], 'ids': ['pldb_idle', 'pldb_active',
-                                 'pldb_waiting', 'pldb_max'],
-         'order': ['pldb_idle', 'pldb_active', 'pldb_waiting', 'pldb_max'],
-         'overlay_ids': ['pldb_max'],
-         'stacked': True, 'panel_px': 150, 'units': 'connections'},
-        {'name': 'Platform server latency', 'title': 'Server latency',
-         'prefixes': [], 'ids': ['plsv_latency'],
-         'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform staleness', 'title': 'Heartbeat staleness',
          'prefixes': [], 'ids': ['plst_30', 'plst_60', 'plst_120'],
          'order': ['plst_30', 'plst_60', 'plst_120'],
@@ -1426,6 +1411,15 @@ def _platform_groups():
         {'name': 'Platform stale by site', 'title': 'Silent over 120 min · by site',
          'prefixes': ['plss_'], 'ids': [],
          'stacked': True, 'panel_px': 150, 'units': 'running jobs'},
+        # The connection limit is stated on the card and in the summary
+        # ('of N'); drawn on the plot it dwarfs the stack into a sliver.
+        {'name': 'Platform DB connections', 'title': 'DB connections',
+         'prefixes': [], 'ids': ['pldb_idle', 'pldb_active', 'pldb_waiting'],
+         'order': ['pldb_idle', 'pldb_active', 'pldb_waiting'],
+         'stacked': True, 'panel_px': 150, 'units': 'connections'},
+        {'name': 'Platform server latency', 'title': 'Server latency',
+         'prefixes': [], 'ids': ['plsv_latency'],
+         'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform monitor load', 'title': 'Monitor host load',
          'prefixes': ['plml_'], 'ids': [],
          'order': ['plml_1m', 'plml_5m', 'plml_15m'],
@@ -1440,6 +1434,11 @@ def _platform_groups():
          'prefixes': ['plmp_'], 'ids': [],
          'order': ['plmp_httpd', 'plmp_wsgi', 'plmp_asgi', 'plmp_ops_agent'],
          'panel_px': 110, 'units': 'MB resident'},
+        {'name': 'Platform jobs', 'title': 'Jobs in flight',
+         'prefixes': ['job_'], 'ids': ['running_cores'],
+         'order': lifecycle, 'default_off_ids': ['job_activated'],
+         'overlay_ids': ['running_cores'],
+         'stacked': True, 'panel_px': 220, 'units': 'jobs'},
         {'name': 'Platform kills', 'title': 'Faulty job events by component',
          'prefixes': ['perrc_'], 'ids': [],
          'event_flow': True, 'end_stamped': True, 'stacked': True,
@@ -2497,12 +2496,6 @@ def _errors_card(data, previous_data, ctx):
 # swatch ('' when the row is a total no single curve draws), unit, and
 # the extractor over (platform data, panda data). Order = panel order.
 _PLATFORM_SUMMARY_SPECS = (
-    ('jobs in flight', '', 'jobs',
-     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('total')),
-    ('running jobs', 'job_running', 'jobs',
-     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_jobs')),
-    ('running cores', 'running_cores', 'cores',
-     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_cores')),
     ('heartbeats received', 'plhb_received', 'per interval',
      lambda p, j: (p.get('heartbeats') or {}).get('received')),
     ('jobs started', 'plhb_started', 'per interval',
@@ -2531,6 +2524,12 @@ _PLATFORM_SUMMARY_SPECS = (
      lambda p, j: ((p.get('monitor_host') or {}).get('memory') or {}).get('used_percent')),
     ('monitor WSGI resident', 'plmp_wsgi', 'MB',
      lambda p, j: ((p.get('monitor_host') or {}).get('wsgi') or {}).get('rss_mb')),
+    ('jobs in flight', '', 'jobs',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('total')),
+    ('running jobs', 'job_running', 'jobs',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_jobs')),
+    ('running cores', 'running_cores', 'cores',
+     lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('running_cores')),
 )
 
 
