@@ -1465,8 +1465,8 @@ def _platform_focus_view():
         'cache_series': True,
         'components': ('platform', 'panda', 'errors'),
         'prewarm_series': False,
-        'note': ('Load above, platform state in the middle, consequences '
-                 'below, on one time axis. Heartbeats and starts count '
+        'note': ('The platform itself on top; load and consequences '
+                 'beneath it, on one time axis. Heartbeats and starts count '
                  'the 5-minute publication interval ending at each stamp; '
                  'yield is heartbeats received over the count expected '
                  'from the running population. Click the plot for the '
