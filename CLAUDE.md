@@ -64,7 +64,7 @@ the old paths here. This repo's docs cover the platform services:
 - `SSE_RELAY.md` — the ActiveMQ → remote SSE relay this builds on.
 - `EXTERNAL_ACCESS.md` — the swf-remote proxy contract, including write-action trigger rules.
 - `SYSTEM_STATUS.md` — cached system status record and page.
-- `SNAPPER.md`, `SNAPPER_ERRORS.md` — Snapper operations in SWF; the error-state component and errors view design.
+- `SNAPPER.md`, `SNAPPER_ERRORS.md`, `SNAPPER_PLATFORM.md`, `PANDA_SERVER_REPORTER.md` — Snapper operations in SWF; the error-state component and errors view; the platform-health component, Platform view, and the pandaserver01 reporter.
 - `ERROR_ATTRIBUTION.md` — correcting unreliable PanDA error labels at a single service root: rule lifetimes, evidence grades, representative-job digs, payload/pilot channels.
 - `CACHED_PRODUCTS.md` — uniform long-build caching: serve stored, rebuild behind, Update button; use this, never a new hand-rolled cache.
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.

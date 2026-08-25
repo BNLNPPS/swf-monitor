@@ -154,4 +154,7 @@ lanes track the E0-E1 state machine in real time. The
 rows from before this write side existed.
 
 The error-state component and the dedicated errors view are designed in
-[SNAPPER_ERRORS.md](SNAPPER_ERRORS.md).
+[SNAPPER_ERRORS.md](SNAPPER_ERRORS.md); the platform-health component,
+the Platform view, and the server-host reporter in
+[SNAPPER_PLATFORM.md](SNAPPER_PLATFORM.md) and
+[PANDA_SERVER_REPORTER.md](PANDA_SERVER_REPORTER.md).
