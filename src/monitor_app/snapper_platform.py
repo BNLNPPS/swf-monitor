@@ -68,7 +68,7 @@ CONFIG_DEFAULTS = {
     "platform_panda_server_url": "https://pandaserver01.sdcc.bnl.gov:25443",
     "platform_server_timeout_seconds": 10,
     "platform_pandamon_url": "https://pandamon01.sdcc.bnl.gov",
-    "platform_pandamon_timeout_seconds": 30,
+    "platform_pandamon_timeout_seconds": 20,
     "platform_heartbeat_period_seconds": 1800,
     "platform_monitor_volumes": ["/", "/var", "/data"],
     "platform_reporter_stale_seconds": 900,
@@ -447,15 +447,19 @@ def pandamon_reading(base_url, timeout_seconds, now):
     front page, and the harvester worker-stats query over the last hour
     — the request the monitor's own tools make, so the record shows the
     face as its consumers meet it."""
+    from concurrent.futures import ThreadPoolExecutor
+
     root = base_url.rstrip("/")
     since = now - timedelta(hours=1)
-    return {
-        "front": timed_get(f"{root}/", timeout_seconds),
-        "workers": timed_get(
-            f"{root}/harvester/getworkerstats/", timeout_seconds,
-            params={"lastupdate_from": since.strftime("%Y-%m-%d %H:%M:%S"),
-                    "lastupdate_to": now.strftime("%Y-%m-%d %H:%M:%S")}),
-    }
+    # The probes run together: the reading costs one timeout at worst,
+    # not one per probe, inside the refresh doer's own time limit.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        front = pool.submit(timed_get, f"{root}/", timeout_seconds)
+        workers = pool.submit(
+            timed_get, f"{root}/harvester/getworkerstats/", timeout_seconds,
+            {"lastupdate_from": since.strftime("%Y-%m-%d %H:%M:%S"),
+             "lastupdate_to": now.strftime("%Y-%m-%d %H:%M:%S")})
+        return {"front": front.result(), "workers": workers.result()}
 
 
 # ── Server host (reporter) ──────────────────────────────────────────────
