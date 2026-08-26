@@ -160,10 +160,16 @@ each family's control row docked above its panel:**
    bands stacked (the recorded nested tiers plotted as exclusive
    bands); a staleness selector switches the panel to the over-120
    count by site.
-3. *DB connections* — idle, active, waiting stacked in blues with
-   waiting in the warning color. The connection limit is stated on
-   the card and in the summary, not drawn: on the plot it dwarfs the
-   stack into a sliver.
+3. *DB activity* — active and waiting stacked, active in blue and
+   waiting in the warning color, on their own scale. *DB connections*
+   follows as a small panel with the pool total as one line: a drop to
+   zero is a server restart, a climb is a leak or a second pool. Idle
+   connections are not plotted — the PanDA server's persistent pools
+   hold on the order of 120 idle connections, a standing base that
+   squashes activity into a hairline when stacked beneath it — and
+   appear on the card and in the summary instead. The connection
+   limit is likewise stated on the card and in the summary, not drawn:
+   on the plot it dwarfs both panels into a sliver.
 4. *Server latency* — milliseconds; a timeout records at the timeout
    value. *PanDA monitor latency* follows on its own panel: the front
    page and the worker-stats query, same treatment.

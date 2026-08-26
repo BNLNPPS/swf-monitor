@@ -627,8 +627,13 @@ def _platform_curve_values(state):
             values[f'plss_{site}'] = int((entry or {}).get('stale_120') or 0)
     db = plat.get('database') or {}
     if db and 'error' not in db:
-        for key in ('active', 'idle', 'waiting'):
+        # Activity (active + waiting) and the pool total draw on separate
+        # panels: the persistent PanDA server pools hold ~120 idle
+        # connections, a standing base that would squash activity into a
+        # hairline if stacked beneath it. Idle stays on the card.
+        for key in ('active', 'waiting'):
             values[f'pldb_{key}'] = int(db.get(key) or 0)
+        values['pldb_total'] = int(db.get('connections') or 0)
     server = plat.get('server') or {}
     if server.get('latency_ms') is not None:
         values['plsv_latency'] = float(server['latency_ms'])
@@ -788,8 +793,8 @@ def _epicprod_curve_color(curve_id):
         return '#ef6c00'
     if curve_id == 'pldb_active':
         return '#1565c0'
-    if curve_id == 'pldb_idle':
-        return '#90caf9'
+    if curve_id == 'pldb_total':
+        return '#0d47a1'
     if curve_id.startswith('qc_'):
         queue = curve_id[3:]
         members = _queue_stack_members()
@@ -841,7 +846,7 @@ _PLATFORM_LABELS = {
     'plhb_started': 'jobs started',
     'plhy_yield': 'yield',
     'pldb_active': 'active',
-    'pldb_idle': 'idle',
+    'pldb_total': 'total',
     'pldb_waiting': 'waiting',
     'plsv_latency': 'is_alive latency',
     'plpm_front': 'front page',
@@ -1380,8 +1385,8 @@ def _epicprod_groups():
 _PLATFORM_FAMILIES_COMMON_HEAD = (
     'Platform heartbeats', 'Platform heartbeat yield')
 _PLATFORM_FAMILIES_COMMON_TAIL = (
-    'Platform DB connections', 'Platform server latency',
-    'Platform PanDA monitor latency',
+    'Platform DB activity', 'Platform DB connections',
+    'Platform server latency', 'Platform PanDA monitor latency',
     'Platform monitor load', 'Platform monitor memory',
     'Platform monitor storage', 'Platform monitor processes',
     'Platform jobs', 'Platform kills', 'Platform outcomes')
@@ -1417,12 +1422,18 @@ def _platform_groups():
         {'name': 'Platform stale by site', 'title': 'Silent over 120 min · by site',
          'prefixes': ['plss_'], 'ids': [],
          'stacked': True, 'panel_px': 150, 'units': 'running jobs'},
-        # The connection limit is stated on the card and in the summary
-        # ('of N'); drawn on the plot it dwarfs the stack into a sliver.
-        {'name': 'Platform DB connections', 'title': 'DB connections',
-         'prefixes': [], 'ids': ['pldb_idle', 'pldb_active', 'pldb_waiting'],
-         'order': ['pldb_idle', 'pldb_active', 'pldb_waiting'],
+        # Activity on its own scale; the pool total as one line beneath
+        # it (a drop to zero is a server restart, a climb is a leak or a
+        # second pool). The connection limit is stated on the card and in
+        # the summary ('of N'); drawn on the plot it dwarfs both into a
+        # sliver.
+        {'name': 'Platform DB activity', 'title': 'DB activity',
+         'prefixes': [], 'ids': ['pldb_active', 'pldb_waiting'],
+         'order': ['pldb_active', 'pldb_waiting'],
          'stacked': True, 'panel_px': 150, 'units': 'connections'},
+        {'name': 'Platform DB connections', 'title': 'DB connections',
+         'prefixes': [], 'ids': ['pldb_total'],
+         'panel_px': 110, 'units': 'connections'},
         {'name': 'Platform server latency', 'title': 'Server latency',
          'prefixes': [], 'ids': ['plsv_latency'],
          'panel_px': 110, 'units': 'ms'},
@@ -2519,12 +2530,12 @@ _PLATFORM_SUMMARY_SPECS = (
      lambda p, j: _platform_band(p, 60, 120)),
     ('silent over 120 min', 'plst_120', 'jobs',
      lambda p, j: (p.get('heartbeats') or {}).get('stale_120')),
-    ('DB connections', '', 'of limit',
-     lambda p, j: (p.get('database') or {}).get('connections')),
     ('DB active', 'pldb_active', 'connections',
      lambda p, j: (p.get('database') or {}).get('active')),
     ('DB waiting', 'pldb_waiting', 'connections',
      lambda p, j: (p.get('database') or {}).get('waiting')),
+    ('DB connections', 'pldb_total', 'of limit',
+     lambda p, j: (p.get('database') or {}).get('connections')),
     ('longest transaction', '', 's',
      lambda p, j: (p.get('database') or {}).get('longest_transaction_s')),
     ('server latency', 'plsv_latency', 'ms',
