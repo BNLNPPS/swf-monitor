@@ -77,18 +77,18 @@ record. Job starts in the interval complete the
 group. Question: were pilots being heard, and at the expected rate.
 
 **Server (gauge, measured by the maintainer).** One timed request to
-the PanDA server's status endpoint from the monitor host, recorded as
+the PanDA server's status endpoint from the swf-monitor host, recorded as
 milliseconds, with a timeout recorded as a timeout, never omitted.
 Question: was the server answering.
 
-**PanDA monitor (gauge, measured by the maintainer).** Two timed
-requests to the PanDA monitor (BigPanDA) web face on pandamon01: its
+**pandamon (gauge, measured by the maintainer).** Two timed requests
+to pandamon, the PanDA monitor (BigPanDA) web face on pandamon01: its
 front page, and the harvester worker-stats query over the last hour —
-the request the monitor's own tools make. Recorded as the server
-measurement is, with its own timeout. The monitor face is a distinct
-tier from the server: its queries are read load on the same database,
-so its latency is both a symptom and a cause. Question: was the
-monitor face answering, at the cost its consumers pay.
+the request swf-monitor's own tools make. Recorded as the server
+measurement is, with its own timeout. pandamon is a distinct tier
+from the server: its queries are read load on the same database, so
+its latency is both a symptom and a cause. Question: was pandamon
+answering, at the cost its consumers pay.
 
 **Server host (delivered by the reporter).** Web-tier request counts
 per endpoint class and status class for the interval (updateJob,
@@ -104,12 +104,12 @@ threshold, and crossing that threshold is a semantic change that
 publishes (DESIGN.md, Maintained assessments). Question: what the
 server host itself saw.
 
-**Monitor host (measured locally by the maintainer).** The monitor's
-own tier on pandaserver02: Apache WSGI process count and resident
-memory, the ASGI service (swf-monitor-mcp-asgi) liveness and resident
-memory, the prod-ops agent's resident memory, host load average,
-memory and swap, root, /var, and /data volume use, and the monitor
-database's connection count. Question: was the monitor itself under
+**swf-monitor host (measured locally by the maintainer).**
+swf-monitor's own tier on pandaserver02: Apache WSGI process count and
+resident memory, the ASGI service (swf-monitor-mcp-asgi) liveness and
+resident memory, the prod-ops agent's resident memory, host load
+average, memory and swap, root, /var, and /data volume use, and the
+swf-monitor database's connection count. Question: was swf-monitor itself under
 strain when it recorded the platform — a degraded observer is part of
 the evidence.
 
@@ -194,14 +194,14 @@ each family's control row docked above its panel:**
    the summary. The connection limit is likewise stated on the card
    and in the summary, not drawn: on the plot it dwarfs both panels.
 4. *Server latency* — milliseconds; a timeout records at the timeout
-   value. *PanDA monitor latency* follows on its own panel: the front
+   value. *pandamon latency* follows on its own panel: the front
    page and the worker-stats query, same treatment.
 5. *Web tier* — request rates by endpoint class and the 5xx count,
    present when the reporter reports; daemon liveness renders as lanes
    above the panels (per-daemon continuous lanes on the health-lane
    mechanism: green alive, failure color silent), so a stalled
    copyArchive is a red band, not a number.
-6. *Hosts* — per host, server and monitor: load average; memory used;
+6. *Hosts* — per host, PanDA server and swf-monitor: load average; memory used;
    volume use as percent, one line per volume; WSGI, ASGI, and agent
    resident memory; service liveness as lanes beside the daemon lanes.
 7. *Jobs in flight* — the scope's in-flight jobs family (by state,
@@ -270,7 +270,7 @@ alarm engine's job ([alarms.md](alarms.md)): the
 `panda_platform_health` alarm reads the latest published component on
 each engine tick and raises one detection per metric in warning —
 heartbeat yield, heartbeat staleness, database connections, server
-latency, PanDA monitor latency, monitor volumes, monitor services —
+latency, pandamon latency, swf-monitor volumes, swf-monitor services —
 plus one when the
 component itself is absent, unreadable, or silent beyond
 `stale_after_minutes`. Heartbeat verdicts are suppressed below

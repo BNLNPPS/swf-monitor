@@ -255,7 +255,7 @@
   <section class="snapper-cut-card">
     <div class="mb-2"><strong>Platform</strong>
       <span class="snapper-chip" style="background:{{ card.overall_chip.color }}">{{ card.overall }}</span>
-      {% if card.interval.end %}<span class="text-muted small">interval ending {{ card.interval.end }}</span>{% endif %}
+      {% if card.interval.end %}<span class="text-muted small">interval {{ card.interval.start|fmt_dt }} – {{ card.interval.end|fmt_dt }} ET</span>{% endif %}
       · <span class="text-muted small">server-host report: {{ card.reporter_status }}</span>
       · <a href="{{ card.errors_url }}">error breakdown at this cut</a></div>
     <div class="d-flex flex-wrap column-gap-3 row-gap-1 mb-2">
@@ -301,7 +301,7 @@
           </tbody>
         </table>
         {% if card.pandamon %}
-        <div class="mb-1"><strong>PanDA monitor</strong></div>
+        <div class="mb-1"><strong>pandamon</strong></div>
         <table class="table table-sm table-bordered w-auto mb-2">
           <tbody>
           {% for label, probe in card.pandamon %}
@@ -313,7 +313,7 @@
         {% endif %}
       </div>
       <div>
-        <div class="mb-1"><strong>Monitor host</strong></div>
+        <div class="mb-1"><strong>swf-monitor host</strong></div>
         {% for e in card.host.errors %}<div class="text-danger mb-1">{{ e }}</div>{% endfor %}
         <table class="table table-sm table-bordered w-auto mb-1">
           <tbody>
@@ -325,7 +325,7 @@
           {% for p in card.host.processes %}
           <tr><td>{{ p.label }}</td><td class="text-end">{% if p.error %}<span class="text-danger">{{ p.error }}</span>{% else %}{% if p.count is not None %}{{ p.count }} proc · {% endif %}{% if p.state %}<span class="{{ p.state|state_class }} px-1">{{ p.state }}</span> · {% endif %}{{ p.rss_mb|default:"—" }} MB{% if p.restarts %} · {{ p.restarts }} restarts{% endif %}{% endif %}</td></tr>
           {% endfor %}
-          <tr><td>monitor DB connections</td><td class="text-end">{{ card.host.db_connections|default:"—" }}</td></tr>
+          <tr><td>swf-monitor DB connections</td><td class="text-end">{{ card.host.db_connections|default:"—" }}</td></tr>
           </tbody>
         </table>
       </div>

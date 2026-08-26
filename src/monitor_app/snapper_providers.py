@@ -1513,21 +1513,21 @@ def _platform_groups():
          'prefixes': [], 'ids': ['plsv_latency'],
          'panel_px': 110, 'units': 'ms'},
         {'name': 'Platform PanDA monitor latency',
-         'title': 'PanDA monitor latency',
+         'title': 'pandamon latency',
          'prefixes': ['plpm_'], 'ids': [],
          'order': ['plpm_front', 'plpm_workers'],
          'panel_px': 110, 'units': 'ms'},
-        {'name': 'Platform monitor load', 'title': 'Monitor host load',
+        {'name': 'Platform monitor load', 'title': 'swf-monitor host load',
          'prefixes': ['plml_'], 'ids': [],
          'order': ['plml_1m', 'plml_5m', 'plml_15m'],
          'panel_px': 110, 'units': 'load average'},
-        {'name': 'Platform monitor memory', 'title': 'Monitor host memory',
+        {'name': 'Platform monitor memory', 'title': 'swf-monitor host memory',
          'prefixes': [], 'ids': ['plmm_used_pct'],
          'panel_px': 110, 'units': '% used'},
-        {'name': 'Platform monitor storage', 'title': 'Monitor host storage',
+        {'name': 'Platform monitor storage', 'title': 'swf-monitor host storage',
          'prefixes': ['plmv_'], 'ids': [],
          'panel_px': 110, 'units': '% used'},
-        {'name': 'Platform monitor processes', 'title': 'Monitor host processes',
+        {'name': 'Platform monitor processes', 'title': 'swf-monitor host processes',
          'prefixes': ['plmp_'], 'ids': [],
          'order': ['plmp_httpd', 'plmp_wsgi', 'plmp_asgi', 'plmp_ops_agent'],
          'panel_px': 110, 'units': 'MB resident'},
@@ -2617,15 +2617,15 @@ _PLATFORM_SUMMARY_SPECS = (
      lambda p, j: (p.get('database') or {}).get('longest_transaction_s')),
     ('server latency', 'plsv_latency', 'ms',
      lambda p, j: (p.get('server') or {}).get('latency_ms')),
-    ('PanDA monitor front page', 'plpm_front', 'ms',
+    ('pandamon front page', 'plpm_front', 'ms',
      lambda p, j: ((p.get('pandamon') or {}).get('front') or {}).get('latency_ms')),
-    ('PanDA monitor worker query', 'plpm_workers', 'ms',
+    ('pandamon worker query', 'plpm_workers', 'ms',
      lambda p, j: ((p.get('pandamon') or {}).get('workers') or {}).get('latency_ms')),
-    ('monitor load (1 min)', 'plml_1m', '',
+    ('swf-monitor load (1 min)', 'plml_1m', '',
      lambda p, j: ((p.get('monitor_host') or {}).get('load') or {}).get('1m')),
-    ('monitor memory used', 'plmm_used_pct', '%',
+    ('swf-monitor memory used', 'plmm_used_pct', '%',
      lambda p, j: ((p.get('monitor_host') or {}).get('memory') or {}).get('used_percent')),
-    ('monitor WSGI resident', 'plmp_wsgi', 'MB',
+    ('swf-monitor WSGI resident', 'plmp_wsgi', 'MB',
      lambda p, j: ((p.get('monitor_host') or {}).get('wsgi') or {}).get('rss_mb')),
     ('jobs in flight', '', 'jobs',
      lambda p, j: ((j.get('jobs') or {}).get('in_flight_now') or {}).get('total')),
@@ -2870,8 +2870,8 @@ def _platform_card(data, previous_data, ctx):
     if verdict_map.get('server_latency') == 'warning':
         warn_rows.add('server latency')
     if verdict_map.get('pandamon_latency') == 'warning':
-        warn_rows.update({'PanDA monitor front page',
-                          'PanDA monitor worker query'})
+        warn_rows.update({'pandamon front page',
+                          'pandamon worker query'})
     if verdict_map.get('monitor_volumes') == 'warning':
         warn_rows.add('monitor storage')
     summary = []
