@@ -113,12 +113,23 @@ from the job page. Each trigger opens one bounded dig: one
 representative job per distinct pattern signature in the episode, and
 for a lost-heartbeat episode one job per top silent node, chosen as
 the job whose silence began first there. For those jobs the dig
-fetches the pilot log from the site's published location where one
-exists (the NERSC portal directory holds `pilotlog-task<N>.txt`,
-the Slurm output, and the payload stdout and stderr per PanDA id),
-since the pilot log is the one record that separates a node blocked
-on I/O from a failing outbound path or a refusing server — the
-2026-08-25 diagnosis rested on a 229-minute hole in one pilot's log.
+reads every file at the site's published location (the NERSC portal
+directory holds, per PanDA id, the Slurm output and error files, the
+pilot log `pilotlog-task<N>.txt`, and the payload stdout and stderr),
+in that order: the batch system's own verdict first, the pilot's
+account second, the payload's last. The 2026-08-25 lost-heartbeat
+storm is the reference case: the pilot log showed a 229-minute hole
+and was read as a node-side I/O stall; the Slurm record, unread, said
+the node had run out of memory — 128 single-core pilots at 5.7 GB
+resident against a 476 GB node.
+
+Before a dig names any node-side cause, it computes the node budget
+from the job records: jobs per node (`modificationhost`) times their
+resident memory (`maxrss`) against the node's memory from the queue
+definition, and the equivalent for cores. A budget over the node is
+the finding; a stall, a hole in a log, or a missing heartbeat is the
+symptom.
+
 A dig's findings enter the action stream and the alarm event's detail,
 and the verdict attaches to the episode as above; a further dig in the
 same episode runs only on escalation or on the daily trickle.

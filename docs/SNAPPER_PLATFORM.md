@@ -318,6 +318,20 @@ discriminator (ERROR_ATTRIBUTION.md, dig triggers). The site-canary
 rider's fingerprint map later joins node identity to environment,
 so a faulty node reads with its platform, kernel, and mount state.
 
+The map also carries a node budget, the reading that catches a queue
+configuration before its first stall: per site, running jobs per node
+(the largest node's count and the median) and the resident memory per
+job from the trailing hour's finished jobs (`maxrss`, mean and 90th
+percentile), against the node memory and cores the queue definition
+declares. The product jobs × memory over the node's memory is
+published as a fraction with its own warning threshold
+(`platform_node_memory_warn_fraction`), evaluated per site, and it
+enters the alarm's detail and the summary at the cut. On 2026-08-25
+the NERSC_Perlmutter_epic queue ran 128 pilots per 476 GB node at
+5.7 GB each — a fraction of 1.5 — for hours before the first pilot
+went silent; the reading would have named the queue and the number
+at the first publication.
+
 ## Worker release for stalled jobs
 
 When the Watcher fails a running job for lost heartbeat, the job's
