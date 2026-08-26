@@ -115,13 +115,22 @@ def detect(client, params):
             continue
         facts = {}
         if metric == "heartbeat_yield":
-            facts = {"yield": heartbeats.get("yield"),
-                     "received": heartbeats.get("received"),
-                     "expected": heartbeats.get("expected"),
+            # The verdict is on the windowed yield (two heartbeat
+            # periods, ratio of sums); older records carry only the
+            # per-interval figure.
+            window = heartbeats.get("window") or {}
+            basis = window if window.get("yield") is not None else heartbeats
+            minutes = round(int(window.get("seconds") or 0) / 60)
+            span = (f"over {minutes} min ({window.get('intervals')} intervals)"
+                    if window.get("yield") is not None else "in the interval")
+            facts = {"yield": basis.get("yield"),
+                     "received": basis.get("received"),
+                     "expected": basis.get("expected"),
+                     "window_minutes": minutes or None,
                      "running": running}
-            detail = (f"yield {heartbeats.get('yield')} — "
-                      f"{heartbeats.get('received')} heartbeats received "
-                      f"against {heartbeats.get('expected')} expected from "
+            detail = (f"yield {basis.get('yield')} {span} — "
+                      f"{basis.get('received')} heartbeats received "
+                      f"against {basis.get('expected')} expected from "
                       f"{running} running jobs")
         elif metric == "heartbeat_staleness":
             tier = thresholds.get("platform_stale_warn_tier_minutes")

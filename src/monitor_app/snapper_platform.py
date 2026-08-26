@@ -6,8 +6,11 @@ assessed reading of the platform at one instant, in five groups:
 - database: PanDA database connections, longest transaction, and the
   jobsactive4 table's health, read from the PanDA database;
 - heartbeats: running jobs by heartbeat age, heartbeats received and
-  jobs started in the publication interval, and the heartbeat yield
-  against the running population's expected rate;
+  jobs started in the publication interval, the heartbeat yield
+  against the running population's expected rate, and the same yield
+  as a ratio of sums over a window of two heartbeat periods (the
+  per-interval yield beats against the pilot's heartbeat phase; the
+  window is the assessed figure);
 - server: one timed liveness request to the PanDA server;
 - server_host: the pandaserver01 reporter's record when one has been
   delivered (docs/PANDA_SERVER_REPORTER.md), else absent;
@@ -26,11 +29,14 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
+import logging
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 
 from django.db import connection, connections, transaction
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 from snapper_ai.services import (
     ComponentUpdate,
@@ -140,8 +146,13 @@ PLATFORM_REGISTRATION = {
                 "stale_120: last modification older than N minutes), "
                 "heartbeats received and jobs started in the interval, "
                 "the expected heartbeat count for the running population "
-                "at the configured heartbeat period, and the yield "
-                "(received over expected)."
+                "at the configured heartbeat period, the yield "
+                "(received over expected), and window: the yield as a "
+                "ratio of sums over the last two heartbeat periods "
+                "(seconds, intervals, received, expected, yield, and the "
+                "recent intervals it sums). The window yield is the "
+                "assessed figure; the per-interval yield beats against "
+                "the pilot heartbeat phase."
             ),
         },
         "heartbeat_sites": {
@@ -600,7 +611,11 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
         verdicts[name] = ("unknown" if not known
                           else "warning" if condition_warning else "ok")
 
-    y = heartbeats.get("yield")
+    # The verdict reads the windowed yield: the per-interval ratio
+    # beats against the 30-minute pilot heartbeat phase.
+    y = (heartbeats.get("window") or {}).get("yield")
+    if y is None:
+        y = heartbeats.get("yield")
     verdict("heartbeat_yield",
             y is not None and y < thresholds["platform_yield_warn_below"],
             known=y is not None and "error" not in heartbeats)
@@ -652,13 +667,61 @@ def assess(database, heartbeats, server, reporter_status, monitor_host,
 
 # ── Projection and publication ──────────────────────────────────────────
 
-def _previous_source_time():
+def _previous_publication():
+    """The component's current source time and data (None, None for a
+    fresh record)."""
     from snapper_ai.models import CurrentComponent
 
     row = (CurrentComponent.objects
            .filter(scope=SCOPE, name=COMPONENT_NAME)
-           .values("source_as_of").first())
-    return row["source_as_of"] if row else None
+           .values("source_as_of", "data").first())
+    if not row:
+        return None, None
+    return row["source_as_of"], (row["data"] or {})
+
+
+WINDOW_PERIODS = 2          # the yield window, in heartbeat periods
+WINDOW_MAX_INTERVALS = 48   # bound on the recent-interval list
+
+
+def heartbeat_window(heartbeats, previous, mark, until, period_seconds):
+    """The yield over the last WINDOW_PERIODS heartbeat periods as a
+    ratio of sums: the intervals carried by the previous publication
+    that end inside the window, plus this one. A ratio of sums, never
+    a mean of ratios — the running population moves between
+    intervals."""
+    window_seconds = WINDOW_PERIODS * max(int(period_seconds), 1)
+    floor = until - timedelta(seconds=window_seconds)
+    recent = []
+    for entry in ((previous or {}).get("window") or {}).get("recent") or []:
+        try:
+            end = datetime.fromisoformat(
+                str(entry["end"]).replace("Z", "+00:00"))
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error("platform heartbeat window: bad recent entry "
+                         "%r: %s", entry, e)
+            continue
+        if end > floor and end <= mark:
+            recent.append({"start": entry.get("start"), "end": entry["end"],
+                           "received": int(entry.get("received") or 0),
+                           "expected": int(entry.get("expected") or 0)})
+    if "error" not in heartbeats:
+        recent.append({"start": _iso_utc(mark), "end": _iso_utc(until),
+                       "received": int(heartbeats.get("received") or 0),
+                       "expected": int(heartbeats.get("expected") or 0)})
+    recent = recent[-WINDOW_MAX_INTERVALS:]
+    received = sum(e["received"] for e in recent)
+    expected = sum(e["expected"] for e in recent)
+    return {
+        "seconds": window_seconds,
+        "periods": WINDOW_PERIODS,
+        "intervals": len(recent),
+        "received": received,
+        "expected": expected,
+        "yield": (round(min(received / expected, 9.999), 3)
+                  if expected else None),
+        "recent": recent,
+    }
 
 
 def platform_projection(now=None, mark=None):
@@ -666,16 +729,19 @@ def platform_projection(now=None, mark=None):
     is (mark, now]; mark defaults to the component's current source
     time, or a short first interval for a fresh record."""
     observed_at = now or timezone.now()
+    previous_mark, previous = _previous_publication()
     if mark is None:
-        mark = _previous_source_time()
+        mark = previous_mark
     if mark is None or mark >= observed_at:
         mark = observed_at - timedelta(minutes=FIRST_INTERVAL_MINUTES)
     thresholds = {key: _config(key) for key in CONFIG_DEFAULTS
                   if key.startswith("platform_") and (
                       "warn" in key)}
     database = database_reading()
-    heartbeats = heartbeat_reading(
-        mark, observed_at, int(_config("platform_heartbeat_period_seconds")))
+    period_seconds = int(_config("platform_heartbeat_period_seconds"))
+    heartbeats = heartbeat_reading(mark, observed_at, period_seconds)
+    heartbeats["window"] = heartbeat_window(
+        heartbeats, previous, mark, observed_at, period_seconds)
     server = server_reading(str(_config("platform_panda_server_url")),
                             _config("platform_server_timeout_seconds"))
     pandamon = pandamon_reading(str(_config("platform_pandamon_url")),

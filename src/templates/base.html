@@ -676,6 +676,7 @@
                    class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}">System Status</a>
                 <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}"
                    class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='platform' %}">Platform status</a>
                 <a href="{% url 'canary:canary_page' %}"
                    class="{% if active_nav.canary %}nav-active{% endif %}">Canary</a>
                 {% if user.is_authenticated and user.is_staff %}

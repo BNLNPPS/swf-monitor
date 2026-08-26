@@ -276,7 +276,7 @@
           {% endfor %}
           </tbody>
         </table>
-        <div class="text-muted small mb-2">{{ card.heartbeats.started }} jobs started in the interval.</div>
+        <div class="text-muted small mb-2">{{ card.heartbeats.started }} jobs started in the interval.{% if card.heartbeats.window_yield is not None %} Yield over the {{ card.heartbeats.window_minutes }}-min window ({{ card.heartbeats.window_intervals }} intervals): <strong>{{ card.heartbeats.window_yield }}</strong>, {{ card.heartbeats.window_received }} received against {{ card.heartbeats.window_expected }} expected — the assessed figure; the per-interval yield beats against the pilot heartbeat phase.{% endif %}</div>
       </div>
       <div>
         <div class="mb-1"><strong>PanDA database</strong></div>

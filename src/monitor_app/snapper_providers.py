@@ -617,6 +617,9 @@ def _platform_curve_values(state):
         values['plhb_started'] = int(hb.get('started') or 0)
         if hb.get('yield') is not None:
             values['plhy_yield'] = float(hb['yield'])
+        window_yield = (hb.get('window') or {}).get('yield')
+        if window_yield is not None:
+            values['plhy_window'] = float(window_yield)
         s30 = int(hb.get('stale_30') or 0)
         s60 = int(hb.get('stale_60') or 0)
         s120 = int(hb.get('stale_120') or 0)
@@ -787,8 +790,12 @@ def _epicprod_curve_color(curve_id):
         return '#ef6c00'
     if curve_id == 'plst_120':
         return '#c62828'
-    if curve_id == 'plhy_yield':
+    if curve_id == 'plhy_window':
         return '#0d47a1'
+    if curve_id == 'plhy_yield':
+        return '#90caf9'
+    if curve_id == 'plhb_started':
+        return '#7e57c2'
     if curve_id == 'pldb_waiting':
         return '#ef6c00'
     if curve_id == 'pldb_active':
@@ -844,7 +851,8 @@ def _epicprod_curve_color(curve_id):
 _PLATFORM_LABELS = {
     'plhb_received': 'heartbeats received',
     'plhb_started': 'jobs started',
-    'plhy_yield': 'yield',
+    'plhy_yield': 'yield per interval',
+    'plhy_window': 'yield, 60-min window',
     'pldb_active': 'active',
     'pldb_total': 'total',
     'pldb_waiting': 'waiting',
@@ -1408,12 +1416,25 @@ def _platform_groups():
     # Panel order: the platform's own quantities first, then the load
     # and consequence panels beneath them for correlation by eye.
     return (
+        # Starts are (in practice) a subset of the heartbeats received:
+        # a light hatch beneath the starts curve marks the subset
+        # without reading as a stacked band. A start that pokes above
+        # received is a job that started and left running within one
+        # interval — a burn-through signature, left visible.
         {'name': 'Platform heartbeats', 'title': 'Heartbeats',
          'prefixes': [], 'ids': ['plhb_received', 'plhb_started'],
          'order': ['plhb_received', 'plhb_started'],
+         'fills': {'plhb_started': {
+             'pattern': '/', 'fgcolor': 'rgba(126,87,194,0.35)',
+             'bgcolor': 'rgba(126,87,194,0.05)', 'size': 7,
+             'solidity': 0.15}},
          'panel_px': 150, 'units': 'per interval'},
+        # The window yield (ratio of sums over two heartbeat periods) is
+        # the assessed figure; the per-interval yield beats against the
+        # pilot's 30-minute heartbeat phase and draws faint beneath it.
         {'name': 'Platform heartbeat yield', 'title': 'Heartbeat yield',
-         'prefixes': [], 'ids': ['plhy_yield'],
+         'prefixes': [], 'ids': ['plhy_window', 'plhy_yield'],
+         'order': ['plhy_window', 'plhy_yield'],
          'panel_px': 110, 'units': 'received / expected'},
         {'name': 'Platform staleness', 'title': 'Heartbeat staleness',
          'prefixes': [], 'ids': ['plst_30', 'plst_60', 'plst_120'],
@@ -2522,7 +2543,9 @@ _PLATFORM_SUMMARY_SPECS = (
      lambda p, j: (p.get('heartbeats') or {}).get('received')),
     ('jobs started', 'plhb_started', 'per interval',
      lambda p, j: (p.get('heartbeats') or {}).get('started')),
-    ('heartbeat yield', 'plhy_yield', '',
+    ('heartbeat yield, 60-min window', 'plhy_window', '',
+     lambda p, j: ((p.get('heartbeats') or {}).get('window') or {}).get('yield')),
+    ('heartbeat yield', 'plhy_yield', 'per interval',
      lambda p, j: (p.get('heartbeats') or {}).get('yield')),
     ('silent 30–60 min', 'plst_30', 'jobs',
      lambda p, j: _platform_band(p, 30, 60)),
@@ -2785,7 +2808,7 @@ def _platform_card(data, previous_data, ctx):
     warn_rows = set()
     verdict_map = assessment.get('verdicts') or {}
     if verdict_map.get('heartbeat_yield') == 'warning':
-        warn_rows.add('heartbeat yield')
+        warn_rows.add('heartbeat yield, 60-min window')
     if verdict_map.get('heartbeat_staleness') == 'warning':
         warn_rows.update({'silent 60–120 min', 'silent over 120 min'})
     if verdict_map.get('db_connections') == 'warning':
@@ -2817,9 +2840,9 @@ def _platform_card(data, previous_data, ctx):
                 round(value) if isinstance(value, float) else value,
                 round(previous) if isinstance(previous, float) else previous)
             if isinstance(value, (int, float)) and isinstance(previous, (int, float))
-            and label != 'heartbeat yield' else (
+            and not label.startswith('heartbeat yield') else (
                 _fmt_signed(value - previous)
-                if label == 'heartbeat yield'
+                if label.startswith('heartbeat yield')
                 and isinstance(value, (int, float))
                 and isinstance(previous, (int, float)) else None),
             'stats': stats, 'warn': label in warn_rows,
@@ -2878,6 +2901,12 @@ def _platform_card(data, previous_data, ctx):
             'received': int(hb.get('received') or 0),
             'expected': int(hb.get('expected') or 0),
             'yield': hb.get('yield'),
+            'window_yield': (hb.get('window') or {}).get('yield'),
+            'window_received': int((hb.get('window') or {}).get('received') or 0),
+            'window_expected': int((hb.get('window') or {}).get('expected') or 0),
+            'window_minutes': round(
+                int((hb.get('window') or {}).get('seconds') or 0) / 60),
+            'window_intervals': int((hb.get('window') or {}).get('intervals') or 0),
             'started': int(hb.get('started') or 0),
             'period_minutes': round(int(hb.get('period_seconds') or 1800) / 60),
             'stale_30': int(hb.get('stale_30') or 0),

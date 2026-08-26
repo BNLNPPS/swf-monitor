@@ -64,7 +64,16 @@ received, on the error component's interval idiom: source time
 advances atomically with content, so intervals tile). Heartbeat yield
 is published as an assessed ratio: received over expected, expected
 being the running population times the interval over the pilot's
-30-minute heartbeat period. Job starts in the interval complete the
+30-minute heartbeat period. The per-interval yield beats against the
+heartbeat phase — a five-minute interval sees whichever pilots' 30-minute
+clocks fall inside it — so the component also publishes the yield
+over a window of two heartbeat periods (60 minutes at the configured
+period) as a ratio of sums: the received and expected counts of the
+intervals ending inside the window, carried in the record and summed,
+never a mean of per-interval ratios (the running population moves
+between intervals). The window yield is the assessed figure the
+verdict and the alarm read; the per-interval yield stays in the
+record. Job starts in the interval complete the
 group. Question: were pilots being heard, and at the expected rate.
 
 **Server (gauge, measured by the maintainer).** One timed request to
@@ -154,8 +163,17 @@ report; the scope's front door does not grow.
 load and consequence panels beneath them for correlation by eye —
 each family's control row docked above its panel:**
 
-1. *Heartbeats* — received per interval and starts per interval;
-   *Heartbeat yield* as its own small panel on a 0–1 scale.
+1. *Heartbeats* — received per interval and starts per interval.
+   Starts are in practice a subset of the heartbeats received (a
+   job that starts in the interval and is still running has
+   heartbeated), so the area beneath the starts curve carries a
+   light hatch marking the subset relation. It is a hatch rather
+   than a solid fill because on this page a solid fill is a stacked
+   band. Starts above received are jobs that started and left the
+   running state within one interval, the burn-through signature,
+   and stay visible. *Heartbeat yield* as its own small panel on a 0–1 scale:
+   the 60-minute window yield bold, the per-interval yield faint
+   beneath it.
 2. *Heartbeat staleness* — the 30–60, 60–120, and over-120-minute
    bands stacked (the recorded nested tiers plotted as exclusive
    bands); a staleness selector switches the panel to the over-120
@@ -164,12 +182,11 @@ each family's control row docked above its panel:**
    waiting in the warning color, on their own scale. *DB connections*
    follows as a small panel with the pool total as one line: a drop to
    zero is a server restart, a climb is a leak or a second pool. Idle
-   connections are not plotted — the PanDA server's persistent pools
-   hold on the order of 120 idle connections, a standing base that
-   squashes activity into a hairline when stacked beneath it — and
-   appear on the card and in the summary instead. The connection
-   limit is likewise stated on the card and in the summary, not drawn:
-   on the plot it dwarfs both panels into a sliver.
+   connections are not plotted: the PanDA server's persistent pools
+   hold about 120 of them, a base that would compress the activity
+   to a sliver if stacked beneath it. Idle appears on the card and in
+   the summary. The connection limit is likewise stated on the card
+   and in the summary, not drawn: on the plot it dwarfs both panels.
 4. *Server latency* — milliseconds; a timeout records at the timeout
    value. *PanDA monitor latency* follows on its own panel: the front
    page and the worker-stats query, same treatment.
