@@ -172,8 +172,10 @@ each family's control row docked above its panel:**
    band. Starts above received are jobs that started and left the
    running state within one interval, the burn-through signature,
    and stay visible. *Heartbeat yield* as its own small panel on a
-   0–1 scale: the 60-minute window yield bold, the per-interval yield
-   faint beneath it. The window curve is derived at series time from
+   0–1 scale: the 60-minute window yield bold; the per-interval yield
+   is a faint member that starts unticked, since its phase spikes
+   would set the axis and flatten the window curve. The window curve
+   is derived at series time from
    the recorded per-interval received and expected counts (a rolling
    ratio of sums over the trailing hour of snaps), so it spans the
    record from its first publication; it equals the record's own

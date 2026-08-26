@@ -1483,9 +1483,12 @@ def _platform_groups():
         # The window yield (ratio of sums over two heartbeat periods) is
         # the assessed figure; the per-interval yield beats against the
         # pilot's 30-minute heartbeat phase and draws faint beneath it.
+        # The per-interval yield starts unticked: its phase spikes would
+        # set the axis and flatten the window curve.
         {'name': 'Platform heartbeat yield', 'title': 'Heartbeat yield',
          'prefixes': [], 'ids': ['plhy_window', 'plhy_yield'],
          'order': ['plhy_window', 'plhy_yield'],
+         'default_off_ids': ['plhy_yield'],
          'panel_px': 110, 'units': 'received / expected'},
         {'name': 'Platform staleness', 'title': 'Heartbeat staleness',
          'prefixes': [], 'ids': ['plst_30', 'plst_60', 'plst_120'],
