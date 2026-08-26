@@ -491,10 +491,60 @@ def _site_curve_values(panda):
     return values
 
 
+PLATFORM_YIELD_WINDOW_SECONDS = 3600
+
+
+def _platform_series_transform(series):
+    """Derive the 60-minute heartbeat yield curve from the recorded
+    per-interval counts: at each snap, heartbeats received over
+    heartbeats expected summed across the snaps of the trailing hour —
+    the ratio of sums the record's own window carries, computed here
+    over the whole series so the curve spans the record from its first
+    publication. The expected counts are an input only and leave the
+    product."""
+    from datetime import datetime, timedelta
+
+    curves = series.get('curves') or {}
+    expected = curves.pop('plhb_expected', None)
+    received = (curves.get('plhb_received') or {}).get('points') or []
+    if not received or not expected:
+        return series
+    expected_at = {point[0]: float(point[1] or 0)
+                   for point in expected.get('points') or []}
+    rows = []
+    for stamp, value in received:
+        try:
+            rows.append((datetime.fromisoformat(stamp), stamp,
+                         float(value or 0), expected_at.get(stamp, 0.0)))
+        except (TypeError, ValueError) as e:
+            logger.error('platform yield window: bad stamp %r: %s', stamp, e)
+    rows.sort(key=lambda row: row[0])
+    span = timedelta(seconds=PLATFORM_YIELD_WINDOW_SECONDS)
+    points = []
+    head = 0
+    sum_received = sum_expected = 0.0
+    for at, stamp, got, want in rows:
+        sum_received += got
+        sum_expected += want
+        while rows[head][0] <= at - span:
+            sum_received -= rows[head][2]
+            sum_expected -= rows[head][3]
+            head += 1
+        if sum_expected > 0:
+            points.append(
+                [stamp, round(min(sum_received / sum_expected, 9.999), 3)])
+    if points:
+        curves['plhy_window'] = {
+            'label': _PLATFORM_LABELS['plhy_window'], 'points': points}
+    series['curves'] = curves
+    return series
+
+
 def _epicprod_series_transform(series):
     """Rank and fold queue curves using the series already assembled."""
     from datetime import datetime
 
+    series = _platform_series_transform(series)
     curves = series.get('curves') or {}
     queue_curves = {
         curve_id: curve for curve_id, curve in curves.items()
@@ -617,9 +667,9 @@ def _platform_curve_values(state):
         values['plhb_started'] = int(hb.get('started') or 0)
         if hb.get('yield') is not None:
             values['plhy_yield'] = float(hb['yield'])
-        window_yield = (hb.get('window') or {}).get('yield')
-        if window_yield is not None:
-            values['plhy_window'] = float(window_yield)
+        # Input to the series transform, which derives the 60-minute
+        # yield curve over the whole record and removes this curve.
+        values['plhb_expected'] = int(hb.get('expected') or 0)
         s30 = int(hb.get('stale_30') or 0)
         s60 = int(hb.get('stale_60') or 0)
         s120 = int(hb.get('stale_120') or 0)
@@ -851,6 +901,7 @@ def _epicprod_curve_color(curve_id):
 _PLATFORM_LABELS = {
     'plhb_received': 'heartbeats received',
     'plhb_started': 'jobs started',
+    'plhb_expected': 'heartbeats expected',
     'plhy_yield': 'yield per interval',
     'plhy_window': 'yield, 60-min window',
     'pldb_active': 'active',
@@ -1422,7 +1473,7 @@ def _platform_groups():
         # received is a job that started and left running within one
         # interval — a burn-through signature, left visible.
         {'name': 'Platform heartbeats', 'title': 'Heartbeats',
-         'prefixes': [], 'ids': ['plhb_received', 'plhb_started'],
+         'prefixes': ['plhb_'], 'ids': [],
          'order': ['plhb_received', 'plhb_started'],
          'fills': {'plhb_started': {
              'pattern': '/', 'fgcolor': 'rgba(126,87,194,0.35)',
