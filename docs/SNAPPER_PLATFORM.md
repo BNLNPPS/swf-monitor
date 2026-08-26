@@ -287,6 +287,77 @@ A `panda-platform` System Status collector reads the latest published
 component so the platform state enters the System page and the health
 lane without a second source.
 
+## Node health map
+
+The staleness tiers say how many running jobs are silent at each
+site; the node health map says which nodes. Every job record carries
+the worker node in `modificationhost` (`nid006841` at
+NERSC_Perlmutter_epic, `n388` at UM_GREX_PanDA_1, a GKE node name at
+BNL_ePIC_GOOGLE), so the heartbeat reading groups silent running jobs
+by site and node. For each site the record carries the nodes whose
+running jobs are all silent beyond the warning tier
+(`platform_stale_warn_tier_minutes`) with the job count and the age
+of the oldest silence, bounded to the 32 worst nodes per site by
+silent count with the remainder folded into a count
+(`heartbeats.nodes`, on the site map's bounding rule). A node whose
+jobs are all silent while its neighbours heartbeat is a node fault —
+the 2026-08-25 lost-heartbeat storm was per-node I/O stalls starting
+at different times on different nodes; silence across every node of a
+site is a site path or server fault. The distinction is the first
+question a site asks, and it is answered from the record without a
+log.
+
+The staleness panel is unchanged; the map renders at the cut as a
+per-site node table beneath the heartbeat table, and the
+`heartbeat_staleness` alarm detection names the top silent nodes and
+their silence onset in its detail, the text a site needs to act.
+Where a site publishes per-job files at a known location (the NERSC
+portal directory per PanDA id), the node table links the job whose
+silence began first on that node, since its pilot log is the
+discriminator (ERROR_ATTRIBUTION.md, dig triggers). The site-canary
+rider's fingerprint map later joins node identity to environment,
+so a faulty node reads with its platform, kernel, and mount state.
+
+## Worker release for stalled jobs
+
+When the Watcher fails a running job for lost heartbeat, the job's
+worker is not released: PanDA's worker synchronization issues
+`SYNC_WORKERS_KILL` only when the pilot has reported `finished` and
+harvester lags behind it (worker_module.py, `get_workers_to_synchronize`),
+and harvester marks a job's workers for killing only on a
+`tobekilled` command (propagator.py), which the Watcher's failure
+never issues. A pilot blocked on I/O reports nothing, so its worker
+holds the node until the batch walltime — on 2026-08-25, up to two
+hours per worker after the job was already failed, on nodes that were
+producing nothing. The queue-level `sweepPQ` API kills every worker
+of a queue in a given status and is too blunt for this.
+
+The release uses the same command the sync daemon uses, with explicit
+worker ids: the Watcher-failed PanDA ids of the interval, joined
+through `harvester_rel_jobs_workers` to workers still `running` in
+`harvester_workers`, issued as `SYNC_WORKERS_KILL` per harvester id in
+shards of 100 through the server's `commandToHarvester`; harvester's
+sweeper marks the workers and the site's sweeper plugin cancels the
+batch jobs. The call is in-process on the PanDA server, so the
+releaser is a host-side script on pandaserver01 beside the reporter
+(PANDA_SERVER_REPORTER.md): standard library plus the server's own
+taskbuffer under the panda service environment, run on demand, never
+on a schedule of its own.
+
+Triggering and bounds follow the bounded-action ladder of
+SNAPPER_ERRORS.md. The `heartbeat_staleness` detection is the
+trigger; the release is first an AI-proposals action
+(AI_PROPOSALS.md) — the detection's detail lists the workers it
+would release, by site and node, and a person approves in one step —
+and becomes autonomous within an allowlist of sites and a per-episode
+cap once the proposal record shows it acting correctly. Every release
+is an action-stream record naming the detection, the workers, and the
+command ids written; a worker that is not `running` by the time the
+command is written is skipped and counted. The releaser never kills
+workers whose jobs are not already failed by the server: it releases
+resources the workflow has given up on, and takes no decision about
+the jobs.
+
 ## Retrieval
 
 The component rides the existing Snapper retrieval surface unchanged:
@@ -326,8 +397,10 @@ envelopes, and `changes_between` locates the transitions.
   entries.
 - Order of delivery: maintainer and component first (the record starts
   accruing), then the view with its summary, then the reporter and
-  ingest, then detection; correlation in a later round. Each stage is
-  usable on its own.
+  ingest, then detection; then the node health map (record, card, and
+  alarm detail), the worker releaser on pandaserver01 in its proposal
+  form, and the dig triggers of ERROR_ATTRIBUTION.md; correlation in a
+  later round. Each stage is usable on its own.
 
 ## Related
 

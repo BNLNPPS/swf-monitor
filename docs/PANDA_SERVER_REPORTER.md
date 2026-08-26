@@ -52,43 +52,47 @@ Available without additional privilege:
   no request. Unprivileged systemd user units exist but do not persist
   across logout without linger.
 
-Not available today:
+Privileged access: the account holds passwordless sudo
+(`(root) NOPASSWD: ALL`, verified 2026-08-25). Not yet set, and set by
+the reporter's install step under that access:
 
-- `sudo`: password required; no rules for the account.
-- Lingering user session (`Linger=no`), so a user systemd unit cannot be
-  the long-running form without a one-time root action.
-- System journal: the account is not in `systemd-journal`; only its own
-  messages are visible.
-- Root-only logs: `/var/log/messages` and `/var/log/httpd/` (the latter
-  is empty; PanDA's web tier logs under `/var/log/panda/`).
+- Lingering user session (`Linger=no` today), so that a user systemd
+  unit persists across logout; alternatively a system unit, as the
+  swf-monitor bots on pandaserver02 are installed.
+- System journal: the account is not in `systemd-journal`; daemon
+  crash, OOM, and unit restart events are read once it is.
+- Root-only logs: `/var/log/messages` (`/var/log/httpd/` is empty;
+  PanDA's web tier logs under `/var/log/panda/`).
 - Apache `mod_status`: not enabled (no listener on localhost:80).
 
 Host note: the root volume is 12 GB at 64% use, /var is 32 GB at 40%;
 the account's home is on the shared EIC NFS volume at 91% use. The
 reporter's state and buffer files are kept small and rotated.
 
-## Access to request
+## Privileged setup at install
 
-Ordered by value, each independent:
+Each step is one root action, read-only in effect except the last:
 
-1. **Linger for the account** — `loginctl enable-linger wenauseic`
-   (one root command). Lets the reporter run as a persistent user
-   systemd service with restart-on-failure instead of a cron entry.
+1. **Persistent service** — a system unit under `/etc/systemd/system/`
+   with `Restart=always`, or `loginctl enable-linger wenauseic` with a
+   user unit. Either replaces the cron form.
 2. **`systemd-journal` group membership** — adds daemon crash, OOM, and
-   unit restart events to the report; read-only.
+   unit restart events to the report.
 3. **Apache `mod_status` on localhost** — one httpd configuration
    fragment (`ExtendedStatus On`, `/server-status` allowed from
    127.0.0.1 only). Adds direct web-tier occupancy: busy and idle
    workers against `MaxRequestWorkers`, the saturation signal the logs
    only show indirectly.
-4. **Service-control sudo rules** — for the operations step beyond
-   monitoring: `systemctl status|restart` on `panda_httpd`,
-   `panda_daemon`, `panda_jedi`, `panda_mcp`, and read access to
-   `/var/log/messages`. A sudoers fragment limited to those commands,
-   or passwordless sudo for the account as on the GPU worker host.
+4. **Service control** — `systemctl status|restart` on `panda_httpd`,
+   `panda_daemon`, `panda_jedi`, `panda_mcp`, for the operations step
+   beyond monitoring: the worker releaser (SNAPPER_PLATFORM.md, Worker
+   release for stalled jobs) and daemon restarts on a silent-daemon
+   detection. Operational control stays behind the platform's
+   proposal and action-stream conventions; the access alone changes
+   nothing.
 
-Items 1–3 are read-only and low-risk; item 4 confers operational
-control and is the one to justify separately.
+Every install action on this host is announced and recorded in the
+action stream before it is taken.
 
 ## Delivery
 

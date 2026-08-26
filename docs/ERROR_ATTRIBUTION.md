@@ -102,6 +102,27 @@ episodes re-earn their verdict by trickle re-sampling (order one dig
 per day). Cost scales with the number of distinct failure modes, not
 with job count.
 
+### Dig triggers
+
+Digs are never routine. A dig runs on three triggers only: a storm
+start from the error-stream detector (SNAPPER_ERRORS.md, storm
+detection), a platform alarm detection whose detail concentrates at a
+site — heartbeat staleness or yield at one site, or a node list from
+the node health map (SNAPPER_PLATFORM.md) — and an operator request
+from the job page. Each trigger opens one bounded dig: one
+representative job per distinct pattern signature in the episode, and
+for a lost-heartbeat episode one job per top silent node, chosen as
+the job whose silence began first there. For those jobs the dig
+fetches the pilot log from the site's published location where one
+exists (the NERSC portal directory holds `pilotlog-task<N>.txt`,
+the Slurm output, and the payload stdout and stderr per PanDA id),
+since the pilot log is the one record that separates a node blocked
+on I/O from a failing outbound path or a refusing server — the
+2026-08-25 diagnosis rested on a 229-minute hole in one pilot's log.
+A dig's findings enter the action stream and the alarm event's detail,
+and the verdict attaches to the episode as above; a further dig in the
+same episode runs only on escalation or on the daily trickle.
+
 ## Population-wide channels
 
 - **Exit-code vocabulary.** The payload communicates its failure mode
