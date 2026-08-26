@@ -429,6 +429,17 @@ RUCIO CATALOGS:
 - All exposed Rucio operations are read-only. Credentials and the BNL proxy
   remain on swf-testbed and are never returned to MCP clients.
 
+SNAPPER STATE HISTORY (snapper_* tools):
+- Coherent snapshots of system state, captured every 30 s when anything
+  changed: snapper_latest, snapper_state_at(time), snapper_changes_between,
+  snapper_component_history, snapper_context_around. Every answer carries
+  the ACTUAL snap time and observer coverage; never infer state across a gap.
+- The views' own products, as data: snapper_series(scope, focus, window) —
+  the curves a focus view plots (platform, site, errors, campaign), and
+  snapper_cut_summary(scope, focus, time) — every plotted metric at an
+  instant with delta and window min/mean/max. Reach for these before walking
+  component history when the question is about time histories.
+
 AFTER swf_start_workflow — ACTIVELY POLL, DO NOT SLEEP:
 Poll swf_get_workflow_monitor(execution_id) every 10-15s until completion.
 Report progress to user as it evolves. Check swf_list_logs(level='ERROR') after.

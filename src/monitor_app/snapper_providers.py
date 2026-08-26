@@ -2743,6 +2743,152 @@ def _scope_cum_at(scope, instant):
     return jobs.get('cum') or {}
 
 
+def _platform_summary(scope, requested_at, since, data, kills_total,
+                      kills_by_comp):
+    """The summary across every metric the Platform view plots: value
+    at the cut, change against the previous snap, and min/mean/max
+    over (since, requested_at], read from the coherent snaps carrying
+    the platform component. Serves the card and the cut-summary query
+    alike (snapper_ai.products.cut_summary). Rows carry formatted text
+    for the page and raw numbers for programmatic readers. Returns
+    (rows, range text, walk error)."""
+    assessment = data.get('assessment') or {}
+    db = data.get('database') or {}
+    walk = []
+    walk_error = ''
+    if requested_at is not None:
+        try:
+            walk = _platform_summary_walk(scope, since, requested_at)
+        except Exception as e:                               # noqa: BLE001
+            logger.error('platform summary: walk failed: %s', e)
+            walk_error = f'range statistics failed: {e}'
+    capped = len(walk) > 3000
+    walk = walk[:3000]
+    at = walk[0] if walk else (requested_at, data, {})
+    prev = walk[1] if len(walk) > 1 else None
+    warn_rows = set()
+    verdict_map = assessment.get('verdicts') or {}
+    if verdict_map.get('heartbeat_yield') == 'warning':
+        warn_rows.add('heartbeat yield, 60-min window')
+    if verdict_map.get('heartbeat_staleness') == 'warning':
+        warn_rows.update({'silent 60–120 min', 'silent over 120 min'})
+    if verdict_map.get('db_connections') == 'warning':
+        warn_rows.add('DB connections')
+    if verdict_map.get('server_latency') == 'warning':
+        warn_rows.add('server latency')
+    if verdict_map.get('pandamon_latency') == 'warning':
+        warn_rows.update({'pandamon front page',
+                          'pandamon worker query'})
+    if verdict_map.get('monitor_volumes') == 'warning':
+        warn_rows.add('monitor storage')
+    summary = []
+    for label, curve, unit, extract in _PLATFORM_SUMMARY_SPECS:
+        value = extract(at[1], at[2])
+        previous = extract(prev[1], prev[2]) if prev else None
+        samples = [v for v in (extract(p, j) for _, p, j in walk)
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        stats = None
+        if samples:
+            lo, hi = min(samples), max(samples)
+            mean = sum(samples) / len(samples)
+            position = (None if hi == lo or not isinstance(value, (int, float))
+                        else round(100 * (value - lo) / (hi - lo)))
+            stats = {'min': _fmt_num(lo), 'mean': _fmt_num(mean),
+                     'max': _fmt_num(hi), 'position': position,
+                     'min_raw': lo, 'mean_raw': mean, 'max_raw': hi,
+                     'samples': len(samples)}
+        numeric = (isinstance(value, (int, float))
+                   and not isinstance(value, bool))
+        summary.append({
+            'label': label, 'curve': curve, 'unit': unit,
+            'value': _fmt_num(value), 'raw': value if numeric else None,
+            'previous_raw': (previous if isinstance(previous, (int, float))
+                             and not isinstance(previous, bool) else None),
+            'delta': cut_delta(
+                round(value) if isinstance(value, float) else value,
+                round(previous) if isinstance(previous, float) else previous)
+            if isinstance(value, (int, float)) and isinstance(previous, (int, float))
+            and not label.startswith('heartbeat yield') else (
+                _fmt_signed(value - previous)
+                if label.startswith('heartbeat yield')
+                and isinstance(value, (int, float))
+                and isinstance(previous, (int, float)) else None),
+            'stats': stats, 'warn': label in warn_rows,
+        })
+    if db.get('max_connections'):
+        for row in summary:
+            if row['label'] == 'DB connections':
+                row['unit'] = f"of {db['max_connections']}"
+    # Consequence rows: faulty events over the detail window, outcomes
+    # since the shown range's start (the counters' window basis).
+    summary.append({
+        'label': 'faulty job events', 'curve': '',
+        'unit': 'in the detail window', 'value': _fmt_num(kills_total),
+        'raw': kills_total, 'previous_raw': None,
+        'delta': None, 'stats': None, 'warn': False,
+        'detail': ', '.join(f'{c} {n}' for c, n in sorted(
+            kills_by_comp.items(), key=lambda kv: -kv[1])[:6]),
+        'by_component': dict(kills_by_comp),
+    })
+    cum_at = _scope_cum_at(scope, requested_at)
+    cum_since = _scope_cum_at(scope, since) if since is not None else {}
+    for status in ('finished', 'failed'):
+        current = int(cum_at.get(status) or 0)
+        basis = int(cum_since.get(status) or 0)
+        summary.append({
+            'label': f'{status} since range start', 'curve': f'outcome_{status}',
+            'unit': 'jobs', 'value': _fmt_num(max(0, current - basis))
+            if cum_at else '—',
+            'raw': max(0, current - basis) if cum_at else None,
+            'previous_raw': None,
+            'delta': None, 'stats': None, 'warn': False,
+        })
+
+    range_text = ''
+    if walk:
+        first, last = walk[-1][0], walk[0][0]
+        range_text = (f"{first.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
+                      f"{last.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')}, "
+                      f"{len(walk)} snaps"
+                      + (' (the newest 3000)' if capped else ''))
+    return summary, range_text, walk_error
+
+
+def _platform_cut_summary(scope, requested_at, since, data, previous_data):
+    """The registered cut-summary builder for the platform component
+    (snapper_ai.products.cut_summary): the card's summary rows, with
+    the faulty-event window defaulting to the hour ending at the cut
+    interval as the card does without a client window."""
+    from datetime import datetime, timedelta
+    from datetime import timezone as dt_timezone
+
+    def _parse(iso):
+        try:
+            parsed = datetime.fromisoformat(str(iso or '').replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt_timezone.utc)
+
+    window_to = _parse((data.get('interval') or {}).get('end')) or requested_at
+    window_from = (window_to - timedelta(hours=1)) if window_to else None
+    kills_total, kills_by_comp = 0, {}
+    if window_from and window_to:
+        kills_total, kills_by_comp = _faulty_events_in_window(
+            scope, window_from, window_to)
+    rows, range_text, walk_error = _platform_summary(
+        scope, requested_at, since, data, kills_total, kills_by_comp)
+    return {
+        'rows': rows,
+        'range': range_text,
+        'faulty_event_window': {
+            'from': window_from.isoformat() if window_from else None,
+            'to': window_to.isoformat() if window_to else None},
+        'overall': (data.get('assessment') or {}).get('overall'),
+        'verdicts': (data.get('assessment') or {}).get('verdicts') or {},
+        'error': walk_error,
+    }
+
+
 def _platform_card(data, previous_data, ctx):
     """The platform cut card (docs/SNAPPER_PLATFORM.md): the assessment
     against thresholds, the database, heartbeat, server, and
@@ -2846,92 +2992,8 @@ def _platform_card(data, previous_data, ctx):
             logger.error('platform card: faulty-event window failed: %s', e)
             kills_error = f'faulty-event count failed: {e}'
 
-    # The summary walk over the shown range.
-    walk = []
-    walk_error = ''
-    if requested_at is not None:
-        try:
-            walk = _platform_summary_walk(scope, since, requested_at)
-        except Exception as e:                               # noqa: BLE001
-            logger.error('platform card: summary walk failed: %s', e)
-            walk_error = f'range statistics failed: {e}'
-    capped = len(walk) > 3000
-    walk = walk[:3000]
-    at = walk[0] if walk else (requested_at, data, {})
-    prev = walk[1] if len(walk) > 1 else None
-    warn_rows = set()
-    verdict_map = assessment.get('verdicts') or {}
-    if verdict_map.get('heartbeat_yield') == 'warning':
-        warn_rows.add('heartbeat yield, 60-min window')
-    if verdict_map.get('heartbeat_staleness') == 'warning':
-        warn_rows.update({'silent 60–120 min', 'silent over 120 min'})
-    if verdict_map.get('db_connections') == 'warning':
-        warn_rows.add('DB connections')
-    if verdict_map.get('server_latency') == 'warning':
-        warn_rows.add('server latency')
-    if verdict_map.get('pandamon_latency') == 'warning':
-        warn_rows.update({'pandamon front page',
-                          'pandamon worker query'})
-    if verdict_map.get('monitor_volumes') == 'warning':
-        warn_rows.add('monitor storage')
-    summary = []
-    for label, curve, unit, extract in _PLATFORM_SUMMARY_SPECS:
-        value = extract(at[1], at[2])
-        previous = extract(prev[1], prev[2]) if prev else None
-        samples = [v for v in (extract(p, j) for _, p, j in walk)
-                   if isinstance(v, (int, float)) and not isinstance(v, bool)]
-        stats = None
-        if samples:
-            lo, hi = min(samples), max(samples)
-            mean = sum(samples) / len(samples)
-            position = (None if hi == lo or not isinstance(value, (int, float))
-                        else round(100 * (value - lo) / (hi - lo)))
-            stats = {'min': _fmt_num(lo), 'mean': _fmt_num(mean),
-                     'max': _fmt_num(hi), 'position': position}
-        summary.append({
-            'label': label, 'curve': curve, 'unit': unit,
-            'value': _fmt_num(value), 'delta': cut_delta(
-                round(value) if isinstance(value, float) else value,
-                round(previous) if isinstance(previous, float) else previous)
-            if isinstance(value, (int, float)) and isinstance(previous, (int, float))
-            and not label.startswith('heartbeat yield') else (
-                _fmt_signed(value - previous)
-                if label.startswith('heartbeat yield')
-                and isinstance(value, (int, float))
-                and isinstance(previous, (int, float)) else None),
-            'stats': stats, 'warn': label in warn_rows,
-        })
-    if db.get('max_connections'):
-        for row in summary:
-            if row['label'] == 'DB connections':
-                row['unit'] = f"of {db['max_connections']}"
-    # Consequence rows: faulty events over the detail window, outcomes
-    # since the shown range's start (the counters' window basis).
-    summary.append({
-        'label': 'faulty job events', 'curve': '',
-        'unit': 'in the detail window', 'value': _fmt_num(kills_total),
-        'delta': None, 'stats': None, 'warn': False,
-        'detail': ', '.join(f'{c} {n}' for c, n in sorted(
-            kills_by_comp.items(), key=lambda kv: -kv[1])[:6]),
-    })
-    cum_at = _scope_cum_at(scope, requested_at)
-    cum_since = _scope_cum_at(scope, since) if since is not None else {}
-    for status in ('finished', 'failed'):
-        current = int(cum_at.get(status) or 0)
-        basis = int(cum_since.get(status) or 0)
-        summary.append({
-            'label': f'{status} since range start', 'curve': f'outcome_{status}',
-            'unit': 'jobs', 'value': _fmt_num(max(0, current - basis))
-            if cum_at else '—', 'delta': None, 'stats': None, 'warn': False,
-        })
-
-    range_text = ''
-    if walk:
-        first, last = walk[-1][0], walk[0][0]
-        range_text = (f"{first.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
-                      f"{last.astimezone(ET_ZONE).strftime('%m-%d %H:%M ET')}, "
-                      f"{len(walk)} snaps"
-                      + (' (the newest 3000)' if capped else ''))
+    summary, range_text, walk_error = _platform_summary(
+        scope, requested_at, since, data, kills_total, kills_by_comp)
     window_text = ''
     if window_from and window_to:
         window_text = (f"{window_from.astimezone(ET_ZONE).strftime('%m-%d %H:%M')} – "
@@ -3594,6 +3656,7 @@ def register_snapper_providers():
         curve_values=_epicprod_curve_values,
         event_values=_epicprod_event_values,
         series_transform=_epicprod_series_transform,
+        cut_summaries={'platform': _platform_cut_summary},
         curve_label=_epicprod_curve_label,
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,

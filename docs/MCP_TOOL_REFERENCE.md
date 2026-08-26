@@ -616,6 +616,29 @@ not an immediate conclusion that data is absent.
 
 ---
 
+### Snapper State History
+
+Snapper (the snapper-ai package, [SNAPPER.md](SNAPPER.md)) records
+coherent snapshots of a scope's state — `epicprod` or `testbed` — at
+aligned 30-second opportunities whenever a component changed. Every
+result carries the actual snap time, schema and policy versions,
+provenance, and observer coverage (`covered`, `gap`, `unknown`); a gap
+is never bridged by carrying state across it.
+
+| Tool | Parameters | Purpose |
+|---|---|---|
+| `snapper_latest` | `scope` | The latest recorded state of every component. |
+| `snapper_state_at` | `scope`, `time` | The state at an instant: the latest eligible snap and its actual time. |
+| `snapper_component_history` | `scope`, `component`, `start`, `end`, `include_unchanged` | One component's recorded evolution, beginning with its state at the interval start. |
+| `snapper_changes_between` | `scope`, `start`, `end` | Component values that changed between two instants, with previous and current documents. |
+| `snapper_context_around` | `scope`, `time`, `window_seconds` | State at the instant, changes in the surrounding window, and resolvable event references. |
+| `snapper_series` | `scope`, `focus`, `window`, `selection`, `selectors` | A focus view's series product as data — the curves the page plots (`platform`, `site`, `errors`, `campaign`) over `6h` … `30d`, including derived curves such as the 60-minute heartbeat yield. |
+| `snapper_cut_summary` | `scope`, `focus`, `time`, `since` | The summary at a time cut: every metric the view plots with its value, delta, and min/mean/max since the basis. Registered for the Platform view. |
+
+The series and cut-summary products are the same objects the report
+pages render, built by the same assembly and cache, so an AI reading
+them and a person reading the page see one history.
+
 ## Tool Summary
 
 | Category | Tools | Count |
@@ -640,12 +663,13 @@ not an immediate conclusion that data is absent.
 | AI Proposals | `ai_list_proposals`, `ai_decide_proposal` | 2 |
 | Campaign Status | `epicprod_campaign_status` | 1 |
 | Action Stream | `epicprod_list_actions` | 1 |
+| Snapper State History | `snapper_latest`, `snapper_state_at`, `snapper_component_history`, `snapper_changes_between`, `snapper_context_around`, `snapper_series`, `snapper_cut_summary` | 7 |
 | PCS Tags | `pcs_list_tags`, `pcs_get_tag`, `pcs_search_tags` | 3 |
 | PCS Datasets and Prod Tasks | `pcs_dataset_list`, `pcs_dataset_get`, `pcs_data_provenance`, `pcs_dataset_intake`, `pcs_prodtask_list`, `pcs_prodtask_get`, `pcs_prodtask_artifact`, `pcs_prodtask_intake`, `pcs_prodtask_link_input`, `pcs_prodtask_set_status` | 10 |
 | PanDA Production | `panda_get_activity`, `panda_list_jobs`, `panda_diagnose_jobs`, `panda_list_tasks`, `panda_error_summary`, `panda_study_job`, `panda_list_queues`, `panda_get_queue`, `panda_resource_usage`, `panda_harvester_workers` | 10 |
 | JLab Rucio | `jlab_rucio_*` | 14 |
 | BNL Rucio | `bnl_rucio_*` | 14 |
-| **Total** | | **88** |
+| **Total** | | **95** |
 
 ---
 

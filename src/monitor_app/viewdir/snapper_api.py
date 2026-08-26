@@ -48,6 +48,59 @@ def snapper_latest(request, scope):
     return _run(lambda: latest(scope))
 
 
+def _run_dict(query):
+    """As _run, for products that return plain dicts."""
+    try:
+        payload = query()
+    except InvalidQuery as e:
+        return JsonResponse({'error': str(e)}, status=400)
+    except SnapNotFound as e:
+        return JsonResponse({'error': str(e)}, status=404)
+    except SnapperError as e:
+        return JsonResponse({'error': str(e)}, status=500)
+    return JsonResponse(payload, json_dumps_params={'default': str})
+
+
+def snapper_series(request, scope):
+    """GET /api/snapper/<scope>/series/?focus=<view>&window=24h
+    [&selection=a,b][&<selector param>=value]
+
+    The focus view's series product as data — the same cached product
+    the page plots (snapper-ai PLAN.md section 9)."""
+    from snapper_ai.products import series_product
+
+    def query():
+        focus = (request.GET.get('focus') or '').strip()
+        if not focus:
+            raise InvalidQuery('focus names the view, e.g. focus=platform')
+        reserved = {'focus', 'window', 'selection'}
+        selectors = {k: v for k, v in request.GET.items()
+                     if k not in reserved}
+        return series_product(
+            scope, focus, window=request.GET.get('window') or '24h',
+            selection=request.GET.get('selection'), selectors=selectors)
+    return _run_dict(query)
+
+
+def snapper_cut_summary(request, scope):
+    """GET /api/snapper/<scope>/cut-summary/?focus=<view>&time=<ISO>
+    [&since=<ISO>]
+
+    The summary at a cut as data: each plotted metric's value at the
+    instant, its delta, and its statistics since the basis."""
+    from snapper_ai.products import cut_summary
+
+    def query():
+        focus = (request.GET.get('focus') or '').strip()
+        if not focus:
+            raise InvalidQuery('focus names the view, e.g. focus=platform')
+        since = request.GET.get('since')
+        return cut_summary(
+            scope, focus, _parse_time(request.GET.get('time'), 'time'),
+            since=_parse_time(since, 'since') if since else None)
+    return _run_dict(query)
+
+
 def snapper_state_at(request, scope):
     """GET /api/snapper/<scope>/state-at/?time=<ISO 8601>"""
     return _run(lambda: state_at(scope, _parse_time(

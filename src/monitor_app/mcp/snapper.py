@@ -195,3 +195,99 @@ async def snapper_changes_between(scope: str, start: str, end: str) -> dict:
     return await sync_to_async(_call)(
         lambda: queries.changes_between(
             scope, _time(start, 'start'), _time(end, 'end')))
+
+
+# View products as queries (snapper-ai PLAN.md section 9): the same
+# series and cut summary the page renders, as data.
+
+def _call_dict(fn):
+    try:
+        return fn()
+    except queries.SnapperError as e:
+        return {'error': str(e)}
+
+
+@mcp.tool()
+async def snapper_series(scope: str, focus: str, window: str = '24h',
+                         selection: str = '', selectors: dict = None) -> dict:
+    """
+    A Snapper focus view's series product — the curves the page plots,
+    as data — over a named window.
+
+    Use this instead of walking component history when the question is
+    about time histories the views already distill: the Platform view's
+    heartbeat yield (60-min window), DB activity, latency curves; the
+    Site view's per-site in-flight and outcome curves; the Errors view's
+    event flow; the Campaign view's delivery quilt.
+
+    Args:
+        scope: 'epicprod' or 'testbed'.
+        focus: the view's name as on its tab: 'platform', 'site',
+            'errors', 'campaign'.
+        window: '6h', '24h', '48h', '7d', '14d', or '30d'.
+        selection: the view's option value(s), comma-separated, when the
+            view has them (a site name for 'site', a task id for
+            'errors', a campaign for 'campaign'); default: the view's
+            default option.
+        selectors: {param: value} for the view's selector axes (for
+            'platform', lens='tiers' or 'sites'); default: each axis's
+            default.
+
+    Reading the result:
+        curves: {curve id: {label, points: [[stamp, value], ...]}} with
+            stamps in the series' timezone (ET). Window-relative
+            counters rise from zero at the window's left edge. Derived
+            curves (e.g. plhy_window, the 60-min yield) are computed by
+            the same transform the page uses.
+        families: the family declarations naming the curves and how the
+            page groups and stacks them.
+        gaps: recorded observation gaps — the record has no state
+            across them.
+        cache: the product's cache state; 'refreshing' True means a
+            newer build is landing behind this one.
+    """
+    from snapper_ai.products import series_product
+
+    return await sync_to_async(_call_dict)(
+        lambda: series_product(scope, focus, window=window,
+                               selection=selection or None,
+                               selectors=selectors or None))
+
+
+@mcp.tool()
+async def snapper_cut_summary(scope: str, focus: str, time: str,
+                              since: str = '') -> dict:
+    """
+    The summary at a time cut of a Snapper focus view, as data: every
+    metric the view plots with its value at the instant, its change
+    against the previous snap, and its min/mean/max over the window.
+
+    This is the table the page shows beneath the plots at a cut — the
+    distilled reading of related parameters at one instant — served in
+    the evidence envelope (actual snap time, coverage, provenance).
+    Today the Platform view registers it.
+
+    Args:
+        scope: 'epicprod' or 'testbed'.
+        focus: the view's name as on its tab, e.g. 'platform'.
+        time: ISO 8601 with timezone; the cut instant.
+        since: ISO 8601 with timezone; the window basis for the
+            statistics and the outcome accumulations (default: 24 hours
+            before the cut).
+
+    Reading the result:
+        snap_time: when the summarized state was ACTUALLY captured —
+            report this, not the requested time, when they differ.
+        coverage: the observer's coverage at the requested instant.
+        summary.rows: one row per metric in panel order — label, unit,
+            'raw' (the number), 'value' (formatted), 'previous_raw',
+            'delta', 'stats' (min/mean/max raw and formatted, position
+            of the value in that range, sample count), 'warn' (the
+            metric's threshold is crossed at the cut).
+        summary.verdicts: the component's own per-metric verdicts.
+    """
+    from snapper_ai.products import cut_summary
+
+    return await sync_to_async(_call_dict)(
+        lambda: cut_summary(scope, focus, _time(time, 'time'),
+                            since=_time(since, 'since') if since else None))

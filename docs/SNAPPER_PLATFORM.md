@@ -365,6 +365,16 @@ the REST endpoints and MCP tools answer connection counts, staleness,
 yield, and server-host state at any instant with the standard evidence
 envelopes, and `changes_between` locates the transitions.
 
+The view's own products — the series (including the derived 60-minute
+yield curve and the window-relative counters) and the summary at the
+cut — are data as much as the components are, and AI clients receive
+them by query rather than by reading the page: the series and
+cut-summary tranche of the snapper-ai plan
+([PLAN.md](https://github.com/BNLNPPS/snapper-ai/blob/main/docs/PLAN.md),
+section 9) serves the same products through REST and MCP in the
+standard envelope, with correlation following once the series is a
+query.
+
 ## Implementation notes
 
 - swf-monitor: `monitor_app/snapper_platform.py` (maintainer;

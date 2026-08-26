@@ -139,6 +139,8 @@ from .snapper import (
     snapper_component_history,
     snapper_changes_between,
     snapper_context_around,
+    snapper_series,
+    snapper_cut_summary,
 )
 
 
@@ -208,6 +210,14 @@ __all__ = [
     'panda_error_summary',
     'panda_get_activity',
     'panda_study_job',
+    # Snapper state history
+    'snapper_latest',
+    'snapper_state_at',
+    'snapper_component_history',
+    'snapper_changes_between',
+    'snapper_context_around',
+    'snapper_series',
+    'snapper_cut_summary',
     # Rucio catalogs
     *RUCIO_TOOL_NAMES,
     # PCS — tag browsing
