@@ -331,6 +331,12 @@ ACTION_DEFAULTS = {
                        "obsolete flag on the ticked paths, with the setter, "
                        "time, and reason recorded.",
     },
+    'evgen_mark_priority': {
+        'sublevel': 'low', 'live': False,
+        'description': "PWG priority set on EVGEN entries (0 clears, 1 is "
+                       "highest), with the setter and time recorded. "
+                       "Bookkeeping, not news: verbose viewers only.",
+    },
     'campaign_set_last': {
         'sublevel': 'high', 'live': True,
         'description': "Operator designation of the last (previous) campaign.",
