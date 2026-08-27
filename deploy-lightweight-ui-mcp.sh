@@ -178,6 +178,28 @@ esac
 log "Syncing pcs lightweight paths (swf-epicprod -> deployed venv)..."
 rsync "${RSYNC_ARGS[@]}" "${PCS_EXCLUDES[@]}" "$EPICPROD_ROOT/pcs/" "$TARGET_PCS/"
 
+# The swf_epicprod package (MCP tools, analytics, assessment) ships from
+# swf-epicprod the same way. mcp_tools/ rides --mcp (the ASGI worker is
+# restarted); analytics and assessment serve the web views and the MCP
+# campaign-status tool, so they sync under either flag. The ops agent
+# imports the package too but only picks up code at restart, which is
+# full-deploy territory.
+EPICPROD_EXCLUDES=(--exclude 'tests/')
+if [[ "$DO_MCP" != true ]]; then
+    EPICPROD_EXCLUDES+=(--exclude 'mcp_tools/')
+fi
+TARGET_EPICPROD=$(cd "$CURRENT_DIR" && "$CURRENT_DIR/.venv/bin/python" -c "import swf_epicprod, os; print(os.path.dirname(swf_epicprod.__file__))")
+case "$TARGET_EPICPROD" in
+    "$CURRENT_DIR"/.venv/*) ;;
+    *)
+        echo "ERROR: deployed swf_epicprod resolves outside the deployed venv: $TARGET_EPICPROD" >&2
+        echo "Run the full deploy to freeze swf-epicprod, then retry." >&2
+        exit 1
+        ;;
+esac
+log "Syncing swf_epicprod lightweight paths (swf-epicprod -> deployed venv)..."
+rsync "${RSYNC_ARGS[@]}" "${EPICPROD_EXCLUDES[@]}" "$EPICPROD_ROOT/swf_epicprod/" "$TARGET_EPICPROD/"
+
 # snapper_ai ships from snapper-ai as an installed package (views and
 # templates included since 2026-07-25); lightweight-sync the dev tree
 # onto the deployed venv's installed copy. Migrations ride the full
