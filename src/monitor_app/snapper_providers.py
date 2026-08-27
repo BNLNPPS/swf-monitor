@@ -1242,7 +1242,6 @@ def _delivery_groups():
                 'panel_px': 300 if category_stack else 0,
                 'detail_key': (_delivery_detail_key('categories', name)
                                if category_stack else ''),
-                'focus_closed': category_stack,
                 'default_off': True, 'units': 'files'})
             groups.append({
                 'name': f'Cumulative {name} events {lens_value}',
@@ -1256,7 +1255,6 @@ def _delivery_groups():
                 'panel_px': 300 if category_stack else 0,
                 'detail_key': (_delivery_detail_key('categories', name)
                                if category_stack else ''),
-                'focus_closed': category_stack,
                 'default_off': True, 'units': 'events (M)'})
         for category in categories:
             pcs = sorted(pc for pc, pc_category
