@@ -6,20 +6,41 @@
 {% block content %}
 <div class="container-fluid">
     <h1>ePIC Compute Queues</h1>
-    <p class="text-muted mb-2">Live from PanDA schedconfig &mdash; {{ queues|length }} queues registered for VO <strong>eic</strong></p>
+    <p class="text-muted mb-2">
+        {% if any_filter %}{{ queues|length }} of {{ total_count }}{% else %}{{ queues|length }}{% endif %}
+        queues registered for VO <strong>eic</strong></p>
 
-        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable">
+    {% for f in filters %}
+    <div class="filter-bar mb-2">
+        <strong>{{ f.label }}:</strong>
+        <a href="?{% for o in filters %}{% if o.key != f.key and o.selected %}{{ o.key }}={{ o.selected|urlencode }}&amp;{% endif %}{% endfor %}"
+           class="filter-link {% if not f.selected %}filter-active{% endif %}">All ({{ total_count }})</a>
+        {% for opt in f.options %}
+        <a href="?{{ f.key }}={{ opt.value|urlencode }}{% for o in filters %}{% if o.key != f.key and o.selected %}&amp;{{ o.key }}={{ o.selected|urlencode }}{% endif %}{% endfor %}"
+           class="filter-link {% if f.selected == opt.value %}filter-active{% endif %}">{{ opt.value }} ({{ opt.count }})</a>
+        {% endfor %}
+    </div>
+    {% endfor %}
+
+    {% include "monitor_app/_active_filters.html" with active_filters=active_filters clear_all_url=clear_all_url %}
+
+    <p class="text-muted mb-1">Opp = opportunistic &middot; Unified = production and analysis &middot; hpc_special = DOE HPC</p>
+    <p class="text-muted mb-1">See <a href="{% url 'canary:canary_page' %}">Canary</a> for full assessment info</p>
+
+        <table class="table table-striped table-bordered table-sm align-middle w-auto mb-0 swf-sortable" data-swf-order="3,desc">
             <thead>
                 <tr>
                     <th>Queue</th>
                     <th>Status</th>
-                    <th>State</th>
+                    <th>Canary</th>
+                    <th>Last use</th>
+                    <th title="Job count in the canary 14-day assessment window">Jobs<br>2&nbsp;wks</th>
+                    <th title="Finished (green) and failed (red) jobs per 8-hour bin over the last 2 weeks">Completions<br>2&nbsp;wks</th>
                     <th>Resource Type</th>
                     <th>Type</th>
                     <th>Region</th>
                     <th>Tier</th>
-                    <th>Core Power</th>
-                    <th>Last Update</th>
+                    <th>Description</th>
                     <th>Jobs</th>
                 </tr>
             </thead>
@@ -28,17 +49,34 @@
                 <tr>
                     <td><a href="{% url 'monitor_app:epic_queue_detail' q.panda_queue %}">{{ q.panda_queue }}</a></td>
                     <td class="{{ q.status|state_class }}">{{ q.status|default:"—" }}</td>
-                    <td>{{ q.state|default:"—" }}</td>
+                    {% if q.canary == 'unknown' or q.canary == 'insufficient' %}
+                    <td></td>
+                    {% else %}
+                    <td class="{{ q.canary|state_class }}">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</td>
+                    {% endif %}
+                    <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
+                    <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
+                    <td data-order="{% if q.spark %}{{ q.spark.total }}{% else %}0{% endif %}">
+                        {% if q.spark %}
+                        <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ q.panda_queue|urlencode }}&amp;window=14d" style="display:block;width:fit-content">
+                        <svg width="{{ q.spark.w }}" height="{{ q.spark.h }}" viewBox="0 0 {{ q.spark.w }} {{ q.spark.h }}" role="img" style="display:block">
+                            <title>Last 2 weeks (8-hour bins): {{ q.spark.fin_total }} finished, {{ q.spark.fail_total }} failed — open the snapper site view</title>
+                            <path d="{{ q.spark.green }}" fill="#207f20" stroke="none"/>
+                            {% if q.spark.red %}<path d="{{ q.spark.red }}" fill="#ff0000" stroke="none"/>{% endif %}
+                            <line x1="0" y1="{{ q.spark.h }}" x2="{{ q.spark.w }}" y2="{{ q.spark.h }}" stroke="#888" stroke-width="2"/>
+                        </svg>
+                        </a>
+                        {% endif %}
+                    </td>
                     <td>{{ q.resource_type|default:"—" }}</td>
                     <td>{{ q.type|default:"—" }}</td>
                     <td>{{ q.country|default:"—" }}</td>
-                    <td>{{ q.tier|default:"—" }}</td>
-                    <td>{{ q.corepower|default:"—" }}</td>
-                    <td>{{ q.last_update|fmt_dt }}</td>
+                    <td{% if q.tier == "Opp" %} title="Opportunistic"{% endif %}>{{ q.tier|default:"—" }}</td>
+                    <td>{{ q.description|default:"—" }}</td>
                     <td><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ q.panda_queue }}">View</a></td>
                 </tr>
             {% empty %}
-                <tr><td colspan="10" class="text-center text-muted">No ePIC queues found</td></tr>
+                <tr><td colspan="12" class="text-center text-muted">No ePIC queues found</td></tr>
             {% endfor %}
             </tbody>
         </table>

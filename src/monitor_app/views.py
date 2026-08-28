@@ -2744,9 +2744,16 @@ def panda_slash_command(request):
 
         if subcmd == 'errors':
             days = int(arg) if arg.isdigit() else 7
-            data = queries.error_summary(days=days, limit=10)
+            # Closed jobs are workflow disposals, not actual errors —
+            # excluded from the digest, named when present.
+            data = queries.error_summary(days=days, limit=10,
+                                         status='failed,cancelled')
             lines = [f"#### Top Errors (last {days} days)"]
             lines.append(f"Total error occurrences: {data.get('total_errors', 0)}")
+            closed = (data.get('status_counts') or {}).get('closed')
+            if closed:
+                lines.append(f"(+ {closed} closed — server workflow "
+                             f"disposals, excluded here)")
             for e in data.get('errors', []):
                 diag = (e.get('error_diag') or '')[:80]
                 lines.append(
@@ -3662,10 +3669,16 @@ def ai_content_list(request):
         'quality_all_url': filter_url(quality=''),
         'username_all_url': filter_url(username=''),
         'ai_all_url': filter_url(ai=''),
-        'clear_subject_url': filter_url(subject_type=''),
-        'clear_quality_url': filter_url(quality=''),
-        'clear_username_url': filter_url(username=''),
-        'clear_ai_url': filter_url(ai=''),
+        'active_filters': [
+            {'label': label, 'value': value}
+            for label, value in (
+                ('Subject', subject_type),
+                ('Quality', quality),
+                ('User', username),
+                ('AI', ai),
+            ) if value
+        ],
+        'clear_all_url': filter_url(subject_type='', quality='', username='', ai=''),
         'page_query': page_params.urlencode(),
     })
 

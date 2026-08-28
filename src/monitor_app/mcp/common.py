@@ -330,6 +330,42 @@ def get_available_tools_list() -> list:
             "description": "Live Harvester pilot/worker counts across EIC queues — running, submitted, finished by site.",
             "parameters": ["site", "hours"],
         },
+        # Snapper state history (snapper-ai): coherent snapshots and the view products
+        {
+            "name": "snapper_latest",
+            "description": "Latest recorded system state for a Snapper scope (epicprod, testbed): every component with its actual snap time and coverage.",
+            "parameters": ["scope"],
+        },
+        {
+            "name": "snapper_state_at",
+            "description": "System state at an instant: the latest eligible snap and its ACTUAL time, with observer coverage (covered, gap, unknown).",
+            "parameters": ["scope", "time"],
+        },
+        {
+            "name": "snapper_component_history",
+            "description": "One component's recorded evolution over an interval, beginning with its state at the start; unchanged baselines suppressed unless asked.",
+            "parameters": ["scope", "component", "start", "end", "include_unchanged"],
+        },
+        {
+            "name": "snapper_changes_between",
+            "description": "Component values that changed between two instants, with previous and current documents and coverage at both ends.",
+            "parameters": ["scope", "start", "end"],
+        },
+        {
+            "name": "snapper_context_around",
+            "description": "State at an instant plus changes in the surrounding window and resolvable event references (action stream, PanDA records).",
+            "parameters": ["scope", "time", "window_seconds"],
+        },
+        {
+            "name": "snapper_series",
+            "description": "A focus view's series product as data — the curves the page plots (platform, site, errors, campaign) over a named window, derived curves included. Use before walking component history for time-history questions.",
+            "parameters": ["scope", "focus", "window", "selection", "selectors"],
+        },
+        {
+            "name": "snapper_cut_summary",
+            "description": "The summary at a time cut of a focus view: every plotted metric with its value, delta, and min/mean/max since the basis, in the evidence envelope (Platform view today).",
+            "parameters": ["scope", "focus", "time", "since"],
+        },
         # PCS (Physics Configuration System) tools
         {
             "name": "pcs_list_tags",

@@ -718,6 +718,18 @@ class EpicProdOpsAgent(BaseAgent):
         items = list(m['items'])
         batch_id = str(m['batch_id'])
         username = str(m.get('created_by') or '')
+        task_ids = [str(item['jedi_task_id']) for item in items]
+        if len(task_ids) <= 8:
+            subject_label = f"PanDA tasks {', '.join(task_ids)}"
+        else:
+            subject_label = f"{len(task_ids)} PanDA tasks"
+        notice_subject = {
+            'subject_type': 'panda_task_batch',
+            'subject_key': batch_id,
+            'subject_label': subject_label,
+            'batch_id': batch_id,
+            'jedi_task_ids': task_ids,
+        }
         paced_seconds = max(
             0, int(PANDA_TASK_BULK_SEND_INTERVAL * (len(items) - 1) + 0.999))
         doer_timeout = PANDA_TASK_OPERATION_TIMEOUT + paced_seconds
@@ -745,11 +757,10 @@ class EpicProdOpsAgent(BaseAgent):
                     m, item, 'timeout', diagnostic=reason)
             self._log_action(
                 'panda_task_operation', t0, outcome='timeout', reason=reason,
-                subject_type='panda_task_batch', subject_key=batch_id,
                 username=username, sublevel='high', live_default=False,
                 level=logging.ERROR, operation=operation, tasks=len(items),
                 summary=f'0/{len(items)} verified · {len(items)} timed out',
-                url='/panda/tasks/')
+                url='/panda/tasks/', **notice_subject)
             return
 
         for line in (process.stderr or '').splitlines():
@@ -804,11 +815,11 @@ class EpicProdOpsAgent(BaseAgent):
             'panda_task_operation', t0, outcome=outcome,
             reason=(f'{problems} task outcomes were not verified'
                     if problems else ''),
-            subject_type='panda_task_batch', subject_key=batch_id,
             username=username, sublevel='high', live_default=False,
             level=logging.WARNING if problems else logging.INFO,
             operation=operation, tasks=len(items),
-            summary=' · '.join(parts), url='/panda/tasks/', **counts)
+            summary=' · '.join(parts), url='/panda/tasks/',
+            **notice_subject, **counts)
 
     def _settle_panda_bulk_item(self, message, item, status, *,
                                 diagnostic='', observed_status='',
@@ -1276,7 +1287,11 @@ class EpicProdOpsAgent(BaseAgent):
             ('rucio_arrivals_sweep', self._do_rucio_arrivals_sweep),
             ('evgen_rucio_update', self._do_evgen_rucio_update),
             ('dataset_definitions_sweep', self._do_dataset_definitions_sweep),
-            ('questionnaire_automatch', self._do_questionnaire_automatch),
+            # Retired from the nightly 2026-08-19: request ingest moves to
+            # the internal request form, so the LLM automatch of legacy
+            # Google-form questionnaires no longer earns a nightly sweep.
+            # The handler remains directly invokable.
+            # ('questionnaire_automatch', self._do_questionnaire_automatch),
             ('questionnaire_match_update', self._do_questionnaire_match_update),
             ('campaign_progress_refresh', self._do_campaign_progress_refresh),
             ('file_events_measure', self._do_file_events_measure),
@@ -1352,14 +1367,17 @@ class EpicProdOpsAgent(BaseAgent):
                              level=logging.ERROR, **counts)
         elif missing:
             tasks = sorted({t for rec in missing for t in rec.get('tasks', [])})
-            reason = (f"sandbox already purged for task(s) {tasks} — "
-                      "not natively retryable")
-            self.logger.warning(f"PRODOPS panda_sandbox_keepalive: {reason}")
-            self._log_action('panda_sandbox_keepalive', t0, outcome='warning',
-                             reason=reason,
+            summary = (f"{counts.get('touched') or 0} tarball(s) touched; "
+                       f"{len(missing)} already absent for {len(tasks)} "
+                       "task(s)")
+            self.logger.info(
+                f"PRODOPS panda_sandbox_keepalive done: {summary}")
+            self._log_action('panda_sandbox_keepalive', t0,
                              username=str(m.get('created_by') or ''),
-                             sublevel='high', live_default=True,
-                             level=logging.WARNING,
+                             sublevel='low', live_default=False,
+                             summary=summary,
+                             missing_task_count=len(tasks),
+                             missing_tarballs=len(missing),
                              missing_tasks=tasks, **counts)
         else:
             self.logger.info("PRODOPS panda_sandbox_keepalive done")

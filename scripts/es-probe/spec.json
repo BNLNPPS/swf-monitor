@@ -1,0 +1,14 @@
+{
+  "outDS": "group.EIC.esprobe.nersc.%STAMP%",
+  "exec": "echo ES-probe payload start; hostname; sleep 120; echo ES-probe payload done",
+  "site": "NERSC_Perlmutter_epic",
+  "prodSourceLabel": "test",
+  "nJobs": 100,
+  "nEventsPerJob": 100,
+  "nEventsPerWorker": 10,
+  "nCore": 1,
+  "memory": 2048,
+  "walltimeHours": 0.5,
+  "skipScout": true,
+  "containerImage": "/cvmfs/singularity.opensciencegrid.org/eicweb/eic_xl:nightly"
+}

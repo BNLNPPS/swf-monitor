@@ -8,7 +8,7 @@ directly. Callers in async contexts should wrap with sync_to_async.
 import logging
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from urllib.parse import unquote
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -37,7 +37,6 @@ PSEUDO_TASK_DATASETS = {'seq_number', 'pseudo_dataset'}
 # NERSC Perlmutter jobs publish their per-job pilot & slurm logs here.
 # Pattern: <base>/<queue>/<pandaid>/{pilotlog.txt, slurm-<id>-task<N>-panda<pid>.out}
 _NERSC_PORTAL_BASE = "https://portal.nersc.gov/cfs/m3763/panda/jobs"
-_NERSC_SLURM_RE = re.compile(r'href="(slurm-\d+-task\d+-panda\d+\.out)"')
 _PANDA_CLIENT_PROCESSING_RE = re.compile(r'^panda-client-[0-9][A-Za-z0-9._-]*-(jedi-.+)$')
 _PANDA_USER_EQUIVALENCES = {
     # Canonical monitor display name -> equivalent login/name variants.
@@ -355,13 +354,26 @@ def _nersc_portal_log_urls(computingsite, pandaid):
     except Exception as e:
         logger.warning("NERSC portal dir fetch failed for %s: %s", pandaid, e)
         return None
-    result = {
-        'nersc_log_dir': log_dir,
-        'pilot_stdout': log_dir + 'pilotlog.txt',
-    }
-    m = _NERSC_SLURM_RE.search(resp.text)
-    if m:
-        result['slurm_task_stdout'] = log_dir + m.group(1)
+    # The published names vary by layout generation: the pilot log is
+    # 'pilotlog.txt' or 'pilotlog-task<N>.txt'; the per-task Slurm files
+    # 'slurm-<id>-task<N>-panda<id>.out' or 'slurm<id>-task<N>.out' with
+    # an '.err' twin; the worker's own Slurm output 'slurm-<id>.out';
+    # and the payload's stdout/stderr under 'PanDA_Pilot-<pandaid>/'.
+    # Every name comes from the listing itself, never assumed.
+    names = re.findall(r'href="([^"/]+/?)"', resp.text)
+    result = {'nersc_log_dir': log_dir}
+    for name in names:
+        if re.fullmatch(r'pilotlog(-task\d+)?\.txt', name):
+            result['pilot_log'] = log_dir + name
+        elif re.fullmatch(r'slurm-?\d+-task\d+(-panda\d+)?\.out', name):
+            result['slurm_task_stdout'] = log_dir + name
+        elif re.fullmatch(r'slurm-?\d+-task\d+(-panda\d+)?\.err', name):
+            result['slurm_task_stderr'] = log_dir + name
+        elif re.fullmatch(r'slurm-?\d+\.out', name):
+            result['slurm_worker_stdout'] = log_dir + name
+        elif name == f'PanDA_Pilot-{pandaid}/':
+            result['payload_stdout'] = log_dir + name + 'payload.stdout'
+            result['payload_stderr'] = log_dir + name + 'payload.stderr'
     return result
 
 
@@ -1007,11 +1019,19 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         time_filter = 'j."modificationtime" >= %s'
         time_params = [timezone.now() - timedelta(days=days)]
     faulty_statuses = ('failed', 'cancelled', 'closed')
-    if status is not None and status not in faulty_statuses:
-        return {'error': f"status must be one of {faulty_statuses}"}
-    if status:
-        status_filter = 'j."jobstatus" = %s'
-        status_params = [status]
+    # status accepts one terminal state or a CSV selection. The
+    # summary always reports the per-status totals of the unrestricted
+    # population alongside (status_counts), so an excluded flood —
+    # e.g. a closed-job kill storm — stays visible in its count.
+    status_list = [s for s in str(status or '').split(',') if s]
+    unknown = [s for s in status_list if s not in faulty_statuses]
+    if unknown:
+        return {'error': f"status must be among {faulty_statuses}, "
+                         f"got {unknown}"}
+    if status_list:
+        placeholders = ', '.join(['%s'] * len(status_list))
+        status_filter = f'j."jobstatus" IN ({placeholders})'
+        status_params = list(status_list)
     else:
         status_filter = "j.\"jobstatus\" IN ('failed','cancelled','closed')"
         status_params = []
@@ -1040,8 +1060,18 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             destse_filter = ' AND f."destinationse" = %s'
         destse_params.append(destinationse)
     if taskid:
-        filters += ' AND "jeditaskid" = %s'
-        extra_params.append(taskid)
+        # One id or a CSV list: the errors view's task filter and the
+        # task-page links both land here.
+        try:
+            taskids = [int(t) for t in str(taskid).split(',')
+                       if str(t).strip()]
+        except (TypeError, ValueError):
+            return {'error': f"taskid must be an id or CSV of ids, "
+                             f"got {taskid!r}"}
+        if taskids:
+            placeholders = ', '.join(['%s'] * len(taskids))
+            filters += f' AND "jeditaskid" IN ({placeholders})'
+            extra_params.extend(taskids)
 
     components_to_query = ERROR_COMPONENTS
     if error_source:
@@ -1109,7 +1139,10 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         WITH errs AS ({union_sql}),
         pattern_totals AS (
             SELECT error_source, error_code,
-                   COALESCE(LEFT(error_diag, 256), '') as error_diag,
+                   COALESCE(LEFT(regexp_replace(
+                       error_diag, '[0-9]+', '#', 'g'), 256), '')
+                       as diag_pattern,
+                   MIN(COALESCE(LEFT(error_diag, 256), '')) as error_diag,
                    COUNT(*) as count,
                    COUNT(DISTINCT jeditaskid) as task_count,
                    array_agg(DISTINCT produsername) as users,
@@ -1123,14 +1156,13 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    COUNT(*) FILTER (WHERE starttime IS NULL)
                        as never_started_count
             FROM errs
-            GROUP BY error_source, error_code,
-                     COALESCE(LEFT(error_diag, 256), '')
+            GROUP BY error_source, error_code, 3
             ORDER BY count DESC
             LIMIT %s
         ),
         site_task_distribution AS (
-            SELECT e.error_source, e.error_code,
-                   COALESCE(LEFT(e.error_diag, 256), '') as error_diag,
+            SELECT p.diag_pattern,
+                   e.error_source, e.error_code,
                    e.computingsite, e.jeditaskid,
                    COUNT(*) as count,
                    MAX(e.pandaid) as representative_pandaid
@@ -1138,9 +1170,9 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             JOIN pattern_totals p
               ON p.error_source = e.error_source
              AND p.error_code = e.error_code
-             AND p.error_diag = COALESCE(LEFT(e.error_diag, 256), '')
-            GROUP BY e.error_source, e.error_code,
-                     COALESCE(LEFT(e.error_diag, 256), ''),
+             AND p.diag_pattern = COALESCE(LEFT(regexp_replace(
+                     e.error_diag, '[0-9]+', '#', 'g'), 256), '')
+            GROUP BY p.diag_pattern, e.error_source, e.error_code,
                      e.computingsite, e.jeditaskid
         )
         SELECT p.error_source, p.error_code, p.error_diag,
@@ -1161,7 +1193,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    FROM site_task_distribution d
                    WHERE d.error_source = p.error_source
                      AND d.error_code = p.error_code
-                     AND d.error_diag = p.error_diag
+                     AND d.diag_pattern = p.diag_pattern
                ), '[]'::jsonb) as site_task_counts
         FROM pattern_totals p
         ORDER BY p.count DESC
@@ -1174,6 +1206,37 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             rows = cursor.fetchall()
     except Exception as e:
         logger.error(f"error_summary query failed: {e}")
+        return {"error": str(e)}
+
+    # Terminal-state totals of the same population WITHOUT the status
+    # restriction: the filter chips self-discover from these — a
+    # status appears exactly when the window holds it, with its count.
+    any_nonzero = ' OR '.join(
+        f'COALESCE(j."{c["code"]}", 0) != 0' for c in components_to_query)
+    count_parts = []
+    count_params = []
+    for table in ['jobsactive4', 'jobsarchived4']:
+        count_parts.append(f"""
+            SELECT j."jobstatus", COUNT(*)
+            FROM "{PANDA_SCHEMA}"."{table}" j
+            {dest_join}
+            WHERE {time_filter}
+              AND j."jobstatus" IN ('failed','cancelled','closed')
+              AND ({any_nonzero})
+              {filters}
+            GROUP BY 1
+        """)
+        count_params.extend(destse_params + time_params + extra_params)
+    status_counts = {}
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(' UNION ALL '.join(count_parts), count_params)
+            for job_status, job_count in cursor.fetchall():
+                status_counts[str(job_status)] = (
+                    status_counts.get(str(job_status)) or 0
+                ) + int(job_count or 0)
+    except Exception as e:
+        logger.error(f"error_summary status counts failed: {e}")
         return {"error": str(e)}
 
     errors = []
@@ -1210,12 +1273,17 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         "total_errors": total,
         "errors": errors,
         "count": len(errors),
+        # Per terminal state, the window's totals with no status
+        # restriction applied — the basis of the status filter chips,
+        # and the visibility of whatever the filter excludes.
+        "status_counts": status_counts,
         "filters": {
             "days": days,
             "username": username,
             "site": site,
             "taskid": taskid,
             "error_source": error_source,
+            "status": ','.join(status_list) if status_list else None,
         },
     }
 
@@ -1474,6 +1542,33 @@ def list_queues(vo=None, status=None, state=None, search=None):
         "count": len(queues),
         "filters": {"vo": vo, "status": status, "state": state, "search": search},
     }
+
+
+def queue_last_use():
+    """Most recent job activity per queue: max modificationtime across
+    active and archived jobs. PanDA DB timestamps are naive UTC; returned
+    values are UTC-aware datetimes keyed by queue name."""
+    conn = connections['panda']
+    sql = f"""
+        SELECT "computingsite", MAX("modificationtime")
+        FROM (
+            SELECT "computingsite", "modificationtime"
+            FROM "{PANDA_SCHEMA}"."jobsactive4"
+            UNION ALL
+            SELECT "computingsite", "modificationtime"
+            FROM "{PANDA_SCHEMA}"."jobsarchived4"
+        ) jobs
+        GROUP BY "computingsite"
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"queue_last_use failed: {e}")
+        return {}
+    return {row[0]: row[1].replace(tzinfo=dt_timezone.utc)
+            for row in rows if row[1] is not None}
 
 
 def get_queue(panda_queue):
@@ -1866,6 +1961,35 @@ def study_job(pandaid):
     job = dict(full_job)
     job['errors'] = extract_errors(job)
 
+    # A lost-heartbeat failure records the LAST HEARTBEAT as the end
+    # time (the Watcher's convention) and the failure instant only as
+    # the modification time; stated together, with the silence between,
+    # so the record reads as what happened rather than as a job that
+    # died seconds after it started.
+    if int(job.get('jobdispatchererrorcode') or 0) == 100:
+        from datetime import datetime as _dt
+
+        def _when(value):
+            if isinstance(value, str):
+                try:
+                    return _dt.fromisoformat(value)
+                except ValueError:
+                    return None
+            return value if isinstance(value, _dt) else None
+
+        last = _when(job.get('endtime'))
+        failed = _when(job.get('modificationtime'))
+        started = _when(job.get('starttime'))
+        timeline = {'last_heartbeat': job.get('endtime'),
+                    'failed_at': job.get('modificationtime')}
+        if last and failed and failed > last:
+            timeline['silent_minutes'] = round(
+                (failed - last).total_seconds() / 60)
+        if started and last:
+            timeline['heard_for_minutes'] = round(
+                (last - started).total_seconds() / 60)
+        job['heartbeat_timeline'] = timeline
+
     # Strip null fields for readability
     job = {k: v for k, v in job.items() if v is not None}
 
@@ -1888,8 +2012,9 @@ def study_job(pandaid):
     if site.startswith('NERSC_Perlmutter'):
         portal_urls = _nersc_portal_log_urls(site, pandaid)
         if portal_urls:
-            # Drop the broken stderr/batch entries; Perlmutter has a single
-            # combined pilot log.
+            # The synthesized pilotid-derived entries 404 on Perlmutter;
+            # the portal listing supplies the real files.
+            log_urls.pop('pilot_stdout', None)
             log_urls.pop('pilot_stderr', None)
             log_urls.pop('batch_log', None)
             log_urls.update(portal_urls)

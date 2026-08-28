@@ -210,6 +210,70 @@
       .swf-wide-table-scroll > table thead th {
         top: 0;
       }
+      /* Optional two-tier latch: a one-line table title sits above the
+         ordinary column headings. Both tiers use the established sticky-th
+         behavior and remain bounded by the table. The fixed one-line title
+         height keeps the second tier seated exactly beneath it without a
+         script-time measurement or jump. */
+      table.swf-latch-titled-head {
+        --swf-latch-title-height: 2rem;
+        --swf-latch-column-height: 2rem;
+        --swf-latch-section-height: 2rem;
+      }
+      table.swf-latch-titled-head thead tr.swf-latch-title-row > th {
+        top: var(--swf-nav-height, 0px);
+        height: var(--swf-latch-title-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
+        z-index: 102;
+      }
+      table.swf-latch-titled-head thead tr.swf-latch-title-row + tr > th {
+        top: calc(var(--swf-nav-height, 0px)
+                  + var(--swf-latch-title-height));
+        height: var(--swf-latch-column-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
+        z-index: 101;
+      }
+      table.swf-latch-titled-head tbody tr.swf-latch-section-row > * {
+        position: sticky;
+        top: calc(var(--swf-nav-height, 0px)
+                  + var(--swf-latch-title-height)
+                  + var(--swf-latch-column-height));
+        z-index: 100;
+        height: var(--swf-latch-section-height);
+        line-height: 1.5rem;
+        white-space: nowrap;
+        background-color: var(--bs-table-bg,
+                              var(--bs-secondary-bg, #e2e3e5));
+        box-shadow: inset 1px 0 0 #dee2e6,
+                    inset 0 -1px 0 #dee2e6;
+      }
+      table.swf-latch-titled-head tbody tr.swf-pc-anchor {
+        scroll-margin-top: calc(var(--swf-nav-height, 0px)
+                                + var(--swf-latch-title-height)
+                                + var(--swf-latch-column-height) + .5rem);
+      }
+      table.swf-latch-titled-head.swf-latch-section-heads
+          tbody tr.swf-pc-anchor {
+        scroll-margin-top: calc(var(--swf-nav-height, 0px)
+                                + var(--swf-latch-title-height)
+                                + var(--swf-latch-column-height)
+                                + var(--swf-latch-section-height) + .5rem);
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          thead tr.swf-latch-title-row > th {
+        top: 0;
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          thead tr.swf-latch-title-row + tr > th {
+        top: var(--swf-latch-title-height);
+      }
+      .swf-wide-table-scroll > table.swf-latch-titled-head
+          tbody tr.swf-latch-section-row > * {
+        top: calc(var(--swf-latch-title-height)
+                  + var(--swf-latch-column-height));
+      }
       /* Wide tables pin two leading columns by default so a compact ID can
          retain the useful name beside it. data-swf-pin-columns can lower
          that number for an exceptional table. Solid cell backgrounds keep
@@ -582,7 +646,8 @@
         <div class="dropdown">
             <button class="dropbtn{% if active_nav.panda_errors or active_nav.alarms or active_nav.panda_diagnostics %} nav-active{% endif %}">Diagnostics</button>
             <div class="dropdown-content">
-                <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Errors</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='errors' %}">Snapper error view</a>
+                <a href="{% url 'monitor_app:panda_errors_list' %}" class="{% if active_nav.panda_errors %}nav-active{% endif %}">Error summary</a>
                 <a href="{% url 'monitor_app:alarms_dashboard' %}" class="{% if active_nav.alarms %}nav-active{% endif %}">Alarms</a>
                 <a href="{% url 'monitor_app:panda_diagnostics_list' %}" class="{% if active_nav.panda_diagnostics %}nav-active{% endif %}">Diagnostics</a>
             </div>
@@ -611,6 +676,7 @@
                    class="{% if system_status_overall == 'error' %}nav-system-error{% endif %}{% if active_nav.system %} nav-active{% endif %}">System Status</a>
                 <a href="{% url 'snapper_ai:snapper_report' scope='epicprod' %}"
                    class="{% if active_nav.snapper %}nav-active{% endif %}">Snapper</a>
+                <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='platform' %}">Platform status</a>
                 <a href="{% url 'canary:canary_page' %}"
                    class="{% if active_nav.canary %}nav-active{% endif %}">Canary</a>
                 {% if user.is_authenticated and user.is_staff %}
@@ -842,7 +908,11 @@ function applyNavMode(mode) {
             return;
           }
 
-          const headerCells = table.querySelectorAll('thead tr:first-child > th');
+          const columnHeaderRow =
+            table.querySelector('thead tr.swf-latch-column-row')
+            || table.querySelector('thead tr:first-child');
+          const headerCells = columnHeaderRow
+            ? columnHeaderRow.querySelectorAll(':scope > th') : [];
           const pinned = Math.min(requestedPinnedColumns(table), headerCells.length);
           table.setAttribute('data-swf-active-pin-columns', String(pinned));
           if (pinned > 1) {
@@ -881,8 +951,18 @@ function applyNavMode(mode) {
         $(function () {
           // House sortable tables get chrome-free DataTables sorting before
           // the adaptive frame measures their rendered column widths.
-          $('table.swf-sortable').DataTable({
-            paging: false, searching: false, info: false, order: []
+          // data-swf-order="N,desc" opts a table into a default sort.
+          $('table.swf-sortable').each(function () {
+            const spec = this.getAttribute('data-swf-order');
+            let order = [];
+            if (spec) {
+              const parts = spec.split(',');
+              order = [[parseInt(parts[0], 10) || 0,
+                        parts[1] === 'desc' ? 'desc' : 'asc']];
+            }
+            $(this).DataTable({
+              paging: false, searching: false, info: false, order: order
+            });
           });
           scheduleTableFrameUpdate();
         });

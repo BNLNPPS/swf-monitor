@@ -5,17 +5,66 @@
 
 {% block content %}
 <div class="container-fluid">
-    <nav aria-label="breadcrumb">
-        <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="{% url 'monitor_app:panda_hub' %}">Home</a></li>
-            <li class="breadcrumb-item"><a href="{% url 'monitor_app:epic_queues_list' %}">ePIC Queues</a></li>
-            <li class="breadcrumb-item active">{{ queue_name }}</li>
-        </ol>
-    </nav>
-
     <h1>{{ queue_name }}</h1>
     <p><a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ queue_name }}" class="btn btn-primary btn-sm">View Jobs on this Queue</a></p>
+    <div class="card mb-3">
+        <div class="card-header d-flex align-items-center">
+            <strong>Description</strong>
+            {% if user.is_authenticated %}
+            <button type="button" class="btn btn-dark-green btn-sm" style="margin-left:1cm;"
+                    onclick="document.getElementById('queue-desc-view').classList.toggle('d-none');
+                             document.getElementById('queue-desc-edit').classList.toggle('d-none');">
+                Edit
+            </button>
+            {% endif %}
+        </div>
+        <div class="card-body">
+            <div id="queue-desc-view">
+                {% if description %}<p class="mb-0">{{ description }}</p>
+                {% else %}<p class="mb-0 text-muted">No description yet.</p>{% endif %}
+            </div>
+            {% if user.is_authenticated %}
+            <form id="queue-desc-edit" class="d-none" method="post"
+                  action="{% url 'monitor_app:epic_queue_description_update' queue_name %}">
+                {% csrf_token %}
+                <textarea name="description" class="form-control mb-2" rows="3"
+                          placeholder="What this queue is for, and how it differs from its siblings.">{{ description }}</textarea>
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                <button type="button" class="btn btn-secondary btn-sm"
+                        onclick="document.getElementById('queue-desc-view').classList.toggle('d-none');
+                                 document.getElementById('queue-desc-edit').classList.toggle('d-none');">
+                    Cancel
+                </button>
+                {% if panda_queue_metadata.description_updated_by %}
+                <span class="text-muted ms-2">last edited by {{ panda_queue_metadata.description_updated_by }}</span>
+                {% endif %}
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
     {% ai_assessment_panel panda_queue_metadata %}
+
+    {% if snapper_embed %}
+    <div class="mb-3">
+        <div class="d-flex align-items-baseline">
+            <h5 class="mb-1">State history · {{ queue_name }} · last 2 weeks</h5>
+            <a class="ms-3" href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}?site={{ queue_name|urlencode }}">Open in Snapper</a>
+        </div>
+        <div class="row g-2 align-items-stretch">
+            <div class="{% if site_outcomes_pie.pie %}col-lg-8{% else %}col-12{% endif %}">
+                {% include 'snapper_ai/_snapper_embed.html' with embed=snapper_embed %}
+            </div>
+            {% if site_outcomes_pie.pie %}
+            <div class="col-lg-4 d-flex justify-content-center">
+                {% include 'monitor_app/_snapper_site_outcomes_pie.html' with site_outcomes=site_outcomes_pie %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% elif site_no_activity %}
+    <p class="text-muted">No recorded job activity for this queue.</p>
+    {% endif %}
 
     {% if error %}
     <div class="alert alert-danger">{{ error }}</div>

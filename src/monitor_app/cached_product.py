@@ -33,6 +33,21 @@ BUILD_LOCK_TIMEOUT_SECONDS = 600
 REFRESH_WAIT_SECONDS = 15
 
 
+def _lock_live(row):
+    """True while the row's build slot is held by a live build.
+
+    A slot older than ``BUILD_LOCK_TIMEOUT_SECONDS`` belongs to a worker
+    that died mid-build (a process recycle kills the background thread
+    before its ``finally`` clears the slot). Every reader of
+    ``building_since`` goes through this rule, so an abandoned slot never
+    presents as an in-flight rebuild and never blocks the next one.
+    """
+    if row is None or row.building_since is None:
+        return False
+    age = (timezone.now() - row.building_since).total_seconds()
+    return age < BUILD_LOCK_TIMEOUT_SECONDS
+
+
 def _claim(key):
     """Atomically claim the build slot for a key. True when claimed."""
     from django.db.models import Q
@@ -88,7 +103,8 @@ def _background_build(key, builder):
     thread.start()
 
 
-def get_product(key, builder, ttl_seconds, refresh=False):
+def get_product(key, builder, ttl_seconds, refresh=False,
+                async_first_fill=False):
     """Serve a cached product; rebuild by the contract above.
 
     Returns ``{'value', 'built_at', 'age_seconds', 'refreshing',
@@ -101,6 +117,15 @@ def get_product(key, builder, ttl_seconds, refresh=False):
 
     row = CachedProduct.objects.filter(key=key).first()
     have_product = row is not None and row.built_at is not None
+
+    # A large focus product must not hold the page request open on its first
+    # build. The report already understands a truthful empty/refreshing shell
+    # and follows it up after three seconds; build behind that response.
+    if async_first_fill and not refresh and not have_product:
+        if _claim(key):
+            _background_build(key, builder)
+        return {'value': None, 'built_at': None, 'age_seconds': None,
+                'refreshing': True, 'built_now': False}
 
     if (refresh or not have_product) and _claim(key):
         _build_and_store(key, builder)
@@ -132,7 +157,7 @@ def get_product(key, builder, ttl_seconds, refresh=False):
                     'refreshing': False,
                     'built_now': False,
                 }
-            if (row is None or row.building_since is None) and _claim(key):
+            if not _lock_live(row) and _claim(key):
                 # The other build ended without landing a newer product
                 # (failure or lock expiry). The caller asked for a
                 # synchronous update, so build it here after all.
@@ -154,7 +179,7 @@ def get_product(key, builder, ttl_seconds, refresh=False):
                 'refreshing': True, 'built_now': False}
 
     age = (timezone.now() - row.built_at).total_seconds()
-    refreshing = row.building_since is not None
+    refreshing = _lock_live(row)
     if age > ttl_seconds and not refreshing and _claim(key):
         _background_build(key, builder)
         refreshing = True

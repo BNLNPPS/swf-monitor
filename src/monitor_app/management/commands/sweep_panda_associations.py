@@ -11,6 +11,15 @@ once with a wide --days window as the backfill.
 from django.core.management.base import BaseCommand
 
 
+def _should_auto_intake(reason):
+    """Only a genuine absence of a PCS identity enters direct intake.
+
+    Association conflicts (including a repeated PanDA taskName under a new
+    JEDI id) already have a PCS task and must never be presented as intake.
+    """
+    return str(reason or '').startswith('no exact PCS match for PanDA taskname')
+
+
 class Command(BaseCommand):
     help = ('Associate recent PanDA tasks with PCS campaign tasks '
             '(batch form of the lazy per-view reconciliation).')
@@ -67,16 +76,18 @@ class Command(BaseCommand):
                     continue
             pcs_task, row, reason = reconcile_panda_task_association(panda_task)
             checked += 1
-            if row is None and not opts['no_intake']:
+            if (row is None and not opts['no_intake']
+                    and _should_auto_intake(reason)):
                 # Commissioning/migration policy: directly submitted
                 # group.EIC production is auto-intaken into the catalog,
                 # then associated by the normal reconciler.
                 task, intake_reason = intake_direct_panda_task(panda_task)
                 if task is not None:
-                    intaken += 1
-                    self.stdout.write(
-                        f"intaken jediTaskID={panda_task.get('jeditaskid')} "
-                        f"-> {task.name}")
+                    if intake_reason == 'intaken':
+                        intaken += 1
+                        self.stdout.write(
+                            f"intaken jediTaskID="
+                            f"{panda_task.get('jeditaskid')} -> {task.name}")
                     pcs_task, row, reason = reconcile_panda_task_association(panda_task)
             if row is None:
                 unmatched += 1

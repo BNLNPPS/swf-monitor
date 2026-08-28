@@ -216,14 +216,22 @@ async def panda_error_summary(
     destinationse: str = None,
     taskid: int = None,
     error_source: str = None,
+    status: str = 'failed,cancelled',
     limit: int = 20,
 ) -> dict:
     """
     Aggregate error summary across failed PanDA jobs, ranked by frequency.
 
     Extracts non-zero errors from all 7 error components (pilot, executor, DDM,
-    brokerage, dispatcher, supervisor, taskbuffer) across failed/cancelled/closed
-    jobs, groups by (component, code, diagnostic), and ranks by occurrence count.
+    brokerage, dispatcher, supervisor, taskbuffer) across faulty jobs,
+    groups by (component, code, diagnostic), and ranks by occurrence count.
+
+    By default the summary covers failed and cancelled jobs and EXCLUDES
+    closed jobs: closed marks jobs the PanDA server disposed of for its own
+    workflow reasons (pending expiry, rebrokerage, task-done kills) — by
+    design not actual errors. The excluded population stays visible in
+    status_counts; pass status='failed,cancelled,closed' to include it,
+    or status='closed' to study a disposal storm by itself.
 
     Unlike panda_diagnose_jobs (per-job detail), this tool gives the big picture:
     "What are the most common errors and who do they affect?"
@@ -237,10 +245,15 @@ async def panda_error_summary(
         taskid: Filter by JEDI task ID.
         error_source: Filter to errors from one component
                       (pilot, executor, ddm, brokerage, dispatcher, supervisor, taskbuffer).
+        status: Terminal state(s) to include, one of failed/cancelled/closed
+            or a CSV of them (default 'failed,cancelled').
         limit: Maximum error patterns to return (default 20).
 
     Returns:
         total_errors: Total error occurrences across all components.
+        status_counts: Per terminal state, the window's totals with NO
+            status restriction applied — closed disposal storms show
+            here even when the status filter excludes them.
         errors: Ranked list of error patterns, each with:
             error_source, error_code, error_diag, count,
             task_count, users, sites, destination_sites, site_counts,
@@ -253,7 +266,8 @@ async def panda_error_summary(
     return await sync_to_async(queries.error_summary)(
         days=days, username=username, site=site,
         destinationse=destinationse,
-        taskid=taskid, error_source=error_source, limit=limit,
+        taskid=taskid, error_source=error_source, status=status,
+        limit=limit,
     )
 
 

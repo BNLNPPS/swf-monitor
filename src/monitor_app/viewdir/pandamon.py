@@ -5,6 +5,9 @@ Web views for ePIC PanDA production monitoring — jobs, tasks, errors,
 activity overview, and detail pages with rich cross-linking.
 """
 
+from django.contrib.auth.decorators import login_required
+from collections import Counter
+
 from django.shortcuts import render, redirect
 from django.http import JsonResponse, HttpResponse
 from django.urls import reverse
@@ -16,7 +19,7 @@ import os
 import hashlib
 import re
 from html import escape
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone as dt_timezone
 from urllib.parse import quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
@@ -28,7 +31,7 @@ from ..panda import (
     list_jobs_dt, build_tasks_window,
     job_filter_counts, task_filter_counts,
     get_task, error_summary, diagnose_jobs, job_completion_details,
-    list_queues, get_queue, resource_usage, job_outcomes,
+    list_queues, get_queue, queue_last_use, resource_usage, job_outcomes,
 )
 from ..panda.constants import (
     LIST_FIELDS, TASK_LIST_FIELDS,
@@ -238,8 +241,27 @@ def _linkify(text):
     return text
 
 
+_NAIVE_ISO_RE = re.compile(r'^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$')
+
+
+def _tag_panda_utc(obj):
+    """PanDA DB timestamps are naive UTC. Stamp the offset onto naive ISO
+    strings, in place, so downstream formatters render true Eastern."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if isinstance(value, str):
+                if _NAIVE_ISO_RE.match(value):
+                    obj[key] = value + '+00:00'
+            elif isinstance(value, (dict, list)):
+                _tag_panda_utc(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            _tag_panda_utc(item)
+
+
 def _fmt_dt(val):
-    """Format an ISO datetime string or datetime object for display."""
+    """Format an ISO datetime string or datetime object for display.
+    Naive values are PanDA DB timestamps, which are UTC."""
     if not val:
         return ''
     if isinstance(val, str):
@@ -247,6 +269,8 @@ def _fmt_dt(val):
             val = datetime.fromisoformat(val)
         except (ValueError, TypeError):
             return val
+    if val.tzinfo is None:
+        val = val.replace(tzinfo=dt_timezone.utc)
     return val.astimezone(_EASTERN).strftime('%Y%m%d %H:%M:%S')
 
 
@@ -600,7 +624,7 @@ def _jobs_site_graphics_product(days, site, refresh,
         f':{ended_after.isoformat()}:{ended_before.isoformat()}'
         if ended_after is not None and ended_before is not None else '')
     return get_product(
-        f'snapper_site_graphics:v4:epicprod:site:{site}:{days}{exact_key}',
+        f'snapper_site_graphics:v7:epicprod:site:{site}:{days}{exact_key}',
         build,
         ttl_seconds=300, refresh=refresh)
 
@@ -977,6 +1001,7 @@ def panda_job_detail(request, pandaid):
     if 'error' in data:
         return render(request, 'monitor_app/panda_job_detail.html',
                       {'error': data['error'], 'pandaid': pandaid})
+    _tag_panda_utc(data)
     data['pandaid'] = pandaid
     job = data.get('job') or {}
     job['transformation_is_url'] = (job.get('transformation') or '').startswith(('http://', 'https://'))
@@ -1348,6 +1373,7 @@ def panda_task_detail(request, jeditaskid):
     if isinstance(task, dict) and 'error' in task:
         return render(request, 'monitor_app/panda_task_detail.html',
                       {'error': task['error'], 'jeditaskid': jeditaskid})
+    _tag_panda_utc(task)
     pcs_task = _pcs_task_for_panda_task(task)
     panda_tasks_row = _panda_tasks_row_for_jeditaskid(jeditaskid)
 
@@ -1389,6 +1415,7 @@ def panda_task_detail(request, jeditaskid):
         if epicprod_job and epicprod_job.failure_summary:
             job['epicprod_phase'] = epicprod_job.phase
             job['epicprod_failure_summary'] = epicprod_job.failure_summary
+    _tag_panda_utc(jobs)
     task_record = task.get('task_record') or {}
     task_record_items = [
         {
@@ -1486,13 +1513,19 @@ def panda_errors_list(request):
         'columns': ERROR_COLUMNS,
         'selected_site': request.GET.get('site', ''),
         'selected_error_source': request.GET.get('error_source', ''),
-        'selected_status': request.GET.get('status', ''),
+        # Default excludes closed (workflow disposals, not actual
+        # errors); the chips show every state present with its count.
+        'selected_status': request.GET.get('status', '') or 'failed,cancelled',
         'classified': request.GET.get('classified', ''),
+        'selected_taskid': request.GET.get('taskid', ''),
         'ended_after': (ended_after.isoformat()
                         if ended_after is not None else ''),
         'ended_before': (ended_before.isoformat()
                          if ended_before is not None else ''),
     }
+    without_taskid = request.GET.copy()
+    without_taskid.pop('taskid', None)
+    context['clear_task_query'] = without_taskid.urlencode()
     context.update(_days_context(days))
     return render(request, 'monitor_app/panda_errors.html', context)
 
@@ -1507,19 +1540,26 @@ def panda_errors_datatable_ajax(request):
     username = request.GET.get('username', '') or None
     site = request.GET.get('site', '') or None
     error_source = request.GET.get('error_source', '') or None
-    status = request.GET.get('status', '') or None
+    # Terminal-state filter, one status or CSV. The default excludes
+    # closed: the server disposed of those jobs for workflow reasons,
+    # by design not actual errors — the closed population stays
+    # visible in the status chips' counts and is one click away.
+    status = request.GET.get('status', '') or 'failed,cancelled'
     classified = request.GET.get('classified') == '1'
+    taskid = request.GET.get('taskid', '') or None
 
     # Served as a cached product: the error aggregation scans the window's
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v2:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v4:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
+        f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
         f'{ended_before.isoformat() if ended_before else ""}',
         lambda: error_summary(days=days, username=username, site=site,
                               error_source=error_source, limit=200,
+                              taskid=taskid,
                               ended_after=ended_after,
                               ended_before=ended_before, status=status,
                               classified=classified),
@@ -1532,6 +1572,10 @@ def panda_errors_datatable_ajax(request):
                              if product['built_at'] else None),
         'product_age_seconds': product['age_seconds'],
         'product_refreshing': product['refreshing'],
+        # Chip basis: per-status totals of the unrestricted window
+        # population, and the selection this response was built under.
+        'status_counts': result.get('status_counts') or {},
+        'status_selected': status,
     }
 
     if 'error' in result:
@@ -1643,12 +1687,226 @@ def panda_diagnostics_datatable_ajax(request):
 
 # ── ePIC Queue views ────────────────────────────────────────────────────────
 
+SPARK_SPAN_DAYS = 14
+SPARK_BIN_HOURS = 8
+
+
+def _queue_completion_sparklines():
+    """Per-queue finished/failed completion flows for the 2-week
+    thumbnail sparklines: per-4-hour-bin deltas of the per-site
+    cumulative finished and failed counters in epicprod panda snaps,
+    extracted server-side (jsonb path, no full-state parsing).
+
+    A bin with no snaps is a coverage gap (None); the next sampled bin
+    carries the delta accumulated across the gap. A counter reset
+    (negative delta) renders as a gap, never as a negative flow.
+    """
+    from django.db import connection
+    from django.utils import timezone as dj_timezone
+    now = dj_timezone.now()
+    nbins = SPARK_SPAN_DAYS * 24 // SPARK_BIN_HOURS
+    # One extra lead-in bin supplies the baseline for the first delta.
+    start = now - timedelta(days=SPARK_SPAN_DAYS, hours=SPARK_BIN_HOURS)
+    sql = """
+        SELECT snap_time, state#>'{components,panda,data,jobs,sites}'
+        FROM snapper_system_snap
+        WHERE scope = 'epicprod'
+          AND snap_time >= %s
+          AND changed_components @> %s::jsonb
+          AND state#>'{components,panda,data,jobs,sites}' IS NOT NULL
+        ORDER BY snap_time
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(sql, [start, '["panda"]'])
+        rows = cursor.fetchall()
+    if not rows:
+        return {}
+    counters = {}              # site -> {slot: (cum finished, cum failed)}
+    for snap_time, sites in rows:
+        if isinstance(sites, str):
+            try:
+                sites = json.loads(sites)
+            except ValueError as e:
+                logger.error("sparkline snap JSON parse failed: %s", e)
+                continue
+        age_h = (now - snap_time).total_seconds() / 3600.0
+        slot = nbins - 1 - int(age_h // SPARK_BIN_HOURS)
+        if slot < -1:
+            continue
+        for site, block in (sites or {}).items():
+            cum = (block or {}).get('cum') or {}
+            counters.setdefault(site, {})[slot] = (
+                cum.get('finished') or 0, cum.get('failed') or 0)
+    sites_out = {}
+    for site, per_slot in counters.items():
+        flows = []
+        prev = per_slot.get(-1)
+        for i in range(nbins):
+            cur = per_slot.get(i)
+            if cur is None or prev is None:
+                flows.append(None)
+            else:
+                dfin, dfail = cur[0] - prev[0], cur[1] - prev[1]
+                flows.append([dfin, dfail]
+                             if dfin >= 0 and dfail >= 0 else None)
+            if cur is not None:
+                prev = cur
+        sites_out[site] = flows
+    return {'nbins': nbins, 'sites': sites_out}
+
+
+def _spark_svg(series, width=120, height=40):
+    """Stacked-area sparkline geometry for one queue's completion flows:
+    green fill = finished, red band above it = failed, scaled to the
+    queue's own peak total. None bins are coverage gaps and break the
+    paths."""
+    if not series:
+        return None
+    totals = [(v[0] + v[1]) if v is not None else None for v in series]
+    peak = max((t for t in totals if t is not None), default=None)
+    if peak is None:
+        return None
+    scale = peak if peak > 0 else 1
+    n = len(series)
+    step = width / max(n - 1, 1)
+    top, base = 2.0, float(height)
+    span = base - top
+    green, red = [], []
+    seg = []                   # (x, y at finished, y at finished+failed)
+
+    def close_segment():
+        if not seg:
+            return
+        fin_fwd = ' L '.join(f'{x:.1f},{yf:.1f}' for x, yf, yt in seg)
+        green.append(
+            f'M {seg[0][0]:.1f},{base:.1f} L {fin_fwd} '
+            f'L {seg[-1][0]:.1f},{base:.1f} Z')
+        if any(yt < yf for x, yf, yt in seg):
+            tot_fwd = ' L '.join(f'{x:.1f},{yt:.1f}' for x, yf, yt in seg)
+            fin_back = ' L '.join(
+                f'{x:.1f},{yf:.1f}' for x, yf, yt in reversed(seg))
+            red.append(f'M {tot_fwd} L {fin_back} Z')
+
+    for i, v in enumerate(series):
+        if v is None:
+            close_segment()
+            seg = []
+            continue
+        dfin, dfail = v
+        y_fin = base - span * dfin / scale
+        y_tot = base - span * (dfin + dfail) / scale
+        seg.append((i * step, y_fin, y_tot))
+    close_segment()
+    if not green:
+        return None
+    fin_total = sum(v[0] for v in series if v is not None)
+    fail_total = sum(v[1] for v in series if v is not None)
+    return {
+        'w': width, 'h': height,
+        'green': ' '.join(green), 'red': ' '.join(red),
+        'fin_total': fin_total, 'fail_total': fail_total,
+        'total': fin_total + fail_total,
+    }
+
+
 def epic_queues_list(request):
     """ePIC compute queues from live PanDA schedconfig."""
     result = list_queues(vo='eic')
     queues = result.get('queues', [])
+    # Operator-written description and tier live in the local model's
+    # metadata, which the CRIC sync never touches. One query, attached by
+    # name. The tier held there overrides schedconfig, whose value reflects
+    # the parent site rather than the facility actually providing the cycles.
+    from monitor_app.models import PandaQueue
+    local = {
+        row.queue_name: (row.metadata or {})
+        for row in PandaQueue.objects.only('queue_name', 'metadata')
+    }
+    # Canary's curated per-queue health, the failure percentage its policy
+    # judges, and the last job activity from the PanDA jobs tables, all
+    # joined by queue name.
+    from canary.store.models import PassiveSample, Queue as CanaryQueue
+    canary_queues = list(CanaryQueue.objects.all())
+    canary_health = {q.name: q.status for q in canary_queues}
+    canary_names = {q.id: q.name for q in canary_queues}
+    canary_pct = {}
+    canary_njobs = {}
+    seen_samples = set()
+    for sample in PassiveSample.objects.order_by('queue_id', '-window_end'):
+        if sample.queue_id in seen_samples:
+            continue
+        seen_samples.add(sample.queue_id)
+        name = canary_names.get(sample.queue_id)
+        if not name:
+            continue
+        canary_njobs[name] = sample.njobs
+        if sample.failure_rate is not None:
+            canary_pct[name] = f'{sample.failure_rate * 100:.0f}%'
+    last_use = queue_last_use()
+    from ..cached_product import get_product
+    spark_product = get_product(
+        'epic_queues_sparklines:v3', _queue_completion_sparklines,
+        ttl_seconds=6 * 3600, async_first_fill=True)
+    spark_data = (spark_product or {}).get('value') or {}
+    spark_sites = spark_data.get('sites') or {}
+    for queue in queues:
+        name = queue.get('panda_queue')
+        meta = local.get(name, {})
+        queue['description'] = meta.get('description', '')
+        queue['tier'] = meta.get('tier') or queue.get('tier') or ''
+        queue['canary'] = canary_health.get(name, 'unknown')
+        queue['canary_pct'] = canary_pct.get(name, '')
+        queue['canary_njobs'] = canary_njobs.get(name)
+        queue['last_use'] = last_use.get(name)
+        queue['spark'] = _spark_svg(spark_sites.get(name))
+        # Schedconfig mixes caps in resource_type (GRID vs cloud/gpu);
+        # display lowercase throughout.
+        if queue.get('resource_type'):
+            queue['resource_type'] = queue['resource_type'].lower()
+
+    filter_fields = [
+        ('status', 'Status'),
+        ('canary', 'Canary'),
+        ('resource_type', 'Resource Type'),
+        ('type', 'Queue Type'),
+        ('country', 'Region'),
+        ('tier', 'Tier'),
+    ]
+    # Options come from the full set, so a chosen filter does not empty the
+    # other filter bars.
+    # Tier options rank T1, T2, ... then Opp, not alphabetically.
+    def _tier_rank(v):
+        if v.startswith('T') and v[1:].isdigit():
+            return (0, int(v[1:]), v)
+        if v == 'Opp':
+            return (1, 0, v)
+        return (2, 0, v)
+
+    filters = []
+    selected = {}
+    for key, label in filter_fields:
+        value = (request.GET.get(key) or '').strip()
+        selected[key] = value
+        counts = Counter((q.get(key) or '') for q in queues if q.get(key))
+        ordered = sorted(counts, key=_tier_rank) if key == 'tier' else sorted(counts)
+        filters.append({
+            'key': key, 'label': label, 'selected': value,
+            'options': [{'value': v, 'count': counts[v]} for v in ordered],
+        })
+    for key, value in selected.items():
+        if value:
+            queues = [q for q in queues if (q.get(key) or '') == value]
+
     return render(request, 'monitor_app/epic_queues_list.html', {
         'queues': queues,
+        'filters': filters,
+        'active_filters': [
+            {'label': f['label'], 'value': f['selected']}
+            for f in filters if f['selected']
+        ],
+        'clear_all_url': reverse('monitor_app:epic_queues_list'),
+        'any_filter': any(selected.values()),
+        'total_count': result.get('count', 0),
     })
 
 
@@ -1667,6 +1925,7 @@ def epic_queue_detail(request, queue_name):
             'error': result['error'],
             'queue_name': queue_name,
             'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
+            'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
         })
     config = result['queue']
 
@@ -1713,10 +1972,65 @@ def epic_queue_detail(request, queue_name):
         shown.update(s.keys())
     other = {k: v for k, v in config.items() if k not in shown}
 
+    # Same snapper site history + outcomes pie the jobs page shows when
+    # filtered to this queue, over the standing 2-week window.
+    snapper_embed = None
+    site_outcomes_pie = None
+    site_no_activity = False
+    try:
+        graphics_product = _jobs_site_graphics_product(
+            14, queue_name, request.GET.get('refresh') == '1')
+        graphics = graphics_product['value'] or {}
+        snapper_embed = graphics.get('embed') or {
+            'scope': 'epicprod',
+            'error': 'state history is building — reload shortly.'}
+        site_outcomes_pie = graphics.get('outcomes_pie')
+    except Exception as e:                                   # noqa: BLE001
+        if 'has no curve family' in str(e):
+            # No job history in the snapper record for this queue: an
+            # expected absence, not a failure.
+            site_no_activity = True
+        else:
+            logger.error(
+                'snapper site graphics failed for queue detail: %s', e)
+            snapper_embed = {'scope': 'epicprod', 'error': str(e)}
+
     return render(request, 'monitor_app/epic_queue_detail.html', {
         'queue_name': queue_name,
         'panda_queue_metadata': (panda_queue.metadata if panda_queue else {}),
+        'description': ((panda_queue.metadata if panda_queue else {}) or {}).get('description', ''),
         'sections': sections,
         'other': other,
         'config_json': json_mod.dumps(config, indent=2, default=str),
+        'snapper_embed': snapper_embed,
+        'site_outcomes_pie': site_outcomes_pie,
+        'site_no_activity': site_no_activity,
     })
+
+
+@login_required
+def epic_queue_description_update(request, queue_name):
+    """Save the operator-written description for a queue.
+
+    The description is held in the local model's ``metadata`` JSON rather than
+    in the mirrored schedconfig: the sync writers replace ``config_data`` and
+    leave ``metadata`` alone, so the text survives every refresh. The local
+    row is created on demand, since most queues are only known from
+    schedconfig until somebody annotates them.
+    """
+    from monitor_app.models import PandaQueue
+
+    if request.method != 'POST':
+        return redirect('monitor_app:epic_queue_detail', queue_name=queue_name)
+
+    queue, _created = PandaQueue.objects.get_or_create(
+        queue_name=queue_name,
+        defaults={'config_data': {}, 'metadata': {}},
+    )
+    metadata = dict(queue.metadata or {})
+    metadata['description'] = (request.POST.get('description') or '').strip()
+    metadata['description_updated_by'] = request.user.get_username()
+    metadata['description_updated_at'] = timezone.now().isoformat()
+    queue.metadata = metadata
+    queue.save(update_fields=['metadata', 'updated_at'])
+    return redirect('monitor_app:epic_queue_detail', queue_name=queue_name)

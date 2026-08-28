@@ -63,6 +63,7 @@
                         {% if job.starttime %}<tr><td><strong>Started</strong></td><td>{{ job.starttime|fmt_dt }}</td></tr>{% endif %}
                         {% if job.endtime %}<tr><td><strong>Ended</strong></td><td>{{ job.endtime|fmt_dt }}</td></tr>{% endif %}
                         {% if job.modificationtime %}<tr><td><strong>Last modified</strong></td><td>{{ job.modificationtime|fmt_dt }}</td></tr>{% endif %}
+                        {% if job.heartbeat_timeline %}<tr><td><strong>Lost heartbeat</strong></td><td>last heartbeat {{ job.heartbeat_timeline.last_heartbeat|fmt_dt }}{% if job.heartbeat_timeline.heard_for_minutes is not None %} ({{ job.heartbeat_timeline.heard_for_minutes }} min after start){% endif %} · failed {{ job.heartbeat_timeline.failed_at|fmt_dt }}{% if job.heartbeat_timeline.silent_minutes is not None %} · silent {{ job.heartbeat_timeline.silent_minutes }} min{% endif %}. The recorded end time is the last heartbeat, not the failure.</td></tr>{% endif %}
                         {% if job.duration %}<tr><td><strong>Duration</strong></td><td>{{ job.duration }}</td></tr>{% endif %}
                         {% if job.waittime %}<tr><td><strong>Wait Time</strong></td><td>{{ job.waittime }}</td></tr>{% endif %}
                     </table>

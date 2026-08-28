@@ -32,35 +32,97 @@
 
 {% elif card.kind == 'panda' %}
   {% if not card.site_only %}
-  <div class="d-flex flex-wrap gap-4 mb-2">
-    {% for stat in card.headline %}
-    <div class="snapper-stat">
-      <div class="snapper-stat-value">{{ stat.value }}
-        {% if stat.delta %}<span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %} fs-6">{{ stat.delta }}</span>{% endif %}
+  <div class="d-flex flex-column gap-3">
+    <section class="snapper-cut-card">
+      <div class="d-flex align-items-baseline gap-2 mb-1">
+        <strong>Queues</strong>
+        {% if card.changed %}<span class="badge bg-info text-dark">changed in this snap</span>{% endif %}
+        <span class="text-muted small">assessed {% if card.assessed_age_text %}{{ card.assessed_age_text }} earlier{% else %}{{ card.assessed_at|fmt_dt }}{% endif %}</span>
       </div>
-      <div class="text-muted">
-        {% if stat.label == 'running jobs' or stat.label == 'running cores' %}<a href="{% url 'monitor_app:panda_jobs_list' %}?status=running">{{ stat.label }}</a>
-        {% elif stat.label == 'in-flight jobs' %}<a href="{% url 'monitor_app:panda_jobs_list' %}">{{ stat.label }}</a>
-        {% elif stat.label == 'queued (activated)' %}<a href="{% url 'monitor_app:panda_jobs_list' %}?status=activated">{{ stat.label }}</a>
-        {% elif stat.label == 'in-flight tasks' %}<a href="{% url 'monitor_app:panda_tasks_list' %}">{{ stat.label }}</a>
-        {% else %}{{ stat.label }}{% endif %}
-      </div>
-    </div>
-    {% endfor %}
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+        <thead><tr><th>Queue</th><th class="text-end">Running cores</th><th class="text-end">Δ prev snap</th></tr></thead>
+        <tbody>
+        {% for entry in card.queue_cores %}
+        <tr>
+          <td><span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{% if entry.site == 'other' %}other{% else %}<a href="{% url 'monitor_app:panda_jobs_list' %}?site={{ entry.site|urlencode }}&status=running">{{ entry.site }}</a>{% endif %}</td>
+          <td class="text-end">{{ entry.value }}</td>
+          <td class="text-end">{% if entry.delta %}{{ entry.delta }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="snapper-cut-card">
+      <div class="mb-1"><strong>Outcomes</strong></div>
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+        <thead><tr><th>Outcome</th><th class="text-end">{{ card.outcomes_basis }}</th><th class="text-end">Δ prev snap</th></tr></thead>
+        <tbody>
+        {% for entry in card.outcomes %}
+        <tr>
+          <td><span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{% url 'monitor_app:panda_jobs_list' %}?status={{ entry.label|urlencode }}">{{ entry.label }}</a></td>
+          <td class="text-end">{{ entry.value }}</td>
+          <td class="text-end">{% if entry.delta %}{{ entry.delta }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="snapper-cut-card">
+      <div class="mb-1"><strong>Types</strong></div>
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+        <thead><tr><th>Type</th><th class="text-end">In-flight jobs</th><th class="text-end">Δ prev snap</th></tr></thead>
+        <tbody>
+        {% for entry in card.types %}
+        <tr>
+          <td><span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ entry.label }}</td>
+          <td class="text-end">{{ entry.value }}</td>
+          <td class="text-end">{% if entry.delta %}{{ entry.delta }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="snapper-cut-card">
+      <div class="mb-1"><strong>States</strong></div>
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+        <thead><tr><th>State</th><th class="text-end">In-flight jobs</th><th class="text-end">Δ prev snap</th></tr></thead>
+        <tbody>
+        {% for entry in card.states %}
+        <tr>
+          <td><span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{% url 'monitor_app:panda_jobs_list' %}?status={{ entry.label|urlencode }}">{{ entry.label }}</a></td>
+          <td class="text-end">{{ entry.value }}</td>
+          <td class="text-end">{% if entry.delta %}{{ entry.delta }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="snapper-cut-card">
+      <div class="mb-1"><strong>Tasks</strong></div>
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+        <thead><tr><th>State</th><th class="text-end">In-flight tasks</th><th class="text-end">Δ prev snap</th></tr></thead>
+        <tbody>
+        {% for entry in card.tasks %}
+        <tr>
+          <td><span data-curve="{{ entry.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{% url 'monitor_app:panda_tasks_list' %}?status={{ entry.label|urlencode }}">{{ entry.label }}</a></td>
+          <td class="text-end">{{ entry.value }}</td>
+          <td class="text-end">{% if entry.delta %}{{ entry.delta }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if card.payload_json %}
+      <details class="mt-1">
+        <summary class="text-muted small">component document (audit)</summary>
+        <pre class="p-2 border rounded snapper-scrollpane" style="max-height:22em; overflow:auto; font-size:.9em;">{{ card.payload_json }}</pre>
+      </details>
+      {% endif %}
+    </section>
   </div>
-  {% if previous_age_text %}
-  <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
-  {% endif %}
-  {% if card.types %}
-  <div class="mb-1"><strong>In flight by type:</strong>
-    {% for type_name, count in card.types %}<a href="{% url 'monitor_app:panda_tasks_list' %}?processingtype={{ type_name|urlencode }}">{{ type_name }}</a> {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}
-  </div>
-  {% endif %}
-  {% if card.type_states %}
-  <div class="mb-1 text-muted">
-    {% for entry in card.type_states %}{{ entry.label }} {{ entry.value }}{% if entry.delta %} ({{ entry.delta }}){% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}
-  </div>
-  {% endif %}
   {% endif %}
   {# Queue slice: one table row per curve, in panel order, the swatch #}
   {# correlating each row to its curve — at-cut standing, change     #}
@@ -108,14 +170,204 @@
   </div>
   {% endfor %}
 
+{% elif card.kind == 'errors' %}
+  {# The error breakdown at the cut: window accruals per category with #}
+  {# catalog labels, the component-share donut, and the trailing       #}
+  {# window's top diagnostic patterns — every fact a drill-down into   #}
+  {# the error summary, the failed-jobs list, or a representative job. #}
+  <section class="snapper-cut-card">
+    <div class="mb-1"><strong>Errors{% if card.task_selection %} · task {{ card.task_selection }}{% endif %}</strong>
+      {% if card.basis %} <span class="text-muted small">window {{ card.basis }} · {{ card.window_errors }} errors</span>{% endif %}
+      · <a href="{{ card.errors_url }}">error summary</a>
+      · <a href="{{ card.jobs_url }}">failed jobs</a></div>
+    {% if card.reading %}
+    <div class="mb-2"><strong>Reading:</strong>
+      {% for r in card.reading %}{% if not forloop.first %} · {% endif %}{{ r.pre }}{% if r.url %}<a href="{{ r.url }}">{{ r.label }}</a>{% else %}{{ r.label }}{% endif %}{{ r.post }}{% endfor %}
+    </div>
+    {% endif %}
+    {% if card.rows %}
+    <div class="d-flex flex-wrap column-gap-4 align-items-start">
+      <div>
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <thead><tr><th>Category</th><th class="text-end">Errors</th></tr></thead>
+          <tbody>
+          {% for r in card.rows %}
+          <tr>
+            <td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ r.url }}">{{ r.label }}</a></td>
+            <td class="text-end">{{ r.window }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if card.row_overflow %}
+        <div class="text-muted small mb-1">{{ card.row_overflow }} {{ card.row_overflow_note }}.</div>
+        {% endif %}
+      </div>
+      {% if card.pie %}
+      <div>
+        <div class="mb-1 text-center"><strong>{{ card.pie_label|default:"Shares" }}</strong></div>
+        <svg width="{{ card.pie_size }}" height="{{ card.pie_size }}"
+             viewBox="0 0 120 120"
+             style="display:block; max-width:100%; height:auto;"
+             role="img" aria-label="Error shares by component">
+          {% for seg in card.pie %}
+          <a href="{{ seg.url }}"><path d="{{ seg.path }}"
+            data-curve="{{ seg.curve }}"
+            {% if seg.color %}fill="{{ seg.color }}"{% endif %}
+            stroke="rgba(255,255,255,0.65)" stroke-width="1"><title>{{ seg.title }}</title></path></a>
+          {% endfor %}
+        </svg>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="text-muted mb-1">No errors accrued in this window{% if card.task_selection %} for this task{% endif %}.</div>
+    {% endif %}
+    {% if card.patterns %}
+    <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">{{ card.window_patterns }} pattern{{ card.window_patterns|pluralize }} in the window, from live job records</span></div>
+    <table class="table table-sm table-bordered w-100 mb-1">
+      <thead><tr><th>Category</th><th>Diagnostic</th><th class="text-end">Count</th><th>Example job</th><th>Tasks</th><th>Queues</th></tr></thead>
+      <tbody>
+      {% for p in card.patterns %}
+      <tr>
+        <td class="text-nowrap"><span data-curve="{{ p.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ p.category }}</td>
+        <td class="small" style="word-break:break-word;">{{ p.diag }}</td>
+        <td class="text-end">{{ p.count }}</td>
+        <td>{% if p.rep_url %}<a href="{{ p.rep_url }}">{{ p.rep_pandaid }}</a>{% else %}—{% endif %}</td>
+        <td>{% for t in p.tasks %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=t %}">{{ t }}</a>{% if not forloop.last %} {% endif %}{% endfor %}</td>
+        <td class="small">{% for s in p.sites %}{{ s }}{% if not forloop.last %} {% endif %}{% endfor %}{% if p.site_overflow %} (+{{ p.site_overflow }}){% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if card.payload_json %}
+    <details class="mt-1">
+      <summary class="text-muted small">component document (audit)</summary>
+      <pre class="p-2 border rounded snapper-scrollpane" style="max-height:22em; overflow:auto; font-size:.9em;">{{ card.payload_json }}</pre>
+    </details>
+    {% endif %}
+  </section>
+
+{% elif card.kind == 'platform' %}
+  {# The platform cut: assessment, then the detail tables, and last the #}
+  {# summary across every plotted metric with its range statistics.  #}
+  <section class="snapper-cut-card">
+    <div class="mb-2"><strong>Platform</strong>
+      <span class="snapper-chip" style="background:{{ card.overall_chip.color }}">{{ card.overall }}</span>
+      {% if card.interval.end %}<span class="text-muted small">interval {{ card.interval.start|fmt_dt }} – {{ card.interval.end|fmt_dt }} ET</span>{% endif %}
+      · <span class="text-muted small">server-host report: {{ card.reporter_status }}</span>
+      · <a href="{{ card.errors_url }}">error breakdown at this cut</a></div>
+    <div class="d-flex flex-wrap column-gap-3 row-gap-1 mb-2">
+      {% for v in card.verdicts %}
+      <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>
+      {% endfor %}
+    </div>
+    <div class="d-flex flex-wrap column-gap-4 row-gap-2 align-items-start">
+      <div>
+        <div class="mb-1"><strong>Heartbeats</strong> <span class="text-muted small">{{ card.heartbeats.period_minutes }}-min pilot period</span></div>
+        {% if card.heartbeats.error %}<div class="text-danger mb-1">{{ card.heartbeats.error }}</div>{% endif %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <thead><tr><th>Queue</th><th class="text-end">Running</th><th class="text-end">Heartbeats</th><th class="text-end">Silent 30+</th><th class="text-end">60+</th><th class="text-end">120+ min</th></tr></thead>
+          <tbody>
+          <tr class="fw-bold"><td>all queues</td><td class="text-end">{{ card.heartbeats.running }}</td><td class="text-end">{{ card.heartbeats.received }} / {{ card.heartbeats.expected }}{% if card.heartbeats.yield is not None %} · yield {{ card.heartbeats.yield }}{% endif %}</td><td class="text-end">{{ card.heartbeats.stale_30 }}</td><td class="text-end">{{ card.heartbeats.stale_60 }}</td><td class="text-end">{{ card.heartbeats.stale_120 }}</td></tr>
+          {% for s in card.site_rows %}
+          <tr><td><a href="{{ s.url }}">{{ s.site }}</a></td><td class="text-end">{{ s.running }}</td><td class="text-end">{{ s.received }}</td><td class="text-end">{{ s.stale_30 }}</td><td class="text-end">{{ s.stale_60 }}</td><td class="text-end">{{ s.stale_120 }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <div class="text-muted small mb-2">{{ card.heartbeats.started }} jobs started in the interval.{% if card.heartbeats.window_yield is not None %} Yield over the {{ card.heartbeats.window_minutes }}-min window ({{ card.heartbeats.window_intervals }} intervals): <strong>{{ card.heartbeats.window_yield }}</strong>, {{ card.heartbeats.window_received }} received against {{ card.heartbeats.window_expected }} expected — the assessed figure; the per-interval yield beats against the pilot heartbeat phase.{% endif %}</div>
+      </div>
+      <div>
+        <div class="mb-1"><strong>PanDA database</strong></div>
+        {% if card.database.error %}<div class="text-danger mb-1">{{ card.database.error }}</div>{% endif %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <tbody>
+          <tr><td>connections</td><td class="text-end">{{ card.database.connections|default_if_none:"—" }} of {{ card.database.max_connections|default_if_none:"—" }}</td></tr>
+          <tr><td>active · idle · waiting</td><td class="text-end">{{ card.database.active|default_if_none:"—" }} · {{ card.database.idle|default_if_none:"—" }} · {{ card.database.waiting|default_if_none:"—" }}</td></tr>
+          <tr><td>longest transaction</td><td class="text-end">{{ card.database.longest_transaction_s|default_if_none:"—" }} s</td></tr>
+          <tr><td>jobsactive4 live · dead tuples</td><td class="text-end">{{ card.database.live_tuples|default_if_none:"—" }} · {{ card.database.dead_tuples|default_if_none:"—" }}</td></tr>
+          <tr><td>minutes since autovacuum</td><td class="text-end">{{ card.database.minutes_since_autovacuum|default_if_none:"—" }}</td></tr>
+          {% for app, n in card.database.by_app %}
+          <tr><td class="text-muted">{{ app }}</td><td class="text-end">{{ n }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <div class="mb-1"><strong>PanDA server</strong></div>
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <tbody>
+          <tr><td>is_alive</td><td class="text-end">{% if card.server.ok %}ok{% else %}<span class="text-danger">{% if card.server.timeout %}timeout{% else %}not ok{% endif %}</span>{% endif %} · {{ card.server.latency_ms|default:"—" }} ms{% if card.server.status %} · HTTP {{ card.server.status }}{% endif %}</td></tr>
+          {% if card.server.error %}<tr><td colspan="2" class="text-danger">{{ card.server.error }}</td></tr>{% endif %}
+          </tbody>
+        </table>
+        {% if card.pandamon %}
+        <div class="mb-1"><strong>pandamon</strong></div>
+        <table class="table table-sm table-bordered w-auto mb-2">
+          <tbody>
+          {% for label, probe in card.pandamon %}
+          <tr><td>{{ label }}</td><td class="text-end">{% if probe.ok %}ok{% else %}<span class="text-danger">{% if probe.timeout %}timeout{% else %}not ok{% endif %}</span>{% endif %} · {{ probe.latency_ms|default_if_none:"—" }} ms{% if probe.status %} · HTTP {{ probe.status }}{% endif %}</td></tr>
+          {% if probe.error %}<tr><td colspan="2" class="text-danger">{{ probe.error }}</td></tr>{% endif %}
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      <div>
+        <div class="mb-1"><strong>swf-monitor host</strong></div>
+        {% for e in card.host.errors %}<div class="text-danger mb-1">{{ e }}</div>{% endfor %}
+        <table class="table table-sm table-bordered w-auto mb-1">
+          <tbody>
+          <tr><td>load 1 · 5 · 15 min</td><td class="text-end">{{ card.host.load.1m|default:"—" }} · {{ card.host.load.5m|default:"—" }} · {{ card.host.load.15m|default:"—" }}{% if card.host.cpus %} on {{ card.host.cpus }} CPUs{% endif %}</td></tr>
+          <tr><td>memory used</td><td class="text-end">{{ card.host.memory.used_mb|default:"—" }} of {{ card.host.memory.total_mb|default:"—" }} MB ({{ card.host.memory.used_percent|default:"—" }}%) · swap {{ card.host.memory.swap_used_mb|default:"0" }} MB</td></tr>
+          {% for v in card.host.volumes %}
+          <tr><td>{{ v.path }}</td><td class="text-end">{% if v.error %}<span class="text-danger">{{ v.error }}</span>{% else %}{{ v.used_percent }}% used · {{ v.free_gb }} GB free{% endif %}</td></tr>
+          {% endfor %}
+          {% for p in card.host.processes %}
+          <tr><td>{{ p.label }}</td><td class="text-end">{% if p.error %}<span class="text-danger">{{ p.error }}</span>{% else %}{% if p.count is not None %}{{ p.count }} proc · {% endif %}{% if p.state %}<span class="{{ p.state|state_class }} px-1">{{ p.state }}</span> · {% endif %}{{ p.rss_mb|default:"—" }} MB{% if p.restarts %} · {{ p.restarts }} restarts{% endif %}{% endif %}</td></tr>
+          {% endfor %}
+          <tr><td>swf-monitor DB connections</td><td class="text-end">{{ card.host.db_connections|default:"—" }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="mt-2 mb-1"><strong>Summary at the cut</strong>
+      <span class="text-muted small">range statistics over {{ card.summary_range|default:"the shown range" }}{% if card.summary_window %} · faulty events over {{ card.summary_window }}{% endif %}</span></div>
+    {% for e in card.summary_errors %}<div class="text-danger mb-1">{{ e }}</div>{% endfor %}
+    <table class="table table-sm table-bordered w-auto mb-1">
+      <thead><tr><th>Metric</th><th class="text-end">At cut</th><th class="text-end">Δ prev snap</th><th class="text-end">Min</th><th class="text-end">Mean</th><th class="text-end">Max</th><th class="text-end">Position</th><th>Unit</th></tr></thead>
+      <tbody>
+      {% for r in card.summary %}
+      <tr{% if r.warn %} class="warning_fill"{% endif %}>
+        <td><span data-curve="{{ r.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;{% if not r.curve %} visibility:hidden;{% endif %}"></span>{{ r.label }}{% if r.detail %} <span class="text-muted small">({{ r.detail }})</span>{% endif %}</td>
+        <td class="text-end">{{ r.value }}</td>
+        <td class="text-end">{{ r.delta|default:"" }}</td>
+        <td class="text-end">{% if r.stats %}{{ r.stats.min }}{% endif %}</td>
+        <td class="text-end">{% if r.stats %}{{ r.stats.mean }}{% endif %}</td>
+        <td class="text-end">{% if r.stats %}{{ r.stats.max }}{% endif %}</td>
+        <td class="text-end">{% if r.stats and r.stats.position is not None %}{{ r.stats.position }}%{% endif %}</td>
+        <td class="text-muted small">{{ r.unit }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="text-muted small mb-1">Position: where the cut value sits between the range's minimum (0%) and maximum (100%). Highlighted rows crossed a threshold.</div>
+    {% if card.payload_json %}
+    <details class="mt-1">
+      <summary class="text-muted small">component document (audit)</summary>
+      <pre class="p-2 border rounded snapper-scrollpane" style="max-height:22em; overflow:auto; font-size:.9em;">{{ card.payload_json }}</pre>
+    </details>
+    {% endif %}
+  </section>
+
 {% elif card.kind == 'delivery' %}
   {% for c in card.campaigns %}
-  <div class="mb-2">
-    {% if c.day_groups %}
+    {% if c.daily %}
     {# The day cut: one headline line naming campaign and day, then  #}
     {# the breakdown as one table per lens group — the group swatch  #}
-    {# is the quilt patch color above it — side by side under the    #}
-    {# plot, not below the fold.                                     #}
+    {# is the quilt patch color above it. This section docks directly #}
+    {# beneath the daily-arrivals plot.                               #}
+    <section data-snapper-detail-key="{{ c.arrivals_detail_key }}"
+             class="snapper-cut-card mb-2">
     <div class="mb-1"><strong>{{ c.name }}{% if c.day %} · {{ c.day }}{% endif %}</strong>
       {% for stat in c.headline %} · <strong>{{ stat.value }}</strong>{% if stat.delta %} <span class="{% if '+' in stat.delta %}snapper-delta-up{% else %}snapper-delta-down{% endif %}">{{ stat.delta }}</span>{% endif %} {{ stat.label }}{% endfor %}
       · <a href="{{ c.plan_url }}">campaign plan</a></div>
@@ -128,17 +380,20 @@
         <div class="mb-1"><strong>{{ grp.name }}</strong>
           · {{ grp.arrived_events }} events, {{ grp.arrived_files }} files this day</div>
         <table class="table table-sm table-bordered w-auto mb-1">
-          <thead><tr><th>PC</th><th>Configuration</th><th>Requestor</th><th>Events this day</th><th>Cumulative events</th><th>Files this day</th><th>Target events</th></tr></thead>
+          <thead><tr><th>PC</th><th>Configuration</th><th>Process</th><th>Species</th><th>Requestor</th><th>Events this day</th><th>Tot events</th><th>Files this day</th><th>Target events</th><th>% complete</th></tr></thead>
           <tbody>
           {% for pc in grp.rows %}
           <tr>
-            <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+            <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="#{{ pc.cumulative_anchor }}">{{ pc.label }}</a></td>
             <td>{{ pc.identity }}</td>
+            <td>{{ pc.process }}</td>
+            <td>{{ pc.species }}</td>
             <td>{{ pc.groups }}</td>
             <td class="text-end">{{ pc.arrived_events }}</td>
             <td class="text-end">{{ pc.cum_events }}</td>
             <td class="text-end">{{ pc.arrived }}</td>
-            <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+            <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+            <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
           </tr>
           {% endfor %}
           </tbody>
@@ -146,7 +401,92 @@
       </div>
       {% endfor %}
     </div>
+    {% if previous_age_text %}
+    <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
+    {% endif %}
+    </section>
+
+    {# The additive category standing, table-aligned with the stacked #}
+    {# cumulative category plot immediately above it.                #}
+    <section data-snapper-detail-key="{{ c.categories_detail_key }}"
+             class="snapper-cut-card mb-2">
+      <div class="mb-1"><strong>Cumulative by category · {{ c.name }}{% if c.day %} · through {{ c.day }}{% endif %}</strong></div>
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+        <thead><tr><th>Category</th><th class="text-end">Configurations</th><th class="text-end">Tot events</th><th class="text-end">{{ c.day }}</th><th class="text-end">Tot files</th><th class="text-end">{{ c.day }}</th></tr></thead>
+        <tbody>
+        {% for row in c.category_rows %}
+        <tr>
+          <td><span data-curve="{{ row.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="#{{ row.plot_anchor }}">{{ row.name }}</a></td>
+          <td class="text-end">{{ row.configurations }}</td>
+          <td class="text-end">{{ row.events }}</td>
+          <td class="text-end">{% if row.today_events %}{{ row.today_events }}{% endif %}</td>
+          <td class="text-end">{{ row.files }}</td>
+          <td class="text-end">{% if row.today_files %}{{ row.today_files }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    {% for category in c.category_pc_groups %}
+    <section data-snapper-detail-key="{{ category.detail_key }}"
+             class="snapper-cut-card mb-2">
+      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0 swf-latch-head swf-latch-titled-head{% if category.species_groups %} swf-latch-section-heads{% endif %}">
+        <thead>
+        <tr class="swf-latch-title-row"><th colspan="10">Cumulative {{ category.name }} by PC · {{ c.name }}{% if c.day %} · through {{ c.day }}{% endif %}</th></tr>
+        <tr class="swf-latch-column-row"><th>PC</th><th>Configuration</th><th>Physics</th><th>Requestor</th><th class="text-end">Tot events</th><th class="text-end">{{ c.day }}</th><th class="text-end">Tot files</th><th class="text-end">{{ c.day }}</th><th class="text-end">Target events</th><th class="text-end">% complete</th></tr>
+        </thead>
+        <tbody>
+        {% if category.species_groups %}
+        {% for species in category.species_groups %}
+        <tr class="table-secondary fw-bold swf-latch-section-row">
+          <td colspan="4"><span data-curve="{{ species.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ species.name }} · {{ species.configurations }} PCs</td>
+          <td class="text-end">{{ species.events }}</td>
+          <td class="text-end">{% if species.today_events %}{{ species.today_events }}{% endif %}</td>
+          <td class="text-end">{{ species.files }}</td>
+          <td class="text-end">{% if species.today_files %}{{ species.today_files }}{% endif %}</td>
+          <td class="text-end">{% if species.target is not None %}{{ species.target }}{% if species.target_partial %} <span class="text-muted">· known targets</span>{% endif %}{% else %}<span class="text-muted">no targets</span>{% endif %}</td>
+          <td class="text-end">{% if species.completion is not None %}{{ species.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        </tr>
+        {% for pc in species.rows %}
+        <tr id="{{ pc.cumulative_anchor }}" class="swf-pc-anchor">
+          <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+          <td>{{ pc.identity }}</td>
+          <td class="text-nowrap">{% if pc.process %}<div>process={{ pc.process }}</div>{% endif %}{% if pc.species and pc.species != 'Unspecified' %}<div>species={{ pc.species }}</div>{% endif %}{% if pc.beam_energy %}<div>beam={{ pc.beam_energy }}</div>{% endif %}{% if pc.q2_range %}<div>Q²={{ pc.q2_range }}</div>{% endif %}{% if pc.sample %}<div>sample={{ pc.sample }}</div>{% endif %}</td>
+          <td>{{ pc.groups }}</td>
+          <td class="text-end">{{ pc.events }}</td>
+          <td class="text-end">{% if pc.today_events %}{{ pc.today_events }}{% endif %}</td>
+          <td class="text-end">{{ pc.files }}</td>
+          <td class="text-end">{% if pc.today_files %}{{ pc.today_files }}{% endif %}</td>
+          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+          <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+        {% else %}
+        {% for pc in category.rows %}
+        <tr id="{{ pc.cumulative_anchor }}" class="swf-pc-anchor">
+          <td><span data-curve="{{ pc.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span><a href="{{ pc.url }}">{{ pc.label }}</a></td>
+          <td>{{ pc.identity }}</td>
+          <td class="text-nowrap">{% if pc.process %}<div>process={{ pc.process }}</div>{% endif %}{% if pc.species and pc.species != 'Unspecified' %}<div>species={{ pc.species }}</div>{% endif %}{% if pc.beam_energy %}<div>beam={{ pc.beam_energy }}</div>{% endif %}{% if pc.q2_range %}<div>Q²={{ pc.q2_range }}</div>{% endif %}{% if pc.sample %}<div>sample={{ pc.sample }}</div>{% endif %}</td>
+          <td>{{ pc.groups }}</td>
+          <td class="text-end">{{ pc.events }}</td>
+          <td class="text-end">{% if pc.today_events %}{{ pc.today_events }}{% endif %}</td>
+          <td class="text-end">{{ pc.files }}</td>
+          <td class="text-end">{% if pc.today_files %}{{ pc.today_files }}{% endif %}</td>
+          <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+          <td class="text-end">{% if pc.completion is not None %}{{ pc.completion|floatformat:1 }}%{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="10" class="text-muted">No PC state recorded for this category at this cut.</td></tr>
+        {% endfor %}
+        {% endif %}
+        </tbody>
+      </table>
+    </section>
+    {% endfor %}
     {% else %}
+    <div class="mb-2">
     <div class="mb-1"><strong>{{ c.name }}</strong>
       · <a href="{{ c.plan_url }}">campaign plan</a></div>
     <div class="d-flex flex-wrap gap-4 mb-1">
@@ -159,7 +499,6 @@
       </div>
       {% endfor %}
     </div>
-    {% endif %}
     {% if c.groups %}
     <div class="mb-1"><strong>Files placed by requestor:</strong>
       {% for group, files in c.groups %}{{ group }} {{ files }}{% if not forloop.last %} · {% endif %}{% endfor %}
@@ -174,18 +513,19 @@
         <td><a href="{{ pc.url }}">{{ pc.label }}</a></td>
         <td>{{ pc.groups }}</td>
         <td class="text-end">{{ pc.files }}</td>
-        <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }} <span class="text-muted">· {{ pc.tier }}</span>{% else %}<span class="text-muted">no target</span>{% endif %}</td>
+        <td class="text-end">{% if pc.expected is not None %}{{ pc.expected }}{% else %}<span class="text-muted">no target</span>{% endif %}</td>
       </tr>
       {% endfor %}
       </tbody>
     </table>
     <div class="text-muted small mb-1">Top configurations by files placed; the <a href="{{ c.plan_url }}">campaign plan</a> lists them all.</div>
     {% endif %}
-  </div>
+    {% if previous_age_text %}
+    <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
+    {% endif %}
+    </div>
+    {% endif %}
   {% endfor %}
-  {% if previous_age_text %}
-  <div class="text-muted small mb-1">+/− = change since the previous snap, {{ previous_age_text }} before this one</div>
-  {% endif %}
 
 {% elif card.kind == 'workflow' %}
   <div class="d-flex flex-wrap gap-4 mb-2">

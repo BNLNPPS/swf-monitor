@@ -34,6 +34,14 @@ from monitor_app.snapper_delivery import (  # noqa: E402
     compact_delivery_publication_report,
     publish_delivery,
 )
+from monitor_app.snapper_errors import (  # noqa: E402
+    compact_errors_publication_report,
+    publish_errors_state,
+)
+from monitor_app.snapper_platform import (  # noqa: E402
+    compact_platform_publication_report,
+    publish_platform_state,
+)
 
 
 def main(argv):
@@ -54,6 +62,10 @@ def main(argv):
         print(compact_workflow_publication_report(workflow_publication))
         delivery_publication = publish_delivery()
         print(compact_delivery_publication_report(delivery_publication))
+        errors_publication = publish_errors_state()
+        print(compact_errors_publication_report(errors_publication))
+        platform_publication = publish_platform_state()
+        print(compact_platform_publication_report(platform_publication))
     return 0
 
 

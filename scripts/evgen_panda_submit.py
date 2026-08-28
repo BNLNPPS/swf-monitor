@@ -139,6 +139,13 @@ def build_task_params(spec, archive_name):
         params['workDiskCount'] = int(disk)
         params['workDiskUnit'] = 'MB'
 
+    # Event Service: presence of nEventsPerWorker switches the task to
+    # ES mode in JEDI (TaskRefinerBase, inherited by GenTaskRefiner) —
+    # events are split into ranges of this size for range-level
+    # dispatch and bookkeeping.
+    if spec.get('nEventsPerWorker'):
+        params['nEventsPerWorker'] = int(spec['nEventsPerWorker'])
+
     # Scouts off -> walltime used directly; scouts on -> HS06 per-event routing
     # (avoids the noInput pseudo-input 1MB-file walltime inflation).
     if spec.get('skipScout'):
