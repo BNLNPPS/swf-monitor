@@ -141,12 +141,6 @@
     </script>
     {% endif %}
 
-    {% if active_tab == 'ops' %}
-    {% for row in campaign_summary_lines %}
-    <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">{{ row.line }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign view</a></p>
-    {% endfor %}
-    {% include 'pcs/dashboard.html' %}
-    {% else %}
     <div class="prod-workflow-header">
         <h1>epicprod - ePIC Production System</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
@@ -154,6 +148,10 @@
         <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">{{ row.line }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign view</a></p>
         {% endfor %}
     </div>
+
+    {% if active_tab == 'ops' %}
+    {% include 'pcs/dashboard.html' %}
+    {% else %}
 
     <div class="workflow-grid">
         <section class="workflow-stage">
