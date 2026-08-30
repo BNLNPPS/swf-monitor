@@ -3423,20 +3423,34 @@ def prod_hub(request):
                                  username)
     else:
         tab = prefs.get('home_tab') if prefs.get('home_tab') in ('nav', 'ops') else 'nav'
+    from .cached_product import get_product
+    # The summary strip (swf-epicprod docs/EPICPROD_DASHBOARD.md), on
+    # both tabs: one campaign completion line per current or producing
+    # campaign, from the completion estimate (CAMPAIGN_DELIVERY.md,
+    # Completion). The estimate walks the campaign's editions and the
+    # daily delivery record, so it is served as a cached product.
+    summary_product = get_product(
+        'prod_hub_campaign_completion', _campaign_completion_lines,
+        ttl_seconds=600)
+    summary = {
+        'campaign_summary_lines': summary_product['value'] or [],
+        'campaign_summary_built_at': summary_product['built_at'],
+    }
     if tab == 'ops':
         return render(request, 'monitor_app/prod_hub_workflow.html', {
             'active_tab': 'ops',
             'dashboard': build_dashboard(prefs.get('panel_order')),
             'can_save_layout': bool(username),
             'nav_mode': 'production',
+            **summary,
         })
     context = pcs_hub_counts()
     context['active_tab'] = 'nav'
     context['nav_mode'] = 'production'
+    context.update(summary)
     # The two corun counts are remote REST calls; served as a cached
     # product (docs/CACHED_PRODUCTS.md) so the Nav tab renders from the
     # store and stale rebuilds run behind the response.
-    from .cached_product import get_product
     corun_product = get_product(
         'prod_hub_corun_counts',
         lambda: {'assessments': _corun_ai_assessment_count(),
@@ -3449,16 +3463,6 @@ def prod_hub(request):
     context['ai_proposals_pending_count'] = Proposal.objects.filter(
         status='proposed').count()
     context['campaign_narratives_count'] = corun_counts['narratives']
-    # The summary strip (swf-epicprod docs/EPICPROD_DASHBOARD.md): one
-    # campaign completion line per current or producing campaign, from
-    # the completion estimate (CAMPAIGN_DELIVERY.md, Completion). The
-    # estimate walks the campaign's editions and the daily delivery
-    # record, so it is served as a cached product.
-    summary_product = get_product(
-        'prod_hub_campaign_completion', _campaign_completion_lines,
-        ttl_seconds=600)
-    context['campaign_summary_lines'] = summary_product['value'] or []
-    context['campaign_summary_built_at'] = summary_product['built_at']
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
