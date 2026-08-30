@@ -27,7 +27,7 @@
         color: var(--bs-body-color);
         font-size: 1.08rem;
         font-weight: 600;
-        margin: .1rem 0 .6rem;
+        margin: .35rem 0 .6rem;
       }
       .prod-summary-strip a { font-weight: 500; }
       .workflow-grid {
@@ -129,10 +129,6 @@
         <a class="{% if active_tab == 'ops' %}active{% endif %}" href="{% url 'monitor_app:prod_hub' %}?tab=ops">Ops</a>
     </div>
 
-    {% for row in campaign_summary_lines %}
-    <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">{{ row.line }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign view</a></p>
-    {% endfor %}
-
     {% if is_tunnel %}
     <script>
       {
@@ -146,11 +142,17 @@
     {% endif %}
 
     {% if active_tab == 'ops' %}
+    {% for row in campaign_summary_lines %}
+    <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">{{ row.line }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign view</a></p>
+    {% endfor %}
     {% include 'pcs/dashboard.html' %}
     {% else %}
     <div class="prod-workflow-header">
         <h1>epicprod - ePIC Production System</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
+        {% for row in campaign_summary_lines %}
+        <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">{{ row.line }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign view</a></p>
+        {% endfor %}
     </div>
 
     <div class="workflow-grid">
