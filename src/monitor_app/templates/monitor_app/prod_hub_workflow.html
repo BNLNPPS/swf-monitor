@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load swf_fmt %}
 
 {% block title %}epicprod - ePIC Production System - SWF Monitor{% endblock %}
 
@@ -21,6 +22,12 @@
       .prod-workflow-header p {
         color: var(--prod-muted);
         margin-bottom: 0;
+      }
+      .prod-workflow-header p.prod-summary-strip {
+        color: var(--bs-body-color);
+        font-size: 1.08rem;
+        font-weight: 600;
+        margin-top: .35rem;
       }
       .workflow-grid {
         align-items: stretch;
@@ -139,6 +146,9 @@
     <div class="prod-workflow-header">
         <h1>epicprod - ePIC Production System</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
+        {% for row in campaign_summary_lines %}
+        <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)"><a href="{{ row.url }}" class="text-decoration-none">{{ row.line }}</a></p>
+        {% endfor %}
     </div>
 
     <div class="workflow-grid">

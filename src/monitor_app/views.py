@@ -3449,7 +3449,41 @@ def prod_hub(request):
     context['ai_proposals_pending_count'] = Proposal.objects.filter(
         status='proposed').count()
     context['campaign_narratives_count'] = corun_counts['narratives']
+    # The summary strip (swf-epicprod docs/EPICPROD_DASHBOARD.md): one
+    # campaign completion line per current or producing campaign, from
+    # the completion estimate (CAMPAIGN_DELIVERY.md, Completion). The
+    # estimate walks the campaign's editions and the daily delivery
+    # record, so it is served as a cached product.
+    summary_product = get_product(
+        'prod_hub_campaign_completion', _campaign_completion_lines,
+        ttl_seconds=600)
+    context['campaign_summary_lines'] = summary_product['value'] or []
+    context['campaign_summary_built_at'] = summary_product['built_at']
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
+
+
+def _campaign_completion_lines():
+    """[{campaign, line, url}] for the current and producing campaigns."""
+    from django.urls import reverse
+    from swf_epicprod.analytics.completion import campaign_completion
+    from swf_epicprod.analytics.rollup import resolve_target_campaigns
+
+    lines = []
+    for name in sorted(resolve_target_campaigns(), reverse=True):
+        block = campaign_completion(name)
+        if not block.get('available'):
+            logger.error('campaign completion unavailable for %s: %s',
+                         name, block.get('reason'))
+            line = f'{name}: completion unavailable ({block.get("reason")})'
+        else:
+            line = block['line']
+        lines.append({
+            'campaign': name, 'line': line,
+            'url': (reverse('snapper_ai:snapper_focus',
+                            args=['epicprod', 'campaign'])
+                    + f'?campaign={name}'),
+        })
+    return lines
 
 
 def ai_content_list(request):
