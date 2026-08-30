@@ -147,7 +147,7 @@
         <h1>epicprod - ePIC Production System</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
         {% for row in campaign_summary_lines %}
-        <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)"><a href="{{ row.url }}" class="text-decoration-none">{{ row.line }}</a></p>
+        <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)"><a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}" class="text-decoration-none">{{ row.line }}</a></p>
         {% endfor %}
     </div>
 

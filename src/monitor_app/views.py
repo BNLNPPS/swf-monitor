@@ -3463,8 +3463,10 @@ def prod_hub(request):
 
 
 def _campaign_completion_lines():
-    """[{campaign, line, url}] for the current and producing campaigns."""
-    from django.urls import reverse
+    """[{campaign, line}] for the current and producing campaigns. The
+    campaign-view link is resolved in the template per request: the
+    script prefix differs between the internal and external faces, so
+    a cached URL would be wrong on one of them."""
     from swf_epicprod.analytics.completion import campaign_completion
     from swf_epicprod.analytics.rollup import resolve_target_campaigns
 
@@ -3477,12 +3479,7 @@ def _campaign_completion_lines():
             line = f'{name}: completion unavailable ({block.get("reason")})'
         else:
             line = block['line']
-        lines.append({
-            'campaign': name, 'line': line,
-            'url': (reverse('snapper_ai:snapper_focus',
-                            args=['epicprod', 'campaign'])
-                    + f'?campaign={name}'),
-        })
+        lines.append({'campaign': name, 'line': line})
     return lines
 
 
