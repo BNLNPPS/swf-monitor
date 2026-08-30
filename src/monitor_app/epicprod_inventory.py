@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime
 from io import StringIO
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
@@ -464,8 +465,130 @@ def cached_payload_log_texts(jeditaskid, pandaid):
     return [part['text'] for part in cached_payload_log_parts(jeditaskid, pandaid)]
 
 
-def diagnosis_from_log_texts(log_texts, job=None):
-    """Derive production phase and causal attribution from job evidence."""
+_WORKER_ENDED_RE = re.compile(
+    r'^The worker was (?P<worker>\w+) while the job was (?P<job>\w+)\s*:\s*(?P<sacct>.+)$')
+
+# A PanDA job at an HPC site runs inside a harvester batch job (one Slurm
+# allocation, many slots). When the batch job ends under a running PanDA job
+# the server records taskbuffer 300 with the sacct line; the Slurm state in it
+# is the batch system's own verdict and the top of the evidence ladder.
+_SLURM_STATE_OPERATIONS = {
+    'TIMEOUT': ('worker_walltime', 'confirmed'),
+    'NODE_FAIL': ('node_failure', 'confirmed'),
+    'OUT_OF_MEMORY': ('node_memory', 'confirmed'),
+    'PREEMPTED': ('worker_preempted', 'confirmed'),
+    'CANCELLED': ('worker_cancelled', 'confirmed'),
+    'COMPLETED': ('worker_ended', 'supported'),
+}
+# A job started this close to the batch job's start that ran to the wall
+# needed more than the batch job's limit; later starts were started too late.
+_BATCH_START_GRACE_SECONDS = 15 * 60
+
+
+def _as_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return value
+
+
+def _seconds_between(start, end):
+    start, end = _as_datetime(start), _as_datetime(end)
+    if start is None or end is None:
+        return None
+    try:
+        seconds = (end - start).total_seconds()
+    except TypeError:
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def _span_text(seconds):
+    """'2 minutes' under an hour, else '3h58m'."""
+    minutes = int(seconds // 60)
+    if minutes < 60:
+        return f'{minutes} minute{"s" if minutes != 1 else ""}'
+    return f'{minutes // 60}h{minutes % 60:02d}m'
+
+
+def _hours_text(seconds):
+    """'4-hour' for a batch job's length, rounded to the hour; under an hour
+    the minutes ('45-minute')."""
+    hours = int(round(seconds / 3600))
+    if hours < 1:
+        return f'{int(seconds // 60)}-minute'
+    return f'{hours}-hour'
+
+
+def _worker_ended_reading(job, worker=None):
+    """Read a taskbuffer 300 diagnostic ('The worker was finished while the
+    job was running : <sacct line>') into (operation, confidence, summary),
+    with the batch job's start and end from the harvester worker record when
+    given. Returns None when the diagnostic is not of that form."""
+    diag = str(job.get('taskbuffererrordiag') or '').strip()
+    match = _WORKER_ENDED_RE.match(diag)
+    if not match:
+        return None
+    worker = worker or {}
+    tokens = match.group('sacct').split()
+    # sacct columns: JobID User Partition Account AllocCPUS State ExitCode
+    state = tokens[-2].upper() if len(tokens) >= 2 else ''
+    exit_code = tokens[-1] if tokens else ''
+    site = str(job.get('computingsite') or '') or 'the site'
+    ran = _seconds_between(job.get('starttime'), job.get('endtime'))
+    lost = f' Its {_span_text(ran)} of processing is lost.' if ran else ''
+    batch_len = _seconds_between(worker.get('starttime'), worker.get('endtime'))
+    offset = _seconds_between(worker.get('starttime'), job.get('starttime'))
+
+    if match.group('job').lower() == 'starting':
+        return ('worker_ended_before_start', 'confirmed',
+                f'Never ran: its batch job at {site} ended before this job started.')
+
+    operation, confidence = _SLURM_STATE_OPERATIONS.get(state, ('worker_ended', 'supported'))
+    if state == 'TIMEOUT':
+        if batch_len is None:
+            summary = f'Killed at {site} when its batch job hit its time limit.{lost}'
+        else:
+            limit = _hours_text(batch_len)
+            head = f'Killed at {site} when its {limit} batch job hit the limit.'
+            if offset is not None and offset <= _BATCH_START_GRACE_SECONDS and ran:
+                summary = (f'{head} This job started {_span_text(offset)} into the batch '
+                           f'job and had run {_span_text(ran)}. It cannot finish in a '
+                           f'{limit} batch job.')
+            elif offset is not None:
+                left = max(batch_len - offset, 0)
+                summary = (f'{head} This job was started with only {_span_text(left)} '
+                           f'of the batch job left.{lost}')
+            else:
+                summary = f'{head}{lost}'
+    elif state == 'NODE_FAIL':
+        summary = f'Killed at {site}: the node it was running on failed (Slurm NODE_FAIL).{lost}'
+    elif state == 'OUT_OF_MEMORY':
+        summary = f'Killed at {site}: its batch job ran out of memory (Slurm OUT_OF_MEMORY).{lost}'
+    elif state == 'PREEMPTED':
+        summary = f'Killed at {site}: its batch job was preempted.{lost}'
+    elif state == 'CANCELLED':
+        summary = f'Killed at {site}: its batch job was cancelled.{lost}'
+    elif state == 'COMPLETED':
+        after = f' after {_span_text(batch_len)}' if batch_len else ''
+        summary = (f'Killed at {site}: its batch job exited normally{after} while this '
+                   f'job was still running, and took the job down with it.{lost} Not a '
+                   f'time limit, not a node failure; why the batch job exited early is '
+                   f'not known.')
+    else:
+        state_text = f'{state} {exit_code}'.strip() or 'unknown'
+        summary = f'Killed at {site}: its batch job ended with Slurm state {state_text}.{lost}'
+    return operation, confidence, summary
+
+
+def diagnosis_from_log_texts(log_texts, job=None, worker=None):
+    """Derive production phase and causal attribution from job evidence.
+    ``worker`` is the harvester worker record of the batch job the PanDA job
+    ran in (start, end, diag), used when the batch job ended under the job."""
     job = job or {}
     combined_log_text = '\n'.join(t for t in log_texts if t)
     transfer = _rucio_transfer_details(combined_log_text)
@@ -504,6 +627,16 @@ def diagnosis_from_log_texts(log_texts, job=None):
             cause_entity = site
             cause_confidence = 'confirmed' if site else 'supported'
             failure_summary = 'Worker terminated for imminent node shutdown'
+        elif _worker_ended_reading(job, worker):
+            # taskbuffer 300: the batch job ended under the PanDA job. The
+            # Slurm state in the diagnostic separates the time limit, node
+            # failure, and a batch job that exited on its own.
+            operation, cause_confidence, failure_summary = _worker_ended_reading(job, worker)
+            phase = 'worker_execution'
+            cause_layer = 'compute'
+            cause_entity = site
+            if not site and cause_confidence == 'confirmed':
+                cause_confidence = 'supported'
         elif 'kill by ' in worker_lower:
             phase = 'operator_cancelled'
             operation = 'operator_cancel'
@@ -589,7 +722,8 @@ def diagnosis_for_study_data(study_data, epicprod_job=None, fetch_logs=False):
     if fetch_logs and not cached_texts:
         fetched_texts = _fetch_job_log_texts(pandaid)
         log_texts.extend(fetched_texts)
-    diagnosis = diagnosis_from_log_texts(log_texts, job=job)
+    diagnosis = diagnosis_from_log_texts(
+        log_texts, job=job, worker=study_data.get('harvester'))
     diagnosis['last_refreshed_at'] = ''
     diagnosis['source'] = (
         'payload_log_cache' if cached_texts
@@ -615,7 +749,8 @@ def sync_job_from_study_data(study_data):
     log_texts = [log_analysis.get('log_excerpt') or '']
     log_texts.extend(cached_payload_log_texts(jeditaskid, pandaid))
     log_texts.extend(_fetch_job_log_texts(pandaid))
-    diagnosis = diagnosis_from_log_texts(log_texts, job=job)
+    diagnosis = diagnosis_from_log_texts(
+        log_texts, job=job, worker=study_data.get('harvester'))
     phase = diagnosis['phase']
     failure_summary = diagnosis['failure_summary']
     timeline = diagnosis['timeline']

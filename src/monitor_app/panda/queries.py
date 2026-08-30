@@ -2047,7 +2047,8 @@ def study_job(pandaid):
     harvester = None
     harvester_sql = f"""
         SELECT w."workerid", w."harvesterid", w."stdout", w."stderr", w."batchlog",
-               w."errorcode", w."diagmessage", w."status"
+               w."errorcode", w."diagmessage", w."status",
+               w."starttime", w."endtime"
         FROM "{PANDA_SCHEMA}"."harvester_workers" w
         JOIN "{PANDA_SCHEMA}"."harvester_rel_jobs_workers" r
             ON w."workerid" = r."workerid" AND w."harvesterid" = r."harvesterid"
@@ -2060,7 +2061,7 @@ def study_job(pandaid):
             hrow = cursor.fetchone()
             if hrow:
                 hcols = ['workerid', 'harvesterid', 'stdout', 'stderr', 'batchlog',
-                         'errorcode', 'diagmessage', 'status']
+                         'errorcode', 'diagmessage', 'status', 'starttime', 'endtime']
                 harvester = row_to_dict(hrow, hcols)
                 harvester = {k: v for k, v in harvester.items() if v is not None}
                 # Use harvester URLs if available (more authoritative than parsed pilotid)

@@ -168,6 +168,22 @@ same episode runs only on escalation or on the daily trickle.
 
 ## Implementation
 
+Implemented to date, ahead of the rules store: read-time attribution
+in `monitor_app/epicprod_inventory.py` (`diagnosis_from_log_texts`),
+applied by job study, the job and task pages, the MCP `panda_study_job`
+tool, and the inventory sync. It reads the payload log for output
+registration failures, and the worker diagnostics for a worker that
+hit its backoff limit, a node shutdown, an operator kill, and a batch
+job that ended under the PanDA job (taskbuffer 300). For the last, the
+Slurm state carried in the diagnostic is the verdict, and the harvester
+worker record supplies the batch job's start and end: TIMEOUT is the
+batch job's time limit (its measured length), with the PanDA job's
+start offset deciding whether the job cannot finish in that limit or
+was started too late in the batch job; NODE_FAIL, OUT_OF_MEMORY,
+PREEMPTED, and CANCELLED name the batch event; COMPLETED is a batch
+job that exited on its own under a running job and is attributed as
+supported, not confirmed. Every summary states the processing lost.
+
 - **swf-monitor**: rules model + `error_corrections` module (pure
   application API with batch form, rules cached); clients wired at the
   readers — `error_summary`, `study_job`/`diagnose_jobs`, Snapper
