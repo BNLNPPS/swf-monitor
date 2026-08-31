@@ -1103,6 +1103,48 @@ def _delivery_pc_detail_key(campaign, category):
             f'{_group_slug(category)}')
 
 
+def _campaign_member_restrict(query):
+    """member_restrict hook of the Campaign focus view: the campaign
+    plan's filter parameters (priority, status, process, ...) narrow
+    the plotted configurations to the same slice the plan page shows,
+    stated in the same words. Only per-configuration curves survive a
+    restriction; lens-group aggregates cannot be reprojected and drop."""
+    from pcs.views import PLAN_FILTER_PARAMS, campaign_plan_pc_filter
+
+    try:
+        from swf_epicprod.analytics.rollup import resolve_target_campaigns
+        campaigns = sorted(resolve_target_campaigns(), reverse=True)
+    except Exception:                                       # noqa: BLE001
+        campaigns = []
+    raw = (query.get('campaign') or '').strip()
+    name = raw.split(',')[0].strip() if raw else (
+        campaigns[0] if campaigns else '')
+    if not name:
+        return None
+    active, pc_set = campaign_plan_pc_filter(name, query)
+    if not active:
+        return None
+    tag = name.replace('.', '_')
+    per_pc = tuple(f'{prefix}{tag}_'
+                   for prefix in ('dlvq_', 'dlvqf_', 'dlvpc_', 'dlvpcf_'))
+
+    def keep(curve_id):
+        cid = str(curve_id)
+        for prefix in per_pc:
+            if cid.startswith(prefix):
+                return cid[len(prefix):] in pc_set
+        return False
+
+    note = ('Filtered to ' + ' · '.join(
+        f'{label}: {value}' for label, value in active)
+        + f' — {len(pc_set)} physics configurations '
+          '(campaign plan filters)')
+    return {'note': note, 'keep': keep,
+            'params': {key: (query.get(key) or '').strip()
+                       for key in PLAN_FILTER_PARAMS
+                       if (query.get(key) or '').strip()}}
+
+
 def _delivery_focus_view():
     """The Campaign focus tab: the report narrowed to one campaign's
     delivery — its family only, the delivery card in the cut, the
@@ -1130,6 +1172,7 @@ def _delivery_focus_view():
         # frequent panda/health snaps carry nothing for this record.
         'cache_series': True,
         'components': ('delivery',),
+        'member_restrict': _campaign_member_restrict,
         'default': campaigns[0],
         # Two selector axes: the plotted quantity (files is the
         # default while the measured event rates are under review;
