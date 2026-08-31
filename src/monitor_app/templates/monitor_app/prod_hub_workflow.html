@@ -173,12 +173,10 @@
                     <tr>
                         <th title="Request priority of the physics configuration; a configuration takes the highest priority among its requests">request priority</th>
                         <th title="Physics configurations in the campaign">physics configs</th>
-                        <th title="Delivered events reached the event count target">complete</th>
                         <th title="Has an event count target, delivered events below it">below target</th>
                         <th title="No files delivered and no task in flight">not started</th>
                         <th title="Has delivered data but no event count target, so completion is unknown">no target</th>
-                        <th title="Mean completion over configurations with a target or not started (counted 0)">% complete, by config</th>
-                        <th title="Delivered events as a fraction of the summed targets">% complete, by events</th>
+                        <th title="Delivered events reached the event count target">complete</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -187,12 +185,10 @@
                     <tr>
                         <td>{{ prow.label }}</td>
                         <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}">{{ prow.configurations }}</a></td>
-                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=complete">{{ prow.complete }}</a></td>
                         <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=below-target">{{ prow.below_target }}</a></td>
                         <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=not-started">{{ prow.not_started }}</a></td>
                         <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=no-target">{{ prow.no_target }}</a></td>
-                        <td>{% if prow.pct_configs is not None %}{{ prow.pct_configs }}%{% else %}&ndash;{% endif %}</td>
-                        <td>{% if prow.pct_events is not None %}{{ prow.pct_events }}%{% else %}&ndash;{% endif %}</td>
+                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=complete">{{ prow.complete }}</a></td>
                     </tr>
                     {% endwith %}
                     {% endfor %}
