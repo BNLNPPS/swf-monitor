@@ -271,6 +271,15 @@ def propose_campaign_plan(campaign_name, items, *, proposer='',
                     status='denied', input_hash=input_hash).exists():
                 denied_skips.append(pc)
                 continue
+            # An identical pending proposal stands: leave it in place —
+            # a regeneration heartbeat must not reissue refs for
+            # unchanged recommendations.
+            if Proposal.objects.filter(
+                    action='campaign_plan', subject_key=pc,
+                    counterpart_key=campaign_name,
+                    status='proposed', input_hash=input_hash).exists():
+                noop.append(pc)
+                continue
             Proposal.objects.filter(
                 action='campaign_plan', subject_key=pc,
                 counterpart_key=campaign_name,
