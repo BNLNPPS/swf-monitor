@@ -360,6 +360,9 @@
   </section>
 
 {% elif card.kind == 'delivery' %}
+  {% if card.filter_note %}
+  <div class="mb-1"><strong>{{ card.filter_note }}</strong></div>
+  {% endif %}
   {% for c in card.campaigns %}
     {% if c.daily %}
     {# The day cut: one headline line naming campaign and day, then  #}

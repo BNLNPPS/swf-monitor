@@ -3137,6 +3137,32 @@ def _delivery_card(data, previous_data, ctx):
         return None
     from django.urls import reverse
 
+    # The campaign plan filters ride the cut fetch (the focus view's
+    # member_restrict params): the card prunes its configuration rows
+    # to the same slice the plot shows, and states the restriction.
+    filter_note = ''
+    pc_filter = None
+    try:
+        from pcs.views import campaign_plan_pc_filter
+        active, pc_filter = campaign_plan_pc_filter(
+            sorted(selected)[0], params)
+    except Exception:                                       # noqa: BLE001
+        logger.exception('delivery card filter resolution failed')
+        active, pc_filter = None, None
+    if active:
+        filter_note = ('Filtered to ' + ' · '.join(
+            f'{label}: {value}' for label, value in active)
+            + f' — {len(pc_filter)} physics configurations '
+              '(campaign plan filters)')
+    else:
+        pc_filter = None
+
+    def _leaves(block):
+        lv = block.get('leaves') or {}
+        if pc_filter is None:
+            return lv
+        return {pc: leaf for pc, leaf in lv.items() if pc in pc_filter}
+
     cache = _pc_cache()
     requestors = cache['requestors']
     keys = cache['keys']
@@ -3153,7 +3179,7 @@ def _delivery_card(data, previous_data, ctx):
         previous_totals = (((previous_data.get('campaigns') or {})
                             .get(name) or {}).get('totals') or {})
         if 'arrived_files' in totals:
-            leaves = block.get('leaves') or {}
+            leaves = _leaves(block)
             # The day's arrivals grouped by the ACTIVE lens — the same
             # projection the quilt draws, so each section's swatch is
             # the patch color above it. The drilldown inside a group
@@ -3360,7 +3386,7 @@ def _delivery_card(data, previous_data, ctx):
             })
             continue
         by_group = {}
-        for pc, leaf in (block.get('leaves') or {}).items():
+        for pc, leaf in _leaves(block).items():
             files = int(leaf.get('files') or 0)
             if not files:
                 continue
@@ -3372,7 +3398,7 @@ def _delivery_card(data, previous_data, ctx):
         # top rows; the plan page is the full list.
         pcs = []
         for pc, leaf in sorted(
-                (block.get('leaves') or {}).items(),
+                _leaves(block).items(),
                 key=lambda kv: -int(kv[1].get('files') or 0))[:10]:
             if not int(leaf.get('files') or 0):
                 continue
@@ -3409,7 +3435,8 @@ def _delivery_card(data, previous_data, ctx):
             'plan_url': (reverse('pcs:pcs_campaign_plan')
                          + f'?campaign={name}'),
         })
-    return {'kind': 'delivery', 'campaigns': campaigns}
+    return {'kind': 'delivery', 'campaigns': campaigns,
+            'filter_note': filter_note}
 
 
 def _workflow_card(data, previous_data, ctx):
