@@ -183,16 +183,18 @@
                 </thead>
                 <tbody>
                     {% for prow in row.priority_rows %}
+                    {% with plan_base='?campaign='|add:row.campaign %}
                     <tr>
                         <td>{{ prow.label }}</td>
-                        <td>{{ prow.configurations }}</td>
-                        <td>{{ prow.complete }}</td>
-                        <td>{{ prow.below_target }}</td>
-                        <td>{{ prow.not_started }}</td>
-                        <td>{{ prow.no_target }}</td>
+                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}">{{ prow.configurations }}</a></td>
+                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=complete">{{ prow.complete }}</a></td>
+                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=below-target">{{ prow.below_target }}</a></td>
+                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=not-started">{{ prow.not_started }}</a></td>
+                        <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}&amp;status=no-target">{{ prow.no_target }}</a></td>
                         <td>{% if prow.pct_configs is not None %}{{ prow.pct_configs }}%{% else %}&ndash;{% endif %}</td>
                         <td>{% if prow.pct_events is not None %}{{ prow.pct_events }}%{% else %}&ndash;{% endif %}</td>
                     </tr>
+                    {% endwith %}
                     {% endfor %}
                 </tbody>
             </table>

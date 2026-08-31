@@ -3467,62 +3467,16 @@ def prod_hub(request):
     return render(request, 'monitor_app/prod_hub_workflow.html', context)
 
 
-def _campaign_priority_row(label, rollup):
-    """One completion-panel row from a campaign_completion rollup dict."""
-    targeted = rollup.get('targeted') or 0
-    complete = rollup.get('complete') or 0
-    fraction_pc = rollup.get('fraction_pc')
-    fraction_events = rollup.get('fraction_events')
-    return {
-        'label': label,
-        'configurations': rollup.get('configurations') or 0,
-        'complete': complete,
-        'below_target': targeted - complete,
-        'not_started': rollup.get('not_started') or 0,
-        'no_target': rollup.get('no_target') or 0,
-        'pct_configs': (round(100 * fraction_pc)
-                        if fraction_pc is not None else None),
-        'pct_events': (round(100 * fraction_events)
-                       if fraction_events is not None else None),
-    }
-
-
-def _campaign_priority_rows(block):
-    """Completion-panel rows: one per request priority, then the
-    configurations with no prioritized request, then all."""
-    by_priority = block.get('by_priority') or {}
-    rows = [_campaign_priority_row(f'priority {key}', by_priority[key])
-            for key in sorted(k for k in by_priority if k != 'none')]
-    if 'none' in by_priority:
-        rows.append(_campaign_priority_row('no priority', by_priority['none']))
-    if rows:
-        rows.append(_campaign_priority_row('all', block['overall']))
-    return rows
-
-
 def _campaign_completion_lines():
-    """[{campaign, line, priority_rows}] for the current and producing
-    campaigns. The campaign-view link is resolved in the template per
-    request: the script prefix differs between the internal and
-    external faces, so a cached URL would be wrong on one of them."""
-    from swf_epicprod.analytics.completion import (campaign_completion,
-                                                   delivered_summary)
-    from swf_epicprod.analytics.rollup import resolve_target_campaigns
+    """The campaign completion product value — built in
+    swf_epicprod.analytics.completion (completion_product_value) so the
+    panel here and the campaign plan page share one builder and one
+    product. Links are resolved in templates per request: the script
+    prefix differs between the internal and external faces, so a cached
+    URL would be wrong on one of them."""
+    from swf_epicprod.analytics.completion import completion_product_value
 
-    lines = []
-    for name in sorted(resolve_target_campaigns(), reverse=True):
-        block = campaign_completion(name)
-        if not block.get('available'):
-            logger.error('campaign completion unavailable for %s: %s',
-                         name, block.get('reason'))
-            summary = f'{name}: completion unavailable ({block.get("reason")})'
-            priority_rows = []
-        else:
-            summary = delivered_summary(block['overall'])
-            priority_rows = _campaign_priority_rows(block)
-        lines.append({'campaign': name, 'summary': summary,
-                      'priority_rows': priority_rows})
-    return lines
+    return completion_product_value()
 
 
 def ai_content_list(request):
