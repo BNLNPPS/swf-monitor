@@ -368,16 +368,14 @@ def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
                 'priority': changes.get('priority', payload.get('priority')),
                 'evidence': payload.get('evidence', ''),
             }
-            # Approval requires a complete entry: an include
-            # recommendation with no target or no priority stays a
-            # proposal, named in the result — never silently dropped,
-            # never approved incomplete.
-            if entry['disposition'] in ('include_prior',
-                                        'include_requested') and (
-                    entry['target_events'] is None
-                    or entry['priority'] is None):
+            # Approval requires a complete entry: any row with no
+            # target or no priority stays a proposal, named in the
+            # result — never silently dropped, never approved
+            # incomplete.
+            if (entry['target_events'] in (None, '')
+                    or entry['priority'] in (None, '')):
                 missing = [f for f in ('target_events', 'priority')
-                           if entry[f] is None]
+                           if entry[f] in (None, '')]
                 incomplete.append(
                     f"{row.subject_key} ({row.ref}): "
                     f"{' and '.join(missing)} required")
