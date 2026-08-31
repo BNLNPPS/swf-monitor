@@ -255,7 +255,7 @@ def propose_campaign_plan(campaign_name, items, *, proposer='',
                     'target_events': item.get('target_events'),
                     'priority': item.get('priority'),
                     'evidence': item.get('evidence', ''),
-                })
+                }, require_complete=False)
             except ServiceError as e:
                 invalid.append(f'{pc}: {e}')
                 continue
@@ -318,7 +318,7 @@ def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
     ``campaign_plan_entries_set`` — one executor call and one
     origin-stamped event per campaign per decision act."""
     amendments = {str(k): v for k, v in (amendments or {}).items()}
-    stale, denied, approved = [], [], []
+    stale, denied, approved, incomplete = [], [], [], []
     by_campaign = {}
     with transaction.atomic():
         for row in rows:
@@ -368,6 +368,20 @@ def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
                 'priority': changes.get('priority', payload.get('priority')),
                 'evidence': payload.get('evidence', ''),
             }
+            # Approval requires a complete entry: an include
+            # recommendation with no target or no priority stays a
+            # proposal, named in the result — never silently dropped,
+            # never approved incomplete.
+            if entry['disposition'] in ('include_prior',
+                                        'include_requested') and (
+                    entry['target_events'] is None
+                    or entry['priority'] is None):
+                missing = [f for f in ('target_events', 'priority')
+                           if entry[f] is None]
+                incomplete.append(
+                    f"{row.subject_key} ({row.ref}): "
+                    f"{' and '.join(missing)} required")
+                continue
             by_campaign.setdefault(campaign, []).append((row, entry))
 
     for campaign, pairs in by_campaign.items():
@@ -388,7 +402,7 @@ def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
                 row.save(update_fields=['status', 'quality', 'decided_by',
                                         'decided_at', 'executed_log_id'])
                 approved.append(row.ref)
-    return approved, denied, stale
+    return approved, denied, stale, incomplete
 
 
 def proposal_decide(composed_names, decision, *, decided_by='',
@@ -507,8 +521,10 @@ def proposal_decide(composed_names, decision, *, decided_by='',
                 _clear_proposal_projection(row.subject_key)
                 approved.append(row.subject_key)
 
+    incomplete = []
     if plan_rows:
-        plan_approved, plan_denied, plan_stale = _decide_campaign_plan(
+        (plan_approved, plan_denied, plan_stale,
+         incomplete) = _decide_campaign_plan(
             plan_rows, decision, decided_by, quality, amendments, now)
         approved += plan_approved
         denied += plan_denied
@@ -526,7 +542,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
             **({'quality': quality} if quality else {}),
         )
     result = {'approved': approved, 'denied': denied, 'stale': stale,
-              'no_proposal': no_proposal}
+              'no_proposal': no_proposal, 'incomplete': incomplete}
     if approved or denied or stale:
         cache_error = _refresh_catalog_table_cache()
         if cache_error:
