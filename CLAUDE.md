@@ -138,6 +138,9 @@ page template:
   underlined tab row. Every tab is an ordinary server-routed link whose URL
   contains the selected view state; do not use hidden Bootstrap panels,
   client-only state, or a remembered preference for these tabs.
+- **Update-button feedback**: class `swf-update-btn` on a cached-product
+  Update link shows `Updating...` while its navigation is in flight,
+  restoring on pageshow and by a 20 s timeout so the label never sticks.
 - **Sortable tables**: DataTables is loaded globally in `base.html`
   and is the house table widget. Big list pages use the
   `_datatable_base` / `_datatable_dynamic_base` templates (ajax);

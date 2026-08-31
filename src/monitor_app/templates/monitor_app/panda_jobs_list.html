@@ -48,7 +48,7 @@
   <div class="text-muted small">
     Bars are completions per {{ job_outcomes.bucket }} (Eastern time); lines are the cumulative integral over the window.
     {% if job_outcomes.built_at_text %}Built {{ job_outcomes.built_at_text }} ·
-    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1">Update</a>{% endif %}
+    <a href="?days={{ days }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_username %}&username={{ selected_username }}{% endif %}{% if selected_site %}&site={{ selected_site }}{% endif %}{% if selected_taskid %}&taskid={{ selected_taskid }}{% endif %}{% if ended_after %}&ended_after={{ ended_after|urlencode }}&ended_before={{ ended_before|urlencode }}{% endif %}&refresh=1" class="swf-update-btn">Update</a>{% endif %}
   </div>
   {{ job_outcomes|json_script:"job-outcomes-data" }}
   <script>

@@ -849,6 +849,27 @@ function applyNavMode(mode) {
         tick();
         setInterval(tick, 1000);
       })();
+      /* Update-button click feedback: an element with class
+         swf-update-btn shows 'Updating...' while its navigation is in
+         flight. The label restores on pageshow (a back/forward-cache
+         return) and by a 20 s timeout (an aborted navigation), so it
+         can never stick. */
+      (function () {
+        function restore() {
+          document.querySelectorAll('.swf-update-btn[data-updating]').forEach(function (el) {
+            el.textContent = el.getAttribute('data-updating');
+            el.removeAttribute('data-updating');
+          });
+        }
+        document.addEventListener('click', function (ev) {
+          const el = ev.target.closest ? ev.target.closest('.swf-update-btn') : null;
+          if (!el || el.hasAttribute('data-updating')) return;
+          el.setAttribute('data-updating', el.textContent);
+          el.textContent = 'Updating...';
+          setTimeout(restore, 20000);
+        });
+        window.addEventListener('pageshow', restore);
+      })();
       // Latching table headers latch beneath the sticky nav bar; expose
       // its measured height to the CSS above.
       (function () {
