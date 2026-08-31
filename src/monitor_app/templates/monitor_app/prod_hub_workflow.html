@@ -30,7 +30,7 @@
         margin: 0 0 .55rem;
       }
       .prod-summary-strip a { font-weight: 500; }
-      .prod-summary-updated { font-weight: 400; }
+      .prod-summary-updated { font-size: .92rem; font-weight: 400; }
       .prod-completion-panel {
         background: var(--prod-panel);
         border: 1px solid var(--prod-border);
@@ -165,8 +165,8 @@
         {% for row in campaign_summary_lines %}
         <div class="prod-completion-panel" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">
             <p class="prod-summary-strip">{{ row.summary|linebreaksbr }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign progress view</a>
-                <span class="text-muted prod-summary-updated">· updated <span data-relative-time="{{ campaign_summary_built_at|date:'c' }}">{{ campaign_summary_built_at|fmt_dt }}</span></span>
-                <a href="?tab={{ active_tab }}&amp;refresh=1" class="btn btn-sm btn-secondary ms-2">Update summary</a></p>
+                <a href="?tab={{ active_tab }}&amp;refresh=1" class="btn btn-sm btn-secondary ms-2">Update summary</a>
+                <span class="text-muted prod-summary-updated">updated <span class="prod-summary-updated-at" data-updated-at="{{ campaign_summary_built_at|date:'c' }}">{{ campaign_summary_built_at|fmt_dt }}</span></span></p>
             {% if row.priority_rows %}
             <table class="table table-bordered table-sm align-middle w-auto swf-sortable prod-completion-table">
                 <thead>
@@ -199,6 +199,22 @@
             {% endif %}
         </div>
         {% endfor %}
+        <script>
+          // The updated-ago stamp redraws every 10 s (the house 1 s
+          // relative-time ticker is deliberately not used here).
+          (function () {
+            function tick() {
+              document.querySelectorAll('.prod-summary-updated-at').forEach(function (el) {
+                const ts = Date.parse(el.getAttribute('data-updated-at'));
+                if (Number.isNaN(ts)) return;
+                el.textContent = window.swfFormatElapsed(
+                  Math.max(0, Math.floor((Date.now() - ts) / 1000)));
+              });
+            }
+            tick();
+            setInterval(tick, 10000);
+          })();
+        </script>
     </div>
 
     {% if active_tab == 'ops' %}
