@@ -819,7 +819,9 @@ function applyNavMode(mode) {
 
       /* The app-wide relative-time ticker: give any element
          data-relative-time="<ISO timestamp>" and its text renders and
-         ticks as 'just now' / 'Ns ago' / 'Nm ago' / 'Nh ago' / 'Nd ago'. */
+         ticks as 'just now' / 'Ns ago' / 'Nm ago' / 'Nh ago' / 'Nd ago'.
+         Optional data-relative-time-interval="<seconds>" slows that
+         element's redraw to every N seconds (default 1). */
       window.swfFormatElapsed = function (seconds) {
         if (seconds < 5) return 'just now';
         if (seconds < 60) return seconds + 's ago';
@@ -830,14 +832,19 @@ function applyNavMode(mode) {
         return Math.floor(hours / 24) + 'd ago';
       };
       (function () {
+        let n = 0;
         function tick() {
           const now = Date.now();
           document.querySelectorAll('[data-relative-time]').forEach(function (el) {
+            const every = parseInt(
+              el.getAttribute('data-relative-time-interval'), 10) || 1;
+            if (n % every !== 0) return;
             const ts = Date.parse(el.getAttribute('data-relative-time'));
             if (Number.isNaN(ts)) return;
             el.textContent = window.swfFormatElapsed(
               Math.max(0, Math.floor((now - ts) / 1000)));
           });
+          n += 1;
         }
         tick();
         setInterval(tick, 1000);

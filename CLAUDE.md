@@ -119,7 +119,9 @@ page template:
 - **Relative time**: give any element
   `data-relative-time="<ISO timestamp>"` and its text renders and ticks
   every second as `just now` / `Ns ago` / `Nm ago` / `Nh ago` / `Nd ago`
-  (`window.swfFormatElapsed` is the formatter).
+  (`window.swfFormatElapsed` is the formatter). Optional
+  `data-relative-time-interval="<seconds>"` slows that element's redraw
+  to every N seconds.
 - **Poll gate**: `window.swfPollGate.attended()` reports whether the page
   is attended — visible, and either its window holds focus or it was
   interacted with within five minutes — and
