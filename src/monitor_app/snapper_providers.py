@@ -1340,6 +1340,11 @@ def _delivery_groups():
                 'title': title,
                 'prefixes': [],
                 'ids': file_ids, 'order': file_ids,
+                # The species family's per-PC curves ride the cached
+                # focus series (not the display) so a campaign-plan
+                # filter can substitute them for the aggregates.
+                'extra_cache_prefixes': ([f'dlvpcf_{tag}_']
+                                         if by_species else []),
                 'stacked': True, 'cumulative_stack': True,
                 'compact': not by_species,
                 'detail_key': _delivery_pc_detail_key(name, category),
@@ -1349,6 +1354,8 @@ def _delivery_groups():
                 'title': title,
                 'prefixes': [],
                 'ids': event_ids, 'order': event_ids,
+                'extra_cache_prefixes': ([f'dlvpc_{tag}_']
+                                         if by_species else []),
                 'stacked': True, 'cumulative_stack': True,
                 'compact': not by_species,
                 'detail_key': _delivery_pc_detail_key(name, category),
