@@ -183,7 +183,7 @@
                 </thead>
                 <tbody>
                     {% for prow in row.priority_rows %}
-                    {% with plan_base='?campaign='|add:row.campaign %}
+                    {% with plan_base='?campaign='|add:row.campaign|add:'&view=pc' %}
                     <tr>
                         <td>{{ prow.label }}</td>
                         <td><a href="{% url 'pcs:pcs_campaign_plan' %}{{ plan_base }}{% if prow.param %}&amp;priority={{ prow.param }}{% endif %}">{{ prow.configurations }}</a></td>
