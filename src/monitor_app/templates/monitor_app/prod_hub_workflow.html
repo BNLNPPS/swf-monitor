@@ -27,9 +27,26 @@
         color: var(--bs-body-color);
         font-size: 1.08rem;
         font-weight: 600;
-        margin: .35rem 0 .6rem;
+        margin: 0 0 .55rem;
       }
       .prod-summary-strip a { font-weight: 500; }
+      .prod-completion-panel {
+        background: var(--prod-panel);
+        border: 1px solid var(--prod-border);
+        border-radius: 6px;
+        margin: .5rem 0 .8rem;
+        padding: .7rem .85rem .45rem;
+      }
+      .prod-completion-table {
+        font-size: 1.02rem;
+        margin-bottom: .25rem;
+      }
+      .prod-completion-table th { white-space: nowrap; }
+      .prod-completion-table td { text-align: right; }
+      .prod-completion-table td:first-child {
+        font-weight: 600;
+        text-align: left;
+      }
       .workflow-grid {
         align-items: stretch;
         display: grid;
@@ -145,7 +162,39 @@
         <h1>epicprod - ePIC Production {% if active_tab == 'ops' %}Operations{% else %}System{% endif %}</h1>
         <p>ePIC experiment production requests, configuration, management and monitoring</p>
         {% for row in campaign_summary_lines %}
-        <p class="prod-summary-strip" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">{{ row.line|linebreaksbr }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign progress view</a></p>
+        <div class="prod-completion-panel" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">
+            <p class="prod-summary-strip">{{ row.line|linebreaksbr }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign progress view</a></p>
+            {% if row.priority_rows %}
+            <table class="table table-bordered table-sm align-middle w-auto swf-sortable prod-completion-table">
+                <thead>
+                    <tr>
+                        <th title="Request priority of the physics configuration; a configuration takes the highest priority among its requests">request priority</th>
+                        <th title="Physics configurations in the campaign">configurations</th>
+                        <th title="Delivered events reached the event count target">complete</th>
+                        <th title="Has an event count target, delivered events below it">below target</th>
+                        <th title="No files delivered and no task in flight">not started</th>
+                        <th title="Has delivered data but no event count target, so completion is unknown">no target</th>
+                        <th title="Mean completion over configurations with a target or not started (counted 0)">% complete, by configuration</th>
+                        <th title="Delivered events as a fraction of the summed targets">% complete, by events</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for prow in row.priority_rows %}
+                    <tr>
+                        <td>{{ prow.label }}</td>
+                        <td>{{ prow.configurations }}</td>
+                        <td>{{ prow.complete }}</td>
+                        <td>{{ prow.below_target }}</td>
+                        <td>{{ prow.not_started }}</td>
+                        <td>{{ prow.no_target }}</td>
+                        <td>{% if prow.pct_configs is not None %}{{ prow.pct_configs }}%{% else %}&ndash;{% endif %}</td>
+                        <td>{% if prow.pct_events is not None %}{{ prow.pct_events }}%{% else %}&ndash;{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
         {% endfor %}
     </div>
 
