@@ -357,24 +357,33 @@ def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
                         raise ServiceError(
                             f'{row.ref}: amended {field} must be an '
                             f'integer; got {amended[field]!r}')
+            if 'disposition' in amended:
+                value = amended['disposition']
+                if value not in ('include', 'defer', 'retire'):
+                    raise ServiceError(
+                        f'{row.ref}: amended disposition must be '
+                        f'include, defer, or retire; got {value!r}')
+                if value != payload.get('disposition'):
+                    changes['disposition'] = value
             if changes:
                 payload['amended'] = changes
                 row.payload = payload
                 row.save(update_fields=['payload'])
             entry = {
-                'disposition': payload.get('disposition'),
+                'disposition': changes.get(
+                    'disposition', payload.get('disposition')),
                 'target_events': changes.get(
                     'target_events', payload.get('target_events')),
                 'priority': changes.get('priority', payload.get('priority')),
                 'evidence': payload.get('evidence', ''),
             }
-            # Approval requires a complete entry: an include
-            # recommendation with no target or no priority stays a
-            # proposal, named in the result — never silently dropped,
-            # never approved incomplete. Defer/retire rows have no
-            # run target and approve without numbers.
-            if entry['disposition'] in ('include_prior',
-                                        'include_requested') and (
+            # Applying requires a complete entry: an include with no
+            # target or no priority stays a proposal, named in the
+            # result — never silently dropped, never applied
+            # incomplete. Defer/retire rows have no run target and
+            # apply without numbers. The gate reads the disposition
+            # being applied, amended or not.
+            if entry['disposition'] == 'include' and (
                     entry['target_events'] in (None, '')
                     or entry['priority'] in (None, '')):
                 missing = [f for f in ('target_events', 'priority')
