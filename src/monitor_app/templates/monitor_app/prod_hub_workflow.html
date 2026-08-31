@@ -166,7 +166,7 @@
         <div class="prod-completion-panel" title="Campaign completion estimate as of {{ campaign_summary_built_at|fmt_dt }} (docs/CAMPAIGN_DELIVERY.md, Completion)">
             <p class="prod-summary-strip">{{ row.summary|default:row.line|linebreaksbr }} · <a href="{% url 'snapper_ai:snapper_focus' 'epicprod' 'campaign' %}?campaign={{ row.campaign }}">campaign progress view</a>
                 <span class="text-muted prod-summary-updated">· updated <span data-relative-time="{{ campaign_summary_built_at|date:'c' }}">{{ campaign_summary_built_at|fmt_dt }}</span></span>
-                <a href="?tab={{ active_tab }}&amp;refresh=1" class="btn btn-sm btn-secondary ms-2">Update summary</a></p>
+                {% if not is_tunnel %}<a href="?tab={{ active_tab }}&amp;refresh=1" class="btn btn-sm btn-secondary ms-2">Update summary</a>{% endif %}</p>
             {% if row.priority_rows %}
             <table class="table table-bordered table-sm align-middle w-auto swf-sortable prod-completion-table">
                 <thead>
