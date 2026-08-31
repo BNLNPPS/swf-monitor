@@ -3431,7 +3431,8 @@ def prod_hub(request):
     # daily delivery record, so it is served as a cached product.
     summary_product = get_product(
         'prod_hub_campaign_completion', _campaign_completion_lines,
-        ttl_seconds=600)
+        ttl_seconds=600,
+        refresh=request.GET.get('refresh') == '1')
     summary = {
         'campaign_summary_lines': summary_product['value'] or [],
         'campaign_summary_built_at': summary_product['built_at'],
@@ -3504,7 +3505,8 @@ def _campaign_completion_lines():
     campaigns. The campaign-view link is resolved in the template per
     request: the script prefix differs between the internal and
     external faces, so a cached URL would be wrong on one of them."""
-    from swf_epicprod.analytics.completion import campaign_completion
+    from swf_epicprod.analytics.completion import (campaign_completion,
+                                                   delivered_summary)
     from swf_epicprod.analytics.rollup import resolve_target_campaigns
 
     lines = []
@@ -3513,12 +3515,12 @@ def _campaign_completion_lines():
         if not block.get('available'):
             logger.error('campaign completion unavailable for %s: %s',
                          name, block.get('reason'))
-            line = f'{name}: completion unavailable ({block.get("reason")})'
+            summary = f'{name}: completion unavailable ({block.get("reason")})'
             priority_rows = []
         else:
-            line = block['line']
+            summary = delivered_summary(block['overall'])
             priority_rows = _campaign_priority_rows(block)
-        lines.append({'campaign': name, 'line': line,
+        lines.append({'campaign': name, 'summary': summary,
                       'priority_rows': priority_rows})
     return lines
 
