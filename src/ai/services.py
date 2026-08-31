@@ -580,8 +580,12 @@ def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
         selector |= Q(subject_key__in=names)
     if ids:
         selector |= Q(pk__in=ids)
-    all_rows = list(Proposal.objects.filter(status='executed')
-                    .filter(selector))
+    # Executed rows undo by compensation; a denied campaign-plan row
+    # also undoes — back to proposed, clearing the denial (a mis-click
+    # deny would otherwise be locked out by denial memory).
+    all_rows = list(Proposal.objects.filter(
+        Q(status='executed')
+        | Q(status='denied', action='campaign_plan')).filter(selector))
     rows = [r for r in all_rows if r.action == 'propagation']
     plan_rows = [r for r in all_rows if r.action == 'campaign_plan']
     found_names = {r.subject_key for r in all_rows}
@@ -592,6 +596,17 @@ def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
     now = _timezone.now()
     undone, moved = [], []
     for row in plan_rows:
+        if row.status == 'denied':
+            row.status = 'proposed'
+            row.decided_by = ''
+            row.decided_at = None
+            row.quality = ''
+            row.undone_by = undone_by
+            row.undone_at = now
+            row.save(update_fields=['status', 'decided_by', 'decided_at',
+                                    'quality', 'undone_by', 'undone_at'])
+            undone.append(row.ref)
+            continue
         payload = dict(row.payload or {})
         amended = payload.get('amended') or {}
         executed_anchor = {
