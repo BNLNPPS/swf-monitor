@@ -618,24 +618,7 @@ def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
             undone.append(row.ref)
             continue
         payload = dict(row.payload or {})
-        amended = payload.get('amended') or {}
-        executed_anchor = {
-            'disposition': payload.get('disposition'),
-            'target_events': amended.get('target_events',
-                                         payload.get('target_events')),
-            'priority': amended.get('priority', payload.get('priority')),
-        }
         campaign = payload.get('campaign', '')
-        current = campaign_plan_get(campaign).get(row.subject_key)
-        current_anchor = ({'disposition': current.get('disposition'),
-                           'target_events': current.get('target_events'),
-                           'priority': current.get('priority')}
-                          if current else None)
-        # The undo offer expires when the plan entry moves past the
-        # executed payload.
-        if current_anchor != executed_anchor:
-            moved.append(row.ref)
-            continue
         prev = (row.precondition or {}).get('prev_entry')
         result = campaign_plan_entries_set(
             campaign, {row.subject_key: dict(prev) if prev else None},
