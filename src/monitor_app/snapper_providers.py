@@ -1139,10 +1139,25 @@ def _campaign_member_restrict(query):
         f'{label}: {value}' for label, value in active)
         + f' — {len(pc_set)} physics configurations '
           '(campaign plan filters)')
+    # The Single Particle cumulative family stacks species aggregates,
+    # which a subset cannot prune honestly; under restriction it
+    # substitutes the slice's per-configuration curves.
+    cache = _pc_cache()
+    sp_pcs = sorted(pc for pc in pc_set
+                    if cache['categories'].get(pc) == 'Single Particle')
+    group_ids = {}
+    group_titles = {}
+    if sp_pcs:
+        for quantity, prefix in (('files', 'dlvpcf_'), ('events', 'dlvpc_')):
+            family = _delivery_pc_family_name(name, quantity,
+                                              'Single Particle')
+            group_ids[family] = [f'{prefix}{tag}_{pc}' for pc in sp_pcs]
+            group_titles[family] = f'Cumulative {name} · Single Particle'
     return {'note': note, 'keep': keep,
             'params': {key: (query.get(key) or '').strip()
                        for key in PLAN_FILTER_PARAMS
-                       if (query.get(key) or '').strip()}}
+                       if (query.get(key) or '').strip()},
+            'group_ids': group_ids, 'group_titles': group_titles}
 
 
 def _delivery_focus_view():
@@ -1251,6 +1266,7 @@ def _delivery_groups():
             'stacked': True, 'end_stamped': True,
             'detail_key': _delivery_detail_key('arrivals', name),
             'pc_groups': pc_groups,
+            'empty_note': 'No arrivals in this window',
             'units': 'files'})
         groups.append({
             'name': f'Arrivals {name} events',
@@ -1259,6 +1275,7 @@ def _delivery_groups():
             'stacked': True, 'end_stamped': True,
             'detail_key': _delivery_detail_key('arrivals', name),
             'pc_groups': pc_groups,
+            'empty_note': 'No arrivals in this window',
             'default_off': True, 'units': 'events (M)'})
         for lens in DELIVERY_LENSES:
             seg, lens_value = lens['seg'], lens['value']
