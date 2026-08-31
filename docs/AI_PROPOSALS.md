@@ -115,6 +115,32 @@ propagation pilot is the worked example of each item.
 10. **Documentation.** The category added to this document: its
     precondition, comment template, and reversibility class.
 
+## Categories
+
+- **Campaign propagation** (`propagation`, ref `cp`) — the pilot:
+  proposes an edition's propagation disposition. Executor
+  `pcs.services.dataset_propagation_set`; precondition `prev_state` /
+  `prev_replaced_by`; undoable.
+- **Campaign plan** (`campaign_plan`, ref `pl`) — campaign assembly
+  (swf-epicprod CONTINUOUS_PRODUCTION.md): proposes one plan-membership
+  entry per physics configuration of a future campaign — disposition
+  (include_prior / include_requested / defer / retire), target events,
+  priority, with code-filled evidence. A creation subject keyed on
+  (campaign, PC), `counterpart_key` carrying the campaign; the
+  precondition anchor is the current plan entry's decision fields (None
+  for a true creation). Executor `pcs.services.campaign_plan_entries_set`
+  (one call and one `campaign_plan_set` event per campaign per decision
+  act); the plan lives in `Campaign.data['plan']`. **Edit-then-approve**:
+  the reviewer may amend target events and priority before deciding —
+  the amendments are recorded on the payload under `amended` and the
+  executor runs the amended values. Review surface: the campaign plan
+  page's assembly view (a future campaign with no editions) plus the
+  proposals page; undoable (the prior entry, or absence, is restored).
+  Proposer: `campaign-assembly` (`pcs/assembly.py`,
+  `scripts/propose-campaign-plan.py`), a rule-based proposer — comments
+  are wholly code-filled. No render projection: the subjects have no
+  Dataset row.
+
 ## Review surfaces
 
 Proposals are **visible but inert** on the open face: anyone can see a

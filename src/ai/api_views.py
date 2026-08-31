@@ -63,6 +63,9 @@ class ProposalDecideView(_AiApiView):
                 quality=request.data.get('quality', ''),
                 filter_state=request.data.get('filter', ''),
                 proposal_ids=request.data.get('ids') or [],
+                # Reviewer amendments for campaign-plan proposals:
+                # {proposal id: {target_events, priority}}.
+                amendments=request.data.get('amendments') or {},
             )
         except ServiceError as e:
             return Response({'detail': e.detail}, status=e.status)

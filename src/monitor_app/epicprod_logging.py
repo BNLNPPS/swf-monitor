@@ -249,6 +249,12 @@ ACTION_DEFAULTS = {
         'description': "A notice-routing subscription was created, changed, "
                        "or removed through the subscriptions API.",
     },
+    'campaign_plan_set': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Set or remove campaign-plan entries — the "
+                       "plan-membership records of a campaign's assembly "
+                       "(CONTINUOUS_PRODUCTION.md).",
+    },
     'assessment_register': {
         'sublevel': 'normal', 'live': True,
         'description': "Register an AI assessment of a production object "

@@ -13,7 +13,8 @@ from django.db import models
 # surface. Every proposal category declares its prefix here
 # (AI_PROPOSALS.md, "Adding a proposal category").
 ACTION_REF_PREFIXES = {
-    'propagation': 'cp',  # campaign propagation
+    'propagation': 'cp',    # campaign propagation
+    'campaign_plan': 'pl',  # campaign assembly plan entries
 }
 
 

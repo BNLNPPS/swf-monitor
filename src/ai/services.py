@@ -19,7 +19,8 @@ _log = _logging.getLogger(__name__)
 
 from pcs.models import Dataset
 from pcs.services import (
-    PROPAGATION_STATES, ServiceError, dataset_propagation_set,
+    CAMPAIGN_PLAN_DISPOSITIONS, PROPAGATION_STATES, ServiceError,
+    campaign_plan_entries_set, campaign_plan_get, dataset_propagation_set,
 )
 
 from .models import ACTION_REF_PREFIXES, Proposal
@@ -210,8 +211,189 @@ def propose_propagation(composed_names, state, comment, *, replaced_by='',
     return result
 
 
+def propose_campaign_plan(campaign_name, items, *, proposer='',
+                          scan_version=1, batch_id='', created_by=''):
+    """Create campaign-assembly plan proposals (CONTINUOUS_PRODUCTION.md,
+    Campaign assembly) — creation subjects keyed on (campaign, PC).
+
+    ``items``: [{pc, disposition, target_events, priority, evidence,
+    comment}]. Validation mirrors the executor
+    (``campaign_plan_entries_set``): an unexecutable proposal is refused
+    at birth. The target campaign row is created if absent (lifecycle
+    ``future``), so the plan page can show the campaign at proposal
+    stage. Denial memory, heartbeat supersession, and one
+    ``proposal_created`` event follow the subsystem conventions. The
+    precondition anchor is the current plan entry's decision fields (or
+    None for a true creation)."""
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    from pcs.models import Campaign
+    from pcs.services import plan_entry_anchor, validate_plan_entry
+
+    campaign_name = (campaign_name or '').strip()
+    if not campaign_name:
+        raise ServiceError('a campaign name is required')
+    if not items:
+        raise ServiceError('no plan items supplied')
+    now = _timezone.now()
+    Campaign.objects.get_or_create(
+        name=campaign_name,
+        defaults={'created_by': created_by or 'campaign-assembly'})
+    plan = campaign_plan_get(campaign_name)
+
+    proposed, noop, denied_skips, invalid = [], [], [], []
+    with transaction.atomic():
+        for item in items:
+            pc = (item.get('pc') or '').strip()
+            comment = (item.get('comment') or '').strip()
+            if not pc or not comment:
+                invalid.append(pc or '(missing pc)')
+                continue
+            try:
+                entry = validate_plan_entry(pc, {
+                    'disposition': item.get('disposition'),
+                    'target_events': item.get('target_events'),
+                    'priority': item.get('priority'),
+                    'evidence': item.get('evidence', ''),
+                })
+            except ServiceError as e:
+                invalid.append(f'{pc}: {e}')
+                continue
+            payload = {'campaign': campaign_name, **entry}
+            current = plan_entry_anchor(plan.get(pc))
+            if current == plan_entry_anchor(entry):
+                noop.append(pc)
+                continue
+            input_hash = _proposal_input_hash(payload, comment)
+            if Proposal.objects.filter(
+                    action='campaign_plan', subject_key=pc,
+                    counterpart_key=campaign_name,
+                    status='denied', input_hash=input_hash).exists():
+                denied_skips.append(pc)
+                continue
+            Proposal.objects.filter(
+                action='campaign_plan', subject_key=pc,
+                counterpart_key=campaign_name,
+                status='proposed').update(status='withdrawn',
+                                          decided_at=now)
+            Proposal.objects.create(
+                action='campaign_plan',
+                subject_type='physics_config',
+                subject_key=pc,
+                counterpart_key=campaign_name,
+                payload=payload,
+                comment=comment,
+                proposer=proposer or '',
+                scan_version=scan_version,
+                batch_id=batch_id or '',
+                executor='service',
+                precondition={'prev_entry': current},
+                input_hash=input_hash,
+                created_by=created_by or '',
+            )
+            proposed.append(pc)
+
+    log_epicprod_action(
+        'web', 'proposal_created',
+        username=created_by,
+        sublevel='normal', live_default=True,
+        message=(f'AI proposal: campaign plan {campaign_name}, '
+                 f'{len(proposed)} configuration(s) '
+                 f'[{batch_id or "no batch"}]'),
+        proposed=len(proposed), noop=len(noop), denied=len(denied_skips),
+        invalid=len(invalid), campaign=campaign_name,
+        proposer=proposer or '', batch_id=batch_id or '',
+        scan_version=scan_version,
+    )
+    return {'proposed': proposed, 'noop': noop, 'denied': denied_skips,
+            'invalid': invalid, 'campaign': campaign_name}
+
+
+def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
+                          now):
+    """Decide pending campaign-plan proposals: revalidate each against
+    the current plan entry (the ``prev_entry`` anchor), apply any
+    reviewer amendments (target_events, priority — recorded on the
+    payload under ``amended``), and execute approvals through
+    ``campaign_plan_entries_set`` — one executor call and one
+    origin-stamped event per campaign per decision act."""
+    amendments = {str(k): v for k, v in (amendments or {}).items()}
+    stale, denied, approved = [], [], []
+    by_campaign = {}
+    with transaction.atomic():
+        for row in rows:
+            payload = dict(row.payload or {})
+            campaign = payload.get('campaign', '')
+            current = campaign_plan_get(campaign).get(row.subject_key)
+            current_anchor = ({'disposition': current.get('disposition'),
+                               'target_events': current.get('target_events'),
+                               'priority': current.get('priority')}
+                              if current else None)
+            pre = (row.precondition or {}).get('prev_entry')
+            if current_anchor != pre:
+                row.status = 'stale'
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'decided_by',
+                                        'decided_at'])
+                stale.append(row.ref)
+                continue
+            if decision == 'deny':
+                row.status = 'denied'
+                row.quality = quality
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'quality', 'decided_by',
+                                        'decided_at'])
+                denied.append(row.ref)
+                continue
+            amended = amendments.get(str(row.pk)) or {}
+            changes = {}
+            for field in ('target_events', 'priority'):
+                if field in amended and amended[field] not in (None, ''):
+                    try:
+                        changes[field] = int(amended[field])
+                    except (TypeError, ValueError):
+                        raise ServiceError(
+                            f'{row.ref}: amended {field} must be an '
+                            f'integer; got {amended[field]!r}')
+            if changes:
+                payload['amended'] = changes
+                row.payload = payload
+                row.save(update_fields=['payload'])
+            entry = {
+                'disposition': payload.get('disposition'),
+                'target_events': changes.get(
+                    'target_events', payload.get('target_events')),
+                'priority': changes.get('priority', payload.get('priority')),
+                'evidence': payload.get('evidence', ''),
+            }
+            by_campaign.setdefault(campaign, []).append((row, entry))
+
+    for campaign, pairs in by_campaign.items():
+        result = campaign_plan_entries_set(
+            campaign, {row.subject_key: entry for row, entry in pairs},
+            f'AI assembly proposal(s) approved by {decided_by}',
+            changed_by=decided_by,
+            origin={'kind': 'ai_proposal',
+                    'proposer': pairs[0][0].proposer,
+                    'batch_id': pairs[0][0].batch_id})
+        with transaction.atomic():
+            for row, _entry in pairs:
+                row.status = 'executed'
+                row.quality = quality
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.executed_log_id = result.get('log_id')
+                row.save(update_fields=['status', 'quality', 'decided_by',
+                                        'decided_at', 'executed_log_id'])
+                approved.append(row.ref)
+    return approved, denied, stale
+
+
 def proposal_decide(composed_names, decision, *, decided_by='',
-                            quality='', filter_state='', proposal_ids=None):
+                            quality='', filter_state='', proposal_ids=None,
+                            amendments=None):
     """Approve or deny pending AI proposals.
 
     Selection by dataset composed names (the catalog and compose surfaces)
@@ -248,14 +430,19 @@ def proposal_decide(composed_names, decision, *, decided_by='',
     if not decided_by:
         raise ServiceError('an authenticated decider is required')
 
-    pending = Proposal.objects.filter(action='propagation', status='proposed')
+    pending = Proposal.objects.filter(
+        action__in=('propagation', 'campaign_plan'), status='proposed')
     selector = Q()
     if names:
         selector |= Q(subject_key__in=names)
     if ids:
         selector |= Q(pk__in=ids)
-    rows = list(pending.filter(selector))
-    found_names = {r.subject_key for r in rows}
+    all_rows = list(pending.filter(selector))
+    # Dispatch by category: propagation executes below; campaign-plan
+    # rows decide through their own executor path.
+    rows = [r for r in all_rows if r.action == 'propagation']
+    plan_rows = [r for r in all_rows if r.action == 'campaign_plan']
+    found_names = {r.subject_key for r in all_rows}
     no_proposal = [n for n in names if n not in found_names]
 
     now = _timezone.now()
@@ -320,12 +507,19 @@ def proposal_decide(composed_names, decision, *, decided_by='',
                 _clear_proposal_projection(row.subject_key)
                 approved.append(row.subject_key)
 
+    if plan_rows:
+        plan_approved, plan_denied, plan_stale = _decide_campaign_plan(
+            plan_rows, decision, decided_by, quality, amendments, now)
+        approved += plan_approved
+        denied += plan_denied
+        stale += plan_stale
+
     if decision == 'deny':
         log_epicprod_action(
             'web', 'proposal_denied',
             username=decided_by,
             sublevel='normal', live_default=True,
-            message=(f'AI proposal denied on {len(denied)} dataset(s)'
+            message=(f'AI proposal denied on {len(denied)} subject(s)'
                      + (f' [{quality}]' if quality else '')),
             denied=len(denied), stale=len(stale),
             no_proposal=len(no_proposal),
@@ -370,14 +564,56 @@ def proposal_undo(composed_names, *, undone_by='', proposal_ids=None):
         selector |= Q(subject_key__in=names)
     if ids:
         selector |= Q(pk__in=ids)
-    rows = list(Proposal.objects.filter(status='executed').filter(selector))
-    found_names = {r.subject_key for r in rows}
-    found_ids = {r.pk for r in rows}
+    all_rows = list(Proposal.objects.filter(status='executed')
+                    .filter(selector))
+    rows = [r for r in all_rows if r.action == 'propagation']
+    plan_rows = [r for r in all_rows if r.action == 'campaign_plan']
+    found_names = {r.subject_key for r in all_rows}
+    found_ids = {r.pk for r in all_rows}
     no_proposal = [n for n in names if n not in found_names]
     not_executed = [i for i in ids if i not in found_ids]
 
     now = _timezone.now()
     undone, moved = [], []
+    for row in plan_rows:
+        payload = dict(row.payload or {})
+        amended = payload.get('amended') or {}
+        executed_anchor = {
+            'disposition': payload.get('disposition'),
+            'target_events': amended.get('target_events',
+                                         payload.get('target_events')),
+            'priority': amended.get('priority', payload.get('priority')),
+        }
+        campaign = payload.get('campaign', '')
+        current = campaign_plan_get(campaign).get(row.subject_key)
+        current_anchor = ({'disposition': current.get('disposition'),
+                           'target_events': current.get('target_events'),
+                           'priority': current.get('priority')}
+                          if current else None)
+        # The undo offer expires when the plan entry moves past the
+        # executed payload.
+        if current_anchor != executed_anchor:
+            moved.append(row.ref)
+            continue
+        prev = (row.precondition or {}).get('prev_entry')
+        result = campaign_plan_entries_set(
+            campaign, {row.subject_key: dict(prev) if prev else None},
+            f'undo of AI proposal {row.ref} '
+            f'(approved by {row.decided_by or "unknown"})',
+            changed_by=undone_by,
+            origin={'kind': 'undo', 'undo_of': row.pk})
+        row.status = 'proposed'
+        row.decided_by = ''
+        row.decided_at = None
+        row.quality = ''
+        row.executed_log_id = None
+        row.undone_by = undone_by
+        row.undone_at = now
+        row.undone_log_id = result.get('log_id')
+        row.save(update_fields=['status', 'decided_by', 'decided_at',
+                                'quality', 'executed_log_id', 'undone_by',
+                                'undone_at', 'undone_log_id'])
+        undone.append(row.ref)
     for row in rows:
         head = (Dataset.objects
                 .filter(composed_name=row.subject_key)
