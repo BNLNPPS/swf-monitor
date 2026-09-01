@@ -1617,16 +1617,6 @@ def panda_errors_datatable_ajax(request):
         diag_text = escape(err.get('error_diag', '') or '')
         # The correction root: a label a rule marks unreliable renders
         # its corrected reading first, the reported text beneath it.
-        corr = err.get('correction')
-        if corr:
-            modes = corr.get('modes') or []
-            if modes:
-                diag_text = ' · '.join(
-                    f"{escape(m['reading'])} ({m['count']})"
-                    for m in modes)
-            else:
-                diag_text = escape(corr['label'])
-
         # Average run time before this error ended the job; patterns
         # whose jobs never started (pre-run failures) say so instead of
         # averaging in zeros.
@@ -1637,16 +1627,29 @@ def panda_errors_datatable_ajax(request):
         elif avg_text and never_started:
             avg_text += f' ({never_started} never started)'
 
-        data.append([
-            f'<a href="{diag_url}">{err["error_source"]}</a>',
-            str(err.get('error_code', '')),
-            diag_text,
-            str(err.get('count', 0)),
-            str(err.get('task_count', 0)),
-            avg_text,
-            users_str,
-            sites_str,
-        ])
+        # A pattern whose label a rule marks unreliable presents as its
+        # real failure modes: one row per mode, each with its count.
+        corr = err.get('correction')
+        modes = (corr.get('modes') or []) if corr else []
+        if corr and not modes:
+            modes = [{'reading': corr['label'],
+                      'count': err.get('count', 0)}]
+        if modes:
+            rows_out = [(escape(m['reading']), str(m['count']))
+                        for m in modes]
+        else:
+            rows_out = [(diag_text, str(err.get('count', 0)))]
+        for cell_text, cell_count in rows_out:
+            data.append([
+                f'<a href="{diag_url}">{err["error_source"]}</a>',
+                str(err.get('error_code', '')),
+                cell_text,
+                cell_count,
+                str(err.get('task_count', 0)),
+                avg_text,
+                users_str,
+                sites_str,
+            ])
 
     return dt.create_response(data, total, total, extra=product_extra)
 

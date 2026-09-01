@@ -2560,27 +2560,40 @@ def _errors_card(data, previous_data, ctx):
                 and not any(str(t) in selected for t in task_list)):
             continue
         window_patterns += 1
-        if len(patterns) < MAX_PATTERNS:
-            rep = int(rep or 0)
-            site_list = sorted({str(s) for s in (pattern_sites or []) if s})
-            # The correction root (docs/ERROR_ATTRIBUTION.md): a rule
-            # marking this label unreliable puts the corrected reading
-            # first; the reported label stays visible beneath it.
-            rule = _match(comp, code, diag)
-            patterns.append({
-                'category': category_label(comp, code),
-                'curve': f'perr_{comp}_{code}',
-                'diag': str(diag or ''),
-                'count': int(count or 0),
-                'rep_pandaid': rep,
-                'rep_url': (reverse('monitor_app:panda_job_detail',
-                                    args=[rep]) if rep else ''),
-                'tasks': task_list[:MAX_PATTERN_TASKS],
-                'sites': site_list[:MAX_PATTERN_SITES],
-                'site_overflow': max(0, len(site_list) - MAX_PATTERN_SITES),
-                'correction': (_correction(rule, exit_counts or {})
-                               if rule is not None else None),
-            })
+        rep = int(rep or 0)
+        site_list = sorted({str(s) for s in (pattern_sites or []) if s})
+        base = {
+            'category': category_label(comp, code),
+            'curve': f'perr_{comp}_{code}',
+            'tasks': task_list[:MAX_PATTERN_TASKS],
+            'sites': site_list[:MAX_PATTERN_SITES],
+            'site_overflow': max(0, len(site_list) - MAX_PATTERN_SITES),
+        }
+
+        def _row(diag_text, row_count, row_rep):
+            row_rep = int(row_rep or 0)
+            return dict(base, diag=diag_text, count=int(row_count or 0),
+                        rep_pandaid=row_rep,
+                        rep_url=(reverse('monitor_app:panda_job_detail',
+                                         args=[row_rep])
+                                 if row_rep else ''))
+
+        # The correction root (docs/ERROR_ATTRIBUTION.md): a pattern
+        # whose label a rule marks unreliable presents as its real
+        # failure modes — one row per mode, each with its own count
+        # and a representative job of that mode.
+        rule = _match(comp, code, diag)
+        corr = (_correction(rule, exit_counts or {})
+                if rule is not None else None)
+        if corr and corr['modes']:
+            for m in corr['modes']:
+                if len(patterns) < MAX_PATTERNS:
+                    patterns.append(_row(m['reading'], m['count'],
+                                         m.get('rep_pandaid') or rep))
+        elif len(patterns) < MAX_PATTERNS:
+            patterns.append(_row(corr['label'] if corr else str(diag or ''),
+                                 count, rep))
+    patterns.sort(key=lambda p: -p['count'])
 
     # The attribution reading: where the window's errors concentrate,
     # axis by axis — category, task, site — with spread itself a

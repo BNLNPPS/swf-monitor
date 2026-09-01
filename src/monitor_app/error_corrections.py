@@ -101,14 +101,20 @@ def correction(rule, exit_counts=None):
     corrected modes. With no readable exit profile the rule's fallback
     label stands.
     """
+    profile = []
+    for exitcode, value in exit_counts_of(exit_counts).items():
+        if isinstance(value, dict):
+            n, rep = int(value.get('n') or 0), value.get('rep')
+        else:
+            n, rep = int(value or 0), None
+        profile.append((str(exitcode), n, rep))
+    profile.sort(key=lambda t: (-t[1], t[0]))
     modes = []
-    for exitcode, count in sorted(
-            exit_counts_of(exit_counts).items(),
-            key=lambda kv: (-int(kv[1] or 0), str(kv[0]))):
+    for exitcode, n, rep in profile:
         reading = exit_reading(exitcode)
         if reading:
-            modes.append({'reading': reading, 'exit_code': str(exitcode),
-                          'count': int(count or 0)})
+            modes.append({'reading': reading, 'exit_code': exitcode,
+                          'count': n, 'rep_pandaid': rep})
     label = (modes[0]['reading'] if modes
              else (rule.corrected_label
                    or 'unreliable label; payload failure of '

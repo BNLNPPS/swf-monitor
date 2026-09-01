@@ -320,14 +320,17 @@ def error_patterns(mark, until, taskid=None, statuses=None):
         exits AS (
             SELECT comp, code, diag_pattern,
                    COALESCE("transexitcode", '') AS exitcode,
-                   COUNT(*) AS n
+                   COUNT(*) AS n,
+                   MAX("pandaid") AS rep
             FROM classified
             GROUP BY 1, 2, 3, 4
         )
         SELECT p.comp, p.code, p.diag_pattern, p.diag, p.count,
                p.representative_pandaid, p.taskids, p.sites,
                COALESCE((
-                   SELECT jsonb_object_agg(x.exitcode, x.n)
+                   SELECT jsonb_object_agg(
+                       x.exitcode,
+                       jsonb_build_object('n', x.n, 'rep', x.rep))
                    FROM exits x
                    WHERE x.comp = p.comp AND x.code = p.code
                      AND x.diag_pattern = p.diag_pattern

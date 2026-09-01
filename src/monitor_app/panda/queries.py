@@ -1182,7 +1182,8 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         exit_modes AS (
             SELECT p.diag_pattern, e.error_source, e.error_code,
                    COALESCE(e.transexitcode, '') AS exitcode,
-                   COUNT(*) AS n
+                   COUNT(*) AS n,
+                   MAX(e.pandaid) AS rep
             FROM errs e
             JOIN pattern_totals p
               ON p.error_source = e.error_source
@@ -1212,7 +1213,9 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                      AND d.diag_pattern = p.diag_pattern
                ), '[]'::jsonb) as site_task_counts,
                COALESCE((
-                   SELECT jsonb_object_agg(x.exitcode, x.n)
+                   SELECT jsonb_object_agg(
+                       x.exitcode,
+                       jsonb_build_object('n', x.n, 'rep', x.rep))
                    FROM exit_modes x
                    WHERE x.error_source = p.error_source
                      AND x.error_code = p.error_code
