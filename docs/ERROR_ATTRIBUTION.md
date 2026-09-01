@@ -184,11 +184,17 @@ PREEMPTED, and CANCELLED name the batch event; COMPLETED is a batch
 job that exited on its own under a running job and is attributed as
 supported, not confirmed. Every summary states the processing lost.
 
-- **swf-monitor**: rules model + `error_corrections` module (pure
-  application API with batch form, rules cached); clients wired at the
-  readers — `error_summary`, `study_job`/`diagnose_jobs`, Snapper
-  errors providers, system status, inventory; REST endpoints;
-  management page; witness grade shown in every rendering.
+- **swf-monitor**: the rules model (`ErrorCorrectionRule`, entered
+  through the admin) and the `error_corrections` module are in place,
+  wired at the two aggregation roots — `error_summary` (the
+  `/panda/errors/` page and the MCP summary) and the Snapper errors
+  breakdown patterns — with the corrected reading refined from each
+  pattern's payload exit-code profile (grade: pilot mechanical
+  fields), the original label preserved beneath it, and the first
+  seeded rule covering the pilot 1305 bind-mount noise. Remaining
+  from the design: REST endpoints, a dedicated management page,
+  episode-scoped cause verdicts, and wiring at system status and the
+  inventory.
 - **swf-epicprod**: dispatcher report writer for the PCS path; the
   exit-code registry; the `run.sh` insert for direct submissions.
 - **Upstream, parallel and non-blocking**:

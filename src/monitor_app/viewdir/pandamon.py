@@ -1568,7 +1568,7 @@ def panda_errors_datatable_ajax(request):
     # full faulty-job population (multi-second under failure churn), so
     # requests serve the stored summary and rebuilds run behind them.
     product = get_product(
-        f'panda_errors:v4:{days}:{username or ""}:{site or ""}'
+        f'panda_errors:v5:{days}:{username or ""}:{site or ""}'
         f':{error_source or ""}:{status or ""}:{int(classified)}:'
         f'{taskid or ""}:'
         f'{ended_after.isoformat() if ended_after else ""}:'
@@ -1615,6 +1615,17 @@ def panda_errors_datatable_ajax(request):
         # Bootstrap shows as the one immediate tooltip. An inner
         # title= span would add a second, delayed native floater.
         diag_text = escape(err.get('error_diag', '') or '')
+        # The correction root: a label a rule marks unreliable renders
+        # its corrected reading first, the reported text beneath it.
+        corr = err.get('correction')
+        if corr:
+            extra_modes = ''.join(
+                f" · {escape(m['reading'])} ({m['count']})"
+                for m in corr.get('modes', [])[1:])
+            diag_text = (f"<strong>{escape(corr['label'])}</strong>"
+                         f"{extra_modes}<br>"
+                         f"<span class=\"text-muted\">reported as: "
+                         f"{diag_text}</span>")
 
         # Average run time before this error ended the job; patterns
         # whose jobs never started (pre-run failures) say so instead of

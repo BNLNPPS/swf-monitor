@@ -1119,6 +1119,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    j."computingsite",
                    j."starttime",
                    j."endtime",
+                   j."transexitcode",
                    {dest_select}
             FROM "{PANDA_SCHEMA}"."{table}" j
             {dest_join}
@@ -1174,6 +1175,18 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                      e.error_diag, '[0-9]+', '#', 'g'), 256), '')
             GROUP BY p.diag_pattern, e.error_source, e.error_code,
                      e.computingsite, e.jeditaskid
+        ),
+        exit_modes AS (
+            SELECT p.diag_pattern, e.error_source, e.error_code,
+                   COALESCE(e.transexitcode, '') AS exitcode,
+                   COUNT(*) AS n
+            FROM errs e
+            JOIN pattern_totals p
+              ON p.error_source = e.error_source
+             AND p.error_code = e.error_code
+             AND p.diag_pattern = COALESCE(LEFT(regexp_replace(
+                     e.error_diag, '[0-9]+', '#', 'g'), 256), '')
+            GROUP BY 1, 2, 3, 4
         )
         SELECT p.error_source, p.error_code, p.error_diag,
                p.count, p.task_count, p.users, p.sites,
@@ -1194,7 +1207,15 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
                    WHERE d.error_source = p.error_source
                      AND d.error_code = p.error_code
                      AND d.diag_pattern = p.diag_pattern
-               ), '[]'::jsonb) as site_task_counts
+               ), '[]'::jsonb) as site_task_counts,
+               COALESCE((
+                   SELECT jsonb_object_agg(x.exitcode, x.n)
+                   FROM exit_modes x
+                   WHERE x.error_source = p.error_source
+                     AND x.error_code = p.error_code
+                     AND x.diag_pattern = p.diag_pattern
+                     AND x.exitcode != ''
+               ), '{{}}'::jsonb) as exit_counts
         FROM pattern_totals p
         ORDER BY p.count DESC
     """
@@ -1259,6 +1280,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'avg_seconds_to_error': (round(float(row[8]), 1)
                                      if row[8] is not None else None),
             'never_started_count': row[9] or 0,
+            'exit_counts': row[11] or {},
             'attribution_guidance': (
                 'computingsite is the execution location, not causal '
                 'attribution; inspect a representative_pandaid with '
@@ -1268,6 +1290,12 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
         entry.update(distribution_views)
         total += row[3]
         errors.append(entry)
+
+    # The correction root (docs/ERROR_ATTRIBUTION.md): entries whose
+    # label a rule marks unreliable gain the corrected reading; the
+    # original label stays in place beneath it.
+    from ..error_corrections import apply_to_summary
+    apply_to_summary(errors)
 
     return {
         "total_errors": total,

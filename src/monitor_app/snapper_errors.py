@@ -177,6 +177,7 @@ def _faulty_union(mark, until, diags=False, sites=False):
     if diags:
         err_fields += ", " + ", ".join(
             f'"{c["diag"]}"' for c in ERROR_COMPONENTS)
+        err_fields += ', "transexitcode"'
     if sites:
         err_fields += ', "computingsite"'
     status_placeholders = ", ".join(["%s"] * len(FAULTY_STATUSES))
@@ -270,7 +271,9 @@ def error_patterns(mark, until, taskid=None, statuses=None):
     """Top diagnostic patterns among faulty jobs ending in
     (mark, until], optionally restricted to one task and/or a
     terminal-state list: category, sample diagnostic, count,
-    representative PanDA job id, and affected task ids, most frequent
+    representative PanDA job id, affected task ids, sites, and the
+    pattern's payload exit-code profile (transexitcode counts — the
+    correction root refines unreliable labels from it), most frequent
     first. Digit runs collapse in the pattern grouping so job-specific
     paths, ids, and line numbers merge into one pattern; the sample
     shown is one member's raw text. Aggregated live from the job
@@ -289,23 +292,49 @@ def error_patterns(mark, until, taskid=None, statuses=None):
         params = params + status_list
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
-        SELECT CASE {comp_case} ELSE 'other' END AS comp,
-               CASE {code_case} ELSE 0 END AS code,
-               COALESCE(LEFT(regexp_replace(
-                   CASE {diag_case} ELSE '' END,
-                   '[0-9]+', '#', 'g'), {PATTERN_DIAG_CHARS}), '')
-                   AS diag_pattern,
-               MIN(COALESCE(LEFT(CASE {diag_case} ELSE '' END,
-                                 {PATTERN_DIAG_CHARS}), '')) AS diag,
-               COUNT(*) AS count,
-               MAX("pandaid") AS representative_pandaid,
-               array_agg(DISTINCT "jeditaskid") AS taskids,
-               array_agg(DISTINCT COALESCE("computingsite", 'unknown'))
-                   AS sites
-        FROM ({union}) faulty
-        {where}
-        GROUP BY 1, 2, 3
-        ORDER BY 5 DESC, 1, 2
+        WITH classified AS (
+            SELECT CASE {comp_case} ELSE 'other' END AS comp,
+                   CASE {code_case} ELSE 0 END AS code,
+                   COALESCE(LEFT(regexp_replace(
+                       CASE {diag_case} ELSE '' END,
+                       '[0-9]+', '#', 'g'), {PATTERN_DIAG_CHARS}), '')
+                       AS diag_pattern,
+                   COALESCE(LEFT(CASE {diag_case} ELSE '' END,
+                                 {PATTERN_DIAG_CHARS}), '') AS diag,
+                   "pandaid", "jeditaskid", "computingsite",
+                   "transexitcode"
+            FROM ({union}) faulty
+            {where}
+        ),
+        pat AS (
+            SELECT comp, code, diag_pattern,
+                   MIN(diag) AS diag,
+                   COUNT(*) AS count,
+                   MAX("pandaid") AS representative_pandaid,
+                   array_agg(DISTINCT "jeditaskid") AS taskids,
+                   array_agg(DISTINCT COALESCE("computingsite", 'unknown'))
+                       AS sites
+            FROM classified
+            GROUP BY 1, 2, 3
+        ),
+        exits AS (
+            SELECT comp, code, diag_pattern,
+                   COALESCE("transexitcode", '') AS exitcode,
+                   COUNT(*) AS n
+            FROM classified
+            GROUP BY 1, 2, 3, 4
+        )
+        SELECT p.comp, p.code, p.diag_pattern, p.diag, p.count,
+               p.representative_pandaid, p.taskids, p.sites,
+               COALESCE((
+                   SELECT jsonb_object_agg(x.exitcode, x.n)
+                   FROM exits x
+                   WHERE x.comp = p.comp AND x.code = p.code
+                     AND x.diag_pattern = p.diag_pattern
+                     AND x.exitcode != ''
+               ), '{{}}'::jsonb) AS exit_counts
+        FROM pat p
+        ORDER BY p.count DESC, p.comp, p.code
     """
     with connections["panda"].cursor() as cursor:
         cursor.execute(sql, params)

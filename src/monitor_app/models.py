@@ -1286,6 +1286,46 @@ class CachedProduct(models.Model):
         return self.key
 
 
+class ErrorCorrectionRule(models.Model):
+    """Label-reliability rule of the error-correction root
+    (docs/ERROR_ATTRIBUTION.md): a job error label matching
+    component x code x diagnostic substring is untrustworthy. Every
+    error-presentation reader applies corrections on the way out —
+    the corrected reading (refined by the payload exit codes of the
+    matched jobs) leads, and the original label stays visible.
+    Recorded history is never rewritten."""
+    component = models.CharField(
+        max_length=20,
+        help_text='Error component: pilot, executor, ddm, brokerage, '
+                  'dispatcher, supervisor, or taskbuffer')
+    code = models.IntegerField(help_text='Error code within the component')
+    diag_substring = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Substring of the diagnostic text; empty matches '
+                  'every diagnostic of the component and code')
+    queue_scope = models.CharField(
+        max_length=120, blank=True, default='',
+        help_text='Optional computingsite LIKE pattern; empty = every queue')
+    corrected_label = models.CharField(
+        max_length=200, blank=True, default='',
+        help_text='Fallback reading when no payload exit code refines '
+                  'the correction')
+    note = models.TextField(blank=True, default='')
+    evidence_url = models.CharField(max_length=500, blank=True, default='')
+    active = models.BooleanField(default=True)
+    created_by = models.CharField(max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'swf_error_correction_rule'
+
+    def __str__(self):
+        return (f'{self.component}:{self.code} '
+                f'~"{self.diag_substring}"'
+                + (f' @{self.queue_scope}' if self.queue_scope else ''))
+
+
 # Import workflow models to register them with Django
 from .workflow_models import (
     STFWorkflow,

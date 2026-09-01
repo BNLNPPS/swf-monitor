@@ -2546,10 +2546,12 @@ def _errors_card(data, previous_data, ctx):
     # Diagnostic patterns aggregate live from the job records over the
     # same bounds; a single-task filter restricts the query itself,
     # a multi-task selection filters the aggregated rows.
+    from .error_corrections import correction as _correction
+    from .error_corrections import match as _match
     patterns = []
     window_patterns = 0
     for (comp, code, _pattern, diag, count, rep, taskids,
-         pattern_sites) in error_patterns(
+         pattern_sites, exit_counts) in error_patterns(
             window_from, window_to,
             taskid=int(single_task) if single_task else None,
             statuses=state_filter or None):
@@ -2561,6 +2563,10 @@ def _errors_card(data, previous_data, ctx):
         if len(patterns) < MAX_PATTERNS:
             rep = int(rep or 0)
             site_list = sorted({str(s) for s in (pattern_sites or []) if s})
+            # The correction root (docs/ERROR_ATTRIBUTION.md): a rule
+            # marking this label unreliable puts the corrected reading
+            # first; the reported label stays visible beneath it.
+            rule = _match(comp, code, diag)
             patterns.append({
                 'category': category_label(comp, code),
                 'curve': f'perr_{comp}_{code}',
@@ -2572,6 +2578,8 @@ def _errors_card(data, previous_data, ctx):
                 'tasks': task_list[:MAX_PATTERN_TASKS],
                 'sites': site_list[:MAX_PATTERN_SITES],
                 'site_overflow': max(0, len(site_list) - MAX_PATTERN_SITES),
+                'correction': (_correction(rule, exit_counts or {})
+                               if rule is not None else None),
             })
 
     # The attribution reading: where the window's errors concentrate,
