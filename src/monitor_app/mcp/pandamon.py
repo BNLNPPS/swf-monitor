@@ -361,6 +361,7 @@ async def panda_resource_usage(
     start_time: str = None,
     end_time: str = None,
     bucket: str = None,
+    execute_sites: bool = False,
 ) -> dict:
     """
     Aggregate resource usage (core-hours) for finished PanDA jobs.
@@ -388,6 +389,10 @@ async def panda_resource_usage(
         start_time: Optional ISO-8601 start timestamp, inclusive.
         end_time: Optional ISO-8601 end timestamp, exclusive. Defaults to now.
         bucket: Optional time-series bin: 'day' or 'week'.
+        execute_sites: With bucket, also split the OSG pool queue(s) (CRIC
+              catchall osgpool=true) by execute site, from the worker-node
+              host on each job record. The OSG pool is one PanDA queue
+              spanning many sites; no other queue gets a breakdown.
 
     Returns:
         totals: {job_count, allocated_core_hours, used_core_hours, wall_hours,
@@ -395,11 +400,15 @@ async def panda_resource_usage(
         by_site: Breakdown by computing site, sorted by allocated_core_hours.
         by_user: Breakdown by job owner, sorted by allocated_core_hours.
         series: Site breakdown per day/week when bucket is supplied.
+        execute_series: Per-bucket metrics per (computing site, execute site)
+                 when execute_sites is set; execute_sites maps each such
+                 computing site to its execute sites, largest first.
         window: Exact start, end, bucket, and time field used.
     """
     return await sync_to_async(queries.resource_usage)(
         days=days, site=site, username=username, taskid=taskid,
         start_time=start_time, end_time=end_time, bucket=bucket,
+        execute_sites=bool(execute_sites),
     )
 
 

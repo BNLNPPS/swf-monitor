@@ -157,7 +157,7 @@
           <div class="form-check mb-1">
             <input class="form-check-input usage-site" type="checkbox" checked
                    value="{{ site.site }}" id="usage-site-{{ forloop.counter }}">
-            <label class="form-check-label small" for="usage-site-{{ forloop.counter }}">{{ site.site }}</label>
+            <label class="form-check-label small" for="usage-site-{{ forloop.counter }}">{% if site.label %}{{ site.label }} ({{ site.site }}){% else %}{{ site.site }}{% endif %}</label>
           </div>
           {% empty %}<span class="text-muted">No sites in this period.</span>{% endfor %}
         </div>
@@ -179,7 +179,7 @@
         {% for site in usage.by_site %}
         <tr data-site="{{ site.site }}">
           <td><span class="usage-site-swatch d-inline-block me-1" data-site="{{ site.site }}"
-                    style="width:.75rem;height:.75rem" aria-hidden="true"></span>{{ site.site }}</td>
+                    style="width:.75rem;height:.75rem" aria-hidden="true"></span>{% if site.label %}{{ site.label }} ({{ site.site }}){% else %}{{ site.site }}{% endif %}</td>
           <td class="text-end usage-site-jobs">—</td>
           <td class="text-end usage-site-failed">—</td>
           <td class="text-end usage-site-allocated">—</td>
@@ -192,6 +192,39 @@
     </table>
   </div>
   </div>
+
+  {% for block in execute_blocks %}
+  <div class="border rounded p-2 mt-3 usage-execute-block" data-site="{{ block.queue }}">
+    <div class="mb-2"><strong>{% if block.label %}{{ block.label }} ({{ block.queue }}){% else %}{{ block.queue }}{% endif %} by execute site</strong>
+      <span class="text-muted">&mdash; the OSG pool is one PanDA queue spanning many sites. This is where its jobs ran in the selected period, from the worker-node host on each job record; a job that never left the submit host is listed as not dispatched.</span></div>
+    <table class="table table-sm table-striped align-middle w-auto swf-sortable">
+      <thead><tr>
+        <th>Execute site</th>
+        <th class="text-end">Jobs</th>
+        <th class="text-end">Failed jobs</th>
+        <th class="text-end">Failure %</th>
+        <th class="text-end">Allocated core-hours</th>
+        <th class="text-end">Used core-hours</th>
+        <th class="text-end">Efficiency</th>
+        <th class="text-end" title="Share of the selected metric within this queue">Share of queue %</th>
+      </tr></thead>
+      <tbody>
+        {% for execute_site in block.sites %}
+        <tr data-site="{{ block.queue }}" data-execute="{{ execute_site }}">
+          <td>{{ execute_site }}</td>
+          <td class="text-end ux-jobs" data-order="0">—</td>
+          <td class="text-end ux-failed" data-order="0">—</td>
+          <td class="text-end ux-failpct" data-order="0">—</td>
+          <td class="text-end ux-allocated" data-order="0">—</td>
+          <td class="text-end ux-used" data-order="0">—</td>
+          <td class="text-end ux-efficiency" data-order="0">—</td>
+          <td class="text-end ux-share" data-order="0">—</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
 
   <p class="small text-muted">
     Period boundaries are Eastern time. Jobs are attributed by end time.
@@ -286,7 +319,54 @@
         }
         addUsage(plotTotals.get(key), point);
       });
-      return {siteTotals, plotRows: [...plotTotals.values()]};
+      // Execute-site totals for the pool-fed queues (the OSG pool): the
+      // same period filter, keyed by queue and execute site.
+      const executeTotals = new Map();
+      (usage.execute_series || []).forEach(point => {
+        const dateText = point.bucket_start.slice(0, 10);
+        if (dateText < start || dateText > end) return;
+        const key = `${point.site} ${point.execute_site}`;
+        if (!executeTotals.has(key)) executeTotals.set(key, emptyUsage());
+        addUsage(executeTotals.get(key), point);
+      });
+      return {siteTotals, plotRows: [...plotTotals.values()], executeTotals};
+    }
+
+    function renderExecuteSites(data, sites, key) {
+      document.querySelectorAll('.usage-execute-block').forEach(block => {
+        const queue = block.dataset.site;
+        const rows = [...block.querySelectorAll('tbody tr')];
+        const lookup = row => data.executeTotals.get(`${queue} ${row.dataset.execute}`);
+        const queueTotal = rows.reduce((sum, row) => {
+          const values = lookup(row);
+          return sum + (values ? Number(values[key] || 0) : 0);
+        }, 0);
+        let shown = 0;
+        rows.forEach(row => {
+          const values = lookup(row);
+          row.hidden = !values || (values.job_count + values.failed_count) === 0;
+          if (row.hidden) return;
+          shown += 1;
+          const attempts = values.job_count + values.failed_count;
+          const failpct = attempts ? 100 * values.failed_count / attempts : 0;
+          const efficiency = values.allocated_core_hours
+            ? 100 * values.used_core_hours / values.allocated_core_hours : 0;
+          const share = queueTotal ? 100 * Number(values[key] || 0) / queueTotal : 0;
+          const set = (cls, text, order) => {
+            const cell = row.querySelector(cls);
+            cell.textContent = text;
+            cell.dataset.order = order;
+          };
+          set('.ux-jobs', values.job_count.toLocaleString(), values.job_count);
+          set('.ux-failed', values.failed_count.toLocaleString(), values.failed_count);
+          set('.ux-failpct', failpct.toFixed(1) + '%', failpct);
+          set('.ux-allocated', fmt(values.allocated_core_hours), values.allocated_core_hours);
+          set('.ux-used', fmt(values.used_core_hours), values.used_core_hours);
+          set('.ux-efficiency', values.allocated_core_hours ? efficiency.toFixed(1) + '%' : '—', efficiency);
+          set('.ux-share', queueTotal ? share.toFixed(1) + '%' : '—', share);
+        });
+        block.hidden = !sites.has(queue) || shown === 0;
+      });
     }
 
     function updateSortIndicators() {
@@ -421,6 +501,7 @@
         row.dataset.share = share;
       });
       sortRows();
+      renderExecuteSites(data, sites, key);
     }
 
     function updatePeriodButtons() {

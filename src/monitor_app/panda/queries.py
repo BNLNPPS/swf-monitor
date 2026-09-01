@@ -1739,10 +1739,78 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
     }
 
 
+# The OSG pool is the special case among the queues: one PanDA queue
+# submits into the OSG pool and its jobs run at many sites, and the job
+# record keeps only the worker-node host. The domain names the site. A
+# domain absent here shows as itself; a bare hostname shows as unresolved;
+# a job whose host is the submit host never reached a worker node.
+EXECUTE_SITE_NAMES = {
+    'uconn.edu': 'UConn',
+    'fsu.edu': 'FSU',
+    'illinois.edu': 'Illinois',
+    'iu.edu': 'Indiana',
+    'infn.it': 'INFN',
+    'mwt2.org': 'MWT2',
+    'osris.org': 'OSiRIS',
+    'unl.edu': 'Nebraska',
+    'uwm.edu': 'UW-Milwaukee',
+    'wisc.edu': 'Wisconsin',
+    'alliancecan.ca': 'Alliance Canada',
+    'umanitoba.ca': 'Manitoba',
+    'ucsd.edu': 'UCSD',
+    'mit.edu': 'MIT',
+    'syr.edu': 'Syracuse',
+    'gla.ac.uk': 'Glasgow',
+    'in2p3.fr': 'IN2P3',
+    'jlab.org': 'JLab',
+    'bnl.gov': 'BNL-SDCC',
+    'nersc.gov': 'NERSC',
+}
+SUBMIT_HOST_KEY = 'submit-host'
+NOT_DISPATCHED_LABEL = 'not dispatched (submit host)'
+UNRESOLVED_LABEL = 'unresolved (bare hostname)'
+
+
+def execute_site_label(key):
+    """Site label for the execute-site key the breakdown query derives:
+    a worker-node domain, '' for a bare hostname, or the submit-host
+    marker for a job that never reached a worker node."""
+    key = str(key or '')
+    if key == SUBMIT_HOST_KEY:
+        return NOT_DISPATCHED_LABEL
+    if not key:
+        return UNRESOLVED_LABEL
+    return EXECUTE_SITE_NAMES.get(key.lower(), key)
+
+
+def osg_pool_queues():
+    """The PanDA queues that submit into the OSG pool: those whose CRIC
+    catchall carries osgpool=true (schedconfig_json)."""
+    sql = f"""
+        SELECT "panda_queue" FROM "{PANDA_SCHEMA}"."schedconfig_json"
+        WHERE lower(replace("data"->>'catchall', ' ', '')) LIKE '%%osgpool=true%%'
+    """
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql)
+            return sorted(row[0] for row in cursor.fetchall())
+    except Exception as e:
+        logger.error(f"osg_pool_queues query failed: {e}")
+        return []
+
+
 def resource_usage(days=30, site=None, username=None, taskid=None,
                    start_time=None, end_time=None, bucket=None,
-                   series_rollup=False):
+                   series_rollup=False, execute_sites=False):
     """Aggregate resource usage for finished jobs.
+
+    With ``bucket`` and ``execute_sites``, the result also carries the
+    OSG pool's execute-site breakdown: ``execute_series``, the same
+    per-bucket metrics per (OSG pool queue, execute site), the execute
+    site taken from the worker-node host on each job record; and
+    ``execute_sites``, each OSG pool queue with its execute sites, largest
+    first. The OSG pool queues are those whose CRIC catchall carries
+    osgpool=true; no other queue gets a breakdown.
 
     Reports two core-hour metrics:
     - allocated: actualcorecount × wall time (cores allocated to the job)
@@ -1868,6 +1936,8 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     try:
         series = []
         series_raw = []
+        execute_series = []
+        execute_site_map = {}
         if bucket:
             bucket_timezone = timezone.get_current_timezone_name()
             sql = f"""
@@ -1896,6 +1966,64 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
                 entry['site'] = row[1] or 'unknown'
                 series.append(entry)
                 series_raw.append((entry['site'], raw))
+
+        pool_queues = osg_pool_queues() if (bucket and execute_sites) else []
+        if pool_queues:
+            # The execute host is "<slot>@<host>" or "<host>". Key: the
+            # submit-host marker for a job that never left the harvester
+            # host, else the host's last two labels, else '' for a bare
+            # hostname.
+            host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
+            key_expr = (
+                "CASE WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
+                r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
+            )
+            pool_where = base_where + ' AND "computingsite" = ANY(%s)'
+            pool_params = base_params + [pool_queues]
+            sql = f"""
+                SELECT date_trunc(
+                           '{bucket}',
+                           ("endtime" AT TIME ZONE 'UTC') AT TIME ZONE %s
+                       ) AS bucket_start,
+                       "computingsite", {key_expr} AS execute_key, {agg_cols}
+                FROM (
+                    SELECT {inner_fields}, {host_expr} AS host
+                    FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {pool_where}
+                    UNION ALL
+                    SELECT {inner_fields}, {host_expr} AS host
+                    FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {pool_where}
+                ) combined
+                GROUP BY bucket_start, "computingsite", execute_key
+                ORDER BY bucket_start, "computingsite", execute_key
+            """
+            with conn.cursor() as cursor:
+                cursor.execute(sql, [bucket_timezone] + pool_params + pool_params)
+                exec_rows = cursor.fetchall()
+            metric_names = (
+                'job_count', 'allocated_core_hours',
+                'used_core_hours', 'wall_hours', 'failed_count',
+            )
+            merged = {}            # (bucket, queue, label) -> raw metrics
+            per_queue = {}         # queue -> {label: weight}
+            for row in exec_rows:
+                queue = row[1] or 'unknown'
+                label = execute_site_label(row[2])
+                raw = _raw_metrics(row, offset=3)
+                key = (row[0].isoformat(), queue, label)
+                target = merged.setdefault(key, {name: 0 for name in metric_names})
+                for name in metric_names:
+                    target[name] += raw[name]
+                per_queue.setdefault(queue, {}).setdefault(label, 0)
+                per_queue[queue][label] += raw['allocated_core_hours'] + raw['failed_count']
+            for (bucket_start, queue, label), values in merged.items():
+                entry = _rounded_metrics(values, precision=4)
+                entry['bucket_start'] = bucket_start
+                entry['site'] = queue
+                entry['execute_site'] = label
+                execute_series.append(entry)
+            execute_site_map = {
+                q: [label for label, _ in sorted(labels.items(), key=lambda x: -x[1])]
+                for q, labels in per_queue.items()}
 
         if series_rollup:
             metric_names = (
@@ -1947,6 +2075,8 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
         "by_site": by_site,
         "by_user": by_user,
         "series": series,
+        "execute_series": execute_series,
+        "execute_sites": execute_site_map,
         "window": {
             "start_time": window_start.isoformat(),
             "end_time": window_end.isoformat(),

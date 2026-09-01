@@ -475,6 +475,7 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
             bucket=bucket,
             site=site,
             series_rollup=series_rollup,
+            execute_sites=True,
         )
         if usage.get('error'):
             raise RuntimeError(usage['error'])
@@ -485,7 +486,7 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
         }
         return usage
 
-    key = (f'compute_usage:v2:{start_date}:{end_date}:{bucket}'
+    key = (f'compute_usage:v3:{start_date}:{end_date}:{bucket}'
            f":{site or ''}:{int(series_rollup)}")
     try:
         product = get_product(key, build, ttl_seconds=300)
@@ -512,8 +513,21 @@ def _compute_usage(request):
     )
 
 
+def _pool_labels(queue_names):
+    """Umbrella name for the OSG pool queues (CRIC catchall osgpool=true):
+    'OSG Pool', shown with the queue name beside it wherever the queue
+    appears."""
+    from ..panda.queries import osg_pool_queues
+    pool = set(osg_pool_queues())
+    return {name: 'OSG Pool' for name in queue_names if name in pool}
+
+
 def compute_usage(request):
-    """Site-level PanDA core-hour history and interactive production plot."""
+    """Site-level PanDA core-hour history and interactive production plot.
+
+    The OSG pool queue is the special case: one PanDA queue spanning many
+    execute sites, so it alone gets an execute-site breakdown block
+    beneath the site table and the umbrella label 'OSG Pool'."""
     today = datetime.now(ZoneInfo(settings.TIME_ZONE)).date()
     selection, error = _compute_usage_dates(request)
     if selection:
@@ -551,9 +565,21 @@ def compute_usage(request):
             'end': period_end,
             'active': start == period_start and end == period_end,
         })
+    usage = usage or {}
+    execute_blocks = []
+    if usage:
+        names = [row['site'] for row in usage.get('by_site') or []]
+        names += list(usage.get('execute_sites') or {})
+        labels = _pool_labels(names)
+        for row in usage.get('by_site') or []:
+            row['label'] = labels.get(row['site'], '')
+        execute_blocks = [
+            {'queue': queue, 'label': labels.get(queue, ''), 'sites': sites}
+            for queue, sites in (usage.get('execute_sites') or {}).items()]
     return render(request, 'monitor_app/compute_usage.html', {
         'error': error,
-        'usage': usage or {},
+        'usage': usage,
+        'execute_blocks': execute_blocks,
         'start': start,
         'end': end,
         'bucket': bucket,
