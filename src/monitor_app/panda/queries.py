@@ -2580,3 +2580,50 @@ def get_task_operation_targets(jedi_task_ids):
         for row in rows
     }
     return [by_id[task_id] for task_id in ids if task_id in by_id]
+
+
+def canary_probe_activity(days=30, limit_jobs=100):
+    """Canary probe tasks and jobs — everything carrying processing
+    type 'canary' in the window, for the canary probes page. Tasks
+    gain per-status job counts; jobs come newest first, bounded."""
+    cutoff = timezone.now() - timedelta(days=days)
+    conn = connections['panda']
+    tasks = []
+    jobs = []
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f'SELECT "jeditaskid", "taskname", "status", "site", '
+                f'"creationdate", "modificationtime" '
+                f'FROM "{PANDA_SCHEMA}"."jedi_tasks" '
+                f"WHERE \"processingtype\" = 'canary' "
+                f'AND COALESCE("modificationtime", "creationdate") >= %s '
+                f'ORDER BY "jeditaskid" DESC', [cutoff])
+            for row in cursor.fetchall():
+                tasks.append(dict(zip(
+                    ('jeditaskid', 'taskname', 'status', 'queue',
+                     'creationdate', 'modificationtime'), row)))
+            for table in ('jobsactive4', 'jobsarchived4'):
+                cursor.execute(
+                    f'SELECT "pandaid", "jeditaskid", "jobstatus", '
+                    f'"computingsite", "starttime", "endtime", '
+                    f'"transexitcode", "piloterrordiag" '
+                    f'FROM "{PANDA_SCHEMA}"."{table}" '
+                    f"WHERE \"processingtype\" = 'canary' "
+                    f'AND "modificationtime" >= %s', [cutoff])
+                for row in cursor.fetchall():
+                    jobs.append(dict(zip(
+                        ('pandaid', 'jeditaskid', 'jobstatus',
+                         'computingsite', 'starttime', 'endtime',
+                         'transexitcode', 'piloterrordiag'), row)))
+    except Exception as e:
+        logger.error(f"canary_probe_activity query failed: {e}")
+        return {'error': str(e)}
+    counts = {}
+    for job in jobs:
+        entry = counts.setdefault(job['jeditaskid'], {})
+        entry[job['jobstatus']] = entry.get(job['jobstatus'], 0) + 1
+    for task in tasks:
+        task['job_counts'] = counts.get(task['jeditaskid'], {})
+    jobs.sort(key=lambda j: -(j['pandaid'] or 0))
+    return {'tasks': tasks, 'jobs': jobs[:limit_jobs]}

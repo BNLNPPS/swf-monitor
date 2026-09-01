@@ -657,6 +657,7 @@
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site compute usage</a>
                 <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
+                <a href="{% url 'canary:probes_page' %}">Canary probes</a>
             </div>
         </div>
         <a href="{% url 'monitor_app:analysis' %}" class="nav-analysis{% if active_nav.analysis %} nav-active{% endif %}">Analysis</a>

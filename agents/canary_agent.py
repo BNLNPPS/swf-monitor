@@ -53,6 +53,9 @@ CANARY_QUEUE = os.environ.get("CANARY_OPS_QUEUE", "/queue/canary.ops")
 # accounting query plus store writes; the evaluator reads the store only.
 ASSESS_TIMEOUT = int(os.environ.get("CANARY_ASSESS_TIMEOUT", "300"))
 EVALUATE_TIMEOUT = int(os.environ.get("CANARY_EVALUATE_TIMEOUT", "120"))
+# Probe dispatch builds a sandbox and runs a client-API submission per
+# due queue; generous bound, one dispatch cycle at a time.
+PROBE_TIMEOUT = int(os.environ.get("CANARY_PROBE_TIMEOUT", "900"))
 
 # Dedicated namespace config shipped beside the agent. A fixed 'canary'
 # namespace makes the singleton identifiable in the monitor and lets callers
@@ -139,6 +142,34 @@ class CanaryAgent(BaseAgent):
         elapsed = time.monotonic() - t0
         self.logger.info(f"CANARY assess_refresh done in {elapsed:.1f}s")
         self._emit_complete(ok=True)
+
+    def _handle_probe_dispatch(self, m):
+        """Enqueue one probe-dispatch cycle: advance probe-run statuses
+        and submit probes for due queues, or for a named queue when the
+        message carries one (the page's Run now). Deduped so an
+        overlapping cron tick and button press never double-submit."""
+        self.run_in_background(
+            self._do_probe_dispatch, m,
+            dedup_key="probe_dispatch", label="probe_dispatch")
+
+    def _do_probe_dispatch(self, m):
+        created_by = str(m.get("created_by") or "?")
+        queue = str(m.get("queue") or "").strip()
+        args = ["probe-dispatch"]
+        if queue:
+            args += ["--queue", queue]
+        self.logger.info(
+            f"CANARY probe_dispatch: starting (by {created_by})"
+            + (f" queue={queue}" if queue else ""))
+        t0 = time.monotonic()
+        ok = self._run_doer(args, PROBE_TIMEOUT)
+        elapsed = time.monotonic() - t0
+        self.logger.info(
+            f"CANARY probe_dispatch {'done' if ok else 'FAILED'} "
+            f"in {elapsed:.1f}s")
+        self.send_message('/topic/epictopic', {
+            "msg_type": "canary_probe_dispatch_complete", "ok": ok,
+            "queue": queue})
 
     # -- doers ---------------------------------------------------------------
 

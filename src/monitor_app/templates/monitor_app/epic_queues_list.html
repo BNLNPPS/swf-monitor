@@ -52,7 +52,7 @@
                     {% if q.canary == 'unknown' or q.canary == 'insufficient' %}
                     <td></td>
                     {% else %}
-                    <td class="{{ q.canary|state_class }}">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</td>
+                    <td class="{{ q.canary|state_class }}"><a href="{% url 'canary:probe_runs' queue_name=q.panda_queue %}" style="color: inherit;" title="This queue's canary probe runs">{{ q.canary }}{% if q.canary_pct %} {{ q.canary_pct }}{% endif %}</a></td>
                     {% endif %}
                     <td data-order="{% if q.last_use %}{{ q.last_use|date:'U' }}{% else %}0{% endif %}">{{ q.last_use|fmt_dt|default:"—" }}</td>
                     <td data-order="{{ q.canary_njobs|default_if_none:0 }}" class="text-end">{% if q.canary_njobs is not None %}{{ q.canary_njobs }}{% endif %}</td>
