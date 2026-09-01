@@ -486,7 +486,7 @@ def _query_compute_usage(start_date, end_date, bucket, site=None,
         }
         return usage
 
-    key = (f'compute_usage:v3:{start_date}:{end_date}:{bucket}'
+    key = (f'compute_usage:v4:{start_date}:{end_date}:{bucket}'
            f":{site or ''}:{int(series_rollup)}")
     try:
         product = get_product(key, build, ttl_seconds=300)

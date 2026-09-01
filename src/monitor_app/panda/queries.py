@@ -1766,6 +1766,7 @@ EXECUTE_SITE_NAMES = {
     'bnl.gov': 'BNL-SDCC',
     'nersc.gov': 'NERSC',
 }
+PRIVATE_DOMAIN_TAILS = {'cluster', 'local', 'localdomain', 'internal', 'lan', 'novalocal'}
 SUBMIT_HOST_KEY = 'submit-host'
 NOT_DISPATCHED_LABEL = 'not dispatched (submit host)'
 UNRESOLVED_LABEL = 'unresolved (bare hostname)'
@@ -1778,7 +1779,9 @@ def execute_site_label(key):
     key = str(key or '')
     if key == SUBMIT_HOST_KEY:
         return NOT_DISPATCHED_LABEL
-    if not key:
+    # A private pseudo-domain (node31.cluster, host.local) names a node,
+    # not a site; it is as unresolved as a bare hostname.
+    if not key or key.rsplit('.', 1)[-1].lower() in PRIVATE_DOMAIN_TAILS:
         return UNRESOLVED_LABEL
     return EXECUTE_SITE_NAMES.get(key.lower(), key)
 
