@@ -128,7 +128,7 @@
   <div class="alert alert-danger">{{ error }}</div>
   {% else %}
   <div class="row g-2 mb-3">
-    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Jobs</div><strong id="usage-jobs">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Finished jobs</div><strong id="usage-jobs">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Failed jobs</div><strong id="usage-failed">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
@@ -187,7 +187,7 @@
     <table class="table table-sm table-striped align-middle w-auto swf-latch-head" id="usage-site-table">
       <thead><tr>
         <th aria-sort="none"><button type="button" class="usage-sort" data-sort="site">Computing site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="jobs">Finished jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none" title="Failed jobs as a share of finished plus failed"><button type="button" class="usage-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
@@ -212,7 +212,7 @@
         <tr class="usage-child usage-child-info" data-parent="{{ site.site }}" hidden><td colspan="8" class="usage-child-info-cell"></td></tr>
         <tr class="usage-child usage-child-head" data-parent="{{ site.site }}" hidden>
           <th class="usage-child-name"><button type="button" class="usage-child-sort" data-sort="site">Execute site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="jobs" data-direction="desc">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="jobs" data-direction="desc">Finished jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
@@ -423,7 +423,7 @@
           const pool = data.siteTotals.get(queue) || emptyUsage();
           const poolAttempts = pool.job_count + pool.failed_count;
           const parts = [
-            `${pool.job_count.toLocaleString()} jobs`,
+            `${pool.job_count.toLocaleString()} finished`,
             `${pool.failed_count.toLocaleString()} failed`,
             poolAttempts ? `${(100 * pool.failed_count / poolAttempts).toFixed(1)}% failure` : null,
             `${fmt(pool.allocated_core_hours)} allocated core-hours`,
