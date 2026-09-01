@@ -218,7 +218,7 @@
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end" title="Share of the selected metric within this pool"><button type="button" class="usage-child-sort" data-sort="share">Share of pool %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end" title="Finished jobs as a share of the pool's finished jobs in the period"><button type="button" class="usage-child-sort" data-sort="share">Share of pool jobs %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         </tr>
         {% endif %}
         {% for execute_site in site.execute_sites %}
@@ -230,7 +230,7 @@
           <td class="text-end ux-allocated">—</td>
           <td class="text-end ux-used">—</td>
           <td class="text-end ux-efficiency">—</td>
-          <td class="text-end ux-share" title="Share of the selected metric within this pool">—</td>
+          <td class="text-end ux-share">—</td>
         </tr>
         {% endfor %}
         {% endfor %}
@@ -357,7 +357,7 @@
 
     // The OSG pool row expands inline into its execute sites, under a
     // header row of its own with an independent sort (most jobs first
-    // by default); share is within the pool.
+    // by default); share is the site's finished jobs within the pool's.
     const childSort = new Map();
     function childSortState(queue) {
       if (!childSort.has(queue)) childSort.set(queue, {key: 'jobs', direction: 'desc'});
@@ -369,9 +369,10 @@
         const head = childHead(queue);
         const rows = childRows(queue);
         const lookup = row => data.executeTotals.get(`${queue}\u0000${row.dataset.execute}`);
+        // Share is by finished job count within the pool.
         const queueTotal = rows.reduce((sum, row) => {
           const values = lookup(row);
-          return sum + (values ? Number(values[key] || 0) : 0);
+          return sum + (values ? Number(values.job_count || 0) : 0);
         }, 0);
         const open = expanded.has(queue) && !parent.hidden;
         let present = 0;
@@ -385,7 +386,7 @@
           const failpct = attempts ? 100 * values.failed_count / attempts : 0;
           const efficiency = values.allocated_core_hours
             ? 100 * values.used_core_hours / values.allocated_core_hours : 0;
-          const share = queueTotal ? 100 * Number(values[key] || 0) / queueTotal : 0;
+          const share = queueTotal ? 100 * values.job_count / queueTotal : 0;
           const set = (cls, text) => { row.querySelector(cls).textContent = text; };
           set('.ux-jobs', values.job_count.toLocaleString());
           set('.ux-failed', values.failed_count.toLocaleString());
