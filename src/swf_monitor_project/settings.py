@@ -261,6 +261,12 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # WhiteNoise configuration
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
+# Messages ride the session, never a cookie of their own: the external
+# proxy forwards only the renamed session and CSRF cookies, so
+# cookie-based message storage is silently dropped on the
+# epic-devcloud face and every action acknowledgment with it.
+MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"
+
 LOGIN_URL = 'login'
 
 
