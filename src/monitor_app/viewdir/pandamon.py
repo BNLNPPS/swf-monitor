@@ -129,6 +129,8 @@ TASK_COLUMNS = [
     {'name': 'taskname', 'title': 'Task Name', 'orderable': True},
     {'name': 'status', 'title': 'Status', 'orderable': True},
     {'name': 'processingtype', 'title': 'Processing type', 'orderable': True},
+    # The task's pinned queue (jedi_tasks.site); unpinned when not set.
+    {'name': 'site', 'title': 'Queue', 'orderable': True},
     {'name': 'username', 'title': 'User', 'orderable': True},
     {'name': 'creationdate', 'title': 'Created', 'orderable': True},
     {'name': 'modificationtime', 'title': 'Modified', 'orderable': True},
@@ -811,12 +813,12 @@ def panda_tasks_list(request):
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
             {'name': 'processingtype', 'label': 'Processing type', 'type': 'select'},
-            {'name': 'site', 'label': 'Site', 'type': 'select'},
+            {'name': 'queue', 'label': 'Queue', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_processingtype': request.GET.get('processingtype', ''),
-        'selected_site': request.GET.get('site', ''),
+        'selected_queue': request.GET.get('queue', ''),
         'bulk_controls_operable': (
             request.user.is_authenticated and not is_tunnel_request(request)),
     }
@@ -851,6 +853,13 @@ def _format_task_row(task, days, *, controls_operable):
     avg_rs = task.get('avg_retries_success')
     avg_rs_str = f'{avg_rs:.2f}' if avg_rs is not None else ''
 
+    site = task.get('site') or ''
+    tasks_by_queue_url = (_url_with_query('monitor_app:panda_tasks_list',
+                                          days=days, queue=site)
+                          if site else None)
+    queue_cell = (f'<a href="{tasks_by_queue_url}">{escape(site)}</a>'
+                  if site else '<span class="text-muted">unpinned</span>')
+
     processingtype = task.get('processingtype') or ''
     processingtype_html = escape(processingtype)
     processingtype_display = (
@@ -882,6 +891,7 @@ def _format_task_row(task, days, *, controls_operable):
         f'<a href="{task_url}" title="{taskname_title}">{taskname_display}</a>',
         _fill_cell(task['status'], task['status'], tasks_by_status_url) if task.get('status') else '',
         processingtype_display,
+        queue_cell,
         f'<a href="{tasks_by_user_url}">{username_html}</a>' if tasks_by_user_url else '',
         _fmt_dt(task.get('creationdate')),
         _fmt_dt(task.get('modificationtime')),
@@ -942,14 +952,16 @@ def panda_tasks_datatable_ajax(request):
     }
 
     # Equality filters over the raw record; '__blank__' selects NULL/empty.
-    for key in ('status', 'username', 'processingtype', 'site'):
+    # The queue filter reads the task's pinned queue (the site field).
+    for key in ('status', 'username', 'processingtype', 'queue'):
         wanted = request.GET.get(key, '') or None
         if wanted is None:
             continue
+        field = 'site' if key == 'queue' else key
         if wanted == '__blank__':
-            rows = [r for r in rows if not (r['raw'].get(key) or '')]
+            rows = [r for r in rows if not (r['raw'].get(field) or '')]
         else:
-            rows = [r for r in rows if (r['raw'].get(key) or '') == wanted]
+            rows = [r for r in rows if (r['raw'].get(field) or '') == wanted]
 
     search = (dt.search_value or '').strip().lower()
     if search:
@@ -988,13 +1000,13 @@ def panda_tasks_filter_counts(request):
     username = request.GET.get('username', '') or None
     processingtype = request.GET.get('processingtype', '') or None
     workinggroup = request.GET.get('workinggroup', '') or None
-    site = request.GET.get('site', '') or None
+    queue = request.GET.get('queue', '') or None
 
     counts = task_filter_counts(days=days, status=status,
                                 username=username,
                                 processingtype=processingtype,
                                 workinggroup=workinggroup,
-                                site=site)
+                                queue=queue)
     return JsonResponse({'filter_counts': counts})
 
 

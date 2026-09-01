@@ -2414,7 +2414,7 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
 
 
 def task_filter_counts(days=7, status=None, username=None,
-                       processingtype=None, workinggroup=None, site=None):
+                       processingtype=None, workinggroup=None, queue=None):
     """Get filter option counts for task list."""
     cutoff = timezone.now() - timedelta(days=days)
     base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
@@ -2432,7 +2432,8 @@ def task_filter_counts(days=7, status=None, username=None,
         ('username', 'username', username),
         ('processingtype', 'processingtype', processingtype),
         ('workinggroup', 'workinggroup', workinggroup),
-        ('site', 'site', site),
+        # The queue filter reads the task's pinned queue (the site field).
+        ('site', 'queue', queue),
     ]
 
     for db_field, filter_name, current_value in filter_config:

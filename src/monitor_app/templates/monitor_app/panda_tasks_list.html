@@ -6,9 +6,9 @@
     <strong>Time window:</strong>
     {% for opt in days_options %}
     {% if opt.active %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status|urlencode }}{% endif %}{% if selected_username %}&username={{ selected_username|urlencode }}{% endif %}{% if selected_processingtype %}&processingtype={{ selected_processingtype|urlencode }}{% endif %}{% if selected_site %}&site={{ selected_site|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status|urlencode }}{% endif %}{% if selected_username %}&username={{ selected_username|urlencode }}{% endif %}{% if selected_processingtype %}&processingtype={{ selected_processingtype|urlencode }}{% endif %}{% if selected_queue %}&queue={{ selected_queue|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="font-weight:bold;text-decoration:underline;margin-right:0.8em;">{{ opt.label }}</a>
     {% else %}
-    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status|urlencode }}{% endif %}{% if selected_username %}&username={{ selected_username|urlencode }}{% endif %}{% if selected_processingtype %}&processingtype={{ selected_processingtype|urlencode }}{% endif %}{% if selected_site %}&site={{ selected_site|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
+    <a href="?days={{ opt.value }}{% if selected_status %}&status={{ selected_status|urlencode }}{% endif %}{% if selected_username %}&username={{ selected_username|urlencode }}{% endif %}{% if selected_processingtype %}&processingtype={{ selected_processingtype|urlencode }}{% endif %}{% if selected_queue %}&queue={{ selected_queue|urlencode }}{% endif %}" class="swf-days-link" data-days="{{ opt.value }}" style="margin-right:0.8em;">{{ opt.label }}</a>
     {% endif %}
     {% endfor %}
 </div>
@@ -45,7 +45,7 @@
     status: '{{ selected_status|default:"" }}',
     username: '{{ selected_username|default:"" }}',
     processingtype: '{{ selected_processingtype|default:"" }}',
-    site: '{{ selected_site|default:"" }}',
+    queue: '{{ selected_queue|default:"" }}',
     days: '{{ days }}'
 }
 {% endblock %}
