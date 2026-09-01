@@ -390,9 +390,11 @@ async def panda_resource_usage(
         end_time: Optional ISO-8601 end timestamp, exclusive. Defaults to now.
         bucket: Optional time-series bin: 'day' or 'week'.
         execute_sites: With bucket, also split the OSG pool queue(s) (CRIC
-              catchall osgpool=true) by execute site, from the worker-node
-              host on each job record. The OSG pool is one PanDA queue
-              spanning many sites; no other queue gets a breakdown.
+              catchall osgpool=true) by execute site: the glidein site the
+              pilot reports on each job record (destinationsite), or the
+              worker-node host's site for older records. The OSG pool is
+              one PanDA queue spanning many sites; no other queue gets a
+              breakdown.
 
     Returns:
         totals: {job_count, allocated_core_hours, used_core_hours, wall_hours,

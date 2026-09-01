@@ -196,7 +196,7 @@
   {% for block in execute_blocks %}
   <div class="border rounded p-2 mt-3 usage-execute-block" data-site="{{ block.queue }}">
     <div class="mb-2"><strong>{% if block.label %}{{ block.label }} ({{ block.queue }}){% else %}{{ block.queue }}{% endif %} by execute site</strong>
-      <span class="text-muted">&mdash; the OSG pool is one PanDA queue spanning many sites. This is where its jobs ran in the selected period, from the worker-node host on each job record; a job that never left the submit host is listed as not dispatched.</span></div>
+      <span class="text-muted">&mdash; the OSG pool is one PanDA queue spanning many sites. This is where its jobs ran in the selected period: the glidein site the pilot reports on each job record, or for older records the worker-node host's site; a job that never left the submit host is listed as not dispatched.</span></div>
     <table class="table table-sm table-striped align-middle w-auto swf-sortable">
       <thead><tr>
         <th>Execute site</th>

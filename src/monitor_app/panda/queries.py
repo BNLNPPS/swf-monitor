@@ -1740,9 +1740,12 @@ def job_outcomes(days=7, site=None, start_time=None, end_time=None):
 
 
 # The OSG pool is the special case among the queues: one PanDA queue
-# submits into the OSG pool and its jobs run at many sites, and the job
-# record keeps only the worker-node host. The domain names the site. A
-# domain absent here shows as itself; a bare hostname shows as unresolved;
+# submits into the OSG pool and its jobs run at many sites. The pilot
+# (pilot user epic, since 2026-08-13) reads GLIDEIN_Site from the
+# glidein's machine ad and records it as the job's destinationsite; that
+# is the execute site. Older records carry only the worker-node host, and
+# for those the host's domain names the site through this table; a
+# domain absent here shows as itself, a bare hostname as unresolved, and
 # a job whose host is the submit host never reached a worker node.
 EXECUTE_SITE_NAMES = {
     'uconn.edu': 'UConn',
@@ -1772,11 +1775,17 @@ NOT_DISPATCHED_LABEL = 'not dispatched (submit host)'
 UNRESOLVED_LABEL = 'unresolved (bare hostname)'
 
 
+SITE_KEY_PREFIX = 'site:'
+
+
 def execute_site_label(key):
     """Site label for the execute-site key the breakdown query derives:
+    'site:<name>' for the pilot-reported glidein site (used verbatim),
     a worker-node domain, '' for a bare hostname, or the submit-host
     marker for a job that never reached a worker node."""
     key = str(key or '')
+    if key.startswith(SITE_KEY_PREFIX):
+        return key[len(SITE_KEY_PREFIX):]
     if key == SUBMIT_HOST_KEY:
         return NOT_DISPATCHED_LABEL
     # A private pseudo-domain (node31.cluster, host.local) names a node,
@@ -1810,7 +1819,8 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     With ``bucket`` and ``execute_sites``, the result also carries the
     OSG pool's execute-site breakdown: ``execute_series``, the same
     per-bucket metrics per (OSG pool queue, execute site), the execute
-    site taken from the worker-node host on each job record; and
+    site being the pilot-reported glidein site (``destinationsite``) or,
+    where a record predates that report, the worker-node host's site; and
     ``execute_sites``, each OSG pool queue with its execute sites, largest
     first. The OSG pool queues are those whose CRIC catchall carries
     osgpool=true; no other queue gets a breakdown.
@@ -1972,13 +1982,14 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
 
         pool_queues = osg_pool_queues() if (bucket and execute_sites) else []
         if pool_queues:
-            # The execute host is "<slot>@<host>" or "<host>". Key: the
+            # Key: the pilot-reported glidein site when present; else the
             # submit-host marker for a job that never left the harvester
-            # host, else the host's last two labels, else '' for a bare
-            # hostname.
+            # host; else the last two labels of the execute host
+            # ("<slot>@<host>" or "<host>"); else '' for a bare hostname.
             host_expr = 'regexp_replace(COALESCE("modificationhost", \'\'), \'^.*@\', \'\')'
             key_expr = (
-                "CASE WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
+                "CASE WHEN COALESCE(dest_site, '') <> '' THEN 'site:' || dest_site "
+                "WHEN host ~ '^(osgsub|pandaharvester)' THEN 'submit-host' "
                 r"ELSE COALESCE(substring(host from '([^.]+\.[^.]+)$'), '') END"
             )
             pool_where = base_where + ' AND "computingsite" = ANY(%s)'
@@ -1990,10 +2001,10 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
                        ) AS bucket_start,
                        "computingsite", {key_expr} AS execute_key, {agg_cols}
                 FROM (
-                    SELECT {inner_fields}, {host_expr} AS host
+                    SELECT {inner_fields}, {host_expr} AS host, "destinationsite" AS dest_site
                     FROM "{PANDA_SCHEMA}"."jobsactive4" WHERE {pool_where}
                     UNION ALL
-                    SELECT {inner_fields}, {host_expr} AS host
+                    SELECT {inner_fields}, {host_expr} AS host, "destinationsite" AS dest_site
                     FROM "{PANDA_SCHEMA}"."jobsarchived4" WHERE {pool_where}
                 ) combined
                 GROUP BY bucket_start, "computingsite", execute_key
