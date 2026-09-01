@@ -36,12 +36,12 @@ def exit_counts_of(value):
 # vocabulary plus the signal convention). Anything above 128 reads as
 # a signal termination even without an entry here.
 EXIT_READINGS = {
-    139: 'payload segfault (SIGSEGV)',
-    134: 'payload abort (SIGABRT)',
-    137: 'payload killed (SIGKILL, commonly out of memory)',
-    143: 'payload terminated (SIGTERM)',
-    78: 'payload Rucio output registration failure (coded exit 78)',
-    65: 'payload validation failure (coded exit 65)',
+    139: 'payload segfault',
+    134: 'payload abort',
+    137: 'payload killed',
+    143: 'payload terminated',
+    78: 'payload Rucio output registration failure',
+    65: 'payload validation failure',
 }
 
 _RULES_TTL_SECONDS = 60.0
