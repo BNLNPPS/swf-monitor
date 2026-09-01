@@ -1619,10 +1619,13 @@ def panda_errors_datatable_ajax(request):
         # its corrected reading first, the reported text beneath it.
         corr = err.get('correction')
         if corr:
-            extra_modes = ''.join(
-                f" · {escape(m['reading'])} ({m['count']})"
-                for m in corr.get('modes', [])[1:])
-            diag_text = f"{escape(corr['label'])}{extra_modes}"
+            modes = corr.get('modes') or []
+            if modes:
+                diag_text = ' · '.join(
+                    f"{escape(m['reading'])} ({m['count']})"
+                    for m in modes)
+            else:
+                diag_text = escape(corr['label'])
 
         # Average run time before this error ended the job; patterns
         # whose jobs never started (pre-run failures) say so instead of
