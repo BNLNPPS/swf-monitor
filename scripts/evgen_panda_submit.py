@@ -154,6 +154,12 @@ def build_task_params(spec, archive_name):
         params['cpuTimeUnit'] = 'HS06sPerEvent'
     params['walltime'] = int(float(spec.get('walltimeHours', 2.0)) * 3600)
 
+    # Job retry ceiling. Production leaves JEDI's default; a canary probe
+    # sets 1 so a failed landing reads as a failed probe rather than being
+    # blurred by automatic retries.
+    if spec.get('maxAttempt'):
+        params['maxAttempt'] = int(spec['maxAttempt'])
+
     if spec.get('containerImage'):
         params['container_name'] = spec['containerImage']
 

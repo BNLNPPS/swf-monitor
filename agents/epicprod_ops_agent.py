@@ -35,6 +35,9 @@ Capabilities:
   evgen_rucio_update — assimilate the JLab Rucio EVGEN inventory (epic:/EVGEN/*)
                        and resolve each PCS evgen Dataset onto metadata['rucio']
                        (delegates to scripts/import_evgen_rucio.py --apply).
+  evgen_register     — register one EVGEN input directory in JLab Rucio as
+                       eicprod (delegates to scripts/register-evgen-rucio.py),
+                       then re-assimilate the inventory so it shows matched.
   campaign_progress_refresh — rebuild current campaign progress data and its
                        rendered progress table cache.
   assessment_completed — enforce and register a finished campaign-assessment
@@ -157,6 +160,12 @@ CAMPAIGN_PROGRESS_MIN_INTERVAL = int(os.environ.get("EPICPROD_CAMPAIGN_PROGRESS_
 EVGEN_RUCIO_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "import_evgen_rucio.py"
 EVGEN_RUCIO_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_RUCIO_TIMEOUT", "900"))
 
+# EVGEN registration doer: door listing + per-file server-side checksums +
+# Rucio writes as eicprod. Checksums are door round trips (~0.5 s each at
+# four in flight), so a large directory takes minutes.
+EVGEN_REGISTER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "register-evgen-rucio.py"
+EVGEN_REGISTER_TIMEOUT = int(os.environ.get("EPICPROD_EVGEN_REGISTER_TIMEOUT", "3600"))
+
 # Inventory refresh doer: a Django management command that reads PanDA/log
 # evidence and writes monitor-side EpicProdJob/EpicProdFile rows.
 MANAGE_PY = Path(__file__).resolve().parent.parent / "src" / "manage.py"
@@ -206,7 +215,8 @@ class EpicProdOpsAgent(BaseAgent):
     KNOWN_TYPES = {"fetch_payload_log", "submit_task", "submit_evgen_task",
                    "panda_task_operation", "panda_task_operations",
                    "panda_sandbox_keepalive",
-                   "rucio_snapshot_update", "evgen_rucio_update", "catalog_import",
+                   "rucio_snapshot_update", "evgen_rucio_update", "evgen_register",
+                   "catalog_import",
                    "questionnaire_match_update", "campaign_progress_refresh",
                    "association_sweep", "catalog_sync", "questionnaire_import",
                    "questionnaire_automatch",
@@ -1821,6 +1831,78 @@ class EpicProdOpsAgent(BaseAgent):
                              sublevel='high', live_default=True,
                              summary='EVGEN input datasets re-resolved '
                                      'from JLab Rucio')
+
+    def _handle_evgen_register(self, m):
+        """Register one EVGEN input directory in JLab Rucio off the receiver
+        thread — door listing, per-file checksums, and the Rucio writes are
+        minutes of network time. Deduped per path so a double click cannot
+        run two registrations of the same directory at once."""
+        path = str(m.get("path") or "").strip()
+        if not path.startswith("/EVGEN/"):
+            self.logger.error(f"PRODOPS evgen_register: bad path {path!r}")
+            return
+        self.run_in_background(
+            self._do_evgen_register, m,
+            dedup_key=f"evgen_register:{path}", label=f"evgen_register {path}")
+
+    def _do_evgen_register(self, m):
+        """Run the registration doer for one path; push evgen_register_ready
+        with the doer's summary on every outcome (the page never hangs), and
+        on success run the EVGEN assimilation inline so the new dataset is in
+        the recorded inventory — and matched — before evgen_rucio_ready lands.
+        The doer's last stdout line is its JSON summary; stderr is its log."""
+        path = str(m["path"]).strip()
+        username = str(m.get("created_by") or "")
+        cmd = [sys.executable, str(EVGEN_REGISTER_SCRIPT), "--path", path]
+        self.logger.info(f"PRODOPS evgen_register: {path}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=EVGEN_REGISTER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f"timed out after {EVGEN_REGISTER_TIMEOUT}s"
+            self.logger.error(f"PRODOPS evgen_register TIMEOUT: {path}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_register_ready', 'ok': False,
+                'path': path, 'error': reason})
+            self._log_action('evgen_register', t0, outcome='timeout', reason=reason,
+                             subject_type='evgen_path', subject_key=path,
+                             username=username, sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  register-evgen-rucio: {line}")
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            summary = {}
+        counts = {k: summary[k] for k in ('files', 'bytes', 'skipped') if k in summary}
+        dids = [d.get('did') for d in summary.get('datasets') or [] if d.get('did')]
+        if p.returncode == 0 and summary.get('ok'):
+            self.logger.info(f"PRODOPS evgen_register done: {path} -> {', '.join(dids)}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_register_ready', 'ok': True, 'path': path,
+                'datasets': summary.get('datasets') or [],
+                'files': summary.get('files'), 'bytes': summary.get('bytes')})
+            self._log_action('evgen_register', t0,
+                             subject_type='evgen_path', subject_key=path,
+                             username=username, sublevel='high', live_default=True,
+                             datasets=dids, **counts)
+            # The inventory the page reads is the recorded snapshot; refresh
+            # it (and the PCS match) so the registration shows at once.
+            self._do_evgen_rucio_update(m)
+        else:
+            reason = summary.get('error') or self._derive_reason(p)
+            self.logger.error(f"PRODOPS evgen_register FAILED rc={p.returncode}: {path}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_register_ready', 'ok': False,
+                'path': path, 'error': reason,
+                'checksum_failed': summary.get('checksum_failed') or []})
+            self._log_action('evgen_register', t0, outcome='error', reason=reason,
+                             subject_type='evgen_path', subject_key=path,
+                             username=username, sublevel='high', live_default=True,
+                             level=logging.ERROR, datasets=dids, **counts)
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —
