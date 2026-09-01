@@ -34,6 +34,7 @@
   tr.usage-child td, tr.usage-child th { background: rgba(13, 110, 253, .06); }
   tr.usage-child td.usage-child-name, tr.usage-child th.usage-child-name { padding-left: 2.2rem; }
   tr.usage-child-head th { font-weight: 600; border-bottom: 2px solid #9ec5fe; }
+  .usage-child-total { font-weight: 400; font-size: .95em; white-space: nowrap; }
   .usage-child-sort {
     border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
   }
@@ -210,12 +211,12 @@
         {% if site.execute_sites %}
         <tr class="usage-child usage-child-head" data-parent="{{ site.site }}" hidden>
           <th class="usage-child-name"><button type="button" class="usage-child-sort" data-sort="site">Execute site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="jobs" data-direction="desc">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="jobs" data-direction="desc">Jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button><div class="usage-child-total text-muted" data-total="jobs"></div></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button><div class="usage-child-total text-muted" data-total="failed"></div></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button><div class="usage-child-total text-muted" data-total="failpct"></div></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button><div class="usage-child-total text-muted" data-total="allocated"></div></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button><div class="usage-child-total text-muted" data-total="used"></div></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button><div class="usage-child-total text-muted" data-total="efficiency"></div></th>
           <th class="text-end" title="Share of the selected metric within this pool"><button type="button" class="usage-child-sort" data-sort="share">Share of pool %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         </tr>
         {% endif %}
@@ -414,6 +415,19 @@
         let anchor = parent;
         if (head) {
           head.hidden = !open || present === 0;
+          const pool = data.siteTotals.get(queue) || emptyUsage();
+          const poolAttempts = pool.job_count + pool.failed_count;
+          const totals = {
+            jobs: pool.job_count.toLocaleString(),
+            failed: pool.failed_count.toLocaleString(),
+            failpct: poolAttempts ? (100 * pool.failed_count / poolAttempts).toFixed(1) + '%' : '\u2014',
+            allocated: fmt(pool.allocated_core_hours),
+            used: fmt(pool.used_core_hours),
+            efficiency: pool.allocated_core_hours ? (100 * pool.used_core_hours / pool.allocated_core_hours).toFixed(1) + '%' : '\u2014',
+          };
+          head.querySelectorAll('.usage-child-total').forEach(cell => {
+            cell.textContent = 'pool ' + totals[cell.dataset.total];
+          });
           head.querySelectorAll('.usage-child-sort').forEach(button => {
             const active = button.dataset.sort === state.key;
             button.dataset.direction = active ? state.direction : '';
