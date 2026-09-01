@@ -2414,7 +2414,7 @@ def job_filter_counts(days=7, status=None, username=None, site=None,
 
 
 def task_filter_counts(days=7, status=None, username=None,
-                       processingtype=None, workinggroup=None):
+                       processingtype=None, workinggroup=None, site=None):
     """Get filter option counts for task list."""
     cutoff = timezone.now() - timedelta(days=days)
     base_where = ['COALESCE("modificationtime", "creationdate") >= %s']
@@ -2432,6 +2432,7 @@ def task_filter_counts(days=7, status=None, username=None,
         ('username', 'username', username),
         ('processingtype', 'processingtype', processingtype),
         ('workinggroup', 'workinggroup', workinggroup),
+        ('site', 'site', site),
     ]
 
     for db_field, filter_name, current_value in filter_config:
@@ -2443,8 +2444,10 @@ def task_filter_counts(days=7, status=None, username=None,
                     clause, vals = _effective_username_filter(other_db_field, other_value)
                     where.append(clause)
                     params.extend(vals)
-                elif other_db_field == 'processingtype' and other_value == '__blank__':
-                    where.append('("processingtype" IS NULL OR "processingtype" = %s)')
+                elif other_db_field in ('processingtype', 'site') \
+                        and other_value == '__blank__':
+                    where.append(f'("{other_db_field}" IS NULL '
+                                 f'OR "{other_db_field}" = %s)')
                     params.append('')
                 else:
                     where.append(f'"{other_db_field}" = %s')

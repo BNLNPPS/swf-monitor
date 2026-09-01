@@ -811,10 +811,12 @@ def panda_tasks_list(request):
             {'name': 'status', 'label': 'Status', 'type': 'select'},
             {'name': 'username', 'label': 'User', 'type': 'select'},
             {'name': 'processingtype', 'label': 'Processing type', 'type': 'select'},
+            {'name': 'site', 'label': 'Site', 'type': 'select'},
         ],
         'selected_status': request.GET.get('status', ''),
         'selected_username': request.GET.get('username', ''),
         'selected_processingtype': request.GET.get('processingtype', ''),
+        'selected_site': request.GET.get('site', ''),
         'bulk_controls_operable': (
             request.user.is_authenticated and not is_tunnel_request(request)),
     }
@@ -940,7 +942,7 @@ def panda_tasks_datatable_ajax(request):
     }
 
     # Equality filters over the raw record; '__blank__' selects NULL/empty.
-    for key in ('status', 'username', 'processingtype'):
+    for key in ('status', 'username', 'processingtype', 'site'):
         wanted = request.GET.get(key, '') or None
         if wanted is None:
             continue
@@ -986,11 +988,13 @@ def panda_tasks_filter_counts(request):
     username = request.GET.get('username', '') or None
     processingtype = request.GET.get('processingtype', '') or None
     workinggroup = request.GET.get('workinggroup', '') or None
+    site = request.GET.get('site', '') or None
 
     counts = task_filter_counts(days=days, status=status,
                                 username=username,
                                 processingtype=processingtype,
-                                workinggroup=workinggroup)
+                                workinggroup=workinggroup,
+                                site=site)
     return JsonResponse({'filter_counts': counts})
 
 
