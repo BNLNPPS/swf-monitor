@@ -231,7 +231,7 @@
       {% for p in card.patterns %}
       <tr>
         <td class="text-nowrap"><span data-curve="{{ p.curve }}" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>{{ p.category }}</td>
-        <td class="small" style="word-break:break-word;">{% if p.correction %}<strong title="Reported as: {{ p.diag }} — an unreliable label ({{ p.correction.note }}) Grade: {{ p.correction.grade }}.">{{ p.correction.label }}</strong>{% for m in p.correction.modes|slice:"1:" %} · {{ m.reading }} ({{ m.count }}){% endfor %}{% else %}{{ p.diag }}{% endif %}</td>
+        <td class="small" style="word-break:break-word;">{% if p.correction %}{{ p.correction.label }}{% for m in p.correction.modes|slice:"1:" %} · {{ m.reading }} ({{ m.count }}){% endfor %}{% else %}{{ p.diag }}{% endif %}</td>
         <td class="text-end">{{ p.count }}</td>
         <td>{% if p.rep_url %}<a href="{{ p.rep_url }}">{{ p.rep_pandaid }}</a>{% else %}—{% endif %}</td>
         <td>{% for t in p.tasks %}<a href="{% url 'monitor_app:panda_task_detail' jeditaskid=t %}">{{ t }}</a>{% if not forloop.last %} {% endif %}{% endfor %}</td>

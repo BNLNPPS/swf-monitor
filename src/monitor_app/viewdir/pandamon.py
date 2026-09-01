@@ -1622,11 +1622,7 @@ def panda_errors_datatable_ajax(request):
             extra_modes = ''.join(
                 f" · {escape(m['reading'])} ({m['count']})"
                 for m in corr.get('modes', [])[1:])
-            hover = escape(f"Reported as: {err.get('error_diag', '')} — "
-                           f"an unreliable label ({corr.get('note', '')}) "
-                           f"Grade: {corr.get('grade', '')}")
-            diag_text = (f"<strong title=\"{hover}\">"
-                         f"{escape(corr['label'])}</strong>{extra_modes}")
+            diag_text = f"{escape(corr['label'])}{extra_modes}"
 
         # Average run time before this error ended the job; patterns
         # whose jobs never started (pre-run failures) say so instead of

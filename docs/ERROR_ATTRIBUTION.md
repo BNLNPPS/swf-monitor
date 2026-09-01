@@ -36,8 +36,11 @@ error-presentation path is a client.
   recorded history (job records, Snapper snaps) stays raw as reported;
   every read path applies corrections on the way out. A rule added
   today corrects last week's presentation everywhere.
-- **Provenance always.** The corrected reading leads; the original
-  label stays visible ("reported as pilot:1305"); every verdict
+- **Provenance in the system, not on the page.** Pages present the
+  corrected reading alone; the original label, the unreliability
+  note, and the evidence grade live in the data — the correction
+  structure served by REST and MCP, the rules store, and the raw job
+  record — where tools and diagnosis reach them. Every verdict
   carries its evidence link, scope, author, and date.
 - **REST face** on the same root, so out-of-process consumers
   (assessment harness, swf-remote face, standalone tools) apply the
