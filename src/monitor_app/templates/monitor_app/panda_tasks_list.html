@@ -36,6 +36,7 @@
         <option value="finish">Stop and finish task</option>
     </select>
     <button type="submit" id="panda-bulk-submit" class="btn btn-success btn-sm" disabled>Submit</button>
+    {% if is_tunnel %}<span style="margin-left: 1cm;">(use pandaserver02 to act on tasks)</span>{% endif %}
     <span id="panda-bulk-status" class="fw-semibold d-none" role="status"></span>
 </form>
 {% endblock %}
