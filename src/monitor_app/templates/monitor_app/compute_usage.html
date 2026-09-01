@@ -278,7 +278,13 @@
     let sortKey = 'share';
     let sortDirection = 'desc';
     const selected = () => new Set(boxes.filter(box => box.checked).map(box => box.value));
-    const fmt = value => Number(value || 0).toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+    // Core-hours to the hour; a decimal only below ten, where it carries meaning.
+    const fmt = value => {
+      const number = Number(value || 0);
+      return number < 10
+        ? number.toLocaleString(undefined, {minimumFractionDigits: 1, maximumFractionDigits: 1})
+        : Math.round(number).toLocaleString();
+    };
     const colors = ['#636efa', '#ef553b', '#00cc96', '#ab63fa', '#ffa15a', '#19d3f3', '#ff6692', '#b6e880', '#ff97ff', '#fecb52', '#2f4b7c', '#a05195'];
     const siteColors = new Map((usage.by_site || []).map((row, index) => [row.site, colors[index % colors.length]]));
 
