@@ -566,20 +566,26 @@ def compute_usage(request):
             'active': start == period_start and end == period_end,
         })
     usage = usage or {}
-    execute_blocks = []
     if usage:
-        names = [row['site'] for row in usage.get('by_site') or []]
-        names += list(usage.get('execute_sites') or {})
-        labels = _pool_labels(names)
-        for row in usage.get('by_site') or []:
+        from ..panda.queries import queue_types
+        by_site = usage.get('by_site') or []
+        labels = _pool_labels([row['site'] for row in by_site])
+        execute_sites = usage.get('execute_sites') or {}
+        types = queue_types()
+        for row in by_site:
             row['label'] = labels.get(row['site'], '')
-        execute_blocks = [
-            {'queue': queue, 'label': labels.get(queue, ''), 'sites': sites}
-            for queue, sites in (usage.get('execute_sites') or {}).items()]
+            # The pool row expands inline into these, in the table itself.
+            row['execute_sites'] = execute_sites.get(row['site'], [])
+            # Test queues stay out unless ticked: anything CRIC does not
+            # type as production, and production queues named as test,
+            # CI, dev, pilot-test, or IRI trials.
+            name = row['site']
+            row['is_test'] = (types.get(name, 'production') != 'production'
+                              or bool(re.search(r'test|_ci$|_dev$|pilotest|_iri$',
+                                                name, re.IGNORECASE)))
     return render(request, 'monitor_app/compute_usage.html', {
         'error': error,
         'usage': usage,
-        'execute_blocks': execute_blocks,
         'start': start,
         'end': end,
         'bucket': bucket,

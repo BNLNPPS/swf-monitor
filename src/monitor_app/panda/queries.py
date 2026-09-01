@@ -1811,6 +1811,18 @@ def osg_pool_queues():
         return []
 
 
+def queue_types():
+    """{panda_queue: CRIC type} for every queue in schedconfig_json."""
+    sql = f"""SELECT "panda_queue", "data"->>'type' FROM "{PANDA_SCHEMA}"."schedconfig_json\""""
+    try:
+        with connections['panda'].cursor() as cursor:
+            cursor.execute(sql)
+            return {row[0]: (row[1] or '') for row in cursor.fetchall()}
+    except Exception as e:
+        logger.error(f"queue_types query failed: {e}")
+        return {}
+
+
 def resource_usage(days=30, site=None, username=None, taskid=None,
                    start_time=None, end_time=None, bucket=None,
                    series_rollup=False, execute_sites=False):
