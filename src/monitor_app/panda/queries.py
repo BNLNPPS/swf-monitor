@@ -14,6 +14,9 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.db import connections
 
+from ..error_corrections import apply_to_summary
+from ..error_corrections import exit_counts_of as _exit_counts_of
+
 from .constants import (
     PANDA_SCHEMA, LIST_FIELDS, ERROR_FIELDS, DIAGNOSE_EXTRA_FIELDS,
     ERROR_COMPONENTS, FAULTY_STATUSES, TASK_LIST_FIELDS,
@@ -1280,7 +1283,7 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
             'avg_seconds_to_error': (round(float(row[8]), 1)
                                      if row[8] is not None else None),
             'never_started_count': row[9] or 0,
-            'exit_counts': row[11] or {},
+            'exit_counts': _exit_counts_of(row[11]),
             'attribution_guidance': (
                 'computingsite is the execution location, not causal '
                 'attribution; inspect a representative_pandaid with '
@@ -1294,7 +1297,6 @@ def error_summary(days=10, username=None, site=None, destinationse=None,
     # The correction root (docs/ERROR_ATTRIBUTION.md): entries whose
     # label a rule marks unreliable gain the corrected reading; the
     # original label stays in place beneath it.
-    from ..error_corrections import apply_to_summary
     apply_to_summary(errors)
 
     return {

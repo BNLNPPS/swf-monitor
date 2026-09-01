@@ -11,10 +11,26 @@ codes (grade: pilot mechanical fields) — 128+N is termination by
 signal N, and the campaign payload's coded exits carry their own
 documented meanings.
 """
+import json
 import logging
 import time
 
 logger = logging.getLogger(__name__)
+
+
+def exit_counts_of(value):
+    """The exit-code histogram as a dict. The panda connection returns
+    jsonb columns as JSON text; a malformed value reads as empty and
+    is logged, never raised."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except ValueError as e:
+            logger.error('exit-counts JSON parse failed: %s', e)
+    return {}
 
 # Payload exit codes with documented meanings (the campaign run.sh
 # vocabulary plus the signal convention). Anything above 128 reads as
@@ -87,7 +103,7 @@ def correction(rule, exit_counts=None):
     """
     modes = []
     for exitcode, count in sorted(
-            (exit_counts or {}).items(),
+            exit_counts_of(exit_counts).items(),
             key=lambda kv: (-int(kv[1] or 0), str(kv[0]))):
         reading = exit_reading(exitcode)
         if reading:
@@ -110,11 +126,19 @@ def correction(rule, exit_counts=None):
 def apply_to_summary(entries):
     """Attach ``correction`` to each error-summary entry whose label a
     rule marks unreliable. Entries carry error_source, error_code,
-    error_diag, and optionally exit_counts."""
+    error_diag, and optionally exit_counts. Decoration must never take
+    a page down: a failure on one entry is logged and that entry keeps
+    its raw label."""
     for entry in entries:
-        rule = match(entry.get('error_source'), entry.get('error_code'),
-                     entry.get('error_diag'))
-        if rule is not None:
-            entry['correction'] = correction(
-                rule, entry.get('exit_counts') or {})
+        try:
+            rule = match(entry.get('error_source'),
+                         entry.get('error_code'),
+                         entry.get('error_diag'))
+            if rule is not None:
+                entry['correction'] = correction(
+                    rule, entry.get('exit_counts') or {})
+        except Exception as e:
+            logger.error('error-correction decoration failed for '
+                         '%s:%s: %s', entry.get('error_source'),
+                         entry.get('error_code'), e)
     return entries
