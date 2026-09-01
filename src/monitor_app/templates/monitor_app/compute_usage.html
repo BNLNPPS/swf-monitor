@@ -599,7 +599,13 @@
         row.dataset.share = share;
       });
       sortRows();
+      lastRender = {data, sites, key};
       renderChildren(data, sites, key);
+    }
+
+    let lastRender = null;
+    function rerenderChildren() {
+      if (lastRender) renderChildren(lastRender.data, lastRender.sites, lastRender.key);
     }
 
     function updatePeriodButtons() {
@@ -636,7 +642,7 @@
       if (toggle) {
         const site = toggle.dataset.site;
         if (expanded.has(site)) expanded.delete(site); else expanded.add(site);
-        render();
+        rerenderChildren();
         return;
       }
       const sort = event.target.closest('.usage-child-sort');
@@ -650,7 +656,7 @@
         state.key = nextKey;
         state.direction = nextKey === 'site' ? 'asc' : 'desc';
       }
-      render();
+      rerenderChildren();
     });
     function applyTestQueues() {
       const on = includeTest && includeTest.checked;
