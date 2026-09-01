@@ -587,6 +587,8 @@ def compute_usage(request):
         'error': error,
         'usage': usage,
         'include_test': (request.GET.get('test') or '').strip() in ('1', 'true', 'yes'),
+        'default_start': str(today - timedelta(days=29)),
+        'default_end': str(today),
         'start': start,
         'end': end,
         'bucket': bucket,

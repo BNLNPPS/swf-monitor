@@ -100,7 +100,7 @@
     {% endfor %}
   </div>
 
-  <form method="get" class="row g-2 align-items-end mb-3" id="usage-period-form">
+  <form method="get" class="row g-2 align-items-end mb-3" id="usage-period-form" data-default-start="{{ default_start }}" data-default-end="{{ default_end }}">
     <div class="col-sm-3 col-lg-2">
       <label class="form-label mb-1" for="usage-start">Start date</label>
       <input class="form-control form-control-sm" id="usage-start" name="start" type="date" value="{{ start }}" required>
@@ -629,14 +629,21 @@
     }
 
     function updateLocation() {
+      // Only state that differs from the default goes in the URL.
       const params = new URLSearchParams(window.location.search);
-      params.set('start', startInput.value);
-      params.set('end', endInput.value);
-      params.set('bucket', bucketInput.value);
-      params.set('metric', metric.value);
-      if (includeTest && includeTest.checked) params.set('test', '1'); else params.delete('test');
-      if (expanded.size) params.set('open', [...expanded].join(',')); else params.delete('open');
-      window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
+      const setOrDrop = (name, value, isDefault) => {
+        if (isDefault) params.delete(name); else params.set(name, value);
+      };
+      const defaultPeriod = startInput.value === periodForm.dataset.defaultStart
+        && endInput.value === periodForm.dataset.defaultEnd;
+      setOrDrop('start', startInput.value, defaultPeriod);
+      setOrDrop('end', endInput.value, defaultPeriod);
+      setOrDrop('bucket', bucketInput.value, bucketInput.value === 'day');
+      setOrDrop('metric', metric.value, metric.value === 'allocated_core_hours');
+      setOrDrop('test', '1', !(includeTest && includeTest.checked));
+      setOrDrop('open', [...expanded].join(','), expanded.size === 0);
+      const query = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''));
       const dataUrl = new URL(jsonLink.href, window.location.href);
       dataUrl.search = params.toString();
       jsonLink.href = dataUrl.toString();
