@@ -1837,17 +1837,17 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
     first. The OSG pool queues are those whose CRIC catchall carries
     osgpool=true; no other queue gets a breakdown.
 
-    Reports two core-hour metrics:
-    - allocated: actualcorecount × wall time (cores allocated to the job)
-    - used: cpuconsumptiontime (CPU time the job actually consumed)
+    Core-hour metrics:
+    - allocated: cores × wall time of every job that ran, finished or
+      failed (a failed job holds its allocation like any other);
+    - used: cpuconsumptiontime of finished jobs, the CPU that produced
+      results; efficiency is used over allocated;
+    - failed_core_hours: the allocation held by failed jobs (wasted).
 
-    Only counts jobs that actually ran: jobstatus='finished' with both
-    starttime and endtime set. Pre-running queue time is excluded.
-
-    Every aggregate additionally carries failed_count: jobs ending
-    'failed' in the window, counted by end time as the jobs page counts
-    them (no starttime requirement). Failed jobs contribute nothing to
-    job_count or any core-hour metric.
+    job_count counts finished jobs; failed_count counts jobs ending
+    'failed' in the window by end time (a failed job that never started
+    counts here and holds no allocation). Pre-running queue time is
+    excluded throughout.
     """
     def _time(value, label):
         if value in (None, ''):
@@ -1909,18 +1909,26 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
         '"starttime", "endtime"'
     )
 
-    agg_cols = """
+    # Allocation is held by every job that ran, finished or failed; used CPU
+    # is what finished jobs consumed; the allocation held by failed jobs is
+    # reported on its own as failed_core_hours (wasted).
+    ran = '"starttime" IS NOT NULL AND "endtime" IS NOT NULL'
+    agg_cols = f"""
         COUNT(*) FILTER (WHERE "jobstatus" = 'finished') as job_count,
         COALESCE(SUM(
             EXTRACT(EPOCH FROM ("endtime" - "starttime"))
             * COALESCE("actualcorecount", "corecount", 1)
-        ) FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as allocated_core_hours,
+        ) FILTER (WHERE {ran}), 0) / 3600.0 as allocated_core_hours,
         COALESCE(SUM("cpuconsumptiontime")
                  FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as used_core_hours,
         COALESCE(SUM(
             EXTRACT(EPOCH FROM ("endtime" - "starttime"))
-        ) FILTER (WHERE "jobstatus" = 'finished'), 0) / 3600.0 as wall_hours,
-        COUNT(*) FILTER (WHERE "jobstatus" = 'failed') as failed_count
+        ) FILTER (WHERE {ran}), 0) / 3600.0 as wall_hours,
+        COUNT(*) FILTER (WHERE "jobstatus" = 'failed') as failed_count,
+        COALESCE(SUM(
+            EXTRACT(EPOCH FROM ("endtime" - "starttime"))
+            * COALESCE("actualcorecount", "corecount", 1)
+        ) FILTER (WHERE "jobstatus" = 'failed' AND {ran}), 0) / 3600.0 as failed_core_hours
     """
 
     def _run(group_col=None):
@@ -1947,6 +1955,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             'used_core_hours': float(row[offset + 2]),
             'wall_hours': float(row[offset + 3]),
             'failed_count': int(row[offset + 4] or 0),
+            'failed_core_hours': float(row[offset + 5]),
         }
 
     def _rounded_metrics(values, precision=1):
@@ -1956,6 +1965,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             'used_core_hours': round(values['used_core_hours'], precision),
             'wall_hours': round(values['wall_hours'], precision),
             'failed_count': values['failed_count'],
+            'failed_core_hours': round(values['failed_core_hours'], precision),
         }
 
     try:
@@ -2028,6 +2038,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             metric_names = (
                 'job_count', 'allocated_core_hours',
                 'used_core_hours', 'wall_hours', 'failed_count',
+                'failed_core_hours',
             )
             merged = {}            # (bucket, queue, label) -> raw metrics
             per_queue = {}         # queue -> {label: weight}
@@ -2055,6 +2066,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             metric_names = (
                 'job_count', 'allocated_core_hours',
                 'used_core_hours', 'wall_hours', 'failed_count',
+                'failed_core_hours',
             )
             totals_raw = {name: 0 for name in metric_names}
             sites_raw = {}
@@ -2078,6 +2090,7 @@ def resource_usage(days=30, site=None, username=None, taskid=None,
             totals = _rounded_metrics(_raw_metrics(rows[0])) if rows else {
                 'job_count': 0, 'allocated_core_hours': 0,
                 'used_core_hours': 0, 'wall_hours': 0, 'failed_count': 0,
+                'failed_core_hours': 0,
             }
 
             by_site = []

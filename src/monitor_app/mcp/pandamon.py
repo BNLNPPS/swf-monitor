@@ -366,18 +366,16 @@ async def panda_resource_usage(
     """
     Aggregate resource usage (core-hours) for finished PanDA jobs.
 
-    Reports two core-hour metrics:
-    - allocated_core_hours: cores allocated × wall time
-    - used_core_hours: CPU time actually consumed by the job
+    Core-hour metrics:
+    - allocated_core_hours: cores × wall time of every job that ran, finished
+      or failed; a failed job holds its allocation like any other.
+    - used_core_hours: CPU consumed by finished jobs, the CPU that produced
+      results. Efficiency is used over allocated, so failures count against it.
+    - failed_core_hours: the allocation held by failed jobs (wasted).
 
-    The gap between allocated and used reflects efficiency — e.g. a job that
-    requests 1 core but gets 2 allocated uses ~50% of its allocation.
-
-    Only counts finished jobs with actual runtime (starttime and endtime set).
-    Jobs are attributed by endtime; queue/waiting time is excluded.
-    Every aggregate also carries failed_count — jobs ending 'failed' in the
-    window, counted by endtime. Failed jobs contribute nothing to job_count
-    or any core-hour metric.
+    job_count counts finished jobs; failed_count counts jobs ending 'failed'
+    in the window by endtime (a failed job that never started holds no
+    allocation). Queue/waiting time is excluded throughout.
 
     Args:
         days: Time window in days ending at end_time (default 30). Used when
@@ -398,7 +396,7 @@ async def panda_resource_usage(
 
     Returns:
         totals: {job_count, allocated_core_hours, used_core_hours, wall_hours,
-                 failed_count}
+                 failed_count, failed_core_hours}
         by_site: Breakdown by computing site, sorted by allocated_core_hours.
         by_user: Breakdown by job owner, sorted by allocated_core_hours.
         series: Site breakdown per day/week when bucket is supplied.

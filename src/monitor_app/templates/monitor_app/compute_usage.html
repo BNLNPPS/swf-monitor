@@ -131,8 +131,9 @@
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Finished jobs</div><strong id="usage-jobs">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Failed jobs</div><strong id="usage-failed">—</strong></div></div>
     <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocated core-hours</div><strong id="usage-allocated">—</strong></div></div>
-    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Used core-hours</div><strong id="usage-used">—</strong></div></div>
-    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted" title="Allocation held by failed jobs">Wasted core-hours</div><strong id="usage-wasted">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted" title="CPU consumed by finished jobs">Productive core-hours</div><strong id="usage-used">—</strong></div></div>
+    <div class="col-sm-6 col-xl"><div class="border rounded p-2 h-100"><div class="small text-muted" title="Used CPU of finished jobs over the allocation held by every job that ran">Allocation efficiency</div><strong id="usage-efficiency">—</strong></div></div>
   </div>
 
   <div class="usage-layout">
@@ -144,7 +145,7 @@
             <label class="me-1 fw-bold" for="usage-metric">Metric</label>
             <select class="form-select form-select-sm d-inline-block w-auto" id="usage-metric">
               <option value="allocated_core_hours">Allocated core-hours</option>
-              <option value="used_core_hours">Used core-hours</option>
+              <option value="used_core_hours">Productive core-hours</option>
               <option value="failed_count">Failed jobs</option>
             </select>
           </div>
@@ -191,7 +192,8 @@
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none" title="Failed jobs as a share of finished plus failed"><button type="button" class="usage-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none" title="Allocation held by failed jobs"><button type="button" class="usage-sort" data-sort="wasted">Wasted core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+        <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="used">Productive core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="none"><button type="button" class="usage-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         <th class="text-end" aria-sort="descending" title="Share of the selected metric across selected sites"><button type="button" class="usage-sort" data-sort="share" data-direction="desc">Compute usage %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
       </tr></thead>
@@ -204,19 +206,21 @@
           <td class="text-end usage-site-failed">—</td>
           <td class="text-end usage-site-failpct">—</td>
           <td class="text-end usage-site-allocated">—</td>
+          <td class="text-end usage-site-wasted">—</td>
           <td class="text-end usage-site-used">—</td>
           <td class="text-end usage-site-efficiency">—</td>
           <td class="text-end usage-site-share">—</td>
         </tr>
         {% if site.execute_sites %}
-        <tr class="usage-child usage-child-info" data-parent="{{ site.site }}" hidden><td colspan="8" class="usage-child-info-cell"></td></tr>
+        <tr class="usage-child usage-child-info" data-parent="{{ site.site }}" hidden><td colspan="9" class="usage-child-info-cell"></td></tr>
         <tr class="usage-child usage-child-head" data-parent="{{ site.site }}" hidden>
           <th class="usage-child-name"><button type="button" class="usage-child-sort" data-sort="site">Execute site<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="jobs" data-direction="desc">Finished jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failed">Failed jobs<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="failpct">Failure %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="allocated">Allocated core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
-          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="used">Used core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end" title="Allocation held by failed jobs"><button type="button" class="usage-child-sort" data-sort="wasted">Wasted core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
+          <th class="text-end"><button type="button" class="usage-child-sort" data-sort="used">Productive core-hours<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end"><button type="button" class="usage-child-sort" data-sort="efficiency">Efficiency<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
           <th class="text-end" title="Finished jobs as a share of the pool's finished jobs in the period"><button type="button" class="usage-child-sort" data-sort="share">Share of pool jobs %<span class="usage-sort-arrows" aria-hidden="true"><span class="usage-sort-up">▲</span><span class="usage-sort-down">▼</span></span></button></th>
         </tr>
@@ -228,6 +232,7 @@
           <td class="text-end ux-failed">—</td>
           <td class="text-end ux-failpct">—</td>
           <td class="text-end ux-allocated">—</td>
+          <td class="text-end ux-wasted">—</td>
           <td class="text-end ux-used">—</td>
           <td class="text-end ux-efficiency">—</td>
           <td class="text-end ux-share">—</td>
@@ -247,10 +252,11 @@
     the worker-node host's site); a job that never left the submit host
     is listed as not dispatched, and a site's share is its share of the
     pool.
-    Allocated core-hours are allocated cores multiplied by wall time; used
-    core-hours are recorded CPU consumption time. Failed jobs are counted
-    by end time and contribute nothing to the core-hour and efficiency
-    metrics.
+    Allocated core-hours are allocated cores multiplied by wall time for
+    every job that ran, finished or failed; wasted core-hours are the part
+    held by failed jobs; productive core-hours are the CPU consumed by
+    finished jobs, and efficiency is productive over allocated, so every
+    failure counts against it. Failed jobs are counted by end time.
   </p>
 
   {{ usage|json_script:"compute-usage-data" }}
@@ -312,7 +318,7 @@
     });
 
     function emptyUsage() {
-      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0, failed_count: 0};
+      return {job_count: 0, allocated_core_hours: 0, used_core_hours: 0, wall_hours: 0, failed_count: 0, failed_core_hours: 0};
     }
 
     function addUsage(target, source) {
@@ -321,6 +327,7 @@
       target.used_core_hours += Number(source.used_core_hours || 0);
       target.wall_hours += Number(source.wall_hours || 0);
       target.failed_count += Number(source.failed_count || 0);
+      target.failed_core_hours += Number(source.failed_core_hours || 0);
     }
 
     function weekStart(dateText) {
@@ -400,6 +407,7 @@
           set('.ux-failed', values.failed_count.toLocaleString());
           set('.ux-failpct', attempts ? failpct.toFixed(1) + '%' : '\u2014');
           set('.ux-allocated', fmt(values.allocated_core_hours));
+          set('.ux-wasted', fmt(values.failed_core_hours));
           set('.ux-used', fmt(values.used_core_hours));
           set('.ux-efficiency', values.allocated_core_hours ? efficiency.toFixed(1) + '%' : '\u2014');
           set('.ux-share', queueTotal ? share.toFixed(1) + '%' : '\u2014');
@@ -407,6 +415,7 @@
           row.dataset.failed = values.failed_count;
           row.dataset.failpct = failpct;
           row.dataset.allocated = values.allocated_core_hours;
+          row.dataset.wasted = values.failed_core_hours;
           row.dataset.used = values.used_core_hours;
           row.dataset.efficiency = efficiency;
           row.dataset.share = share;
@@ -434,7 +443,8 @@
             `${pool.failed_count.toLocaleString()} failed`,
             poolAttempts ? `${(100 * pool.failed_count / poolAttempts).toFixed(1)}% failure` : null,
             `${fmt(pool.allocated_core_hours)} allocated core-hours`,
-            `${fmt(pool.used_core_hours)} used`,
+            `${fmt(pool.failed_core_hours)} wasted`,
+            `${fmt(pool.used_core_hours)} productive`,
             pool.allocated_core_hours ? `${(100 * pool.used_core_hours / pool.allocated_core_hours).toFixed(1)}% efficiency` : null,
             `${present} sites`,
           ].filter(Boolean);
@@ -570,11 +580,13 @@
           failed: sum.failed + Number(row.failed_count || 0),
           allocated: sum.allocated + Number(row.allocated_core_hours || 0),
           used: sum.used + Number(row.used_core_hours || 0),
-        }), {jobs: 0, failed: 0, allocated: 0, used: 0});
+          wasted: sum.wasted + Number(row.failed_core_hours || 0),
+        }), {jobs: 0, failed: 0, allocated: 0, used: 0, wasted: 0});
       document.getElementById('usage-jobs').textContent = totals.jobs.toLocaleString();
       document.getElementById('usage-failed').textContent = totals.failed.toLocaleString();
       document.getElementById('usage-allocated').textContent = fmt(totals.allocated);
       document.getElementById('usage-used').textContent = fmt(totals.used);
+      document.getElementById('usage-wasted').textContent = fmt(totals.wasted);
       document.getElementById('usage-efficiency').textContent = totals.allocated
         ? (100 * totals.used / totals.allocated).toFixed(1) + '%' : '—';
       const usageTotal = siteTotals.reduce(
@@ -589,6 +601,7 @@
         const failpct = attempts ? 100 * values.failed_count / attempts : 0;
         row.querySelector('.usage-site-failpct').textContent = attempts ? failpct.toFixed(1) + '%' : '—';
         row.querySelector('.usage-site-allocated').textContent = fmt(values.allocated_core_hours);
+        row.querySelector('.usage-site-wasted').textContent = fmt(values.failed_core_hours);
         row.querySelector('.usage-site-used').textContent = fmt(values.used_core_hours);
         const efficiency = values.allocated_core_hours
           ? 100 * values.used_core_hours / values.allocated_core_hours : 0;
@@ -601,6 +614,7 @@
         row.dataset.failed = values.failed_count;
         row.dataset.failpct = failpct;
         row.dataset.allocated = values.allocated_core_hours;
+        row.dataset.wasted = values.failed_core_hours;
         row.dataset.used = values.used_core_hours;
         row.dataset.efficiency = efficiency;
         row.dataset.share = share;
