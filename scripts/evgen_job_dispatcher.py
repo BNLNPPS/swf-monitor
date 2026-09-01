@@ -15,6 +15,15 @@ payload. The payload's run.sh sources ``environment*.sh`` from the unpacked
 sandbox itself, so no env is set here.
 
 Usage (as PanDA expands it):  evgen_job_dispatcher.py <SEQNUMBER> <csv_base>
+
+Canary probe mode:  evgen_job_dispatcher.py canary [payload_seconds]
+The site-canary probe task ships this same dispatcher in its sandbox —
+one runner for production and probe jobs — beside the vendored canary
+kit/ (package + prmon). The canary branch runs the landing kit as the
+payload and ships the landing report both ways: embedded in
+jobReport.json, which the pilot lifts into the PanDA job metadata
+(written on success and failure alike — site attribute reporting), and
+to stdout between CANARY-REPORT markers, collectable from the job log.
 """
 import csv
 import json
@@ -31,36 +40,88 @@ PAYLOAD_RUN = "/opt/campaigns/hepmc3/scripts/run.sh"
 EXIT_MSGS = {65: "output validation failed", 78: "Rucio registration failed"}
 
 
-def write_job_report(rc, workdir):
+def write_job_report(rc, workdir, extra=None):
     """Write jobReport.json for the pilot to ship with the job record.
 
-    The pilot reads this file from the job workdir and sends it with the
-    final job update; the epic pilot plugin stores a nonzero exitCode and
-    exitMsg in the job record (exeErrorCode/exeErrorDiag). The message is
-    the payload's last ERROR line when one is found in the pilot-captured
-    payload output, else the coded-exit description. Never raises and
-    never alters the payload exit code.
+    The pilot reads this file from the job workdir and sends the whole
+    object with the final job update as job metadata; the epic pilot
+    plugin additionally stores a nonzero exitCode and exitMsg in the job
+    record (exeErrorCode/exeErrorDiag). On failure the message is the
+    payload's last ERROR line when one is found in the pilot-captured
+    payload output, else the coded-exit description. ``extra`` fields
+    merge into the report object — the canary mode ships its landing
+    report this way. Never raises and never alters the payload exit
+    code.
     """
-    msg = EXIT_MSGS.get(rc, f"payload exited {rc}")
-    for name in ("payload.stdout", "payload.stderr"):
-        try:
-            with open(os.path.join(workdir, name), "rb") as f:
-                lines = f.read()[-65536:].decode(errors="replace").splitlines()
-            err = [ln.strip() for ln in lines if ln.strip().startswith("ERROR")]
-            if err:
-                msg = err[-1]
-                break
-        except OSError:
-            continue
+    if rc == 0:
+        msg = "ok"
+    else:
+        msg = EXIT_MSGS.get(rc, f"payload exited {rc}")
+        for name in ("payload.stdout", "payload.stderr"):
+            try:
+                with open(os.path.join(workdir, name), "rb") as f:
+                    lines = (f.read()[-65536:]
+                             .decode(errors="replace").splitlines())
+                err = [ln.strip() for ln in lines
+                       if ln.strip().startswith("ERROR")]
+                if err:
+                    msg = err[-1]
+                    break
+            except OSError:
+                continue
+    body = {"exitCode": rc, "exitMsg": msg[:500]}
+    if extra:
+        body.update(extra)
     try:
         with open(os.path.join(workdir, "jobReport.json"), "w") as f:
-            json.dump({"exitCode": rc, "exitMsg": msg[:500]}, f)
+            json.dump(body, f)
         print(f"jobReport.json written: exitCode={rc} exitMsg={msg[:500]}")
     except OSError as e:
         print(f"jobReport.json not written: {e}", file=sys.stderr)
 
 
+def run_canary(payload_seconds, workdir):
+    """Canary probe branch: the landing kit is the payload (site-canary
+    PLAN.md increment 8). The sandbox carries kit/ — the vendored canary
+    package and the prmon binary — and the landing report is emitted to
+    stdout between CANARY-REPORT markers for collection from the job log.
+    """
+    kit = os.path.join(workdir, "kit")
+    env = dict(os.environ)
+    env["CANARY_PRMON"] = os.path.join(kit, "prmon")
+    env["PYTHONPATH"] = kit + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    result = subprocess.run(
+        [sys.executable, "-m", "canary", "landing",
+         "--payload-seconds", str(payload_seconds),
+         "-o", "landing-report.json"],
+        text=True, env=env)
+    landing = None
+    report_text = None
+    try:
+        with open(os.path.join(workdir, "landing-report.json")) as f:
+            report_text = f.read()
+        landing = json.loads(report_text)
+    except (OSError, ValueError) as e:
+        print(f"landing report not readable: {e}", file=sys.stderr)
+    print("CANARY-REPORT-BEGIN", flush=True)
+    if report_text:
+        print(report_text, flush=True)
+    print("CANARY-REPORT-END", flush=True)
+    # The self-report always ships for canary jobs, success included:
+    # the pilot lifts jobReport.json into the job metadata, carrying
+    # the landing report to PanDA — site attribute reporting through
+    # the production channel, with the stdout markers as fallback.
+    write_job_report(result.returncode, workdir,
+                     extra={"canary": landing} if landing else None)
+    return result.returncode
+
+
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "canary":
+        # Canary probe job: same runner, landing-kit payload.
+        payload_seconds = int(sys.argv[2]) if len(sys.argv) > 2 else 60
+        return run_canary(payload_seconds, os.getcwd())
     if len(sys.argv) < 3:
         print(f"Usage: {sys.argv[0]} <SEQNUMBER> <csv_base>", file=sys.stderr)
         return 2
