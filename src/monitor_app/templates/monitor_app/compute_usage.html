@@ -34,7 +34,7 @@
   tr.usage-child td, tr.usage-child th { background: rgba(13, 110, 253, .06); }
   tr.usage-child td.usage-child-name, tr.usage-child th.usage-child-name { padding-left: 2.2rem; }
   tr.usage-child-head th { font-weight: 600; border-bottom: 2px solid #9ec5fe; }
-  tr.usage-child-info td { font-weight: 600; background: rgba(13, 110, 253, .12); padding-left: 2.2rem; }
+  tr.usage-child-info td { font-weight: 400; background: rgba(13, 110, 253, .12); padding: .5rem 1rem .5rem 2.2rem; white-space: nowrap; }
   .usage-child-sort {
     border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
   }
@@ -422,14 +422,16 @@
           info.hidden = !open || present === 0;
           const pool = data.siteTotals.get(queue) || emptyUsage();
           const poolAttempts = pool.job_count + pool.failed_count;
-          const label = parent.querySelector('td').textContent.replace(/\s+/g, ' ').replace(/\(\d+ sites\)/, '').trim();
-          info.querySelector('.usage-child-info-cell').textContent =
-            `${label}, ${startInput.value} to ${endInput.value}: `
-            + `${pool.job_count.toLocaleString()} jobs, ${pool.failed_count.toLocaleString()} failed`
-            + (poolAttempts ? ` (${(100 * pool.failed_count / poolAttempts).toFixed(1)}% failure)` : '')
-            + `, ${fmt(pool.allocated_core_hours)} allocated core-hours, ${fmt(pool.used_core_hours)} used`
-            + (pool.allocated_core_hours ? ` (${(100 * pool.used_core_hours / pool.allocated_core_hours).toFixed(1)}% efficiency)` : '')
-            + `, ${present} sites`;
+          const parts = [
+            `${pool.job_count.toLocaleString()} jobs`,
+            `${pool.failed_count.toLocaleString()} failed`,
+            poolAttempts ? `${(100 * pool.failed_count / poolAttempts).toFixed(1)}% failure` : null,
+            `${fmt(pool.allocated_core_hours)} allocated core-hours`,
+            `${fmt(pool.used_core_hours)} used`,
+            pool.allocated_core_hours ? `${(100 * pool.used_core_hours / pool.allocated_core_hours).toFixed(1)}% efficiency` : null,
+            `${present} sites`,
+          ].filter(Boolean);
+          info.querySelector('.usage-child-info-cell').textContent = parts.join('\u2003\u00b7\u2003');
           anchor.after(info);
           anchor = info;
         }
