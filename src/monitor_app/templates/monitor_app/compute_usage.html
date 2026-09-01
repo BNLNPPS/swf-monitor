@@ -273,7 +273,8 @@
     const childRows = site => [...tableBody.querySelectorAll(`tr.usage-child:not(.usage-child-head):not(.usage-child-info)[data-parent="${site}"]`)];
     const childHead = site => tableBody.querySelector(`tr.usage-child-head[data-parent="${site}"]`);
     const childInfo = site => tableBody.querySelector(`tr.usage-child-info[data-parent="${site}"]`);
-    const expanded = new Set();
+    const expanded = new Set(
+      (new URLSearchParams(window.location.search).get('open') || '').split(',').filter(Boolean));
     const sortButtons = [...document.querySelectorAll('.usage-sort')];
     let sortKey = 'share';
     let sortDirection = 'desc';
@@ -630,6 +631,7 @@
       params.set('bucket', bucketInput.value);
       params.set('metric', metric.value);
       if (includeTest && includeTest.checked) params.set('test', '1'); else params.delete('test');
+      if (expanded.size) params.set('open', [...expanded].join(',')); else params.delete('open');
       window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
       const dataUrl = new URL(jsonLink.href, window.location.href);
       dataUrl.search = params.toString();
@@ -648,6 +650,7 @@
       if (toggle) {
         const site = toggle.dataset.site;
         if (expanded.has(site)) expanded.delete(site); else expanded.add(site);
+        updateLocation();
         rerenderChildren();
         return;
       }
@@ -712,6 +715,14 @@
         periodForm.appendChild(testField);
       }
       testField.value = includeTest && includeTest.checked ? '1' : '';
+      let openField = periodForm.querySelector('input[name="open"]');
+      if (!openField) {
+        openField = document.createElement('input');
+        openField.type = 'hidden';
+        openField.name = 'open';
+        periodForm.appendChild(openField);
+      }
+      openField.value = [...expanded].join(',');
     });
     document.getElementById('usage-sites-all').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = !box.closest('.form-check').hidden; }); render();
