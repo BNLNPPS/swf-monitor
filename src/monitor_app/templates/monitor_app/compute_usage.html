@@ -167,13 +167,13 @@
           </span>
         </div>
         <div class="form-check mb-2">
-          <input class="form-check-input" type="checkbox" id="usage-include-test">
+          <input class="form-check-input" type="checkbox" id="usage-include-test"{% if include_test %} checked{% endif %}>
           <label class="form-check-label small" for="usage-include-test" title="Test, CI, dev, and unified queues stay out of the plots and table unless ticked">Test queues</label>
         </div>
         <div class="usage-site-list">
           {% for site in usage.by_site %}
-          <div class="form-check mb-1"{% if site.is_test %} hidden{% endif %}>
-            <input class="form-check-input usage-site" type="checkbox"{% if not site.is_test %} checked{% endif %}
+          <div class="form-check mb-1"{% if site.is_test and not include_test %} hidden{% endif %}>
+            <input class="form-check-input usage-site" type="checkbox"{% if not site.is_test or include_test %} checked{% endif %}
                    data-test="{% if site.is_test %}1{% else %}0{% endif %}"
                    value="{{ site.site }}" id="usage-site-{{ forloop.counter }}">
             <label class="form-check-label small" for="usage-site-{{ forloop.counter }}">{% if site.label %}{{ site.label }} ({{ site.site }}){% else %}{{ site.site }}{% endif %}</label>
@@ -267,6 +267,7 @@
     const bucketInput = document.getElementById('usage-bucket');
     const jsonLink = document.getElementById('usage-json-link');
     const metric = document.getElementById('usage-metric');
+    const includeTest = document.getElementById('usage-include-test');
     const tableBody = document.querySelector('#usage-site-table tbody');
     const tableRows = [...tableBody.querySelectorAll('tr:not(.usage-child)')];
     const childRows = site => [...tableBody.querySelectorAll(`tr.usage-child:not(.usage-child-head):not(.usage-child-info)[data-parent="${site}"]`)];
@@ -614,6 +615,7 @@
       params.set('end', endInput.value);
       params.set('bucket', bucketInput.value);
       params.set('metric', metric.value);
+      if (includeTest && includeTest.checked) params.set('test', '1'); else params.delete('test');
       window.history.replaceState(null, '', `${window.location.pathname}?${params}`);
       const dataUrl = new URL(jsonLink.href, window.location.href);
       dataUrl.search = params.toString();
@@ -648,7 +650,6 @@
       }
       render();
     });
-    const includeTest = document.getElementById('usage-include-test');
     function applyTestQueues() {
       const on = includeTest && includeTest.checked;
       boxes.filter(box => box.dataset.test === '1').forEach(box => {
@@ -656,7 +657,7 @@
         box.closest('.form-check').hidden = !on;
       });
     }
-    if (includeTest) includeTest.addEventListener('change', () => { applyTestQueues(); render(); });
+    if (includeTest) includeTest.addEventListener('change', () => { applyTestQueues(); updateLocation(); render(); });
     applyTestQueues();
     metric.addEventListener('change', () => { updateLocation(); render(); });
     sortButtons.forEach(button => button.addEventListener('click', () => {
@@ -689,6 +690,14 @@
         periodForm.appendChild(metricField);
       }
       metricField.value = metric.value;
+      let testField = periodForm.querySelector('input[name="test"]');
+      if (!testField) {
+        testField = document.createElement('input');
+        testField.type = 'hidden';
+        testField.name = 'test';
+        periodForm.appendChild(testField);
+      }
+      testField.value = includeTest && includeTest.checked ? '1' : '';
     });
     document.getElementById('usage-sites-all').addEventListener('click', () => {
       boxes.forEach(box => { box.checked = !box.closest('.form-check').hidden; }); render();

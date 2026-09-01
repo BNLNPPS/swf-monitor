@@ -586,6 +586,7 @@ def compute_usage(request):
     return render(request, 'monitor_app/compute_usage.html', {
         'error': error,
         'usage': usage,
+        'include_test': (request.GET.get('test') or '').strip() in ('1', 'true', 'yes'),
         'start': start,
         'end': end,
         'bucket': bucket,
