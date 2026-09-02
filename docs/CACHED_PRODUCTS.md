@@ -51,6 +51,16 @@ variant.
 | `panda_errors:v2:<days>:<user>:<site>:<source>` | PanDA error summary aggregation | 300 s |
 | `panda_tasks_window:<days>` | PanDA tasks list full-window aggregation | 120 s |
 | `prod_hub_corun_counts` | corun-ai assessment/narrative counts | 600 s |
+| `evgen_convention:v2` | EVGEN paths implied by recorded produced outputs (`pcs.services.evgen_convention_paths_cached`) | 26 h; refreshed by the EVGEN sweep |
+| `evgen_coverage:v2` | EVGEN registration worklist (`pcs.services.build_evgen_coverage`) | 26 h; refreshed by the EVGEN sweep |
+
+A producer that changes a product's input refreshes the product as its
+last step, synchronously, so the page serves the new product at once.
+The EVGEN sweep (nightly and the Update button) rebuilds the two EVGEN
+products above this way; the TTL is only the safety net for a missed
+sweep. A builder that cannot see its own input raises rather than
+returning an empty result, so an empty product is never stored in place
+of a missing one.
 
 ## Migration targets
 
