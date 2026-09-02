@@ -1884,7 +1884,8 @@ class EpicProdOpsAgent(BaseAgent):
             self.send_message('/topic/epictopic', {
                 'msg_type': 'evgen_register_ready', 'ok': True, 'path': path,
                 'datasets': summary.get('datasets') or [],
-                'files': summary.get('files'), 'bytes': summary.get('bytes')})
+                'files': summary.get('files'), 'bytes': summary.get('bytes'),
+                'events_pending': True})
             self._log_action('evgen_register', t0,
                              subject_type='evgen_path', subject_key=path,
                              username=username, sublevel='high', live_default=True,
@@ -1892,6 +1893,9 @@ class EpicProdOpsAgent(BaseAgent):
             # The inventory the page reads is the recorded snapshot; refresh
             # it (and the PCS match) so the registration shows at once.
             self._do_evgen_rucio_update(m)
+            # Second step: event counts on the DIDs just registered, then a
+            # second assimilation so the inventory carries them.
+            self._count_evgen_events(m, path, username)
         else:
             reason = summary.get('error') or self._derive_reason(p)
             self.logger.error(f"PRODOPS evgen_register FAILED rc={p.returncode}: {path}")
@@ -1903,6 +1907,59 @@ class EpicProdOpsAgent(BaseAgent):
                              subject_type='evgen_path', subject_key=path,
                              username=username, sublevel='high', live_default=True,
                              level=logging.ERROR, datasets=dids, **counts)
+
+    def _count_evgen_events(self, m, path, username):
+        """The registration's second step: the doer's --events-only mode
+        reads each file's event count through the door and records it as
+        Rucio's events attribute on the file and dataset DIDs. Pushes
+        evgen_events_ready on every outcome, records evgen_events, and
+        re-assimilates so the inventory carries the counts (partial counts
+        included; an uncounted file leaves its dataset total unset)."""
+        cmd = [sys.executable, str(EVGEN_REGISTER_SCRIPT), "--path", path,
+               "--events-only"]
+        self.logger.info(f"PRODOPS evgen_events: {path}")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=EVGEN_REGISTER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            reason = f"timed out after {EVGEN_REGISTER_TIMEOUT}s"
+            self.logger.error(f"PRODOPS evgen_events TIMEOUT: {path}")
+            self.send_message('/topic/epictopic', {
+                'msg_type': 'evgen_events_ready', 'ok': False,
+                'path': path, 'error': reason})
+            self._log_action('evgen_events', t0, outcome='timeout', reason=reason,
+                             subject_type='evgen_path', subject_key=path,
+                             username=username, sublevel='high', live_default=True,
+                             level=logging.ERROR)
+            return
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  register-evgen-rucio --events-only: {line}")
+        summary = {}
+        try:
+            summary = json.loads((p.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            summary = {}
+        dids = [d.get('did') for d in summary.get('datasets') or [] if d.get('did')]
+        counted = sum(d.get('counted') or 0 for d in summary.get('datasets') or [])
+        ok = p.returncode == 0 and bool(summary.get('ok'))
+        reason = '' if ok else (summary.get('error') or self._derive_reason(p))
+        if ok:
+            self.logger.info(f"PRODOPS evgen_events done: {path} events={summary.get('events')}")
+        else:
+            self.logger.error(f"PRODOPS evgen_events FAILED rc={p.returncode}: {path}: {reason}")
+        self.send_message('/topic/epictopic', {
+            'msg_type': 'evgen_events_ready', 'ok': ok, 'path': path,
+            'events': summary.get('events'),
+            'datasets': summary.get('datasets') or [], 'error': reason})
+        self._log_action('evgen_events', t0, outcome='ok' if ok else 'error',
+                         reason=reason, subject_type='evgen_path', subject_key=path,
+                         username=username, sublevel='high', live_default=True,
+                         level=logging.INFO if ok else logging.ERROR,
+                         datasets=dids, events=summary.get('events'),
+                         files_counted=counted)
+        # The counts that did land belong in the inventory either way.
+        self._do_evgen_rucio_update(m)
 
     def _handle_catalog_import(self, m):
         """Run a PCS catalog import (csv / epic-prod) off the receiver thread —

@@ -31,6 +31,7 @@ Usage::
 
     register-evgen-rucio.py --path /EVGEN/BACKGROUNDS/BEAMGAS/proton/pythia8.306-1.0/100GeV
     register-evgen-rucio.py --path ... --dry-run    # list + checksum only, no Rucio write
+    register-evgen-rucio.py --path ... --events-only  # count events, record on the DIDs
 
 Exit codes: 0 ok · 2 bad path · 3 listing failed or empty · 4 checksum
 incomplete · 5 proxy unusable · 6 Rucio error · 7 verification mismatch.
@@ -60,8 +61,14 @@ LISTING_TIMEOUT = 600
 CHECKSUM_TIMEOUT = 120
 BATCH_SIZE = 500
 PATH_OK = re.compile(r'^/EVGEN/[A-Za-z0-9._=+\-/]+$')
+# Event counting (--events-only): the entry count of the HepMC3 tree, read
+# from the file's tree header through the door; no event bytes move.
+EVENTS_WORKERS = int(os.environ.get('EVGEN_EVENTS_WORKERS', '4'))
+EVENTS_TIMEOUT = int(os.environ.get('EVGEN_EVENTS_TIMEOUT', '120'))   # per file
+EVENTS_TREE = os.environ.get('EVGEN_EVENTS_TREE', 'hepmc3_tree')
 
 EXIT_BAD_PATH, EXIT_LISTING, EXIT_CHECKSUM, EXIT_PROXY, EXIT_RUCIO, EXIT_VERIFY = 2, 3, 4, 5, 6, 7
+EXIT_EVENTS = 8
 
 
 def _log(msg):
@@ -206,15 +213,16 @@ def plan_datasets(files, adlers):
         name = door_path[len(XRD_BASE):]
         datasets[os.path.dirname(name)].append({
             'scope': RUCIO_SCOPE, 'name': name, 'bytes': size,
-            'adler32': adlers[door_path], 'pfn': f'{XRD_DOOR}/{door_path}'})
+            'adler32': adlers[door_path] if door_path in adlers else '',
+            'pfn': f'{XRD_DOOR}/{door_path}'})
     return dict(sorted(datasets.items()))
 
 
-def register(datasets, proxy):
+def rucio_client(proxy):
+    """The Rucio client as the production account, authenticated by the
+    proxy; refuses a proxy that maps to any other account."""
     from rucio.client import Client
-    from rucio.common.exception import (DataIdentifierAlreadyExists,
-                                        DuplicateContent, FileAlreadyExists,
-                                        RucioException)
+    from rucio.common.exception import RucioException
     try:
         client = Client(rucio_host=RUCIO_HOST, auth_host=RUCIO_HOST,
                         account=RUCIO_ACCOUNT, auth_type='x509_proxy',
@@ -225,6 +233,94 @@ def register(datasets, proxy):
     if who.get('account') != RUCIO_ACCOUNT:
         raise DoerError(EXIT_RUCIO, f'proxy maps to account {who.get("account")!r}, '
                         f'not {RUCIO_ACCOUNT!r}')
+    return client
+
+
+def count_events(datasets, proxy, write=True):
+    """Event count per file, read through the door as the entry count of
+    the HepMC3 tree (the tree header carries it; no event bytes move), then
+    recorded as Rucio's ``events`` attribute on each file DID and, once
+    every file of a dataset is counted, on the dataset. Returns one record
+    per dataset; a file that cannot be counted is reported by name and
+    leaves its dataset's total unset — never a partial total presented as
+    the whole. ``write=False`` counts and reports without touching Rucio."""
+    import uproot
+    from concurrent.futures import TimeoutError as FutureTimeout
+    from rucio.common.exception import RucioException
+    os.environ['X509_USER_PROXY'] = proxy
+
+    class _NoWrite:
+        def set_metadata(self, *_args, **_kwargs):
+            return True
+
+    def _one(entry):
+        if not entry['name'].endswith('.root'):
+            return entry['name'], None, 'not a ROOT file'
+        try:
+            with uproot.open(entry['pfn']) as fh:
+                if EVENTS_TREE not in fh:
+                    return entry['name'], None, f'no {EVENTS_TREE} in file'
+                return entry['name'], int(fh[EVENTS_TREE].num_entries), ''
+        except Exception as e:                              # noqa: BLE001
+            return entry['name'], None, f'{type(e).__name__}: {e}'
+
+    client = rucio_client(proxy) if write else _NoWrite()
+    result = []
+    for ds_name, entries in datasets.items():
+        rec = {'did': f'{RUCIO_SCOPE}:{ds_name}', 'files': len(entries),
+               'counted': 0, 'events': None, 'failed': []}
+        counts = {}
+        with ThreadPoolExecutor(max_workers=EVENTS_WORKERS) as pool:
+            futures = {pool.submit(_one, e): e for e in entries}
+            for fut, entry in futures.items():
+                try:
+                    name, n, why = fut.result(timeout=EVENTS_TIMEOUT)
+                except FutureTimeout:
+                    name, n, why = entry['name'], None, f'timed out after {EVENTS_TIMEOUT}s'
+                if n is None:
+                    rec['failed'].append({'file': name, 'reason': why})
+                else:
+                    counts[name] = n
+        for name, n in counts.items():
+            try:
+                client.set_metadata(RUCIO_SCOPE, name, 'events', n)
+                rec['counted'] += 1
+            except RucioException as e:
+                rec['failed'].append({'file': name, 'reason': f'set_metadata: {e}'})
+        if rec['counted'] == len(entries):
+            # Rucio derives a dataset's events from its files and refuses a
+            # direct write on the dataset; read the derived value back and
+            # hold it to the sum.
+            total = sum(counts.values())
+            if not write:
+                rec['events'] = total
+            else:
+                try:
+                    derived = client.get_metadata(RUCIO_SCOPE, ds_name).get('events')
+                except RucioException as e:
+                    derived = None
+                    rec['failed'].append({'file': ds_name,
+                                          'reason': f'get_metadata: {e}'})
+                if derived == total:
+                    rec['events'] = total
+                elif derived is not None or not rec['failed']:
+                    rec['failed'].append({
+                        'file': ds_name,
+                        'reason': f'dataset events {derived} differs from the '
+                                  f'sum of its files {total}'})
+        rec['failed'] = rec['failed'][:20]
+        _log(f'  {rec["did"]}: {rec["counted"]}/{rec["files"]} files counted, '
+             f'events {rec["events"] if rec["events"] is not None else "unset"}'
+             + (f', {len(rec["failed"])} failed' if rec['failed'] else ''))
+        result.append(rec)
+    return result
+
+
+def register(datasets, proxy):
+    from rucio.common.exception import (DataIdentifierAlreadyExists,
+                                        DuplicateContent, FileAlreadyExists,
+                                        RucioException)
+    client = rucio_client(proxy)
 
     result = []
     for ds_name, entries in datasets.items():
@@ -300,6 +396,9 @@ def main(argv):
     ap.add_argument('--path', required=True, help='EVGEN path, e.g. /EVGEN/DIS/...')
     ap.add_argument('--dry-run', action='store_true',
                     help='list and checksum only; write nothing to Rucio')
+    ap.add_argument('--events-only', action='store_true',
+                    help='count events per file through the door and record '
+                         'them on the registered DIDs; no registration')
     args = ap.parse_args(argv[1:])
 
     evgen_path = args.path.strip().rstrip('/')
@@ -317,6 +416,24 @@ def main(argv):
                        skipped=len(skipped))
         _log(f'{len(files)} files, {summary["bytes"]} bytes under {XRD_BASE}{evgen_path}'
              + (f' ({len(skipped)} .nfs remnants skipped)' if skipped else ''))
+
+        if args.events_only:
+            # The registration's second step: counts recorded on the DIDs
+            # the first step registered. Checksums are not needed here.
+            datasets = plan_datasets(files, defaultdict(str))
+            summary['datasets'] = count_events(datasets, proxy,
+                                               write=not args.dry_run)
+            failed_files = sum(len(d['failed']) for d in summary['datasets'])
+            summary['events'] = (sum(d['events'] for d in summary['datasets'])
+                                 if all(d['events'] is not None
+                                        for d in summary['datasets']) else None)
+            if failed_files:
+                raise DoerError(EXIT_EVENTS, f'{failed_files} file(s) not counted; '
+                                f'dataset totals left unset where a file is missing')
+            summary['ok'] = True
+            summary['seconds'] = round(time.monotonic() - t0, 1)
+            print(json.dumps(summary), flush=True)
+            return 0
 
         adlers, failed = checksums(files, proxy)
         if failed:
