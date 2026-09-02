@@ -604,6 +604,7 @@
                 <a href="{% url 'pcs:tag_compose' tag_type='k' %}" class="{% if active_nav.pcs_background_tags %}nav-active{% endif %}">Background Tags</a>
                 <a href="{% url 'pcs:datasets_compose' %}" class="{% if active_nav.pcs_datasets %}nav-active{% endif %}">Datasets</a>
                 <a href="{% url 'pcs:evgen_inputs' %}" class="{% if active_nav.pcs_evgen_inputs %}nav-active{% endif %}">EVGEN Inputs</a>
+                <a href="{% url 'pcs:pc_ingest' %}" class="{% if active_nav.pcs_ingest %}nav-active{% endif %}">PC ingest</a>
                 <a href="{% url 'pcs:prod_configs_compose' %}" class="{% if active_nav.pcs_configs %}nav-active{% endif %}">Prod Configs</a>
                 <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks" class="{% if active_nav.pcs_tasks %}nav-active{% endif %}">Prod Tasks</a>
             </div>
