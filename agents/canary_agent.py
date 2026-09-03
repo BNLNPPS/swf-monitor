@@ -71,7 +71,7 @@ EXIT_DELIBERATE = 100
 class CanaryAgent(BaseAgent):
     """Canary site-health agent — dispatches canary messages to handlers."""
 
-    KNOWN_TYPES = {"assess_refresh", "health_ping", "shutdown"}
+    KNOWN_TYPES = {"assess_refresh", "probe_dispatch", "health_ping", "shutdown"}
 
     def __init__(self):
         # System-level singleton (not a per-user testbed agent): its namespace
