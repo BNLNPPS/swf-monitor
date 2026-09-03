@@ -108,13 +108,18 @@ def run_canary(payload_seconds, workdir):
     if report_text:
         print(report_text, flush=True)
     print("CANARY-REPORT-END", flush=True)
-    # The self-report always ships for canary jobs, success included:
-    # the pilot lifts jobReport.json into the job metadata, carrying
-    # the landing report to PanDA — site attribute reporting through
-    # the production channel, with the stdout markers as fallback.
-    write_job_report(result.returncode, workdir,
-                     extra={"canary": landing} if landing else None)
-    return result.returncode
+    # A probe that reached this point has done its job: delivering the
+    # report. It exits success whatever the landing kit returned, so the
+    # pilot ships jobReport.json as job metadata (the server keeps
+    # metadata for finished jobs only), and the verdict is read from the
+    # report, which carries the kit's own exit code. The stdout markers
+    # above are the fallback copy.
+    canary = dict(landing) if landing else {}
+    canary["kit_exit_code"] = result.returncode
+    if landing is None:
+        canary["error"] = "landing report not produced"
+    write_job_report(0, workdir, extra={"canary": canary})
+    return 0
 
 
 def main():
