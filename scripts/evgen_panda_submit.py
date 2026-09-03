@@ -57,11 +57,17 @@ def _upload_sandbox(workdir):
         archive_path = os.path.join(tmpdir, archive_name)
         _log(f"packing sandbox {workdir} -> {archive_name}")
         with tarfile.open(archive_path, 'w:gz') as tar:
-            for fname in sorted(os.listdir(workdir)):
-                fpath = os.path.join(workdir, fname)
-                if os.path.isfile(fpath):
-                    tar.add(fpath, arcname=fname)   # flat: name only, no path
-                    _log(f"  + {fname}")
+            # Every file under the sandbox with its path relative to the
+            # sandbox root: a flat sandbox (the production CSV and runner)
+            # packs exactly as before, and a sandbox carrying a package
+            # tree (the canary kit) keeps it, so the job can import it.
+            for root, dirs, files in os.walk(workdir):
+                dirs[:] = sorted(d for d in dirs if d != '__pycache__')
+                for fname in sorted(files):
+                    fpath = os.path.join(root, fname)
+                    arcname = os.path.relpath(fpath, workdir)
+                    tar.add(fpath, arcname=arcname)
+                    _log(f"  + {arcname}")
         old_cwd = os.getcwd()
         os.chdir(tmpdir)
         try:
