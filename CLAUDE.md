@@ -70,7 +70,8 @@ the old paths here. This repo's docs cover the platform services:
 - `PRODUCTION_DEPLOYMENT.md` — deploying swf-monitor.
 - `API_REFERENCE.md` — REST API surface.
 - `MCP.md`, `MCP_TOOL_REFERENCE.md`, `MCP_CLIENTS.md`, `PANDA_BOT.md` — MCP server overview, tool catalog, client setup, and the DISpatcher Mattermost bot (MCP client).
-- `alarms.md`, `SETUP_GUIDE.md`, `TEST_SYSTEM.md`, `POSTGRES_MCP.md` — alarms, setup, tests, Postgres MCP.
+- `alarms.md`, `ALARM_QUEUE.md` — the alarm engine; the alarm queue design: lifecycle transitions, per-subscriber feeds with read state, automated response (design).
+- `SETUP_GUIDE.md`, `TEST_SYSTEM.md`, `POSTGRES_MCP.md` — setup, tests, Postgres MCP.
 - `FASTMON_FILES.md`, `TFSLICE.md` — testbed fast-monitoring docs.
 
 ## Editing discipline (AI sessions)

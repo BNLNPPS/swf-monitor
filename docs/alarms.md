@@ -5,6 +5,9 @@ Alarms are now owned by `swf-monitor` on `pandaserver02`. The old
 but the live alarm dashboard, editor, runtime state, and cron runner are in
 this repository.
 
+Lifecycle, per-subscriber feeds, and automated response are specified in
+[ALARM_QUEUE.md](ALARM_QUEUE.md).
+
 ## Runtime
 
 - Dashboard: `/swf-monitor/alarms/`
