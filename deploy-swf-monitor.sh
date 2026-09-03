@@ -118,6 +118,17 @@ log "Copying development virtual environment..."
 cp -r /eic/u/wenauseic/github/swf-testbed/.venv .venv
 source .venv/bin/activate
 
+# The copied venv carries the dev venv's editable install of swf_monitor,
+# whose path file points at the development tree: from any directory that
+# does not put this release's src first, the deployed python would import
+# monitor_app from the dev tree. Point the path file at this release's src
+# so every process in this venv resolves the release, whatever its cwd.
+for pth in .venv/lib/python3*/site-packages/__editable__.swf_monitor-*.pth; do
+    [ -f "$pth" ] || continue
+    echo "$(pwd)/src" > "$pth"
+    log "Editable swf_monitor path file -> $(pwd)/src"
+done
+
 # Freeze swf-epicprod into the deployed venv. The shared dev venv carries it
 # as an editable install (dev ergonomics); shipped verbatim, the deployed venv
 # would import the dev working tree live. Reinstalling non-editable here
@@ -146,6 +157,11 @@ fi
 if .venv/bin/python -m pip show site-canary >/dev/null 2>&1; then
     log "Freezing site-canary into the deployed venv (non-editable)..."
     .venv/bin/python -m pip install --quiet --force-reinstall --no-deps /data/wenauseic/github/site-canary
+    # The probe sandbox vendors the canary package from this wheel, so a
+    # probe ships exactly what this release deployed, never the checkout.
+    log "Building the site-canary wheel beside the release for probe sandboxes..."
+    mkdir -p wheels
+    .venv/bin/python -m pip wheel --quiet --no-deps -w wheels /data/wenauseic/github/site-canary
     rm -rf /data/wenauseic/github/site-canary/build
 fi
 # swf-common-lib likewise: the copied venv carries its dev editable, which
