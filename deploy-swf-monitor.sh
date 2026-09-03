@@ -287,6 +287,14 @@ if systemctl is-enabled epicprod-ops-agent.service >/dev/null 2>&1; then
     systemctl restart epicprod-ops-agent.service
 fi
 
+# The canary agent runs its doers from the release tree the same way; a deploy
+# that left it running kept a deleted release as cwd and every probe died at
+# shell start (2026-09-01). Restart it every deploy like the prod-ops agent.
+if systemctl is-enabled canary-agent.service >/dev/null 2>&1; then
+    log "Restarting canary agent (canary-agent) to pick up new code/env..."
+    systemctl restart canary-agent.service
+fi
+
 # Detect bot code changes before health check (bots restart after)
 PREV_RELEASE=$(ls -1t "$DEPLOY_ROOT/releases" | sed -n '2p')
 PANDA_BOT_CHANGED=false
