@@ -30,8 +30,10 @@ creates queue items.
 
 An alarm event is one condition on one subject (`dedupe_key`). Its lifecycle
 is a sequence of transitions, recorded in an `AlarmTransition` table (event,
-kind, time, actor, detail). The engine writes the detection transitions; the
-web tier, REST, and the responder write the rest.
+kind, time, actor, detail). The engine originates the detection transitions;
+the web tier, REST actions, and the responder originate the rest. Every
+transition is recorded through one endpoint (Data), which also logs it as an
+incident, so a transition and its incident cannot diverge.
 
 | Transition | Written by | Meaning |
 |---|---|---|
@@ -47,17 +49,20 @@ web tier, REST, and the responder write the rest.
 
 The event row keeps its current state as a summary of the latest transitions
 (`acknowledged_by`, `assigned_to`, `escalated_at`, `clear_time`), and the
-transitions are its history. Acknowledgement and assignment are actions on the
-dashboard and through REST; the response transitions carry a response record:
-the diagnosis, the proposed action, who approved it, what was done, and what
-the verification found.
+transitions are its history. A `renotified` transition is written when the
+renotify interval has elapsed since the later of `raised` and the previous
+`renotified`, independently of whether email is enabled or sent; the email
+bundle keeps its own `last_notified` stamp. Acknowledgement and assignment are
+actions on the dashboard and through REST; the response transitions carry a
+response record: the diagnosis, the proposed action, who approved it, what was
+done, and what the verification found.
 
 Every transition is also logged on the action stream as an incident
 (`alarm_raised`, `alarm_acknowledged`, `alarm_response_taken`, `alarm_cleared`,
 and so on) with the alarm name, the subject, the severity, and the dashboard
-URL as attributes. The engine logs through the REST twin of
-`log_epicprod_action` that the ops agent uses, since the engine does not boot
-Django. Email notification is unchanged.
+URL as attributes. The engine does not boot Django; it posts its transitions
+to the endpoint, which records them and logs the incidents. Email
+notification is unchanged.
 
 ## Feeds
 
@@ -90,14 +95,17 @@ of the queue and no read state.
 
 ## Response
 
-The responder is an LLM operation dispatched on `raised` for the alarm
-classes it subscribes to. It runs where the platform already runs bounded LLM
-work: a notice-routing push plugin, `alarm-responder`, hands the incident to a
-corun-ai wrangle work item (EPICPROD_LLM_OPERATIONS.md, the comment-reply
-pattern), and the worker runs with the swf-monitor MCP tools. It never holds a
-production credential; a privileged action is a request to the production
-ops agent (`panda_task_operations`), which executes it, verifies the result,
-and records the verified outcome as it does for any operator request.
+The responder is an LLM operation dispatched for the alarm classes it
+subscribes to: on `raised`, and on `renotified` when the event carries no
+response transition yet, so a dispatch lost to an outage is retried at the
+next renotify. It runs on the wrangler agent
+([WRANGLER_AGENT.md](WRANGLER_AGENT.md)): the notice-routing push plugin
+`alarm-responder` enqueues one worker per matching incident, keyed on the
+event, and the agent's `alarm_respond` handler runs the doer with the
+swf-monitor MCP tools. The responder never holds a production credential; a
+privileged action is a request to the production ops agent through the
+task-operation queue, which executes it, verifies the result, and records the
+verified outcome as it does for any operator request.
 
 The responder has three modes, set per alarm class in SysConfig and visible
 on the dashboard:
@@ -144,9 +152,11 @@ Each is one `detect(client, params)` module and one alarm entry, per
 
 ## Data
 
-- `AlarmTransition` — event, kind, time, actor, detail (JSON). Written by the
-  engine through psycopg for detection transitions and by Django for the
-  rest.
+- `AlarmTransition` — event, kind, time, actor, detail (JSON). Written only
+  by the web tier: a token-authenticated endpoint, `/api/alarms/transitions/`,
+  records a transition and logs its action-stream incident in one request.
+  The engine posts its detection transitions to it; the dashboard, REST
+  actions, and the responder write through the same path.
 - `AlarmFeedState` — subscriber, event, last read transition. Unique per
   (subscriber, event).
 - Alarm entry parameters gain `escalation_interval` and `responder_mode`.
