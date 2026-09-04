@@ -13,7 +13,9 @@ Serves two things from the uvicorn process on 127.0.0.1:8001:
 
 MCPRequestGuard wraps the MCP Starlette app and enforces:
 - /health returns {"status": "ok"} with no auth, for the watchdog
-- Only POST is accepted (405 otherwise) — no server-pushed SSE, no GET
+- GET on the endpoint root returns the setup page for people and their
+  assistants (how to connect on this face, and the external page for
+  those outside BNL); every other non-POST is 405 — no server-pushed SSE
 - Authorization: Bearer <settings.MCP_BEARER_TOKEN> on every non-health
   request (401 missing, 403 wrong, 503 not configured), OR the proxied
   identity: a request from the localhost hop (the swf-remote SSH tunnel,
@@ -72,6 +74,49 @@ async def _send_json(send, status: int, value: dict[str, Any], headers=None) -> 
     await send({"type": "http.response.body", "body": body})
 
 
+_SETUP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>swf-monitor MCP</title>
+<style>
+body { font: 17px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #222; background: #fff; max-width: 60em; margin: 2em auto; padding: 0 1em; }
+h1 { font-size: 1.6em; } h2 { font-size: 1.2em; margin-top: 1.6em; }
+code, pre { font-size: 0.95em; background: #f3f3f3; border-radius: 4px; }
+code { padding: 1px 5px; } pre { padding: 10px 14px; overflow-x: auto; }
+</style></head><body>
+<h1>swf-monitor MCP</h1>
+<p>This endpoint serves the ePIC production monitor's MCP toolset: PanDA
+tasks and jobs, queues, the production catalog, canary probes, alarms and
+pings, AI proposals, Rucio, and the testbed. An AI assistant connected to
+it can answer questions about the system and propose actions for a person
+to accept.</p>
+<h2>Outside BNL</h2>
+<p>Use the external face: <a href="https://epic-devcloud.org/prod/mcp/">https://epic-devcloud.org/prod/mcp/</a>,
+which explains how to sign in, create a token, and connect. The tools run
+there as the signed-in person.</p>
+<h2>On the BNL network</h2>
+<p>Connect to this endpoint with the shared bearer token, kept in the
+monitor's environment as <code>SWF_MONITOR_MCP_TOKEN</code>:</p>
+<pre>claude mcp add --transport http swf-testbed https://pandaserver02.sdcc.bnl.gov/swf-monitor/mcp/ \\
+  --header "Authorization: Bearer $SWF_MONITOR_MCP_TOKEN"</pre>
+<p>Tools that take a <code>username</code> need it on this face; through the
+external face it is filled in from the sign-in. Details: the repository's
+<code>docs/MCP_CLIENTS.md</code> and <code>docs/MCP.md</code>.</p>
+</body></html>
+"""
+
+
+async def _send_setup_page(send) -> None:
+    body = _SETUP_PAGE.encode("utf-8")
+    await send({
+        "type": "http.response.start",
+        "status": 200,
+        "headers": [
+            (b"content-type", b"text/html; charset=utf-8"),
+            (b"content-length", str(len(body)).encode("ascii")),
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
 class MCPRequestGuard:
     """Enforce auth and finite POST JSON-RPC before FastMCP sees a request."""
 
@@ -90,6 +135,9 @@ class MCPRequestGuard:
 
         scope = self._normalize_mcp_path(scope)
         method = scope.get("method", "").upper()
+        if method == "GET" and scope.get("path", "/") in ("", "/"):
+            await _send_setup_page(send)
+            return
         if method != "POST":
             await _send_json(
                 send,
