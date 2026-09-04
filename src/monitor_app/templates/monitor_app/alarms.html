@@ -282,7 +282,9 @@
         <p class="text-muted">No open pings.</p>
         {% endif %}
 
-        <form id="ping-form" class="row g-2 align-items-end mb-2" style="max-width:1300px;" autocomplete="off">
+        <div class="alarm-desc" style="max-width:1300px; margin-top:0.6em;">
+        <div class="label">Add a ping</div>
+        <form id="ping-form" class="row g-2 align-items-end mb-0" autocomplete="off">
             <div class="col-md-4">
                 <label class="form-label text-muted mb-0" style="font-size:0.85em;">Ping title</label>
                 <input name="title" class="form-control form-control-sm" required {% if not user.is_authenticated %}disabled{% endif %}>
@@ -312,6 +314,7 @@
             </div>
             <div class="col-md-12"><span id="ping-form-status" class="text-muted" style="font-size:0.9em;">{% if not user.is_authenticated %}Sign in to enter or fulfil pings.{% endif %}</span></div>
         </form>
+        </div>
 
         {% if pings_done %}
         <details class="mb-2">
