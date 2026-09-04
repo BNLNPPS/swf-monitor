@@ -3774,6 +3774,9 @@ def register_snapper_providers():
         curve_color=_epicprod_curve_color,
         curve_groups=_epicprod_groups,
         scope_curve_groups=_epicprod_scope_groups,
+        # The report page's cut carries the scope's own cards; errors
+        # and platform have their focus views and their cards live there.
+        scope_components=('panda', 'health', 'delivery'),
         focus_view=(_delivery_focus_view, _site_focus_view,
                     _errors_focus_view, _platform_focus_view),
         component_cards={'panda': _panda_card,
