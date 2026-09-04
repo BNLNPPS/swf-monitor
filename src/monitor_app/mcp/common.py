@@ -56,9 +56,15 @@ def _get_username(username: str = None) -> str:
 
 
 def _monitor_url(path: str) -> str:
-    """Build a full monitor URL from a path."""
+    """Build a full monitor URL from a path: the external face for a
+    caller that arrived through the swf-remote proxy (the internal name
+    is unreachable from where they are), else the monitor's own base."""
     import os
-    base = os.getenv('SWF_MONITOR_HTTP_URL', 'http://localhost:8000/swf-monitor')
+    if CALLER.get():
+        from monitor_app.models import external_face_base_url
+        base = f"{external_face_base_url().rstrip('/')}/prod"
+    else:
+        base = os.getenv('SWF_MONITOR_HTTP_URL', 'http://localhost:8000/swf-monitor')
     return f"{base.rstrip('/')}/{path.lstrip('/')}"
 
 
