@@ -657,8 +657,8 @@
             <button class="dropbtn{% if active_nav.sites %} nav-active{% endif %}">Sites</button>
             <div class="dropdown-content">
                 <a href="{% url 'monitor_app:compute_usage' %}" class="{% if active_nav.compute_usage %}nav-active{% endif %}">Site compute usage</a>
-                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
                 <a href="{% url 'snapper_ai:snapper_focus' scope='epicprod' focus_slug='site' %}">Snapper site view</a>
+                <a href="{% url 'monitor_app:epic_queues_list' %}" class="{% if active_nav.panda_queues %}nav-active{% endif %}">PanDA queues</a>
                 <a href="{% url 'canary:probes_page' %}">Canary probes</a>
             </div>
         </div>
