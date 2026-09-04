@@ -685,8 +685,8 @@
                 {% if user.is_authenticated and user.is_staff %}
                     <a href="{% url 'admin:index' %}">Admin</a>
                 {% endif %}
-                <a href="{% url 'monitor_app:about' %}" class="{% if active_nav.about %}nav-active{% endif %}">About</a>
                 <a href="{{ request.META.SCRIPT_NAME }}/mcp/" title="Connect an AI assistant to this monitor's MCP tools">MCP</a>
+                <a href="{% url 'monitor_app:about' %}" class="{% if active_nav.about %}nav-active{% endif %}">About</a>
             </div>
         </div>
         <div class="nav-auth">
