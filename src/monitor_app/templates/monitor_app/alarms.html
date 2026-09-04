@@ -232,8 +232,7 @@
                     <th>Due</th>
                     <th title="Days from today (Eastern) to the due date; negative when overdue">Days left</th>
                     <th title="The state of the ping: scheduled (not yet within its lead time), ping (raised), alarm (overdue), fulfilled">State</th>
-                    <th title="The responsible person or @team; mailed with each raise">Owner</th>
-                    <th title="Entered by hand, or the AI proposal that created it">Origin</th>
+                    <th title="The responsible person or @team, mailed with each raise; below it, how the ping entered: by hand, or the AI proposal that created it">Owner</th>
                     <th></th>
                 </tr>
             </thead>
@@ -244,8 +243,7 @@
                     <td style="white-space:nowrap;">{{ pg.due }}</td>
                     <td class="text-end">{% if pg.days_left is not None %}{{ pg.days_left }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                     <td class="{{ pg.state|state_class }}" style="white-space:nowrap;">{{ pg.state }}</td>
-                    <td>{{ pg.owner|default:'—' }}</td>
-                    <td><small>{{ pg.origin }}{% if pg.created_by %} <span class="text-muted">by {{ pg.created_by }}</span>{% endif %}</small></td>
+                    <td>{{ pg.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">{{ pg.origin }}{% if pg.created_by %} by {{ pg.created_by }}{% endif %}</div></td>
                     <td style="white-space:nowrap;">
                       <button type="button" class="btn btn-success btn-sm ping-fulfil"
                               data-url="{% url 'monitor_app:ping_fulfil' ping_uuid=pg.id %}"
@@ -295,7 +293,7 @@
           <summary class="text-muted" style="cursor:pointer;">Fulfilled pings ({{ pings_done|length }})</summary>
           <table class="table table-sm swf-sortable mt-2" style="max-width:1300px;">
             <thead>
-              <tr><th>Fulfilled</th><th>By</th><th>Due</th><th>Obligation</th><th>Owner</th><th>Origin</th></tr>
+              <tr><th>Fulfilled</th><th>By</th><th>Due</th><th>Obligation</th><th>Owner</th></tr>
             </thead>
             <tbody>
               {% for pg in pings_done %}
@@ -304,8 +302,7 @@
                 <td>{{ pg.fulfilled_by|default:'—' }}</td>
                 <td style="white-space:nowrap;">{{ pg.due }}</td>
                 <td>{% if pg.url %}<a href="{{ pg.url }}" target="_blank" rel="noopener">{{ pg.title }}</a>{% else %}{{ pg.title }}{% endif %}</td>
-                <td>{{ pg.owner|default:'—' }}</td>
-                <td><small>{{ pg.origin }}</small></td>
+                <td>{{ pg.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">{{ pg.origin }}{% if pg.created_by %} by {{ pg.created_by }}{% endif %}</div></td>
               </tr>
               {% endfor %}
             </tbody>
