@@ -157,4 +157,8 @@ history of a ping is the alarm event history it already has.
 Step 1 was completed 2026-09-04: the ping entry, the `pings` module and
 its alarm entry, the dashboard section with entry and fulfil, event
 severity refresh, and owner recipients are in production, and the first
-two pings raised on the engine's tick. Steps 2 to 4 are not started.
+two pings raised on the engine's tick. Step 2 was completed the same day:
+the `ping` and `ping_fulfil` proposal categories, the `ai_propose_ping`
+MCP tool, and the proposal rows on the dashboard with an editable due
+date; the first two pings were re-issued as proposals for acceptance.
+Steps 3 and 4 are not started.
