@@ -154,4 +154,7 @@ history of a ping is the alarm event history it already has.
 
 ## Status
 
-Design. Nothing in this document is implemented.
+Step 1 was completed 2026-09-04: the ping entry, the `pings` module and
+its alarm entry, the dashboard section with entry and fulfil, event
+severity refresh, and owner recipients are in production, and the first
+two pings raised on the engine's tick. Steps 2 to 4 are not started.
