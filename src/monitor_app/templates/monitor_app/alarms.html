@@ -224,11 +224,11 @@
             — dated obligations: raised {{ ping_default_lead }} days ahead, an alarm once overdue, cleared when fulfilled
           </span>
         </div>
-        {% if pings_open %}
+        {% if pings_open or ping_proposals %}
         <table class="table table-sm table-hover swf-sortable" style="max-width:1300px;">
             <thead>
                 <tr>
-                    <th>Obligation</th>
+                    <th>Ping title</th>
                     <th>Due</th>
                     <th title="Days from today (Eastern) to the due date; negative when overdue">Days left</th>
                     <th title="The state of the ping: scheduled (not yet within its lead time), ping (raised), alarm (overdue), fulfilled">State</th>
@@ -237,18 +237,42 @@
                 </tr>
             </thead>
             <tbody>
+                {% for pr in ping_proposals %}
+                <tr class="ping-proposal" data-proposal-id="{{ pr.id }}" data-orig-due="{{ pr.due }}" style="background-color: var(--ai-bg);">
+                    <td>{% if pr.url %}<a href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.title }}</a>{% else %}{{ pr.title }}{% endif %}{% if pr.note %}<div class="text-muted" style="font-size:0.9em;">{{ pr.note|truncatechars:200 }}</div>{% endif %}<div class="ai-attr-text" style="font-size:0.85em; display:inline-block; padding:1px 6px; border-radius:3px; margin-top:2px;">AI proposal {{ pr.ref }}: {{ pr.comment }}</div></td>
+                    <td style="white-space:nowrap;"><input type="date" class="form-control form-control-sm ping-proposal-due" value="{{ pr.due }}" style="width:11em; display:inline-block;" title="Editable before acceptance; the amended date is recorded with the decision" {% if not user.is_authenticated %}disabled{% endif %}></td>
+                    <td class="text-end">{% if pr.days_left is not None %}{{ pr.days_left }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="ai-fill" style="white-space:nowrap; color: var(--ai-fg); font-weight:600;">proposed</td>
+                    <td>{{ pr.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">AI proposal {{ pr.ref }} by {{ pr.proposer|default:'?' }}</div></td>
+                    <td style="white-space:nowrap;">
+                      <button type="button" class="btn btn-success btn-sm ping-proposal-decide" data-decision="approve" {% if not user.is_authenticated %}disabled{% endif %}
+                              title="{% if user.is_authenticated %}Accept the proposal and enter the ping with the date shown{% else %}Sign in to accept{% endif %}">Approve</button>
+                      <button type="button" class="btn btn-secondary btn-sm ping-proposal-decide" data-decision="deny" {% if not user.is_authenticated %}disabled{% endif %}
+                              title="{% if user.is_authenticated %}Deny the proposal; it is not re-proposed until its inputs change{% else %}Sign in to deny{% endif %}">Deny</button>
+                    </td>
+                </tr>
+                {% endfor %}
                 {% for pg in pings_open %}
                 <tr>
-                    <td>{% if pg.url %}<a href="{{ pg.url }}" target="_blank" rel="noopener">{{ pg.title }}</a>{% else %}{{ pg.title }}{% endif %}{% if pg.note %}<div class="text-muted" style="font-size:0.9em;">{{ pg.note|truncatechars:200 }}</div>{% endif %}</td>
+                    <td>{% if pg.url %}<a href="{{ pg.url }}" target="_blank" rel="noopener">{{ pg.title }}</a>{% else %}{{ pg.title }}{% endif %}{% if pg.note %}<div class="text-muted" style="font-size:0.9em;">{{ pg.note|truncatechars:200 }}</div>{% endif %}{% if pg.fulfil_proposal %}<div class="ai-attr-text" style="font-size:0.85em; display:inline-block; padding:1px 6px; border-radius:3px; margin-top:2px;">AI proposal {{ pg.fulfil_proposal.ref }}: mark fulfilled. {{ pg.fulfil_proposal.comment }}</div>{% endif %}</td>
                     <td style="white-space:nowrap;">{{ pg.due }}</td>
                     <td class="text-end">{% if pg.days_left is not None %}{{ pg.days_left }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
                     <td class="{{ pg.state|state_class }}" style="white-space:nowrap;">{{ pg.state }}</td>
                     <td>{{ pg.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">{{ pg.origin }}{% if pg.created_by %} by {{ pg.created_by }}{% endif %}</div></td>
                     <td style="white-space:nowrap;">
+                      {% if pg.fulfil_proposal %}
+                      <span data-proposal-id="{{ pg.fulfil_proposal.id }}">
+                      <button type="button" class="btn btn-success btn-sm ping-proposal-decide" data-decision="approve" {% if not user.is_authenticated %}disabled{% endif %}
+                              title="Accept the AI proposal: record the obligation as met">Approve</button>
+                      <button type="button" class="btn btn-secondary btn-sm ping-proposal-decide" data-decision="deny" {% if not user.is_authenticated %}disabled{% endif %}
+                              title="Deny the AI proposal; the ping stays open">Deny</button>
+                      </span>
+                      {% else %}
                       <button type="button" class="btn btn-success btn-sm ping-fulfil"
                               data-url="{% url 'monitor_app:ping_fulfil' ping_uuid=pg.id %}"
                               {% if not user.is_authenticated %}disabled{% endif %}
                               title="{% if user.is_authenticated %}Record the obligation as met; the alarm clears on the next engine tick{% else %}Sign in to mark a ping fulfilled{% endif %}">Fulfilled</button>
+                      {% endif %}
                     </td>
                 </tr>
                 {% endfor %}
@@ -260,8 +284,8 @@
 
         <form id="ping-form" class="row g-2 align-items-end mb-2" style="max-width:1300px;" autocomplete="off">
             <div class="col-md-4">
-                <label class="form-label text-muted mb-0" style="font-size:0.85em;">Obligation</label>
-                <input name="title" class="form-control form-control-sm" placeholder="what has to be done, e.g. Renew the osgsub01 host certificate" required {% if not user.is_authenticated %}disabled{% endif %}>
+                <label class="form-label text-muted mb-0" style="font-size:0.85em;">Ping title</label>
+                <input name="title" class="form-control form-control-sm" placeholder="what has to be done by when, e.g. Renew the osgsub01 host certificate" required {% if not user.is_authenticated %}disabled{% endif %}>
             </div>
             <div class="col-md-2">
                 <label class="form-label text-muted mb-0" style="font-size:0.85em;">Due date</label>
@@ -273,17 +297,17 @@
             </div>
             <div class="col-md-2">
                 <label class="form-label text-muted mb-0" style="font-size:0.85em;">Owner</label>
-                <input name="owner" class="form-control form-control-sm" placeholder="name@bnl.gov or @team" {% if not user.is_authenticated %}disabled{% endif %}>
+                <input name="owner" class="form-control form-control-sm" placeholder="name@bnl.gov or @team" value="{% if user.is_authenticated %}{{ user.email|default:user.username }}{% endif %}" {% if not user.is_authenticated %}disabled{% endif %}>
             </div>
             <div class="col-md-2">
                 <label class="form-label text-muted mb-0" style="font-size:0.85em;">Link</label>
-                <input name="url" type="url" class="form-control form-control-sm" placeholder="https://… where to look or act" {% if not user.is_authenticated %}disabled{% endif %}>
+                <input name="url" type="url" class="form-control form-control-sm" placeholder="Optional" title="Where to look at or act on the obligation; the ping title links there" {% if not user.is_authenticated %}disabled{% endif %}>
             </div>
             <div class="col-md-1">
                 <button type="submit" class="btn btn-primary btn-sm w-100" {% if not user.is_authenticated %}disabled title="Sign in to enter a ping"{% endif %}>Add ping</button>
             </div>
             <div class="col-md-12">
-                <input name="note" class="form-control form-control-sm" placeholder="note: what to do and where (goes into the alarm email)" {% if not user.is_authenticated %}disabled{% endif %}>
+                <input name="note" class="form-control form-control-sm" placeholder="description: what to do and where; it goes into the ping's alarm email" {% if not user.is_authenticated %}disabled{% endif %}>
             </div>
             <div class="col-md-12"><span id="ping-form-status" class="text-muted" style="font-size:0.9em;">{% if not user.is_authenticated %}Sign in to enter or fulfil pings.{% endif %}</span></div>
         </form>
@@ -293,7 +317,7 @@
           <summary class="text-muted" style="cursor:pointer;">Fulfilled pings ({{ pings_done|length }})</summary>
           <table class="table table-sm swf-sortable mt-2" style="max-width:1300px;">
             <thead>
-              <tr><th>Fulfilled</th><th>By</th><th>Due</th><th>Obligation</th><th>Owner</th></tr>
+              <tr><th>Fulfilled</th><th>By</th><th>Due</th><th>Ping title</th><th>Owner</th></tr>
             </thead>
             <tbody>
               {% for pg in pings_done %}
@@ -355,6 +379,31 @@
                   .catch(function(e) { setStatus('Error: ' + e, 'text-danger'); });
               });
             }
+            document.querySelectorAll('.ping-proposal-decide').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                var holder = btn.closest('[data-proposal-id]');
+                var id = parseInt(holder.getAttribute('data-proposal-id'), 10);
+                var decision = btn.getAttribute('data-decision');
+                var amendments = {};
+                var dueInput = holder.querySelector('.ping-proposal-due');
+                if (dueInput && dueInput.value && dueInput.value !== holder.getAttribute('data-orig-due')) {
+                  amendments[id] = {due: dueInput.value};
+                }
+                btn.disabled = true;
+                fetch("{{ request.META.SCRIPT_NAME }}/ai/api/proposals/decide/", {
+                  method: 'POST',
+                  headers: postHeaders(true),
+                  credentials: 'same-origin',
+                  body: JSON.stringify({ids: [id], decision: decision, amendments: amendments, filter: 'alarms#pings'}),
+                }).then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+                  .then(function(o) {
+                    if (!o.ok) { btn.disabled = false; alert('Could not decide: ' + (o.j.detail || o.j.error || 'unknown error')); return; }
+                    if (o.j.stale && o.j.stale.length) { alert('The proposal was stale: the ping store changed since it was made; it was withdrawn.'); }
+                    window.location.reload();
+                  })
+                  .catch(function(e) { btn.disabled = false; alert('Could not decide: ' + e); });
+              });
+            });
             document.querySelectorAll('.ping-fulfil').forEach(function(btn) {
               btn.addEventListener('click', function() {
                 btn.disabled = true;

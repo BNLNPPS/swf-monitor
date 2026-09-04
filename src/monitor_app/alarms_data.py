@@ -658,3 +658,71 @@ def fulfil_ping(ping_id: str, *, by: str = '') -> Entry:
     e.timestamp_modified = now
     e.save()
     return e
+
+
+def _origin_attrs(origin):
+    """Action-stream attributes of an origin: manual, or the AI proposal
+    that was approved (AI_PROPOSALS.md, origin-stamped events)."""
+    origin = origin or {}
+    if origin.get('kind') != 'ai_proposal':
+        return {'origin': 'manual'}
+    return {k: v for k, v in {
+        'origin': 'ai_proposal', 'proposer': origin.get('proposer', ''),
+        'proposal_ref': origin.get('ref', ''),
+        'batch_id': origin.get('batch_id', ''),
+        'proposed_at': origin.get('proposed_at', ''),
+    }.items() if v}
+
+
+def ping_create_execute(payload, *, changed_by, origin=None):
+    """The executor behind entering a ping: the identical call the
+    dashboard form and an approved proposal make. Creates the entry and
+    logs one origin-stamped ``ping_create`` event. Returns (entry, log id)."""
+    from .epicprod_logging import log_epicprod_action
+    attrs = _origin_attrs(origin)
+    e = create_ping(
+        title=payload.get('title', ''), due=payload.get('due', ''),
+        lead_days=payload.get('lead_days'), owner=payload.get('owner', ''),
+        note=payload.get('note', ''), url=payload.get('url', ''),
+        created_by=changed_by,
+        origin=(attrs.get('proposal_ref') or 'manual'))
+    log_id = log_epicprod_action(
+        'web', 'ping_create', subject_type='ping', subject_key=e.id,
+        subject_label=e.title, username=changed_by,
+        sublevel='normal', live_default=True,
+        due=(e.data or {}).get('due', ''), url='/alarms/#pings', **attrs)
+    return e, log_id
+
+
+def ping_fulfil_execute(ping_id, *, changed_by, origin=None):
+    """The executor behind marking a ping fulfilled, for the dashboard
+    control and an approved proposal alike. Returns (entry, log id)."""
+    from .epicprod_logging import log_epicprod_action
+    attrs = _origin_attrs(origin)
+    e = fulfil_ping(ping_id, by=changed_by)
+    log_id = log_epicprod_action(
+        'web', 'ping_fulfil', subject_type='ping', subject_key=e.id,
+        subject_label=e.title, username=changed_by,
+        sublevel='normal', live_default=True,
+        due=(e.data or {}).get('due', ''), url='/alarms/#pings', **attrs)
+    return e, log_id
+
+
+def get_ping(ping_id: str) -> Entry | None:
+    return (Entry.objects
+            .filter(id=ping_id, context_id=CONTEXT_NAME, kind='ping',
+                    deleted_at__isnull=True).first())
+
+
+def open_ping_with_title(title: str) -> Entry | None:
+    """An open ping whose title matches, case-insensitively: the
+    idempotency check behind a ping proposal."""
+    title = (title or '').strip()
+    if not title:
+        return None
+    for e in Entry.objects.filter(context_id=CONTEXT_NAME, kind='ping',
+                                  archived=False, deleted_at__isnull=True,
+                                  title__iexact=title[:255]):
+        if (e.data or {}).get('status', 'open') == 'open':
+            return e
+    return None

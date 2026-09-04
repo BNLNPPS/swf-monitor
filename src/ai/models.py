@@ -15,6 +15,8 @@ from django.db import models
 ACTION_REF_PREFIXES = {
     'propagation': 'cp',    # campaign propagation
     'campaign_plan': 'pl',  # campaign assembly plan entries
+    'ping': 'pg',           # a ping to enter (PINGS.md)
+    'ping_fulfil': 'pf',    # a ping to mark fulfilled (PINGS.md)
 }
 
 

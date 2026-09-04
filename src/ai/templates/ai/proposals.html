@@ -84,10 +84,10 @@
         <td><input type="checkbox" class="props-cb" value="{{ p.id }}" {% if not user.is_authenticated %}disabled title="Sign in to select"{% endif %}></td>
         <td class="small"><strong>{{ p.ref }}</strong></td>
         <td class="small text-muted">{{ p.created_at|date:"Y-m-d H:i" }}</td>
-        <td class="small">{% if p.action == 'propagation' %}campaign propagation{% else %}{{ p.action }}{% endif %}</td>
-        <td class="small text-nowrap">{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}</td>
-        <td class="small"><a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
-          {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}</td>
+        <td class="small">{% if p.action == 'propagation' %}campaign propagation{% elif p.action == 'campaign_plan' %}campaign plan{% elif p.action == 'ping' %}ping{% elif p.action == 'ping_fulfil' %}ping fulfilled{% else %}{{ p.action }}{% endif %}</td>
+        <td class="small text-nowrap">{% if p.action == 'ping' %}enter, due {{ p.payload.due }}{% if p.payload.amended.due %} &rarr; {{ p.payload.amended.due }}{% endif %}{% elif p.action == 'ping_fulfil' %}open &rarr; fulfilled{% else %}{{ p.precondition.prev_state|default:"?" }} &rarr; {{ p.payload.state|default:"?" }}{% endif %}</td>
+        <td class="small">{% if p.action == 'ping' or p.action == 'ping_fulfil' %}<a href="{% url 'monitor_app:alarms_dashboard' %}#pings">{{ p.payload.title|default:p.subject_key }}</a>{% else %}<a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ p.subject_key|urlencode }}">{{ p.subject_key }}</a>
+          {% if p.counterpart_key %}<div class="text-muted">&harr; {{ p.counterpart_key }}</div>{% endif %}{% endif %}</td>
         <td class="small pcs-props-comment">{{ p.comment }}
           {% if p.payload.replaced_by %}<div class="text-muted">Replaced by: {{ p.payload.replaced_by }}</div>{% endif %}
           {% if p.confidence %}<div class="text-muted">Confidence: {{ p.confidence }}</div>{% endif %}</td>

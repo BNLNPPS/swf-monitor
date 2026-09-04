@@ -26,12 +26,29 @@ class _AiApiView(APIView):
 
 class ProposalProposeView(_AiApiView):
     def post(self, request):
-        """Create AI propagation proposals (AI_PROPOSALS.md).
-
-        Body: ``names``, ``state``, ``comment`` (required), ``replaced_by``,
-        ``proposer``, ``scan_version``, ``batch_id``.
+        """Create AI proposals (AI_PROPOSALS.md), by ``action``:
+        propagation (default; ``names``, ``state``, ``comment``,
+        ``replaced_by``), ping (``items``: title, due, lead_days, owner,
+        note, url, comment), or ping_fulfil (``ping_id``, ``comment``);
+        plus ``proposer``, ``scan_version``, ``batch_id``.
         """
+        action = (request.data.get('action') or 'propagation').strip()
         try:
+            if action == 'ping':
+                result = services.propose_pings(
+                    request.data.get('items') or [],
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
+            if action == 'ping_fulfil':
+                result = services.propose_ping_fulfil(
+                    request.data.get('ping_id', ''),
+                    request.data.get('comment', ''),
+                    proposer=request.data.get('proposer', ''),
+                    batch_id=request.data.get('batch_id', ''),
+                    created_by=request.user.username)
+                return Response(result, status=status.HTTP_200_OK)
             result = services.propose_propagation(
                 request.data.get('names') or [],
                 request.data.get('state'),

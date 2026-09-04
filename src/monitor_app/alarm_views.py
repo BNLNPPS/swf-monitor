@@ -259,7 +259,11 @@ def alarms_dashboard(request):
     built_at_dt = datetime.fromtimestamp(now, tz=_EASTERN)
 
     pings_open, pings_done = alarms_data.list_pings()
+    ping_proposals, fulfil_proposals = _ping_proposals()
+    for pg in pings_open:
+        pg['fulfil_proposal'] = fulfil_proposals.get(pg['id'])
     return render(request, 'monitor_app/alarms.html', {
+        'ping_proposals': ping_proposals,
         'hours': hours,
         'summary_rows': summary_rows,
         'sections': sections,
@@ -278,6 +282,46 @@ def alarms_dashboard(request):
 
 # ── pings (docs/PINGS.md) ──────────────────────────────────────────────
 
+def _ping_proposals():
+    """Pending AI proposals for the Pings section: proposed pings as
+    rows to accept with an editable due date, and proposed fulfilments
+    keyed by the ping they concern (AI_PROPOSALS.md, PINGS.md)."""
+    from datetime import date
+    try:
+        from ai.models import Proposal
+    except Exception as e:  # noqa: BLE001 - the ai app is optional to this page
+        import logging
+        logging.getLogger(__name__).error('ping proposals unavailable: %s', e)
+        return [], {}
+    today = alarms_data._today_eastern()
+    proposals = []
+    fulfils = {}
+    for row in (Proposal.objects
+                .filter(action__in=('ping', 'ping_fulfil'), status='proposed')
+                .order_by('created_at')):
+        payload = row.payload or {}
+        if row.action == 'ping_fulfil':
+            fulfils[row.subject_key] = {
+                'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
+                'comment': row.comment, 'created_at': row.created_at}
+            continue
+        due = None
+        try:
+            due = date.fromisoformat(str(payload.get('due') or '')[:10])
+        except ValueError:
+            pass
+        proposals.append({
+            'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
+            'comment': row.comment, 'created_at': row.created_at,
+            'title': payload.get('title', ''), 'due': payload.get('due', ''),
+            'days_left': (due - today).days if due else None,
+            'lead_days': payload.get('lead_days'),
+            'owner': payload.get('owner', ''), 'note': payload.get('note', ''),
+            'url': payload.get('url', ''),
+        })
+    return proposals, fulfils
+
+
 def _json_body(request) -> dict:
     if request.content_type and 'json' in request.content_type:
         try:
@@ -294,23 +338,15 @@ def ping_create(request):
     """POST /alarms/pings/create/ — one open ping from the dashboard
     form (JSON or form body: title, due, lead_days, owner, note, url).
     Returns {ok, id}; a bad field returns {error} with the reason."""
-    from .epicprod_logging import log_epicprod_action
     username = getattr(request.user, 'username', '') or ''
     try:
         body = _json_body(request)
-        e = alarms_data.create_ping(
-            title=body.get('title', ''), due=body.get('due', ''),
-            lead_days=body.get('lead_days'), owner=body.get('owner', ''),
-            note=body.get('note', ''), url=body.get('url', ''),
-            created_by=username, origin='manual')
+        e, _log_id = alarms_data.ping_create_execute(
+            {k: body.get(k, '') for k in
+             ('title', 'due', 'lead_days', 'owner', 'note', 'url')},
+            changed_by=username)
     except alarms_data.PingError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
-    log_epicprod_action(
-        'web', 'ping_create', subject_type='ping', subject_key=e.id,
-        subject_label=e.title, username=username,
-        sublevel='normal', live_default=True,
-        due=(e.data or {}).get('due', ''), origin='manual',
-        url=f'/alarms/#pings')
     return JsonResponse({'ok': True, 'id': e.id})
 
 
@@ -320,17 +356,12 @@ def ping_create(request):
 def ping_fulfil(request, ping_uuid: str):
     """POST /alarms/pings/<uuid>/fulfil/ — record that the obligation
     is met. The engine clears the ping's event on its next tick."""
-    from .epicprod_logging import log_epicprod_action
     username = getattr(request.user, 'username', '') or ''
     try:
-        e = alarms_data.fulfil_ping(ping_uuid, by=username)
+        e, _log_id = alarms_data.ping_fulfil_execute(ping_uuid,
+                                                     changed_by=username)
     except alarms_data.PingError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
-    log_epicprod_action(
-        'web', 'ping_fulfil', subject_type='ping', subject_key=e.id,
-        subject_label=e.title, username=username,
-        sublevel='normal', live_default=True,
-        due=(e.data or {}).get('due', ''), url=f'/alarms/#pings')
     return JsonResponse({'ok': True, 'id': e.id})
 
 

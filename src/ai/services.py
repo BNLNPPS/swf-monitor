@@ -424,6 +424,203 @@ def _decide_campaign_plan(rows, decision, decided_by, quality, amendments,
     return approved, denied, stale, incomplete
 
 
+def _ping_subject_key(title):
+    """A ping's creation-subject key: the obligation, normalized."""
+    import re
+    key = re.sub(r'[^a-z0-9]+', '-', (title or '').strip().lower()).strip('-')
+    return key[:255] or 'ping'
+
+
+def propose_pings(items, *, proposer='', batch_id='', created_by=''):
+    """Propose pings (PINGS.md): creation subjects keyed on the obligation,
+    the due date as counterpart. ``items``: [{title, due, lead_days,
+    owner, note, url, comment}]. Validation mirrors the executor
+    (``alarms_data.create_ping``); the precondition anchor is the open
+    ping with the same obligation at proposal time (None for a true
+    creation). Denial memory and identical-pending checks follow the
+    subsystem conventions; one ``proposal_created`` event per call."""
+    from datetime import date
+
+    from monitor_app import alarms_data
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if not items:
+        raise ServiceError('no pings supplied')
+    now = _timezone.now()
+    proposed, noop, denied_skips, invalid = [], [], [], []
+    with transaction.atomic():
+        for item in items:
+            title = (item.get('title') or '').strip()
+            comment = (item.get('comment') or '').strip()
+            if not title or not comment:
+                invalid.append(title or '(missing title)')
+                continue
+            try:
+                due = date.fromisoformat(str(item.get('due') or '')[:10])
+                lead = int(item.get('lead_days')
+                           or alarms_data.PING_DEFAULT_LEAD_DAYS)
+                if lead < 0:
+                    raise ValueError('lead days cannot be negative')
+            except ValueError as e:
+                invalid.append(f'{title}: {e}')
+                continue
+            payload = {
+                'title': title, 'due': due.isoformat(), 'lead_days': lead,
+                'owner': (item.get('owner') or '').strip(),
+                'note': (item.get('note') or '').strip(),
+                'url': (item.get('url') or '').strip(),
+            }
+            subject_key = _ping_subject_key(title)
+            existing = alarms_data.open_ping_with_title(title)
+            precondition = {'existing_open': existing.id if existing else None}
+            input_hash = _proposal_input_hash(payload, comment)
+            base = Proposal.objects.filter(action='ping',
+                                           subject_key=subject_key)
+            if base.filter(status='denied', input_hash=input_hash).exists():
+                denied_skips.append(title)
+                continue
+            if base.filter(status='proposed', input_hash=input_hash).exists():
+                noop.append(title)
+                continue
+            base.filter(status='proposed').update(status='withdrawn',
+                                                  decided_at=now)
+            Proposal.objects.create(
+                action='ping', subject_type='ping', subject_key=subject_key,
+                counterpart_key=due.isoformat(), payload=payload,
+                comment=comment, proposer=proposer or '', scan_version=1,
+                batch_id=batch_id or '', executor='service',
+                precondition=precondition, input_hash=input_hash,
+                created_by=created_by or '')
+            proposed.append(title)
+    log_epicprod_action(
+        'web', 'proposal_created', username=created_by,
+        sublevel='normal', live_default=True,
+        message=(f'AI proposal: {len(proposed)} ping(s) '
+                 f'[{batch_id or "no batch"}]'),
+        proposed=len(proposed), noop=len(noop), denied=len(denied_skips),
+        invalid=len(invalid), proposer=proposer or '',
+        batch_id=batch_id or '', category='ping', url='/alarms/#pings')
+    return {'proposed': proposed, 'noop': noop, 'denied': denied_skips,
+            'invalid': invalid}
+
+
+def propose_ping_fulfil(ping_id, comment, *, proposer='', batch_id='',
+                        created_by=''):
+    """Propose that an open ping be marked fulfilled (PINGS.md). The
+    subject is the ping entry; the precondition is that it is open."""
+    from monitor_app import alarms_data
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    comment = (comment or '').strip()
+    if not comment:
+        raise ServiceError('a comment is required')
+    ping = alarms_data.get_ping(ping_id)
+    if ping is None:
+        raise ServiceError(f'no such ping: {ping_id}')
+    if (ping.data or {}).get('status', 'open') != 'open':
+        raise ServiceError(f'ping {ping.title!r} is not open')
+    payload = {'ping_id': ping.id, 'title': ping.title}
+    input_hash = _proposal_input_hash(payload, comment)
+    base = Proposal.objects.filter(action='ping_fulfil', subject_key=ping.id)
+    if base.filter(status='denied', input_hash=input_hash).exists():
+        return {'proposed': [], 'noop': [], 'denied': [ping.title]}
+    if base.filter(status='proposed').exists():
+        return {'proposed': [], 'noop': [ping.title], 'denied': []}
+    Proposal.objects.create(
+        action='ping_fulfil', subject_type='ping', subject_key=ping.id,
+        payload=payload, comment=comment, proposer=proposer or '',
+        batch_id=batch_id or '', executor='service',
+        precondition={'status': 'open'}, input_hash=input_hash,
+        created_by=created_by or '')
+    log_epicprod_action(
+        'web', 'proposal_created', username=created_by,
+        sublevel='normal', live_default=True,
+        message=f'AI proposal: mark ping fulfilled: {ping.title}',
+        proposed=1, proposer=proposer or '', batch_id=batch_id or '',
+        category='ping_fulfil', url='/alarms/#pings')
+    return {'proposed': [ping.title], 'noop': [], 'denied': []}
+
+
+def _decide_pings(rows, decision, decided_by, quality, amendments, now):
+    """Decide pending ping and ping-fulfil proposals: revalidate against
+    the ping store (an obligation already open, or a ping no longer
+    open, is stale), apply a reviewer's amended due date (recorded on the
+    payload under ``amended``), and execute approvals through the ping
+    executors, one origin-stamped event each."""
+    from datetime import date
+
+    from monitor_app import alarms_data
+
+    amendments = {str(k): v for k, v in (amendments or {}).items()}
+    stale, denied, approved = [], [], []
+    for row in rows:
+        with transaction.atomic():
+            payload = dict(row.payload or {})
+            if row.action == 'ping':
+                existing = alarms_data.open_ping_with_title(payload.get('title'))
+                current = existing.id if existing else None
+                moved = current != (row.precondition or {}).get('existing_open')
+            else:
+                ping = alarms_data.get_ping(row.subject_key)
+                moved = (ping is None
+                         or (ping.data or {}).get('status', 'open') != 'open')
+            if moved:
+                row.status = 'stale'
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'decided_by', 'decided_at'])
+                stale.append(row.ref)
+                continue
+            if decision == 'deny':
+                row.status = 'denied'
+                row.quality = quality
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'quality', 'decided_by',
+                                        'decided_at'])
+                denied.append(row.ref)
+                continue
+            origin = {'kind': 'ai_proposal', 'ref': row.ref,
+                      'proposer': row.proposer, 'batch_id': row.batch_id,
+                      'proposed_at': row.created_at.isoformat()}
+            if row.action == 'ping':
+                amended = amendments.get(str(row.pk)) or {}
+                changes = {}
+                if amended.get('due'):
+                    try:
+                        changes['due'] = date.fromisoformat(
+                            str(amended['due'])[:10]).isoformat()
+                    except ValueError:
+                        raise ServiceError(
+                            f'{row.ref}: amended due must be a date '
+                            f'(YYYY-MM-DD); got {amended["due"]!r}')
+                if changes:
+                    payload['amended'] = changes
+                    row.payload = payload
+                    row.save(update_fields=['payload'])
+                try:
+                    _entry, log_id = alarms_data.ping_create_execute(
+                        {**payload, **changes}, changed_by=decided_by,
+                        origin=origin)
+                except alarms_data.PingError as e:
+                    raise ServiceError(f'{row.ref}: {e}')
+            else:
+                try:
+                    _entry, log_id = alarms_data.ping_fulfil_execute(
+                        row.subject_key, changed_by=decided_by, origin=origin)
+                except alarms_data.PingError as e:
+                    raise ServiceError(f'{row.ref}: {e}')
+            row.status = 'executed'
+            row.quality = quality
+            row.decided_by = decided_by
+            row.decided_at = now
+            row.executed_log_id = log_id
+            row.save(update_fields=['status', 'quality', 'decided_by',
+                                    'decided_at', 'executed_log_id'])
+            approved.append(row.ref)
+    return approved, denied, stale
+
+
 def proposal_decide(composed_names, decision, *, decided_by='',
                             quality='', filter_state='', proposal_ids=None,
                             amendments=None):
@@ -464,7 +661,8 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         raise ServiceError('an authenticated decider is required')
 
     pending = Proposal.objects.filter(
-        action__in=('propagation', 'campaign_plan'), status='proposed')
+        action__in=('propagation', 'campaign_plan', 'ping', 'ping_fulfil'),
+        status='proposed')
     selector = Q()
     if names:
         selector |= Q(subject_key__in=names)
@@ -472,9 +670,10 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         selector |= Q(pk__in=ids)
     all_rows = list(pending.filter(selector))
     # Dispatch by category: propagation executes below; campaign-plan
-    # rows decide through their own executor path.
+    # and ping rows decide through their own executor paths.
     rows = [r for r in all_rows if r.action == 'propagation']
     plan_rows = [r for r in all_rows if r.action == 'campaign_plan']
+    ping_rows = [r for r in all_rows if r.action in ('ping', 'ping_fulfil')]
     found_names = {r.subject_key for r in all_rows}
     no_proposal = [n for n in names if n not in found_names]
 
@@ -548,6 +747,13 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         approved += plan_approved
         denied += plan_denied
         stale += plan_stale
+
+    if ping_rows:
+        ping_approved, ping_denied, ping_stale = _decide_pings(
+            ping_rows, decision, decided_by, quality, amendments, now)
+        approved += ping_approved
+        denied += ping_denied
+        stale += ping_stale
 
     if decision == 'deny':
         log_epicprod_action(

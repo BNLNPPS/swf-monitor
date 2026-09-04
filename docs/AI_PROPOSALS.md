@@ -140,6 +140,25 @@ propagation pilot is the worked example of each item.
   `scripts/propose-campaign-plan.py`), a rule-based proposer — comments
   are wholly code-filled. No render projection: the subjects have no
   Dataset row.
+- **Ping** (`ping`, ref `pg`) — proposes a dated obligation for the alarm
+  system ([PINGS.md](PINGS.md)): a creation subject keyed on the
+  obligation's title, the due date as `counterpart_key`, payload title,
+  due, lead days, owner, note, url. Precondition: the open ping with the
+  same title at proposal time (None for a true creation); a ping that has
+  since been entered makes the proposal stale. Executor
+  `monitor_app.alarms_data.ping_create_execute`, the identical call the
+  dashboard form makes. **Edit-then-approve**: the reviewer may change the
+  due date before accepting; the amendment is recorded on the payload
+  under `amended`. Review surface: the Pings section of the alarm
+  dashboard, proposed rows in the AI treatment with approve, an editable
+  date, and deny, plus the proposals page. Propose surface: the propose
+  endpoint with `action: ping` and the MCP tool `ai_propose_ping`.
+  Reversibility: mitigable, a ping created in error is marked fulfilled.
+- **Ping fulfilled** (`ping_fulfil`, ref `pf`) — proposes that an open
+  ping be marked fulfilled; subject the ping entry, precondition that it
+  is open, executor `ping_fulfil_execute`. Reviewed on the ping's own row
+  in the Pings section and on the proposals page. Irreversible by design:
+  a fulfilled ping is the record that the obligation was met.
 
 ## Review surfaces
 

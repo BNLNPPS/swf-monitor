@@ -78,7 +78,9 @@ def ai_proposals(request):
         'all_active': status_filter == 'all',
     }
 
-    action_labels = {'propagation': 'campaign propagation'}
+    action_labels = {'propagation': 'campaign propagation',
+                     'campaign_plan': 'campaign plan',
+                     'ping': 'ping', 'ping_fulfil': 'ping fulfilled'}
     facet_rows = [
         status_row,
         facet_row('Action', 'action',
