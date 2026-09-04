@@ -39,7 +39,7 @@
         {% if card.changed %}<span class="badge bg-info text-dark">changed in this snap</span>{% endif %}
         <span class="text-muted small">assessed {% if card.assessed_age_text %}{{ card.assessed_age_text }} earlier{% else %}{{ card.assessed_at|fmt_dt }}{% endif %}</span>
       </div>
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0">
         <thead><tr><th>Queue</th><th class="text-end">Running cores</th><th class="text-end">Δ prev snap</th></tr></thead>
         <tbody>
         {% for entry in card.queue_cores %}
@@ -55,7 +55,7 @@
 
     <section class="snapper-cut-card">
       <div class="mb-1"><strong>Outcomes</strong></div>
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0">
         <thead><tr><th>Outcome</th><th class="text-end">{{ card.outcomes_basis }}</th><th class="text-end">Δ prev snap</th></tr></thead>
         <tbody>
         {% for entry in card.outcomes %}
@@ -71,7 +71,7 @@
 
     <section class="snapper-cut-card">
       <div class="mb-1"><strong>Types</strong></div>
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0">
         <thead><tr><th>Type</th><th class="text-end">In-flight jobs</th><th class="text-end">Δ prev snap</th></tr></thead>
         <tbody>
         {% for entry in card.types %}
@@ -87,7 +87,7 @@
 
     <section class="snapper-cut-card">
       <div class="mb-1"><strong>States</strong></div>
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0">
         <thead><tr><th>State</th><th class="text-end">In-flight jobs</th><th class="text-end">Δ prev snap</th></tr></thead>
         <tbody>
         {% for entry in card.states %}
@@ -103,7 +103,7 @@
 
     <section class="snapper-cut-card">
       <div class="mb-1"><strong>Tasks</strong></div>
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0">
         <thead><tr><th>State</th><th class="text-end">In-flight tasks</th><th class="text-end">Δ prev snap</th></tr></thead>
         <tbody>
         {% for entry in card.tasks %}
@@ -225,7 +225,7 @@
     {% endif %}
     {% if card.patterns %}
     <div class="mb-1 mt-2"><strong>Top diagnostic patterns</strong> <span class="text-muted small">{{ card.window_patterns }} pattern{{ card.window_patterns|pluralize }} in the window, from live job records</span></div>
-    <table class="table table-sm table-bordered w-100 mb-1">
+    <table class="table table-sm table-bordered w-automb-1">
       <thead><tr><th>Category</th><th>Diagnostic</th><th class="text-end">Count</th><th>Example job</th><th>Tasks</th><th>Queues</th></tr></thead>
       <tbody>
       {% for p in card.patterns %}
@@ -414,7 +414,7 @@
     <section data-snapper-detail-key="{{ c.categories_detail_key }}"
              class="snapper-cut-card mb-2">
       <div class="mb-1"><strong>Cumulative by category · {{ c.name }}{% if c.day %} · through {{ c.day }}{% endif %}</strong></div>
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0">
         <thead><tr><th>Category</th><th class="text-end">Configurations</th><th class="text-end">Tot events</th><th class="text-end">{{ c.day }}</th><th class="text-end">Tot files</th><th class="text-end">{{ c.day }}</th></tr></thead>
         <tbody>
         {% for row in c.category_rows %}
@@ -434,7 +434,7 @@
     {% for category in c.category_pc_groups %}
     <section data-snapper-detail-key="{{ category.detail_key }}"
              class="snapper-cut-card mb-2">
-      <table class="table table-striped table-bordered table-sm align-middle w-100 mb-0 swf-latch-head swf-latch-titled-head{% if category.species_groups %} swf-latch-section-heads{% endif %}">
+      <table class="table table-striped table-bordered table-sm align-middle w-automb-0 swf-latch-head swf-latch-titled-head{% if category.species_groups %} swf-latch-section-heads{% endif %}">
         <thead>
         <tr class="swf-latch-title-row"><th colspan="10">Cumulative {{ category.name }} by PC · {{ c.name }}{% if c.day %} · through {{ c.day }}{% endif %}</th></tr>
         <tr class="swf-latch-column-row"><th>PC</th><th>Configuration</th><th>Physics</th><th>Requestor</th><th class="text-end">Tot events</th><th class="text-end">{{ c.day }}</th><th class="text-end">Tot files</th><th class="text-end">{{ c.day }}</th><th class="text-end">Target events</th><th class="text-end">% complete</th></tr>

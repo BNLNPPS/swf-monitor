@@ -2293,6 +2293,8 @@ def _panda_card(data, previous_data, ctx):
         queue_cores.append({'site': site, 'curve': f'qc_{site}',
                             'value': cores,
                             'delta': cut_delta(cores, was)})
+    # Read by size: queues in running-cores order, the fold last.
+    queue_cores.sort(key=lambda entry: (-entry['value'], entry['site']))
     other_now = other_prev = 0
     for site in set(site_blocks) | set(prev_blocks):
         cores = int((site_blocks.get(site) or {})
