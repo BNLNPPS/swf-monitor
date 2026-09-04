@@ -1780,7 +1780,8 @@ def _site_focus_view():
     return {
         'param': 'site',
         'label': 'Site',
-        'selector_label': 'Queue',
+        'selector_label': 'Queue display',
+        'jump_label': 'Queues by peak running jobs',
         # A Site view needs only the selected queue's PanDA curves. Sharing
         # the all-scope product makes a cold 30-day request assemble every
         # campaign and every queue before discarding nearly all of it.
