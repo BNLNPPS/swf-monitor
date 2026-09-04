@@ -6,7 +6,8 @@ but the live alarm dashboard, editor, runtime state, and cron runner are in
 this repository.
 
 Lifecycle, per-subscriber feeds, and automated response are specified in
-[ALARM_QUEUE.md](ALARM_QUEUE.md).
+[ALARM_QUEUE.md](ALARM_QUEUE.md); pings, dated obligations carried at
+their own severity, in [PINGS.md](PINGS.md).
 
 ## Runtime
 
