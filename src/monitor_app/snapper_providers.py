@@ -1795,8 +1795,12 @@ def _site_focus_view():
                  'integration range, and zooming re-bases it. Click '
                  'the plot for the full picture at that instant.'),
         'default': 'all',
+        # With several queues shown, presentation follows activity: the
+        # peak of each queue's running-jobs curve over the window.
+        'activity_label': 'running jobs',
         'options': [
             {'value': site, 'label': site,
+             'activity': f'sj_{site}_running',
              'families': [f'Site jobs {site}',
                           f'Site completions {site}',
                           f'Site outcomes {site}',
