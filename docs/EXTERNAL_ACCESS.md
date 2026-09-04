@@ -58,9 +58,12 @@ internal face hides every constraint below.
 What the proxy actually does (verified in `monitor_client.py`):
 
 - Forwards method + query + **body** + the user identity as **`X-Remote-User`**.
-- Sends only `Host`, `X-Remote-User`, `Content-Type` upstream — **every other
-  request header is dropped** (no `X-Requested-With`, no `X-CSRFToken`, no
-  cookies). swf-monitor therefore sees no Django session and no CSRF token.
+- Sends upstream only `Host`, the identity and correlation headers
+  (`X-Remote-User`, `X-Remote-Access`, `X-Remote-Request-ID`,
+  `X-Remote-Client`, `X-Remote-User-Agent`), `Content-Type`, and a client
+  `Authorization` header when one is present — **every other request header
+  is dropped** (no `X-Requested-With`, no `X-CSRFToken`, no cookies).
+  swf-monitor therefore sees no Django session and no CSRF token.
 - **Cannot relay a redirect**: any upstream 3xx is turned into a `502` page. A
   page-view POST that ends in `redirect()` (the POST-redirect-GET pattern)
   returns 502 through the proxy.
@@ -111,20 +114,20 @@ proxied HTML in swf-remote.
 
 The MCP toolset external users get is the monitor's own, proxied, not a
 second server. The monitor's MCP transport is stateless JSON over POST
-(MCP.md), so the proxy contract above carries it with two additions on
-the swf-remote side: an explicit `mcp/` route (the path is outside the
-`pcs/` and `panda/` catch-alls), and the `Accept` request header
-forwarded, since the transport requires `application/json,
-text/event-stream`. No `Authorization` header is forwarded. The monitor's
-MCP guard (`swf_monitor_project/mcp_asgi.py`) accepts a request from the
-localhost hop that carries `X-Remote-User` as that user, the same trust
-the REST tier gives the tunnel; every other caller presents the bearer
-token. Tools that take a `username` default it to the forwarded identity
-(`monitor_app.mcp.common.CALLER`), so a proxied caller acts as the
-signed-in person, not as a name it declares.
+(MCP.md). The swf-remote `mcp/` route (the path is outside the `pcs/` and
+`panda/` catch-alls) forwards POST only, with the identity and
+correlation headers, `Accept` and `Content-Type`, and never a client
+`Authorization` header; status and body are relayed untouched. The
+monitor's MCP guard (`swf_monitor_project/mcp_asgi.py`) accepts a request
+from the localhost hop that carries `X-Remote-User` as that user, the
+same trust the REST tier gives the tunnel; every other caller presents
+the bearer token. Tools that take a `username` default it to the
+forwarded identity (`monitor_app.mcp.common.CALLER`), so a proxied caller
+acts as the signed-in person, not as a name it declares.
 
-Headless LLM clients cannot complete the CILogon browser login, so the
-`mcp/` route authenticates them by a per-user token issued on swf-remote,
+Headless LLM clients cannot complete a browser sign-in, so the `mcp/`
+route authenticates them by a per-user token issued on swf-remote
+(created and revoked at `/prod/account/tokens/` after signing in),
 resolved to the username injected as `X-Remote-User`. Client setup for
 external users is in [MCP_CLIENTS.md](MCP_CLIENTS.md).
 
@@ -137,10 +140,12 @@ swf-remote change is required.
 
 ## Authentication
 
-External users authenticate against swf-remote (OIDC via CILogon, same
-identity provider as swf-monitor's Apache layer). swf-remote forwards
-the resolved username to swf-monitor as `X-Remote-User` for both
-HTML-page and API requests.
+External users authenticate against swf-remote, by local password or
+GitHub sign-in (django-allauth). swf-remote forwards the resolved
+username to swf-monitor as `X-Remote-User` for both HTML-page and API
+requests. Headless clients (an LLM command line reaching the MCP route)
+present a per-user token issued on swf-remote instead of signing in;
+the token resolves to the same username and never leaves swf-remote.
 
 ## Why explicit enumeration
 

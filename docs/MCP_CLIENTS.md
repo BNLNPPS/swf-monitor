@@ -36,6 +36,23 @@ Add via `/mcp add` or create `.mcp.json` in project:
 }
 ```
 
+## External access through devcloud
+
+Outside BNL the same toolset is reached through swf-remote at
+`https://epic-devcloud.org/prod/mcp/`, which proxies the monitor's
+endpoint and identifies the caller (EXTERNAL_ACCESS.md, MCP through the
+proxy). Sign in at https://epic-devcloud.org/prod/ , open
+https://epic-devcloud.org/prod/account/tokens/ , create a token with a
+label and copy it once; the same page revokes it. Then:
+
+```bash
+claude mcp add --transport http swf-devcloud https://epic-devcloud.org/prod/mcp/ \
+  --header "Authorization: Bearer <token>"
+```
+
+The token is swf-remote's and never reaches the monitor; tools run as
+the signed-in user, and a tool that takes a `username` fills it in.
+
 ## Authentication
 
 The operational MCP clients on swf-testbed are local clients: Claude Code,
