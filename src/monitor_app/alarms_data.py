@@ -532,3 +532,129 @@ def _event_to_dict(e: Entry) -> dict:
         'timestamp_created': e.timestamp_created,
         'timestamp_modified': e.timestamp_modified,
     }
+
+
+# ── pings (docs/PINGS.md) ──────────────────────────────────────────────────
+
+PING_DEFAULT_LEAD_DAYS = 7
+
+
+def _today_eastern():
+    from zoneinfo import ZoneInfo
+    from datetime import datetime
+    return datetime.now(ZoneInfo('America/New_York')).date()
+
+
+def _ping_to_dict(e: Entry) -> dict:
+    """One ping for the dashboard: its fields, days left, and the state
+    word its cell takes — scheduled (not yet within lead), ping, alarm
+    (overdue), or fulfilled."""
+    from datetime import date
+    data = e.data or {}
+    status = data.get('status') or 'open'
+    due = None
+    try:
+        due = date.fromisoformat(str(data.get('due') or '')[:10])
+    except ValueError:
+        pass
+    lead = int(data.get('lead_days') or PING_DEFAULT_LEAD_DAYS)
+    days_left = (due - _today_eastern()).days if due else None
+    if status == 'fulfilled':
+        state = 'fulfilled'
+    elif due is None:
+        state = 'alarm'
+    elif days_left < 0:
+        state = 'alarm'
+    elif days_left <= lead:
+        state = 'ping'
+    else:
+        state = 'scheduled'
+    return {
+        'id': e.id,
+        'title': e.title,
+        'note': e.content,
+        'due': due.isoformat() if due else str(data.get('due') or ''),
+        'due_date': due,
+        'days_left': days_left,
+        'lead_days': lead,
+        'owner': data.get('owner') or '',
+        'url': data.get('url') or '',
+        'status': status,
+        'state': state,
+        'origin': data.get('origin') or 'manual',
+        'created_by': data.get('created_by') or '',
+        'created': e.timestamp_created,
+        'fulfilled_by': data.get('fulfilled_by') or '',
+        'fulfilled_at': _ts_to_dt(data.get('fulfilled_at')),
+    }
+
+
+def list_pings() -> tuple[list[dict], list[dict]]:
+    """(open pings by due date, fulfilled pings newest first)."""
+    rows = [_ping_to_dict(e) for e in
+            Entry.objects.filter(context_id=CONTEXT_NAME, kind='ping',
+                                 archived=False, deleted_at__isnull=True)]
+    open_rows = sorted((r for r in rows if r['status'] == 'open'),
+                       key=lambda r: (r['due'] or '9999', r['title']))
+    done_rows = sorted((r for r in rows if r['status'] == 'fulfilled'),
+                       key=lambda r: (r['fulfilled_at'] is None,
+                                      r['fulfilled_at']), reverse=True)
+    return open_rows, done_rows
+
+
+class PingError(ValueError):
+    """A ping that cannot be created or changed as asked."""
+
+
+def create_ping(*, title: str, due: str, lead_days=None, owner: str = '',
+                note: str = '', url: str = '', created_by: str = '',
+                origin: str = 'manual') -> Entry:
+    """Create one open ping. Validates the fields the engine relies on;
+    raises PingError with the reason."""
+    from datetime import date
+    title = (title or '').strip()
+    if not title:
+        raise PingError('the obligation (title) is required')
+    try:
+        due_date = date.fromisoformat(str(due or '').strip()[:10])
+    except ValueError:
+        raise PingError(f'due must be a date (YYYY-MM-DD), got {due!r}')
+    try:
+        lead = int(lead_days) if lead_days not in (None, '') \
+            else PING_DEFAULT_LEAD_DAYS
+    except (TypeError, ValueError):
+        raise PingError(f'lead days must be a whole number, got {lead_days!r}')
+    if lead < 0:
+        raise PingError('lead days cannot be negative')
+    now = time.time()
+    return Entry.objects.create(
+        title=title[:255], content=(note or '').strip(), kind='ping',
+        context_id=CONTEXT_NAME, status='open',
+        data={
+            'due': due_date.isoformat(), 'lead_days': lead,
+            'owner': (owner or '').strip(), 'url': (url or '').strip(),
+            'status': 'open', 'origin': origin or 'manual',
+            'created_by': created_by or '',
+        },
+        timestamp_created=now, timestamp_modified=now)
+
+
+def fulfil_ping(ping_id: str, *, by: str = '') -> Entry:
+    """Mark one open ping fulfilled; the engine clears its event on the
+    next tick. Raises PingError if it is not an open ping."""
+    e = (Entry.objects
+         .filter(id=ping_id, context_id=CONTEXT_NAME, kind='ping',
+                 deleted_at__isnull=True).first())
+    if e is None:
+        raise PingError('no such ping')
+    data = dict(e.data or {})
+    if data.get('status') == 'fulfilled':
+        raise PingError('already fulfilled')
+    now = time.time()
+    data.update({'status': 'fulfilled', 'fulfilled_by': by or '',
+                 'fulfilled_at': now})
+    e.data = data
+    e.status = 'fulfilled'
+    e.timestamp_modified = now
+    e.save()
+    return e

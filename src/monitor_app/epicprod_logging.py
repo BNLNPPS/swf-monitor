@@ -71,6 +71,18 @@ SUBLEVEL_ORDER = {'high': 2, 'normal': 1, 'low': 0}
 # log entry page and the live-policy page, so a stream reader is never left
 # guessing what an event was.
 ACTION_DEFAULTS = {
+    # alarm dashboard: pings (docs/PINGS.md)
+    'ping_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Enter a ping, a dated obligation the alarm system "
+                       "raises ahead of its due date, on the alarm "
+                       "dashboard.",
+    },
+    'ping_fulfil': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Record a ping's obligation as fulfilled; its alarm "
+                       "event clears on the engine's next tick.",
+    },
     # ops agent
     'task_submit': {
         'sublevel': 'high', 'live': True,

@@ -210,8 +210,15 @@ def main(argv: list[str] | None = None) -> int:
                     new_bundle.append((event_uuid, det))
                     continue
 
-                # Same entity already firing — always bump last_seen.
+                # Same entity already firing — always bump last_seen, and
+                # carry a changed severity onto the event (a ping past its
+                # due date is detected at alarm severity; docs/PINGS.md).
                 db.touch_event_last_seen(conn, existing["id"])
+                new_severity = (det.extra_data or {}).get("severity")
+                if new_severity and new_severity != (
+                        existing.get("data") or {}).get("severity"):
+                    db.update_event_severity(conn, existing["id"],
+                                             str(new_severity))
 
                 # Renotification candidacy (bundled, not sent per-detection):
                 # computed independently of send_mail so that the
@@ -271,14 +278,41 @@ def main(argv: list[str] | None = None) -> int:
                 new_bundle=new_bundle,
                 renotify_bundle=renotify_bundle,
             )
-            if send_mail:
+            # A detection may name its own owner (a ping's owner); the
+            # bundle goes to the alarm's recipients and every owner in it.
+            owner_tokens: list[str] = []
+            for _, det in new_bundle + renotify_bundle:
+                owner = (det.extra_data or {}).get("owner")
+                if owner:
+                    owner_tokens.extend(
+                        db._split_tokens(owner) if isinstance(owner, str)
+                        else [str(o) for o in owner])
+            owner_addrs: list[str] = []
+            if owner_tokens:
+                owner_addrs, unresolved_owner = db.resolve_recipients(
+                    conn, owner_tokens)
+                if unresolved_owner:
+                    log.warning("alarm %s: unresolved owner team(s) %s",
+                                alarm_entry_id, unresolved_owner)
+            bundle_recipients = list(dict.fromkeys(
+                list(recipients) + list(owner_addrs)))
+            if send_mail and not bundle_recipients:
+                # Emails are on but nobody is subscribed: the bundle waits
+                # (nothing is stamped notified) and the run report says so,
+                # without counting a configuration gap as an engine error
+                # every tick.
+                alarm_err_msg = (f"emails on but no address to send to: "
+                                 f"recipients and owners of {alarm_entry_id} "
+                                 "resolve to nothing; bundle held")
+                log.warning(alarm_err_msg)
+            elif send_mail:
                 ok = send_email(
                     Alarm(
                         alarm_name=alarm_entry_id,
                         dedupe_key=f"bundle:{int(time.time())}",
                         subject=bundle_subject,
                         body=body,
-                        recipients=list(recipients),
+                        recipients=bundle_recipients,
                         data={
                             "bundle": True,
                             "new_count": bundle_new,
@@ -303,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
                     msg = (
                         f"email send failed for {alarm_entry_id}: "
                         f"provider={cfg.email.provider} "
-                        f"recipients={','.join(recipients)}"
+                        f"recipients={','.join(bundle_recipients)}"
                     )
                     log.error(msg)
                     errors += 1

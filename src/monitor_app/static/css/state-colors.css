@@ -256,6 +256,10 @@
    prod team → grey (inert, closed family). */
 .draft_fill { color:black; background-color:#e6f0f6 !important; }
 
+/* Ping severity (docs/PINGS.md): a reminder, not an outage; fulfilled is history. */
+.ping_fill { color:black; background-color:#cfe3f8 !important; }
+.fulfilled_fill { color:black; background-color:#e3efe3 !important; }
+
 /* Canary queue states; unknown_fill already above. */
 .healthy_fill { color:black; background-color:#96ca69 !important; }
 .degraded_fill { color:black; background-color:#FFE38E !important; }

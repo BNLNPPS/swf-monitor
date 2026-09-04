@@ -27,6 +27,7 @@
     }
 
     async function refresh() {
+      if (window.swfHoldRefresh) return;   // a ping form holds input
       try {
         var resp = await fetch(window.location.href, {
           cache: 'no-store',
@@ -120,7 +121,8 @@
       </div>
     </div>
     <div class="mb-3" style="font-size: 0.92em;">
-      <a href="#summary">alarm summary</a>
+      <a href="#pings">pings</a>
+      <span class="text-muted">&middot;</span> <a href="#summary">alarm summary</a>
       {% for r in summary_rows %}
         <span class="text-muted">&middot;</span> <a href="#section-{{ r.entry_id }}">{{ r.title|default:r.name }}</a>
       {% endfor %}
@@ -169,6 +171,159 @@
         }, 1000);
       })();
     </script>
+
+    <section id="pings" class="mb-4">
+        <div class="alarm-section-header">
+          Pings
+          <span class="text-muted" style="font-size:0.85em; font-weight:400;">
+            — dated obligations: raised {{ ping_default_lead }} days ahead, an alarm once overdue, cleared when fulfilled
+          </span>
+        </div>
+        {% if pings_open %}
+        <table class="table table-sm table-hover swf-sortable" style="max-width:1300px;">
+            <thead>
+                <tr>
+                    <th title="The state of the ping: scheduled (not yet within its lead time), ping (raised), alarm (overdue), fulfilled">State</th>
+                    <th>Due</th>
+                    <th title="Days from today (Eastern) to the due date; negative when overdue">Days left</th>
+                    <th>Obligation</th>
+                    <th title="The responsible person or @team; mailed with each raise">Owner</th>
+                    <th title="Entered by hand, or the AI proposal that created it">Origin</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pg in pings_open %}
+                <tr>
+                    <td class="{{ pg.state|state_class }}" style="white-space:nowrap;">{{ pg.state }}</td>
+                    <td style="white-space:nowrap;">{{ pg.due }}</td>
+                    <td class="text-end">{% if pg.days_left is not None %}{{ pg.days_left }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td>{% if pg.url %}<a href="{{ pg.url }}" target="_blank" rel="noopener">{{ pg.title }}</a>{% else %}{{ pg.title }}{% endif %}{% if pg.note %}<div class="text-muted" style="font-size:0.9em;">{{ pg.note|truncatechars:200 }}</div>{% endif %}</td>
+                    <td>{{ pg.owner|default:'—' }}</td>
+                    <td><small>{{ pg.origin }}{% if pg.created_by %} <span class="text-muted">by {{ pg.created_by }}</span>{% endif %}</small></td>
+                    <td style="white-space:nowrap;">
+                      {% if user.is_authenticated and not is_tunnel %}
+                      <button type="button" class="btn btn-success btn-sm ping-fulfil"
+                              data-url="{% url 'monitor_app:ping_fulfil' ping_uuid=pg.id %}"
+                              title="Record the obligation as met; the alarm clears on the next engine tick">Fulfilled</button>
+                      {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="text-muted">No open pings.</p>
+        {% endif %}
+
+        {% if user.is_authenticated and not is_tunnel %}
+        <form id="ping-form" class="row g-2 align-items-end mb-2" style="max-width:1300px;" autocomplete="off">
+            <div class="col-md-4">
+                <label class="form-label text-muted mb-0" style="font-size:0.85em;">Obligation</label>
+                <input name="title" class="form-control form-control-sm" placeholder="what has to be done, e.g. Renew the osgsub01 host certificate" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted mb-0" style="font-size:0.85em;">Due date</label>
+                <input name="due" type="date" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label text-muted mb-0" style="font-size:0.85em;" title="Days ahead of the due date the ping raises">Lead (days)</label>
+                <input name="lead_days" type="number" min="0" step="1" value="{{ ping_default_lead }}" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted mb-0" style="font-size:0.85em;">Owner</label>
+                <input name="owner" class="form-control form-control-sm" placeholder="name@bnl.gov or @team">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-muted mb-0" style="font-size:0.85em;">Link</label>
+                <input name="url" type="url" class="form-control form-control-sm" placeholder="https://… where to look or act">
+            </div>
+            <div class="col-md-1">
+                <button type="submit" class="btn btn-primary btn-sm w-100">Add ping</button>
+            </div>
+            <div class="col-md-12">
+                <input name="note" class="form-control form-control-sm" placeholder="note: what to do and where (goes into the alarm email)">
+            </div>
+            <div class="col-md-12"><span id="ping-form-status" class="text-muted" style="font-size:0.9em;"></span></div>
+        </form>
+        {% else %}
+        <p class="text-muted" style="font-size:0.9em;">Sign in on pandaserver02 to enter or fulfil pings.</p>
+        {% endif %}
+
+        {% if pings_done %}
+        <details class="mb-2">
+          <summary class="text-muted" style="cursor:pointer;">Fulfilled pings ({{ pings_done|length }})</summary>
+          <table class="table table-sm swf-sortable mt-2" style="max-width:1300px;">
+            <thead>
+              <tr><th>Fulfilled</th><th>By</th><th>Due</th><th>Obligation</th><th>Owner</th><th>Origin</th></tr>
+            </thead>
+            <tbody>
+              {% for pg in pings_done %}
+              <tr>
+                <td style="white-space:nowrap;">{{ pg.fulfilled_at|fmt_dt }}</td>
+                <td>{{ pg.fulfilled_by|default:'—' }}</td>
+                <td style="white-space:nowrap;">{{ pg.due }}</td>
+                <td>{% if pg.url %}<a href="{{ pg.url }}" target="_blank" rel="noopener">{{ pg.title }}</a>{% else %}{{ pg.title }}{% endif %}</td>
+                <td>{{ pg.owner|default:'—' }}</td>
+                <td><small>{{ pg.origin }}</small></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+        {% endif %}
+        <script>
+          (function(){
+            var form = document.getElementById('ping-form');
+            var status = document.getElementById('ping-form-status');
+            function setStatus(text, cls) {
+              if (!status) return;
+              status.textContent = text;
+              status.className = cls || 'text-muted';
+            }
+            if (form) {
+              // Hold the page's auto-refresh while the form holds input.
+              form.addEventListener('input', function() {
+                var dirty = false;
+                form.querySelectorAll('input').forEach(function(i) {
+                  if (i.name !== 'lead_days' && i.value) dirty = true;
+                });
+                window.swfHoldRefresh = dirty;
+              });
+              form.addEventListener('submit', function(ev) {
+                ev.preventDefault();
+                var body = {};
+                form.querySelectorAll('input').forEach(function(i) { body[i.name] = i.value; });
+                setStatus('Adding…');
+                fetch("{% url 'monitor_app:ping_create' %}", {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  credentials: 'same-origin',
+                  body: JSON.stringify(body),
+                }).then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+                  .then(function(o) {
+                    if (!o.ok) { setStatus('Error: ' + (o.j.error || 'could not add the ping'), 'text-danger'); return; }
+                    window.swfHoldRefresh = false;
+                    window.location.reload();
+                  })
+                  .catch(function(e) { setStatus('Error: ' + e, 'text-danger'); });
+              });
+            }
+            document.querySelectorAll('.ping-fulfil').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                btn.disabled = true;
+                fetch(btn.getAttribute('data-url'), {method: 'POST', credentials: 'same-origin'})
+                  .then(function(r) { return r.json().then(function(j) { return {ok: r.ok, j: j}; }); })
+                  .then(function(o) {
+                    if (!o.ok) { btn.disabled = false; alert('Could not mark fulfilled: ' + (o.j.error || 'unknown error')); return; }
+                    window.location.reload();
+                  })
+                  .catch(function(e) { btn.disabled = false; alert('Could not mark fulfilled: ' + e); });
+              });
+            });
+          })();
+        </script>
+    </section>
 
     <section class="mb-4">
         <div class="alarm-section-header">

@@ -258,10 +258,14 @@ def alarms_dashboard(request):
     next_check_seconds = int(cycle_seconds - (now % cycle_seconds))
     built_at_dt = datetime.fromtimestamp(now, tz=_EASTERN)
 
+    pings_open, pings_done = alarms_data.list_pings()
     return render(request, 'monitor_app/alarms.html', {
         'hours': hours,
         'summary_rows': summary_rows,
         'sections': sections,
+        'pings_open': pings_open,
+        'pings_done': pings_done,
+        'ping_default_lead': alarms_data.PING_DEFAULT_LEAD_DAYS,
         'teams': alarms_data.list_teams(),
         'health': alarms_data.engine_health(),
         'recent_runs': alarms_data.recent_runs(limit=20),
@@ -270,6 +274,64 @@ def alarms_dashboard(request):
         'built_at_dt': built_at_dt,
         'auto_refresh_seconds': 10,
     })
+
+
+# ── pings (docs/PINGS.md) ──────────────────────────────────────────────
+
+def _json_body(request) -> dict:
+    if request.content_type and 'json' in request.content_type:
+        try:
+            return json.loads(request.body or b'{}')
+        except json.JSONDecodeError as e:
+            raise alarms_data.PingError(f'bad json: {e}')
+    return {k: v for k, v in request.POST.items()}
+
+
+@login_required
+@csrf_exempt
+@require_POST
+def ping_create(request):
+    """POST /alarms/pings/create/ — one open ping from the dashboard
+    form (JSON or form body: title, due, lead_days, owner, note, url).
+    Returns {ok, id}; a bad field returns {error} with the reason."""
+    from .epicprod_logging import log_epicprod_action
+    username = getattr(request.user, 'username', '') or ''
+    try:
+        body = _json_body(request)
+        e = alarms_data.create_ping(
+            title=body.get('title', ''), due=body.get('due', ''),
+            lead_days=body.get('lead_days'), owner=body.get('owner', ''),
+            note=body.get('note', ''), url=body.get('url', ''),
+            created_by=username, origin='manual')
+    except alarms_data.PingError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    log_epicprod_action(
+        'web', 'ping_create', subject_type='ping', subject_key=e.id,
+        subject_label=e.title, username=username,
+        sublevel='normal', live_default=True,
+        due=(e.data or {}).get('due', ''), origin='manual',
+        url=f'/alarms/#pings')
+    return JsonResponse({'ok': True, 'id': e.id})
+
+
+@login_required
+@csrf_exempt
+@require_POST
+def ping_fulfil(request, ping_uuid: str):
+    """POST /alarms/pings/<uuid>/fulfil/ — record that the obligation
+    is met. The engine clears the ping's event on its next tick."""
+    from .epicprod_logging import log_epicprod_action
+    username = getattr(request.user, 'username', '') or ''
+    try:
+        e = alarms_data.fulfil_ping(ping_uuid, by=username)
+    except alarms_data.PingError as exc:
+        return JsonResponse({'error': str(exc)}, status=400)
+    log_epicprod_action(
+        'web', 'ping_fulfil', subject_type='ping', subject_key=e.id,
+        subject_label=e.title, username=username,
+        sublevel='normal', live_default=True,
+        due=(e.data or {}).get('due', ''), url=f'/alarms/#pings')
+    return JsonResponse({'ok': True, 'id': e.id})
 
 
 # ── event detail ──────────────────────────────────────────────────────────

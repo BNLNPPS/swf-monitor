@@ -328,22 +328,36 @@ def capcom_state(request):
         detail['panda'] = {'error_text': str(exc)}
 
     try:
-        from ..alarms_data import active_event_count, alarm_configs
+        from ..alarms_data import active_event_rows, alarm_configs
 
+        # Pings (docs/PINGS.md) are reminders, not outages: counted apart,
+        # shown amber, and never paint the tile red on their own.
         counts = {}
+        pings = 0
         for cfg in alarm_configs():
             entry_id = cfg.get('entry_id') or ''
-            if entry_id:
-                counts[cfg.get('name') or entry_id] = (
-                    active_event_count(entry_id))
+            if not entry_id:
+                continue
+            n = 0
+            for ev in active_event_rows(entry_id):
+                if (ev.data or {}).get('severity') == 'ping':
+                    pings += 1
+                else:
+                    n += 1
+            counts[cfg.get('name') or entry_id] = n
         active = sum(counts.values())
+        parts = []
+        if active:
+            parts.append(f'{active} active')
+        if pings:
+            parts.append(f'{pings} ping{"s" if pings != 1 else ""}')
         states.append({
             'source': 'swf-alarms',
-            'value': f'{active} active' if active else 'OK',
-            'color': 'red' if active else 'green',
+            'value': ', '.join(parts) if parts else 'OK',
+            'color': 'red' if active else ('amber' if pings else 'green'),
             'url': f'{REMOTE_FACE}/alarms/'})
         detail['alarms'] = {
-            'active': active,
+            'active': active, 'pings': pings,
             'by_alarm': {name: n for name, n in counts.items() if n}}
     except Exception as exc:
         logger.error('capcom state: alarm counts failed: %s', exc)
