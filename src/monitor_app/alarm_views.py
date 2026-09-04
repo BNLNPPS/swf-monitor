@@ -264,6 +264,7 @@ def alarms_dashboard(request):
         pg['fulfil_proposal'] = fulfil_proposals.get(pg['id'])
     return render(request, 'monitor_app/alarms.html', {
         'ping_proposals': ping_proposals,
+        'ping_today': alarms_data._today_eastern().isoformat(),
         'hours': hours,
         'summary_rows': summary_rows,
         'sections': sections,

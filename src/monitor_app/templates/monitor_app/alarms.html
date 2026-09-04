@@ -241,7 +241,7 @@
                 <tr class="ping-proposal" data-proposal-id="{{ pr.id }}" data-orig-due="{{ pr.due }}" style="background-color: var(--ai-bg);">
                     <td>{% if pr.url %}<a href="{{ pr.url }}" target="_blank" rel="noopener">{{ pr.title }}</a>{% else %}{{ pr.title }}{% endif %}{% if pr.note %}<div class="text-muted" style="font-size:0.9em;">{{ pr.note|truncatechars:200 }}</div>{% endif %}<div class="ai-attr-text" style="font-size:0.85em; display:inline-block; padding:1px 6px; border-radius:3px; margin-top:2px;">AI proposal {{ pr.ref }}: {{ pr.comment }}</div></td>
                     <td style="white-space:nowrap;"><input type="date" class="form-control form-control-sm ping-proposal-due" value="{{ pr.due }}" style="width:11em; display:inline-block;" title="Editable before acceptance; the amended date is recorded with the decision" {% if not user.is_authenticated %}disabled{% endif %}></td>
-                    <td class="text-end">{% if pr.days_left is not None %}{{ pr.days_left }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td class="text-end"><input type="number" step="1" class="form-control form-control-sm ping-proposal-days" value="{{ pr.days_left|default_if_none:'' }}" data-today="{{ ping_today }}" style="width:5.5em; display:inline-block; text-align:right;" title="Editable before acceptance; moves the due date" {% if not user.is_authenticated %}disabled{% endif %}></td>
                     <td class="ai-fill" style="white-space:nowrap; color: var(--ai-fg); font-weight:600;">proposed</td>
                     <td>{{ pr.owner|default:'—' }}<div class="text-muted" style="font-size:0.85em;">AI proposal {{ pr.ref }} by {{ pr.proposer|default:'?' }}</div></td>
                     <td style="white-space:nowrap;">
@@ -380,6 +380,26 @@
                   .catch(function(e) { setStatus('Error: ' + e, 'text-danger'); });
               });
             }
+            // Days left and due date are one value on a proposal row: editing either moves the other.
+            document.querySelectorAll('tr.ping-proposal').forEach(function(tr) {
+              var due = tr.querySelector('.ping-proposal-due');
+              var days = tr.querySelector('.ping-proposal-days');
+              if (!due || !days) return;
+              var today = new Date(days.getAttribute('data-today') + 'T00:00:00');
+              function isoPlus(n) {
+                var d = new Date(today.getTime() + n * 86400000);
+                return d.toISOString().slice(0, 10);
+              }
+              days.addEventListener('input', function() {
+                var n = parseInt(days.value, 10);
+                if (!isNaN(n)) due.value = isoPlus(n);
+              });
+              due.addEventListener('input', function() {
+                if (!due.value) return;
+                var d = new Date(due.value + 'T00:00:00');
+                days.value = Math.round((d.getTime() - today.getTime()) / 86400000);
+              });
+            });
             document.querySelectorAll('.ping-proposal-decide').forEach(function(btn) {
               btn.addEventListener('click', function() {
                 var holder = btn.closest('[data-proposal-id]');
