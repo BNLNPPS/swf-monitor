@@ -231,9 +231,16 @@ def _github_actions():
         latest_by_workflow = {}
         for run in payload.get('workflow_runs', []):
             # Only main and the coordinated baselines redden the system;
-            # PR-branch failures are the pull request's concern.
+            # PR-branch failures are the pull request's concern. A run
+            # whose head is another repository is a pull request from a
+            # fork whatever its branch is named: a fork's main is not
+            # this repository's main.
             branch = run.get('head_branch') or ''
             if branch != 'main' and not branch.startswith('infra/baseline-'):
+                continue
+            head_repo = ((run.get('head_repository') or {}).get('full_name')
+                         or repo)
+            if head_repo.lower() != repo.lower():
                 continue
             latest_by_workflow.setdefault(run.get('workflow_id'), run)
         for run in latest_by_workflow.values():
