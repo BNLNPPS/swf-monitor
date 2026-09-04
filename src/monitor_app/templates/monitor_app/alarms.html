@@ -271,7 +271,7 @@
                       <button type="button" class="btn btn-success btn-sm ping-fulfil"
                               data-url="{% url 'monitor_app:ping_fulfil' ping_uuid=pg.id %}"
                               {% if not user.is_authenticated %}disabled{% endif %}
-                              title="{% if user.is_authenticated %}Record the obligation as met; the alarm clears on the next engine tick{% else %}Sign in to mark a ping fulfilled{% endif %}">Fulfilled</button>
+                              title="{% if user.is_authenticated %}Record the obligation as met; the alarm clears on the next engine tick{% else %}Sign in to mark a ping fulfilled{% endif %}">Mark as fulfilled</button>
                       {% endif %}
                     </td>
                 </tr>
