@@ -121,8 +121,8 @@
       </div>
     </div>
     <div class="mb-3" style="font-size: 0.92em;">
-      <a href="#pings">pings</a>
-      <span class="text-muted">&middot;</span> <a href="#summary">alarm summary</a>
+      <a href="#summary">alarms</a>
+      <span class="text-muted">&middot;</span> <a href="#pings">pings</a>
       {% for r in summary_rows %}
         <span class="text-muted">&middot;</span> <a href="#section-{{ r.entry_id }}">{{ r.title|default:r.name }}</a>
       {% endfor %}
@@ -171,6 +171,51 @@
         }, 1000);
       })();
     </script>
+
+
+
+    <div id="summary" class="alarm-section-header">
+      Alarms
+    </div>
+    <form method="get" class="d-flex align-items-center gap-2 mb-2">
+        <label class="text-muted">Since:</label>
+        <input type="number" name="hours" value="{{ hours }}" min="1" max="720"
+               class="form-control form-control-sm" style="width:90px;"
+               title="How far back to look when counting/listing past alarms. View filter only; does not change alarm behavior.">
+        <span class="text-muted">hours ago</span>
+        <button class="btn btn-primary btn-sm">Apply</button>
+    </form>
+    <table class="table table-sm table-hover swf-sortable">
+        <thead>
+            <tr>
+                <th>Alarm</th>
+                <th title="Per-alarm email switch. When OFF, the alarm's detection still runs and events still appear here — only email notifications are suppressed. Flip in the editor.">Emails</th>
+                <th>Alarm tasks in last {{ hours }}h</th>
+                <th>Current alarm tasks</th>
+                <th>Last alarm</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in summary_rows %}
+            <tr>
+                <td>
+                  <a href="#section-{{ r.entry_id }}"><span class="text-muted">Alarm {{ forloop.counter }}:</span> {{ r.title|default:r.name }}</a>
+                  {% if r.quiet %}<span class="quiet-badge" title="No detections in the last few runs despite prior history — may indicate a silently broken alarm.">quiet</span>{% endif %}
+                </td>
+                <td class="{% if r.enabled %}ok_fill{% else %}paused_fill{% endif %}"
+                    title="{% if r.enabled %}Emails are ON — notifications are sent on new detections.{% else %}Emails are OFF — detection still runs and events appear on this dashboard; mail is suppressed.{% endif %}">
+                    {% if r.enabled %}on{% else %}off{% endif %}
+                </td>
+                <td class="{% if r.count %}failed_fill{% else %}ok_fill{% endif %}">{{ r.count }}</td>
+                <td class="{% if r.active %}failed_fill{% else %}ok_fill{% endif %}">{{ r.active }}</td>
+                <td>{% if r.last_fired_dt %}{{ r.last_fired_dt|naturaltime }}{% else %}—{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="text-muted">No alarm configs defined.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
 
     <section id="pings" class="mb-4">
         <div class="alarm-section-header">
@@ -365,51 +410,6 @@
         <a class="btn btn-sm btn-primary"
            href="{% url 'monitor_app:team_new' %}">Create team</a>
     </section>
-
-    <div id="summary" class="alarm-section-header">
-      Alarm summary
-      <span class="text-muted" style="font-size:0.85em; font-weight:400;">
-        — one row per configured alarm
-      </span>
-    </div>
-    <form method="get" class="d-flex align-items-center gap-2 mb-2">
-        <label class="text-muted">Since:</label>
-        <input type="number" name="hours" value="{{ hours }}" min="1" max="720"
-               class="form-control form-control-sm" style="width:90px;"
-               title="How far back to look when counting/listing past alarms. View filter only; does not change alarm behavior.">
-        <span class="text-muted">hours ago</span>
-        <button class="btn btn-primary btn-sm">Apply</button>
-    </form>
-    <table class="table table-sm table-hover swf-sortable">
-        <thead>
-            <tr>
-                <th>Alarm</th>
-                <th title="Per-alarm email switch. When OFF, the alarm's detection still runs and events still appear here — only email notifications are suppressed. Flip in the editor.">Emails</th>
-                <th>Alarm tasks in last {{ hours }}h</th>
-                <th>Current alarm tasks</th>
-                <th>Last alarm</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in summary_rows %}
-            <tr>
-                <td>
-                  <a href="#section-{{ r.entry_id }}"><span class="text-muted">Alarm {{ forloop.counter }}:</span> {{ r.title|default:r.name }}</a>
-                  {% if r.quiet %}<span class="quiet-badge" title="No detections in the last few runs despite prior history — may indicate a silently broken alarm.">quiet</span>{% endif %}
-                </td>
-                <td class="{% if r.enabled %}ok_fill{% else %}paused_fill{% endif %}"
-                    title="{% if r.enabled %}Emails are ON — notifications are sent on new detections.{% else %}Emails are OFF — detection still runs and events appear on this dashboard; mail is suppressed.{% endif %}">
-                    {% if r.enabled %}on{% else %}off{% endif %}
-                </td>
-                <td class="{% if r.count %}failed_fill{% else %}ok_fill{% endif %}">{{ r.count }}</td>
-                <td class="{% if r.active %}failed_fill{% else %}ok_fill{% endif %}">{{ r.active }}</td>
-                <td>{% if r.last_fired_dt %}{{ r.last_fired_dt|naturaltime }}{% else %}—{% endif %}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="5" class="text-muted">No alarm configs defined.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
 
     {% for sec in sections %}
     <section id="section-{{ sec.config.entry_id }}">
