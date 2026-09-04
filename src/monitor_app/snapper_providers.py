@@ -1794,7 +1794,7 @@ def _site_focus_view():
                  'edge of the shown window — the window is the '
                  'integration range, and zooming re-bases it. Click '
                  'the plot for the full picture at that instant.'),
-        'default': sites[0],
+        'default': 'all',
         'options': [
             {'value': site, 'label': site,
              'families': [f'Site jobs {site}',
