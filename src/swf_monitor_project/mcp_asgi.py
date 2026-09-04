@@ -15,7 +15,13 @@ MCPRequestGuard wraps the MCP Starlette app and enforces:
 - /health returns {"status": "ok"} with no auth, for the watchdog
 - Only POST is accepted (405 otherwise) — no server-pushed SSE, no GET
 - Authorization: Bearer <settings.MCP_BEARER_TOKEN> on every non-health
-  request (401 missing, 403 wrong, 503 not configured)
+  request (401 missing, 403 wrong, 503 not configured), OR the proxied
+  identity: a request from the localhost hop (the swf-remote SSH tunnel,
+  as Apache reports the client) carrying X-Remote-User is accepted as
+  that user without a token, the same trust the REST tier gives the
+  tunnel (EXTERNAL_ACCESS.md). The identity is published to the tools
+  through ``monitor_app.mcp.common.CALLER`` so a tool that takes a
+  username defaults to it.
 - Path normalization so /swf-monitor/mcp[/...], /mcp[/...], and / all
   reach the FastMCP app cleanly, regardless of what Apache strips
 
@@ -41,6 +47,9 @@ django.setup()
 from django.conf import settings  # noqa: E402
 
 from monitor_app.mcp import mcp  # noqa: E402
+from monitor_app.mcp.common import CALLER  # noqa: E402
+
+_LOCALHOST = ("127.0.0.1", "::1")
 
 
 def _json_body(value: dict[str, Any]) -> bytes:
@@ -95,7 +104,20 @@ class MCPRequestGuard:
 
         headers = self._headers(scope)
         auth_header = headers.get("authorization", "")
+        client_host = (scope.get("client") or ("", 0))[0]
+        remote_user = headers.get("x-remote-user", "").strip()
         if not auth_header.startswith("Bearer "):
+            # The swf-remote tunnel arrives from localhost with the signed-in
+            # user's name; uvicorn takes the client address from Apache's
+            # X-Forwarded-For (--proxy-headers), so a direct client is never
+            # seen as localhost.
+            if client_host in _LOCALHOST and remote_user:
+                token = CALLER.set(remote_user)
+                try:
+                    await self.app(scope, receive, send)
+                finally:
+                    CALLER.reset(token)
+                return
             await _send_json(send, 401, {"error": "Authorization required"})
             return
 
@@ -108,7 +130,11 @@ class MCPRequestGuard:
             await _send_json(send, 403, {"error": "Invalid token"})
             return
 
-        await self.app(scope, receive, send)
+        token = CALLER.set("")
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            CALLER.reset(token)
 
     def _normalize_mcp_path(self, scope):
         """Accept common proxy forms: /, /mcp[/...], or /swf-monitor/mcp[/...]."""

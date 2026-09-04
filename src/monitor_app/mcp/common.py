@@ -2,6 +2,7 @@
 Common utilities and tool discovery for MCP tools.
 """
 
+import contextvars
 import logging
 from datetime import timedelta, timezone as dt_timezone
 from django.utils import timezone
@@ -34,8 +35,21 @@ def _default_start_time(hours=24):
     return timezone.now() - timedelta(hours=hours)
 
 
+# The identity the MCP guard established for the current request: the
+# signed-in user forwarded by the swf-remote tunnel, or '' for a bearer
+# token caller (swf_monitor_project/mcp_asgi.py). Tools read it through
+# _get_username, so a proxied caller need not, and cannot usefully,
+# declare a different name.
+CALLER: contextvars.ContextVar = contextvars.ContextVar('mcp_caller', default='')
+
+
 def _get_username(username: str = None) -> str:
-    """Validate and return the username. Must be provided by the caller."""
+    """The username a tool acts as: the proxied caller's identity when
+    the request came through the tunnel, else the username the caller
+    supplied. A bearer-token caller must supply one."""
+    caller = CALLER.get()
+    if caller:
+        return caller
     if not username:
         raise RuntimeError("username parameter is required")
     return username

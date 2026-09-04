@@ -41,7 +41,9 @@ The ASGI worker runs separately from the mod_wsgi Django site. This isolates MCP
 failures from the browser UI and REST API. `MCPRequestGuard` in
 `mcp_asgi.py` handles the transport and bearer-token gate: `/health` is open for
 the watchdog; other requests require POST plus `Authorization: Bearer
-<MCP_BEARER_TOKEN>`.
+<MCP_BEARER_TOKEN>`, or, for the swf-remote tunnel, the localhost hop with
+`X-Remote-User`, which the guard accepts as that user and publishes to the
+tools as the caller (EXTERNAL_ACCESS.md, MCP through the proxy).
 
 JLab and BNL Rucio are credentialed locally on swf-testbed and exposed as
 prefixed read-only tools on this same authenticated endpoint. Remote clients do

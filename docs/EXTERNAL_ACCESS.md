@@ -107,6 +107,27 @@ disabling page-view write controls that are only supported on `pandaserver02`.
 Do not implement this class of behavior by matching URL strings or rewriting
 proxied HTML in swf-remote.
 
+## MCP through the proxy
+
+The MCP toolset external users get is the monitor's own, proxied, not a
+second server. The monitor's MCP transport is stateless JSON over POST
+(MCP.md), so the proxy contract above carries it with two additions on
+the swf-remote side: an explicit `mcp/` route (the path is outside the
+`pcs/` and `panda/` catch-alls), and the `Accept` request header
+forwarded, since the transport requires `application/json,
+text/event-stream`. No `Authorization` header is forwarded. The monitor's
+MCP guard (`swf_monitor_project/mcp_asgi.py`) accepts a request from the
+localhost hop that carries `X-Remote-User` as that user, the same trust
+the REST tier gives the tunnel; every other caller presents the bearer
+token. Tools that take a `username` default it to the forwarded identity
+(`monitor_app.mcp.common.CALLER`), so a proxied caller acts as the
+signed-in person, not as a name it declares.
+
+Headless LLM clients cannot complete the CILogon browser login, so the
+`mcp/` route authenticates them by a per-user token issued on swf-remote,
+resolved to the username injected as `X-Remote-User`. Client setup for
+external users is in [MCP_CLIENTS.md](MCP_CLIENTS.md).
+
 ## Static assets
 
 CSS, JS, and images at `/swf-monitor/static/...` proxy through
