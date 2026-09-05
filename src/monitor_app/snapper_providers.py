@@ -1991,9 +1991,24 @@ def _storage_curve_label(curve_id):
     return _STORAGE_MEMBER_LABELS.get(member, member)
 
 
-def _storage_rse_families(rse, quantity, lens):
-    """The per-RSE families for one quantity and grouping, in panel
-    order (docs/SNAPPER_STORAGE.md, Families per RSE)."""
+_STORAGE_PANELS = ({'value': 'lifecycle', 'label': 'data lifecycle'},
+                   {'value': 'capacity', 'label': 'capacity only'},
+                   {'value': 'ghosts', 'label': 'ghosts only'})
+
+
+def _storage_rse_families(rse, quantity, lens, panels='lifecycle'):
+    """The per-RSE families for one quantity, grouping and panel set,
+    in panel order (docs/SNAPPER_STORAGE.md, Families per RSE). The
+    capacity and ghosts sets are the RSE-status and ghost-history
+    readings alone, one click from the whole lifecycle."""
+    if panels == 'capacity':
+        return [f'Storage capacity {rse} {quantity}']
+    if panels == 'ghosts':
+        return [(f'Storage ghosts {rse} files {lens}' if quantity == 'files'
+                 else f'Storage ghosts {rse} bytes'),
+                f'Storage ghost flow {rse}',
+                f'Storage ghost yield {rse}',
+                f'Storage capacity {rse} {quantity}']
     return [f'Storage arrivals {rse} {quantity}',
             f'Storage transfers {rse} {quantity}',
             f'Storage backlog {rse} {quantity} {lens}',
@@ -2007,9 +2022,12 @@ def _storage_rse_families(rse, quantity, lens):
             f'Storage capacity {rse} {quantity}']
 
 
-def _storage_campaign_families(campaigns, quantity):
-    """The scope-level families, per target campaign, in panel order."""
+def _storage_campaign_families(campaigns, quantity, panels='lifecycle'):
+    """The scope-level families, per target campaign, in panel order;
+    none under the capacity and ghosts panel sets."""
     names = []
+    if panels != 'lifecycle':
+        return names
     for name in campaigns:
         names += [f'Storage copies {name}', f'Storage placement {name}',
                   f'Storage catalog quality {name}',
@@ -2240,10 +2258,12 @@ def _storage_focus_view():
          # RSE holding nothing is the idle one.
          'activity': f'stofu_{rse}_files',
          'families_by': {
-             f"{quantity['value']}|{lens['value']}": _storage_rse_families(
-                 rse, quantity['value'], lens['value'])
+             f"{quantity['value']}|{lens['value']}|{panels['value']}":
+                 _storage_rse_families(rse, quantity['value'],
+                                       lens['value'], panels['value'])
              for quantity in _STORAGE_QUANTITIES
-             for lens in _STORAGE_LENSES},
+             for lens in _STORAGE_LENSES
+             for panels in _STORAGE_PANELS},
          'component': 'storage', 'start': floor}
         for rse in inventory['rses']]
     if inventory['campaigns']:
@@ -2251,11 +2271,13 @@ def _storage_focus_view():
             'value': _STORAGE_CAMPAIGNS_OPTION, 'label': 'Campaign totals',
             'pin': 'last',
             'families_by': {
-                f"{quantity['value']}|{lens['value']}":
+                f"{quantity['value']}|{lens['value']}|{panels['value']}":
                     _storage_campaign_families(inventory['campaigns'],
-                                               quantity['value'])
+                                               quantity['value'],
+                                               panels['value'])
                 for quantity in _STORAGE_QUANTITIES
-                for lens in _STORAGE_LENSES},
+                for lens in _STORAGE_LENSES
+                for panels in _STORAGE_PANELS},
             'component': 'storage', 'start': floor})
     return {
         'param': 'rse',
@@ -2279,6 +2301,8 @@ def _storage_focus_view():
              'default': 'files', 'choices': list(_STORAGE_QUANTITIES)},
             {'param': 'lens', 'label': 'Grouping',
              'default': 'campaign', 'choices': list(_STORAGE_LENSES)},
+            {'param': 'panels', 'label': 'Show',
+             'default': 'lifecycle', 'choices': list(_STORAGE_PANELS)},
         ],
         'options': options,
     }

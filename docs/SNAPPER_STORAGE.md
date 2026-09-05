@@ -91,6 +91,11 @@ jump list, and the RSE's detail docked beneath its own panels.
   other panels are the same under every grouping. The campaign
   grouping shows the target campaigns with every other campaign
   folded into `other`, as the record folds them.
+- **Show** selector: the whole data lifecycle (default), capacity only
+  (each RSE's usage against its limit over time, with the capacity
+  table across RSEs beneath: the RSE-status reading), or ghosts only
+  (each RSE's ghost population, flow and yield, with its capacity).
+  The choice rides the URL, so each reading is a bookmark.
 - the window, cut, zoom and curve selection every report page
   carries. The clean page lands on the last seven days (the view's
   default window; a signed-in user's remembered window takes
