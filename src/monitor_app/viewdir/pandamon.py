@@ -1732,7 +1732,8 @@ def panda_diagnostics_datatable_ajax(request):
 
         errors_html = []
         for err in job.get('errors', []):
-            diag = err.get('diag', '')
+            corr = err.get('correction')
+            diag = corr['label'] if corr else err.get('diag', '')
             if len(diag) > 80:
                 diag = diag[:77] + '...'
             errors_html.append(f'<strong>{err["component"]}</strong>:{err["code"]} {diag}')

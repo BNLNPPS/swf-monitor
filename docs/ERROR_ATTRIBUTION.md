@@ -194,10 +194,15 @@ supported, not confirmed. Every summary states the processing lost.
   breakdown patterns — with the corrected reading refined from each
   pattern's payload exit-code profile (grade: pilot mechanical
   fields), the original label preserved beneath it, and the first
-  seeded rule covering the pilot 1305 bind-mount noise. Remaining
-  from the design: REST endpoints, a dedicated management page,
-  episode-scoped cause verdicts, and wiring at system status and the
-  inventory.
+  seeded rule covering the pilot 1305 bind-mount noise. The per-job
+  root is wired the same way: `extract_errors` in
+  `monitor_app/panda/sql.py`, through which the task page's job list,
+  the jobs list, and the job page's error entries read, attaches the
+  correction to each entry with the job's own transformation exit code
+  as its profile, so a job labelled pilot 1305 with exit 78 presents as
+  a payload Rucio output registration failure. Remaining from the
+  design: REST endpoints, a dedicated management page, episode-scoped
+  cause verdicts, and wiring at system status and the inventory.
 - **swf-epicprod**: dispatcher report writer for the PCS path; the
   exit-code registry; the `run.sh` insert for direct submissions.
 - **Upstream, parallel and non-blocking**:

@@ -5,7 +5,12 @@ Pure functions that construct SQL strings and transform database rows.
 No database I/O — callers execute the returned (sql, params) tuples.
 """
 
+import logging
+
 from .constants import PANDA_SCHEMA, ERROR_COMPONENTS, JOB_STATUS_CATEGORIES
+from ..error_corrections import correction, match
+
+logger = logging.getLogger(__name__)
 
 
 def _job_status_in_list(category):
@@ -97,7 +102,16 @@ def row_to_dict(row, fields):
 
 
 def extract_errors(job_dict):
-    """Extract non-zero error components from a job dict."""
+    """Extract non-zero error components from a job dict.
+
+    This is the per-job error root: the task page's job list, the jobs
+    list, and the job page's error entries all read through it. An entry
+    whose label a rule marks unreliable carries the correction root's
+    reading under ``correction`` (docs/ERROR_ATTRIBUTION.md), refined
+    from this job's own transformation exit code. Decoration never
+    raises into a page: a failure is logged and the entry keeps its raw
+    label.
+    """
     errors = []
     for comp in ERROR_COMPONENTS:
         code = job_dict.get(comp['code'])
@@ -108,12 +122,23 @@ def extract_errors(job_dict):
                 'diag': job_dict.get(comp['diag'], ''),
             })
     transexitcode = job_dict.get('transexitcode')
-    if transexitcode and str(transexitcode).strip() not in ('', '0'):
+    has_exit = bool(transexitcode) and str(transexitcode).strip() not in ('', '0')
+    if has_exit:
         errors.append({
             'component': 'transformation',
             'code': transexitcode,
             'diag': '',
         })
+    exit_profile = {str(transexitcode).strip(): 1} if has_exit else {}
+    for err in errors:
+        try:
+            rule = match(err['component'], err['code'], err['diag'])
+            if rule is not None:
+                err['correction'] = correction(rule, exit_profile)
+        except Exception as e:
+            logger.error('error-correction decoration failed for job %s '
+                         '%s:%s: %s', job_dict.get('pandaid'),
+                         err['component'], err['code'], e)
     return errors
 
 

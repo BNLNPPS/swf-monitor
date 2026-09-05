@@ -251,7 +251,7 @@
                 <tr>
                     <td><a href="{% url 'monitor_app:panda_diagnostics_list' %}?error_source={{ err.component }}">{{ err.component }}</a></td>
                     <td>{{ err.code }}</td>
-                    <td>{{ err.diag }}</td>
+                    <td>{% if err.correction %}{{ err.correction.label }}{% else %}{{ err.diag }}{% endif %}</td>
                 </tr>
                 {% endfor %}
                 </tbody>
