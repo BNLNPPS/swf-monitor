@@ -453,9 +453,8 @@
   </div>
   {% endfor %}
   <div data-snapper-detail-key="{{ card.scope.key }}" class="snapper-cut-card">
-    <div class="mb-1 fs-5"><strong>Storage record</strong>
-      {% if card.scope.reconstructed %}<span class="text-muted fs-6">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip fs-6" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span> <span class="fs-6">{{ card.scope.verdict_summary }}; each is stated with its RSE or campaign below</span>{% endif %}
-      <span class="fs-6">· <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></span></div>
+    <div class="mb-1 fs-5"><strong>Storage record</strong> <span class="fs-6">· <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></span></div>
+    <div class="mb-1">{% if card.scope.reconstructed %}<span class="text-muted">Reconstructed arrivals record; the state record begins at the census.</span>{% else %}<span class="snapper-chip" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span> {{ card.scope.verdict_summary }}; each is stated with its RSE or campaign below.{% endif %}</div>
     <div class="mb-2 text-muted">The {{ card.scope.pass.mode }} pass that published this state ended {{ card.scope.interval.end|fmt_dt }} ET{% if card.scope.pass.duration_min %}, having checked {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets in {{ card.scope.pass.duration_min }} min{% endif %}{% if card.scope.interval.start %}; it covers the changes since the previous publication at {{ card.scope.interval.start|fmt_dt }} ET{% endif %}.{% if card.scope.pass.errors %} <span class="text-danger">{{ card.scope.pass.errors }} catalog reads failed.</span>{% endif %}</div>
     <table class="table table-sm table-bordered table-striped w-auto mb-3 swf-latch-head swf-latch-titled-head">
       <thead>
