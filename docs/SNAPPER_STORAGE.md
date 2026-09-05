@@ -92,10 +92,11 @@ jump list, and the RSE's detail docked beneath its own panels.
   grouping shows the target campaigns with every other campaign
   folded into `other`, as the record folds them.
 - the window, cut, zoom and curve selection every report page
-  carries. The option's window floor is the later of the record's
-  first snap and thirty days before now, so the clean page lands on
-  the last thirty days of the record, the named windows remain one
-  click away, and stepping never offers territory before the record.
+  carries. The clean page lands on the last seven days (the view's
+  default window; a signed-in user's remembered window takes
+  precedence), with no floor at the record's first snap: a young
+  record leaves the left of the window empty rather than shrinking
+  the window to its span.
 
 **Families per RSE**, panel order following the lifecycle, rates
 first, then backlogs, then state. Every family's control row is
@@ -161,6 +162,9 @@ error entries carry no RSE, so the strip is scope-level, once; the
 attribution of a failure to its destination RSE is not recorded and
 is not shown.
 
+State curves hold their last recorded value to the present: the record
+is hourly and a quiet pass affirms the state unchanged, so the last
+pass's gauges are the state until the next pass; flows stay per-bin.
 Units on every panel title; house state colors where a state is
 drawn (available blue, copying the warning color, unavailable and
 bad the failure color, tape grey); campaign and root members take the

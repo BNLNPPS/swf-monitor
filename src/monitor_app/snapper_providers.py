@@ -540,6 +540,12 @@ def _platform_series_transform(series):
     return series
 
 
+# Storage curve prefixes that are flows (counter projections and the
+# derived yield), never held forward.
+_STORAGE_FLOW_PREFIXES = ('stofa_', 'stoba_', 'stoft_', 'stobt_', 'stoxe_',
+                          'stopf_', 'stopb_', 'stoxy_')
+
+
 def _storage_series_transform(series):
     """Derive the ghost yield per RSE (docs/SNAPPER_STORAGE.md) from the
     projected flows: ghosts appeared over registrations, first copies
@@ -565,6 +571,27 @@ def _storage_series_transform(series):
         if points:
             curves[f'stoxy_{rse}_yield'] = {
                 'label': _STORAGE_MEMBER_LABELS['yield'], 'points': points}
+    # State curves hold their last recorded value to the present: the
+    # record is hourly and a quiet pass affirms the state unchanged, so
+    # the last pass's gauges are the state until the next pass. Flows
+    # (counter projections and the yield) are per-bin and stay as they
+    # are. The hold stops a minute short of the series end so the
+    # landing cut stays inside the capture scheduler's evaluated span.
+    end = series.get('end')
+    if end:
+        from datetime import datetime, timedelta
+        try:
+            hold_stamp = (datetime.fromisoformat(end)
+                          - timedelta(seconds=60)).isoformat(timespec='seconds')
+        except ValueError:
+            hold_stamp = None
+        for curve_id, curve in curves.items():
+            if (hold_stamp is None or not curve_id.startswith('sto')
+                    or curve_id.startswith(_STORAGE_FLOW_PREFIXES)):
+                continue
+            points = curve.get('points') or []
+            if points and points[-1][0] < hold_stamp:
+                points.append([hold_stamp, points[-1][1]])
     series['curves'] = curves
     return series
 
@@ -2177,18 +2204,15 @@ def _storage_focus_view():
     lifecycle per RSE — arrivals, transfers and deletions, the copying
     backlog, ghosts, inventory, rule locks and capacity — with the
     campaign families pinned after the ranked RSE sections, and the
-    cut narrowed to the storage component's card. The window floor is
-    the later of the record's first snap and thirty days ago."""
-    from datetime import timedelta
-
-    from django.utils import timezone
-
+    cut narrowed to the storage component's card. The clean page lands
+    on the last seven days, with no floor at the record's start."""
     inventory = _storage_inventory()
     if not inventory['rses']:
         return None
+    # No window floor: the page lands on the last seven days whatever
+    # the record's age, and a young record leaves the left of the
+    # window empty rather than shrinking the window to its span.
     floor = None
-    if inventory['first'] is not None:
-        floor = max(inventory['first'], timezone.now() - timedelta(days=30))
     options = [
         {'value': rse, 'label': rse,
          # Presentation follows holdings, the files on the RSE, so an
@@ -2221,12 +2245,13 @@ def _storage_focus_view():
         'cache_series': True,
         'components': ('storage',),
         'prewarm_series': False,
+        'default_window': '7d',
         'note': ('The data lifecycle per RSE: arrivals, transfers and '
                  'deletions per bin from the record\'s counters; backlog, '
                  'ghosts, inventory, rule locks and capacity as the state '
-                 'at each storage pass. Bytes plot in TB. Click the plot '
-                 'for the RSE\'s standing at that instant and the capacity '
-                 'table across RSEs.'),
+                 'at each storage pass, held until the next pass. Bytes '
+                 'plot in TB. Click the plot for the RSE\'s standing at '
+                 'that instant and the capacity table across RSEs.'),
         'default': 'all',
         'activity_label': 'files held',
         'selectors': [
