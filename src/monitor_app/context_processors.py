@@ -193,6 +193,8 @@ def _active_nav(request):
         'pcs_datasets': namespace == 'pcs' and url_name in pcs_dataset_names,
         'pcs_evgen_inputs': namespace == 'pcs' and url_name in (
             'evgen_inputs', 'evgen_inputs_update'),
+        'pcs_storage': namespace == 'pcs' and url_name in (
+            'storage_listings', 'storage_listings_home'),
         'pcs_ingest': namespace == 'pcs' and url_name == 'pc_ingest',
         'pcs_configs': namespace == 'pcs' and url_name in pcs_config_names,
         'pcs_tasks': namespace == 'pcs' and url_name in pcs_task_names,
