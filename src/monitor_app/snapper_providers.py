@@ -3920,12 +3920,51 @@ def _storage_card(data, previous_data, ctx):
                         else 'warning' if verdict == 'warning'
                         else 'unknown')
 
-    def _verdict_rows(prefix):
+    def _verdict_text(name, block):
+        """The verdict as a sentence with its number and threshold: what
+        the reader is to conclude, not the name of a check."""
+        if name == 'transfers_stuck':
+            backlog = block.get('backlog') or {}
+            return (f"{_fmt_count(backlog.get('over_threshold'))} copying "
+                    'replicas older than '
+                    f"{thresholds.get('storage_copying_stuck_hours')} h")
+        if name == 'rules_stuck':
+            rules = block.get('rules') or {}
+            locks = rules.get('locks') or {}
+            text = f"{_fmt_count(locks.get('stuck'))} stuck locks"
+            stuck_rules = (rules.get('by_state') or {}).get('STUCK')
+            if stuck_rules:
+                text += f" on {_fmt_count(stuck_rules)} stuck rules"
+            if rules.get('oldest_stuck_age_s') is not None:
+                text += f", oldest {_days(rules['oldest_stuck_age_s'])} d"
+            return text
+        if name == 'datasets_stalled':
+            return (f"{_fmt_count((block.get('datasets') or {}).get('stalled'))} "
+                    'open datasets with no arrival for '
+                    f"{thresholds.get('storage_stalled_hours')} h while their "
+                    'task runs')
+        if name == 'single_copy_old':
+            return (f"{_fmt_count((block.get('protection') or {}).get('single_copy_old'))} "
+                    'single-copy files older than '
+                    f"{thresholds.get('storage_single_copy_warn_days')} d")
+        return name.replace('_', ' ')
+
+    def _verdict_rows(prefix, block):
         return [{'name': key[len(prefix):].replace('_', ' '),
                  'chip': _chip(verdict),
+                 'text': (_verdict_text(key[len(prefix):], block)
+                          if verdict != 'ok' else key[len(prefix):].replace('_', ' ')),
                  'threshold': threshold_text.get(key[len(prefix):], '')}
                 for key, verdict in sorted(verdicts.items())
                 if key.startswith(prefix)]
+
+    warning_count = sum(1 for v in verdicts.values() if v == 'warning')
+    rse_warnings = sum(1 for k, v in verdicts.items()
+                       if v == 'warning' and k.startswith('rse:'))
+    verdict_summary = (
+        f'{warning_count} of {len(verdicts)} checks in warning '
+        f'({rse_warnings} on RSEs, {warning_count - rse_warnings} on campaigns)'
+        if verdicts else 'no checks recorded')
 
     def _tb(value):
         return None if value is None else round(int(value or 0) / _TB, 2)
@@ -4004,7 +4043,7 @@ def _storage_card(data, previous_data, ctx):
             'rse': rse, 'key': f'sto-{rse}',
             'type': str(block.get('type') or '').lower(),
             'url': f"{listing_urls['ghosts']}?rse={quote(rse)}",
-            'verdicts': _verdict_rows(f'rse:{rse}:'),
+            'verdicts': _verdict_rows(f'rse:{rse}:', block),
             'inventory': inventory,
             'datasets': block.get('datasets') or {},
             'backlog': {
@@ -4099,7 +4138,7 @@ def _storage_card(data, previous_data, ctx):
 
         campaigns.append({
             'name': name, 'segment': _storage_slug(name),
-            'verdicts': _verdict_rows(f'campaign:{name}:'),
+            'verdicts': _verdict_rows(f'campaign:{name}:', block),
             'files': _fmt_count(int(block.get('files') or 0)),
             'tb': _tb(block.get('bytes')),
             'single': _fmt_count(int(protection.get('single_copy') or 0)),
@@ -4159,6 +4198,7 @@ def _storage_card(data, previous_data, ctx):
             'reconstructed': (pass_info.get('mode') == 'backfill'),
             'overall': assessment.get('overall') or 'unknown',
             'overall_chip': _chip(assessment.get('overall')),
+            'verdict_summary': verdict_summary,
             'interval': data.get('interval') or {},
             'pass': {
                 'mode': pass_info.get('mode') or '',

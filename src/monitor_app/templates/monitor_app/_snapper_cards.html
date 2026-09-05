@@ -368,9 +368,10 @@
   {# counts.                                                            #}
   {% for s in card.sections %}
   <div data-snapper-detail-key="{{ s.key }}" class="snapper-cut-card mb-2">
-    <div class="mb-2 fs-5"><strong><a href="{{ s.url }}">{{ s.rse }}</a></strong> <span class="text-muted fs-6">{{ s.type }}</span>
-      {% for v in s.verdicts %} <span class="fs-6" title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}
-    </div>
+    <div class="mb-1 fs-5"><strong><a href="{{ s.url }}">{{ s.rse }}</a></strong> <span class="text-muted fs-6">{{ s.type }}</span></div>
+    {% if s.verdicts %}
+    <div class="mb-2">{% for v in s.verdicts %}<span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.text }}</span>{% if not forloop.last %} <span class="text-muted">·</span> {% endif %}{% endfor %}</div>
+    {% endif %}
     {% if card.scope.reconstructed %}
     <div class="text-muted mb-2">This instant is inside the reconstructed arrivals record: arrival counters only, rebuilt from the catalog's creation times. Inventory, ghosts, backlog, rules and capacity begin at the census.</div>
     {% endif %}
@@ -446,10 +447,10 @@
   </div>
   {% endfor %}
   <div data-snapper-detail-key="{{ card.scope.key }}" class="snapper-cut-card">
-    <div class="mb-2 fs-5"><strong>Storage record</strong>
-      {% if card.scope.reconstructed %}<span class="text-muted fs-6">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip fs-6" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>{% endif %}
-      <span class="text-muted fs-6">{{ card.scope.pass.mode }} pass{% if card.scope.interval.end %} · interval {{ card.scope.interval.start|fmt_dt }} – {{ card.scope.interval.end|fmt_dt }} ET{% endif %} · {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets checked in {{ card.scope.pass.duration_min }} min{% if card.scope.pass.errors %} · <span class="text-danger">{{ card.scope.pass.errors }} read errors</span>{% endif %}</span>
+    <div class="mb-1 fs-5"><strong>Storage record</strong>
+      {% if card.scope.reconstructed %}<span class="text-muted fs-6">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip fs-6" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span> <span class="fs-6">{{ card.scope.verdict_summary }}; each is stated with its RSE or campaign below</span>{% endif %}
       <span class="fs-6">· <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></span></div>
+    <div class="mb-2 text-muted">The {{ card.scope.pass.mode }} pass that published this state ended {{ card.scope.interval.end|fmt_dt }} ET{% if card.scope.pass.duration_min %}, having checked {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets in {{ card.scope.pass.duration_min }} min{% endif %}{% if card.scope.interval.start %}; it covers the changes since the previous publication at {{ card.scope.interval.start|fmt_dt }} ET{% endif %}.{% if card.scope.pass.errors %} <span class="text-danger">{{ card.scope.pass.errors }} catalog reads failed.</span>{% endif %}</div>
     <table class="table table-sm table-bordered table-striped w-auto mb-3 swf-latch-head swf-latch-titled-head">
       <thead>
         <tr class="swf-latch-title-row"><th colspan="8">RSE capacity at this instant · the rows of rucio account limit list eicprod <span class="fw-normal text-muted">(usage is RSE-wide until the account usage is recorded; click the plot at another time for the table then)</span></th></tr>
@@ -465,9 +466,11 @@
     {% for c in card.scope.campaigns %}
     <div class="d-flex flex-wrap column-gap-4 row-gap-3 align-items-start mb-3">
       <table class="table table-sm table-bordered table-striped w-auto mb-0 swf-latch-head swf-latch-titled-head">
-        <thead><tr class="swf-latch-title-row"><th colspan="2">Campaign {{ c.name }} · {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered
-          {% for v in c.verdicts %} <span class="fw-normal" title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}</th></tr></thead>
+        <thead><tr class="swf-latch-title-row"><th colspan="2">Campaign {{ c.name }} · {{ c.files }} files · {{ c.tb|default_if_none:"—" }} TB registered</th></tr></thead>
         <tbody>
+        {% for v in c.verdicts %}
+        <tr><td colspan="2"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.text }}</td></tr>
+        {% endfor %}
         <tr><td><span data-curve="stopc_{{ c.segment }}_single" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>single copy</td><td class="text-end">{{ c.single }}{% if c.single_old %} · {{ c.single_old }} older than the warning age{% endif %}</td></tr>
         <tr><td><span data-curve="stopc_{{ c.segment }}_two_plus" style="display:inline-block; width:0.85em; height:0.85em; border-radius:3px; margin-right:0.45em; vertical-align:-0.08em;"></span>two or more copies</td><td class="text-end">{{ c.two_plus }}</td></tr>
         <tr><td>disk only · tape only · disk and tape</td><td class="text-end">{{ c.disk_only }} · {{ c.tape_only }} · {{ c.disk_and_tape }}</td></tr>
