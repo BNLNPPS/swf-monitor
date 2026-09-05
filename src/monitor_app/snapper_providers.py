@@ -575,14 +575,16 @@ def _storage_series_transform(series):
     # record is hourly and a quiet pass affirms the state unchanged, so
     # the last pass's gauges are the state until the next pass. Flows
     # (counter projections and the yield) are per-bin and stay as they
-    # are. The hold stops a minute short of the series end so the
-    # landing cut stays inside the capture scheduler's evaluated span.
+    # are. The hold stops two minutes short of the series end so the
+    # landing cut, which takes the last stamp, stays inside the capture
+    # scheduler's evaluated span (30 s boundaries plus evaluation lag)
+    # and never lands on a "coverage unknown" instant.
     end = series.get('end')
     if end:
         from datetime import datetime, timedelta
         try:
             hold_stamp = (datetime.fromisoformat(end)
-                          - timedelta(seconds=60)).isoformat(timespec='seconds')
+                          - timedelta(seconds=120)).isoformat(timespec='seconds')
         except ValueError:
             hold_stamp = None
         for curve_id, curve in curves.items():
