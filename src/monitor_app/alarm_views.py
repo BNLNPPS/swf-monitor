@@ -259,9 +259,12 @@ def alarms_dashboard(request):
     built_at_dt = datetime.fromtimestamp(now, tz=_EASTERN)
 
     pings_open, pings_done = alarms_data.list_pings()
-    ping_proposals, fulfil_proposals = _ping_proposals()
+    ping_proposals, fulfil_proposals, remedies = _ping_proposals()
     for pg in pings_open:
         pg['fulfil_proposal'] = fulfil_proposals.get(pg['id'])
+        pg['remedy_proposal'] = remedies.get((pg['title'] or '').strip().lower())
+    for pr in ping_proposals:
+        pr['remedy'] = remedies.get((pr['title'] or '').strip().lower())
     return render(request, 'monitor_app/alarms.html', {
         'ping_proposals': ping_proposals,
         'ping_today': alarms_data._today_eastern().isoformat(),
@@ -297,14 +300,27 @@ def _ping_proposals():
     today = alarms_data._today_eastern()
     proposals = []
     fulfils = {}
+    # Remedies (PINGS.md § Pings with a remedy): proposals in the
+    # obligation's own category, keyed by the ping title they close.
+    remedies = {}
     for row in (Proposal.objects
-                .filter(action__in=('ping', 'ping_fulfil'), status='proposed')
+                .filter(action__in=('ping', 'ping_fulfil', 'standard_config'),
+                        status='proposed')
                 .order_by('created_at')):
         payload = row.payload or {}
         if row.action == 'ping_fulfil':
             fulfils[row.subject_key] = {
                 'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
                 'comment': row.comment, 'created_at': row.created_at}
+            continue
+        if row.action == 'standard_config':
+            key = (payload.get('ping_title') or '').strip().lower()
+            remedies[key] = {
+                'id': row.pk, 'ref': row.ref, 'proposer': row.proposer,
+                'comment': row.comment, 'created_at': row.created_at,
+                'label': f"create {payload.get('name', '')}",
+                'detail': (f"from {payload.get('template', '')}, image "
+                           f"{payload.get('container_image', '')}")}
             continue
         due = None
         try:
@@ -320,7 +336,7 @@ def _ping_proposals():
             'owner': payload.get('owner', ''), 'note': payload.get('note', ''),
             'url': payload.get('url', ''),
         })
-    return proposals, fulfils
+    return proposals, fulfils, remedies
 
 
 def _json_body(request) -> dict:

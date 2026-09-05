@@ -17,6 +17,9 @@ ACTION_REF_PREFIXES = {
     'campaign_plan': 'pl',  # campaign assembly plan entries
     'ping': 'pg',           # a ping to enter (PINGS.md)
     'ping_fulfil': 'pf',    # a ping to mark fulfilled (PINGS.md)
+    'standard_config': 'sc',  # an edition's Standard Production configuration
+                              # to create; the remedy of a campaign
+                              # configuration ping (PINGS.md)
 }
 
 

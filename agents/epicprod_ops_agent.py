@@ -139,6 +139,11 @@ DELIVERY_DAILY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "de
 DELIVERY_DAILY_TIMEOUT = int(os.environ.get("EPICPROD_DELIVERY_DAILY_TIMEOUT", "3600"))
 STORAGE_SWEEP_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "storage-sweep.py"
 STORAGE_SWEEP_TIMEOUT = int(os.environ.get("EPICPROD_STORAGE_SWEEP_TIMEOUT", "3600"))
+# The campaign configuration proposer (swf-monitor docs/PINGS.md, Pings
+# with a remedy): pings and remedies for editions without a Standard
+# Production configuration.
+CONFIG_PROPOSER_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "propose-campaign-configs.py"
+CONFIG_PROPOSER_TIMEOUT = int(os.environ.get("EPICPROD_CONFIG_PROPOSER_TIMEOUT", "300"))
 # A catalog_sync step that fails on a JLab Rucio authentication stall is run
 # once more after this wait, one wait per chain (2026-09-04: a stall of a
 # few minutes took out five steps in a row).
@@ -231,7 +236,7 @@ class EpicProdOpsAgent(BaseAgent):
                    "capture_system_snap",
                    "rucio_arrivals_sweep", "epic_prod_past_import",
                    "file_events_measure", "delivery_daily_rebuild",
-                   "storage_sweep",
+                   "storage_sweep", "campaign_config_propose",
                    "assessment_completed",
                    "health_ping", "shutdown"}
 
@@ -1320,6 +1325,7 @@ class EpicProdOpsAgent(BaseAgent):
             ('delivery_daily_rebuild', self._do_delivery_daily_rebuild),
             ('storage_sweep',
              lambda msg: self._do_storage_sweep(dict(msg, mode='full'))),
+            ('campaign_config_propose', self._do_campaign_config_propose),
         ]
         failed, retried, raised = self._run_sync_chain(
             steps, dict(m, created_by=created_by))
@@ -1770,6 +1776,71 @@ class EpicProdOpsAgent(BaseAgent):
             self._log_action('storage_sweep', t0, outcome='ok', summary=text,
                              username=username, mode=mode,
                              sublevel='low', live_default=False, **counts)
+
+    def _handle_campaign_config_propose(self, m):
+        """Run the campaign configuration proposer (swf-monitor
+        docs/PINGS.md, Pings with a remedy): a catalog_sync chain step,
+        also directly invokable."""
+        self.run_in_background(
+            self._do_campaign_config_propose, m,
+            dedup_key="campaign_config_propose",
+            label="campaign_config_propose")
+
+    def _do_campaign_config_propose(self, m):
+        """Propose, through the AI proposal subsystem, a ping and its
+        remedy for every campaign edition with tasks and no Standard
+        Production configuration; withdraw proposals whose finding no
+        longer holds. Nothing is created without a person's approval."""
+        username = str(m.get('created_by') or '')
+        cmd = [sys.executable, str(CONFIG_PROPOSER_SCRIPT), "--apply",
+               "--created-by", str(m.get('created_by') or 'prodops_agent')]
+        self.logger.info("PRODOPS campaign_config_propose: scanning editions")
+        t0 = time.monotonic()
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=CONFIG_PROPOSER_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"PRODOPS campaign_config_propose TIMEOUT after "
+                f"{CONFIG_PROPOSER_TIMEOUT}s")
+            self._log_action('campaign_config_propose', t0, outcome='timeout',
+                             reason=f'timed out after {CONFIG_PROPOSER_TIMEOUT}s',
+                             username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        for line in (p.stdout or "").splitlines():
+            self.logger.info(f"  propose-campaign-configs: {line}")
+        for line in (p.stderr or "").splitlines():
+            self.logger.info(f"  propose-campaign-configs: {line}")
+        if p.returncode != 0:
+            reason = self._derive_reason(p)
+            self.logger.error(
+                f"PRODOPS campaign_config_propose FAILED rc={p.returncode}")
+            self._log_action('campaign_config_propose', t0, outcome='error',
+                             reason=reason, username=username, sublevel='low',
+                             live_default=False, level=logging.ERROR)
+            return
+        summary = {}
+        for line in (p.stdout or "").splitlines():
+            if line.startswith('SUMMARY '):
+                try:
+                    summary = json.loads(line[len('SUMMARY '):])
+                except ValueError as e:
+                    self.logger.error(
+                        f"PRODOPS campaign_config_propose: bad SUMMARY: {e}")
+        editions = summary.get('editions') or []
+        pings = (summary.get('pings') or {}).get('proposed') or []
+        text = (f"{len(editions)} edition(s) without a standard configuration"
+                + (f": {', '.join(editions)}" if editions else '')
+                + f"; {len(pings)} new ping(s) proposed, "
+                  f"{summary.get('withdrawn', 0)} withdrawn, "
+                  f"{len(summary.get('fulfil_proposed') or [])} fulfilment(s) proposed")
+        self.logger.info(f"PRODOPS campaign_config_propose done: {text}")
+        self._log_action('campaign_config_propose', t0, outcome='ok',
+                         summary=text, username=username, sublevel='low',
+                         live_default=False, findings=len(editions),
+                         editions=editions,
+                         withdrawn=summary.get('withdrawn', 0))
 
     def _record_panda_operation_state(self, operation_id, status, *,
                                       diagnostic='', observed_status='',

@@ -106,6 +106,33 @@ proposer on the production ops agent, the certificate proposer in the
 alarm engine's tick or beside it. Neither writes a ping; a person accepts
 each one, with the date editable.
 
+### Pings with a remedy
+
+Some obligations the system can carry out itself once a person agrees.
+For those the proposer emits two proposals at once: the ping, and a
+remedy, a proposal in the obligation's own category whose executor does
+the work and, on success, marks the ping fulfilled in the same act with
+the same origin. The remedy proposal carries the ping's title as its
+link; the Pings section shows the remedy beside the ping with approve
+and deny, so the reviewer's one tap both fixes the condition and closes
+the obligation. Denying the remedy leaves the ping standing for a person
+to fulfil by hand; denying the ping leaves the remedy, which then closes
+nothing. The heartbeat withdraws and re-derives both while the condition
+holds; when it no longer holds, neither returns.
+
+The first such proposer is the **campaign configuration** rule: every
+campaign edition that has tasks and no `<edition> Standard
+Production` configuration yields a ping, "Create the <edition> Standard
+Production configuration", due two days out with a one-day lead, and its
+remedy, category `standard_config` (AI_PROPOSALS.md), whose executor
+creates the configuration from the template the
+`create_standard_prodconfig.py` script clones, with the edition's image
+and tag. It runs nightly as a `catalog_sync` chain step on the
+production ops agent, through the `propose-campaign-configs.py` doer,
+which is also runnable by hand with a dry run. An edition without its
+standard configuration cannot be submitted or rerun from PCS; on
+2026-09-05 the 26.07.1 edition had run for six weeks in that state.
+
 ## Delivery
 
 - **Email.** The `alarm_pings` entry's recipients are the subscribers;
@@ -148,8 +175,9 @@ history of a ping is the alarm event history it already has.
    owner added to the bundle. Pings work by hand end to end.
 2. The `ping` and `ping_fulfil` proposal categories, the MCP propose
    tool, and the proposal rows in the Pings section.
-3. The credential and certificate proposers; the nightly check's warning
-   line retired.
+3. The rule-based proposers: the campaign configuration proposer with
+   its remedy, the first ping with a remedy; then the credential and
+   certificate proposers, and the nightly check's warning line retired.
 4. `ping` as a Capcom severity on the tjai side.
 
 ## Status

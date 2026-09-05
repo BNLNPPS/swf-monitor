@@ -159,6 +159,24 @@ propagation pilot is the worked example of each item.
   is open, executor `ping_fulfil_execute`. Reviewed on the ping's own row
   in the Pings section and on the proposals page. Irreversible by design:
   a fulfilled ping is the record that the obligation was met.
+- **Standard configuration** (`standard_config`, ref `sc`) — the remedy
+  of a campaign-configuration ping (PINGS.md § Pings with a remedy):
+  proposes the creation of an edition's `<edition> Standard Production`
+  configuration. A creation subject keyed on the edition; payload the
+  edition, the configuration name, the template configuration, the
+  container image and tag, the Rucio RSE, and the title of the ping it
+  remedies. Precondition: no configuration of that name exists (the
+  proposal is stale once one does). Executor
+  `pcs.services.standard_prodconfig_create`, the identical call the
+  `create_standard_prodconfig.py` script makes, which logs one
+  origin-stamped `standard_prodconfig_create` event and, when the linked
+  ping is open, marks it fulfilled through `ping_fulfil_execute` with the
+  same origin. Dry-runnable: the payload's values are the preview. Review
+  surface: the remedy's row beside its ping in the Pings section, with
+  approve and deny, and the proposals page. Proposer:
+  `campaign-config`, rule-based, comments wholly code-filled.
+  Reversibility: mitigable, a configuration created in error is deleted
+  while no task is bound to it.
 
 ## Review surfaces
 

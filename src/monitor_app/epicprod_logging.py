@@ -83,6 +83,13 @@ ACTION_DEFAULTS = {
         'description': "Record a ping's obligation as fulfilled; its alarm "
                        "event clears on the engine's next tick.",
     },
+    'standard_prodconfig_create': {
+        'sublevel': 'normal', 'live': True,
+        'description': "Create a campaign edition's Standard Production "
+                       "configuration from the template, by the script or "
+                       "an approved standard_config proposal, the remedy of "
+                       "a campaign configuration ping.",
+    },
     # ops agent
     'task_submit': {
         'sublevel': 'high', 'live': True,

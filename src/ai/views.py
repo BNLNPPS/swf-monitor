@@ -80,7 +80,8 @@ def ai_proposals(request):
 
     action_labels = {'propagation': 'campaign propagation',
                      'campaign_plan': 'campaign plan',
-                     'ping': 'ping', 'ping_fulfil': 'ping fulfilled'}
+                     'ping': 'ping', 'ping_fulfil': 'ping fulfilled',
+                     'standard_config': 'standard configuration'}
     facet_rows = [
         status_row,
         facet_row('Action', 'action',

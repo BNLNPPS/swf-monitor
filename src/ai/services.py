@@ -19,8 +19,10 @@ _log = _logging.getLogger(__name__)
 
 from pcs.models import Dataset
 from pcs.services import (
-    CAMPAIGN_PLAN_DISPOSITIONS, PROPAGATION_STATES, ServiceError,
-    campaign_plan_entries_set, campaign_plan_get, dataset_propagation_set,
+    CAMPAIGN_PLAN_DISPOSITIONS, PROPAGATION_STATES, STANDARD_CONFIG_TEMPLATE,
+    ServiceError, campaign_plan_entries_set, campaign_plan_get,
+    dataset_propagation_set, standard_prodconfig_create,
+    standard_prodconfig_name, standard_prodconfig_values,
 )
 
 from .models import ACTION_REF_PREFIXES, Proposal
@@ -541,6 +543,122 @@ def propose_ping_fulfil(ping_id, comment, *, proposer='', batch_id='',
     return {'proposed': [ping.title], 'noop': [], 'denied': []}
 
 
+def propose_standard_configs(items, *, proposer='', batch_id='',
+                             created_by=''):
+    """Propose the creation of editions' Standard Production
+    configurations (AI_PROPOSALS.md, category standard_config): the
+    remedy of a campaign-configuration ping (PINGS.md § Pings with a
+    remedy). ``items``: [{edition, ping_title, comment}]. Validation is
+    the executor's own (``standard_prodconfig_values``); a creation
+    subject keyed on the configuration name; the precondition is that no
+    configuration of that name exists. Denial memory and identical-pending
+    checks follow the subsystem conventions."""
+    from pcs.models import ProdConfig
+    from monitor_app.epicprod_logging import log_epicprod_action
+
+    if not items:
+        raise ServiceError('no editions supplied')
+    now = _timezone.now()
+    proposed, noop, denied_skips, invalid = [], [], [], []
+    with transaction.atomic():
+        for item in items:
+            edition = str(item.get('edition') or '').strip()
+            comment = (item.get('comment') or '').strip()
+            if not edition or not comment:
+                invalid.append(edition or '(missing edition)')
+                continue
+            try:
+                values = standard_prodconfig_values(edition)
+            except ServiceError as e:
+                invalid.append(f'{edition}: {e}')
+                continue
+            name = standard_prodconfig_name(edition)
+            if ProdConfig.objects.filter(name=name).exists():
+                noop.append(f'{name} exists')
+                continue
+            payload = {
+                'edition': edition, 'name': name,
+                'template': STANDARD_CONFIG_TEMPLATE,
+                'container_image': values['container_image'],
+                'jug_xl_tag': values['jug_xl_tag'],
+                'rucio_rse': values['rucio_rse'],
+                'ping_title': (item.get('ping_title') or '').strip(),
+            }
+            input_hash = _proposal_input_hash(payload, comment)
+            base = Proposal.objects.filter(action='standard_config',
+                                           subject_key=name)
+            if base.filter(status='denied', input_hash=input_hash).exists():
+                denied_skips.append(name)
+                continue
+            if base.filter(status='proposed', input_hash=input_hash).exists():
+                noop.append(name)
+                continue
+            base.filter(status='proposed').update(status='withdrawn',
+                                                  decided_at=now)
+            Proposal.objects.create(
+                action='standard_config', subject_type='prod_config',
+                subject_key=name, counterpart_key=edition, payload=payload,
+                comment=comment, proposer=proposer or '', scan_version=1,
+                batch_id=batch_id or '', executor='service',
+                precondition={'existing': None}, input_hash=input_hash,
+                created_by=created_by or '')
+            proposed.append(name)
+    log_epicprod_action(
+        'web', 'proposal_created', username=created_by,
+        sublevel='normal', live_default=True,
+        message=(f'AI proposal: {len(proposed)} standard configuration(s) '
+                 f'[{batch_id or "no batch"}]'),
+        proposed=len(proposed), noop=len(noop), denied=len(denied_skips),
+        invalid=len(invalid), proposer=proposer or '',
+        batch_id=batch_id or '', category='standard_config',
+        url='/alarms/#pings')
+    return {'proposed': proposed, 'noop': noop, 'denied': denied_skips,
+            'invalid': invalid}
+
+
+def _decide_standard_configs(rows, decision, decided_by, quality, now):
+    """Decide pending standard_config proposals: stale once the
+    configuration exists; approval runs the executor, which creates the
+    configuration and fulfils the linked ping in one origin-stamped act."""
+    from pcs.models import ProdConfig
+
+    stale, denied, approved = [], [], []
+    for row in rows:
+        with transaction.atomic():
+            payload = dict(row.payload or {})
+            if ProdConfig.objects.filter(name=row.subject_key).exists():
+                row.status = 'stale'
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'decided_by', 'decided_at'])
+                stale.append(row.ref)
+                continue
+            if decision == 'deny':
+                row.status = 'denied'
+                row.quality = quality
+                row.decided_by = decided_by
+                row.decided_at = now
+                row.save(update_fields=['status', 'quality', 'decided_by',
+                                        'decided_at'])
+                denied.append(row.ref)
+                continue
+            origin = {'kind': 'ai_proposal', 'ref': row.ref,
+                      'proposer': row.proposer, 'batch_id': row.batch_id,
+                      'proposed_at': row.created_at.isoformat()}
+            result = standard_prodconfig_create(
+                payload.get('edition'), changed_by=decided_by, origin=origin,
+                ping_title=payload.get('ping_title') or '')
+            row.status = 'executed'
+            row.quality = quality
+            row.decided_by = decided_by
+            row.decided_at = now
+            row.executed_log_id = result.get('log_id')
+            row.save(update_fields=['status', 'quality', 'decided_by',
+                                    'decided_at', 'executed_log_id'])
+            approved.append(row.ref)
+    return approved, denied, stale
+
+
 def _decide_pings(rows, decision, decided_by, quality, amendments, now):
     """Decide pending ping and ping-fulfil proposals: revalidate against
     the ping store (an obligation already open, or a ping no longer
@@ -661,7 +779,8 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         raise ServiceError('an authenticated decider is required')
 
     pending = Proposal.objects.filter(
-        action__in=('propagation', 'campaign_plan', 'ping', 'ping_fulfil'),
+        action__in=('propagation', 'campaign_plan', 'ping', 'ping_fulfil',
+                    'standard_config'),
         status='proposed')
     selector = Q()
     if names:
@@ -674,6 +793,7 @@ def proposal_decide(composed_names, decision, *, decided_by='',
     rows = [r for r in all_rows if r.action == 'propagation']
     plan_rows = [r for r in all_rows if r.action == 'campaign_plan']
     ping_rows = [r for r in all_rows if r.action in ('ping', 'ping_fulfil')]
+    config_rows = [r for r in all_rows if r.action == 'standard_config']
     found_names = {r.subject_key for r in all_rows}
     no_proposal = [n for n in names if n not in found_names]
 
@@ -754,6 +874,13 @@ def proposal_decide(composed_names, decision, *, decided_by='',
         approved += ping_approved
         denied += ping_denied
         stale += ping_stale
+
+    if config_rows:
+        cfg_approved, cfg_denied, cfg_stale = _decide_standard_configs(
+            config_rows, decision, decided_by, quality, now)
+        approved += cfg_approved
+        denied += cfg_denied
+        stale += cfg_stale
 
     if decision == 'deny':
         log_epicprod_action(
