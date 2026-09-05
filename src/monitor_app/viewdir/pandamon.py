@@ -1531,8 +1531,24 @@ def panda_task_detail(request, jeditaskid):
         pending=pending_operation,
     )
 
+    # A PanDA task submitted outside PCS and linked to its PCS task by name
+    # only is moved into PCS from this page ("Move this task to PCS",
+    # swf-epicprod docs/JEDI_INTEGRATION.md § Residual rerun). The readiness
+    # read is database-only; a failure here never takes the page down.
+    pcs_adopt = None
+    if pcs_task is not None:
+        try:
+            from pcs.services import prodtask_adopt_readiness
+            pcs_adopt = prodtask_adopt_readiness(pcs_task)
+        except Exception:
+            logger.exception("PCS adopt readiness failed for PanDA task %s",
+                             jeditaskid)
+            pcs_adopt = {'applicable': True, 'eligible': False,
+                         'blocked': 'the readiness check failed; see the server log',
+                         'jedi_task_id': jeditaskid, 'config': None}
     return render(request, 'monitor_app/panda_task_detail.html', {
         'task': task,
+        'pcs_adopt': pcs_adopt,
         'errordialog_display': errordialog_display,
         'jeditaskid': jeditaskid,
         'pcs_task': pcs_task,

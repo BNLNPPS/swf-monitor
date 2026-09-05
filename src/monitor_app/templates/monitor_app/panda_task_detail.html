@@ -295,6 +295,24 @@
     </div>
     {% endif %}
 
+    {% if pcs_adopt and pcs_adopt.applicable %}
+    <!-- A task submitted outside PCS, linked to its PCS task by name only, is moved into PCS here (swf-epicprod docs/JEDI_INTEGRATION.md, Residual rerun). -->
+    <div class="card mb-3" id="pcs-adopt-card">
+        <div class="card-header"><strong>Move this task to PCS</strong></div>
+        <div class="card-body">
+            <p class="mb-2">This task was submitted outside PCS and is linked to its PCS task by name only, so the PCS retry and rerun operations do not apply to it yet. Moving it records PanDA task {{ pcs_adopt.jedi_task_id }} as the PCS task's submission{% if pcs_adopt.config %} and binds {{ pcs_adopt.config }}{% endif %}; the PanDA operations on the PCS task page, Rerun Residual included, then apply. Nothing is submitted by the move.</p>
+            {% if pcs_adopt.eligible %}
+            <form id="pcs-adopt-form" class="d-flex align-items-center gap-2 mb-0">{% csrf_token %}
+                <button type="button" class="btn btn-success btn-sm" id="pcs-adopt-btn" {% if not request.user.is_authenticated %}disabled title="Sign in to move it"{% endif %}>Move this task to PCS</button>
+                <span id="pcs-adopt-status"></span>
+            </form>
+            {% else %}
+            <div class="alert alert-warning py-2 px-3 mb-0"><strong>Blocked</strong> {{ pcs_adopt.blocked }} <a href="{% url 'pcs:evgen_inputs' %}?view=coverage">Open the Registration view.</a></div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- External links -->
     <div class="mb-3">
         <a href="https://pandamon01.sdcc.bnl.gov/task/{{ jeditaskid }}/" target="_blank" rel="noopener" class="btn btn-outline-primary btn-sm">View in PanDA Monitor</a>
@@ -304,6 +322,42 @@
 
     {% endif %}
 </div>
+
+{% if pcs_adopt and pcs_adopt.applicable and pcs_adopt.eligible and request.user.is_authenticated %}
+<script>
+(function () {
+    const btn = document.getElementById('pcs-adopt-btn');
+    const status = document.getElementById('pcs-adopt-status');
+    const form = document.getElementById('pcs-adopt-form');
+    const url = "{{ request.META.SCRIPT_NAME }}/pcs/api/prod-tasks/{{ pcs_task.composed_name|urlencode }}/adopt/";
+    btn.addEventListener('click', async () => {
+        if (!confirm("Move {{ pcs_task.composed_name|escapejs }} into PCS? PanDA task {{ pcs_adopt.jedi_task_id }} becomes its recorded submission and {{ pcs_adopt.config|escapejs }} is bound. Nothing is submitted.")) return;
+        btn.disabled = true;
+        status.textContent = 'Moving...';
+        let resp, data = null;
+        try {
+            resp = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: {'Content-Type': 'application/json',
+                          'X-CSRFToken': form.querySelector('[name=csrfmiddlewaretoken]').value},
+                body: '{}',
+            });
+            data = await resp.json().catch(() => null);
+        } catch (e) {
+            btn.disabled = false;
+            status.textContent = 'Move failed: ' + e;
+            return;
+        }
+        if (!resp.ok) {
+            btn.disabled = false;
+            status.textContent = 'Refused: ' + ((data && data.detail) || resp.status);
+            return;
+        }
+        status.innerHTML = 'Moved. <a href="{% url 'pcs:prod_task_compose' %}?tab=tasks&amp;selected={{ pcs_task.composed_name|urlencode }}">Open the PCS task</a> for the PanDA operations.';
+    });
+})();
+</script>
+{% endif %}
 
 {% if task_operation_controls.visible and request.user.is_authenticated and not is_tunnel %}
 <script>
