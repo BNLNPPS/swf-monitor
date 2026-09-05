@@ -1794,20 +1794,29 @@ def _storage_curve_values(state):
     for rse, block in (sto.get('rses') or {}).items():
         if not isinstance(block, dict):
             continue
+        # A counter or block absent from a publication emits no value:
+        # the arrivals backfill carries the arrival counters alone, and
+        # a zero for an unrecorded quantity would draw a false step at
+        # the census.
         flow = block.get('flow') or {}
-        values[f'stofa_{rse}_first'] = int(flow.get('first_copy_files') or 0)
-        values[f'stofa_{rse}_replica'] = int(flow.get('replica_files') or 0)
-        values[f'stoba_{rse}_first'] = _storage_tb(flow.get('first_copy_bytes'))
-        values[f'stoba_{rse}_replica'] = _storage_tb(flow.get('replica_bytes'))
-        values[f'stoft_{rse}_transfers'] = int(flow.get('transfers_completed') or 0)
-        values[f'stoft_{rse}_deleted'] = int(flow.get('deleted_files') or 0)
-        values[f'stobt_{rse}_deleted'] = _storage_tb(flow.get('deleted_bytes'))
-        values[f'stoxe_{rse}_appeared'] = int(flow.get('ghosts_appeared') or 0)
-        values[f'stoxe_{rse}_cleared'] = int(flow.get('ghosts_cleared') or 0)
+        for key, curve_id, as_tb in (
+                ('first_copy_files', f'stofa_{rse}_first', False),
+                ('replica_files', f'stofa_{rse}_replica', False),
+                ('first_copy_bytes', f'stoba_{rse}_first', True),
+                ('replica_bytes', f'stoba_{rse}_replica', True),
+                ('transfers_completed', f'stoft_{rse}_transfers', False),
+                ('deleted_files', f'stoft_{rse}_deleted', False),
+                ('deleted_bytes', f'stobt_{rse}_deleted', True),
+                ('ghosts_appeared', f'stoxe_{rse}_appeared', False),
+                ('ghosts_cleared', f'stoxe_{rse}_cleared', False)):
+            if key in flow:
+                values[curve_id] = (_storage_tb(flow[key]) if as_tb
+                                    else int(flow[key] or 0))
         backlog = block.get('backlog') or {}
-        values[f'stofs_{rse}_copying'] = int(backlog.get('copying_files') or 0)
-        values[f'stobs_{rse}_copying'] = _storage_tb(backlog.get('copying_bytes'))
-        values[f'stoxo_{rse}_over'] = int(backlog.get('over_threshold') or 0)
+        if backlog:
+            values[f'stofs_{rse}_copying'] = int(backlog.get('copying_files') or 0)
+            values[f'stobs_{rse}_copying'] = _storage_tb(backlog.get('copying_bytes'))
+            values[f'stoxo_{rse}_over'] = int(backlog.get('over_threshold') or 0)
         ages = backlog.get('age_s') or {}
         for member in ('median', 'p90', 'max'):
             if ages.get(member) is not None:
@@ -1844,11 +1853,13 @@ def _storage_curve_values(state):
         for name, entry in (ghosts.get('by_campaign') or {}).items():
             values[f'stofh_{rse}_{_storage_slug(name)}'] = int(
                 (entry or {}).get('files') or 0)
-        values[f'stofi_{rse}_files'] = int(ghosts.get('files') or 0)
-        values[f'stobi_{rse}_bytes'] = _storage_tb(ghosts.get('bytes'))
+        if ghosts:
+            values[f'stofi_{rse}_files'] = int(ghosts.get('files') or 0)
+            values[f'stobi_{rse}_bytes'] = _storage_tb(ghosts.get('bytes'))
         locks = (block.get('rules') or {}).get('locks') or {}
-        values[f'stoxl_{rse}_replicating'] = int(locks.get('replicating') or 0)
-        values[f'stoxl_{rse}_stuck'] = int(locks.get('stuck') or 0)
+        if locks:
+            values[f'stoxl_{rse}_replicating'] = int(locks.get('replicating') or 0)
+            values[f'stoxl_{rse}_stuck'] = int(locks.get('stuck') or 0)
         capacity = block.get('capacity') or {}
         if capacity.get('used') is not None:
             values[f'stobu_{rse}_used'] = _storage_tb(capacity.get('used'))
@@ -1861,25 +1872,34 @@ def _storage_curve_values(state):
             continue
         segment = _storage_slug(name)
         protection = block.get('protection') or {}
-        values[f'stopc_{segment}_single'] = int(protection.get('single_copy') or 0)
-        values[f'stopc_{segment}_two_plus'] = int(protection.get('two_plus') or 0)
-        for member in ('disk_only', 'tape_only', 'disk_and_tape'):
-            values[f'stopp_{segment}_{member}'] = int(protection.get(member) or 0)
-        values[f'stopa_{segment}'] = _storage_tb(block.get('archival_backlog_bytes'))
-        values[f'stopq_{segment}_unattached'] = int(block.get('unattached_files') or 0)
-        values[f'stopq_{segment}_no_events'] = int(block.get('no_events_attr') or 0)
+        if protection:
+            values[f'stopc_{segment}_single'] = int(protection.get('single_copy') or 0)
+            values[f'stopc_{segment}_two_plus'] = int(protection.get('two_plus') or 0)
+            for member in ('disk_only', 'tape_only', 'disk_and_tape'):
+                values[f'stopp_{segment}_{member}'] = int(protection.get(member) or 0)
+        if 'archival_backlog_bytes' in block:
+            values[f'stopa_{segment}'] = _storage_tb(block.get('archival_backlog_bytes'))
+        if 'unattached_files' in block:
+            values[f'stopq_{segment}_unattached'] = int(block.get('unattached_files') or 0)
+        if 'no_events_attr' in block:
+            values[f'stopq_{segment}_no_events'] = int(block.get('no_events_attr') or 0)
         datasets = block.get('datasets') or {}
-        for member in ('open', 'partial_anywhere', 'quiet_open', 'stalled'):
-            values[f'stopd_{segment}_{member}'] = int(datasets.get(member) or 0)
+        if datasets:
+            for member in ('open', 'partial_anywhere', 'quiet_open', 'stalled'):
+                values[f'stopd_{segment}_{member}'] = int(datasets.get(member) or 0)
         for kind, entry in (block.get('latency_s') or {}).items():
             median = (entry or {}).get('median')
             if median is not None:
                 values[f'stopl_{segment}_{kind}'] = round(float(median) / 3600, 2)
         flow = block.get('flow') or {}
-        values[f'stopf_{segment}_arrived'] = int(flow.get('arrived_files') or 0)
-        values[f'stopf_{segment}_archived'] = int(flow.get('archived_files') or 0)
-        values[f'stopb_{segment}_arrived'] = _storage_tb(flow.get('arrived_bytes'))
-        values[f'stopb_{segment}_archived'] = _storage_tb(flow.get('archived_bytes'))
+        for key, curve_id, as_tb in (
+                ('arrived_files', f'stopf_{segment}_arrived', False),
+                ('archived_files', f'stopf_{segment}_archived', False),
+                ('arrived_bytes', f'stopb_{segment}_arrived', True),
+                ('archived_bytes', f'stopb_{segment}_archived', True)):
+            if key in flow:
+                values[curve_id] = (_storage_tb(flow[key]) if as_tb
+                                    else int(flow[key] or 0))
     return values
 
 
@@ -4071,6 +4091,9 @@ def _storage_card(data, previous_data, ctx):
         'sections': sections,
         'scope': {
             'key': 'sto-scope',
+            # A cut inside the arrivals backfill (STORAGE.md, Backfill)
+            # reads a reconstructed publication carrying counters alone.
+            'reconstructed': (pass_info.get('mode') == 'backfill'),
             'overall': assessment.get('overall') or 'unknown',
             'overall_chip': _chip(assessment.get('overall')),
             'interval': data.get('interval') or {},

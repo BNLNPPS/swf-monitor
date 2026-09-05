@@ -370,6 +370,9 @@
     <div class="mb-2"><strong><a href="{{ s.url }}">{{ s.rse }}</a></strong> <span class="text-muted small">{{ s.type }}</span>
       {% for v in s.verdicts %} <span title="{{ v.threshold }}"><span class="snapper-chip" style="background:{{ v.chip.color }}">{{ v.chip.value }}</span> {{ v.name }}</span>{% endfor %}
     </div>
+    {% if card.scope.reconstructed %}
+    <div class="text-muted mb-2">This instant is inside the reconstructed arrivals record: arrival counters only, rebuilt from the catalog's creation times. Inventory, ghosts, backlog, rules and capacity begin at the census.</div>
+    {% endif %}
     <div class="d-flex flex-wrap column-gap-4 row-gap-2 align-items-start">
       <div>
         <div class="mb-1"><strong>Inventory</strong></div>
@@ -446,7 +449,7 @@
   {% endfor %}
   <div data-snapper-detail-key="{{ card.scope.key }}" class="snapper-cut-card">
     <div class="mb-2"><strong>Storage record</strong>
-      <span class="snapper-chip" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>
+      {% if card.scope.reconstructed %}<span class="text-muted">reconstructed arrivals record; the state record begins at the census</span>{% else %}<span class="snapper-chip" style="background:{{ card.scope.overall_chip.color }}">{{ card.scope.overall }}</span>{% endif %}
       <span class="text-muted small">{{ card.scope.pass.mode }} pass{% if card.scope.interval.end %} · interval {{ card.scope.interval.start|fmt_dt }} – {{ card.scope.interval.end|fmt_dt }} ET{% endif %} · {{ card.scope.pass.files }} files and {{ card.scope.pass.datasets }} datasets checked in {{ card.scope.pass.duration_min }} min{% if card.scope.pass.errors %} · <span class="text-danger">{{ card.scope.pass.errors }} read errors</span>{% endif %}</span>
       · <a href="{{ card.scope.urls.ghosts }}">Storage exceptions</a></div>
     <div class="mb-1"><strong>Capacity across RSEs</strong> <span class="text-muted small">the rows of rucio account limit list eicprod at this instant; usage is RSE-wide until the account usage is recorded</span></div>
