@@ -3770,6 +3770,17 @@ def _platform_card(data, previous_data, ctx):
     }
 
 
+def _fmt_count(value):
+    """A file or lock count on the storage card: millions as 1.3M,
+    else with separators; a missing value as a dash."""
+    if value is None:
+        return '—'
+    value = int(value)
+    if value >= 1_000_000:
+        return f'{value / 1e6:.1f}M'
+    return f'{value:,}'
+
+
 def _storage_card(data, previous_data, ctx):
     """The storage cut card (docs/SNAPPER_STORAGE.md). For each shown
     RSE its standing at the instant — verdicts, inventory by replica
@@ -3867,7 +3878,7 @@ def _storage_card(data, previous_data, ctx):
         inventory = [
             {'state': _state_label(state),
              'curve': f'sto{quantity_code}n_{rse}_{state}',
-             'files': _fmt_num(int((entry or {}).get('files') or 0)),
+             'files': _fmt_count(int((entry or {}).get('files') or 0)),
              'tb': _tb((entry or {}).get('bytes')),
              'delta': cut_delta((entry or {}).get('files'),
                                 (prev_by_state.get(state) or {}).get('files'))
@@ -3905,7 +3916,7 @@ def _storage_card(data, previous_data, ctx):
                     ('bad replicas appeared', 'bad_appeared', None, '')):
                 flow_rows.append({
                     'label': label, 'curve': curve,
-                    'files': _fmt_num(_since(files_key)),
+                    'files': _fmt_count(_since(files_key)),
                     'tb': _tb(_since(bytes_key)) if bytes_key else None})
         sections.append({
             'rse': rse, 'key': f'sto-{rse}',
@@ -3915,17 +3926,17 @@ def _storage_card(data, previous_data, ctx):
             'inventory': inventory,
             'datasets': block.get('datasets') or {},
             'backlog': {
-                'files': _fmt_num(int(backlog.get('copying_files') or 0)),
+                'files': _fmt_count(int(backlog.get('copying_files') or 0)),
                 'tb': _tb(backlog.get('copying_bytes')),
                 'median_h': _hours(ages.get('median')),
                 'p90_h': _hours(ages.get('p90')),
                 'max_h': _hours(ages.get('max')),
-                'over': _fmt_num(int(backlog.get('over_threshold') or 0)),
+                'over': _fmt_count(int(backlog.get('over_threshold') or 0)),
                 'stuck_hours': thresholds.get('storage_copying_stuck_hours'),
                 'curve': f'sto{quantity_code}s_{rse}_copying',
                 'over_curve': f'stoxo_{rse}_over'},
             'ghosts': {
-                'files': _fmt_num(int(ghosts.get('files') or 0)),
+                'files': _fmt_count(int(ghosts.get('files') or 0)),
                 'tb': _tb(ghosts.get('bytes')),
                 'delta': cut_delta(ghosts.get('files'),
                                    (prev.get('ghosts') or {}).get('files')) or '',
@@ -3939,7 +3950,7 @@ def _storage_card(data, previous_data, ctx):
                                     if flow.get('first_copy_files') else None),
                 'by_state': [
                     {'state': _state_label(state),
-                     'files': _fmt_num(int(count or 0)),
+                     'files': _fmt_count(int(count or 0)),
                      'curve': f'stofg_{rse}_{state}'}
                     for state, count in sorted(
                         (ghosts.get('by_state') or {}).items(),
@@ -3948,9 +3959,9 @@ def _storage_card(data, previous_data, ctx):
                 'url': f"{listing_urls['ghosts']}?rse={quote(rse)}"},
             'rules': {
                 'by_state': sorted((rules.get('by_state') or {}).items()),
-                'ok': _fmt_num(int(locks.get('ok') or 0)),
-                'replicating': _fmt_num(int(locks.get('replicating') or 0)),
-                'stuck': _fmt_num(int(locks.get('stuck') or 0)),
+                'ok': _fmt_count(int(locks.get('ok') or 0)),
+                'replicating': _fmt_count(int(locks.get('replicating') or 0)),
+                'stuck': _fmt_count(int(locks.get('stuck') or 0)),
                 'oldest_stuck_d': _days(rules.get('oldest_stuck_age_s')),
                 'expiring_30d': int(rules.get('expiring_30d') or 0),
                 'url': f"{listing_urls['stuck_rules']}?rse={quote(rse)}"},
@@ -3961,7 +3972,7 @@ def _storage_card(data, previous_data, ctx):
                             if limit and used is not None else None),
                 'fill_pct': (round(100 * float(capacity['fraction']), 1)
                              if capacity.get('fraction') is not None else None),
-                'files': _fmt_num(capacity.get('files')),
+                'files': _fmt_count(capacity.get('files')),
                 'as_of': capacity.get('as_of'),
                 'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
                           else f'stofu_{rse}_files')},
@@ -3984,7 +3995,7 @@ def _storage_card(data, previous_data, ctx):
                         if limit and used is not None else None),
             'fill_pct': (round(100 * float(capacity['fraction']), 1)
                          if capacity.get('fraction') is not None else None),
-            'files': _fmt_num(capacity.get('files')),
+            'files': _fmt_count(capacity.get('files')),
             'as_of': capacity.get('as_of'),
             'shown': rse in shown,
             'curve': (f'stobu_{rse}_used' if quantity_code == 'b'
@@ -4007,17 +4018,17 @@ def _storage_card(data, previous_data, ctx):
         campaigns.append({
             'name': name, 'segment': _storage_slug(name),
             'verdicts': _verdict_rows(f'campaign:{name}:'),
-            'files': _fmt_num(int(block.get('files') or 0)),
+            'files': _fmt_count(int(block.get('files') or 0)),
             'tb': _tb(block.get('bytes')),
-            'single': _fmt_num(int(protection.get('single_copy') or 0)),
+            'single': _fmt_count(int(protection.get('single_copy') or 0)),
             'single_old': int(protection.get('single_copy_old') or 0),
-            'two_plus': _fmt_num(int(protection.get('two_plus') or 0)),
-            'disk_only': _fmt_num(int(protection.get('disk_only') or 0)),
-            'tape_only': _fmt_num(int(protection.get('tape_only') or 0)),
-            'disk_and_tape': _fmt_num(int(protection.get('disk_and_tape') or 0)),
+            'two_plus': _fmt_count(int(protection.get('two_plus') or 0)),
+            'disk_only': _fmt_count(int(protection.get('disk_only') or 0)),
+            'tape_only': _fmt_count(int(protection.get('tape_only') or 0)),
+            'disk_and_tape': _fmt_count(int(protection.get('disk_and_tape') or 0)),
             'archival_tb': _tb(block.get('archival_backlog_bytes')),
-            'unattached': _fmt_num(int(block.get('unattached_files') or 0)),
-            'no_events': _fmt_num(int(block.get('no_events_attr') or 0)),
+            'unattached': _fmt_count(int(block.get('unattached_files') or 0)),
+            'no_events': _fmt_count(int(block.get('no_events_attr') or 0)),
             'datasets': block.get('datasets') or {},
             'latency': [
                 {'kind': str(kind).replace('_', ' '),
@@ -4025,9 +4036,9 @@ def _storage_card(data, previous_data, ctx):
                  'median_h': _hours((entry or {}).get('median')),
                  'p90_h': _hours((entry or {}).get('p90'))}
                 for kind, entry in sorted((block.get('latency_s') or {}).items())],
-            'arrived_files': _fmt_num(_campaign_since('arrived_files')),
+            'arrived_files': _fmt_count(_campaign_since('arrived_files')),
             'arrived_tb': _tb(_campaign_since('arrived_bytes')),
-            'archived_files': _fmt_num(_campaign_since('archived_files')),
+            'archived_files': _fmt_count(_campaign_since('archived_files')),
             'archived_tb': _tb(_campaign_since('archived_bytes')),
             'basis': basis_text if base else '',
         })
@@ -4065,8 +4076,8 @@ def _storage_card(data, previous_data, ctx):
             'interval': data.get('interval') or {},
             'pass': {
                 'mode': pass_info.get('mode') or '',
-                'files': _fmt_num(pass_info.get('files_checked')),
-                'datasets': _fmt_num(pass_info.get('datasets_checked')),
+                'files': _fmt_count(pass_info.get('files_checked')),
+                'datasets': _fmt_count(pass_info.get('datasets_checked')),
                 'duration_min': round(float(pass_info.get('duration_s') or 0) / 60),
                 'errors': int(pass_info.get('error_count') or 0)},
             'capacity_rows': capacity_rows,
