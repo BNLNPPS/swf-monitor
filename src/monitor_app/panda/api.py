@@ -247,11 +247,14 @@ def task_operations_request(request):
         return Response({'error': 'Every JEDI task ID must be an integer.'},
                         status=http_status.HTTP_400_BAD_REQUEST)
     try:
+        new_parameters = operations.retry_parameters(
+            request.data.get('new_parameters'))
         tasks = queries.get_task_operation_targets(task_ids)
         result = operations.queue_task_operations(
             tasks=tasks,
             operation=str(request.data.get('operation') or ''),
             requested_by=getattr(request.user, 'username', '') or 'operator',
+            new_parameters=new_parameters,
         )
     except operations.PandaTaskOperationError as exc:
         return Response({'error': exc.detail}, status=exc.status)

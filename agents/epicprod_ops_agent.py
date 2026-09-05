@@ -758,6 +758,10 @@ class EpicProdOpsAgent(BaseAgent):
             '--send-interval', str(PANDA_TASK_BULK_SEND_INTERVAL),
             '--timeout', str(doer_timeout),
         ]
+        # A failure retry may carry changed resource requirements
+        # (memory, wall time) for every task of the batch.
+        if operation == 'retry_failures' and m.get('new_parameters'):
+            cmd += ['--new-parameters', json.dumps(m['new_parameters'])]
         for item in items:
             self._record_panda_operation_state(item['operation_id'], 'running')
         self.logger.info(

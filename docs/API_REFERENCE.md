@@ -167,7 +167,13 @@ export REQUESTS_CA_BUNDLE=/opt/swf-monitor/current/full-chain.pem
   strands tasks in `aborted`. An aborted task is retried through PanDA's
   reactivation path (retry with new parameters, processed as incexec —
   the plain retry command refuses aborted); the executor selects the path
-  by the task's observed state. Prod-ops sends
+  by the task's observed state. A `retry_failures` request may carry
+  `"new_parameters": {"ram_count_mb": N, "walltime_hours": H}` (either or
+  both): the retry then changes the task's memory per core and wall
+  time, in PanDA form `ramCount` with `ramUnit` MBPerCore and `walltime`
+  in seconds, merged into the task's stored parameters through the same reactivation
+  path for every task of the batch; the values are recorded on each
+  operation record's evidence. Prod-ops sends
   the accepted scalar PanDA commands one second apart and records each task's
   verified outcome (retry verified when the task leaves its terminal state,
   kill when it reaches `aborting`/`aborted`).

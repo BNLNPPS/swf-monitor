@@ -199,6 +199,7 @@ def _inside_pclient(payload_path):
             verify_timeout=float(payload.get("verify_timeout") or 90),
             poll_interval=float(payload.get("poll_interval") or 5),
             send_interval=float(payload.get("send_interval") or 1),
+            new_parameters=payload.get("new_parameters") or None,
         )
         print(json.dumps(output, default=str))
         return 0
@@ -416,8 +417,14 @@ def _task_state_verified(operation, observed_status):
 
 
 def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
-                                poll_interval, send_interval):
-    """Submit scalar commands with pacing, then verify on one shared clock."""
+                                poll_interval, send_interval,
+                                new_parameters=None):
+    """Submit scalar commands with pacing, then verify on one shared clock.
+
+    ``new_parameters`` (retry_failures only) are task parameters the retry
+    changes, e.g. ramCount and walltime: PanDA merges them into the
+    task's stored parameters and re-executes the task with them (its
+    reactivation path), for every task of the batch."""
     actions = {
         "pause": Client.pauseTask,
         "resume": Client.resumeTask,
@@ -442,12 +449,19 @@ def _run_batch_panda_operations(Client, operation, items, *, verify_timeout,
             if operation == "retry_failures":
                 # An aborted task takes the reactivation path (retry with
                 # new_parameters -> incexec); plain retry refuses aborted.
+                # Changed resource requirements take the same path on any
+                # retryable task, merged over the reactivation parameters
+                # when the task is aborted.
                 observed, _diag = _panda_task_status(
                     Client.getTaskStatus(jedi_task_id, False))
+                params = None
                 if observed == "aborted":
+                    params = dict(_reactivation_params(Client, jedi_task_id))
+                if new_parameters:
+                    params = dict(params or {}, **new_parameters)
+                if params:
                     panda_result = Client.retryTask(
-                        jedi_task_id, False,
-                        newParams=_reactivation_params(Client, jedi_task_id))
+                        jedi_task_id, False, newParams=params)
                 else:
                     panda_result = Client.retryTask(jedi_task_id, False)
             elif operation == "finish":
